@@ -5,7 +5,7 @@
 
 ## 1. 通用约定
 
-- Base URL：`https://<node.api_base_url>`
+- Base URL：`<node.api_base_url>`（必须是 `https://...` 的完整 origin）
 - 编码：UTF-8
 - 时间：RFC3339（带时区）
 - ID：ULID 字符串

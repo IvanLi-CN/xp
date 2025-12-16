@@ -20,7 +20,7 @@
 
 ### 2.1 HTTP API Server
 
-承载三类入口（同一 HTTPS listener，减少端口占用）：
+承载三类入口（同一 listener，减少端口占用；对外 HTTPS 由反代/隧道终止）：
 
 - 管理员 API：`/admin/*`
 - 订阅 API：`/sub/*`
