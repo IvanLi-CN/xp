@@ -1,0 +1,26 @@
+pre-commit:
+  parallel: true
+  commands:
+    format-web:
+      glob: "web/**/*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
+      run: cd web && npm run format
+      stage_fixed: true
+    typecheck-web:
+      glob: "web/**/*.{ts,tsx}"
+      run: cd web && npm run typecheck
+    format-markdown:
+      files: git diff --cached --name-only --diff-filter=ACMR -- '*.md'
+      run: npx dprint fmt {files}
+      stage_fixed: true
+    fmt-rust:
+      glob: "**/*.{rs}"
+      run: cargo fmt
+      stage_fixed: true
+    clippy-rust:
+      glob: "**/*.{rs}"
+      run: cargo clippy -- -D warnings
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx commitlint --edit {1}

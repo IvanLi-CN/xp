@@ -18,3 +18,27 @@
 ## 状态
 
 当前处于设计阶段（未开始代码实现）。
+
+## 开发（初始化脚手架）
+
+工具链（commitlint + dprint）：
+
+```bash
+npm install
+```
+
+前端：
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+后端：
+
+```bash
+cargo run
+```
+
+> Git hooks 由 `lefthook.yml` 定义；需要先在本机安装 lefthook 并执行 `lefthook install`。

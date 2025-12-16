@@ -1,0 +1,14 @@
+/target
+/logs
+*.log
+.env
+.env.local
+.DS_Store
+
+/node_modules
+/web/node_modules
+/web/dist
+/web/.vite
+/web/storybook-static
+/web/playwright-report
+/web/test-results
