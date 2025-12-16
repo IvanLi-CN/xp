@@ -64,7 +64,7 @@
 开发联调：
 
 - `web` dev server 绑定 `127.0.0.1:60080`
-- 通过 Vite proxy 将 `/api`、`/events` 反代到 `xp`（后端默认 `127.0.0.1:<port>`）
+- 通过 Vite proxy 将 `/api`、`/events` 反代到 `xp`（后端默认 `127.0.0.1:62416`）
 
 ## 4. Git hooks 与质量门禁（lefthook）
 

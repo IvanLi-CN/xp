@@ -41,4 +41,6 @@ npm run dev
 cargo run
 ```
 
+> 默认监听 `127.0.0.1:62416`；如需改端口：`cargo run -- --bind 127.0.0.1:<port>`。
+
 > Git hooks 由 `lefthook.yml` 定义；需要先在本机安装 lefthook 并执行 `lefthook install`。

@@ -15,7 +15,7 @@ use tracing_subscriber::{EnvFilter, fmt};
     disable_help_subcommand = true
 )]
 struct CliArgs {
-    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8080")]
+    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:62416")]
     bind: SocketAddr,
 }
 

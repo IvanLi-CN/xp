@@ -13,7 +13,7 @@
 
 - Install repo tooling (commitlint + dprint): `npm install`
 - Install Git hooks (required): `lefthook install`
-- Run backend locally: `cargo run` (default bind `127.0.0.1:8080`)
+- Run backend locally: `cargo run` (default bind `127.0.0.1:62416`)
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
 - Install frontend deps: `cd web && npm install`
 - Run frontend dev server: `cd web && npm run dev` (binds `127.0.0.1:60080`)
