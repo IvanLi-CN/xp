@@ -6,6 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     domain::{
@@ -14,6 +15,12 @@ use crate::{
         validate_cycle_day_of_month, validate_port,
     },
     id::new_ulid_string,
+    protocol::{
+        RealityKeys, RotateShortIdResult, SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
+        Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
+        generate_short_id_16hex, generate_ss2022_psk_b64, rotate_short_ids_in_place,
+        ss2022_password,
+    },
 };
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -174,6 +181,7 @@ impl JsonSnapshotStore {
         let endpoint_id = new_ulid_string();
         let tag = endpoint_tag(&kind, &endpoint_id);
 
+        let meta = build_endpoint_meta(&kind, meta)?;
         let endpoint = Endpoint {
             endpoint_id: endpoint_id.clone(),
             node_id,
@@ -238,7 +246,7 @@ impl JsonSnapshotStore {
         }
 
         let grant_id = new_ulid_string();
-        let credentials = credentials_for_endpoint_kind(endpoint.kind.clone(), &grant_id);
+        let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
 
         let grant = Grant {
             grant_id: grant_id.clone(),
@@ -278,6 +286,29 @@ impl JsonSnapshotStore {
             self.save()?;
         }
         Ok(deleted)
+    }
+
+    pub fn rotate_vless_reality_short_id(
+        &mut self,
+        endpoint_id: &str,
+    ) -> Result<Option<RotateShortIdResult>, StoreError> {
+        let endpoint = match self.state.endpoints.get_mut(endpoint_id) {
+            Some(endpoint) => endpoint,
+            None => return Ok(None),
+        };
+
+        debug_assert_eq!(endpoint.kind, EndpointKind::VlessRealityVisionTcp);
+
+        let mut meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(endpoint.meta.clone())?;
+
+        let mut rng = rand::rngs::OsRng;
+        let out =
+            rotate_short_ids_in_place(&mut meta.short_ids, &mut meta.active_short_id, &mut rng);
+
+        endpoint.meta = serde_json::to_value(meta)?;
+        self.save()?;
+        Ok(Some(out))
     }
 
     pub fn list_users(&self) -> Vec<User> {
@@ -355,31 +386,81 @@ impl JsonSnapshotStore {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct VlessRealityEndpointMetaInput {
+    public_domain: String,
+    reality: crate::protocol::RealityConfig,
+}
+
+fn build_endpoint_meta(
+    kind: &EndpointKind,
+    meta_input: serde_json::Value,
+) -> Result<serde_json::Value, StoreError> {
+    let mut rng = rand::rngs::OsRng;
+
+    match kind {
+        EndpointKind::VlessRealityVisionTcp => {
+            let input: VlessRealityEndpointMetaInput = serde_json::from_value(meta_input)?;
+            let keypair = generate_reality_keypair(&mut rng);
+            let short_id = generate_short_id_16hex(&mut rng);
+
+            let meta = VlessRealityVisionTcpEndpointMeta {
+                public_domain: input.public_domain,
+                reality: input.reality,
+                reality_keys: RealityKeys {
+                    private_key: keypair.private_key,
+                    public_key: keypair.public_key,
+                },
+                short_ids: vec![short_id.clone()],
+                active_short_id: short_id,
+            };
+
+            Ok(serde_json::to_value(meta)?)
+        }
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            let server_psk_b64 = generate_ss2022_psk_b64(&mut rng);
+            Ok(serde_json::to_value(Ss2022EndpointMeta {
+                method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
+                server_psk_b64,
+            })?)
+        }
+    }
+}
+
+fn credentials_for_endpoint(
+    endpoint: &Endpoint,
+    grant_id: &str,
+) -> Result<GrantCredentials, StoreError> {
+    let mut rng = rand::rngs::OsRng;
+
+    match endpoint.kind.clone() {
+        EndpointKind::VlessRealityVisionTcp => Ok(GrantCredentials {
+            vless: Some(VlessCredentials {
+                uuid: Uuid::new_v4().to_string(),
+                email: format!("grant:{grant_id}"),
+            }),
+            ss2022: None,
+        }),
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            let meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())?;
+            let user_psk_b64 = generate_ss2022_psk_b64(&mut rng);
+            Ok(GrantCredentials {
+                vless: None,
+                ss2022: Some(Ss2022Credentials {
+                    method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
+                    password: ss2022_password(&meta.server_psk_b64, &user_psk_b64),
+                }),
+            })
+        }
+    }
+}
+
 fn endpoint_tag(kind: &EndpointKind, endpoint_id: &str) -> String {
     let kind_short = match kind {
         EndpointKind::VlessRealityVisionTcp => "vless-vision",
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022",
     };
     format!("{kind_short}-{endpoint_id}")
-}
-
-fn credentials_for_endpoint_kind(kind: EndpointKind, grant_id: &str) -> GrantCredentials {
-    match kind {
-        EndpointKind::VlessRealityVisionTcp => GrantCredentials {
-            vless: Some(VlessCredentials {
-                uuid: new_ulid_string(),
-                email: format!("grant:{grant_id}"),
-            }),
-            ss2022: None,
-        },
-        EndpointKind::Ss2022_2022Blake3Aes128Gcm => GrantCredentials {
-            vless: None,
-            ss2022: Some(Ss2022Credentials {
-                method: "2022-blake3-aes-128-gcm".to_string(),
-                password: new_ulid_string(),
-            }),
-        },
-    }
 }
 
 fn write_atomic(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), io::Error> {

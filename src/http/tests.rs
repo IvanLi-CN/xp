@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use base64::Engine as _;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
@@ -11,6 +12,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
+use uuid::Uuid;
 
 use crate::{
     config::Config,
@@ -396,4 +398,281 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let listed = body_json(res).await;
     let items = listed["items"].as_array().unwrap();
     assert!(items.iter().any(|u| u["user_id"] == user_id));
+}
+
+#[tokio::test]
+async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uuidv4() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "public_domain": "example.com",
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap();
+
+    let meta = &endpoint["meta"];
+    let short_ids = meta["short_ids"].as_array().unwrap();
+    assert_eq!(short_ids.len(), 1);
+    let short_id = short_ids[0].as_str().unwrap();
+    assert_eq!(short_id.len(), 16);
+    assert!(short_id.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_eq!(meta["active_short_id"], short_ids[0]);
+
+    let priv_key = meta["reality_keys"]["private_key"].as_str().unwrap();
+    let pub_key = meta["reality_keys"]["public_key"].as_str().unwrap();
+    let priv_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(priv_key)
+        .unwrap();
+    let pub_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(pub_key)
+        .unwrap();
+    assert_eq!(priv_bytes.len(), 32);
+    assert_eq!(pub_bytes.len(), 32);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    let user = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user["user_id"],
+              "endpoint_id": endpoint_id,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let grant = body_json(res).await;
+    let vless = &grant["credentials"]["vless"];
+    let uuid = vless["uuid"].as_str().unwrap();
+    assert!(Uuid::parse_str(uuid).is_ok());
+    assert!(!is_ulid_string(uuid));
+    assert_eq!(
+        vless["email"],
+        format!("grant:{}", grant["grant_id"].as_str().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_server_and_user_psk()
+{
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap();
+
+    assert_eq!(endpoint["meta"]["method"], "2022-blake3-aes-128-gcm");
+    let server_psk_b64 = endpoint["meta"]["server_psk_b64"].as_str().unwrap();
+    let server_psk = base64::engine::general_purpose::STANDARD
+        .decode(server_psk_b64)
+        .unwrap();
+    assert_eq!(server_psk.len(), 16);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    let user = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user["user_id"],
+              "endpoint_id": endpoint_id,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let grant = body_json(res).await;
+    let ss2022 = &grant["credentials"]["ss2022"];
+    assert_eq!(ss2022["method"], "2022-blake3-aes-128-gcm");
+
+    let password = ss2022["password"].as_str().unwrap();
+    let (server_part, user_part) = password.split_once(':').unwrap();
+    assert_eq!(server_part, server_psk_b64);
+    let user_psk = base64::engine::general_purpose::STANDARD
+        .decode(user_part)
+        .unwrap();
+    assert_eq!(user_psk.len(), 16);
+}
+
+#[tokio::test]
+async fn rotate_shortid_updates_persisted_meta_and_rejects_non_vless_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "public_domain": "example.com",
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
+    let before_active = endpoint["meta"]["active_short_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/rotate-shortid"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let rotated = body_json(res).await;
+    assert_eq!(rotated["endpoint_id"], endpoint_id);
+    assert_ne!(rotated["active_short_id"], before_active);
+    assert_eq!(rotated["short_ids"].as_array().unwrap().len(), 2);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+        ))
+        .await
+        .unwrap();
+    let persisted = body_json(res).await;
+    assert_eq!(
+        persisted["meta"]["active_short_id"],
+        rotated["active_short_id"]
+    );
+    assert_eq!(persisted["meta"]["short_ids"], rotated["short_ids"]);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    let ss_endpoint = body_json(res).await;
+    let ss_endpoint_id = ss_endpoint["endpoint_id"].as_str().unwrap();
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{ss_endpoint_id}/rotate-shortid"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
 }

@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::Config,
-    domain::{CyclePolicy, CyclePolicyDefault, Endpoint, Grant, Node, User},
+    domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
     state::{JsonSnapshotStore, StoreError},
 };
 
@@ -206,7 +206,7 @@ pub fn build_router(config: Config, store: Arc<Mutex<JsonSnapshotStore>>) -> Rou
         )
         .route(
             "/endpoints/:endpoint_id/rotate-shortid",
-            post(not_implemented),
+            post(admin_rotate_short_id),
         )
         .route("/users", post(admin_create_user).get(admin_list_users))
         .route(
@@ -364,6 +364,40 @@ async fn admin_delete_endpoint(
         )));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct RotateShortIdResponse {
+    endpoint_id: String,
+    active_short_id: String,
+    short_ids: Vec<String>,
+}
+
+async fn admin_rotate_short_id(
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
+) -> Result<Json<RotateShortIdResponse>, ApiError> {
+    let mut store = state.store.lock().await;
+
+    let endpoint = store
+        .get_endpoint(&endpoint_id)
+        .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+
+    if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+        return Err(ApiError::invalid_request(
+            "rotate-shortid is only supported for vless_reality_vision_tcp endpoints",
+        ));
+    }
+
+    let out = store
+        .rotate_vless_reality_short_id(&endpoint_id)?
+        .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+
+    Ok(Json(RotateShortIdResponse {
+        endpoint_id,
+        active_short_id: out.active_short_id,
+        short_ids: out.short_ids,
+    }))
 }
 
 async fn admin_create_user(
