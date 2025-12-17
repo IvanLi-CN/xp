@@ -2,9 +2,9 @@
 
 ## 1. 输出入口
 
-- `GET /sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
-- `GET /sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
-- `GET /sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
+- `GET /api/sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
+- `GET /api/sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
+- `GET /api/sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
 
 ## 2. 统一规则
 

@@ -69,7 +69,7 @@
 1. leader 生成 `join_token`（一次性、带过期）：
    - 包含：`cluster_id`、`leader_api_base_url`、`cluster_ca_pem`、`one_time_secret`
 2. 新节点执行 join：
-   - 用 token 联系 leader 的 `/cluster/join`
+   - 用 token 联系 leader 的 `/api/cluster/join`
    - 提交 CSR + token 校验材料
 3. leader 校验通过后：
    - 签发节点证书并返回
@@ -89,15 +89,15 @@
   - `Authorization: Bearer <admin_token>`
   - 仅管理员可写（创建/修改/删除 Nodes/Endpoints/Users/Grants）
 - 订阅 API：
-  - `GET /sub/{token}`（只读）
+  - `GET /api/sub/{token}`（只读）
   - token 随机不可预测；建议支持随时重置
 
 ## 6. 端口占用策略
 
 推荐：单端口承载三类流量（同一 listener；对外 HTTPS → 回环 HTTP）：
 
-1. 管理员 API（/admin/*）
-2. 订阅 API（/sub/*）
-3. 集群内部（/cluster/* + Raft RPC）
+1. 管理员 API（/api/admin/*）
+2. 订阅 API（/api/sub/*）
+3. 集群内部（/api/cluster/* + Raft RPC）
 
 这样每节点除 Xray 数据面端口外，`xp` 只占用一个入口端口（对外 HTTPS，内部回环 HTTP）。

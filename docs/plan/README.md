@@ -13,6 +13,7 @@
 
 ## 1. Milestone：控制面基础（单机可用）
 
+- 细化方案：`docs/plan/m1-control-plane-foundation.md`
 - 工程与约定：配置加载（CLI/ENV/文件择一）、日志、错误格式、ID（ULID）
 - 领域模型：Node / Endpoint / User / Grant 的核心字段与校验规则
 - 管理员认证：`Authorization: Bearer <admin_token>` 的统一中间件
@@ -30,7 +31,7 @@
 
 ## 3. Milestone：订阅输出（对用户可交付）
 
-- 订阅 API：`/sub/{token}` 输出 raw/base64/clash（按 `docs/desgin/subscription.md`）
+- 订阅 API：`/api/sub/{token}` 输出 raw/base64/clash（按 `docs/desgin/subscription.md`）
 - token 生命周期：生成/重置/失效策略；只读权限边界清晰
 - 订阅内容：按 Node 的 `public_domain`/端点端口拼装，确保与 Web 展示一致
 
@@ -45,7 +46,7 @@
 
 - Raft 选型与落地：WAL + snapshot；状态机仅存“期望状态”（Nodes/Endpoints/Users/Grants）
 - 节点身份：cluster CA + 节点证书（mTLS）；证书/密钥落盘与轮换策略
-- init/join：`xp init`、join token、`/cluster/join`（CSR 签发）与节点注册
+- init/join：`xp init`、join token、`/api/cluster/join`（CSR 签发）与节点注册
 - 写转发：follower 将写请求转发 leader（或返回 leader 地址供客户端重试）
 - Reconcile 分工：仅对“本节点拥有的端点”调用本机 xray；其余只复制状态
 

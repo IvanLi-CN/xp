@@ -1,50 +1,40 @@
-use std::net::SocketAddr;
-
 use anyhow::Result;
-use axum::{Json, Router, routing::get};
-use clap::Parser;
-use serde::Serialize;
+use std::sync::Arc;
+
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "xp",
-    about = "Xray control plane",
-    disable_help_subcommand = true
-)]
-struct CliArgs {
-    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:62416")]
-    bind: SocketAddr,
-}
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-}
+use clap::Parser;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
 
-    let cli = CliArgs::parse();
+    let config = xp::config::Config::parse();
+    let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
+        data_dir: config.data_dir.clone(),
+        bootstrap_node_name: config.node_name.clone(),
+        bootstrap_public_domain: config.public_domain.clone(),
+        bootstrap_api_base_url: config.api_base_url.clone(),
+    })?;
+    let store = Arc::new(Mutex::new(store));
 
-    let app = Router::new()
-        .route("/api/health", get(health))
+    let app = xp::http::build_router(config.clone(), store)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive());
 
-    info!(bind = %cli.bind, "starting xp");
-    let listener = tokio::net::TcpListener::bind(cli.bind).await?;
+    info!(
+        bind = %config.bind,
+        data_dir = %config.data_dir.display(),
+        "starting xp"
+    );
+    let listener = tokio::net::TcpListener::bind(config.bind).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
 }
 
 fn init_tracing() {

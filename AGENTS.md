@@ -4,6 +4,7 @@
 
 - `src/`: Rust control-plane service (`xp`) and core logic (e.g., cycle calculation).
 - `web/`: Vite + React admin UI (TanStack Router/Query, Tailwind + DaisyUI).
+- DaisyUI theme prompt: `https://daisyui.com/llms.txt give me a light daisyUI 5 theme with tropical color palette`
 - `docs/desgin/`: design specs (requirements, architecture, API, quota, cluster, workflows).
 - `docs/plan/`: milestone-level plan and acceptance criteria.
 - `scripts/`: repo tooling and helper scripts.
