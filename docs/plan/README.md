@@ -22,6 +22,7 @@
 
 ## 2. Milestone：Xray Controller + Reconcile（单机闭环）
 
+- 细化方案：`docs/plan/m2-xray-controller-reconcile.md`
 - Xray gRPC 适配：`AddInbound/RemoveInbound`、`AlterInbound(AddUser/RemoveUser)`、`StatsService`
 - 协议材料生成：
   - VLESS/Reality：key pair、shortIds、active_short_id
