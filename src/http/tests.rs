@@ -45,7 +45,11 @@ fn test_store_init(config: &Config) -> StoreInit {
 fn app(tmp: &TempDir) -> axum::Router {
     let config = test_config(tmp.path().to_path_buf());
     let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
-    build_router(config, Arc::new(Mutex::new(store)))
+    build_router(
+        config,
+        Arc::new(Mutex::new(store)),
+        crate::reconcile::ReconcileHandle::noop(),
+    )
 }
 
 fn req(method: &str, uri: &str) -> Request<Body> {
@@ -367,7 +371,11 @@ async fn persistence_smoke_user_roundtrip_via_api() {
 
     let config = test_config(data_dir.clone());
     let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
-    let app = build_router(config.clone(), Arc::new(Mutex::new(store)));
+    let app = build_router(
+        config.clone(),
+        Arc::new(Mutex::new(store)),
+        crate::reconcile::ReconcileHandle::noop(),
+    );
 
     let res = app
         .clone()
@@ -388,7 +396,11 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     drop(app);
 
     let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
-    let app = build_router(config, Arc::new(Mutex::new(store)));
+    let app = build_router(
+        config,
+        Arc::new(Mutex::new(store)),
+        crate::reconcile::ReconcileHandle::noop(),
+    );
 
     let res = app
         .oneshot(req_authed("GET", "/api/admin/users"))

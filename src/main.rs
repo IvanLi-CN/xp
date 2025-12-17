@@ -13,6 +13,7 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = xp::config::Config::parse();
+    let config_arc = Arc::new(config.clone());
     let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_name: config.node_name.clone(),
@@ -21,7 +22,9 @@ async fn main() -> Result<()> {
     })?;
     let store = Arc::new(Mutex::new(store));
 
-    let app = xp::http::build_router(config.clone(), store)
+    let reconcile = xp::reconcile::spawn_reconciler(config_arc, store.clone());
+
+    let app = xp::http::build_router(config.clone(), store, reconcile)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive());
 
