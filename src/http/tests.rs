@@ -22,6 +22,7 @@ use crate::{
 fn test_config(data_dir: PathBuf) -> Config {
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
         data_dir,
         admin_token: "testtoken".to_string(),
         node_name: "node-1".to_string(),

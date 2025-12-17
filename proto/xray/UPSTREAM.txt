@@ -1,0 +1,10 @@
+Upstream repo: https://github.com/XTLS/Xray-core
+Revision: 74df63add2cd7f11afb5b30a269156aecf4d1b17
+
+Vendored proto files:
+- app/proxyman/command/command.proto
+- app/stats/command/command.proto
+- common/protocol/user.proto
+- common/serial/typed_message.proto
+- core/config.proto
+
