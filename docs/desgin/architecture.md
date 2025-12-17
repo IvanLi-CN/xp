@@ -22,9 +22,9 @@
 
 承载三类入口（同一 listener，减少端口占用；对外 HTTPS 由反代/隧道终止）：
 
-- 管理员 API：`/admin/*`
-- 订阅 API：`/sub/*`
-- 集群内部：`/cluster/*`（join、心跳、转发等）与 Raft RPC
+- 管理员 API：`/api/admin/*`
+- 订阅 API：`/api/sub/*`
+- 集群内部：`/api/cluster/*`（join、心跳、转发等）与 Raft RPC
 
 默认只监听 `127.0.0.1:<port>`（由反代/隧道/组网提供可达性）。
 
@@ -135,7 +135,7 @@
 ## 5. 关键接口轮廓
 
 - 管理员接口：Nodes/Endpoints/Users/Grants 的 CRUD
-- 订阅接口：`/sub/{token}` 输出 raw/base64/clash
-- 集群接口：`/cluster/info`、`/cluster/join`、以及写转发（实现可内部化）
+- 订阅接口：`/api/sub/{token}` 输出 raw/base64/clash
+- 集群接口：`/api/cluster/info`、`/api/cluster/join`、以及写转发（实现可内部化）
 
 具体字段见：`api.md` 与 `subscription.md`（以实现时的 API 文档为准）。
