@@ -57,6 +57,7 @@ pub fn validate_cycle_day_of_month(day_of_month: u8) -> Result<(), DomainError> 
 #[serde(rename_all = "snake_case")]
 pub enum EndpointKind {
     VlessRealityVisionTcp,
+    #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
     Ss2022_2022Blake3Aes128Gcm,
 }
 

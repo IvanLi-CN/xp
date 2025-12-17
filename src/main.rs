@@ -1,31 +1,27 @@
 use anyhow::Result;
-use axum::{Json, Router, routing::get};
-use serde::Serialize;
+use std::sync::Arc;
+
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use clap::Parser;
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-}
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
 
     let config = xp::config::Config::parse();
-    let _store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
+    let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_name: config.node_name.clone(),
         bootstrap_public_domain: config.public_domain.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
     })?;
+    let store = Arc::new(Mutex::new(store));
 
-    let app = Router::new()
-        .route("/api/health", get(health))
+    let app = xp::http::build_router(config.clone(), store)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive());
 
@@ -39,10 +35,6 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
 }
 
 fn init_tracing() {

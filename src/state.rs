@@ -255,6 +255,104 @@ impl JsonSnapshotStore {
         self.save()?;
         Ok(grant)
     }
+
+    pub fn list_nodes(&self) -> Vec<Node> {
+        self.state.nodes.values().cloned().collect()
+    }
+
+    pub fn get_node(&self, node_id: &str) -> Option<Node> {
+        self.state.nodes.get(node_id).cloned()
+    }
+
+    pub fn list_endpoints(&self) -> Vec<Endpoint> {
+        self.state.endpoints.values().cloned().collect()
+    }
+
+    pub fn get_endpoint(&self, endpoint_id: &str) -> Option<Endpoint> {
+        self.state.endpoints.get(endpoint_id).cloned()
+    }
+
+    pub fn delete_endpoint(&mut self, endpoint_id: &str) -> Result<bool, StoreError> {
+        let deleted = self.state.endpoints.remove(endpoint_id).is_some();
+        if deleted {
+            self.save()?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn list_users(&self) -> Vec<User> {
+        self.state.users.values().cloned().collect()
+    }
+
+    pub fn get_user(&self, user_id: &str) -> Option<User> {
+        self.state.users.get(user_id).cloned()
+    }
+
+    pub fn delete_user(&mut self, user_id: &str) -> Result<bool, StoreError> {
+        let deleted = self.state.users.remove(user_id).is_some();
+        if deleted {
+            self.save()?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn reset_user_token(&mut self, user_id: &str) -> Result<Option<String>, StoreError> {
+        let user = match self.state.users.get_mut(user_id) {
+            Some(user) => user,
+            None => return Ok(None),
+        };
+
+        let subscription_token = format!("sub_{}", new_ulid_string());
+        user.subscription_token = subscription_token.clone();
+        self.save()?;
+        Ok(Some(subscription_token))
+    }
+
+    pub fn list_grants(&self) -> Vec<Grant> {
+        self.state.grants.values().cloned().collect()
+    }
+
+    pub fn get_grant(&self, grant_id: &str) -> Option<Grant> {
+        self.state.grants.get(grant_id).cloned()
+    }
+
+    pub fn delete_grant(&mut self, grant_id: &str) -> Result<bool, StoreError> {
+        let deleted = self.state.grants.remove(grant_id).is_some();
+        if deleted {
+            self.save()?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn update_grant(
+        &mut self,
+        grant_id: &str,
+        enabled: bool,
+        quota_limit_bytes: u64,
+        cycle_policy: CyclePolicy,
+        cycle_day_of_month: Option<u8>,
+    ) -> Result<Option<Grant>, StoreError> {
+        let grant = match self.state.grants.get_mut(grant_id) {
+            Some(grant) => grant,
+            None => return Ok(None),
+        };
+
+        if cycle_policy != CyclePolicy::InheritUser && cycle_day_of_month.is_none() {
+            return Err(DomainError::MissingCycleDayOfMonth { cycle_policy }.into());
+        }
+        if let Some(day) = cycle_day_of_month {
+            validate_cycle_day_of_month(day)?;
+        }
+
+        grant.enabled = enabled;
+        grant.quota_limit_bytes = quota_limit_bytes;
+        grant.cycle_policy = cycle_policy;
+        grant.cycle_day_of_month = cycle_day_of_month;
+
+        let grant = grant.clone();
+        self.save()?;
+        Ok(Some(grant))
+    }
 }
 
 fn endpoint_tag(kind: &EndpointKind, endpoint_id: &str) -> String {
