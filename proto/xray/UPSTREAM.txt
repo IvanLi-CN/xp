@@ -2,9 +2,18 @@ Upstream repo: https://github.com/XTLS/Xray-core
 Revision: 74df63add2cd7f11afb5b30a269156aecf4d1b17
 
 Vendored proto files:
+- app/proxyman/config.proto
 - app/proxyman/command/command.proto
 - app/stats/command/command.proto
+- common/net/address.proto
+- common/net/network.proto
+- common/net/port.proto
 - common/protocol/user.proto
 - common/serial/typed_message.proto
 - core/config.proto
-
+- proxy/shadowsocks_2022/config.proto
+- proxy/vless/account.proto
+- proxy/vless/inbound/config.proto
+- transport/internet/config.proto
+- transport/internet/reality/config.proto
+- transport/internet/tcp/config.proto

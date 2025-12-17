@@ -10,6 +10,7 @@ use crate::xray::proto::xray::app::proxyman::command::{
 use crate::xray::proto::xray::app::stats::command::stats_service_client::StatsServiceClient;
 use crate::xray::proto::xray::app::stats::command::{QueryStatsRequest, QueryStatsResponse};
 
+pub mod builder;
 pub mod proto;
 
 #[derive(Debug)]

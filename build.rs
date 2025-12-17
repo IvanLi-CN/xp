@@ -8,11 +8,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let proto_root = "proto/xray";
     let protos = [
+        "proto/xray/app/proxyman/config.proto",
         "proto/xray/app/proxyman/command/command.proto",
         "proto/xray/app/stats/command/command.proto",
+        "proto/xray/common/net/address.proto",
+        "proto/xray/common/net/network.proto",
+        "proto/xray/common/net/port.proto",
         "proto/xray/common/protocol/user.proto",
         "proto/xray/common/serial/typed_message.proto",
         "proto/xray/core/config.proto",
+        "proto/xray/proxy/shadowsocks_2022/config.proto",
+        "proto/xray/proxy/vless/account.proto",
+        "proto/xray/proxy/vless/inbound/config.proto",
+        "proto/xray/transport/internet/config.proto",
+        "proto/xray/transport/internet/reality/config.proto",
+        "proto/xray/transport/internet/tcp/config.proto",
     ];
 
     for proto in protos {
@@ -22,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
-        .compile_protos(&protos[..2], &[proto_root])?;
+        .compile_protos(&protos, &[proto_root])?;
 
     Ok(())
 }
