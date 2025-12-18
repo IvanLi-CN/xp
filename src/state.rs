@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub const SCHEMA_VERSION: u32 = 1;
+pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub struct StoreInit {
@@ -108,10 +109,44 @@ impl PersistedState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PersistedUsage {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub grants: BTreeMap<String, GrantUsage>,
+}
+
+impl PersistedUsage {
+    pub fn empty() -> Self {
+        Self {
+            schema_version: USAGE_SCHEMA_VERSION,
+            grants: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GrantUsage {
+    pub cycle_start_at: String,
+    pub cycle_end_at: String,
+    pub used_bytes: u64,
+    pub last_uplink_total: u64,
+    pub last_downlink_total: u64,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageSnapshot {
+    pub cycle_start_at: String,
+    pub cycle_end_at: String,
+    pub used_bytes: u64,
+}
+
 pub struct JsonSnapshotStore {
-    data_dir: PathBuf,
     state_path: PathBuf,
     state: PersistedState,
+    usage_path: PathBuf,
+    usage: PersistedUsage,
 }
 
 impl JsonSnapshotStore {
@@ -119,7 +154,7 @@ impl JsonSnapshotStore {
         fs::create_dir_all(&init.data_dir)?;
 
         let state_path = init.data_dir.join("state.json");
-        if state_path.exists() {
+        let (state, is_new_state) = if state_path.exists() {
             let bytes = fs::read(&state_path)?;
             let state: PersistedState = serde_json::from_slice(&bytes)?;
             if state.schema_version != SCHEMA_VERSION {
@@ -128,30 +163,47 @@ impl JsonSnapshotStore {
                     got: state.schema_version,
                 });
             }
-            return Ok(Self {
-                data_dir: init.data_dir,
-                state_path,
-                state,
-            });
-        }
+            (state, false)
+        } else {
+            let node_id = new_ulid_string();
+            let node = Node {
+                node_id: node_id.clone(),
+                node_name: init.bootstrap_node_name,
+                public_domain: init.bootstrap_public_domain,
+                api_base_url: init.bootstrap_api_base_url,
+            };
 
-        let node_id = new_ulid_string();
-        let node = Node {
-            node_id: node_id.clone(),
-            node_name: init.bootstrap_node_name,
-            public_domain: init.bootstrap_public_domain,
-            api_base_url: init.bootstrap_api_base_url,
+            let mut state = PersistedState::empty();
+            state.nodes.insert(node_id, node);
+            (state, true)
         };
 
-        let mut state = PersistedState::empty();
-        state.nodes.insert(node_id, node);
+        let usage_path = init.data_dir.join("usage.json");
+        let usage = if usage_path.exists() {
+            let bytes = fs::read(&usage_path)?;
+            let usage: PersistedUsage = serde_json::from_slice(&bytes)?;
+            if usage.schema_version != USAGE_SCHEMA_VERSION {
+                return Err(StoreError::SchemaVersionMismatch {
+                    expected: USAGE_SCHEMA_VERSION,
+                    got: usage.schema_version,
+                });
+            }
+            usage
+        } else {
+            PersistedUsage::empty()
+        };
 
         let store = Self {
-            data_dir: init.data_dir,
             state_path,
             state,
+            usage_path,
+            usage,
         };
-        store.save()?;
+
+        if is_new_state {
+            store.save()?;
+        }
+
         Ok(store)
     }
 
@@ -165,8 +217,73 @@ impl JsonSnapshotStore {
 
     pub fn save(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.state)?;
-        write_atomic(&self.data_dir, &self.state_path, &bytes)?;
+        write_atomic(&self.state_path, &bytes)?;
         Ok(())
+    }
+
+    pub fn save_usage(&self) -> Result<(), StoreError> {
+        let bytes = serde_json::to_vec_pretty(&self.usage)?;
+        write_atomic(&self.usage_path, &bytes)?;
+        Ok(())
+    }
+
+    pub fn apply_grant_usage_sample(
+        &mut self,
+        grant_id: &str,
+        cycle_start_at: String,
+        cycle_end_at: String,
+        uplink_total: u64,
+        downlink_total: u64,
+        seen_at: String,
+    ) -> Result<UsageSnapshot, StoreError> {
+        let used_bytes = {
+            let entry = self
+                .usage
+                .grants
+                .entry(grant_id.to_string())
+                .or_insert_with(|| GrantUsage {
+                    cycle_start_at: cycle_start_at.clone(),
+                    cycle_end_at: cycle_end_at.clone(),
+                    used_bytes: uplink_total.saturating_add(downlink_total),
+                    last_uplink_total: uplink_total,
+                    last_downlink_total: downlink_total,
+                    last_seen_at: seen_at.clone(),
+                });
+
+            if entry.cycle_start_at != cycle_start_at || entry.cycle_end_at != cycle_end_at {
+                entry.cycle_start_at = cycle_start_at.clone();
+                entry.cycle_end_at = cycle_end_at.clone();
+                entry.used_bytes = 0;
+                entry.last_uplink_total = uplink_total;
+                entry.last_downlink_total = downlink_total;
+                entry.last_seen_at = seen_at.clone();
+                entry.used_bytes
+            } else if uplink_total < entry.last_uplink_total
+                || downlink_total < entry.last_downlink_total
+            {
+                // Counter reset / xray restart: don't subtract, just reset the baseline.
+                entry.last_uplink_total = uplink_total;
+                entry.last_downlink_total = downlink_total;
+                entry.last_seen_at = seen_at.clone();
+                entry.used_bytes
+            } else {
+                let delta_up = uplink_total - entry.last_uplink_total;
+                let delta_down = downlink_total - entry.last_downlink_total;
+                entry.used_bytes =
+                    entry.used_bytes.saturating_add(delta_up.saturating_add(delta_down));
+                entry.last_uplink_total = uplink_total;
+                entry.last_downlink_total = downlink_total;
+                entry.last_seen_at = seen_at.clone();
+                entry.used_bytes
+            }
+        };
+
+        self.save_usage()?;
+        Ok(UsageSnapshot {
+            cycle_start_at,
+            cycle_end_at,
+            used_bytes,
+        })
     }
 
     pub fn create_endpoint(
@@ -463,8 +580,14 @@ fn endpoint_tag(kind: &EndpointKind, endpoint_id: &str) -> String {
     format!("{kind_short}-{endpoint_id}")
 }
 
-fn write_atomic(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), io::Error> {
-    let tmp_path = dir.join("state.json.tmp");
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), io::Error> {
+    let dir = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
+    })?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let tmp_path = dir.join(format!("{}.tmp", file_name.to_string_lossy()));
     {
         let mut file = fs::File::create(&tmp_path)?;
         file.write_all(bytes)?;
