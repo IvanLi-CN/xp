@@ -211,3 +211,4 @@ M2 采用最小假设：`xp` 与 `xray` 同机部署，gRPC API 仅监听回环�
 - shortId 旋转能驱动入站更新（必要时重建）且不丢失已启用授权。
 - kill/restart xray 后，`xp` 能在合理时间内恢复运行态（无需人工干预）。
 - StatsService 能按 `grant:<grant_id>` 读取 uplink/downlink（读不到时错误清晰可定位）。
+- 提供可复现的真实 `xray-core` gRPC E2E smoke（见 `scripts/e2e/`），用于验证协议与 RPC 的实际兼容性。

@@ -113,12 +113,35 @@ Storybook 运行环境约定（实现时落地到 `.storybook/preview` 的 decor
   - 统计增量计算（计数回退、重启归零）
   - 超限封禁与幂等（重复封禁/解封）
 
-### 4.3 集成测试（可选，后续）
+### 4.3 真实 Xray gRPC E2E（M2 已落地）
 
-在不引入额外服务的前提下：
+目标：用 **真实 `xray-core`** 验证 `xp` 的 gRPC 下发在“实际实现”上可用，避免仅靠 in-proc mock 导致的兼容性偏差。
 
-- 可用 `xp` 的内部模块做“本地端到端”的集成测试（不启动真实 xray）
-- 若要测试真实 gRPC：实现阶段再评估（是否使用 xray 二进制作为 test fixture）
+落地形式：
+
+- `tests/xray_e2e.rs`：Rust integration test（默认 `#[ignore]`，避免在普通 `cargo test` 中强制依赖 Docker）
+- `scripts/e2e/run-local-xray-e2e.sh`：一键拉起 `xray-core`（Docker）并运行上述 ignored tests
+
+本地运行：
+
+```bash
+scripts/e2e/run-local-xray-e2e.sh
+```
+
+可配置：
+
+- `XRAY_DOCKER_TAG`：指定 `ghcr.io/xtls/xray-core` 的 tag（用于 pin 版本或验证升级）
+
+覆盖范围（smoke）：
+
+- 通过 `xp` 管理 API 创建 Endpoint/Grant
+- `xp` reconciler 能对真实 Xray 执行：AddInbound / AlterInbound(AddUser) 并落到运行态
+- 测试最后通过 RemoveUser/RemoveInbound 清理并以“可成功移除”作为“确实存在过”的断言
+
+非覆盖范围（后续增强）：
+
+- 真实数据面连通性（客户端握手与转发）
+- StatsService 的流量统计准确性（需产生真实流量）
 
 ## 5. Git Hooks（lefthook）与提交规范
 
