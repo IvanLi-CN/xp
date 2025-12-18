@@ -3,7 +3,11 @@ use std::{net::SocketAddr, path::PathBuf};
 use axum::{body::Body, http::Request};
 use pretty_assertions::assert_eq;
 use serde_json::json;
-use tokio::time::{Duration, Instant, sleep};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    time::{Duration, Instant, sleep},
+};
 use tower::util::ServiceExt;
 
 use xp::{config::Config, http::build_router, reconcile::spawn_reconciler, state::StoreInit, xray};
@@ -12,6 +16,13 @@ fn env_socket_addr(key: &str) -> Result<SocketAddr, String> {
     let raw = std::env::var(key)
         .map_err(|_| format!("missing env {key}; run via `scripts/e2e/run-local-xray-e2e.sh`"))?;
     raw.parse::<SocketAddr>()
+        .map_err(|e| format!("invalid {key}={raw}: {e}"))
+}
+
+fn env_u16(key: &str) -> Result<u16, String> {
+    let raw = std::env::var(key)
+        .map_err(|_| format!("missing env {key}; run via `scripts/e2e/run-local-xray-e2e.sh`"))?;
+    raw.parse::<u16>()
         .map_err(|e| format!("invalid {key}={raw}: {e}"))
 }
 
@@ -89,6 +100,82 @@ async fn wait_for_remove_inbound(client: &mut xray::XrayClient, tag: &str) {
             Err(status) => panic!("xray remove_inbound failed: {status}"),
         }
     }
+}
+
+async fn spawn_echo_server() -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match listener.accept().await {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 16 * 1024];
+                loop {
+                    let n = match stream.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    if stream.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+
+    (port, handle)
+}
+
+async fn ss_roundtrip_echo(
+    ss_port: u16,
+    password: &str,
+    dest_port: u16,
+    payload_len: usize,
+) -> std::io::Result<()> {
+    use shadowsocks::{
+        config::{ServerConfig, ServerType},
+        context::Context,
+        crypto::CipherKind,
+        relay::tcprelay::proxy_stream::ProxyClientStream,
+    };
+
+    let context = Context::new_shared(ServerType::Local);
+    let server_addr = SocketAddr::from(([127, 0, 0, 1], ss_port));
+    let server_cfg = ServerConfig::new(
+        server_addr,
+        password.to_string(),
+        CipherKind::AEAD2022_BLAKE3_AES_128_GCM,
+    )
+    .map_err(std::io::Error::other)?;
+
+    let mut stream = ProxyClientStream::connect(
+        context,
+        &server_cfg,
+        ("host.docker.internal".to_string(), dest_port),
+    )
+    .await?;
+
+    let payload = vec![0x42; payload_len];
+    // ProxyClientStream's first write includes handshake+payload in one buffer and
+    // expects the encrypted write to behave like write_all in debug builds.
+    // Keep the first write small to avoid triggering internal debug assertions.
+    let first_chunk_len = payload.len().min(1024);
+    stream.write_all(&payload[..first_chunk_len]).await?;
+    stream.write_all(&payload[first_chunk_len..]).await?;
+    stream.flush().await?;
+
+    let mut received = vec![0u8; payload.len()];
+    stream.read_exact(&mut received).await?;
+    assert_eq!(received, payload);
+
+    stream.shutdown().await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -240,4 +327,172 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
 
     wait_for_remove_inbound(&mut client, &endpoint_tag_ss).await;
     wait_for_remove_inbound(&mut client, &endpoint_tag_vless).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn xray_e2e_quota_enforcement_ss2022() {
+    if std::env::var("XP_E2E_XRAY_MODE").ok().as_deref() != Some("external") {
+        return;
+    }
+
+    let xray_api_addr = env_socket_addr("XP_E2E_XRAY_API_ADDR").unwrap();
+    let ss_port = env_u16("XP_E2E_SS_PORT").unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf(), xray_api_addr);
+
+    let store = xp::state::JsonSnapshotStore::load_or_init(store_init(&config)).unwrap();
+    let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
+    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let app = build_router(config.clone(), store.clone(), reconcile.clone());
+
+    let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "/api/admin/users",
+            json!({
+              "display_name": "quota-e2e",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let user: serde_json::Value = {
+        use http_body_util::BodyExt as _;
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    let user_id = user["user_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": ss_port
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let endpoint_ss: serde_json::Value = {
+        use http_body_util::BodyExt as _;
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
+    let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+
+    let quota_limit_bytes: u64 = 12 * 1024 * 1024;
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "/api/admin/grants",
+            json!({
+              "user_id": user_id,
+              "endpoint_id": endpoint_id_ss,
+              "quota_limit_bytes": quota_limit_bytes,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let grant_ss: serde_json::Value = {
+        use http_body_util::BodyExt as _;
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    let grant_id_ss = grant_ss["grant_id"].as_str().unwrap().to_string();
+    let ss_password = grant_ss["credentials"]["ss2022"]["password"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (dest_port, echo_task) = spawn_echo_server().await;
+
+    let payload_len = 1024 * 1024;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match ss_roundtrip_echo(ss_port, &ss_password, dest_port, payload_len).await {
+            Ok(()) => break,
+            Err(err) => {
+                if Instant::now() >= deadline {
+                    panic!("timeout waiting for ss inbound to become ready: {err}");
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    let now = chrono::Utc::now();
+    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
+        .await
+        .unwrap();
+
+    {
+        let store = store.lock().await;
+        let grant = store.get_grant(&grant_id_ss).unwrap();
+        let usage = store.get_grant_usage(&grant_id_ss).unwrap();
+        assert_eq!(grant.enabled, false);
+        assert_eq!(usage.quota_banned, true);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        match ss_roundtrip_echo(ss_port, &ss_password, dest_port, 32).await {
+            Ok(()) => {
+                if Instant::now() >= deadline {
+                    panic!("expected ss connection to fail after quota ban");
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+            Err(_) => break,
+        }
+    }
+
+    let later = now + chrono::Duration::days(40);
+    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile)
+        .await
+        .unwrap();
+
+    {
+        let store = store.lock().await;
+        let grant = store.get_grant(&grant_id_ss).unwrap();
+        let usage = store.get_grant_usage(&grant_id_ss).unwrap();
+        assert_eq!(grant.enabled, true);
+        assert_eq!(usage.quota_banned, false);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match ss_roundtrip_echo(ss_port, &ss_password, dest_port, 128).await {
+            Ok(()) => break,
+            Err(err) => {
+                if Instant::now() >= deadline {
+                    panic!("timeout waiting for ss inbound to be re-enabled: {err}");
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    echo_task.abort();
+
+    use xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest;
+    let mut client = xray::connect(xray_api_addr).await.unwrap();
+    let _ = client
+        .remove_inbound(RemoveInboundRequest {
+            tag: endpoint_tag_ss,
+        })
+        .await;
 }

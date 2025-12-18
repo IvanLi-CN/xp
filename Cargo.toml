@@ -34,6 +34,7 @@ tonic-prost-build = "0.14"
 bytes = "1"
 http-body-util = "0.1"
 pretty_assertions = "1.4"
+shadowsocks = { version = "1.24.0", default-features = false, features = ["aead-cipher-2022"] }
 tempfile = "3.23.0"
 tokio-stream = { version = "0.1", features = ["net"] }
 tower = { version = "0.5", features = ["util"] }

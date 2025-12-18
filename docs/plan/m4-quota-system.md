@@ -120,7 +120,7 @@ Milestone 1–3 已完成：
   - 超限封禁：达到阈值后触发 RemoveUser + `Grant.enabled=false` + `quota_banned=true`
   - 周期切换：窗口变化时 `used_bytes` 重置，且只对 `quota_banned=true` 的 Grant 自动解封
   - 管理员显式禁用：清除 `quota_banned`，下一周期不自动解封
-- 集成（可选，依赖本机 xray）：复用现有 e2e 脚本/测试，在真实统计增长下验证封禁/解封链路。
+- E2E（依赖本机 xray）：复用现有 e2e 脚本/测试，在真实统计增长下验证封禁/解封链路（至少覆盖 SS2022 的超限封禁与周期切换自动解封）。
 
 ## 9. 风险点与待确认问题
 
