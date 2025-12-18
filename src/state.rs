@@ -557,6 +557,26 @@ impl JsonSnapshotStore {
         self.save()?;
         Ok(Some(grant))
     }
+
+    pub fn set_grant_enabled(
+        &mut self,
+        grant_id: &str,
+        enabled: bool,
+    ) -> Result<Option<Grant>, StoreError> {
+        let grant = match self.state.grants.get_mut(grant_id) {
+            Some(grant) => grant,
+            None => return Ok(None),
+        };
+
+        if grant.enabled == enabled {
+            return Ok(Some(grant.clone()));
+        }
+
+        grant.enabled = enabled;
+        let grant = grant.clone();
+        self.save()?;
+        Ok(Some(grant))
+    }
 }
 
 #[derive(Debug, Deserialize)]

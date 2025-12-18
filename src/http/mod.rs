@@ -9,14 +9,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::{DateTime, Datelike, FixedOffset, Local, LocalResult, TimeZone, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::{
     config::Config,
-    cycle::cycle_anchor_date,
+    cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
     domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, StoreError},
@@ -582,131 +582,15 @@ struct GrantUsageResponse {
     used_bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum EffectiveCyclePolicy {
-    ByUser,
-    ByNode,
-}
-
-fn at_start_of_day<Tz: TimeZone>(tz: &Tz, date: chrono::NaiveDate) -> Result<DateTime<Tz>, ApiError>
-where
-    Tz::Offset: Copy,
-{
-    let naive = date
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| ApiError::internal("failed to build local midnight"))?;
-    match tz.from_local_datetime(&naive) {
-        LocalResult::Single(dt) => Ok(dt),
-        LocalResult::Ambiguous(dt, _) => Ok(dt),
-        LocalResult::None => {
-            // Extremely rare (DST shifts at midnight): fall back to 01:00.
-            let naive = date
-                .and_hms_opt(1, 0, 0)
-                .ok_or_else(|| ApiError::internal("failed to build local 01:00"))?;
-            match tz.from_local_datetime(&naive) {
-                LocalResult::Single(dt) => Ok(dt),
-                LocalResult::Ambiguous(dt, _) => Ok(dt),
-                LocalResult::None => Err(ApiError::internal("failed to resolve local time")),
-            }
-        }
-    }
-}
-
-fn prev_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 1 {
-        (year - 1, 12)
-    } else {
-        (year, month - 1)
-    }
-}
-
-fn next_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    }
-}
-
-fn cycle_window_at<Tz: TimeZone>(
-    tz: &Tz,
-    now: DateTime<Tz>,
-    day_of_month: u8,
-) -> Result<(DateTime<Tz>, DateTime<Tz>), ApiError>
-where
-    Tz::Offset: Copy,
-{
-    let day = u32::from(day_of_month);
-
-    let anchor_this = cycle_anchor_date(now.year(), now.month(), day);
-    let start_this = at_start_of_day(tz, anchor_this)?;
-    let start = if now >= start_this {
-        start_this
-    } else {
-        let (prev_year, prev_month) = prev_year_month(now.year(), now.month());
-        let anchor_prev = cycle_anchor_date(prev_year, prev_month, day);
-        at_start_of_day(tz, anchor_prev)?
-    };
-
-    let (next_year, next_month) = next_year_month(start.year(), start.month());
-    let anchor_next = cycle_anchor_date(next_year, next_month, day);
-    let end = at_start_of_day(tz, anchor_next)?;
-    Ok((start, end))
-}
-
-fn current_cycle_window(
-    policy: EffectiveCyclePolicy,
-    day_of_month: u8,
-) -> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), ApiError> {
-    match policy {
-        EffectiveCyclePolicy::ByUser => {
-            let tz = FixedOffset::east_opt(8 * 3600)
-                .ok_or_else(|| ApiError::internal("invalid UTC+8 offset"))?;
-            let now = Utc::now().with_timezone(&tz);
-            let (start, end) = cycle_window_at(&tz, now, day_of_month)?;
-            Ok((start, end))
-        }
-        EffectiveCyclePolicy::ByNode => {
-            let now = Local::now();
-            let (start, end) = cycle_window_at(&Local, now, day_of_month)?;
-            Ok((
-                start.with_timezone(start.offset()),
-                end.with_timezone(end.offset()),
-            ))
-        }
-    }
-}
-
-fn effective_cycle_policy_and_day(
-    store: &JsonSnapshotStore,
-    grant: &Grant,
-) -> Result<(EffectiveCyclePolicy, u8), ApiError> {
-    match grant.cycle_policy {
-        CyclePolicy::InheritUser => {
-            let user = store.get_user(&grant.user_id).ok_or_else(|| {
-                ApiError::not_found(format!(
-                    "user not found (cycle_policy=inherit_user): {}",
-                    grant.user_id
-                ))
-            })?;
-            let policy = match user.cycle_policy_default {
-                CyclePolicyDefault::ByUser => EffectiveCyclePolicy::ByUser,
-                CyclePolicyDefault::ByNode => EffectiveCyclePolicy::ByNode,
-            };
-            Ok((policy, user.cycle_day_of_month_default))
-        }
-        CyclePolicy::ByUser => Ok((
-            EffectiveCyclePolicy::ByUser,
-            grant
-                .cycle_day_of_month
-                .ok_or_else(|| ApiError::invalid_request("cycle_day_of_month is required"))?,
+fn map_cycle_window_error(err: CycleWindowError) -> ApiError {
+    match err {
+        CycleWindowError::UserNotFound { user_id } => ApiError::not_found(format!(
+            "user not found (cycle_policy=inherit_user): {user_id}"
         )),
-        CyclePolicy::ByNode => Ok((
-            EffectiveCyclePolicy::ByNode,
-            grant
-                .cycle_day_of_month
-                .ok_or_else(|| ApiError::invalid_request("cycle_day_of_month is required"))?,
-        )),
+        CycleWindowError::MissingCycleDayOfMonth => {
+            ApiError::invalid_request("cycle_day_of_month is required")
+        }
+        _ => ApiError::internal(err.to_string()),
     }
 }
 
@@ -719,11 +603,13 @@ async fn admin_get_grant_usage(
         let grant = store
             .get_grant(&grant_id)
             .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-        let (policy, day_of_month) = effective_cycle_policy_and_day(&store, &grant)?;
+        let (policy, day_of_month) =
+            effective_cycle_policy_and_day(&store, &grant).map_err(map_cycle_window_error)?;
         (grant, policy, day_of_month)
     };
 
-    let (cycle_start, cycle_end) = current_cycle_window(policy, day_of_month)?;
+    let (cycle_start, cycle_end) =
+        current_cycle_window_now(policy, day_of_month).map_err(map_cycle_window_error)?;
     let cycle_start_at = cycle_start.to_rfc3339();
     let cycle_end_at = cycle_end.to_rfc3339();
 
