@@ -10,7 +10,8 @@ use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_stream::wrappers::TcpListenerStream;
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
@@ -21,6 +22,11 @@ use crate::{
     id::{is_ulid_string, new_ulid_string},
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
+    xray::proto::xray::app::stats::command::stats_service_server::{StatsService, StatsServiceServer},
+    xray::proto::xray::app::stats::command::{
+        GetStatsOnlineIpListResponse, GetStatsRequest, GetStatsResponse, QueryStatsRequest,
+        QueryStatsResponse, Stat, SysStatsRequest, SysStatsResponse,
+    },
 };
 
 fn test_config(data_dir: PathBuf) -> Config {
@@ -565,8 +571,80 @@ async fn delete_admin_grant_schedules_remove_user_then_full_when_endpoint_exists
 
 #[tokio::test]
 async fn grant_usage_is_501_not_implemented() {
+    #[derive(Debug, Default)]
+    struct TestStatsService;
+
+    #[tonic::async_trait]
+    impl StatsService for TestStatsService {
+        async fn get_stats(
+            &self,
+            request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let value = if req.name.ends_with(">>>uplink") {
+                100
+            } else if req.name.ends_with(">>>downlink") {
+                200
+            } else {
+                return Err(tonic::Status::not_found("missing stat"));
+            };
+            Ok(tonic::Response::new(GetStatsResponse {
+                stat: Some(Stat {
+                    name: req.name,
+                    value,
+                }),
+            }))
+        }
+
+        async fn get_stats_online(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_stats_online"))
+        }
+
+        async fn query_stats(
+            &self,
+            _request: tonic::Request<QueryStatsRequest>,
+        ) -> Result<tonic::Response<QueryStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("query_stats"))
+        }
+
+        async fn get_sys_stats(
+            &self,
+            _request: tonic::Request<SysStatsRequest>,
+        ) -> Result<tonic::Response<SysStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_sys_stats"))
+        }
+
+        async fn get_stats_online_ip_list(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsOnlineIpListResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_stats_online_ip_list"))
+        }
+    }
+
     let tmp = tempfile::tempdir().unwrap();
-    let app = app(&tmp);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let xray_api_addr = listener.local_addr().unwrap();
+    let incoming = TcpListenerStream::new(listener);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(StatsServiceServer::new(TestStatsService::default()))
+            .serve_with_incoming_shutdown(incoming, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let mut config = test_config(tmp.path().to_path_buf());
+    config.xray_api_addr = xray_api_addr;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let app = build_router(config, store, ReconcileHandle::noop());
 
     let res = app
         .clone()
@@ -632,9 +710,17 @@ async fn grant_usage_is_501_not_implemented() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
-    assert_eq!(json["error"]["code"], "not_implemented");
+    assert_eq!(json["grant_id"], grant_id);
+    assert_eq!(json["used_bytes"], 300);
+    let start = json["cycle_start_at"].as_str().unwrap();
+    let end = json["cycle_end_at"].as_str().unwrap();
+    let start = chrono::DateTime::parse_from_rfc3339(start).unwrap();
+    let end = chrono::DateTime::parse_from_rfc3339(end).unwrap();
+    assert!(end > start);
+
+    let _ = shutdown_tx.send(());
 }
 
 #[tokio::test]

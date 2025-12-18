@@ -9,15 +9,18 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use chrono::{DateTime, Datelike, FixedOffset, Local, LocalResult, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::{
     config::Config,
+    cycle::cycle_anchor_date,
     domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, StoreError},
+    xray,
 };
 
 #[derive(Clone)]
@@ -228,7 +231,7 @@ pub fn build_router(
                 .delete(admin_delete_grant)
                 .patch(admin_patch_grant),
         )
-        .route("/grants/:grant_id/usage", get(not_implemented))
+        .route("/grants/:grant_id/usage", get(admin_get_grant_usage))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
     Router::new()
@@ -566,6 +569,186 @@ async fn admin_delete_grant(
     }
     state.reconcile.request_full();
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct GrantUsageResponse {
+    grant_id: String,
+    cycle_start_at: String,
+    cycle_end_at: String,
+    used_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EffectiveCyclePolicy {
+    ByUser,
+    ByNode,
+}
+
+fn at_start_of_day<Tz: TimeZone>(
+    tz: &Tz,
+    date: chrono::NaiveDate,
+) -> Result<DateTime<Tz>, ApiError>
+where
+    Tz::Offset: Copy,
+{
+    let naive = date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| ApiError::internal("failed to build local midnight"))?;
+    match tz.from_local_datetime(&naive) {
+        LocalResult::Single(dt) => Ok(dt),
+        LocalResult::Ambiguous(dt, _) => Ok(dt),
+        LocalResult::None => {
+            // Extremely rare (DST shifts at midnight): fall back to 01:00.
+            let naive = date
+                .and_hms_opt(1, 0, 0)
+                .ok_or_else(|| ApiError::internal("failed to build local 01:00"))?;
+            match tz.from_local_datetime(&naive) {
+                LocalResult::Single(dt) => Ok(dt),
+                LocalResult::Ambiguous(dt, _) => Ok(dt),
+                LocalResult::None => Err(ApiError::internal("failed to resolve local time")),
+            }
+        }
+    }
+}
+
+fn prev_year_month(year: i32, month: u32) -> (i32, u32) {
+    if month == 1 { (year - 1, 12) } else { (year, month - 1) }
+}
+
+fn next_year_month(year: i32, month: u32) -> (i32, u32) {
+    if month == 12 { (year + 1, 1) } else { (year, month + 1) }
+}
+
+fn cycle_window_at<Tz: TimeZone>(
+    tz: &Tz,
+    now: DateTime<Tz>,
+    day_of_month: u8,
+) -> Result<(DateTime<Tz>, DateTime<Tz>), ApiError>
+where
+    Tz::Offset: Copy,
+{
+    let day = u32::from(day_of_month);
+
+    let anchor_this = cycle_anchor_date(now.year(), now.month(), day);
+    let start_this = at_start_of_day(tz, anchor_this)?;
+    let start = if now >= start_this {
+        start_this
+    } else {
+        let (prev_year, prev_month) = prev_year_month(now.year(), now.month());
+        let anchor_prev = cycle_anchor_date(prev_year, prev_month, day);
+        at_start_of_day(tz, anchor_prev)?
+    };
+
+    let (next_year, next_month) = next_year_month(start.year(), start.month());
+    let anchor_next = cycle_anchor_date(next_year, next_month, day);
+    let end = at_start_of_day(tz, anchor_next)?;
+    Ok((start, end))
+}
+
+fn current_cycle_window(
+    policy: EffectiveCyclePolicy,
+    day_of_month: u8,
+) -> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), ApiError> {
+    match policy {
+        EffectiveCyclePolicy::ByUser => {
+            let tz = FixedOffset::east_opt(8 * 3600)
+                .ok_or_else(|| ApiError::internal("invalid UTC+8 offset"))?;
+            let now = Utc::now().with_timezone(&tz);
+            let (start, end) = cycle_window_at(&tz, now, day_of_month)?;
+            Ok((start, end))
+        }
+        EffectiveCyclePolicy::ByNode => {
+            let now = Local::now();
+            let (start, end) = cycle_window_at(&Local, now, day_of_month)?;
+            Ok((
+                start.with_timezone(start.offset()),
+                end.with_timezone(end.offset()),
+            ))
+        }
+    }
+}
+
+fn effective_cycle_policy_and_day(
+    store: &JsonSnapshotStore,
+    grant: &Grant,
+) -> Result<(EffectiveCyclePolicy, u8), ApiError> {
+    match grant.cycle_policy {
+        CyclePolicy::InheritUser => {
+            let user = store.get_user(&grant.user_id).ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "user not found (cycle_policy=inherit_user): {}",
+                    grant.user_id
+                ))
+            })?;
+            let policy = match user.cycle_policy_default {
+                CyclePolicyDefault::ByUser => EffectiveCyclePolicy::ByUser,
+                CyclePolicyDefault::ByNode => EffectiveCyclePolicy::ByNode,
+            };
+            Ok((policy, user.cycle_day_of_month_default))
+        }
+        CyclePolicy::ByUser => Ok((
+            EffectiveCyclePolicy::ByUser,
+            grant
+                .cycle_day_of_month
+                .ok_or_else(|| ApiError::invalid_request("cycle_day_of_month is required"))?,
+        )),
+        CyclePolicy::ByNode => Ok((
+            EffectiveCyclePolicy::ByNode,
+            grant
+                .cycle_day_of_month
+                .ok_or_else(|| ApiError::invalid_request("cycle_day_of_month is required"))?,
+        )),
+    }
+}
+
+async fn admin_get_grant_usage(
+    Extension(state): Extension<AppState>,
+    Path(grant_id): Path<String>,
+) -> Result<Json<GrantUsageResponse>, ApiError> {
+    let (grant, policy, day_of_month) = {
+        let store = state.store.lock().await;
+        let grant = store
+            .get_grant(&grant_id)
+            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
+        let (policy, day_of_month) = effective_cycle_policy_and_day(&store, &grant)?;
+        (grant, policy, day_of_month)
+    };
+
+    let (cycle_start, cycle_end) = current_cycle_window(policy, day_of_month)?;
+    let cycle_start_at = cycle_start.to_rfc3339();
+    let cycle_end_at = cycle_end.to_rfc3339();
+
+    let email = format!("grant:{grant_id}");
+    let (uplink_total, downlink_total) = {
+        let mut client = xray::connect(state.config.xray_api_addr)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        client
+            .get_user_traffic_totals(&email)
+            .await
+            .map_err(|status| ApiError::internal(format!("xray get_stats failed: {status}")))?
+    };
+    let seen_at = Utc::now().to_rfc3339();
+
+    let snapshot = {
+        let mut store = state.store.lock().await;
+        store.apply_grant_usage_sample(
+            &grant.grant_id,
+            cycle_start_at.clone(),
+            cycle_end_at.clone(),
+            uplink_total,
+            downlink_total,
+            seen_at,
+        )?
+    };
+
+    Ok(Json(GrantUsageResponse {
+        grant_id,
+        cycle_start_at: snapshot.cycle_start_at,
+        cycle_end_at: snapshot.cycle_end_at,
+        used_bytes: snapshot.used_bytes,
+    }))
 }
 
 async fn not_implemented() -> ApiError {

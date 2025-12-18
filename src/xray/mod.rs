@@ -8,7 +8,9 @@ use crate::xray::proto::xray::app::proxyman::command::{
     RemoveInboundRequest, RemoveInboundResponse,
 };
 use crate::xray::proto::xray::app::stats::command::stats_service_client::StatsServiceClient;
-use crate::xray::proto::xray::app::stats::command::{QueryStatsRequest, QueryStatsResponse};
+use crate::xray::proto::xray::app::stats::command::{
+    GetStatsRequest, GetStatsResponse, QueryStatsRequest, QueryStatsResponse,
+};
 
 pub mod builder;
 pub mod proto;
@@ -74,12 +76,58 @@ impl XrayClient {
         Ok(resp.into_inner())
     }
 
+    pub async fn get_stats(
+        &mut self,
+        req: GetStatsRequest,
+    ) -> Result<GetStatsResponse, tonic::Status> {
+        let resp = self.stats.get_stats(req).await?;
+        Ok(resp.into_inner())
+    }
+
     pub async fn query_stats(
         &mut self,
         req: QueryStatsRequest,
     ) -> Result<QueryStatsResponse, tonic::Status> {
         let resp = self.stats.query_stats(req).await?;
         Ok(resp.into_inner())
+    }
+
+    pub async fn get_stat_value(&mut self, name: &str) -> Result<Option<u64>, tonic::Status> {
+        let req = GetStatsRequest {
+            name: name.to_string(),
+            reset: false,
+        };
+        let resp = match self.get_stats(req).await {
+            Ok(resp) => resp,
+            Err(status) if is_not_found(&status) => return Ok(None),
+            Err(status) => return Err(status),
+        };
+
+        let stat = resp
+            .stat
+            .ok_or_else(|| tonic::Status::internal("missing stat in GetStatsResponse"))?;
+        if stat.value < 0 {
+            return Err(tonic::Status::internal(format!(
+                "xray stat value must be non-negative: name={} value={}",
+                stat.name, stat.value
+            )));
+        }
+        Ok(Some(stat.value as u64))
+    }
+
+    pub async fn get_user_traffic_totals(
+        &mut self,
+        email: &str,
+    ) -> Result<(u64, u64), tonic::Status> {
+        let uplink = self
+            .get_stat_value(&format!("user>>>{email}>>>traffic>>>uplink"))
+            .await?
+            .unwrap_or(0);
+        let downlink = self
+            .get_stat_value(&format!("user>>>{email}>>>traffic>>>downlink"))
+            .await?
+            .unwrap_or(0);
+        Ok((uplink, downlink))
     }
 }
 
