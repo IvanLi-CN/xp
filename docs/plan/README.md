@@ -39,6 +39,7 @@
 
 ## 4. Milestone：配额系统（单机强约束）
 
+- 细化方案：`docs/plan/m4-quota-system.md`
 - 用量采集：Stats 拉取 + 本地游标增量累计（用量不进 Raft）
 - 周期计算：ByUser(UTC+8)/ByNode(本地时区) 与 “缺日取月末” 规则
 - 超限动作：本机 RemoveUser + 写入期望状态 `Grant.enabled=false`（单机先本地落盘）
