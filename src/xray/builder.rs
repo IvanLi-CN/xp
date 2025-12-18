@@ -391,7 +391,7 @@ pub fn build_add_inbound_request(
                 port: 0,
                 protocol_name: "tcp".to_string(),
                 transport_settings: vec![tcp_transport_settings()],
-                security_type: "reality".to_string(),
+                security_type: TYPE_REALITY_SECURITY_CONFIG.to_string(),
                 security_settings: vec![to_typed_message(TYPE_REALITY_SECURITY_CONFIG, &reality)],
                 socket_settings: None,
             };
@@ -644,7 +644,7 @@ mod tests {
 
         let stream = receiver.stream_settings.unwrap();
         assert_eq!(stream.protocol_name, "tcp");
-        assert_eq!(stream.security_type, "reality");
+        assert_eq!(stream.security_type, TYPE_REALITY_SECURITY_CONFIG);
         assert_eq!(stream.security_settings.len(), 1);
 
         let reality_tm = &stream.security_settings[0];

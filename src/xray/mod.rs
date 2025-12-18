@@ -92,10 +92,22 @@ pub enum IdempotencyStatus {
 
 pub fn classify_idempotency_status(status: &tonic::Status) -> IdempotencyStatus {
     match status.code() {
-        tonic::Code::AlreadyExists => IdempotencyStatus::AlreadyExists,
-        tonic::Code::NotFound => IdempotencyStatus::NotFound,
-        _ => IdempotencyStatus::Other,
+        tonic::Code::AlreadyExists => return IdempotencyStatus::AlreadyExists,
+        tonic::Code::NotFound => return IdempotencyStatus::NotFound,
+        _ => {}
     }
+
+    // Xray-core sometimes returns `Code::Unknown` with a nested error message
+    // (e.g. "handler not found") instead of gRPC `Code::NotFound`.
+    let msg = status.message().to_ascii_lowercase();
+    if msg.contains("not found") {
+        return IdempotencyStatus::NotFound;
+    }
+    if msg.contains("already exists") || msg.contains("already exist") {
+        return IdempotencyStatus::AlreadyExists;
+    }
+
+    IdempotencyStatus::Other
 }
 
 pub fn is_already_exists(status: &tonic::Status) -> bool {
@@ -128,6 +140,8 @@ mod tests {
     fn classify_idempotency_status_works() {
         let already = tonic::Status::new(tonic::Code::AlreadyExists, "exists");
         let missing = tonic::Status::new(tonic::Code::NotFound, "missing");
+        let missing_unknown = tonic::Status::new(tonic::Code::Unknown, "handler not found: foo");
+        let already_unknown = tonic::Status::new(tonic::Code::Unknown, "something already exists");
         let other = tonic::Status::new(tonic::Code::Internal, "boom");
 
         assert_eq!(
@@ -137,6 +151,14 @@ mod tests {
         assert_eq!(
             classify_idempotency_status(&missing),
             IdempotencyStatus::NotFound
+        );
+        assert_eq!(
+            classify_idempotency_status(&missing_unknown),
+            IdempotencyStatus::NotFound
+        );
+        assert_eq!(
+            classify_idempotency_status(&already_unknown),
+            IdempotencyStatus::AlreadyExists
         );
         assert_eq!(
             classify_idempotency_status(&other),
