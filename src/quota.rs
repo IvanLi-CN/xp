@@ -882,4 +882,286 @@ mod tests {
 
         let _ = shutdown.send(());
     }
+
+    #[tokio::test]
+    async fn missing_endpoint_tag_still_disables() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let grant_id = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id.clone(),
+                    QUOTA_TOLERANCE_BYTES + 100,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(store.delete_endpoint(&endpoint.endpoint_id).unwrap());
+            grant.grant_id
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 100);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let grant = store_guard.get_grant(&grant_id).unwrap();
+        assert!(!grant.enabled);
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert!(usage.quota_banned);
+        assert!(usage.quota_banned_at.is_some());
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert_eq!(st.calls, vec![]);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn rollover_does_not_auto_unban_when_disabled_in_config() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, false);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let reconcile = ReconcileHandle::from_sender(tx);
+
+        let banned_at = "2025-11-15T00:00:00Z".to_string();
+        let grant_id = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id,
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            store.set_grant_enabled(&grant.grant_id, false).unwrap();
+
+            let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc);
+            let (start, end) =
+                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, old_now)
+                    .unwrap();
+            store
+                .apply_grant_usage_sample(
+                    &grant.grant_id,
+                    start.to_rfc3339(),
+                    end.to_rfc3339(),
+                    0,
+                    0,
+                    old_now.to_rfc3339(),
+                )
+                .unwrap();
+            store
+                .set_quota_banned(&grant.grant_id, banned_at.clone())
+                .unwrap();
+            grant.grant_id
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(new_now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let grant = store_guard.get_grant(&grant_id).unwrap();
+        assert!(!grant.enabled);
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert!(usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, Some(banned_at));
+
+        assert!(
+            rx.try_recv().is_err(),
+            "expected quota_auto_unban=false to not request reconcile"
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn xray_connect_failure_is_non_fatal_and_does_not_create_usage() {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let grant_id = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id,
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            grant.grant_id
+        };
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            run_quota_tick_at(now, &config, &store, &reconcile)
+                .await
+                .is_ok()
+        );
+
+        let store_guard = store.lock().await;
+        assert_eq!(store_guard.get_grant_usage(&grant_id), None);
+    }
+
+    #[tokio::test]
+    async fn invalid_stats_values_do_not_corrupt_usage() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let reconcile = ReconcileHandle::from_sender(tx);
+
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let grant_id = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id,
+                    u64::MAX,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let (start, end) =
+                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, now)
+                    .unwrap();
+            store
+                .apply_grant_usage_sample(
+                    &grant.grant_id,
+                    start.to_rfc3339(),
+                    end.to_rfc3339(),
+                    100,
+                    200,
+                    now.to_rfc3339(),
+                )
+                .unwrap();
+            grant.grant_id
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), -1);
+        }
+
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let grant = store_guard.get_grant(&grant_id).unwrap();
+        assert!(grant.enabled);
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert_eq!(usage.used_bytes, 300);
+        assert!(!usage.quota_banned);
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert_eq!(st.calls, vec![]);
+        drop(st);
+
+        assert!(
+            rx.try_recv().is_err(),
+            "expected invalid stats to not trigger reconcile"
+        );
+
+        let _ = shutdown.send(());
+    }
 }
