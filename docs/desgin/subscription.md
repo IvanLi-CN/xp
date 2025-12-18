@@ -18,6 +18,7 @@
 - URI 的 `#name` 与 Clash 的 `name`：
   - 默认：`{user.display_name}-{node.name}-{endpoint.tag}`
   - 可被 Grant.note 覆盖（更友好）
+- URI 的 `#name` 建议进行 URL encode（至少对空格等非法字符做转义），避免生成非法 URI（参见 SIP002 的说明）。
 
 ## 3. Raw URI（逐行）
 
@@ -45,16 +46,17 @@ vless://<UUID>@<HOST>:<PORT>?encryption=none&security=reality&type=tcp&sni=<SNI>
 
 本项目采用多用户 SS2022：客户端 password 为 `server_psk:user_psk`。
 
-Raw 结构建议采用常见形式：
+由于 SS2022 属于 AEAD-2022（SIP022），按 SIP002 约定 `userinfo` 不应进行 Base64URL 编码，而应使用 RFC3986 可解析的 “plain user info” 形式，并对 `method/password` 进行 percent-encoding。
 
 ```
-ss://<BASE64(method:password)>@<HOST>:<PORT>#<NAME>
+ss://2022-blake3-aes-128-gcm:<PASSWORD>@<HOST>:<PORT>#<NAME>
 ```
 
 其中：
 
 - `method` 固定：`2022-blake3-aes-128-gcm`
-- `password`：`<server_psk_b64>:<user_psk_b64>`
+- `PASSWORD`：对 `password` 进行 percent-encoding 后的字符串
+- `password`：`<server_psk_b64>:<user_psk_b64>`（注意 `:`、`+`、`/`、`=` 等需编码）
 
 ## 4. Base64 订阅
 
