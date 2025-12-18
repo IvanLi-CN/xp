@@ -15,7 +15,8 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::Config,
-    domain::{CyclePolicy, CyclePolicyDefault, Endpoint, Grant, Node, User},
+    domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
+    reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, StoreError},
 };
 
@@ -23,6 +24,7 @@ use crate::{
 pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
+    pub reconcile: ReconcileHandle,
 }
 
 #[derive(Debug)]
@@ -184,10 +186,15 @@ enum CreateEndpointRequest {
     Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
 }
 
-pub fn build_router(config: Config, store: Arc<Mutex<JsonSnapshotStore>>) -> Router {
+pub fn build_router(
+    config: Config,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    reconcile: ReconcileHandle,
+) -> Router {
     let app_state = AppState {
         config: Arc::new(config),
         store,
+        reconcile,
     };
 
     let admin_token = app_state.config.admin_token.clone();
@@ -206,7 +213,7 @@ pub fn build_router(config: Config, store: Arc<Mutex<JsonSnapshotStore>>) -> Rou
         )
         .route(
             "/endpoints/:endpoint_id/rotate-shortid",
-            post(not_implemented),
+            post(admin_rotate_short_id),
         )
         .route("/users", post(admin_create_user).get(admin_list_users))
         .route(
@@ -306,8 +313,6 @@ async fn admin_create_endpoint(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateEndpointRequest>,
 ) -> Result<Json<Endpoint>, ApiError> {
-    let mut store = state.store.lock().await;
-
     let (node_id, kind, port, meta) = match req {
         CreateEndpointRequest::VlessRealityVisionTcp {
             node_id,
@@ -328,7 +333,11 @@ async fn admin_create_endpoint(
         ),
     };
 
-    let endpoint = store.create_endpoint(node_id, kind, port, meta)?;
+    let endpoint = {
+        let mut store = state.store.lock().await;
+        store.create_endpoint(node_id, kind, port, meta)?
+    };
+    state.reconcile.request_full();
     Ok(Json(endpoint))
 }
 
@@ -356,14 +365,59 @@ async fn admin_delete_endpoint(
     Extension(state): Extension<AppState>,
     Path(endpoint_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let mut store = state.store.lock().await;
-    let deleted = store.delete_endpoint(&endpoint_id)?;
-    if !deleted {
-        return Err(ApiError::not_found(format!(
-            "endpoint not found: {endpoint_id}"
-        )));
-    }
+    let tag = {
+        let mut store = state.store.lock().await;
+        let endpoint = store
+            .get_endpoint(&endpoint_id)
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+        let deleted = store.delete_endpoint(&endpoint_id)?;
+        if !deleted {
+            return Err(ApiError::not_found(format!(
+                "endpoint not found: {endpoint_id}"
+            )));
+        }
+        endpoint.tag
+    };
+    state.reconcile.request_remove_inbound(tag);
+    state.reconcile.request_full();
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct RotateShortIdResponse {
+    endpoint_id: String,
+    active_short_id: String,
+    short_ids: Vec<String>,
+}
+
+async fn admin_rotate_short_id(
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
+) -> Result<Json<RotateShortIdResponse>, ApiError> {
+    let out = {
+        let mut store = state.store.lock().await;
+
+        let endpoint = store
+            .get_endpoint(&endpoint_id)
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+
+        if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+            return Err(ApiError::invalid_request(
+                "rotate-shortid is only supported for vless_reality_vision_tcp endpoints",
+            ));
+        }
+
+        store
+            .rotate_vless_reality_short_id(&endpoint_id)?
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?
+    };
+    state.reconcile.request_rebuild_inbound(endpoint_id.clone());
+
+    Ok(Json(RotateShortIdResponse {
+        endpoint_id,
+        active_short_id: out.active_short_id,
+        short_ids: out.short_ids,
+    }))
 }
 
 async fn admin_create_user(
@@ -433,15 +487,18 @@ async fn admin_create_grant(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateGrantRequest>,
 ) -> Result<Json<Grant>, ApiError> {
-    let mut store = state.store.lock().await;
-    let grant = store.create_grant(
-        req.user_id,
-        req.endpoint_id,
-        req.quota_limit_bytes,
-        req.cycle_policy,
-        req.cycle_day_of_month,
-        req.note,
-    )?;
+    let grant = {
+        let mut store = state.store.lock().await;
+        store.create_grant(
+            req.user_id,
+            req.endpoint_id,
+            req.quota_limit_bytes,
+            req.cycle_policy,
+            req.cycle_day_of_month,
+            req.note,
+        )?
+    };
+    state.reconcile.request_full();
     Ok(Json(grant))
 }
 
@@ -450,16 +507,19 @@ async fn admin_patch_grant(
     Path(grant_id): Path<String>,
     ApiJson(req): ApiJson<PatchGrantRequest>,
 ) -> Result<Json<Grant>, ApiError> {
-    let mut store = state.store.lock().await;
-    let grant = store
-        .update_grant(
-            &grant_id,
-            req.enabled,
-            req.quota_limit_bytes,
-            req.cycle_policy,
-            req.cycle_day_of_month,
-        )?
-        .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
+    let grant = {
+        let mut store = state.store.lock().await;
+        store
+            .update_grant(
+                &grant_id,
+                req.enabled,
+                req.quota_limit_bytes,
+                req.cycle_policy,
+                req.cycle_day_of_month,
+            )?
+            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?
+    };
+    state.reconcile.request_full();
     Ok(Json(grant))
 }
 
@@ -487,11 +547,24 @@ async fn admin_delete_grant(
     Extension(state): Extension<AppState>,
     Path(grant_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let mut store = state.store.lock().await;
-    let deleted = store.delete_grant(&grant_id)?;
-    if !deleted {
-        return Err(ApiError::not_found(format!("grant not found: {grant_id}")));
+    let (endpoint_tag, email) = {
+        let mut store = state.store.lock().await;
+        let grant = store
+            .get_grant(&grant_id)
+            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
+        let email = format!("grant:{grant_id}");
+        let endpoint_tag = store.get_endpoint(&grant.endpoint_id).map(|e| e.tag);
+        let deleted = store.delete_grant(&grant_id)?;
+        if !deleted {
+            return Err(ApiError::not_found(format!("grant not found: {grant_id}")));
+        }
+        (endpoint_tag, email)
+    };
+
+    if let Some(tag) = endpoint_tag {
+        state.reconcile.request_remove_user(tag, email);
     }
+    state.reconcile.request_full();
     Ok(StatusCode::NO_CONTENT)
 }
 

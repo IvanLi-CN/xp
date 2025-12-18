@@ -1,0 +1,1048 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
+
+use rand::{RngCore, SeedableRng, rngs::StdRng};
+use tokio::{
+    sync::{Mutex, mpsc},
+    time::{Instant, MissedTickBehavior},
+};
+use tracing::{debug, warn};
+
+use crate::{
+    config::Config,
+    domain::{Endpoint, Grant},
+    state::JsonSnapshotStore,
+    xray,
+    xray::builder,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileRequest {
+    Full,
+    RemoveInbound { tag: String },
+    RemoveUser { tag: String, email: String },
+    RebuildInbound { endpoint_id: String },
+}
+
+#[derive(Debug, Default)]
+struct PendingBatch {
+    full: bool,
+    remove_inbounds: BTreeSet<String>,
+    remove_users: BTreeSet<(String, String)>,
+    rebuild_inbounds: BTreeSet<String>,
+}
+
+impl PendingBatch {
+    fn has_any(&self) -> bool {
+        self.full
+            || !self.remove_inbounds.is_empty()
+            || !self.remove_users.is_empty()
+            || !self.rebuild_inbounds.is_empty()
+    }
+
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    fn add(&mut self, req: ReconcileRequest) {
+        match req {
+            ReconcileRequest::Full => self.full = true,
+            ReconcileRequest::RemoveInbound { tag } => {
+                self.remove_inbounds.insert(tag);
+            }
+            ReconcileRequest::RemoveUser { tag, email } => {
+                self.remove_users.insert((tag, email));
+            }
+            ReconcileRequest::RebuildInbound { endpoint_id } => {
+                self.rebuild_inbounds.insert(endpoint_id);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconcileHandle {
+    tx: Option<mpsc::UnboundedSender<ReconcileRequest>>,
+}
+
+impl ReconcileHandle {
+    pub fn noop() -> Self {
+        Self { tx: None }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
+        Self { tx: Some(tx) }
+    }
+
+    pub fn request(&self, req: ReconcileRequest) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(req);
+        }
+    }
+
+    pub fn request_full(&self) {
+        self.request(ReconcileRequest::Full);
+    }
+
+    pub fn request_remove_inbound(&self, tag: impl Into<String>) {
+        self.request(ReconcileRequest::RemoveInbound { tag: tag.into() });
+    }
+
+    pub fn request_remove_user(&self, tag: impl Into<String>, email: impl Into<String>) {
+        self.request(ReconcileRequest::RemoveUser {
+            tag: tag.into(),
+            email: email.into(),
+        });
+    }
+
+    pub fn request_rebuild_inbound(&self, endpoint_id: impl Into<String>) {
+        self.request(ReconcileRequest::RebuildInbound {
+            endpoint_id: endpoint_id.into(),
+        });
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BackoffConfig {
+    base: Duration,
+    cap: Duration,
+    jitter_max_divisor: u32,
+}
+
+#[derive(Debug)]
+struct BackoffState<R> {
+    cfg: BackoffConfig,
+    attempt: u32,
+    rng: R,
+}
+
+impl<R: RngCore> BackoffState<R> {
+    fn new(cfg: BackoffConfig, rng: R) -> Self {
+        Self {
+            cfg,
+            attempt: 0,
+            rng,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.attempt = 0;
+    }
+
+    fn next_delay(&mut self) -> Duration {
+        let base = base_delay_for_attempt(self.cfg.base, self.cfg.cap, self.attempt);
+        self.attempt = self.attempt.saturating_add(1);
+
+        let base_ms = base.as_millis().min(u128::from(u64::MAX)) as u64;
+        let jitter_max_ms = if self.cfg.jitter_max_divisor == 0 {
+            0
+        } else {
+            base_ms / u64::from(self.cfg.jitter_max_divisor)
+        };
+        let jitter_ms = if jitter_max_ms == 0 {
+            0
+        } else {
+            self.rng.next_u64() % (jitter_max_ms + 1)
+        };
+
+        let total_ms = base_ms.saturating_add(jitter_ms);
+        std::cmp::min(self.cfg.cap, Duration::from_millis(total_ms))
+    }
+}
+
+fn base_delay_for_attempt(base: Duration, cap: Duration, attempt: u32) -> Duration {
+    let mut delay = base;
+    for _ in 0..attempt {
+        delay = match delay.checked_mul(2) {
+            Some(v) => v,
+            None => return cap,
+        };
+        if delay >= cap {
+            return cap;
+        }
+    }
+    std::cmp::min(delay, cap)
+}
+
+#[derive(Debug)]
+struct ReconcilerOptions<R> {
+    debounce: Duration,
+    periodic_full: Duration,
+    backoff: BackoffConfig,
+    rng: R,
+}
+
+impl Default for ReconcilerOptions<StdRng> {
+    fn default() -> Self {
+        Self {
+            debounce: Duration::from_millis(200),
+            periodic_full: Duration::from_secs(30),
+            backoff: BackoffConfig {
+                base: Duration::from_secs(1),
+                cap: Duration::from_secs(30),
+                jitter_max_divisor: 4,
+            },
+            rng: StdRng::from_entropy(),
+        }
+    }
+}
+
+pub fn spawn_reconciler(
+    config: Arc<Config>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+) -> ReconcileHandle {
+    spawn_reconciler_with_options(config, store, ReconcilerOptions::default())
+}
+
+fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
+    config: Arc<Config>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    options: ReconcilerOptions<R>,
+) -> ReconcileHandle {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let handle = ReconcileHandle { tx: Some(tx) };
+
+    tokio::spawn(reconciler_task(config, store, rx, options));
+
+    handle
+}
+
+async fn reconciler_task<R: RngCore>(
+    config: Arc<Config>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    mut rx: mpsc::UnboundedReceiver<ReconcileRequest>,
+    options: ReconcilerOptions<R>,
+) {
+    let mut pending = PendingBatch {
+        full: true,
+        ..Default::default()
+    };
+    let mut debounce_until: Option<Instant> = Some(Instant::now());
+    let mut backoff_until: Option<Instant> = None;
+    let mut backoff = BackoffState::new(options.backoff, options.rng);
+
+    let mut periodic = tokio::time::interval_at(
+        Instant::now() + options.periodic_full,
+        options.periodic_full,
+    );
+    periodic.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        let now = Instant::now();
+        let run_at = if pending.has_any() {
+            let debounce_at = debounce_until.unwrap_or(now);
+            let backoff_at = backoff_until.unwrap_or(now);
+            Some(std::cmp::max(debounce_at, backoff_at))
+        } else {
+            None
+        };
+
+        tokio::select! {
+            _ = periodic.tick() => {
+                pending.add(ReconcileRequest::Full);
+                debounce_until = Some(Instant::now() + options.debounce);
+            }
+            maybe = rx.recv() => {
+                match maybe {
+                    Some(req) => {
+                        pending.add(req);
+                        debounce_until = Some(Instant::now() + options.debounce);
+                    }
+                    None => break,
+                }
+            }
+            _ = async {
+                if let Some(at) = run_at {
+                    tokio::time::sleep_until(at).await;
+                }
+            }, if run_at.is_some() => {
+                debounce_until = None;
+                if let Err(err) = reconcile_once(&config, &store, &pending).await {
+                    let delay = backoff.next_delay();
+                    debug!(?err, ?delay, "reconcile connect failed; backing off");
+                    backoff_until = Some(Instant::now() + delay);
+                    continue;
+                }
+
+                pending.clear();
+                backoff.reset();
+                backoff_until = None;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Snapshot {
+    endpoints: Vec<Endpoint>,
+    grants: Vec<Grant>,
+}
+
+async fn take_snapshot(store: &Arc<Mutex<JsonSnapshotStore>>) -> Snapshot {
+    let store = store.lock().await;
+    Snapshot {
+        endpoints: store.list_endpoints(),
+        grants: store.list_grants(),
+    }
+}
+
+async fn reconcile_once(
+    config: &Arc<Config>,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    pending: &PendingBatch,
+) -> Result<(), xray::XrayError> {
+    let snapshot = take_snapshot(store).await;
+    reconcile_snapshot(config.xray_api_addr, snapshot, pending).await
+}
+
+async fn reconcile_snapshot(
+    xray_api_addr: SocketAddr,
+    snapshot: Snapshot,
+    pending: &PendingBatch,
+) -> Result<(), xray::XrayError> {
+    use crate::xray::proto::xray::app::proxyman::command::{
+        AlterInboundRequest, RemoveInboundRequest,
+    };
+
+    let mut client = xray::connect(xray_api_addr).await?;
+
+    let endpoints_by_id: BTreeMap<String, Endpoint> = snapshot
+        .endpoints
+        .into_iter()
+        .map(|e| (e.endpoint_id.clone(), e))
+        .collect();
+
+    let mut grants_by_endpoint: BTreeMap<String, Vec<Grant>> = BTreeMap::new();
+    for grant in snapshot.grants.into_iter() {
+        grants_by_endpoint
+            .entry(grant.endpoint_id.clone())
+            .or_default()
+            .push(grant);
+    }
+
+    // 1) Explicit requests first.
+    for (tag, email) in pending.remove_users.iter() {
+        let op = builder::build_remove_user_operation(email);
+        let req = AlterInboundRequest {
+            tag: tag.clone(),
+            operation: Some(op),
+        };
+        match client.alter_inbound(req).await {
+            Ok(_) => {}
+            Err(status) if xray::is_not_found(&status) => {}
+            Err(status) => warn!(tag, email, %status, "xray alter_inbound remove_user failed"),
+        }
+    }
+
+    for tag in pending.remove_inbounds.iter() {
+        let req = RemoveInboundRequest { tag: tag.clone() };
+        match client.remove_inbound(req).await {
+            Ok(_) => {}
+            Err(status) if xray::is_not_found(&status) => {}
+            Err(status) => warn!(tag, %status, "xray remove_inbound failed"),
+        }
+    }
+
+    for endpoint_id in pending.rebuild_inbounds.iter() {
+        let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
+            continue;
+        };
+
+        let req = RemoveInboundRequest {
+            tag: endpoint.tag.clone(),
+        };
+        match client.remove_inbound(req).await {
+            Ok(_) => {}
+            Err(status) if xray::is_not_found(&status) => {}
+            Err(status) => {
+                warn!(tag = endpoint.tag, %status, "xray remove_inbound (rebuild) failed")
+            }
+        }
+
+        match builder::build_add_inbound_request(endpoint) {
+            Ok(req) => match client.add_inbound(req).await {
+                Ok(_) => {}
+                Err(status) if xray::is_already_exists(&status) => {}
+                Err(status) => {
+                    warn!(tag = endpoint.tag, %status, "xray add_inbound (rebuild) failed")
+                }
+            },
+            Err(e) => {
+                warn!(endpoint_id, error = %e, "failed to build add_inbound request (rebuild)")
+            }
+        }
+
+        if let Some(grants) = grants_by_endpoint.get(endpoint_id) {
+            for grant in grants.iter().filter(|g| g.enabled) {
+                apply_grant_enabled(&mut client, endpoint, grant).await;
+            }
+        }
+    }
+
+    // 2) Desired state apply.
+    for endpoint in endpoints_by_id.values() {
+        match builder::build_add_inbound_request(endpoint) {
+            Ok(req) => match client.add_inbound(req).await {
+                Ok(_) => {}
+                Err(status) if xray::is_already_exists(&status) => {}
+                Err(status) => warn!(tag = endpoint.tag, %status, "xray add_inbound failed"),
+            },
+            Err(e) => warn!(
+                endpoint_id = endpoint.endpoint_id,
+                error = %e,
+                "failed to build add_inbound request"
+            ),
+        }
+    }
+
+    for (endpoint_id, grants) in grants_by_endpoint.iter() {
+        let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
+            warn!(endpoint_id, "grant references missing endpoint; skipping");
+            continue;
+        };
+
+        for grant in grants.iter() {
+            if grant.enabled {
+                apply_grant_enabled(&mut client, endpoint, grant).await;
+            } else {
+                let email = format!("grant:{}", grant.grant_id);
+                let op = builder::build_remove_user_operation(&email);
+                let req = AlterInboundRequest {
+                    tag: endpoint.tag.clone(),
+                    operation: Some(op),
+                };
+                match client.alter_inbound(req).await {
+                    Ok(_) => {}
+                    Err(status) if xray::is_not_found(&status) => {}
+                    Err(status) => warn!(
+                        tag = endpoint.tag,
+                        grant_id = grant.grant_id,
+                        %status,
+                        "xray alter_inbound remove_user failed"
+                    ),
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint, grant: &Grant) {
+    use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
+
+    let op = match builder::build_add_user_operation(endpoint, grant) {
+        Ok(op) => op,
+        Err(e) => {
+            warn!(grant_id = grant.grant_id, error = %e, "failed to build add_user operation");
+            return;
+        }
+    };
+
+    let req = AlterInboundRequest {
+        tag: endpoint.tag.clone(),
+        operation: Some(op),
+    };
+    match client.alter_inbound(req).await {
+        Ok(_) => {}
+        Err(status) if xray::is_already_exists(&status) => {}
+        Err(status) if xray::is_not_found(&status) => {
+            match builder::build_add_inbound_request(endpoint) {
+                Ok(req) => match client.add_inbound(req).await {
+                    Ok(_) => {}
+                    Err(status) if xray::is_already_exists(&status) => {}
+                    Err(status) => {
+                        warn!(tag = endpoint.tag, %status, "xray add_inbound retry failed")
+                    }
+                },
+                Err(e) => {
+                    warn!(endpoint_id = endpoint.endpoint_id, error = %e, "failed to build add_inbound request (retry)")
+                }
+            }
+
+            let op = match builder::build_add_user_operation(endpoint, grant) {
+                Ok(op) => op,
+                Err(e) => {
+                    warn!(grant_id = grant.grant_id, error = %e, "failed to build add_user operation (retry)");
+                    return;
+                }
+            };
+            let req = AlterInboundRequest {
+                tag: endpoint.tag.clone(),
+                operation: Some(op),
+            };
+            match client.alter_inbound(req).await {
+                Ok(_) => {}
+                Err(status) if xray::is_already_exists(&status) => {}
+                Err(status) => warn!(
+                    tag = endpoint.tag,
+                    grant_id = grant.grant_id,
+                    %status,
+                    "xray alter_inbound add_user retry failed"
+                ),
+            }
+        }
+        Err(status) => warn!(
+            tag = endpoint.tag,
+            grant_id = grant.grant_id,
+            %status,
+            "xray alter_inbound add_user failed"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    use pretty_assertions::assert_eq;
+    use tokio::sync::{Mutex, oneshot};
+
+    use super::*;
+    use crate::{
+        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        state::StoreInit,
+        xray::proto::xray::app::proxyman::command::handler_service_server::{
+            HandlerService, HandlerServiceServer,
+        },
+        xray::proto::xray::app::proxyman::command::{
+            AddInboundRequest, AddInboundResponse, AddOutboundRequest, AddOutboundResponse,
+            AlterInboundRequest, AlterInboundResponse, AlterOutboundRequest, AlterOutboundResponse,
+            GetInboundUserRequest, GetInboundUserResponse, GetInboundUsersCountResponse,
+            ListInboundsRequest, ListInboundsResponse, ListOutboundsRequest, ListOutboundsResponse,
+            RemoveInboundRequest, RemoveInboundResponse, RemoveOutboundRequest,
+            RemoveOutboundResponse,
+        },
+    };
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Call {
+        AddInbound {
+            tag: String,
+        },
+        RemoveInbound {
+            tag: String,
+        },
+        AlterInbound {
+            tag: String,
+            op_type: String,
+            email: String,
+        },
+    }
+
+    #[derive(Debug, Default)]
+    struct Behavior {
+        add_user_not_found_first: bool,
+        remove_inbound_not_found: bool,
+        remove_user_not_found: bool,
+    }
+
+    #[derive(Debug)]
+    struct RecordingHandler {
+        calls: Arc<Mutex<Vec<Call>>>,
+        behavior: Behavior,
+        add_user_not_found_seen: Arc<Mutex<BTreeSet<(String, String)>>>,
+    }
+
+    impl RecordingHandler {
+        fn new(calls: Arc<Mutex<Vec<Call>>>, behavior: Behavior) -> Self {
+            Self {
+                calls,
+                behavior,
+                add_user_not_found_seen: Arc::new(Mutex::new(BTreeSet::new())),
+            }
+        }
+    }
+
+    fn decode_typed<T: prost::Message + Default>(
+        tm: &crate::xray::proto::xray::common::serial::TypedMessage,
+    ) -> T {
+        T::decode(tm.value.as_slice()).unwrap()
+    }
+
+    #[tonic::async_trait]
+    impl HandlerService for RecordingHandler {
+        async fn add_inbound(
+            &self,
+            request: tonic::Request<AddInboundRequest>,
+        ) -> Result<tonic::Response<AddInboundResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let inbound = req
+                .inbound
+                .ok_or_else(|| tonic::Status::invalid_argument("inbound required"))?;
+            self.calls
+                .lock()
+                .await
+                .push(Call::AddInbound { tag: inbound.tag });
+            Ok(tonic::Response::new(AddInboundResponse {}))
+        }
+
+        async fn remove_inbound(
+            &self,
+            request: tonic::Request<RemoveInboundRequest>,
+        ) -> Result<tonic::Response<RemoveInboundResponse>, tonic::Status> {
+            let req = request.into_inner();
+            self.calls.lock().await.push(Call::RemoveInbound {
+                tag: req.tag.clone(),
+            });
+            if self.behavior.remove_inbound_not_found {
+                return Err(tonic::Status::not_found("missing inbound"));
+            }
+            Ok(tonic::Response::new(RemoveInboundResponse {}))
+        }
+
+        async fn alter_inbound(
+            &self,
+            request: tonic::Request<AlterInboundRequest>,
+        ) -> Result<tonic::Response<AlterInboundResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let op = req
+                .operation
+                .ok_or_else(|| tonic::Status::invalid_argument("operation required"))?;
+            let (op_type, email) = match op.r#type.as_str() {
+                "xray.app.proxyman.command.AddUserOperation" => {
+                    let decoded: crate::xray::proto::xray::app::proxyman::command::AddUserOperation =
+                        decode_typed(&op);
+                    let user = decoded.user.unwrap();
+                    (op.r#type, user.email)
+                }
+                "xray.app.proxyman.command.RemoveUserOperation" => {
+                    let decoded: crate::xray::proto::xray::app::proxyman::command::RemoveUserOperation =
+                        decode_typed(&op);
+                    (op.r#type, decoded.email)
+                }
+                _ => (op.r#type, String::new()),
+            };
+
+            self.calls.lock().await.push(Call::AlterInbound {
+                tag: req.tag.clone(),
+                op_type: op_type.clone(),
+                email: email.clone(),
+            });
+
+            if self.behavior.add_user_not_found_first
+                && op_type == "xray.app.proxyman.command.AddUserOperation"
+            {
+                let key = (req.tag.clone(), email.clone());
+                let mut seen = self.add_user_not_found_seen.lock().await;
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    return Err(tonic::Status::not_found("missing inbound"));
+                }
+            }
+
+            if self.behavior.remove_user_not_found
+                && op_type == "xray.app.proxyman.command.RemoveUserOperation"
+            {
+                return Err(tonic::Status::not_found("missing user"));
+            }
+
+            Ok(tonic::Response::new(AlterInboundResponse {}))
+        }
+
+        async fn list_inbounds(
+            &self,
+            _request: tonic::Request<ListInboundsRequest>,
+        ) -> Result<tonic::Response<ListInboundsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("list_inbounds"))
+        }
+
+        async fn get_inbound_users(
+            &self,
+            _request: tonic::Request<GetInboundUserRequest>,
+        ) -> Result<tonic::Response<GetInboundUserResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_inbound_users"))
+        }
+
+        async fn get_inbound_users_count(
+            &self,
+            _request: tonic::Request<GetInboundUserRequest>,
+        ) -> Result<tonic::Response<GetInboundUsersCountResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_inbound_users_count"))
+        }
+
+        async fn add_outbound(
+            &self,
+            _request: tonic::Request<AddOutboundRequest>,
+        ) -> Result<tonic::Response<AddOutboundResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("add_outbound"))
+        }
+
+        async fn remove_outbound(
+            &self,
+            _request: tonic::Request<RemoveOutboundRequest>,
+        ) -> Result<tonic::Response<RemoveOutboundResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("remove_outbound"))
+        }
+
+        async fn alter_outbound(
+            &self,
+            _request: tonic::Request<AlterOutboundRequest>,
+        ) -> Result<tonic::Response<AlterOutboundResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("alter_outbound"))
+        }
+
+        async fn list_outbounds(
+            &self,
+            _request: tonic::Request<ListOutboundsRequest>,
+        ) -> Result<tonic::Response<ListOutboundsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("list_outbounds"))
+        }
+    }
+
+    async fn start_server(
+        calls: Arc<Mutex<Vec<Call>>>,
+        behavior: Behavior,
+    ) -> (SocketAddr, oneshot::Sender<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+
+        let handler = RecordingHandler::new(calls, behavior);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            let _ = tonic::transport::Server::builder()
+                .add_service(HandlerServiceServer::new(handler))
+                .serve_with_incoming_shutdown(incoming, async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+
+        (addr, shutdown_tx)
+    }
+
+    fn test_store_init(
+        tmp_dir: &std::path::Path,
+        xray_api_addr: SocketAddr,
+    ) -> (Arc<Config>, Arc<Mutex<JsonSnapshotStore>>) {
+        let config = Arc::new(Config {
+            bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+            xray_api_addr,
+            data_dir: tmp_dir.to_path_buf(),
+            admin_token: "testtoken".to_string(),
+            node_name: "node-1".to_string(),
+            public_domain: "".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+        });
+
+        let store = JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: config.data_dir.clone(),
+            bootstrap_node_name: config.node_name.clone(),
+            bootstrap_public_domain: config.public_domain.clone(),
+            bootstrap_api_base_url: config.api_base_url.clone(),
+        })
+        .unwrap();
+
+        (config, Arc::new(Mutex::new(store)))
+    }
+
+    #[tokio::test]
+    async fn full_reconcile_creates_inbound_and_adds_enabled_user() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        {
+            let mut store = store.lock().await;
+            let _user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let _grant = store
+                .create_grant(
+                    _user.user_id.clone(),
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(calls.iter().any(|c| matches!(c, Call::AddInbound { .. })));
+        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { op_type, .. } if op_type == "xray.app.proxyman.command.AddUserOperation")));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn disabled_grant_triggers_remove_user_operation() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint_tag, grant_id) = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id.clone(),
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let grant = store
+                .update_grant(&grant.grant_id, false, 1, CyclePolicy::InheritUser, None)
+                .unwrap()
+                .unwrap();
+            (endpoint.tag, grant.grant_id)
+        };
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == &format!("grant:{grant_id}"))));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn rebuild_inbound_removes_then_adds_then_readds_enabled_users() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint_id, endpoint_tag) = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let _grant = store
+                .create_grant(
+                    user.user_id.clone(),
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            (endpoint.endpoint_id, endpoint.tag)
+        };
+
+        let mut pending = PendingBatch::default();
+        pending.add(ReconcileRequest::RebuildInbound {
+            endpoint_id: endpoint_id.clone(),
+        });
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(calls.len() >= 3);
+        assert_eq!(
+            calls[0],
+            Call::RemoveInbound {
+                tag: endpoint_tag.clone()
+            }
+        );
+        assert_eq!(
+            calls[1],
+            Call::AddInbound {
+                tag: endpoint_tag.clone()
+            }
+        );
+        assert!(matches!(
+            calls[2].clone(),
+            Call::AlterInbound { tag, op_type, .. }
+                if tag == endpoint_tag && op_type == "xray.app.proxyman.command.AddUserOperation"
+        ));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn remove_requests_issue_calls_and_treat_not_found_as_ok() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(
+            calls.clone(),
+            Behavior {
+                remove_inbound_not_found: true,
+                remove_user_not_found: true,
+                ..Behavior::default()
+            },
+        )
+        .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let mut pending = PendingBatch::default();
+        pending.add(ReconcileRequest::RemoveInbound {
+            tag: "missing-inbound".to_string(),
+        });
+        pending.add(ReconcileRequest::RemoveUser {
+            tag: "missing-inbound".to_string(),
+            email: "grant:missing".to_string(),
+        });
+
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == "missing-inbound"))
+        );
+        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "grant:missing")));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn add_user_not_found_triggers_add_inbound_then_retries_add_user_once() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(
+            calls.clone(),
+            Behavior {
+                add_user_not_found_first: true,
+                ..Behavior::default()
+            },
+        )
+        .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (_config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint, grant) = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            (endpoint, grant)
+        };
+
+        let mut client = crate::xray::connect(addr).await.unwrap();
+        apply_grant_enabled(&mut client, &endpoint, &grant).await;
+
+        let calls = calls.lock().await.clone();
+        assert_eq!(calls.len(), 3);
+        assert!(
+            matches!(&calls[0], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+        );
+        assert_eq!(
+            calls[1],
+            Call::AddInbound {
+                tag: endpoint.tag.clone()
+            }
+        );
+        assert!(
+            matches!(&calls[2], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[test]
+    fn backoff_base_doubles_and_caps() {
+        let base = Duration::from_secs(1);
+        let cap = Duration::from_secs(30);
+
+        assert_eq!(base_delay_for_attempt(base, cap, 0), Duration::from_secs(1));
+        assert_eq!(base_delay_for_attempt(base, cap, 1), Duration::from_secs(2));
+        assert_eq!(base_delay_for_attempt(base, cap, 2), Duration::from_secs(4));
+        assert_eq!(base_delay_for_attempt(base, cap, 3), Duration::from_secs(8));
+        assert_eq!(
+            base_delay_for_attempt(base, cap, 4),
+            Duration::from_secs(16)
+        );
+        assert_eq!(
+            base_delay_for_attempt(base, cap, 5),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            base_delay_for_attempt(base, cap, 6),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn backoff_jitter_is_bounded_and_deterministic_with_seeded_rng() {
+        let cfg = BackoffConfig {
+            base: Duration::from_secs(1),
+            cap: Duration::from_secs(30),
+            jitter_max_divisor: 4,
+        };
+
+        let mut backoff = BackoffState::new(cfg, StdRng::seed_from_u64(1));
+        let d0 = backoff.next_delay();
+        let base0 = Duration::from_secs(1);
+        assert!(d0 >= base0);
+        assert!(d0 <= Duration::from_millis(1250));
+
+        let d1 = backoff.next_delay();
+        let base1 = Duration::from_secs(2);
+        assert!(d1 >= base1);
+        assert!(d1 <= Duration::from_millis(2500));
+    }
+}

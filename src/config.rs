@@ -14,6 +14,14 @@ pub struct Config {
 
     #[arg(
         long,
+        env = "XP_XRAY_API_ADDR",
+        value_name = "ADDR",
+        default_value = "127.0.0.1:10085"
+    )]
+    pub xray_api_addr: SocketAddr,
+
+    #[arg(
+        long,
         env = "XP_DATA_DIR",
         value_name = "PATH",
         default_value = "./data"

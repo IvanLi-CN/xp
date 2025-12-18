@@ -1,0 +1,10 @@
+name: xp-e2e
+
+services:
+  xray:
+    image: ghcr.io/xtls/xray-core:${XRAY_DOCKER_TAG:-25.12.8}
+    command: ["run", "-c", "/etc/xray/config.json"]
+    ports:
+      - "127.0.0.1:${XP_E2E_XRAY_API_PORT:-10085}:10085"
+    volumes:
+      - ./xray-config.json:/etc/xray/config.json:ro
