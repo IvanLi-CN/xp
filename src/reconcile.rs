@@ -731,6 +731,8 @@ mod tests {
             node_name: "node-1".to_string(),
             public_domain: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_poll_interval_secs: 10,
+            quota_auto_unban: true,
         });
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {

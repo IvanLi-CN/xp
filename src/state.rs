@@ -133,6 +133,10 @@ pub struct GrantUsage {
     pub last_uplink_total: u64,
     pub last_downlink_total: u64,
     pub last_seen_at: String,
+    #[serde(default)]
+    pub quota_banned: bool,
+    #[serde(default)]
+    pub quota_banned_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +231,45 @@ impl JsonSnapshotStore {
         Ok(())
     }
 
+    pub fn get_grant_usage(&self, grant_id: &str) -> Option<GrantUsage> {
+        self.usage.grants.get(grant_id).cloned()
+    }
+
+    pub fn set_quota_banned(
+        &mut self,
+        grant_id: &str,
+        banned_at: String,
+    ) -> Result<(), StoreError> {
+        let entry = self
+            .usage
+            .grants
+            .entry(grant_id.to_string())
+            .or_insert_with(|| GrantUsage {
+                cycle_start_at: banned_at.clone(),
+                cycle_end_at: banned_at.clone(),
+                used_bytes: 0,
+                last_uplink_total: 0,
+                last_downlink_total: 0,
+                last_seen_at: banned_at.clone(),
+                quota_banned: false,
+                quota_banned_at: None,
+            });
+
+        entry.quota_banned = true;
+        entry.quota_banned_at = Some(banned_at);
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn clear_quota_banned(&mut self, grant_id: &str) -> Result<(), StoreError> {
+        if let Some(entry) = self.usage.grants.get_mut(grant_id) {
+            entry.quota_banned = false;
+            entry.quota_banned_at = None;
+            self.save_usage()?;
+        }
+        Ok(())
+    }
+
     pub fn apply_grant_usage_sample(
         &mut self,
         grant_id: &str,
@@ -248,6 +291,8 @@ impl JsonSnapshotStore {
                     last_uplink_total: uplink_total,
                     last_downlink_total: downlink_total,
                     last_seen_at: seen_at.clone(),
+                    quota_banned: false,
+                    quota_banned_at: None,
                 });
 
             if entry.cycle_start_at != cycle_start_at || entry.cycle_end_at != cycle_end_at {
@@ -476,7 +521,9 @@ impl JsonSnapshotStore {
     pub fn delete_grant(&mut self, grant_id: &str) -> Result<bool, StoreError> {
         let deleted = self.state.grants.remove(grant_id).is_some();
         if deleted {
+            self.usage.grants.remove(grant_id);
             self.save()?;
+            self.save_usage()?;
         }
         Ok(deleted)
     }
@@ -620,10 +667,14 @@ mod tests {
     use std::fs;
 
     use pretty_assertions::assert_eq;
+    use serde_json::json;
 
     use super::*;
     use crate::{
-        domain::{CyclePolicyDefault, validate_cycle_day_of_month, validate_port},
+        domain::{
+            CyclePolicy, CyclePolicyDefault, Grant, GrantCredentials, validate_cycle_day_of_month,
+            validate_port,
+        },
         id::is_ulid_string,
     };
 
@@ -690,5 +741,133 @@ mod tests {
         assert!(validate_port(0).is_err());
         assert!(validate_port(1).is_ok());
         assert!(validate_port(65535).is_ok());
+    }
+
+    #[test]
+    fn load_usage_json_missing_quota_fields_is_backward_compatible() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path()).unwrap();
+
+        let grant_id = "grant_1";
+        let usage_path = tmp.path().join("usage.json");
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "schema_version": USAGE_SCHEMA_VERSION,
+            "grants": {
+                grant_id: {
+                    "cycle_start_at": "2025-12-01T00:00:00Z",
+                    "cycle_end_at": "2026-01-01T00:00:00Z",
+                    "used_bytes": 123,
+                    "last_uplink_total": 100,
+                    "last_downlink_total": 23,
+                    "last_seen_at": "2025-12-18T00:00:00Z"
+                }
+            }
+        }))
+        .unwrap();
+        fs::write(&usage_path, bytes).unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let usage = store.get_grant_usage(grant_id).unwrap();
+        assert!(!usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, None);
+    }
+
+    #[test]
+    fn set_and_clear_quota_banned_persists_and_survives_reload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let banned_at = "2025-12-18T00:00:00Z".to_string();
+        let grant_id = "grant_1";
+
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        store.set_quota_banned(grant_id, banned_at.clone()).unwrap();
+        let usage = store.get_grant_usage(grant_id).unwrap();
+        assert!(usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, Some(banned_at.clone()));
+
+        store.clear_quota_banned(grant_id).unwrap();
+        let usage = store.get_grant_usage(grant_id).unwrap();
+        assert!(!usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, None);
+
+        drop(store);
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let usage = store.get_grant_usage(grant_id).unwrap();
+        assert!(!usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, None);
+    }
+
+    #[test]
+    fn apply_grant_usage_sample_keeps_quota_markers_on_cycle_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let grant_id = "grant_1";
+        let banned_at = "2025-12-18T00:00:00Z".to_string();
+
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        store
+            .apply_grant_usage_sample(
+                grant_id,
+                "2025-12-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_string(),
+                10,
+                20,
+                "2025-12-18T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        store.set_quota_banned(grant_id, banned_at.clone()).unwrap();
+
+        store
+            .apply_grant_usage_sample(
+                grant_id,
+                "2026-01-01T00:00:00Z".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                0,
+                0,
+                "2026-01-01T00:00:00Z".to_string(),
+            )
+            .unwrap();
+
+        let usage = store.get_grant_usage(grant_id).unwrap();
+        assert!(usage.quota_banned);
+        assert_eq!(usage.quota_banned_at, Some(banned_at));
+    }
+
+    #[test]
+    fn deleting_grant_removes_usage_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let grant_id = "grant_1";
+
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+
+        store.state_mut().grants.insert(
+            grant_id.to_string(),
+            Grant {
+                grant_id: grant_id.to_string(),
+                user_id: "user_1".to_string(),
+                endpoint_id: "endpoint_1".to_string(),
+                enabled: true,
+                quota_limit_bytes: 0,
+                cycle_policy: CyclePolicy::InheritUser,
+                cycle_day_of_month: None,
+                note: None,
+                credentials: GrantCredentials {
+                    vless: None,
+                    ss2022: None,
+                },
+            },
+        );
+
+        store
+            .set_quota_banned(grant_id, "2025-12-18T00:00:00Z".to_string())
+            .unwrap();
+        assert!(store.get_grant_usage(grant_id).is_some());
+
+        assert!(store.delete_grant(grant_id).unwrap());
+        assert!(store.get_grant_usage(grant_id).is_none());
+
+        drop(store);
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(store.get_grant_usage(grant_id).is_none());
     }
 }

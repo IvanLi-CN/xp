@@ -513,7 +513,7 @@ async fn admin_patch_grant(
 ) -> Result<Json<Grant>, ApiError> {
     let grant = {
         let mut store = state.store.lock().await;
-        store
+        let grant = store
             .update_grant(
                 &grant_id,
                 req.enabled,
@@ -521,7 +521,9 @@ async fn admin_patch_grant(
                 req.cycle_policy,
                 req.cycle_day_of_month,
             )?
-            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?
+            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
+        store.clear_quota_banned(&grant_id)?;
+        grant
     };
     state.reconcile.request_full();
     Ok(Json(grant))
