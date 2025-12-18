@@ -437,6 +437,14 @@ impl JsonSnapshotStore {
         self.state.users.get(user_id).cloned()
     }
 
+    pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {
+        self.state
+            .users
+            .values()
+            .find(|u| u.subscription_token == subscription_token)
+            .cloned()
+    }
+
     pub fn delete_user(&mut self, user_id: &str) -> Result<bool, StoreError> {
         let deleted = self.state.users.remove(user_id).is_some();
         if deleted {
