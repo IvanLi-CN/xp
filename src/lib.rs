@@ -6,4 +6,5 @@ pub mod id;
 pub mod protocol;
 pub mod reconcile;
 pub mod state;
+pub mod subscription;
 pub mod xray;

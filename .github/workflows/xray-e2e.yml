@@ -23,12 +23,25 @@ jobs:
           toolchain: 1.91.0
           components: rustfmt, clippy
 
-      - name: login ghcr
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: login ghcr (retry)
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..6}; do
+            if echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin; then
+              exit 0
+            fi
+
+            echo "docker login ghcr.io failed (attempt ${attempt}/6)" >&2
+            sleep $((attempt * 5))
+          done
+
+          echo "docker login ghcr.io failed after retries" >&2
+          exit 1
 
       - name: cargo test
         run: cargo test
@@ -37,4 +50,3 @@ jobs:
         env:
           XRAY_DOCKER_TAG: 25.12.8
         run: scripts/e2e/run-local-xray-e2e.sh
-

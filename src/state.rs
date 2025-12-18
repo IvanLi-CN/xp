@@ -269,8 +269,9 @@ impl JsonSnapshotStore {
             } else {
                 let delta_up = uplink_total - entry.last_uplink_total;
                 let delta_down = downlink_total - entry.last_downlink_total;
-                entry.used_bytes =
-                    entry.used_bytes.saturating_add(delta_up.saturating_add(delta_down));
+                entry.used_bytes = entry
+                    .used_bytes
+                    .saturating_add(delta_up.saturating_add(delta_down));
                 entry.last_uplink_total = uplink_total;
                 entry.last_downlink_total = downlink_total;
                 entry.last_seen_at = seen_at.clone();
@@ -434,6 +435,14 @@ impl JsonSnapshotStore {
 
     pub fn get_user(&self, user_id: &str) -> Option<User> {
         self.state.users.get(user_id).cloned()
+    }
+
+    pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {
+        self.state
+            .users
+            .values()
+            .find(|u| u.subscription_token == subscription_token)
+            .cloned()
     }
 
     pub fn delete_user(&mut self, user_id: &str) -> Result<bool, StoreError> {

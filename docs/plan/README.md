@@ -32,6 +32,7 @@
 
 ## 3. Milestone：订阅输出（对用户可交付）
 
+- 细化方案：`docs/plan/m3-subscription-output.md`
 - 订阅 API：`/api/sub/{token}` 输出 raw/base64/clash（按 `docs/desgin/subscription.md`）
 - token 生命周期：生成/重置/失效策略；只读权限边界清晰
 - 订阅内容：按 Node 的 `public_domain`/端点端口拼装，确保与 Web 展示一致

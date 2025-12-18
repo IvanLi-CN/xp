@@ -20,7 +20,7 @@ use crate::{
     domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, StoreError},
-    xray,
+    subscription, xray,
 };
 
 #[derive(Clone)]
@@ -238,6 +238,7 @@ pub fn build_router(
         .route("/api/health", get(health))
         .route("/api/cluster/info", get(cluster_info))
         .route("/api/cluster/join", post(not_implemented))
+        .route("/api/sub/:subscription_token", get(get_subscription))
         .nest("/api/admin", admin)
         .layer(Extension(app_state))
         .fallback(fallback_not_found)
@@ -585,10 +586,7 @@ enum EffectiveCyclePolicy {
     ByNode,
 }
 
-fn at_start_of_day<Tz: TimeZone>(
-    tz: &Tz,
-    date: chrono::NaiveDate,
-) -> Result<DateTime<Tz>, ApiError>
+fn at_start_of_day<Tz: TimeZone>(tz: &Tz, date: chrono::NaiveDate) -> Result<DateTime<Tz>, ApiError>
 where
     Tz::Offset: Copy,
 {
@@ -613,11 +611,19 @@ where
 }
 
 fn prev_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 1 { (year - 1, 12) } else { (year, month - 1) }
+    if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    }
 }
 
 fn next_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 12 { (year + 1, 1) } else { (year, month + 1) }
+    if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    }
 }
 
 fn cycle_window_at<Tz: TimeZone>(
@@ -757,6 +763,76 @@ async fn not_implemented() -> ApiError {
 
 async fn fallback_not_found() -> ApiError {
     ApiError::not_found("not found")
+}
+
+#[derive(Debug, Deserialize)]
+struct SubscriptionQuery {
+    format: Option<String>,
+}
+
+fn text_plain_utf8(body: String) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        "text/plain; charset=utf-8".parse().unwrap(),
+    );
+    (headers, body).into_response()
+}
+
+fn text_yaml_utf8(body: String) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        "text/yaml; charset=utf-8".parse().unwrap(),
+    );
+    (headers, body).into_response()
+}
+
+async fn get_subscription(
+    Extension(state): Extension<AppState>,
+    Path(subscription_token): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<SubscriptionQuery>,
+) -> Result<Response, ApiError> {
+    let format = match query.format.as_deref() {
+        None => "base64",
+        Some("raw") => "raw",
+        Some("clash") => "clash",
+        Some(_) => {
+            return Err(ApiError::invalid_request(
+                "invalid format, expected raw|clash or omit for base64",
+            ));
+        }
+    };
+
+    let (user, grants, endpoints, nodes) = {
+        let store = state.store.lock().await;
+        let user = store
+            .get_user_by_subscription_token(&subscription_token)
+            .ok_or_else(|| ApiError::not_found("not found"))?;
+        let grants: Vec<Grant> = store
+            .state()
+            .grants
+            .values()
+            .filter(|g| g.user_id == user.user_id)
+            .cloned()
+            .collect();
+        let endpoints = store.list_endpoints();
+        let nodes = store.list_nodes();
+        (user, grants, endpoints, nodes)
+    };
+
+    match format {
+        "raw" => subscription::build_raw_text(&user, &grants, &endpoints, &nodes)
+            .map(text_plain_utf8)
+            .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "base64" => subscription::build_base64(&user, &grants, &endpoints, &nodes)
+            .map(text_plain_utf8)
+            .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "clash" => subscription::build_clash_yaml(&user, &grants, &endpoints, &nodes)
+            .map(text_yaml_utf8)
+            .map_err(|_e| ApiError::internal("failed to build subscription")),
+        _ => Err(ApiError::internal("unreachable subscription format")),
+    }
 }
 
 #[cfg(test)]
