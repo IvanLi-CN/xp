@@ -20,7 +20,7 @@ use crate::{
     xray::builder,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
     RemoveInbound { tag: String },
@@ -72,6 +72,11 @@ pub struct ReconcileHandle {
 impl ReconcileHandle {
     pub fn noop() -> Self {
         Self { tx: None }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
+        Self { tx: Some(tx) }
     }
 
     pub fn request(&self, req: ReconcileRequest) {
@@ -493,6 +498,7 @@ async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint,
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     use pretty_assertions::assert_eq;
@@ -532,6 +538,7 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct Behavior {
+        add_user_not_found_first: bool,
         remove_inbound_not_found: bool,
         remove_user_not_found: bool,
     }
@@ -540,11 +547,16 @@ mod tests {
     struct RecordingHandler {
         calls: Arc<Mutex<Vec<Call>>>,
         behavior: Behavior,
+        add_user_not_found_seen: Arc<Mutex<BTreeSet<(String, String)>>>,
     }
 
     impl RecordingHandler {
         fn new(calls: Arc<Mutex<Vec<Call>>>, behavior: Behavior) -> Self {
-            Self { calls, behavior }
+            Self {
+                calls,
+                behavior,
+                add_user_not_found_seen: Arc::new(Mutex::new(BTreeSet::new())),
+            }
         }
     }
 
@@ -613,6 +625,17 @@ mod tests {
                 op_type: op_type.clone(),
                 email: email.clone(),
             });
+
+            if self.behavior.add_user_not_found_first
+                && op_type == "xray.app.proxyman.command.AddUserOperation"
+            {
+                let key = (req.tag.clone(), email.clone());
+                let mut seen = self.add_user_not_found_seen.lock().await;
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    return Err(tonic::Status::not_found("missing inbound"));
+                }
+            }
 
             if self.behavior.remove_user_not_found
                 && op_type == "xray.app.proxyman.command.RemoveUserOperation"
@@ -888,6 +911,7 @@ mod tests {
             Behavior {
                 remove_inbound_not_found: true,
                 remove_user_not_found: true,
+                ..Behavior::default()
             },
         )
         .await;
@@ -913,6 +937,68 @@ mod tests {
                 .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == "missing-inbound"))
         );
         assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "grant:missing")));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn add_user_not_found_triggers_add_inbound_then_retries_add_user_once() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(
+            calls.clone(),
+            Behavior {
+                add_user_not_found_first: true,
+                ..Behavior::default()
+            },
+        )
+        .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (_config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint, grant) = {
+            let mut store = store.lock().await;
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    "node-1".to_string(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            (endpoint, grant)
+        };
+
+        let mut client = crate::xray::connect(addr).await.unwrap();
+        apply_grant_enabled(&mut client, &endpoint, &grant).await;
+
+        let calls = calls.lock().await.clone();
+        assert_eq!(calls.len(), 3);
+        assert!(
+            matches!(&calls[0], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+        );
+        assert_eq!(
+            calls[1],
+            Call::AddInbound {
+                tag: endpoint.tag.clone()
+            }
+        );
+        assert!(
+            matches!(&calls[2], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+        );
 
         let _ = shutdown.send(());
     }

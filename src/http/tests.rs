@@ -10,14 +10,16 @@ use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
 use crate::{
     config::Config,
+    domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
+    reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
 };
 
@@ -42,14 +44,29 @@ fn test_store_init(config: &Config) -> StoreInit {
     }
 }
 
-fn app(tmp: &TempDir) -> axum::Router {
+fn app_with(
+    tmp: &TempDir,
+    reconcile: ReconcileHandle,
+) -> (axum::Router, Arc<Mutex<JsonSnapshotStore>>) {
     let config = test_config(tmp.path().to_path_buf());
     let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
-    build_router(
-        config,
-        Arc::new(Mutex::new(store)),
-        crate::reconcile::ReconcileHandle::noop(),
-    )
+    let store = Arc::new(Mutex::new(store));
+    let router = build_router(config, store.clone(), reconcile);
+    (router, store)
+}
+
+fn app(tmp: &TempDir) -> axum::Router {
+    app_with(tmp, ReconcileHandle::noop()).0
+}
+
+fn drain_reconcile_requests(
+    rx: &mut mpsc::UnboundedReceiver<ReconcileRequest>,
+) -> Vec<ReconcileRequest> {
+    let mut out = Vec::new();
+    while let Ok(req) = rx.try_recv() {
+        out.push(req);
+    }
+    out
 }
 
 fn req(method: &str, uri: &str) -> Request<Body> {
@@ -288,6 +305,262 @@ async fn patch_grant_validates_cycle_day_of_month_rules() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn post_admin_endpoints_schedules_full_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, _store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": "node-1",
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+}
+
+#[tokio::test]
+async fn post_admin_grants_schedules_full_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let (user_id, endpoint_id) = {
+        let mut store = store.lock().await;
+        let user = store
+            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+            .unwrap();
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        (user.user_id, endpoint.endpoint_id)
+    };
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user_id,
+              "endpoint_id": endpoint_id,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+}
+
+#[tokio::test]
+async fn patch_admin_grants_schedules_full_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let grant_id = {
+        let mut store = store.lock().await;
+        let user = store
+            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+            .unwrap();
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let grant = store
+            .create_grant(
+                user.user_id,
+                endpoint.endpoint_id,
+                0,
+                CyclePolicy::InheritUser,
+                None,
+                None,
+            )
+            .unwrap();
+        grant.grant_id
+    };
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/grants/{grant_id}"),
+            json!({
+              "enabled": true,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+}
+
+#[tokio::test]
+async fn post_rotate_shortid_schedules_rebuild_inbound() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::VlessRealityVisionTcp,
+                443,
+                json!({
+                  "public_domain": "example.com",
+                  "reality": {
+                    "dest": "example.com:443",
+                    "server_names": ["example.com"],
+                    "fingerprint": "chrome"
+                  }
+                }),
+            )
+            .unwrap();
+        endpoint.endpoint_id
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/rotate-shortid"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::RebuildInbound { endpoint_id }]
+    );
+}
+
+#[tokio::test]
+async fn delete_admin_endpoint_schedules_remove_inbound_then_full() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let (endpoint_id, tag) = {
+        let mut store = store.lock().await;
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        (endpoint.endpoint_id, endpoint.tag)
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "DELETE",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![
+            ReconcileRequest::RemoveInbound { tag },
+            ReconcileRequest::Full
+        ]
+    );
+}
+
+#[tokio::test]
+async fn delete_admin_grant_schedules_remove_user_then_full_when_endpoint_exists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let (grant_id, endpoint_tag) = {
+        let mut store = store.lock().await;
+        let user = store
+            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+            .unwrap();
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let endpoint_tag = endpoint.tag.clone();
+        let grant = store
+            .create_grant(
+                user.user_id,
+                endpoint.endpoint_id,
+                0,
+                CyclePolicy::InheritUser,
+                None,
+                None,
+            )
+            .unwrap();
+        (grant.grant_id, endpoint_tag)
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "DELETE",
+            &format!("/api/admin/grants/{grant_id}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![
+            ReconcileRequest::RemoveUser {
+                tag: endpoint_tag,
+                email: format!("grant:{grant_id}")
+            },
+            ReconcileRequest::Full
+        ]
+    );
 }
 
 #[tokio::test]
