@@ -22,7 +22,9 @@ use crate::{
     id::{is_ulid_string, new_ulid_string},
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
-    xray::proto::xray::app::stats::command::stats_service_server::{StatsService, StatsServiceServer},
+    xray::proto::xray::app::stats::command::stats_service_server::{
+        StatsService, StatsServiceServer,
+    },
     xray::proto::xray::app::stats::command::{
         GetStatsOnlineIpListResponse, GetStatsRequest, GetStatsResponse, QueryStatsRequest,
         QueryStatsResponse, Stat, SysStatsRequest, SysStatsResponse,

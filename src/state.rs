@@ -269,8 +269,9 @@ impl JsonSnapshotStore {
             } else {
                 let delta_up = uplink_total - entry.last_uplink_total;
                 let delta_down = downlink_total - entry.last_downlink_total;
-                entry.used_bytes =
-                    entry.used_bytes.saturating_add(delta_up.saturating_add(delta_down));
+                entry.used_bytes = entry
+                    .used_bytes
+                    .saturating_add(delta_up.saturating_add(delta_down));
                 entry.last_uplink_total = uplink_total;
                 entry.last_downlink_total = downlink_total;
                 entry.last_seen_at = seen_at.clone();

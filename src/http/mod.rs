@@ -585,10 +585,7 @@ enum EffectiveCyclePolicy {
     ByNode,
 }
 
-fn at_start_of_day<Tz: TimeZone>(
-    tz: &Tz,
-    date: chrono::NaiveDate,
-) -> Result<DateTime<Tz>, ApiError>
+fn at_start_of_day<Tz: TimeZone>(tz: &Tz, date: chrono::NaiveDate) -> Result<DateTime<Tz>, ApiError>
 where
     Tz::Offset: Copy,
 {
@@ -613,11 +610,19 @@ where
 }
 
 fn prev_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 1 { (year - 1, 12) } else { (year, month - 1) }
+    if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    }
 }
 
 fn next_year_month(year: i32, month: u32) -> (i32, u32) {
-    if month == 12 { (year + 1, 1) } else { (year, month + 1) }
+    if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    }
 }
 
 fn cycle_window_at<Tz: TimeZone>(
