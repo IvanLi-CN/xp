@@ -103,7 +103,7 @@ async fn wait_for_remove_inbound(client: &mut xray::XrayClient, tag: &str) {
 }
 
 async fn spawn_echo_server() -> (u16, tokio::task::JoinHandle<()>) {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let listener = TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
     let handle = tokio::spawn(async move {
