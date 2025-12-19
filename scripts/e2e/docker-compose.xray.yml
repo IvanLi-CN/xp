@@ -6,5 +6,8 @@ services:
     command: ["run", "-c", "/etc/xray/config.json"]
     ports:
       - "127.0.0.1:${XP_E2E_XRAY_API_PORT:-10085}:10085"
+      - "127.0.0.1:${XP_E2E_SS_PORT:-31080}:${XP_E2E_SS_PORT:-31080}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./xray-config.json:/etc/xray/config.json:ro

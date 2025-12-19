@@ -22,7 +22,9 @@ async fn main() -> Result<()> {
     })?;
     let store = Arc::new(Mutex::new(store));
 
-    let reconcile = xp::reconcile::spawn_reconciler(config_arc, store.clone());
+    let reconcile = xp::reconcile::spawn_reconciler(config_arc.clone(), store.clone());
+    let _quota =
+        xp::quota::spawn_quota_worker(config_arc.clone(), store.clone(), reconcile.clone());
 
     let app = xp::http::build_router(config.clone(), store, reconcile)
         .layer(TraceLayer::new_for_http())

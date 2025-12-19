@@ -24,6 +24,30 @@ PY
 fi
 export XP_E2E_XRAY_API_PORT
 
+if [ -z "${XP_E2E_SS_PORT:-}" ]; then
+  XP_E2E_SS_PORT="$(
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+  )"
+fi
+while [ "${XP_E2E_SS_PORT}" = "${XP_E2E_XRAY_API_PORT}" ]; do
+  XP_E2E_SS_PORT="$(
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+  )"
+done
+export XP_E2E_SS_PORT
+
 cleanup() {
   compose down
 }

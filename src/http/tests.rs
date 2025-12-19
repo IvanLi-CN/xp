@@ -41,6 +41,8 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         public_domain: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_poll_interval_secs: 10,
+        quota_auto_unban: true,
     }
 }
 
@@ -978,6 +980,70 @@ async fn subscription_disabled_grant_not_in_output() {
     assert_eq!(res.status(), StatusCode::OK);
     let raw_body = body_text(res).await;
     assert!(!raw_body.contains(&password));
+}
+
+#[tokio::test]
+async fn admin_patch_grant_clears_quota_ban_marker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (_token, grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let banned_at = "2025-12-18T00:00:00Z".to_string();
+
+    {
+        let mut store = store.lock().await;
+        store.set_quota_banned(&grant_id, banned_at).unwrap();
+        assert!(store.get_grant_usage(&grant_id).unwrap().quota_banned);
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/grants/{grant_id}"),
+            json!({
+              "enabled": false,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let store = store.lock().await;
+    let usage = store.get_grant_usage(&grant_id).unwrap();
+    assert!(!usage.quota_banned);
+    assert_eq!(usage.quota_banned_at, None);
+}
+
+#[tokio::test]
+async fn admin_delete_grant_removes_usage_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (_token, grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+
+    {
+        let mut store = store.lock().await;
+        store
+            .set_quota_banned(&grant_id, "2025-12-18T00:00:00Z".to_string())
+            .unwrap();
+        assert!(store.get_grant_usage(&grant_id).is_some());
+    }
+
+    let res = app
+        .oneshot(req_authed(
+            "DELETE",
+            &format!("/api/admin/grants/{grant_id}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let store = store.lock().await;
+    assert!(store.get_grant_usage(&grant_id).is_none());
 }
 
 #[tokio::test]
