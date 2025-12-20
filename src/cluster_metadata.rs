@@ -50,11 +50,21 @@ pub struct ClusterMetadata {
     pub node_name: String,
     pub public_domain: String,
     pub api_base_url: String,
-    /// `true` if this node has the cluster CA private key (bootstrap leader).
+    /// `true` if this node has the cluster CA private key.
     pub has_cluster_ca_key: bool,
+    /// `true` if this node should bootstrap raft when starting a brand-new cluster.
+    ///
+    /// Backward-compat: older metadata.json files don't have this field; in that case, we
+    /// infer bootstrap behavior from `has_cluster_ca_key` (legacy meaning).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_bootstrap_node: Option<bool>,
 }
 
 impl ClusterMetadata {
+    pub fn should_bootstrap_raft(&self) -> bool {
+        self.is_bootstrap_node.unwrap_or(self.has_cluster_ca_key)
+    }
+
     pub fn init_new_cluster(
         data_dir: &Path,
         node_name: String,
@@ -80,6 +90,7 @@ impl ClusterMetadata {
             .with_context(|| format!("write {}", paths.cluster_ca_pem.display()))?;
         write_atomic(&paths.cluster_ca_key_pem, ca.key_pem.as_bytes())
             .with_context(|| format!("write {}", paths.cluster_ca_key_pem.display()))?;
+        best_effort_chmod_0600(&paths.cluster_ca_key_pem);
 
         let csr = generate_node_keypair_and_csr(&node_id)?;
         let signed = sign_node_csr(&cluster_id, &ca.key_pem, &csr.csr_pem)?;
@@ -99,6 +110,7 @@ impl ClusterMetadata {
             public_domain,
             api_base_url,
             has_cluster_ca_key: true,
+            is_bootstrap_node: Some(true),
         };
 
         meta.save(data_dir)?;
@@ -179,4 +191,12 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     fs::rename(tmp_path, path)?;
     Ok(())
+}
+
+fn best_effort_chmod_0600(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
 }

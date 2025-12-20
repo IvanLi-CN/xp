@@ -102,6 +102,11 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing cluster_ca_pem in join response"))?
         .to_string();
+    let cluster_ca_key_pem = resp
+        .get("cluster_ca_key_pem")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing cluster_ca_key_pem in join response"))?
+        .to_string();
 
     if node_id != expected_node_id {
         anyhow::bail!(
@@ -112,6 +117,8 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     let paths = xp::cluster_metadata::ClusterPaths::new(&config.data_dir);
     std::fs::create_dir_all(&paths.dir)?;
     std::fs::write(&paths.cluster_ca_pem, cluster_ca_pem.as_bytes())?;
+    std::fs::write(&paths.cluster_ca_key_pem, cluster_ca_key_pem.as_bytes())?;
+    best_effort_chmod_0600(&paths.cluster_ca_key_pem);
     std::fs::write(&paths.node_key_pem, csr.key_pem.as_bytes())?;
     std::fs::write(&paths.node_csr_pem, csr.csr_pem.as_bytes())?;
     std::fs::write(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
@@ -123,7 +130,8 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         node_name,
         public_domain,
         api_base_url,
-        has_cluster_ca_key: false,
+        has_cluster_ca_key: true,
+        is_bootstrap_node: Some(false),
     };
     meta.save(&config.data_dir)?;
 
@@ -186,7 +194,7 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
         raft_endpoint: cluster.api_base_url.clone(),
     };
 
-    if cluster.has_cluster_ca_key {
+    if cluster.should_bootstrap_raft() {
         raft.initialize_single_node_if_needed(raft_id, raft_node_meta)
             .await?;
     }
@@ -225,4 +233,12 @@ fn init_tracing() {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn best_effort_chmod_0600(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
 }

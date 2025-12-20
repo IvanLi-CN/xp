@@ -180,6 +180,7 @@ struct ClusterJoinResponse {
     node_id: String,
     signed_cert_pem: String,
     cluster_ca_pem: String,
+    cluster_ca_key_pem: String,
 }
 
 #[derive(Deserialize)]
@@ -528,6 +529,7 @@ async fn cluster_join(
         node_id,
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+        cluster_ca_key_pem: ca_key_pem,
     }))
 }
 
