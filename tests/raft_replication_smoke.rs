@@ -14,6 +14,7 @@ use xp::{
         NodeId, NodeMeta,
         app::RaftFacade as _,
         http_rpc::{RaftRpcState, build_raft_rpc_router},
+        network_http::HttpNetworkFactory,
         runtime::start_raft,
         types::TypeConfig,
     },
@@ -158,6 +159,7 @@ async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
         node1_id,
         store1.clone(),
         ReconcileHandle::noop(),
+        HttpNetworkFactory::new(),
     )
     .await
     .context("start raft-1")?;
@@ -167,6 +169,7 @@ async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
         node2_id,
         store2.clone(),
         ReconcileHandle::noop(),
+        HttpNetworkFactory::new(),
     )
     .await
     .context("start raft-2")?;
