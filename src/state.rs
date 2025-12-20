@@ -110,6 +110,172 @@ impl PersistedState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DesiredStateCommand {
+    UpsertNode { node: Node },
+    UpsertEndpoint { endpoint: Endpoint },
+    DeleteEndpoint { endpoint_id: String },
+    UpsertUser { user: User },
+    DeleteUser { user_id: String },
+    ResetUserSubscriptionToken {
+        user_id: String,
+        subscription_token: String,
+    },
+    UpsertGrant { grant: Grant },
+    DeleteGrant { grant_id: String },
+    UpdateGrantFields {
+        grant_id: String,
+        enabled: bool,
+        quota_limit_bytes: u64,
+        cycle_policy: CyclePolicy,
+        cycle_day_of_month: Option<u8>,
+    },
+    SetGrantEnabled { grant_id: String, enabled: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesiredStateApplyResult {
+    Applied,
+    EndpointDeleted { deleted: bool },
+    UserDeleted { deleted: bool },
+    UserTokenReset { applied: bool },
+    GrantDeleted { deleted: bool },
+    GrantUpdated { grant: Option<Grant> },
+    GrantEnabledSet { grant: Option<Grant>, changed: bool },
+}
+
+impl DesiredStateCommand {
+    pub fn apply(
+        &self,
+        state: &mut PersistedState,
+    ) -> Result<DesiredStateApplyResult, StoreError> {
+        match self {
+            Self::UpsertNode { node } => {
+                state.nodes.insert(node.node_id.clone(), node.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::UpsertEndpoint { endpoint } => {
+                validate_port(endpoint.port)?;
+                state
+                    .endpoints
+                    .insert(endpoint.endpoint_id.clone(), endpoint.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteEndpoint { endpoint_id } => {
+                let deleted = state.endpoints.remove(endpoint_id).is_some();
+                Ok(DesiredStateApplyResult::EndpointDeleted { deleted })
+            }
+            Self::UpsertUser { user } => {
+                validate_cycle_day_of_month(user.cycle_day_of_month_default)?;
+                state.users.insert(user.user_id.clone(), user.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteUser { user_id } => {
+                let deleted = state.users.remove(user_id).is_some();
+                Ok(DesiredStateApplyResult::UserDeleted { deleted })
+            }
+            Self::ResetUserSubscriptionToken {
+                user_id,
+                subscription_token,
+            } => {
+                let user = match state.users.get_mut(user_id) {
+                    Some(user) => user,
+                    None => return Ok(DesiredStateApplyResult::UserTokenReset { applied: false }),
+                };
+                user.subscription_token = subscription_token.clone();
+                Ok(DesiredStateApplyResult::UserTokenReset { applied: true })
+            }
+            Self::UpsertGrant { grant } => {
+                if !state.users.contains_key(&grant.user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: grant.user_id.clone(),
+                    }
+                    .into());
+                }
+                if !state.endpoints.contains_key(&grant.endpoint_id) {
+                    return Err(DomainError::MissingEndpoint {
+                        endpoint_id: grant.endpoint_id.clone(),
+                    }
+                    .into());
+                }
+
+                if grant.cycle_policy != CyclePolicy::InheritUser
+                    && grant.cycle_day_of_month.is_none()
+                {
+                    return Err(DomainError::MissingCycleDayOfMonth {
+                        cycle_policy: grant.cycle_policy.clone(),
+                    }
+                    .into());
+                }
+                if let Some(day) = grant.cycle_day_of_month {
+                    validate_cycle_day_of_month(day)?;
+                }
+
+                state.grants.insert(grant.grant_id.clone(), grant.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteGrant { grant_id } => {
+                let deleted = state.grants.remove(grant_id).is_some();
+                Ok(DesiredStateApplyResult::GrantDeleted { deleted })
+            }
+            Self::UpdateGrantFields {
+                grant_id,
+                enabled,
+                quota_limit_bytes,
+                cycle_policy,
+                cycle_day_of_month,
+            } => {
+                let grant = match state.grants.get_mut(grant_id) {
+                    Some(grant) => grant,
+                    None => return Ok(DesiredStateApplyResult::GrantUpdated { grant: None }),
+                };
+
+                if *cycle_policy != CyclePolicy::InheritUser && cycle_day_of_month.is_none() {
+                    return Err(DomainError::MissingCycleDayOfMonth {
+                        cycle_policy: cycle_policy.clone(),
+                    }
+                    .into());
+                }
+                if let Some(day) = cycle_day_of_month {
+                    validate_cycle_day_of_month(*day)?;
+                }
+
+                grant.enabled = *enabled;
+                grant.quota_limit_bytes = *quota_limit_bytes;
+                grant.cycle_policy = cycle_policy.clone();
+                grant.cycle_day_of_month = *cycle_day_of_month;
+
+                Ok(DesiredStateApplyResult::GrantUpdated {
+                    grant: Some(grant.clone()),
+                })
+            }
+            Self::SetGrantEnabled { grant_id, enabled } => {
+                let grant = match state.grants.get_mut(grant_id) {
+                    Some(grant) => grant,
+                    None => return Ok(DesiredStateApplyResult::GrantEnabledSet {
+                        grant: None,
+                        changed: false,
+                    }),
+                };
+
+                if grant.enabled == *enabled {
+                    return Ok(DesiredStateApplyResult::GrantEnabledSet {
+                        grant: Some(grant.clone()),
+                        changed: false,
+                    });
+                }
+
+                grant.enabled = *enabled;
+                Ok(DesiredStateApplyResult::GrantEnabledSet {
+                    grant: Some(grant.clone()),
+                    changed: true,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedUsage {
     pub schema_version: u32,
     #[serde(default)]
@@ -339,8 +505,6 @@ impl JsonSnapshotStore {
         port: u16,
         meta: serde_json::Value,
     ) -> Result<Endpoint, StoreError> {
-        validate_port(port)?;
-
         let endpoint_id = new_ulid_string();
         let tag = endpoint_tag(&kind, &endpoint_id);
 
@@ -353,7 +517,10 @@ impl JsonSnapshotStore {
             port,
             meta,
         };
-        self.state.endpoints.insert(endpoint_id, endpoint.clone());
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+        }
+        .apply(&mut self.state)?;
         self.save()?;
         Ok(endpoint)
     }
@@ -364,8 +531,6 @@ impl JsonSnapshotStore {
         cycle_policy_default: CyclePolicyDefault,
         cycle_day_of_month_default: u8,
     ) -> Result<User, StoreError> {
-        validate_cycle_day_of_month(cycle_day_of_month_default)?;
-
         let user_id = new_ulid_string();
         let subscription_token = format!("sub_{}", new_ulid_string());
 
@@ -376,7 +541,7 @@ impl JsonSnapshotStore {
             cycle_policy_default,
             cycle_day_of_month_default,
         };
-        self.state.users.insert(user_id, user.clone());
+        DesiredStateCommand::UpsertUser { user: user.clone() }.apply(&mut self.state)?;
         self.save()?;
         Ok(user)
     }
@@ -401,13 +566,6 @@ impl JsonSnapshotStore {
                     endpoint_id: endpoint_id.clone(),
                 })?;
 
-        if cycle_policy != CyclePolicy::InheritUser && cycle_day_of_month.is_none() {
-            return Err(DomainError::MissingCycleDayOfMonth { cycle_policy }.into());
-        }
-        if let Some(day) = cycle_day_of_month {
-            validate_cycle_day_of_month(day)?;
-        }
-
         let grant_id = new_ulid_string();
         let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
 
@@ -422,7 +580,10 @@ impl JsonSnapshotStore {
             note,
             credentials,
         };
-        self.state.grants.insert(grant_id, grant.clone());
+        DesiredStateCommand::UpsertGrant {
+            grant: grant.clone(),
+        }
+        .apply(&mut self.state)?;
         self.save()?;
         Ok(grant)
     }
@@ -435,6 +596,12 @@ impl JsonSnapshotStore {
         self.state.nodes.get(node_id).cloned()
     }
 
+    pub fn upsert_node(&mut self, node: Node) -> Result<Node, StoreError> {
+        DesiredStateCommand::UpsertNode { node: node.clone() }.apply(&mut self.state)?;
+        self.save()?;
+        Ok(node)
+    }
+
     pub fn list_endpoints(&self) -> Vec<Endpoint> {
         self.state.endpoints.values().cloned().collect()
     }
@@ -444,7 +611,13 @@ impl JsonSnapshotStore {
     }
 
     pub fn delete_endpoint(&mut self, endpoint_id: &str) -> Result<bool, StoreError> {
-        let deleted = self.state.endpoints.remove(endpoint_id).is_some();
+        let out = DesiredStateCommand::DeleteEndpoint {
+            endpoint_id: endpoint_id.to_string(),
+        }
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::EndpointDeleted { deleted } = out else {
+            unreachable!("delete endpoint must return EndpointDeleted");
+        };
         if deleted {
             self.save()?;
         }
@@ -491,7 +664,13 @@ impl JsonSnapshotStore {
     }
 
     pub fn delete_user(&mut self, user_id: &str) -> Result<bool, StoreError> {
-        let deleted = self.state.users.remove(user_id).is_some();
+        let out = DesiredStateCommand::DeleteUser {
+            user_id: user_id.to_string(),
+        }
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::UserDeleted { deleted } = out else {
+            unreachable!("delete user must return UserDeleted");
+        };
         if deleted {
             self.save()?;
         }
@@ -499,15 +678,21 @@ impl JsonSnapshotStore {
     }
 
     pub fn reset_user_token(&mut self, user_id: &str) -> Result<Option<String>, StoreError> {
-        let user = match self.state.users.get_mut(user_id) {
-            Some(user) => user,
-            None => return Ok(None),
-        };
-
         let subscription_token = format!("sub_{}", new_ulid_string());
-        user.subscription_token = subscription_token.clone();
-        self.save()?;
-        Ok(Some(subscription_token))
+        let out = DesiredStateCommand::ResetUserSubscriptionToken {
+            user_id: user_id.to_string(),
+            subscription_token: subscription_token.clone(),
+        }
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::UserTokenReset { applied } = out else {
+            unreachable!("reset user token must return UserTokenReset");
+        };
+        if applied {
+            self.save()?;
+            Ok(Some(subscription_token))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn list_grants(&self) -> Vec<Grant> {
@@ -519,7 +704,13 @@ impl JsonSnapshotStore {
     }
 
     pub fn delete_grant(&mut self, grant_id: &str) -> Result<bool, StoreError> {
-        let deleted = self.state.grants.remove(grant_id).is_some();
+        let out = DesiredStateCommand::DeleteGrant {
+            grant_id: grant_id.to_string(),
+        }
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::GrantDeleted { deleted } = out else {
+            unreachable!("delete grant must return GrantDeleted");
+        };
         if deleted {
             self.usage.grants.remove(grant_id);
             self.save()?;
@@ -536,26 +727,21 @@ impl JsonSnapshotStore {
         cycle_policy: CyclePolicy,
         cycle_day_of_month: Option<u8>,
     ) -> Result<Option<Grant>, StoreError> {
-        let grant = match self.state.grants.get_mut(grant_id) {
-            Some(grant) => grant,
-            None => return Ok(None),
+        let out = DesiredStateCommand::UpdateGrantFields {
+            grant_id: grant_id.to_string(),
+            enabled,
+            quota_limit_bytes,
+            cycle_policy,
+            cycle_day_of_month,
+        }
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::GrantUpdated { grant } = out else {
+            unreachable!("update grant must return GrantUpdated");
         };
-
-        if cycle_policy != CyclePolicy::InheritUser && cycle_day_of_month.is_none() {
-            return Err(DomainError::MissingCycleDayOfMonth { cycle_policy }.into());
+        if grant.is_some() {
+            self.save()?;
         }
-        if let Some(day) = cycle_day_of_month {
-            validate_cycle_day_of_month(day)?;
-        }
-
-        grant.enabled = enabled;
-        grant.quota_limit_bytes = quota_limit_bytes;
-        grant.cycle_policy = cycle_policy;
-        grant.cycle_day_of_month = cycle_day_of_month;
-
-        let grant = grant.clone();
-        self.save()?;
-        Ok(Some(grant))
+        Ok(grant)
     }
 
     pub fn set_grant_enabled(
@@ -563,19 +749,18 @@ impl JsonSnapshotStore {
         grant_id: &str,
         enabled: bool,
     ) -> Result<Option<Grant>, StoreError> {
-        let grant = match self.state.grants.get_mut(grant_id) {
-            Some(grant) => grant,
-            None => return Ok(None),
-        };
-
-        if grant.enabled == enabled {
-            return Ok(Some(grant.clone()));
+        let out = DesiredStateCommand::SetGrantEnabled {
+            grant_id: grant_id.to_string(),
+            enabled,
         }
-
-        grant.enabled = enabled;
-        let grant = grant.clone();
-        self.save()?;
-        Ok(Some(grant))
+        .apply(&mut self.state)?;
+        let DesiredStateApplyResult::GrantEnabledSet { grant, changed } = out else {
+            unreachable!("set grant enabled must return GrantEnabledSet");
+        };
+        if changed {
+            self.save()?;
+        }
+        Ok(grant)
     }
 }
 
@@ -692,8 +877,8 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
-            CyclePolicy, CyclePolicyDefault, Grant, GrantCredentials, validate_cycle_day_of_month,
-            validate_port,
+            CyclePolicy, CyclePolicyDefault, DomainError, EndpointKind, Grant, GrantCredentials,
+            validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
     };
@@ -889,5 +1074,244 @@ mod tests {
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert!(store.get_grant_usage(grant_id).is_none());
+    }
+
+    #[test]
+    fn desired_state_apply_upsert_node_inserts_node() {
+        let mut state = PersistedState::empty();
+        let node = Node {
+            node_id: "node_1".to_string(),
+            node_name: "node-1".to_string(),
+            public_domain: "example.com".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+        };
+
+        DesiredStateCommand::UpsertNode { node: node.clone() }
+            .apply(&mut state)
+            .unwrap();
+
+        assert_eq!(state.nodes.get(&node.node_id), Some(&node));
+    }
+
+    #[test]
+    fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
+        let mut state = PersistedState::empty();
+        let endpoint = Endpoint {
+            endpoint_id: "ep_1".to_string(),
+            node_id: "node_1".to_string(),
+            tag: "ss2022-ep_1".to_string(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 443,
+            meta: json!({"k":"v"}),
+        };
+
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(state.endpoints.get(&endpoint.endpoint_id), Some(&endpoint));
+
+        let out = DesiredStateCommand::DeleteEndpoint {
+            endpoint_id: endpoint.endpoint_id.clone(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(
+            out,
+            DesiredStateApplyResult::EndpointDeleted { deleted: true }
+        );
+        assert!(!state.endpoints.contains_key(&endpoint.endpoint_id));
+    }
+
+    #[test]
+    fn desired_state_apply_rejects_invalid_port() {
+        let mut state = PersistedState::empty();
+        let endpoint = Endpoint {
+            endpoint_id: "ep_1".to_string(),
+            node_id: "node_1".to_string(),
+            tag: "ss2022-ep_1".to_string(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 0,
+            meta: json!({}),
+        };
+
+        let err = DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Domain(DomainError::InvalidPort { .. })
+        ));
+    }
+
+    #[test]
+    fn desired_state_apply_user_create_reset_token_and_delete_are_deterministic() {
+        let mut state = PersistedState::empty();
+        let user = User {
+            user_id: "user_1".to_string(),
+            display_name: "alice".to_string(),
+            subscription_token: "sub_1".to_string(),
+            cycle_policy_default: CyclePolicyDefault::ByUser,
+            cycle_day_of_month_default: 1,
+        };
+
+        DesiredStateCommand::UpsertUser { user: user.clone() }
+            .apply(&mut state)
+            .unwrap();
+        assert_eq!(state.users.get(&user.user_id), Some(&user));
+
+        let out = DesiredStateCommand::ResetUserSubscriptionToken {
+            user_id: user.user_id.clone(),
+            subscription_token: "sub_2".to_string(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(out, DesiredStateApplyResult::UserTokenReset { applied: true });
+        assert_eq!(
+            state.users
+                .get(&user.user_id)
+                .unwrap()
+                .subscription_token
+                .as_str(),
+            "sub_2"
+        );
+
+        let out = DesiredStateCommand::DeleteUser {
+            user_id: user.user_id.clone(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(out, DesiredStateApplyResult::UserDeleted { deleted: true });
+        assert!(!state.users.contains_key(&user.user_id));
+    }
+
+    #[test]
+    fn desired_state_apply_grant_create_update_delete_are_deterministic() {
+        let mut state = PersistedState::empty();
+        state.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                cycle_policy_default: CyclePolicyDefault::ByUser,
+                cycle_day_of_month_default: 1,
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        let grant = Grant {
+            grant_id: "grant_1".to_string(),
+            user_id: "user_1".to_string(),
+            endpoint_id: "endpoint_1".to_string(),
+            enabled: true,
+            quota_limit_bytes: 10,
+            cycle_policy: CyclePolicy::InheritUser,
+            cycle_day_of_month: None,
+            note: None,
+            credentials: GrantCredentials {
+                vless: None,
+                ss2022: None,
+            },
+        };
+
+        DesiredStateCommand::UpsertGrant { grant: grant.clone() }
+            .apply(&mut state)
+            .unwrap();
+        assert_eq!(state.grants.get(&grant.grant_id), Some(&grant));
+
+        let out = DesiredStateCommand::UpdateGrantFields {
+            grant_id: grant.grant_id.clone(),
+            enabled: false,
+            quota_limit_bytes: 123,
+            cycle_policy: CyclePolicy::InheritUser,
+            cycle_day_of_month: None,
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        let DesiredStateApplyResult::GrantUpdated { grant: updated } = out else {
+            panic!("expected GrantUpdated");
+        };
+        let updated = updated.unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(updated.quota_limit_bytes, 123);
+
+        let out = DesiredStateCommand::DeleteGrant {
+            grant_id: grant.grant_id.clone(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(out, DesiredStateApplyResult::GrantDeleted { deleted: true });
+        assert!(!state.grants.contains_key(&grant.grant_id));
+    }
+
+    #[test]
+    fn json_snapshot_store_create_update_delete_grant_flow_is_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+
+        let user = store
+            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+            .unwrap();
+        let endpoint = store
+            .create_endpoint(
+                store.list_nodes()[0].node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let grant = store
+            .create_grant(
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                1024,
+                CyclePolicy::InheritUser,
+                None,
+                None,
+            )
+            .unwrap();
+
+        store
+            .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+            .unwrap();
+        assert!(store.get_grant_usage(&grant.grant_id).is_some());
+
+        let updated = store
+            .update_grant(
+                &grant.grant_id,
+                false,
+                2048,
+                CyclePolicy::InheritUser,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(updated.quota_limit_bytes, 2048);
+
+        assert!(store.delete_grant(&grant.grant_id).unwrap());
+        assert!(store.get_grant_usage(&grant.grant_id).is_none());
+
+        drop(store);
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(store.get_grant(&grant.grant_id).is_none());
+        assert!(store.get_grant_usage(&grant.grant_id).is_none());
+        assert!(store.get_user(&user.user_id).is_some());
+        assert!(store.get_endpoint(&endpoint.endpoint_id).is_some());
     }
 }
