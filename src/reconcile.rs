@@ -20,6 +20,17 @@ use crate::{
     xray::builder,
 };
 
+pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
+    let nodes = store.list_nodes();
+    if let Some(node) = nodes.iter().find(|n| n.api_base_url == config.api_base_url) {
+        return Some(node.node_id.clone());
+    }
+    nodes
+        .iter()
+        .find(|n| n.node_name == config.node_name)
+        .map(|n| n.node_id.clone())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
@@ -283,25 +294,33 @@ struct Snapshot {
     grants: Vec<Grant>,
 }
 
-async fn take_snapshot(store: &Arc<Mutex<JsonSnapshotStore>>) -> Snapshot {
-    let store = store.lock().await;
-    Snapshot {
-        endpoints: store.list_endpoints(),
-        grants: store.list_grants(),
-    }
-}
-
 async fn reconcile_once(
     config: &Arc<Config>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     pending: &PendingBatch,
 ) -> Result<(), xray::XrayError> {
-    let snapshot = take_snapshot(store).await;
-    reconcile_snapshot(config.xray_api_addr, snapshot, pending).await
+    let (local_node_id, snapshot) = {
+        let store = store.lock().await;
+        let Some(local_node_id) = resolve_local_node_id(config, &store) else {
+            warn!(
+                node_name = %config.node_name,
+                api_base_url = %config.api_base_url,
+                "reconcile: local node_id not found; skipping xray calls"
+            );
+            return Ok(());
+        };
+        (local_node_id, Snapshot {
+            endpoints: store.list_endpoints(),
+            grants: store.list_grants(),
+        })
+    };
+
+    reconcile_snapshot(config.xray_api_addr, &local_node_id, snapshot, pending).await
 }
 
 async fn reconcile_snapshot(
     xray_api_addr: SocketAddr,
+    local_node_id: &str,
     snapshot: Snapshot,
     pending: &PendingBatch,
 ) -> Result<(), xray::XrayError> {
@@ -309,12 +328,15 @@ async fn reconcile_snapshot(
         AlterInboundRequest, RemoveInboundRequest,
     };
 
-    let mut client = xray::connect(xray_api_addr).await?;
-
     let endpoints_by_id: BTreeMap<String, Endpoint> = snapshot
         .endpoints
         .into_iter()
         .map(|e| (e.endpoint_id.clone(), e))
+        .collect();
+
+    let endpoint_by_tag: BTreeMap<String, Endpoint> = endpoints_by_id
+        .values()
+        .map(|e| (e.tag.clone(), e.clone()))
         .collect();
 
     let mut grants_by_endpoint: BTreeMap<String, Vec<Grant>> = BTreeMap::new();
@@ -325,8 +347,42 @@ async fn reconcile_snapshot(
             .push(grant);
     }
 
+    let has_local_endpoints = endpoints_by_id.values().any(|e| e.node_id == local_node_id);
+    let has_local_rebuilds = pending.rebuild_inbounds.iter().any(|endpoint_id| {
+        endpoints_by_id
+            .get(endpoint_id)
+            .is_some_and(|e| e.node_id == local_node_id)
+    });
+    let has_local_remove_inbounds = pending
+        .remove_inbounds
+        .iter()
+        .any(|tag| match endpoint_by_tag.get(tag) {
+            None => true,
+            Some(e) => e.node_id == local_node_id,
+        });
+    let has_local_remove_users = pending
+        .remove_users
+        .iter()
+        .any(|(tag, _)| match endpoint_by_tag.get(tag) {
+            None => true,
+            Some(e) => e.node_id == local_node_id,
+        });
+
+    if !(has_local_endpoints || has_local_rebuilds || has_local_remove_inbounds || has_local_remove_users)
+    {
+        return Ok(());
+    }
+
+    let mut client = xray::connect(xray_api_addr).await?;
+
     // 1) Explicit requests first.
     for (tag, email) in pending.remove_users.iter() {
+        if endpoint_by_tag
+            .get(tag)
+            .is_some_and(|e| e.node_id != local_node_id)
+        {
+            continue;
+        }
         let op = builder::build_remove_user_operation(email);
         let req = AlterInboundRequest {
             tag: tag.clone(),
@@ -340,6 +396,12 @@ async fn reconcile_snapshot(
     }
 
     for tag in pending.remove_inbounds.iter() {
+        if endpoint_by_tag
+            .get(tag)
+            .is_some_and(|e| e.node_id != local_node_id)
+        {
+            continue;
+        }
         let req = RemoveInboundRequest { tag: tag.clone() };
         match client.remove_inbound(req).await {
             Ok(_) => {}
@@ -352,6 +414,9 @@ async fn reconcile_snapshot(
         let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
             continue;
         };
+        if endpoint.node_id != local_node_id {
+            continue;
+        }
 
         let req = RemoveInboundRequest {
             tag: endpoint.tag.clone(),
@@ -385,7 +450,10 @@ async fn reconcile_snapshot(
     }
 
     // 2) Desired state apply.
-    for endpoint in endpoints_by_id.values() {
+    for endpoint in endpoints_by_id
+        .values()
+        .filter(|e| e.node_id == local_node_id)
+    {
         match builder::build_add_inbound_request(endpoint) {
             Ok(req) => match client.add_inbound(req).await {
                 Ok(_) => {}
@@ -405,6 +473,9 @@ async fn reconcile_snapshot(
             warn!(endpoint_id, "grant references missing endpoint; skipping");
             continue;
         };
+        if endpoint.node_id != local_node_id {
+            continue;
+        }
 
         for grant in grants.iter() {
             if grant.enabled {
@@ -506,7 +577,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
         state::StoreInit,
         xray::proto::xray::app::proxyman::command::handler_service_server::{
             HandlerService, HandlerServiceServer,
@@ -737,6 +808,7 @@ mod tests {
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: config.data_dir.clone(),
+            bootstrap_node_id: None,
             bootstrap_node_name: config.node_name.clone(),
             bootstrap_public_domain: config.public_domain.clone(),
             bootstrap_api_base_url: config.api_base_url.clone(),
@@ -756,12 +828,13 @@ mod tests {
 
         {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let _user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -793,6 +866,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_endpoints_are_skipped_for_apply_and_explicit_remove() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (local_tag, remote_tag) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let remote_node_id = "node-remote".to_string();
+            let _ = store
+                .upsert_node(Node {
+                    node_id: remote_node_id.clone(),
+                    node_name: "node-2".to_string(),
+                    public_domain: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62417".to_string(),
+                })
+                .unwrap();
+
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+
+            let local_endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let remote_endpoint = store
+                .create_endpoint(
+                    remote_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let _ = store
+                .create_grant(
+                    user.user_id.clone(),
+                    local_endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let _ = store
+                .create_grant(
+                    user.user_id,
+                    remote_endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            (local_endpoint.tag, remote_endpoint.tag)
+        };
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let calls_snapshot = calls.lock().await.clone();
+        assert!(calls_snapshot.iter().any(|c| {
+            matches!(c, Call::AddInbound { tag } if tag == &local_tag)
+        }));
+        assert!(!calls_snapshot.iter().any(|c| {
+            matches!(c, Call::AddInbound { tag } if tag == &remote_tag)
+        }));
+        assert!(!calls_snapshot.iter().any(|c| {
+            matches!(c, Call::AlterInbound { tag, .. } if tag == &remote_tag)
+        }));
+
+        calls.lock().await.clear();
+        let mut pending = PendingBatch::default();
+        pending.add(ReconcileRequest::RemoveInbound { tag: remote_tag });
+        reconcile_once(&config, &store, &pending).await.unwrap();
+        let calls_snapshot = calls.lock().await.clone();
+        assert!(!calls_snapshot.iter().any(|c| matches!(c, Call::RemoveInbound { .. })));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
     async fn disabled_grant_triggers_remove_user_operation() {
         let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
         let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
@@ -802,12 +968,13 @@ mod tests {
 
         let (endpoint_tag, grant_id) = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -852,12 +1019,13 @@ mod tests {
 
         let (endpoint_id, endpoint_tag) = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -960,12 +1128,13 @@ mod tests {
 
         let (endpoint, grant) = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),

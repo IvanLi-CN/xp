@@ -96,9 +96,12 @@
 {
   "node_id": "01J...",
   "signed_cert_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
-  "cluster_ca_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+  "cluster_ca_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
+  "cluster_ca_key_pem": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 }
 ```
+
+> `cluster_ca_key_pem` 为敏感私钥，仅在 leader 节点本地确实持有时才会返回；新节点收到后应以 0600（Unix）权限落盘保存。
 
 ### 2.4 查询节点列表（管理员）
 

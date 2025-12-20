@@ -10,17 +10,23 @@ use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use serde_yaml::Value as YamlValue;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
 use crate::{
+    cluster_metadata::ClusterMetadata,
     config::Config,
     domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
+    raft::{
+        app::LocalRaft,
+        types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
+    },
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
     xray::proto::xray::app::stats::command::stats_service_server::{
@@ -46,9 +52,10 @@ fn test_config(data_dir: PathBuf) -> Config {
     }
 }
 
-fn test_store_init(config: &Config) -> StoreInit {
+fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     StoreInit {
         data_dir: config.data_dir.clone(),
+        bootstrap_node_id,
         bootstrap_node_name: config.node_name.clone(),
         bootstrap_public_domain: config.public_domain.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
@@ -60,10 +67,59 @@ fn app_with(
     reconcile: ReconcileHandle,
 ) -> (axum::Router, Arc<Mutex<JsonSnapshotStore>>) {
     let config = test_config(tmp.path().to_path_buf());
-    let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
     let store = Arc::new(Mutex::new(store));
-    let router = build_router(config, store.clone(), reconcile);
+
+    let raft = leader_raft(store.clone(), &cluster);
+
+    let router = build_router(
+        config,
+        store.clone(),
+        reconcile,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
     (router, store)
+}
+
+fn leader_raft(
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    cluster: &ClusterMetadata,
+) -> Arc<dyn crate::raft::app::RaftFacade> {
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    Arc::new(LocalRaft::new(store, rx))
 }
 
 fn app(tmp: &TempDir) -> axum::Router {
@@ -239,11 +295,179 @@ async fn cluster_info_is_single_node_leader_and_ids_present() {
 
     let node_id = json["node_id"].as_str().unwrap();
     let cluster_id = json["cluster_id"].as_str().unwrap();
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
     assert!(is_ulid_string(node_id));
-    assert_eq!(cluster_id, node_id);
+    assert_eq!(cluster_id, meta.cluster_id);
+    assert_eq!(node_id, meta.node_id);
     assert_eq!(json["role"], "leader");
     assert_eq!(json["term"], 1);
-    assert_eq!(json["leader_api_base_url"], "https://127.0.0.1:62416");
+    assert_eq!(json["leader_api_base_url"], meta.api_base_url);
+}
+
+#[tokio::test]
+async fn join_token_endpoint_returns_decodable_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let token = json["join_token"].as_str().unwrap();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(token, chrono::Utc::now()).unwrap();
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_key_pem = meta.read_cluster_ca_key_pem(tmp.path()).unwrap().unwrap();
+    decoded.validate_one_time_secret(&ca_key_pem).unwrap();
+    assert_eq!(decoded.cluster_id, meta.cluster_id);
+    assert_eq!(decoded.leader_api_base_url, meta.api_base_url);
+}
+
+#[tokio::test]
+async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let join_token = json["join_token"].as_str().unwrap().to_string();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let expected_node_id = decoded.token_id.clone();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&expected_node_id).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "public_domain": "example.com",
+                        "api_base_url": "https://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["node_id"], expected_node_id);
+    assert!(json["signed_cert_pem"].as_str().unwrap().len() > 0);
+    assert!(json["cluster_ca_pem"].as_str().unwrap().len() > 0);
+
+    let key_pem = json["cluster_ca_key_pem"].as_str().unwrap();
+    assert!(key_pem.starts_with("-----BEGIN"));
+
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+    let expected_key_pem = meta
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("expected bootstrap node to have a CA key");
+
+    let got_hash = hex::encode(Sha256::digest(key_pem.as_bytes()));
+    let expected_hash = hex::encode(Sha256::digest(expected_key_pem.as_bytes()));
+    assert_eq!(got_hash, expected_hash);
+}
+
+#[tokio::test]
+async fn follower_write_returns_307_redirect_to_leader() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let follower_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let leader_id = follower_id.wrapping_add(1);
+    let mut metrics = openraft::RaftMetrics::new_initial(follower_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Follower;
+    metrics.current_leader = Some(leader_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        leader_id,
+        RaftNodeMeta {
+            name: "leader".to_string(),
+            api_base_url: "https://leader.example.com".to_string(),
+            raft_endpoint: "https://leader.example.com".to_string(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([leader_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(LocalRaft::new(store.clone(), rx));
+
+    let app = build_router(
+        config,
+        store,
+        ReconcileHandle::noop(),
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+    let loc = res
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(loc, "https://leader.example.com/api/admin/users");
 }
 
 #[tokio::test]
@@ -745,9 +969,32 @@ async fn grant_usage_is_501_not_implemented() {
 
     let mut config = test_config(tmp.path().to_path_buf());
     config.xray_api_addr = xray_api_addr;
-    let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
+
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
     let store = Arc::new(Mutex::new(store));
-    let app = build_router(config, store, ReconcileHandle::noop());
+    let raft = leader_raft(store.clone(), &cluster);
+    let app = build_router(
+        config,
+        store,
+        ReconcileHandle::noop(),
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
 
     let res = app
         .clone()
@@ -1080,11 +1327,30 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let data_dir = tmp.path().to_path_buf();
 
     let config = test_config(data_dir.clone());
-    let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let raft = leader_raft(store.clone(), &cluster);
     let app = build_router(
         config.clone(),
-        Arc::new(Mutex::new(store)),
+        store,
         crate::reconcile::ReconcileHandle::noop(),
+        cluster.clone(),
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
     );
 
     let res = app
@@ -1105,11 +1371,23 @@ async fn persistence_smoke_user_roundtrip_via_api() {
 
     drop(app);
 
-    let store = JsonSnapshotStore::load_or_init(test_store_init(&config)).unwrap();
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let raft = leader_raft(store.clone(), &cluster);
     let app = build_router(
         config,
-        Arc::new(Mutex::new(store)),
+        store,
         crate::reconcile::ReconcileHandle::noop(),
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
     );
 
     let res = app
