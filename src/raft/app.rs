@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::Context;
 use tokio::sync::watch;
@@ -22,6 +22,8 @@ pub trait RaftFacade: Send + Sync + 'static {
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>>;
 
     fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
 #[derive(Clone)]
@@ -91,6 +93,16 @@ impl RaftFacade for RealRaft {
             Ok(())
         })
     }
+
+    fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            self.raft
+                .change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true)
+                .await
+                .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
+            Ok(())
+        })
+    }
 }
 
 /// A test-only Raft facade that applies desired-state commands directly to the local store.
@@ -153,6 +165,10 @@ impl RaftFacade for LocalRaft {
     }
 
     fn add_learner(&self, _node_id: NodeId, _node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn add_voters(&self, _node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
