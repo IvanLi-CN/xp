@@ -19,6 +19,7 @@ use xp::{
         types::TypeConfig,
     },
     reconcile::ReconcileHandle,
+    raft::storage::StorePaths,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
 
@@ -68,11 +69,11 @@ async fn spawn_raft_rpc_server(raft: openraft::Raft<TypeConfig>) -> anyhow::Resu
     })
 }
 
-fn store_init(data_dir: &Path, bootstrap_node_id: &str, node_name: &str) -> StoreInit {
+fn store_init(data_dir: &Path, bootstrap_node_id: String, node_name: String) -> StoreInit {
     StoreInit {
         data_dir: data_dir.to_path_buf(),
-        bootstrap_node_id: Some(bootstrap_node_id.to_string()),
-        bootstrap_node_name: node_name.to_string(),
+        bootstrap_node_id: Some(bootstrap_node_id),
+        bootstrap_node_name: node_name,
         bootstrap_public_domain: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     }
@@ -149,82 +150,120 @@ async fn wait_for_user(
     }
 }
 
+async fn wait_for_snapshot(
+    raft: &openraft::Raft<TypeConfig>,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let snapshot = raft
+            .get_snapshot()
+            .await
+            .map_err(|e| anyhow::anyhow!("raft get_snapshot: {e}"))?;
+        if snapshot.is_some() {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            anyhow::bail!("timeout waiting for snapshot to be built");
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tokio::test]
 async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
+    run_raft_cluster_replication_smoke(2).await
+}
+
+#[tokio::test]
+async fn raft_single_node_replication_smoke() -> anyhow::Result<()> {
+    run_raft_cluster_replication_smoke(1).await
+}
+
+#[tokio::test]
+async fn raft_three_node_replication_smoke() -> anyhow::Result<()> {
+    run_raft_cluster_replication_smoke(3).await
+}
+
+#[tokio::test]
+async fn raft_four_node_replication_smoke() -> anyhow::Result<()> {
+    run_raft_cluster_replication_smoke(4).await
+}
+
+async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result<()> {
+    anyhow::ensure!(node_count >= 1, "node_count must be >= 1");
+
     let tmp = tempfile::tempdir().context("tempdir")?;
-    let node1_dir = tmp.path().join("node-1");
-    let node2_dir = tmp.path().join("node-2");
-    std::fs::create_dir_all(&node1_dir).context("create node-1 dir")?;
-    std::fs::create_dir_all(&node2_dir).context("create node-2 dir")?;
+    let mut node_dirs = Vec::with_capacity(node_count);
+    for i in 1..=node_count {
+        let dir = tmp.path().join(format!("node-{i}"));
+        std::fs::create_dir_all(&dir).with_context(|| format!("create node-{i} dir"))?;
+        node_dirs.push(dir);
+    }
 
-    let store1 = Arc::new(Mutex::new(
-        JsonSnapshotStore::load_or_init(store_init(
-            &node1_dir,
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "node-1",
+    let mut stores = Vec::with_capacity(node_count);
+    for i in 1..=node_count {
+        let dir = &node_dirs[i - 1];
+        let store = JsonSnapshotStore::load_or_init(store_init(
+            dir,
+            xp::id::new_ulid_string(),
+            format!("node-{i}"),
         ))
-        .context("init store-1")?,
-    ));
-    let store2 = Arc::new(Mutex::new(
-        JsonSnapshotStore::load_or_init(store_init(
-            &node2_dir,
-            "01ARZ3NDEKTSV4RRFFQ69G5FB0",
-            "node-2",
-        ))
-        .context("init store-2")?,
-    ));
+        .with_context(|| format!("init store-{i}"))?;
+        stores.push(Arc::new(Mutex::new(store)));
+    }
 
-    let cluster_name = "raft-two-node-replication-smoke".to_string();
+    let cluster_name = format!("raft-{node_count}-node-replication-smoke");
 
-    let node1_id: NodeId = 1;
-    let node2_id: NodeId = 2;
+    let mut rafts = Vec::with_capacity(node_count);
+    for i in 1..=node_count {
+        let raft = start_raft(
+            &node_dirs[i - 1],
+            cluster_name.clone(),
+            i as NodeId,
+            stores[i - 1].clone(),
+            ReconcileHandle::noop(),
+            HttpNetworkFactory::new(),
+        )
+        .await
+        .with_context(|| format!("start raft-{i}"))?;
+        rafts.push(raft);
+    }
 
-    let raft1 = start_raft(
-        &node1_dir,
-        cluster_name.clone(),
-        node1_id,
-        store1.clone(),
-        ReconcileHandle::noop(),
-        HttpNetworkFactory::new(),
-    )
-    .await
-    .context("start raft-1")?;
-    let raft2 = start_raft(
-        &node2_dir,
-        cluster_name,
-        node2_id,
-        store2.clone(),
-        ReconcileHandle::noop(),
-        HttpNetworkFactory::new(),
-    )
-    .await
-    .context("start raft-2")?;
+    let mut rpcs = Vec::with_capacity(node_count);
+    for i in 1..=node_count {
+        let rpc = spawn_raft_rpc_server(rafts[i - 1].raft())
+            .await
+            .with_context(|| format!("rpc-{i}"))?;
+        rpcs.push(rpc);
+    }
 
-    let rpc1 = spawn_raft_rpc_server(raft1.raft()).await.context("rpc-1")?;
-    let rpc2 = spawn_raft_rpc_server(raft2.raft()).await.context("rpc-2")?;
+    let mut metas = Vec::with_capacity(node_count);
+    for i in 1..=node_count {
+        metas.push(NodeMeta {
+            name: format!("node-{i}"),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            raft_endpoint: rpcs[i - 1].base_url.clone(),
+        });
+    }
 
-    let node1_meta = NodeMeta {
-        name: "node-1".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
-        raft_endpoint: rpc1.base_url.clone(),
-    };
-    let node2_meta = NodeMeta {
-        name: "node-2".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
-        raft_endpoint: rpc2.base_url.clone(),
-    };
-
-    raft1
-        .initialize_single_node_if_needed(node1_id, node1_meta.clone())
+    let leader_id: NodeId = 1;
+    let leader = &rafts[0];
+    leader
+        .initialize_single_node_if_needed(leader_id, metas[0].clone())
         .await
         .context("initialize node-1")?;
 
-    wait_for_leader(raft1.metrics(), node1_id, Duration::from_secs(8)).await?;
+    wait_for_leader(leader.metrics(), leader_id, Duration::from_secs(10)).await?;
 
-    raft1
-        .add_learner(node2_id, node2_meta)
-        .await
-        .context("add node-2 learner")?;
+    for i in 2..=node_count {
+        leader
+            .add_learner(i as NodeId, metas[i - 1].clone())
+            .await
+            .with_context(|| format!("add node-{i} learner"))?;
+    }
 
     let user = User {
         user_id: "user-1".to_string(),
@@ -233,30 +272,161 @@ async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
         cycle_policy_default: CyclePolicyDefault::ByUser,
         cycle_day_of_month_default: 1,
     };
-    raft1
+    leader
         .client_write(DesiredStateCommand::UpsertUser { user: user.clone() })
         .await
         .context("client_write on leader")?;
 
-    let replicated =
-        wait_for_user(&store2, &user.user_id, Duration::from_secs(8)).await?;
-    assert_eq!(replicated, user);
+    for i in 1..=node_count {
+        let replicated = wait_for_user(&stores[i - 1], &user.user_id, Duration::from_secs(10))
+            .await
+            .with_context(|| format!("wait for replicated user on node-{i}"))?;
+        assert_eq!(replicated, user);
+    }
 
-    raft1
-        .add_voters(BTreeSet::from([node2_id]))
+    if node_count > 1 {
+        let voters = (2..=node_count).map(|i| i as NodeId).collect::<BTreeSet<_>>();
+        leader
+            .add_voters(voters.clone())
+            .await
+            .context("promote learners to voters")?;
+
+        for node_id in voters {
+            wait_for_voter(leader.metrics(), node_id, Duration::from_secs(15)).await?;
+            let m = leader.metrics().borrow().clone();
+            assert!(m.membership_config.voter_ids().any(|id| id == node_id));
+            assert!(!m
+                .membership_config
+                .membership()
+                .learner_ids()
+                .any(|id| id == node_id));
+        }
+    }
+
+    for rpc in rpcs {
+        rpc.shutdown().await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow::Result<()> {
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let node_dir = tmp.path().join("node-1");
+    std::fs::create_dir_all(&node_dir).context("create node-1 dir")?;
+
+    let bootstrap_node_id = xp::id::new_ulid_string();
+    let cluster_name = "raft-single-node-restart-smoke".to_string();
+    let node_id: NodeId = 1;
+
+    {
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(store_init(
+                &node_dir,
+                bootstrap_node_id.clone(),
+                "node-1".to_string(),
+            ))
+            .context("init store-1")?,
+        ));
+
+        let raft = start_raft(
+            &node_dir,
+            cluster_name.clone(),
+            node_id,
+            store.clone(),
+            ReconcileHandle::noop(),
+            HttpNetworkFactory::new(),
+        )
         .await
-        .context("promote node-2 to voter")?;
-    wait_for_voter(raft1.metrics(), node2_id, Duration::from_secs(8)).await?;
-    let m = raft1.metrics().borrow().clone();
-    assert!(m.membership_config.voter_ids().any(|id| id == node2_id));
-    assert!(!m
-        .membership_config
-        .membership()
-        .learner_ids()
-        .any(|id| id == node2_id));
+        .context("start raft-1")?;
 
-    rpc1.shutdown().await?;
-    rpc2.shutdown().await?;
+        let rpc = spawn_raft_rpc_server(raft.raft()).await.context("rpc-1")?;
+        let meta = NodeMeta {
+            name: "node-1".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            raft_endpoint: rpc.base_url.clone(),
+        };
 
+        raft.initialize_single_node_if_needed(node_id, meta)
+            .await
+            .context("initialize raft")?;
+        wait_for_leader(raft.metrics(), node_id, Duration::from_secs(10)).await?;
+
+        let user = User {
+            user_id: "user-restart".to_string(),
+            display_name: "restart-smoke".to_string(),
+            subscription_token: "sub_test_token".to_string(),
+            cycle_policy_default: CyclePolicyDefault::ByUser,
+            cycle_day_of_month_default: 1,
+        };
+        raft.client_write(DesiredStateCommand::UpsertUser { user: user.clone() })
+            .await
+            .context("client_write")?;
+        let got = wait_for_user(&store, &user.user_id, Duration::from_secs(10))
+            .await
+            .context("wait for user on leader")?;
+        assert_eq!(got, user);
+
+        let raft_handle = raft.raft();
+        raft_handle
+            .trigger()
+            .snapshot()
+            .await
+            .map_err(|e| anyhow::anyhow!("trigger snapshot: {e}"))?;
+        wait_for_snapshot(&raft_handle, Duration::from_secs(10)).await?;
+
+        let paths = StorePaths::new(&node_dir);
+        let meta_bytes =
+            std::fs::read(&paths.snapshot_meta_json).context("read snapshot_meta_json")?;
+        let snap_bytes =
+            std::fs::read(&paths.snapshot_data_json).context("read snapshot_data_json")?;
+        assert!(!meta_bytes.is_empty(), "snapshot meta must not be empty");
+        assert!(!snap_bytes.is_empty(), "snapshot data must not be empty");
+
+        rpc.shutdown().await?;
+    }
+
+    // Restart: reload store, start raft again, and ensure state is still present.
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(store_init(
+            &node_dir,
+            bootstrap_node_id,
+            "node-1".to_string(),
+        ))
+        .context("reload store-1")?,
+    ));
+    let raft = start_raft(
+        &node_dir,
+        cluster_name,
+        node_id,
+        store.clone(),
+        ReconcileHandle::noop(),
+        HttpNetworkFactory::new(),
+    )
+    .await
+    .context("restart raft-1")?;
+    let rpc = spawn_raft_rpc_server(raft.raft())
+        .await
+        .context("restart rpc-1")?;
+    let meta = NodeMeta {
+        name: "node-1".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        raft_endpoint: rpc.base_url.clone(),
+    };
+    raft.initialize_single_node_if_needed(node_id, meta)
+        .await
+        .context("initialize after restart")?;
+    wait_for_leader(raft.metrics(), node_id, Duration::from_secs(10)).await?;
+
+    {
+        let store_guard = store.lock().await;
+        let user = store_guard
+            .get_user("user-restart")
+            .expect("expected user to persist after restart");
+        assert_eq!(user.display_name, "restart-smoke");
+    }
+
+    rpc.shutdown().await?;
     Ok(())
 }
