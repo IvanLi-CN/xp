@@ -60,8 +60,10 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         "{}/api/cluster/join",
         token.leader_api_base_url.trim_end_matches('/')
     );
+    let cluster_ca = reqwest::Certificate::from_pem(token.cluster_ca_pem.as_bytes())?;
     let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
+        .tls_built_in_root_certs(false)
+        .add_root_certificate(cluster_ca)
         .build()?;
 
     let node_name = config.node_name.clone();
@@ -140,6 +142,8 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
     let cluster = xp::cluster_metadata::ClusterMetadata::load(&config.data_dir)?;
     let cluster_ca_pem = cluster.read_cluster_ca_pem(&config.data_dir)?;
     let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(&config.data_dir)?;
+    let node_cert_pem = cluster.read_node_cert_pem(&config.data_dir)?;
+    let node_key_pem = cluster.read_node_key_pem(&config.data_dir)?;
 
     // Prefer persisted cluster metadata for node identity fields.
     config.node_name = cluster.node_name.clone();
@@ -161,12 +165,18 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
         xp::quota::spawn_quota_worker(config_arc.clone(), store.clone(), reconcile.clone());
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
+    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
+        &cluster_ca_pem,
+        &node_cert_pem,
+        &node_key_pem,
+    )?;
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),
         raft_id,
         store.clone(),
         reconcile.clone(),
+        raft_network,
     )
     .await?;
 
