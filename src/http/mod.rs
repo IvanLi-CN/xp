@@ -600,7 +600,7 @@ async fn promote_joined_learner_to_voter(
                     // Learner is not reachable yet. Keep waiting.
                 }
                 Some(Some(log_id)) => {
-                    if log_id.index() >= required_log_index {
+                    if log_id.index >= required_log_index {
                         break;
                     }
                 }
