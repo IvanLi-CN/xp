@@ -10,6 +10,7 @@ use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use serde_yaml::Value as YamlValue;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio_stream::wrappers::TcpListenerStream;
@@ -327,6 +328,71 @@ async fn join_token_endpoint_returns_decodable_token() {
     decoded.validate_one_time_secret(&ca_key_pem).unwrap();
     assert_eq!(decoded.cluster_id, meta.cluster_id);
     assert_eq!(decoded.leader_api_base_url, meta.api_base_url);
+}
+
+#[tokio::test]
+async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let join_token = json["join_token"].as_str().unwrap().to_string();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let expected_node_id = decoded.token_id.clone();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&expected_node_id).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "public_domain": "example.com",
+                        "api_base_url": "https://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["node_id"], expected_node_id);
+    assert!(json["signed_cert_pem"].as_str().unwrap().len() > 0);
+    assert!(json["cluster_ca_pem"].as_str().unwrap().len() > 0);
+
+    let key_pem = json["cluster_ca_key_pem"].as_str().unwrap();
+    assert!(key_pem.starts_with("-----BEGIN"));
+
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+    let expected_key_pem = meta
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("expected bootstrap node to have a CA key");
+
+    let got_hash = hex::encode(Sha256::digest(key_pem.as_bytes()));
+    let expected_hash = hex::encode(Sha256::digest(expected_key_pem.as_bytes()));
+    assert_eq!(got_hash, expected_hash);
 }
 
 #[tokio::test]
