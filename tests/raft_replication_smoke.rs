@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use anyhow::Context as _;
 use tokio::{
@@ -99,6 +99,32 @@ async fn wait_for_leader(
                 "timeout waiting for leader={expected_leader}; state={:?} current_leader={:?}",
                 m.state,
                 m.current_leader
+            );
+        }
+
+        rx.changed().await.context("metrics changed")?;
+    }
+}
+
+async fn wait_for_voter(
+    mut rx: tokio::sync::watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>,
+    voter_id: NodeId,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        {
+            let m = rx.borrow();
+            if m.membership_config.voter_ids().any(|id| id == voter_id) {
+                return Ok(());
+            }
+        }
+
+        if Instant::now() >= deadline {
+            let m = rx.borrow();
+            anyhow::bail!(
+                "timeout waiting for voter_id={voter_id}; membership={}",
+                m.membership_config
             );
         }
 
@@ -215,6 +241,19 @@ async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
     let replicated =
         wait_for_user(&store2, &user.user_id, Duration::from_secs(8)).await?;
     assert_eq!(replicated, user);
+
+    raft1
+        .add_voters(BTreeSet::from([node2_id]))
+        .await
+        .context("promote node-2 to voter")?;
+    wait_for_voter(raft1.metrics(), node2_id, Duration::from_secs(8)).await?;
+    let m = raft1.metrics().borrow().clone();
+    assert!(m.membership_config.voter_ids().any(|id| id == node2_id));
+    assert!(!m
+        .membership_config
+        .membership()
+        .learner_ids()
+        .any(|id| id == node2_id));
 
     rpc1.shutdown().await?;
     rpc2.shutdown().await?;
