@@ -47,6 +47,7 @@
 
 ## 5. Milestone：Raft 集群（强一致 + HTTPS-only）
 
+- 细化方案：`docs/plan/m5-raft-cluster.md`
 - Raft 选型与落地：WAL + snapshot；状态机仅存“期望状态”（Nodes/Endpoints/Users/Grants）
 - 节点身份：cluster CA + 节点证书（mTLS）；证书/密钥落盘与轮换策略
 - init/join：`xp init`、join token、`/api/cluster/join`（CSR 签发）与节点注册
