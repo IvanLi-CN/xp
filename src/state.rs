@@ -628,8 +628,17 @@ impl JsonSnapshotStore {
         &mut self,
         endpoint_id: &str,
     ) -> Result<Option<RotateShortIdResult>, StoreError> {
-        let endpoint = match self.state.endpoints.get_mut(endpoint_id) {
-            Some(endpoint) => endpoint,
+        let mut rng = rand::rngs::OsRng;
+        self.rotate_vless_reality_short_id_with_rng(endpoint_id, &mut rng)
+    }
+
+    fn rotate_vless_reality_short_id_with_rng<R: rand::RngCore + rand::CryptoRng>(
+        &mut self,
+        endpoint_id: &str,
+        rng: &mut R,
+    ) -> Result<Option<RotateShortIdResult>, StoreError> {
+        let mut endpoint = match self.state.endpoints.get(endpoint_id) {
+            Some(endpoint) => endpoint.clone(),
             None => return Ok(None),
         };
 
@@ -638,11 +647,10 @@ impl JsonSnapshotStore {
         let mut meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
 
-        let mut rng = rand::rngs::OsRng;
-        let out =
-            rotate_short_ids_in_place(&mut meta.short_ids, &mut meta.active_short_id, &mut rng);
+        let out = rotate_short_ids_in_place(&mut meta.short_ids, &mut meta.active_short_id, rng);
 
         endpoint.meta = serde_json::to_value(meta)?;
+        DesiredStateCommand::UpsertEndpoint { endpoint }.apply(&mut self.state)?;
         self.save()?;
         Ok(Some(out))
     }
@@ -872,6 +880,7 @@ mod tests {
     use std::fs;
 
     use pretty_assertions::assert_eq;
+    use rand::{SeedableRng as _, rngs::StdRng};
     use serde_json::json;
 
     use super::*;
@@ -881,6 +890,7 @@ mod tests {
             validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
+        protocol::{RealityConfig, RealityKeys, VlessRealityVisionTcpEndpointMeta},
     };
 
     fn test_init(tmp_dir: &Path) -> StoreInit {
@@ -916,6 +926,59 @@ mod tests {
         assert_eq!(node.public_domain, "");
         assert_eq!(node.api_base_url, "https://127.0.0.1:62416");
         assert!(is_ulid_string(&node.node_id));
+    }
+
+    #[test]
+    fn rotate_vless_reality_short_id_updates_meta_and_persists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let endpoint_id = "endpoint_1".to_string();
+        let kind = EndpointKind::VlessRealityVisionTcp;
+
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            public_domain: "example.com".to_string(),
+            reality: RealityConfig {
+                dest: "example.com:443".to_string(),
+                server_names: vec!["example.com".to_string()],
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        store.state_mut().endpoints.insert(
+            endpoint_id.clone(),
+            Endpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id,
+                tag: endpoint_tag(&kind, &endpoint_id),
+                kind,
+                port: 443,
+                meta: serde_json::to_value(meta).unwrap(),
+            },
+        );
+        store.save().unwrap();
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let out = store
+            .rotate_vless_reality_short_id_with_rng(&endpoint_id, &mut rng)
+            .unwrap()
+            .unwrap();
+
+        drop(store);
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta).unwrap();
+
+        assert_eq!(out.active_short_id, meta.active_short_id);
+        assert_eq!(out.short_ids, meta.short_ids);
     }
 
     #[test]
