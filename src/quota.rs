@@ -80,8 +80,28 @@ pub async fn run_quota_tick_at(
 ) -> anyhow::Result<()> {
     let snapshots = {
         let store = store.lock().await;
+        let Some(local_node_id) = crate::reconcile::resolve_local_node_id(config, &store) else {
+            warn!(
+                node_name = %config.node_name,
+                api_base_url = %config.api_base_url,
+                "quota tick: local node_id not found; skipping xray calls"
+            );
+            return Ok(());
+        };
+
+        let endpoints_by_id = store
+            .list_endpoints()
+            .into_iter()
+            .map(|e| (e.endpoint_id.clone(), e))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
         let mut out = Vec::new();
         for grant in store.list_grants() {
+            let endpoint = endpoints_by_id.get(&grant.endpoint_id);
+            if let Some(endpoint) = endpoint && endpoint.node_id != local_node_id {
+                continue;
+            }
+
             let (policy, day) = match effective_cycle_policy_and_day(&store, &grant) {
                 Ok(v) => v,
                 Err(err) => {
@@ -94,11 +114,10 @@ pub async fn run_quota_tick_at(
                 }
             };
 
-            let endpoint_tag = store.get_endpoint(&grant.endpoint_id).map(|e| e.tag);
             let usage = store.get_grant_usage(&grant.grant_id);
             out.push(GrantQuotaSnapshot {
                 grant_id: grant.grant_id,
-                endpoint_tag,
+                endpoint_tag: endpoint.map(|e| e.tag.clone()),
                 quota_limit_bytes: grant.quota_limit_bytes,
                 cycle_policy: policy,
                 cycle_day_of_month: day,
@@ -108,6 +127,10 @@ pub async fn run_quota_tick_at(
         }
         out
     };
+
+    if snapshots.is_empty() {
+        return Ok(());
+    }
 
     let mut client = match xray::connect(config.xray_api_addr).await {
         Ok(client) => client,
@@ -260,7 +283,7 @@ mod tests {
     use tokio::sync::{Mutex, oneshot};
 
     use crate::{
-        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
         state::{JsonSnapshotStore, StoreInit},
         xray::proto::xray::{
             app::{
@@ -280,6 +303,7 @@ mod tests {
     struct RecordingState {
         calls: Vec<Call>,
         stats: BTreeMap<String, i64>,
+        stats_calls: Vec<String>,
     }
 
     #[derive(Debug)]
@@ -458,10 +482,9 @@ mod tests {
             tonic::Status,
         > {
             let req = request.into_inner();
-            let value = self
-                .state
-                .lock()
-                .await
+            let mut state = self.state.lock().await;
+            state.stats_calls.push(req.name.clone());
+            let value = state
                 .stats
                 .get(&req.name)
                 .copied()
@@ -594,12 +617,13 @@ mod tests {
 
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -650,6 +674,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_grant_does_not_call_xray_or_create_usage() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let grant_id = {
+            let mut store = store.lock().await;
+            let remote_node_id = "node-remote".to_string();
+            let _ = store
+                .upsert_node(Node {
+                    node_id: remote_node_id.clone(),
+                    node_name: "node-2".to_string(),
+                    public_domain: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62417".to_string(),
+                })
+                .unwrap();
+
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    remote_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id,
+                    0,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            grant.grant_id
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 100);
+            st.stats.insert(stat_name(&email, "downlink"), 200);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let st = state.lock().await;
+        assert_eq!(st.calls, vec![]);
+        assert!(st.stats_calls.is_empty());
+        drop(st);
+
+        let store_guard = store.lock().await;
+        assert_eq!(store_guard.get_grant_usage(&grant_id), None);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn remote_grant_is_ignored_when_local_grant_exists() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let (local_grant_id, remote_grant_id) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let remote_node_id = "node-remote".to_string();
+            let _ = store
+                .upsert_node(Node {
+                    node_id: remote_node_id.clone(),
+                    node_name: "node-2".to_string(),
+                    public_domain: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62417".to_string(),
+                })
+                .unwrap();
+
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+
+            let local_endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let remote_endpoint = store
+                .create_endpoint(
+                    remote_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let local_grant = store
+                .create_grant(
+                    user.user_id.clone(),
+                    local_endpoint.endpoint_id,
+                    0,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let remote_grant = store
+                .create_grant(
+                    user.user_id,
+                    remote_endpoint.endpoint_id,
+                    0,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            (local_grant.grant_id, remote_grant.grant_id)
+        };
+
+        let local_email = format!("grant:{local_grant_id}");
+        let remote_email = format!("grant:{remote_grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&local_email, "uplink"), 100);
+            st.stats.insert(stat_name(&local_email, "downlink"), 200);
+            st.stats.insert(stat_name(&remote_email, "uplink"), 300);
+            st.stats.insert(stat_name(&remote_email, "downlink"), 400);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let st = state.lock().await;
+        assert!(!st.stats_calls.is_empty());
+        assert!(!st
+            .stats_calls
+            .iter()
+            .any(|name| name == &stat_name(&remote_email, "uplink")));
+        assert!(!st
+            .stats_calls
+            .iter()
+            .any(|name| name == &stat_name(&remote_email, "downlink")));
+        drop(st);
+
+        let store_guard = store.lock().await;
+        assert!(store_guard.get_grant_usage(&local_grant_id).is_some());
+        assert_eq!(store_guard.get_grant_usage(&remote_grant_id), None);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
     async fn exceed_triggers_ban() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
@@ -662,12 +858,13 @@ mod tests {
 
         let (grant_id, endpoint_tag) = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -732,12 +929,13 @@ mod tests {
 
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -817,12 +1015,13 @@ mod tests {
 
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -894,12 +1093,13 @@ mod tests {
 
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -962,12 +1162,13 @@ mod tests {
         let banned_at = "2025-11-15T00:00:00Z".to_string();
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -1045,12 +1246,13 @@ mod tests {
 
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
@@ -1099,12 +1301,13 @@ mod tests {
             .with_timezone(&Utc);
         let grant_id = {
             let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store
                 .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
                 .unwrap();
             let endpoint = store
                 .create_endpoint(
-                    "node-1".to_string(),
+                    local_node_id,
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
