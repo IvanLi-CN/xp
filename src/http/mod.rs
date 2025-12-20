@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -12,7 +12,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::Duration};
 
 use crate::{
     cluster_identity::JoinToken,
@@ -525,12 +525,104 @@ async fn cluster_join(
     )
     .await?;
 
+    let join_required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
+    let expected_leader = metrics.id;
+    let promotion_raft = state.raft.clone();
+    let promotion_metrics = state.raft.metrics();
+    tokio::spawn(async move {
+        if let Err(err) = promote_joined_learner_to_voter(
+            promotion_raft,
+            promotion_metrics,
+            expected_leader,
+            raft_node_id,
+            join_required_log_index,
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            tracing::warn!(
+                raft_node_id = raft_node_id,
+                expected_leader = expected_leader,
+                error = %err,
+                "join: voter promotion skipped"
+            );
+        }
+    });
+
     Ok(Json(ClusterJoinResponse {
         node_id,
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
         cluster_ca_key_pem: ca_key_pem,
     }))
+}
+
+async fn promote_joined_learner_to_voter(
+    raft: Arc<dyn RaftFacade>,
+    mut metrics: tokio::sync::watch::Receiver<openraft::RaftMetrics<RaftNodeId, RaftNodeMeta>>,
+    expected_leader: RaftNodeId,
+    raft_node_id: RaftNodeId,
+    required_log_index: u64,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        {
+            let m = metrics.borrow();
+
+            if m.state != openraft::ServerState::Leader || m.current_leader != Some(expected_leader)
+            {
+                return Err("leadership changed".to_string());
+            }
+
+            let membership = m.membership_config.membership();
+            if membership
+                .voter_ids()
+                .any(|voter_id| voter_id == raft_node_id)
+            {
+                return Ok(());
+            }
+
+            if membership.get_node(&raft_node_id).is_none() {
+                return Err("learner removed from membership".to_string());
+            }
+
+            let repl = match m.replication.as_ref() {
+                Some(x) => x,
+                None => return Err("no longer leader (no replication metrics)".to_string()),
+            };
+
+            match repl.get(&raft_node_id) {
+                None => {
+                    // Replication is not reported yet. Keep waiting.
+                }
+                Some(None) => {
+                    // Learner is not reachable yet. Keep waiting.
+                }
+                Some(Some(log_id)) => {
+                    if log_id.index() >= required_log_index {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(format!("timeout after {}s", timeout.as_secs()));
+        }
+        let remaining = deadline - now;
+        tokio::time::timeout(remaining, metrics.changed())
+            .await
+            .map_err(|_| format!("timeout after {}s", timeout.as_secs()))?
+            .map_err(|_| "metrics sender dropped".to_string())?;
+    }
+
+    raft.add_voters(BTreeSet::from([raft_node_id]))
+        .await
+        .map_err(|e| format!("change_membership add voter: {e}"))?;
+
+    Ok(())
 }
 
 async fn admin_list_nodes(
