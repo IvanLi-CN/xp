@@ -3,8 +3,12 @@
 //! This module intentionally avoids any HTTP/CLI wiring in Task 003. Wave 2 will implement the
 //! transport and storage adapters and then integrate them with the existing HTTP/CLI surface.
 
+pub mod app;
+pub mod http_rpc;
 pub mod network;
+pub mod network_http;
 pub mod node;
+pub mod runtime;
 pub mod storage;
 pub mod types;
 

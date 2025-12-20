@@ -6,7 +6,7 @@ use axum::{
     extract::{Extension, FromRequest, Path, Request, State},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use chrono::Utc;
@@ -15,9 +15,18 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::{
+    cluster_identity::JoinToken,
+    cluster_metadata::ClusterMetadata,
     config::Config,
     cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
     domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
+    raft::{
+        app::RaftFacade,
+        types::{
+            ClientResponse as RaftClientResponse, NodeId as RaftNodeId, NodeMeta as RaftNodeMeta,
+            raft_node_id_from_ulid,
+        },
+    },
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, StoreError},
     subscription, xray,
@@ -28,6 +37,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub reconcile: ReconcileHandle,
+    pub cluster: Arc<ClusterMetadata>,
+    pub cluster_ca_pem: Arc<String>,
+    pub cluster_ca_key_pem: Arc<Option<String>>,
+    pub raft: Arc<dyn RaftFacade>,
 }
 
 #[derive(Debug)]
@@ -144,6 +157,32 @@ struct ClusterInfoResponse {
 }
 
 #[derive(Deserialize)]
+struct CreateJoinTokenRequest {
+    ttl_seconds: i64,
+}
+
+#[derive(Serialize)]
+struct CreateJoinTokenResponse {
+    join_token: String,
+}
+
+#[derive(Deserialize)]
+struct ClusterJoinRequest {
+    join_token: String,
+    node_name: String,
+    public_domain: String,
+    api_base_url: String,
+    csr_pem: String,
+}
+
+#[derive(Serialize)]
+struct ClusterJoinResponse {
+    node_id: String,
+    signed_cert_pem: String,
+    cluster_ca_pem: String,
+}
+
+#[derive(Deserialize)]
 struct CreateUserRequest {
     display_name: String,
     cycle_policy_default: CyclePolicyDefault,
@@ -189,21 +228,31 @@ enum CreateEndpointRequest {
     Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_router(
     config: Config,
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
+    cluster: ClusterMetadata,
+    cluster_ca_pem: String,
+    cluster_ca_key_pem: Option<String>,
+    raft: Arc<dyn RaftFacade>,
+    raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
 ) -> Router {
     let app_state = AppState {
         config: Arc::new(config),
         store,
         reconcile,
+        cluster: Arc::new(cluster),
+        cluster_ca_pem: Arc::new(cluster_ca_pem),
+        cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
+        raft,
     };
 
     let admin_token = app_state.config.admin_token.clone();
 
     let admin = Router::new()
-        .route("/cluster/join-tokens", post(not_implemented))
+        .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/:node_id", get(admin_get_node))
         .route(
@@ -234,14 +283,22 @@ pub fn build_router(
         .route("/grants/:grant_id/usage", get(admin_get_grant_usage))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
-    Router::new()
+    let mut app = Router::new()
         .route("/api/health", get(health))
         .route("/api/cluster/info", get(cluster_info))
-        .route("/api/cluster/join", post(not_implemented))
+        .route("/api/cluster/join", post(cluster_join))
         .route("/api/sub/:subscription_token", get(get_subscription))
         .nest("/api/admin", admin)
+        .fallback(fallback_not_found);
+
+    if let Some(raft) = raft_rpc {
+        app = app.merge(crate::raft::http_rpc::build_raft_rpc_router(
+            crate::raft::http_rpc::RaftRpcState { raft },
+        ));
+    }
+
+    app.layer(middleware::from_fn(redirect_follower_writes))
         .layer(Extension(app_state))
-        .fallback(fallback_not_found)
 }
 
 async fn admin_auth(
@@ -266,30 +323,211 @@ async fn health() -> Json<serde_json::Value> {
     Json(json!({ "status": "ok" }))
 }
 
+fn raft_metrics(state: &AppState) -> openraft::RaftMetrics<RaftNodeId, RaftNodeMeta> {
+    state.raft.metrics().borrow().clone()
+}
+
+fn is_leader(metrics: &openraft::RaftMetrics<RaftNodeId, RaftNodeMeta>) -> bool {
+    matches!(metrics.state, openraft::ServerState::Leader)
+}
+
+fn leader_api_base_url(
+    metrics: &openraft::RaftMetrics<RaftNodeId, RaftNodeMeta>,
+) -> Option<String> {
+    let leader_id = metrics.current_leader?;
+    metrics
+        .membership_config
+        .nodes()
+        .find(|(id, _node)| **id == leader_id)
+        .map(|(_id, node)| node.api_base_url.clone())
+}
+
+async fn raft_write(
+    state: &AppState,
+    cmd: crate::state::DesiredStateCommand,
+) -> Result<crate::state::DesiredStateApplyResult, ApiError> {
+    let resp = state
+        .raft
+        .client_write(cmd)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    match resp {
+        RaftClientResponse::Ok { result } => Ok(result),
+        RaftClientResponse::Err {
+            status,
+            code,
+            message,
+        } => {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let code_static = match code.as_str() {
+                "invalid_request" => "invalid_request",
+                "not_found" => "not_found",
+                "unauthorized" => "unauthorized",
+                _ => "internal",
+            };
+            Err(ApiError::new(code_static, status, message))
+        }
+    }
+}
+
+async fn redirect_follower_writes(req: Request<Body>, next: Next) -> Response {
+    use axum::http::Method;
+
+    let method = req.method().clone();
+    let path = req.uri().path();
+    let is_write = matches!(
+        method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+
+    let is_cluster_write = path == "/api/cluster/join";
+    let is_admin_write = path.starts_with("/api/admin") && is_write;
+
+    if !is_write || (!is_cluster_write && !is_admin_write) {
+        return next.run(req).await;
+    }
+
+    let Some(state) = req.extensions().get::<AppState>() else {
+        return ApiError::internal("missing AppState extension").into_response();
+    };
+    let metrics = raft_metrics(state);
+    if is_leader(&metrics) {
+        return next.run(req).await;
+    }
+
+    let Some(leader_base_url) = leader_api_base_url(&metrics) else {
+        return ApiError::internal("no leader available").into_response();
+    };
+
+    let suffix = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or(path);
+    let location = format!("{}{}", leader_base_url.trim_end_matches('/'), suffix);
+    Redirect::temporary(&location).into_response()
+}
+
 async fn cluster_info(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<ClusterInfoResponse>, ApiError> {
-    let store = state.store.lock().await;
-    let node = store
-        .state()
-        .nodes
-        .values()
-        .next()
-        .cloned()
-        .ok_or_else(|| ApiError::internal("no node in persisted state"))?;
-
-    let leader_api_base_url = if node.api_base_url.is_empty() {
-        state.config.api_base_url.clone()
+    let metrics = raft_metrics(&state);
+    let leader_api_base_url = leader_api_base_url(&metrics).unwrap_or_default();
+    let role = if is_leader(&metrics) {
+        "leader"
     } else {
-        node.api_base_url.clone()
+        "follower"
+    };
+    Ok(Json(ClusterInfoResponse {
+        cluster_id: state.cluster.cluster_id.clone(),
+        node_id: state.cluster.node_id.clone(),
+        role,
+        leader_api_base_url,
+        term: metrics.current_term,
+    }))
+}
+
+async fn admin_create_join_token(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<CreateJoinTokenRequest>,
+) -> Result<Json<CreateJoinTokenResponse>, ApiError> {
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .clone()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    let token = JoinToken::issue_signed_at(
+        state.cluster.cluster_id.clone(),
+        state.cluster.api_base_url.clone(),
+        state.cluster_ca_pem.as_str(),
+        req.ttl_seconds,
+        Utc::now(),
+        &ca_key_pem,
+    );
+    Ok(Json(CreateJoinTokenResponse {
+        join_token: token.encode_base64url_json(),
+    }))
+}
+
+async fn cluster_join(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<ClusterJoinRequest>,
+) -> Result<Json<ClusterJoinResponse>, ApiError> {
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+
+    let token = JoinToken::decode_and_validate(&req.join_token, Utc::now())
+        .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .clone()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    token
+        .validate_one_time_secret(&ca_key_pem)
+        .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    if token.cluster_id != state.cluster.cluster_id {
+        return Err(ApiError::invalid_request("join token cluster_id mismatch"));
+    }
+
+    let node_id = token.token_id.clone();
+    {
+        let store = state.store.lock().await;
+        if store.get_node(&node_id).is_some() {
+            return Err(ApiError::invalid_request("join token already used"));
+        }
+    }
+
+    let signed_cert_pem = crate::cluster_identity::sign_node_csr(
+        &state.cluster.cluster_id,
+        &ca_key_pem,
+        &req.csr_pem,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let node = Node {
+        node_id: node_id.clone(),
+        node_name: req.node_name.clone(),
+        public_domain: req.public_domain.clone(),
+        api_base_url: req.api_base_url.clone(),
     };
 
-    Ok(Json(ClusterInfoResponse {
-        cluster_id: node.node_id.clone(),
-        node_id: node.node_id,
-        role: "leader",
-        leader_api_base_url,
-        term: 1,
+    let raft_node_id =
+        raft_node_id_from_ulid(&node_id).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    state
+        .raft
+        .add_learner(
+            raft_node_id,
+            RaftNodeMeta {
+                name: node.node_name.clone(),
+                api_base_url: node.api_base_url.clone(),
+                raft_endpoint: node.api_base_url.clone(),
+            },
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertNode { node },
+    )
+    .await?;
+
+    Ok(Json(ClusterJoinResponse {
+        node_id,
+        signed_cert_pem,
+        cluster_ca_pem: (*state.cluster_ca_pem).clone(),
     }))
 }
 
@@ -338,9 +576,16 @@ async fn admin_create_endpoint(
     };
 
     let endpoint = {
-        let mut store = state.store.lock().await;
-        store.create_endpoint(node_id, kind, port, meta)?
+        let store = state.store.lock().await;
+        store.build_endpoint(node_id, kind, port, meta)?
     };
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+        },
+    )
+    .await?;
     state.reconcile.request_full();
     Ok(Json(endpoint))
 }
@@ -370,18 +615,28 @@ async fn admin_delete_endpoint(
     Path(endpoint_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let tag = {
-        let mut store = state.store.lock().await;
+        let store = state.store.lock().await;
         let endpoint = store
             .get_endpoint(&endpoint_id)
             .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
-        let deleted = store.delete_endpoint(&endpoint_id)?;
-        if !deleted {
-            return Err(ApiError::not_found(format!(
-                "endpoint not found: {endpoint_id}"
-            )));
-        }
         endpoint.tag
     };
+
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::DeleteEndpoint {
+            endpoint_id: endpoint_id.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::EndpointDeleted { deleted } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+    if !deleted {
+        return Err(ApiError::not_found(format!(
+            "endpoint not found: {endpoint_id}"
+        )));
+    }
     state.reconcile.request_remove_inbound(tag);
     state.reconcile.request_full();
     Ok(StatusCode::NO_CONTENT)
@@ -398,8 +653,8 @@ async fn admin_rotate_short_id(
     Extension(state): Extension<AppState>,
     Path(endpoint_id): Path<String>,
 ) -> Result<Json<RotateShortIdResponse>, ApiError> {
-    let out = {
-        let mut store = state.store.lock().await;
+    let (cmd, out) = {
+        let store = state.store.lock().await;
 
         let endpoint = store
             .get_endpoint(&endpoint_id)
@@ -411,10 +666,13 @@ async fn admin_rotate_short_id(
             ));
         }
 
+        let mut rng = rand::rngs::OsRng;
         store
-            .rotate_vless_reality_short_id(&endpoint_id)?
+            .build_rotate_vless_reality_short_id_command(&endpoint_id, &mut rng)?
             .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?
     };
+
+    let _ = raft_write(&state, cmd).await?;
     state.reconcile.request_rebuild_inbound(endpoint_id.clone());
 
     Ok(Json(RotateShortIdResponse {
@@ -428,12 +686,19 @@ async fn admin_create_user(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateUserRequest>,
 ) -> Result<Json<User>, ApiError> {
-    let mut store = state.store.lock().await;
-    let user = store.create_user(
-        req.display_name,
-        req.cycle_policy_default,
-        req.cycle_day_of_month_default,
-    )?;
+    let user = {
+        let store = state.store.lock().await;
+        store.build_user(
+            req.display_name,
+            req.cycle_policy_default,
+            req.cycle_day_of_month_default,
+        )?
+    };
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertUser { user: user.clone() },
+    )
+    .await?;
     Ok(Json(user))
 }
 
@@ -461,8 +726,16 @@ async fn admin_delete_user(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let mut store = state.store.lock().await;
-    let deleted = store.delete_user(&user_id)?;
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::DeleteUser {
+            user_id: user_id.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::UserDeleted { deleted } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
     if !deleted {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
@@ -478,13 +751,22 @@ async fn admin_reset_user_token(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
 ) -> Result<Json<ResetTokenResponse>, ApiError> {
-    let mut store = state.store.lock().await;
-    let token = store
-        .reset_user_token(&user_id)?
-        .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
-    Ok(Json(ResetTokenResponse {
-        subscription_token: token,
-    }))
+    let subscription_token = format!("sub_{}", crate::id::new_ulid_string());
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::ResetUserSubscriptionToken {
+            user_id: user_id.clone(),
+            subscription_token: subscription_token.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::UserTokenReset { applied } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+    if !applied {
+        return Err(ApiError::not_found(format!("user not found: {user_id}")));
+    }
+    Ok(Json(ResetTokenResponse { subscription_token }))
 }
 
 async fn admin_create_grant(
@@ -492,8 +774,8 @@ async fn admin_create_grant(
     ApiJson(req): ApiJson<CreateGrantRequest>,
 ) -> Result<Json<Grant>, ApiError> {
     let grant = {
-        let mut store = state.store.lock().await;
-        store.create_grant(
+        let store = state.store.lock().await;
+        store.build_grant(
             req.user_id,
             req.endpoint_id,
             req.quota_limit_bytes,
@@ -502,6 +784,13 @@ async fn admin_create_grant(
             req.note,
         )?
     };
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertGrant {
+            grant: grant.clone(),
+        },
+    )
+    .await?;
     state.reconcile.request_full();
     Ok(Json(grant))
 }
@@ -511,20 +800,21 @@ async fn admin_patch_grant(
     Path(grant_id): Path<String>,
     ApiJson(req): ApiJson<PatchGrantRequest>,
 ) -> Result<Json<Grant>, ApiError> {
-    let grant = {
-        let mut store = state.store.lock().await;
-        let grant = store
-            .update_grant(
-                &grant_id,
-                req.enabled,
-                req.quota_limit_bytes,
-                req.cycle_policy,
-                req.cycle_day_of_month,
-            )?
-            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-        store.clear_quota_banned(&grant_id)?;
-        grant
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpdateGrantFields {
+            grant_id: grant_id.clone(),
+            enabled: req.enabled,
+            quota_limit_bytes: req.quota_limit_bytes,
+            cycle_policy: req.cycle_policy,
+            cycle_day_of_month: req.cycle_day_of_month,
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::GrantUpdated { grant } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
     };
+    let grant = grant.ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
     state.reconcile.request_full();
     Ok(Json(grant))
 }
@@ -554,18 +844,28 @@ async fn admin_delete_grant(
     Path(grant_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let (endpoint_tag, email) = {
-        let mut store = state.store.lock().await;
+        let store = state.store.lock().await;
         let grant = store
             .get_grant(&grant_id)
             .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
         let email = format!("grant:{grant_id}");
         let endpoint_tag = store.get_endpoint(&grant.endpoint_id).map(|e| e.tag);
-        let deleted = store.delete_grant(&grant_id)?;
-        if !deleted {
-            return Err(ApiError::not_found(format!("grant not found: {grant_id}")));
-        }
         (endpoint_tag, email)
     };
+
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::DeleteGrant {
+            grant_id: grant_id.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::GrantDeleted { deleted } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+    if !deleted {
+        return Err(ApiError::not_found(format!("grant not found: {grant_id}")));
+    }
 
     if let Some(tag) = endpoint_tag {
         state.reconcile.request_remove_user(tag, email);
@@ -643,10 +943,6 @@ async fn admin_get_grant_usage(
         cycle_end_at: snapshot.cycle_end_at,
         used_bytes: snapshot.used_bytes,
     }))
-}
-
-async fn not_implemented() -> ApiError {
-    ApiError::not_implemented("not implemented in milestone 1")
 }
 
 async fn fallback_not_found() -> ApiError {

@@ -1,0 +1,49 @@
+use std::sync::Arc;
+
+use anyhow::Context;
+
+use crate::{
+    raft::{
+        app::RealRaft,
+        network_http::HttpNetworkFactory,
+        storage::{FileLogStore, FileStateMachine},
+        types::{NodeId, TypeConfig},
+    },
+    reconcile::ReconcileHandle,
+    state::JsonSnapshotStore,
+};
+
+pub async fn start_raft(
+    data_dir: &std::path::Path,
+    cluster_name: String,
+    node_id: NodeId,
+    store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
+    reconcile: ReconcileHandle,
+) -> anyhow::Result<RealRaft> {
+    let config = openraft::Config {
+        cluster_name,
+        ..Default::default()
+    }
+    .validate()
+    .map_err(|e| anyhow::anyhow!("raft config validate: {e}"))?;
+
+    let config = Arc::new(config);
+    let network = HttpNetworkFactory::new();
+
+    let log_store = FileLogStore::open(data_dir, node_id)
+        .await
+        .map_err(|e| anyhow::anyhow!("open log store: {e}"))?;
+    let state_machine = FileStateMachine::open(data_dir, store, reconcile)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state machine: {e}"))?;
+
+    let raft =
+        openraft::Raft::<TypeConfig>::new(node_id, config, network, log_store, state_machine)
+            .await
+            .context("start raft")?;
+
+    let raft = RealRaft::new(raft);
+
+    // NOTE: initialization is handled by the caller because it depends on cluster bootstrap mode.
+    Ok(raft)
+}

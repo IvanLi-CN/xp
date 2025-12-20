@@ -570,6 +570,7 @@ mod tests {
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: config.data_dir.clone(),
+            bootstrap_node_id: None,
             bootstrap_node_name: config.node_name.clone(),
             bootstrap_public_domain: config.public_domain.clone(),
             bootstrap_api_base_url: config.api_base_url.clone(),

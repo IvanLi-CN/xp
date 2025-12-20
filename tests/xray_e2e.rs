@@ -10,6 +10,13 @@ use tokio::{
 };
 use tower::util::ServiceExt;
 
+use xp::{
+    cluster_metadata::ClusterMetadata,
+    raft::{
+        app::LocalRaft,
+        types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
+    },
+};
 use xp::{config::Config, http::build_router, reconcile::spawn_reconciler, state::StoreInit, xray};
 
 fn env_socket_addr(key: &str) -> Result<SocketAddr, String> {
@@ -40,9 +47,10 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
     }
 }
 
-fn store_init(config: &Config) -> StoreInit {
+fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     StoreInit {
         data_dir: config.data_dir.clone(),
+        bootstrap_node_id,
         bootstrap_node_name: config.node_name.clone(),
         bootstrap_public_domain: config.public_domain.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
@@ -190,10 +198,56 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf(), xray_api_addr);
 
-    let store = xp::state::JsonSnapshotStore::load_or_init(store_init(&config)).unwrap();
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
+        &config,
+        Some(cluster.node_id.clone()),
+    ))
+    .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
     let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
-    let app = build_router(config, store.clone(), reconcile);
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config =
+        std::sync::Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = tokio::sync::watch::channel(metrics);
+    let raft: std::sync::Arc<dyn xp::raft::app::RaftFacade> =
+        std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
+
+    let app = build_router(
+        config,
+        store.clone(),
+        reconcile,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
 
@@ -342,10 +396,56 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf(), xray_api_addr);
 
-    let store = xp::state::JsonSnapshotStore::load_or_init(store_init(&config)).unwrap();
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
+        &config,
+        Some(cluster.node_id.clone()),
+    ))
+    .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
     let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
-    let app = build_router(config.clone(), store.clone(), reconcile.clone());
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config =
+        std::sync::Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = tokio::sync::watch::channel(metrics);
+    let raft: std::sync::Arc<dyn xp::raft::app::RaftFacade> =
+        std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
+
+    let app = build_router(
+        config.clone(),
+        store.clone(),
+        reconcile.clone(),
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
 

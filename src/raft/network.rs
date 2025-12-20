@@ -22,4 +22,3 @@ pub trait RaftTransport: Send + Sync + Debug + 'static {
         _req: ClientRequest,
     ) -> impl std::future::Future<Output = anyhow::Result<ClientResponse>> + Send;
 }
-

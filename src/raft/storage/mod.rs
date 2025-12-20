@@ -7,11 +7,12 @@
 //! Task 003 defines project-facing abstractions matching this boundary, so Wave 2 can implement
 //! durable WAL + snapshot and then adapt into OpenRaft traits.
 
+pub mod file;
 pub mod snapshot;
 pub mod state_machine;
 pub mod wal;
 
+pub use file::{FileLogStore, FileStateMachine, StorePaths};
 pub use snapshot::{SnapshotBuilder, SnapshotStore};
 pub use state_machine::StateMachineStore;
 pub use wal::WalLogStore;
-

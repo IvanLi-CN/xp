@@ -29,6 +29,7 @@ pub const USAGE_SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone)]
 pub struct StoreInit {
     pub data_dir: PathBuf,
+    pub bootstrap_node_id: Option<String>,
     pub bootstrap_node_name: String,
     pub bootstrap_public_domain: String,
     pub bootstrap_api_base_url: String,
@@ -112,17 +113,31 @@ impl PersistedState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateCommand {
-    UpsertNode { node: Node },
-    UpsertEndpoint { endpoint: Endpoint },
-    DeleteEndpoint { endpoint_id: String },
-    UpsertUser { user: User },
-    DeleteUser { user_id: String },
+    UpsertNode {
+        node: Node,
+    },
+    UpsertEndpoint {
+        endpoint: Endpoint,
+    },
+    DeleteEndpoint {
+        endpoint_id: String,
+    },
+    UpsertUser {
+        user: User,
+    },
+    DeleteUser {
+        user_id: String,
+    },
     ResetUserSubscriptionToken {
         user_id: String,
         subscription_token: String,
     },
-    UpsertGrant { grant: Grant },
-    DeleteGrant { grant_id: String },
+    UpsertGrant {
+        grant: Grant,
+    },
+    DeleteGrant {
+        grant_id: String,
+    },
     UpdateGrantFields {
         grant_id: String,
         enabled: bool,
@@ -130,10 +145,14 @@ pub enum DesiredStateCommand {
         cycle_policy: CyclePolicy,
         cycle_day_of_month: Option<u8>,
     },
-    SetGrantEnabled { grant_id: String, enabled: bool },
+    SetGrantEnabled {
+        grant_id: String,
+        enabled: bool,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateApplyResult {
     Applied,
     EndpointDeleted { deleted: bool },
@@ -145,10 +164,7 @@ pub enum DesiredStateApplyResult {
 }
 
 impl DesiredStateCommand {
-    pub fn apply(
-        &self,
-        state: &mut PersistedState,
-    ) -> Result<DesiredStateApplyResult, StoreError> {
+    pub fn apply(&self, state: &mut PersistedState) -> Result<DesiredStateApplyResult, StoreError> {
         match self {
             Self::UpsertNode { node } => {
                 state.nodes.insert(node.node_id.clone(), node.clone());
@@ -252,10 +268,12 @@ impl DesiredStateCommand {
             Self::SetGrantEnabled { grant_id, enabled } => {
                 let grant = match state.grants.get_mut(grant_id) {
                     Some(grant) => grant,
-                    None => return Ok(DesiredStateApplyResult::GrantEnabledSet {
-                        grant: None,
-                        changed: false,
-                    }),
+                    None => {
+                        return Ok(DesiredStateApplyResult::GrantEnabledSet {
+                            grant: None,
+                            changed: false,
+                        });
+                    }
                 };
 
                 if grant.enabled == *enabled {
@@ -312,6 +330,7 @@ pub struct UsageSnapshot {
     pub used_bytes: u64,
 }
 
+#[derive(Debug)]
 pub struct JsonSnapshotStore {
     state_path: PathBuf,
     state: PersistedState,
@@ -335,7 +354,7 @@ impl JsonSnapshotStore {
             }
             (state, false)
         } else {
-            let node_id = new_ulid_string();
+            let node_id = init.bootstrap_node_id.unwrap_or_else(new_ulid_string);
             let node = Node {
                 node_id: node_id.clone(),
                 node_name: init.bootstrap_node_name,
@@ -399,6 +418,13 @@ impl JsonSnapshotStore {
 
     pub fn get_grant_usage(&self, grant_id: &str) -> Option<GrantUsage> {
         self.usage.grants.get(grant_id).cloned()
+    }
+
+    pub fn clear_grant_usage(&mut self, grant_id: &str) -> Result<(), StoreError> {
+        if self.usage.grants.remove(grant_id).is_some() {
+            self.save_usage()?;
+        }
+        Ok(())
     }
 
     pub fn set_quota_banned(
@@ -498,8 +524,8 @@ impl JsonSnapshotStore {
         })
     }
 
-    pub fn create_endpoint(
-        &mut self,
+    pub fn build_endpoint(
+        &self,
         node_id: String,
         kind: EndpointKind,
         port: u16,
@@ -509,14 +535,24 @@ impl JsonSnapshotStore {
         let tag = endpoint_tag(&kind, &endpoint_id);
 
         let meta = build_endpoint_meta(&kind, meta)?;
-        let endpoint = Endpoint {
-            endpoint_id: endpoint_id.clone(),
+        Ok(Endpoint {
+            endpoint_id,
             node_id,
             tag,
             kind,
             port,
             meta,
-        };
+        })
+    }
+
+    pub fn create_endpoint(
+        &mut self,
+        node_id: String,
+        kind: EndpointKind,
+        port: u16,
+        meta: serde_json::Value,
+    ) -> Result<Endpoint, StoreError> {
+        let endpoint = self.build_endpoint(node_id, kind, port, meta)?;
         DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint.clone(),
         }
@@ -525,29 +561,44 @@ impl JsonSnapshotStore {
         Ok(endpoint)
     }
 
+    pub fn build_user(
+        &self,
+        display_name: String,
+        cycle_policy_default: CyclePolicyDefault,
+        cycle_day_of_month_default: u8,
+    ) -> Result<User, StoreError> {
+        validate_cycle_day_of_month(cycle_day_of_month_default)?;
+
+        let user_id = new_ulid_string();
+        let subscription_token = format!("sub_{}", new_ulid_string());
+
+        Ok(User {
+            user_id,
+            display_name,
+            subscription_token,
+            cycle_policy_default,
+            cycle_day_of_month_default,
+        })
+    }
+
     pub fn create_user(
         &mut self,
         display_name: String,
         cycle_policy_default: CyclePolicyDefault,
         cycle_day_of_month_default: u8,
     ) -> Result<User, StoreError> {
-        let user_id = new_ulid_string();
-        let subscription_token = format!("sub_{}", new_ulid_string());
-
-        let user = User {
-            user_id: user_id.clone(),
+        let user = self.build_user(
             display_name,
-            subscription_token,
             cycle_policy_default,
             cycle_day_of_month_default,
-        };
+        )?;
         DesiredStateCommand::UpsertUser { user: user.clone() }.apply(&mut self.state)?;
         self.save()?;
         Ok(user)
     }
 
-    pub fn create_grant(
-        &mut self,
+    pub fn build_grant(
+        &self,
         user_id: String,
         endpoint_id: String,
         quota_limit_bytes: u64,
@@ -569,8 +620,8 @@ impl JsonSnapshotStore {
         let grant_id = new_ulid_string();
         let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
 
-        let grant = Grant {
-            grant_id: grant_id.clone(),
+        Ok(Grant {
+            grant_id,
             user_id,
             endpoint_id,
             enabled: true,
@@ -579,7 +630,26 @@ impl JsonSnapshotStore {
             cycle_day_of_month,
             note,
             credentials,
-        };
+        })
+    }
+
+    pub fn create_grant(
+        &mut self,
+        user_id: String,
+        endpoint_id: String,
+        quota_limit_bytes: u64,
+        cycle_policy: CyclePolicy,
+        cycle_day_of_month: Option<u8>,
+        note: Option<String>,
+    ) -> Result<Grant, StoreError> {
+        let grant = self.build_grant(
+            user_id,
+            endpoint_id,
+            quota_limit_bytes,
+            cycle_policy,
+            cycle_day_of_month,
+            note,
+        )?;
         DesiredStateCommand::UpsertGrant {
             grant: grant.clone(),
         }
@@ -632,11 +702,11 @@ impl JsonSnapshotStore {
         self.rotate_vless_reality_short_id_with_rng(endpoint_id, &mut rng)
     }
 
-    fn rotate_vless_reality_short_id_with_rng<R: rand::RngCore + rand::CryptoRng>(
-        &mut self,
+    pub fn build_rotate_vless_reality_short_id_command<R: rand::RngCore + rand::CryptoRng>(
+        &self,
         endpoint_id: &str,
         rng: &mut R,
-    ) -> Result<Option<RotateShortIdResult>, StoreError> {
+    ) -> Result<Option<(DesiredStateCommand, RotateShortIdResult)>, StoreError> {
         let mut endpoint = match self.state.endpoints.get(endpoint_id) {
             Some(endpoint) => endpoint.clone(),
             None => return Ok(None),
@@ -650,7 +720,25 @@ impl JsonSnapshotStore {
         let out = rotate_short_ids_in_place(&mut meta.short_ids, &mut meta.active_short_id, rng);
 
         endpoint.meta = serde_json::to_value(meta)?;
-        DesiredStateCommand::UpsertEndpoint { endpoint }.apply(&mut self.state)?;
+
+        Ok(Some((
+            DesiredStateCommand::UpsertEndpoint { endpoint },
+            out,
+        )))
+    }
+
+    fn rotate_vless_reality_short_id_with_rng<R: rand::RngCore + rand::CryptoRng>(
+        &mut self,
+        endpoint_id: &str,
+        rng: &mut R,
+    ) -> Result<Option<RotateShortIdResult>, StoreError> {
+        let Some((cmd, out)) =
+            self.build_rotate_vless_reality_short_id_command(endpoint_id, rng)?
+        else {
+            return Ok(None);
+        };
+
+        cmd.apply(&mut self.state)?;
         self.save()?;
         Ok(Some(out))
     }
@@ -896,6 +984,7 @@ mod tests {
     fn test_init(tmp_dir: &Path) -> StoreInit {
         StoreInit {
             data_dir: tmp_dir.to_path_buf(),
+            bootstrap_node_id: None,
             bootstrap_node_name: "node-1".to_string(),
             bootstrap_public_domain: "".to_string(),
             bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
@@ -975,7 +1064,8 @@ mod tests {
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         let endpoint = store.get_endpoint(&endpoint_id).unwrap();
-        let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(endpoint.meta).unwrap();
 
         assert_eq!(out.active_short_id, meta.active_short_id);
         assert_eq!(out.short_ids, meta.short_ids);
@@ -1231,9 +1321,13 @@ mod tests {
         }
         .apply(&mut state)
         .unwrap();
-        assert_eq!(out, DesiredStateApplyResult::UserTokenReset { applied: true });
         assert_eq!(
-            state.users
+            out,
+            DesiredStateApplyResult::UserTokenReset { applied: true }
+        );
+        assert_eq!(
+            state
+                .users
                 .get(&user.user_id)
                 .unwrap()
                 .subscription_token
@@ -1290,9 +1384,11 @@ mod tests {
             },
         };
 
-        DesiredStateCommand::UpsertGrant { grant: grant.clone() }
-            .apply(&mut state)
-            .unwrap();
+        DesiredStateCommand::UpsertGrant {
+            grant: grant.clone(),
+        }
+        .apply(&mut state)
+        .unwrap();
         assert_eq!(state.grants.get(&grant.grant_id), Some(&grant));
 
         let out = DesiredStateCommand::UpdateGrantFields {
@@ -1354,13 +1450,7 @@ mod tests {
         assert!(store.get_grant_usage(&grant.grant_id).is_some());
 
         let updated = store
-            .update_grant(
-                &grant.grant_id,
-                false,
-                2048,
-                CyclePolicy::InheritUser,
-                None,
-            )
+            .update_grant(&grant.grant_id, false, 2048, CyclePolicy::InheritUser, None)
             .unwrap()
             .unwrap();
         assert!(!updated.enabled);

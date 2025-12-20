@@ -1,5 +1,6 @@
-pub mod config;
 pub mod cluster_identity;
+pub mod cluster_metadata;
+pub mod config;
 pub mod cycle;
 pub mod domain;
 pub mod http;

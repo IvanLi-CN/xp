@@ -2,6 +2,8 @@ use std::io::Cursor;
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::{DesiredStateApplyResult, DesiredStateCommand};
+
 /// Raft node identifier type for this project.
 pub type NodeId = u64;
 
@@ -25,20 +27,26 @@ pub struct NodeMeta {
 }
 
 /// State-machine command (client request) submitted to Raft.
-///
-/// Task 003 keeps this intentionally minimal; Milestone 5 will evolve it into "desired state"
-/// updates (Nodes/Endpoints/Users/Grants).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClientRequest {
-    /// A no-op command used by tests and smoke wiring.
-    Noop,
-}
+pub type ClientRequest = DesiredStateCommand;
 
 /// State-machine response to a committed `ClientRequest`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientResponse {
-    /// Acknowledge `ClientRequest::Noop`.
-    Ok,
+    Ok {
+        result: DesiredStateApplyResult,
+    },
+    Err {
+        status: u16,
+        code: String,
+        message: String,
+    },
+}
+
+pub fn raft_node_id_from_ulid(node_id: &str) -> anyhow::Result<NodeId> {
+    let ulid = ulid::Ulid::from_string(node_id)
+        .map_err(|e| anyhow::anyhow!("invalid ulid node_id={node_id}: {e}"))?;
+    Ok((ulid.0 & u64::MAX as u128) as u64)
 }
 
 /// OpenRaft type configuration for this project.
@@ -62,4 +70,3 @@ impl openraft::RaftTypeConfig for TypeConfig {
     // Requires tokio `io-util` feature for AsyncRead/Write/Seek impls on Cursor.
     type SnapshotData = Cursor<Vec<u8>>;
 }
-

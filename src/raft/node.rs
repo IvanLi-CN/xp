@@ -57,12 +57,8 @@ impl RaftNode {
 
         std::fs::create_dir_all(&paths.wal_dir)
             .with_context(|| format!("create wal dir: {}", paths.wal_dir.display()))?;
-        std::fs::create_dir_all(&paths.snapshot_dir).with_context(|| {
-            format!(
-                "create snapshot dir: {}",
-                paths.snapshot_dir.display()
-            )
-        })?;
+        std::fs::create_dir_all(&paths.snapshot_dir)
+            .with_context(|| format!("create snapshot dir: {}", paths.snapshot_dir.display()))?;
 
         Ok(Self {
             data_dir,
@@ -83,4 +79,3 @@ impl RaftNode {
         &self.paths
     }
 }
-

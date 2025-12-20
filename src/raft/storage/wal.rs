@@ -18,4 +18,3 @@ pub trait WalLogStore: Send + Sync + Debug + 'static {
         _bytes: Vec<u8>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 }
-
