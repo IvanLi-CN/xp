@@ -8,7 +8,7 @@ use crate::{
     config::Config,
     cycle::{CycleWindowError, current_cycle_window_at, effective_cycle_policy_and_day},
     reconcile::ReconcileHandle,
-    state::JsonSnapshotStore,
+    state::{GrantEnabledSource, JsonSnapshotStore},
     xray,
 };
 
@@ -98,7 +98,9 @@ pub async fn run_quota_tick_at(
         let mut out = Vec::new();
         for grant in store.list_grants() {
             let endpoint = endpoints_by_id.get(&grant.endpoint_id);
-            if let Some(endpoint) = endpoint && endpoint.node_id != local_node_id {
+            if let Some(endpoint) = endpoint
+                && endpoint.node_id != local_node_id
+            {
                 continue;
             }
 
@@ -222,7 +224,7 @@ async fn process_grant_once(
         );
         {
             let mut store = store.lock().await;
-            store.set_grant_enabled(&snapshot.grant_id, true)?;
+            store.set_grant_enabled(&snapshot.grant_id, true, GrantEnabledSource::Quota)?;
             store.clear_quota_banned(&snapshot.grant_id)?;
         }
         reconcile.request_full();
@@ -265,7 +267,7 @@ async fn process_grant_once(
 
     {
         let mut store = store.lock().await;
-        store.set_grant_enabled(&snapshot.grant_id, false)?;
+        store.set_grant_enabled(&snapshot.grant_id, false, GrantEnabledSource::Quota)?;
         store.set_quota_banned(&snapshot.grant_id, now.to_rfc3339())?;
     }
     reconcile.request_full();
@@ -828,14 +830,16 @@ mod tests {
 
         let st = state.lock().await;
         assert!(!st.stats_calls.is_empty());
-        assert!(!st
-            .stats_calls
-            .iter()
-            .any(|name| name == &stat_name(&remote_email, "uplink")));
-        assert!(!st
-            .stats_calls
-            .iter()
-            .any(|name| name == &stat_name(&remote_email, "downlink")));
+        assert!(
+            !st.stats_calls
+                .iter()
+                .any(|name| name == &stat_name(&remote_email, "uplink"))
+        );
+        assert!(
+            !st.stats_calls
+                .iter()
+                .any(|name| name == &stat_name(&remote_email, "downlink"))
+        );
         drop(st);
 
         let store_guard = store.lock().await;
@@ -951,7 +955,9 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            store.set_grant_enabled(&grant.grant_id, false).unwrap();
+            store
+                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
+                .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
@@ -1037,7 +1043,9 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            store.set_grant_enabled(&grant.grant_id, false).unwrap();
+            store
+                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Manual)
+                .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
@@ -1184,7 +1192,9 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            store.set_grant_enabled(&grant.grant_id, false).unwrap();
+            store
+                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
+                .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
