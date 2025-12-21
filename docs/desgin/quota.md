@@ -74,7 +74,7 @@
 
 - 若 `used_bytes + 10MiB >= quota_limit_bytes`：
   1. 立即对对应 inbound 执行 `RemoveUserOperation`（本机动作，尽快断开新连接）
-  2. 写入 Raft：`Grant.enabled=false`（全局一致）
+  2. 写入 Raft：`Grant.enabled=false`（全局一致；若 Raft 暂不可写，仍必须保持本地强约束，见 §8）
 
 行为约束：
 
@@ -97,3 +97,15 @@
 - “封禁/解封”必须写入 Raft（避免管理员在其他节点看到状态不一致）。
 - “用量累计”不写入 Raft：\
   管理界面展示时，管理节点可向目标节点拉取实时用量（或使用节点定期上报摘要的方式做汇总——后续可选）。
+
+## 8. 策略 H：本地强约束与异常提示
+
+为避免 Raft 暂不可写时出现“封禁抖动”，在 owner 节点采用如下执行口径：
+
+- `effective_enabled = Grant.enabled && !quota_banned_local`
+- `quota_banned_local` 为 owner 节点本地用量状态的封禁标记（不进 Raft）。
+
+当 `Grant.enabled=true` 但 `quota_banned_local=true` 时：
+
+- owner 节点的数据面实际行为以 `effective_enabled=false` 执行（强制移除 client）。
+- 该情况必须通过管理员接口明确提示（见 `docs/desgin/api.md` 的 alerts 与 usage 扩展）。

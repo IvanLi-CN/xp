@@ -393,6 +393,39 @@
   "grant_id": "01J...",
   "cycle_start_at": "2025-12-01T00:00:00+08:00",
   "cycle_end_at": "2026-01-01T00:00:00+08:00",
-  "used_bytes": 123456789
+  "used_bytes": 123456789,
+  "owner_node_id": "01J...",
+  "desired_enabled": true,
+  "quota_banned": false,
+  "quota_banned_at": null,
+  "effective_enabled": true,
+  "warning": null
+}
+```
+
+### 5.7 查询异常提示（管理员）
+
+`GET /api/admin/alerts`
+
+返回：
+
+```json
+{
+  "partial": false,
+  "unreachable_nodes": [],
+  "items": [
+    {
+      "type": "quota_enforced_but_desired_enabled",
+      "grant_id": "01J...",
+      "endpoint_id": "01J...",
+      "owner_node_id": "01J...",
+      "desired_enabled": true,
+      "quota_banned": true,
+      "quota_banned_at": "2025-12-01T00:00:00Z",
+      "effective_enabled": false,
+      "message": "quota enforced on owner node but desired state is still enabled",
+      "action_hint": "check raft leader/quorum and retry status"
+    }
+  ]
 }
 ```
