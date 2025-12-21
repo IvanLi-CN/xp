@@ -897,7 +897,7 @@ async fn delete_admin_grant_schedules_remove_user_then_full_when_endpoint_exists
 }
 
 #[tokio::test]
-async fn grant_usage_is_501_not_implemented() {
+async fn grant_usage_includes_warning_fields() {
     #[derive(Debug, Default)]
     struct TestStatsService;
 
@@ -1069,6 +1069,12 @@ async fn grant_usage_is_501_not_implemented() {
     let start = chrono::DateTime::parse_from_rfc3339(start).unwrap();
     let end = chrono::DateTime::parse_from_rfc3339(end).unwrap();
     assert!(end > start);
+    assert_eq!(json["owner_node_id"], node_id);
+    assert_eq!(json["desired_enabled"], true);
+    assert_eq!(json["quota_banned"], false);
+    assert!(json["quota_banned_at"].is_null());
+    assert_eq!(json["effective_enabled"], true);
+    assert!(json["warning"].is_null());
 
     let _ = shutdown_tx.send(());
 }
@@ -1263,6 +1269,110 @@ async fn admin_patch_grant_clears_quota_ban_marker() {
     let usage = store.get_grant_usage(&grant_id).unwrap();
     assert!(!usage.quota_banned);
     assert_eq!(usage.quota_banned_at, None);
+}
+
+#[tokio::test]
+async fn admin_alerts_local_reports_quota_mismatch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let user = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user["user_id"],
+              "endpoint_id": endpoint_id,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let grant = body_json(res).await;
+    let grant_id = grant["grant_id"].as_str().unwrap().to_string();
+
+    let banned_at = "2025-12-18T00:00:00Z".to_string();
+    {
+        let mut store = store.lock().await;
+        store
+            .set_quota_banned(&grant_id, banned_at.clone())
+            .unwrap();
+    }
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/alerts?scope=local"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["partial"], false);
+    assert_eq!(json["unreachable_nodes"], json!([]));
+
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    assert_eq!(item["type"], "quota_enforced_but_desired_enabled");
+    assert_eq!(item["grant_id"], grant_id);
+    assert_eq!(item["endpoint_id"], endpoint_id);
+    assert_eq!(item["owner_node_id"], node_id);
+    assert_eq!(item["desired_enabled"], true);
+    assert_eq!(item["quota_banned"], true);
+    assert_eq!(item["quota_banned_at"], banned_at);
+    assert_eq!(item["effective_enabled"], false);
+    assert_eq!(
+        item["message"],
+        "quota enforced on owner node but desired state is still enabled"
+    );
+    assert_eq!(
+        item["action_hint"],
+        "check raft leader/quorum and retry status"
+    );
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Extension, FromRequest, Path, Request, State},
+    extract::{Extension, FromRequest, Path, Query, Request, State},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
@@ -282,6 +282,7 @@ pub fn build_router(
                 .patch(admin_patch_grant),
         )
         .route("/grants/:grant_id/usage", get(admin_get_grant_usage))
+        .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
     let mut app = Router::new()
@@ -974,6 +975,39 @@ struct GrantUsageResponse {
     cycle_start_at: String,
     cycle_end_at: String,
     used_bytes: u64,
+    owner_node_id: String,
+    desired_enabled: bool,
+    quota_banned: bool,
+    quota_banned_at: Option<String>,
+    effective_enabled: bool,
+    warning: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AlertsQuery {
+    scope: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AlertItem {
+    #[serde(rename = "type")]
+    alert_type: String,
+    grant_id: String,
+    endpoint_id: String,
+    owner_node_id: String,
+    desired_enabled: bool,
+    quota_banned: bool,
+    quota_banned_at: Option<String>,
+    effective_enabled: bool,
+    message: String,
+    action_hint: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AlertsResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    items: Vec<AlertItem>,
 }
 
 fn map_cycle_window_error(err: CycleWindowError) -> ApiError {
@@ -988,18 +1022,26 @@ fn map_cycle_window_error(err: CycleWindowError) -> ApiError {
     }
 }
 
+const ALERT_TYPE_QUOTA_ENFORCED: &str = "quota_enforced_but_desired_enabled";
+const ALERT_MESSAGE_QUOTA_ENFORCED: &str =
+    "quota enforced on owner node but desired state is still enabled";
+const ALERT_ACTION_HINT_QUOTA_ENFORCED: &str = "check raft leader/quorum and retry status";
+
 async fn admin_get_grant_usage(
     Extension(state): Extension<AppState>,
     Path(grant_id): Path<String>,
 ) -> Result<Json<GrantUsageResponse>, ApiError> {
-    let (grant, policy, day_of_month) = {
+    let (grant, policy, day_of_month, owner_node_id) = {
         let store = state.store.lock().await;
         let grant = store
             .get_grant(&grant_id)
             .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
+        let endpoint = store.get_endpoint(&grant.endpoint_id).ok_or_else(|| {
+            ApiError::internal(format!("endpoint not found for grant: {grant_id}"))
+        })?;
         let (policy, day_of_month) =
             effective_cycle_policy_and_day(&store, &grant).map_err(map_cycle_window_error)?;
-        (grant, policy, day_of_month)
+        (grant, policy, day_of_month, endpoint.node_id)
     };
 
     let (cycle_start, cycle_end) =
@@ -1019,16 +1061,30 @@ async fn admin_get_grant_usage(
     };
     let seen_at = Utc::now().to_rfc3339();
 
-    let snapshot = {
+    let (snapshot, usage) = {
         let mut store = state.store.lock().await;
-        store.apply_grant_usage_sample(
+        let snapshot = store.apply_grant_usage_sample(
             &grant.grant_id,
             cycle_start_at.clone(),
             cycle_end_at.clone(),
             uplink_total,
             downlink_total,
             seen_at,
-        )?
+        )?;
+        let usage = store.get_grant_usage(&grant.grant_id).ok_or_else(|| {
+            ApiError::internal(format!("grant usage missing after sampling: {grant_id}"))
+        })?;
+        (snapshot, usage)
+    };
+
+    let desired_enabled = grant.enabled;
+    let quota_banned = usage.quota_banned;
+    let quota_banned_at = usage.quota_banned_at;
+    let effective_enabled = desired_enabled && !quota_banned;
+    let warning = if desired_enabled != effective_enabled {
+        Some(ALERT_MESSAGE_QUOTA_ENFORCED.to_string())
+    } else {
+        None
     };
 
     Ok(Json(GrantUsageResponse {
@@ -1036,6 +1092,134 @@ async fn admin_get_grant_usage(
         cycle_start_at: snapshot.cycle_start_at,
         cycle_end_at: snapshot.cycle_end_at,
         used_bytes: snapshot.used_bytes,
+        owner_node_id,
+        desired_enabled,
+        quota_banned,
+        quota_banned_at,
+        effective_enabled,
+        warning,
+    }))
+}
+
+fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<AlertItem> {
+    let mut items = Vec::new();
+    for grant in store.list_grants() {
+        let endpoint = match store.get_endpoint(&grant.endpoint_id) {
+            Some(endpoint) => endpoint,
+            None => continue,
+        };
+        if endpoint.node_id != local_node_id {
+            continue;
+        }
+        let usage = match store.get_grant_usage(&grant.grant_id) {
+            Some(usage) => usage,
+            None => continue,
+        };
+        if !grant.enabled || !usage.quota_banned {
+            continue;
+        }
+        let effective_enabled = grant.enabled && !usage.quota_banned;
+        items.push(AlertItem {
+            alert_type: ALERT_TYPE_QUOTA_ENFORCED.to_string(),
+            grant_id: grant.grant_id.clone(),
+            endpoint_id: endpoint.endpoint_id,
+            owner_node_id: endpoint.node_id,
+            desired_enabled: grant.enabled,
+            quota_banned: usage.quota_banned,
+            quota_banned_at: usage.quota_banned_at,
+            effective_enabled,
+            message: ALERT_MESSAGE_QUOTA_ENFORCED.to_string(),
+            action_hint: ALERT_ACTION_HINT_QUOTA_ENFORCED.to_string(),
+        });
+    }
+    items
+}
+
+fn build_admin_http_client(cluster_ca_pem: &str) -> Result<reqwest::Client, ApiError> {
+    let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    reqwest::Client::builder()
+        .tls_built_in_root_certs(false)
+        .add_root_certificate(ca)
+        .build()
+        .map_err(|e| ApiError::internal(e.to_string()))
+}
+
+async fn admin_get_alerts(
+    Extension(state): Extension<AppState>,
+    Query(query): Query<AlertsQuery>,
+) -> Result<Json<AlertsResponse>, ApiError> {
+    if let Some(scope) = query.scope.as_deref()
+        && scope != "local"
+    {
+        return Err(ApiError::invalid_request(
+            "invalid scope, expected local or omit",
+        ));
+    }
+
+    let local_node_id = state.cluster.node_id.clone();
+    let local_items = {
+        let store = state.store.lock().await;
+        build_local_alerts(&store, &local_node_id)
+    };
+
+    if query.scope.as_deref() == Some("local") {
+        return Ok(Json(AlertsResponse {
+            partial: false,
+            unreachable_nodes: Vec::new(),
+            items: local_items,
+        }));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let admin_token = state.config.admin_token.clone();
+
+    let mut items = local_items;
+    let mut unreachable_nodes = Vec::new();
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+        let url = format!("{base}/api/admin/alerts?scope=local");
+        let request = client
+            .get(url)
+            .header(header::AUTHORIZATION, format!("Bearer {admin_token}"))
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id);
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+
+        match response.json::<AlertsResponse>().await {
+            Ok(remote) => items.extend(remote.items),
+            Err(_) => unreachable_nodes.push(node.node_id),
+        }
+    }
+
+    let partial = !unreachable_nodes.is_empty();
+    Ok(Json(AlertsResponse {
+        partial,
+        unreachable_nodes,
+        items,
     }))
 }
 
