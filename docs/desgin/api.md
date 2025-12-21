@@ -128,6 +128,24 @@
 
 返回：Node（略，字段同上）。
 
+### 2.6 更新节点（管理员）
+
+> 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `public_domain`），**不涉及** Raft membership 变更与节点移除。
+
+`PATCH /api/admin/nodes/{node_id}`
+
+请求：
+
+```json
+{
+  "node_name": "node-1",
+  "public_domain": "example.com",
+  "api_base_url": "https://node-1.internal:8443"
+}
+```
+
+返回：Node（略，字段同创建/查询返回）。
+
 ## 3. Endpoints（端点）
 
 ### 3.1 创建端点
@@ -200,13 +218,41 @@
 
 返回：Endpoint（略，字段同创建返回）。
 
-### 3.4 删除端点（管理员）
+### 3.4 更新端点（管理员）
+
+> 约束：`kind/node_id/tag` 不可变；如需迁移到其它节点，请通过“新建 endpoint → 迁移 grants → 删除旧 endpoint”完成。
+
+`PATCH /api/admin/endpoints/{endpoint_id}`
+
+请求（VLESS/Reality）：
+
+```json
+{
+  "port": 443,
+  "public_domain": "example.com",
+  "reality": {
+    "dest": "example.com:443",
+    "server_names": ["example.com"],
+    "fingerprint": "chrome"
+  }
+}
+```
+
+请求（SS2022）：
+
+```json
+{ "port": 8388 }
+```
+
+返回：Endpoint（略，字段同创建返回）。
+
+### 3.5 删除端点（管理员）
 
 `DELETE /api/admin/endpoints/{endpoint_id}`
 
 返回：`204 No Content`。
 
-### 3.5 旋转 shortId
+### 3.6 旋转 shortId
 
 `POST /api/admin/endpoints/{endpoint_id}/rotate-shortid`
 
@@ -274,13 +320,29 @@
 
 返回：User（略，字段同创建返回）。
 
-### 4.4 删除用户（管理员）
+### 4.4 更新用户（管理员）
+
+`PATCH /api/admin/users/{user_id}`
+
+请求：
+
+```json
+{
+  "display_name": "alice",
+  "cycle_policy_default": "by_user",
+  "cycle_day_of_month_default": 1
+}
+```
+
+返回：User（略，字段同创建返回）。
+
+### 4.5 删除用户（管理员）
 
 `DELETE /api/admin/users/{user_id}`
 
 返回：`204 No Content`。
 
-### 4.5 重置订阅 token
+### 4.6 重置订阅 token
 
 `POST /api/admin/users/{user_id}/reset-token`
 
@@ -336,6 +398,7 @@
 ```json
 {
   "enabled": false,
+  "note": "alice@node-1",
   "quota_limit_bytes": 0,
   "cycle_policy": "by_user",
   "cycle_day_of_month": 1
