@@ -199,7 +199,14 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
             .await?;
     }
 
-    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> = Arc::new(raft.clone());
+    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
+        Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
+            raft.raft(),
+            config.admin_token.clone(),
+            &cluster_ca_pem,
+            Some(&node_cert_pem),
+            Some(&node_key_pem),
+        )?);
 
     let app = xp::http::build_router(
         config.clone(),

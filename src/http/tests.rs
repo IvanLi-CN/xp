@@ -285,6 +285,18 @@ async fn unauthorized_admin_returns_401_with_error_shape() {
 }
 
 #[tokio::test]
+async fn internal_client_write_requires_admin_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req("POST", "/api/admin/_internal/raft/client-write"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn cluster_info_is_single_node_leader_and_ids_present() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -396,7 +408,7 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
 }
 
 #[tokio::test]
-async fn follower_write_returns_307_redirect_to_leader() {
+async fn follower_admin_write_does_not_redirect() {
     let tmp = tempfile::tempdir().unwrap();
 
     let config = test_config(tmp.path().to_path_buf());
@@ -460,14 +472,9 @@ async fn follower_write_returns_307_redirect_to_leader() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
-    let loc = res
-        .headers()
-        .get(header::LOCATION)
-        .unwrap()
-        .to_str()
-        .unwrap();
-    assert_eq!(loc, "https://leader.example.com/api/admin/users");
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert!(json["user_id"].as_str().unwrap().len() > 0);
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::Context;
+use reqwest::header::AUTHORIZATION;
 use tokio::sync::watch;
 
 use crate::{
@@ -103,6 +104,147 @@ impl RaftFacade for RealRaft {
             Ok(())
         })
     }
+}
+
+#[derive(Clone)]
+pub struct ForwardingRaftFacade {
+    raft: openraft::Raft<TypeConfig>,
+    metrics: watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>,
+    client: reqwest::Client,
+    admin_token: String,
+}
+
+impl ForwardingRaftFacade {
+    pub fn try_new(
+        raft: openraft::Raft<TypeConfig>,
+        admin_token: String,
+        cluster_ca_pem: &str,
+        node_cert_pem: Option<&str>,
+        node_key_pem: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
+            .context("parse cluster_ca_pem")?;
+        let mut builder = reqwest::Client::builder()
+            .tls_built_in_root_certs(false)
+            .add_root_certificate(ca);
+        if let (Some(cert), Some(key)) = (node_cert_pem, node_key_pem) {
+            let identity_pem = format!("{cert}\n{key}");
+            let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
+                .context("parse node identity pem")?;
+            builder = builder.identity(identity);
+        }
+        let client = builder.build().context("build reqwest client")?;
+        let metrics = raft.metrics();
+        Ok(Self {
+            raft,
+            metrics,
+            client,
+            admin_token,
+        })
+    }
+}
+
+impl RaftFacade for ForwardingRaftFacade {
+    fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>> {
+        self.metrics.clone()
+    }
+
+    fn client_write(
+        &self,
+        cmd: DesiredStateCommand,
+    ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
+        let raft = self.raft.clone();
+        let metrics = self.metrics.clone();
+        let client = self.client.clone();
+        let admin_token = self.admin_token.clone();
+        Box::pin(async move {
+            let cmd_clone = cmd.clone();
+            match raft.client_write(cmd).await {
+                Ok(resp) => Ok(resp.data),
+                Err(err) => {
+                    let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
+                        err.api_error()
+                    else {
+                        return Err(anyhow::anyhow!("raft client_write: {err}"));
+                    };
+                    let metrics_snapshot = metrics.borrow().clone();
+                    let leader_base_url =
+                        leader_api_base_url_from_forward(forward, &metrics_snapshot).ok_or_else(
+                            || anyhow::anyhow!("raft client_write forward: leader not available"),
+                        )?;
+                    forward_client_write(&client, &admin_token, &leader_base_url, &cmd_clone).await
+                }
+            }
+        })
+    }
+
+    fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
+        let raft = self.raft.clone();
+        Box::pin(async move {
+            raft.add_learner(node_id, node, false)
+                .await
+                .map_err(|e| anyhow::anyhow!("raft add_learner: {e}"))?;
+            Ok(())
+        })
+    }
+
+    fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
+        let raft = self.raft.clone();
+        Box::pin(async move {
+            raft.change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true)
+                .await
+                .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
+            Ok(())
+        })
+    }
+}
+
+fn leader_api_base_url_from_forward(
+    forward: &openraft::error::ForwardToLeader<NodeId, NodeMeta>,
+    metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
+) -> Option<String> {
+    if let Some(node) = forward.leader_node.as_ref()
+        && !node.api_base_url.is_empty()
+    {
+        return Some(node.api_base_url.clone());
+    }
+    let leader_id = forward.leader_id.or(metrics.current_leader)?;
+    metrics
+        .membership_config
+        .nodes()
+        .find(|(id, _node)| **id == leader_id)
+        .and_then(|(_id, node)| {
+            if node.api_base_url.is_empty() {
+                None
+            } else {
+                Some(node.api_base_url.clone())
+            }
+        })
+}
+
+async fn forward_client_write(
+    client: &reqwest::Client,
+    admin_token: &str,
+    leader_base_url: &str,
+    cmd: &DesiredStateCommand,
+) -> anyhow::Result<ClientResponse> {
+    let url = format!(
+        "{}/api/admin/_internal/raft/client-write",
+        leader_base_url.trim_end_matches('/')
+    );
+    let resp = client
+        .post(url)
+        .header(AUTHORIZATION, format!("Bearer {admin_token}"))
+        .json(cmd)
+        .send()
+        .await
+        .context("forward client_write request")?
+        .error_for_status()
+        .context("forward client_write response status")?
+        .json::<ClientResponse>()
+        .await
+        .context("parse forward client_write response")?;
+    Ok(resp)
 }
 
 /// A test-only Raft facade that applies desired-state commands directly to the local store.

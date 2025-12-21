@@ -28,7 +28,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    state::{JsonSnapshotStore, StoreError},
+    state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
     subscription, xray,
 };
 
@@ -253,6 +253,10 @@ pub fn build_router(
     let admin_token = app_state.config.admin_token.clone();
 
     let admin = Router::new()
+        .route(
+            "/_internal/raft/client-write",
+            post(admin_internal_raft_client_write),
+        )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/:node_id", get(admin_get_node))
@@ -384,9 +388,8 @@ async fn redirect_follower_writes(req: Request<Body>, next: Next) -> Response {
     );
 
     let is_cluster_write = path == "/api/cluster/join";
-    let is_admin_write = path.starts_with("/api/admin") && is_write;
 
-    if !is_write || (!is_cluster_write && !is_admin_write) {
+    if !is_write || !is_cluster_write {
         return next.run(req).await;
     }
 
@@ -428,6 +431,18 @@ async fn cluster_info(
         leader_api_base_url,
         term: metrics.current_term,
     }))
+}
+
+async fn admin_internal_raft_client_write(
+    Extension(state): Extension<AppState>,
+    ApiJson(cmd): ApiJson<DesiredStateCommand>,
+) -> Result<Json<RaftClientResponse>, ApiError> {
+    let resp = state
+        .raft
+        .client_write(cmd)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(resp))
 }
 
 async fn admin_create_join_token(
