@@ -10,6 +10,7 @@ use tokio::{
 
 use xp::{
     domain::{CyclePolicyDefault, User},
+    raft::storage::StorePaths,
     raft::{
         NodeId, NodeMeta,
         app::RaftFacade as _,
@@ -19,7 +20,6 @@ use xp::{
         types::TypeConfig,
     },
     reconcile::ReconcileHandle,
-    raft::storage::StorePaths,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
 
@@ -42,7 +42,9 @@ impl RpcServerHandle {
     }
 }
 
-async fn spawn_raft_rpc_server(raft: openraft::Raft<TypeConfig>) -> anyhow::Result<RpcServerHandle> {
+async fn spawn_raft_rpc_server(
+    raft: openraft::Raft<TypeConfig>,
+) -> anyhow::Result<RpcServerHandle> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .context("bind raft rpc listener")?;
@@ -285,7 +287,9 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
     }
 
     if node_count > 1 {
-        let voters = (2..=node_count).map(|i| i as NodeId).collect::<BTreeSet<_>>();
+        let voters = (2..=node_count)
+            .map(|i| i as NodeId)
+            .collect::<BTreeSet<_>>();
         leader
             .add_voters(voters.clone())
             .await
@@ -295,11 +299,12 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
             wait_for_voter(leader.metrics(), node_id, Duration::from_secs(15)).await?;
             let m = leader.metrics().borrow().clone();
             assert!(m.membership_config.voter_ids().any(|id| id == node_id));
-            assert!(!m
-                .membership_config
-                .membership()
-                .learner_ids()
-                .any(|id| id == node_id));
+            assert!(
+                !m.membership_config
+                    .membership()
+                    .learner_ids()
+                    .any(|id| id == node_id)
+            );
         }
     }
 
