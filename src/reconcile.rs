@@ -292,6 +292,7 @@ async fn reconciler_task<R: RngCore>(
 struct Snapshot {
     endpoints: Vec<Endpoint>,
     grants: Vec<Grant>,
+    quota_banned_by_grant: BTreeMap<String, bool>,
 }
 
 async fn reconcile_once(
@@ -309,10 +310,33 @@ async fn reconcile_once(
             );
             return Ok(());
         };
-        (local_node_id, Snapshot {
-            endpoints: store.list_endpoints(),
-            grants: store.list_grants(),
-        })
+        let endpoints = store.list_endpoints();
+        let grants = store.list_grants();
+        let local_endpoint_ids = endpoints
+            .iter()
+            .filter(|e| e.node_id == local_node_id)
+            .map(|e| e.endpoint_id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut quota_banned_by_grant = BTreeMap::new();
+        for grant in grants.iter() {
+            if !local_endpoint_ids.contains(&grant.endpoint_id) {
+                continue;
+            }
+            let banned = store
+                .get_grant_usage(&grant.grant_id)
+                .is_some_and(|u| u.quota_banned);
+            if banned {
+                quota_banned_by_grant.insert(grant.grant_id.clone(), true);
+            }
+        }
+        (
+            local_node_id,
+            Snapshot {
+                endpoints,
+                grants,
+                quota_banned_by_grant,
+            },
+        )
     };
 
     reconcile_snapshot(config.xray_api_addr, &local_node_id, snapshot, pending).await
@@ -328,8 +352,13 @@ async fn reconcile_snapshot(
         AlterInboundRequest, RemoveInboundRequest,
     };
 
-    let endpoints_by_id: BTreeMap<String, Endpoint> = snapshot
-        .endpoints
+    let Snapshot {
+        endpoints,
+        grants,
+        quota_banned_by_grant,
+    } = snapshot;
+
+    let endpoints_by_id: BTreeMap<String, Endpoint> = endpoints
         .into_iter()
         .map(|e| (e.endpoint_id.clone(), e))
         .collect();
@@ -340,12 +369,20 @@ async fn reconcile_snapshot(
         .collect();
 
     let mut grants_by_endpoint: BTreeMap<String, Vec<Grant>> = BTreeMap::new();
-    for grant in snapshot.grants.into_iter() {
+    for grant in grants.into_iter() {
         grants_by_endpoint
             .entry(grant.endpoint_id.clone())
             .or_default()
             .push(grant);
     }
+
+    let is_effective_enabled = |grant: &Grant| {
+        grant.enabled
+            && !quota_banned_by_grant
+                .get(&grant.grant_id)
+                .copied()
+                .unwrap_or(false)
+    };
 
     let has_local_endpoints = endpoints_by_id.values().any(|e| e.node_id == local_node_id);
     let has_local_rebuilds = pending.rebuild_inbounds.iter().any(|endpoint_id| {
@@ -368,7 +405,10 @@ async fn reconcile_snapshot(
             Some(e) => e.node_id == local_node_id,
         });
 
-    if !(has_local_endpoints || has_local_rebuilds || has_local_remove_inbounds || has_local_remove_users)
+    if !(has_local_endpoints
+        || has_local_rebuilds
+        || has_local_remove_inbounds
+        || has_local_remove_users)
     {
         return Ok(());
     }
@@ -443,7 +483,7 @@ async fn reconcile_snapshot(
         }
 
         if let Some(grants) = grants_by_endpoint.get(endpoint_id) {
-            for grant in grants.iter().filter(|g| g.enabled) {
+            for grant in grants.iter().filter(|g| is_effective_enabled(g)) {
                 apply_grant_enabled(&mut client, endpoint, grant).await;
             }
         }
@@ -478,7 +518,7 @@ async fn reconcile_snapshot(
         }
 
         for grant in grants.iter() {
-            if grant.enabled {
+            if is_effective_enabled(grant) {
                 apply_grant_enabled(&mut client, endpoint, grant).await;
             } else {
                 let email = format!("grant:{}", grant.grant_id);
@@ -938,22 +978,32 @@ mod tests {
         reconcile_once(&config, &store, &pending).await.unwrap();
 
         let calls_snapshot = calls.lock().await.clone();
-        assert!(calls_snapshot.iter().any(|c| {
-            matches!(c, Call::AddInbound { tag } if tag == &local_tag)
-        }));
-        assert!(!calls_snapshot.iter().any(|c| {
-            matches!(c, Call::AddInbound { tag } if tag == &remote_tag)
-        }));
-        assert!(!calls_snapshot.iter().any(|c| {
-            matches!(c, Call::AlterInbound { tag, .. } if tag == &remote_tag)
-        }));
+        assert!(
+            calls_snapshot
+                .iter()
+                .any(|c| { matches!(c, Call::AddInbound { tag } if tag == &local_tag) })
+        );
+        assert!(
+            !calls_snapshot
+                .iter()
+                .any(|c| { matches!(c, Call::AddInbound { tag } if tag == &remote_tag) })
+        );
+        assert!(
+            !calls_snapshot
+                .iter()
+                .any(|c| { matches!(c, Call::AlterInbound { tag, .. } if tag == &remote_tag) })
+        );
 
         calls.lock().await.clear();
         let mut pending = PendingBatch::default();
         pending.add(ReconcileRequest::RemoveInbound { tag: remote_tag });
         reconcile_once(&config, &store, &pending).await.unwrap();
         let calls_snapshot = calls.lock().await.clone();
-        assert!(!calls_snapshot.iter().any(|c| matches!(c, Call::RemoveInbound { .. })));
+        assert!(
+            !calls_snapshot
+                .iter()
+                .any(|c| matches!(c, Call::RemoveInbound { .. }))
+        );
 
         let _ = shutdown.send(());
     }
@@ -1005,6 +1055,58 @@ mod tests {
 
         let calls = calls.lock().await.clone();
         assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == &format!("grant:{grant_id}"))));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn quota_banned_enabled_grant_removes_user_and_does_not_add() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint_tag, grant_id) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id.clone(),
+                    endpoint.endpoint_id.clone(),
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            store
+                .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+                .unwrap();
+            (endpoint.tag, grant.grant_id)
+        };
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(&config, &store, &pending).await.unwrap();
+
+        let email = format!("grant:{grant_id}");
+        let calls = calls.lock().await.clone();
+        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email: e } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && e == &email)));
+        assert!(!calls.iter().any(|c| matches!(c, Call::AlterInbound { op_type, email: e, .. } if op_type == "xray.app.proxyman.command.AddUserOperation" && e == &email)));
 
         let _ = shutdown.send(());
     }

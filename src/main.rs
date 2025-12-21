@@ -169,8 +169,6 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
     let store = Arc::new(Mutex::new(store));
 
     let reconcile = xp::reconcile::spawn_reconciler(config_arc.clone(), store.clone());
-    let _quota =
-        xp::quota::spawn_quota_worker(config_arc.clone(), store.clone(), reconcile.clone());
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
     let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
@@ -199,7 +197,20 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
             .await?;
     }
 
-    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> = Arc::new(raft.clone());
+    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
+        Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
+            raft.raft(),
+            config.admin_token.clone(),
+            &cluster_ca_pem,
+            Some(&node_cert_pem),
+            Some(&node_key_pem),
+        )?);
+    let _quota = xp::quota::spawn_quota_worker(
+        config_arc.clone(),
+        store.clone(),
+        reconcile.clone(),
+        raft_facade.clone(),
+    );
 
     let app = xp::http::build_router(
         config.clone(),

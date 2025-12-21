@@ -12,7 +12,7 @@ use crate::{
     raft::types::ClientResponse,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, JsonSnapshotStore},
+    state::{DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
 };
 
 use openraft::entry::RaftPayload as _;
@@ -469,9 +469,21 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                         })?;
                                     }
                                 }
+                                (DesiredStateCommand::UpdateGrantFields { grant_id, .. }, _) => {
+                                    store.clear_quota_banned(grant_id).map_err(|e| {
+                                        io_err(
+                                            ErrorSubject::StateMachine,
+                                            ErrorVerb::Write,
+                                            std::io::Error::other(e.to_string()),
+                                        )
+                                    })?;
+                                }
                                 (
-                                    DesiredStateCommand::UpdateGrantFields { grant_id, .. }
-                                    | DesiredStateCommand::SetGrantEnabled { grant_id, .. },
+                                    DesiredStateCommand::SetGrantEnabled {
+                                        grant_id,
+                                        source: GrantEnabledSource::Manual,
+                                        ..
+                                    },
                                     _,
                                 ) => {
                                     store.clear_quota_banned(grant_id).map_err(|e| {
@@ -668,4 +680,108 @@ async fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     })
     .await
     .expect("spawn_blocking write_bytes")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::Path, sync::Arc};
+
+    use serde_json::json;
+    use tokio::sync::Mutex;
+
+    use super::*;
+    use crate::{
+        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        state::{GrantEnabledSource, JsonSnapshotStore, StoreInit},
+    };
+
+    fn test_store_init(tmp_dir: &Path) -> StoreInit {
+        StoreInit {
+            data_dir: tmp_dir.to_path_buf(),
+            bootstrap_node_id: None,
+            bootstrap_node_name: "node-1".to_string(),
+            bootstrap_public_domain: "".to_string(),
+            bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        }
+    }
+
+    fn store_with_banned_grant(tmp_dir: &Path) -> (Arc<Mutex<JsonSnapshotStore>>, String) {
+        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp_dir)).unwrap();
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let user = store
+            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+            .unwrap();
+        let endpoint = store
+            .create_endpoint(
+                node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let grant = store
+            .create_grant(
+                user.user_id,
+                endpoint.endpoint_id,
+                1,
+                CyclePolicy::InheritUser,
+                None,
+                None,
+            )
+            .unwrap();
+        store
+            .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+            .unwrap();
+        (Arc::new(Mutex::new(store)), grant.grant_id)
+    }
+
+    fn build_entry(cmd: DesiredStateCommand, index: u64) -> openraft::impls::Entry<TypeConfig> {
+        let log_id = LogId::new(openraft::CommittedLeaderId::new(1, 1), index);
+        openraft::impls::Entry {
+            log_id,
+            payload: EntryPayload::Normal(cmd),
+        }
+    }
+
+    #[tokio::test]
+    async fn set_grant_enabled_manual_clears_quota_banned_state_machine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (store, grant_id) = store_with_banned_grant(tmp.path());
+        let reconcile = ReconcileHandle::noop();
+        let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+            .await
+            .unwrap();
+
+        let cmd = DesiredStateCommand::SetGrantEnabled {
+            grant_id: grant_id.clone(),
+            enabled: false,
+            source: GrantEnabledSource::Manual,
+        };
+        let entry = build_entry(cmd, 1);
+        state_machine.apply(vec![entry]).await.unwrap();
+
+        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
+        assert!(!usage.quota_banned);
+    }
+
+    #[tokio::test]
+    async fn set_grant_enabled_quota_keeps_quota_banned_state_machine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (store, grant_id) = store_with_banned_grant(tmp.path());
+        let reconcile = ReconcileHandle::noop();
+        let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+            .await
+            .unwrap();
+
+        let cmd = DesiredStateCommand::SetGrantEnabled {
+            grant_id: grant_id.clone(),
+            enabled: false,
+            source: GrantEnabledSource::Quota,
+        };
+        let entry = build_entry(cmd, 1);
+        state_machine.apply(vec![entry]).await.unwrap();
+
+        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
+        assert!(usage.quota_banned);
+    }
 }

@@ -245,7 +245,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
-        raft,
+        raft.clone(),
         None,
     );
 
@@ -443,7 +443,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
-        raft,
+        raft.clone(),
         None,
     );
 
@@ -535,7 +535,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let now = chrono::Utc::now();
-    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
+    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile, &raft)
         .await
         .unwrap();
 
@@ -561,7 +561,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let later = now + chrono::Duration::days(40);
-    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile)
+    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile, &raft)
         .await
         .unwrap();
 

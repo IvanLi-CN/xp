@@ -110,6 +110,14 @@ impl PersistedState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantEnabledSource {
+    #[default]
+    Manual,
+    Quota,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateCommand {
@@ -148,6 +156,8 @@ pub enum DesiredStateCommand {
     SetGrantEnabled {
         grant_id: String,
         enabled: bool,
+        #[serde(default)]
+        source: GrantEnabledSource,
     },
 }
 
@@ -265,7 +275,11 @@ impl DesiredStateCommand {
                     grant: Some(grant.clone()),
                 })
             }
-            Self::SetGrantEnabled { grant_id, enabled } => {
+            Self::SetGrantEnabled {
+                grant_id,
+                enabled,
+                source: _,
+            } => {
                 let grant = match state.grants.get_mut(grant_id) {
                     Some(grant) => grant,
                     None => {
@@ -844,10 +858,12 @@ impl JsonSnapshotStore {
         &mut self,
         grant_id: &str,
         enabled: bool,
+        source: GrantEnabledSource,
     ) -> Result<Option<Grant>, StoreError> {
         let out = DesiredStateCommand::SetGrantEnabled {
             grant_id: grant_id.to_string(),
             enabled,
+            source,
         }
         .apply(&mut self.state)?;
         let DesiredStateApplyResult::GrantEnabledSet { grant, changed } = out else {
@@ -1015,6 +1031,23 @@ mod tests {
         assert_eq!(node.public_domain, "");
         assert_eq!(node.api_base_url, "https://127.0.0.1:62416");
         assert!(is_ulid_string(&node.node_id));
+    }
+
+    #[test]
+    fn set_grant_enabled_missing_source_defaults_manual() {
+        let cmd: DesiredStateCommand = serde_json::from_value(json!({
+            "type": "set_grant_enabled",
+            "grant_id": "grant_1",
+            "enabled": false
+        }))
+        .unwrap();
+
+        match cmd {
+            DesiredStateCommand::SetGrantEnabled { source, .. } => {
+                assert_eq!(source, GrantEnabledSource::Manual);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

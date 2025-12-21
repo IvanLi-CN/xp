@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { fetchAdminAlerts } from "../api/adminAlerts";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
@@ -37,6 +38,12 @@ export function HomePage() {
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+
+	const adminAlerts = useQuery({
+		queryKey: ["adminAlerts", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
 	return (
@@ -175,6 +182,98 @@ export function HomePage() {
 							variant="secondary"
 							loading={clusterInfo.isFetching}
 							onClick={() => clusterInfo.refetch()}
+						>
+							Refresh
+						</Button>
+					</div>
+				</div>
+			</div>
+
+			<div className="card bg-base-100 shadow">
+				<div className="card-body">
+					<h2 className="card-title">Alerts</h2>
+					{adminToken.length === 0 ? (
+						<p className="text-warning">Please set admin token.</p>
+					) : adminAlerts.isLoading ? (
+						<p>Loading...</p>
+					) : adminAlerts.isError ? (
+						<div className="space-y-1">
+							<p className="text-error">Failed to load alerts.</p>
+							{isBackendApiError(adminAlerts.error) ? (
+								<p className="font-mono text-sm opacity-70">
+									{adminAlerts.error.status} {adminAlerts.error.code}:{" "}
+									{adminAlerts.error.message}
+								</p>
+							) : (
+								<p className="font-mono text-sm opacity-70">
+									{String(adminAlerts.error)}
+								</p>
+							)}
+						</div>
+					) : !adminAlerts.data ? (
+						<p className="text-sm opacity-70">No data.</p>
+					) : (
+						<div className="space-y-3">
+							<p>
+								Alerts count:{" "}
+								<span className="font-mono">
+									{adminAlerts.data.items.length}
+								</span>
+							</p>
+							{adminAlerts.data.partial ? (
+								<div className="space-y-1">
+									<p className="text-warning font-semibold">
+										Warning: results are partial due to unreachable nodes.
+									</p>
+									<p className="font-mono text-sm">
+										unreachable_nodes:{" "}
+										{adminAlerts.data.unreachable_nodes.length > 0
+											? adminAlerts.data.unreachable_nodes.join(", ")
+											: "none"}
+									</p>
+								</div>
+							) : null}
+							{adminAlerts.data.items.length > 0 ? (
+								<div className="space-y-2">
+									<p className="text-error font-semibold">
+										Warning: {adminAlerts.data.items.length} alert(s) detected.
+									</p>
+									<div className="overflow-x-auto">
+										<table className="table table-zebra table-sm">
+											<thead>
+												<tr>
+													<th>type</th>
+													<th>grant_id</th>
+													<th>message</th>
+													<th>action_hint</th>
+												</tr>
+											</thead>
+											<tbody>
+												{adminAlerts.data.items.map((item) => (
+													<tr
+														key={`${item.type}-${item.grant_id}-${item.endpoint_id}-${item.owner_node_id}`}
+													>
+														<td>{item.type}</td>
+														<td className="font-mono">{item.grant_id}</td>
+														<td>{item.message}</td>
+														<td>{item.action_hint}</td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								</div>
+							) : (
+								<p className="text-sm opacity-70">No alerts.</p>
+							)}
+						</div>
+					)}
+					<div className="card-actions justify-end">
+						<Button
+							variant="secondary"
+							disabled={adminToken.length === 0}
+							loading={adminAlerts.isFetching}
+							onClick={() => adminAlerts.refetch()}
 						>
 							Refresh
 						</Button>
