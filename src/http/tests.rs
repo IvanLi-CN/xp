@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
-    domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+    domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     raft::{
@@ -1087,6 +1087,191 @@ async fn grant_usage_includes_warning_fields() {
 }
 
 #[tokio::test]
+async fn grant_usage_warns_on_quota_mismatch() {
+    #[derive(Debug, Default)]
+    struct TestStatsService;
+
+    #[tonic::async_trait]
+    impl StatsService for TestStatsService {
+        async fn get_stats(
+            &self,
+            request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let value = if req.name.ends_with(">>>uplink") {
+                100
+            } else if req.name.ends_with(">>>downlink") {
+                200
+            } else {
+                return Err(tonic::Status::not_found("missing stat"));
+            };
+            Ok(tonic::Response::new(GetStatsResponse {
+                stat: Some(Stat {
+                    name: req.name,
+                    value,
+                }),
+            }))
+        }
+
+        async fn get_stats_online(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_stats_online"))
+        }
+
+        async fn query_stats(
+            &self,
+            _request: tonic::Request<QueryStatsRequest>,
+        ) -> Result<tonic::Response<QueryStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("query_stats"))
+        }
+
+        async fn get_sys_stats(
+            &self,
+            _request: tonic::Request<SysStatsRequest>,
+        ) -> Result<tonic::Response<SysStatsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_sys_stats"))
+        }
+
+        async fn get_stats_online_ip_list(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<tonic::Response<GetStatsOnlineIpListResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("get_stats_online_ip_list"))
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let xray_api_addr = listener.local_addr().unwrap();
+    let incoming = TcpListenerStream::new(listener);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(StatsServiceServer::new(TestStatsService::default()))
+            .serve_with_incoming_shutdown(incoming, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let mut config = test_config(tmp.path().to_path_buf());
+    config.xray_api_addr = xray_api_addr;
+
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.public_domain.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let raft = leader_raft(store.clone(), &cluster);
+    let app = build_router(
+        config,
+        store.clone(),
+        ReconcileHandle::noop(),
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+    );
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    let user = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    let endpoint = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user["user_id"],
+              "endpoint_id": endpoint["endpoint_id"],
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    let grant = body_json(res).await;
+    let grant_id = grant["grant_id"].as_str().unwrap();
+
+    let banned_at = "2025-12-18T00:00:00Z".to_string();
+    {
+        let mut store = store.lock().await;
+        store.set_quota_banned(grant_id, banned_at.clone()).unwrap();
+    }
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/grants/{grant_id}/usage"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["grant_id"], grant_id);
+    assert_eq!(json["desired_enabled"], true);
+    assert_eq!(json["quota_banned"], true);
+    assert_eq!(json["quota_banned_at"], banned_at);
+    assert_eq!(json["effective_enabled"], false);
+    assert_eq!(
+        json["warning"],
+        "quota enforced on owner node but desired state is still enabled"
+    );
+
+    let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
 async fn subscription_endpoint_does_not_require_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
@@ -1380,6 +1565,31 @@ async fn admin_alerts_local_reports_quota_mismatch() {
         item["action_hint"],
         "check raft leader/quorum and retry status"
     );
+}
+
+#[tokio::test]
+async fn admin_alerts_reports_partial_when_node_unreachable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let remote_node_id = new_ulid_string();
+    {
+        let mut store = store.lock().await;
+        store
+            .upsert_node(Node {
+                node_id: remote_node_id.clone(),
+                node_name: "node-unreachable".to_string(),
+                public_domain: "".to_string(),
+                api_base_url: "https://127.0.0.1:1".to_string(),
+            })
+            .unwrap();
+    }
+
+    let res = app.oneshot(req_authed("GET", "/api/admin/alerts")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["partial"], true);
+    assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
 }
 
 #[tokio::test]
