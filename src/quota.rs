@@ -738,6 +738,70 @@ mod tests {
         (Arc::new(raft), calls)
     }
 
+    #[derive(Clone)]
+    struct FailOnceRaft {
+        inner: Arc<dyn RaftFacade>,
+        failed: Arc<Mutex<bool>>,
+    }
+
+    impl RaftFacade for FailOnceRaft {
+        fn metrics(
+            &self,
+        ) -> watch::Receiver<
+            openraft::RaftMetrics<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
+        > {
+            self.inner.metrics()
+        }
+
+        fn client_write(
+            &self,
+            cmd: DesiredStateCommand,
+        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>>
+        {
+            let inner = self.inner.clone();
+            let failed = self.failed.clone();
+            Box::pin(async move {
+                if matches!(
+                    cmd,
+                    DesiredStateCommand::SetGrantEnabled {
+                        enabled: false,
+                        source: GrantEnabledSource::Quota,
+                        ..
+                    }
+                ) {
+                    let mut failed = failed.lock().await;
+                    if !*failed {
+                        *failed = true;
+                        return Err(anyhow::anyhow!("injected raft failure"));
+                    }
+                }
+                inner.client_write(cmd).await
+            })
+        }
+
+        fn add_learner(
+            &self,
+            node_id: crate::raft::types::NodeId,
+            node: crate::raft::types::NodeMeta,
+        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+            self.inner.add_learner(node_id, node)
+        }
+
+        fn add_voters(
+            &self,
+            node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
+        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+            self.inner.add_voters(node_ids)
+        }
+    }
+
+    fn fail_once_raft(store: Arc<Mutex<JsonSnapshotStore>>) -> Arc<dyn RaftFacade> {
+        Arc::new(FailOnceRaft {
+            inner: test_raft(store),
+            failed: Arc::new(Mutex::new(false)),
+        })
+    }
+
     #[tokio::test]
     async fn poll_updates_usage() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
@@ -1061,6 +1125,92 @@ mod tests {
                 } if cmd_grant_id == &grant_id
             )
         }));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn quota_raft_retry_disables_grant_after_first_failure() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = fail_once_raft(store.clone());
+
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let grant_id = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let user = store
+                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
+                .unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    user.user_id,
+                    endpoint.endpoint_id,
+                    0,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let (start, end) =
+                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, now)
+                    .unwrap();
+            store
+                .apply_grant_usage_sample(
+                    &grant.grant_id,
+                    start.to_rfc3339(),
+                    end.to_rfc3339(),
+                    0,
+                    0,
+                    now.to_rfc3339(),
+                )
+                .unwrap();
+            store
+                .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+                .unwrap();
+            grant.grant_id
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let grant = store_guard.get_grant(&grant_id).unwrap();
+        assert!(grant.enabled);
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert!(usage.quota_banned);
+        drop(store_guard);
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let grant = store_guard.get_grant(&grant_id).unwrap();
+        assert!(!grant.enabled);
 
         let _ = shutdown.send(());
     }
