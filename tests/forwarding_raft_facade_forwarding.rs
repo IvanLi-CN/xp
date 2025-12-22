@@ -67,9 +67,7 @@ async fn spawn_server(listener: TcpListener, router: axum::Router) -> anyhow::Re
     })
 }
 
-async fn spawn_raft_rpc_server(
-    raft: openraft::Raft<TypeConfig>,
-) -> anyhow::Result<ServerHandle> {
+async fn spawn_raft_rpc_server(raft: openraft::Raft<TypeConfig>) -> anyhow::Result<ServerHandle> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .context("bind raft rpc listener")?;

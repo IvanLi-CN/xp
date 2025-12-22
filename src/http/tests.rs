@@ -545,6 +545,332 @@ async fn create_endpoint_then_list_contains_it() {
 }
 
 #[tokio::test]
+async fn patch_admin_node_updates_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node = nodes["items"][0].as_object().unwrap();
+    let node_id = node["node_id"].as_str().unwrap();
+    let original_node_name = node["node_name"].as_str().unwrap();
+    let original_api_base_url = node["api_base_url"].as_str().unwrap();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "public_domain": "node.example.com"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["node_id"], node_id);
+    assert_eq!(updated["node_name"], original_node_name);
+    assert_eq!(updated["public_domain"], "node.example.com");
+    assert_eq!(updated["api_base_url"], original_api_base_url);
+}
+
+#[tokio::test]
+async fn patch_admin_node_unknown_returns_404() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let node_id = new_ulid_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "public_domain": "node.example.com"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn patch_admin_user_updates_fields_preserves_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+    let token = created["subscription_token"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            json!({
+              "display_name": "alice-2"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["user_id"], user_id);
+    assert_eq!(updated["display_name"], "alice-2");
+    assert_eq!(updated["cycle_policy_default"], "by_user");
+    assert_eq!(updated["cycle_day_of_month_default"], 1);
+    assert_eq!(updated["subscription_token"], token);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            json!({
+              "cycle_policy_default": "by_node",
+              "cycle_day_of_month_default": 15
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["display_name"], "alice-2");
+    assert_eq!(updated["cycle_policy_default"], "by_node");
+    assert_eq!(updated["cycle_day_of_month_default"], 15);
+}
+
+#[tokio::test]
+async fn patch_admin_user_unknown_returns_404() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let user_id = new_ulid_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn patch_admin_endpoint_vless_updates_meta_and_port() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "public_domain": "example.com",
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+    let reality_keys = created["meta"]["reality_keys"].clone();
+    let short_ids = created["meta"]["short_ids"].clone();
+    let active_short_id = created["meta"]["active_short_id"].clone();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "port": 8443
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["endpoint_id"], endpoint_id);
+    assert_eq!(updated["port"], 8443);
+    assert_eq!(updated["meta"]["public_domain"], "example.com");
+    assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
+    assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
+    assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
+    assert_eq!(updated["meta"]["reality_keys"], reality_keys);
+    assert_eq!(updated["meta"]["short_ids"], short_ids);
+    assert_eq!(updated["meta"]["active_short_id"], active_short_id);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "public_domain": "edge.example.com"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["endpoint_id"], endpoint_id);
+    assert_eq!(updated["port"], 8443);
+    assert_eq!(updated["meta"]["public_domain"], "edge.example.com");
+    assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
+    assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
+    assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
+    assert_eq!(updated["meta"]["reality_keys"], reality_keys);
+    assert_eq!(updated["meta"]["short_ids"], short_ids);
+    assert_eq!(updated["meta"]["active_short_id"], active_short_id);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "reality": {
+                "dest": "edge.example.com:443",
+                "server_names": ["edge.example.com"],
+                "fingerprint": "firefox"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["endpoint_id"], endpoint_id);
+    assert_eq!(updated["port"], 8443);
+    assert_eq!(updated["meta"]["public_domain"], "edge.example.com");
+    assert_eq!(updated["meta"]["reality"]["dest"], "edge.example.com:443");
+    assert_eq!(
+        updated["meta"]["reality"]["server_names"][0],
+        "edge.example.com"
+    );
+    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
+    assert_eq!(updated["meta"]["reality_keys"], reality_keys);
+    assert_eq!(updated["meta"]["short_ids"], short_ids);
+    assert_eq!(updated["meta"]["active_short_id"], active_short_id);
+}
+
+#[tokio::test]
+async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "port": 8389,
+              "public_domain": "example.com",
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn patch_admin_endpoint_unknown_returns_404() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let endpoint_id = new_ulid_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
 async fn create_grant_with_missing_resources_returns_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -645,6 +971,106 @@ async fn patch_grant_validates_cycle_day_of_month_rules() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn patch_admin_grant_updates_note_and_allows_clear() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    let user = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    let endpoint = body_json(res).await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user["user_id"],
+              "endpoint_id": endpoint["endpoint_id"],
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null,
+              "note": null
+            }),
+        ))
+        .await
+        .unwrap();
+    let grant = body_json(res).await;
+    let grant_id = grant["grant_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/grants/{grant_id}"),
+            json!({
+              "enabled": true,
+              "note": "alice@node-1",
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["note"], "alice@node-1");
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/grants/{grant_id}"),
+            json!({
+              "enabled": true,
+              "note": null,
+              "quota_limit_bytes": 0,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert!(updated["note"].is_null());
 }
 
 #[tokio::test]
@@ -1585,7 +2011,10 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
             .unwrap();
     }
 
-    let res = app.oneshot(req_authed("GET", "/api/admin/alerts")).await.unwrap();
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/alerts"))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
     assert_eq!(json["partial"], true);

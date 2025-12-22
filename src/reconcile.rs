@@ -1041,7 +1041,14 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .update_grant(&grant.grant_id, false, 1, CyclePolicy::InheritUser, None)
+                .update_grant(
+                    &grant.grant_id,
+                    false,
+                    1,
+                    CyclePolicy::InheritUser,
+                    None,
+                    None,
+                )
                 .unwrap()
                 .unwrap();
             (endpoint.tag, grant.grant_id)

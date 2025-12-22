@@ -110,6 +110,14 @@ impl PersistedState {
     }
 }
 
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GrantEnabledSource {
@@ -152,6 +160,8 @@ pub enum DesiredStateCommand {
         quota_limit_bytes: u64,
         cycle_policy: CyclePolicy,
         cycle_day_of_month: Option<u8>,
+        #[serde(default, deserialize_with = "deserialize_optional_string")]
+        note: Option<Option<String>>,
     },
     SetGrantEnabled {
         grant_id: String,
@@ -250,6 +260,7 @@ impl DesiredStateCommand {
                 quota_limit_bytes,
                 cycle_policy,
                 cycle_day_of_month,
+                note,
             } => {
                 let grant = match state.grants.get_mut(grant_id) {
                     Some(grant) => grant,
@@ -270,6 +281,9 @@ impl DesiredStateCommand {
                 grant.quota_limit_bytes = *quota_limit_bytes;
                 grant.cycle_policy = cycle_policy.clone();
                 grant.cycle_day_of_month = *cycle_day_of_month;
+                if let Some(note) = note {
+                    grant.note = note.clone();
+                }
 
                 Ok(DesiredStateApplyResult::GrantUpdated {
                     grant: Some(grant.clone()),
@@ -836,6 +850,7 @@ impl JsonSnapshotStore {
         quota_limit_bytes: u64,
         cycle_policy: CyclePolicy,
         cycle_day_of_month: Option<u8>,
+        note: Option<Option<String>>,
     ) -> Result<Option<Grant>, StoreError> {
         let out = DesiredStateCommand::UpdateGrantFields {
             grant_id: grant_id.to_string(),
@@ -843,6 +858,7 @@ impl JsonSnapshotStore {
             quota_limit_bytes,
             cycle_policy,
             cycle_day_of_month,
+            note,
         }
         .apply(&mut self.state)?;
         let DesiredStateApplyResult::GrantUpdated { grant } = out else {
@@ -1430,6 +1446,7 @@ mod tests {
             quota_limit_bytes: 123,
             cycle_policy: CyclePolicy::InheritUser,
             cycle_day_of_month: None,
+            note: None,
         }
         .apply(&mut state)
         .unwrap();
@@ -1483,7 +1500,14 @@ mod tests {
         assert!(store.get_grant_usage(&grant.grant_id).is_some());
 
         let updated = store
-            .update_grant(&grant.grant_id, false, 2048, CyclePolicy::InheritUser, None)
+            .update_grant(
+                &grant.grant_id,
+                false,
+                2048,
+                CyclePolicy::InheritUser,
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
         assert!(!updated.enabled);

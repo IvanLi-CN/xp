@@ -444,6 +444,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
+                    let rebuild_inbound = match &cmd {
+                        DesiredStateCommand::UpsertEndpoint { endpoint } => store
+                            .get_endpoint(&endpoint.endpoint_id)
+                            .filter(|existing| {
+                                existing.port != endpoint.port || existing.meta != endpoint.meta
+                            })
+                            .map(|_| endpoint.endpoint_id.clone()),
+                        _ => None,
+                    };
                     match cmd.apply(store.state_mut()) {
                         Ok(apply_result) => {
                             store.save().map_err(|e| {
@@ -453,6 +462,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
+                            if let Some(endpoint_id) = rebuild_inbound {
+                                self.reconcile.request_rebuild_inbound(endpoint_id);
+                            }
 
                             match (&cmd, &apply_result) {
                                 (
@@ -687,11 +699,12 @@ mod tests {
     use std::{path::Path, sync::Arc};
 
     use serde_json::json;
-    use tokio::sync::Mutex;
+    use tokio::sync::{Mutex, mpsc};
 
     use super::*;
     use crate::{
         domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        reconcile::ReconcileRequest,
         state::{GrantEnabledSource, JsonSnapshotStore, StoreInit},
     };
 
@@ -741,6 +754,59 @@ mod tests {
             log_id,
             payload: EntryPayload::Normal(cmd),
         }
+    }
+
+    #[tokio::test]
+    async fn upsert_endpoint_change_requests_rebuild_inbound() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let reconcile = ReconcileHandle::from_sender(tx);
+        let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let endpoint_id = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+            let endpoint = store
+                .create_endpoint(
+                    node_id,
+                    EndpointKind::VlessRealityVisionTcp,
+                    443,
+                    json!({
+                        "public_domain": "example.com",
+                        "reality": {
+                            "dest": "example.com:443",
+                            "server_names": ["example.com"],
+                            "fingerprint": "chrome"
+                        }
+                    }),
+                )
+                .unwrap();
+            endpoint.endpoint_id
+        };
+
+        let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+            .await
+            .unwrap();
+
+        let mut endpoint = {
+            let store = store.lock().await;
+            store.get_endpoint(&endpoint_id).unwrap()
+        };
+        endpoint.port = 8443;
+
+        let entry = build_entry(DesiredStateCommand::UpsertEndpoint { endpoint }, 1);
+        state_machine.apply(vec![entry]).await.unwrap();
+
+        let mut requests = Vec::new();
+        while let Ok(req) = rx.try_recv() {
+            requests.push(req);
+        }
+        assert!(requests.iter().any(|req| {
+            matches!(
+                req,
+                ReconcileRequest::RebuildInbound { endpoint_id: id } if id == &endpoint_id
+            )
+        }));
     }
 
     #[tokio::test]
