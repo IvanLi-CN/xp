@@ -53,6 +53,7 @@ export function GrantDetailsPage() {
 	const [note, setNote] = useState("");
 	const [formError, setFormError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [disableOpen, setDisableOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
@@ -126,6 +127,60 @@ export function GrantDetailsPage() {
 		isBackendApiError(usageQuery.error) &&
 		usageQuery.error.status === 501;
 
+	const handleSave = async (confirmedDisable: boolean) => {
+		if (isSaving) return;
+		if (quotaLimit < 0) {
+			setFormError("Quota limit must be zero or greater.");
+			return;
+		}
+		if (cyclePolicy !== "inherit_user") {
+			if (cycleDay < 1 || cycleDay > 31) {
+				setFormError("Cycle day must be between 1 and 31.");
+				return;
+			}
+		}
+
+		if (!confirmedDisable && grant.enabled && !enabled) {
+			setDisableOpen(true);
+			return;
+		}
+
+		setFormError(null);
+		setIsSaving(true);
+		try {
+			const payload: AdminGrantPatchRequest = {
+				enabled,
+				quota_limit_bytes: quotaLimit,
+				cycle_policy: cyclePolicy,
+				cycle_day_of_month: cyclePolicy === "inherit_user" ? null : cycleDay,
+			};
+			const currentNote = grant.note ?? null;
+			const nextNote = note.trim() ? note.trim() : null;
+			if (nextNote !== currentNote) {
+				payload.note = nextNote;
+			}
+			const updated = await patchAdminGrant(
+				adminToken,
+				grant.grant_id,
+				payload,
+			);
+			queryClient.setQueryData(["adminGrant", adminToken, grantId], updated);
+			pushToast({
+				variant: "success",
+				message: "Grant updated.",
+			});
+		} catch (err) {
+			setFormError(formatError(err));
+			pushToast({
+				variant: "error",
+				message: "Failed to update grant.",
+			});
+		} finally {
+			setIsSaving(false);
+			setDisableOpen(false);
+		}
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="flex flex-wrap items-center justify-between gap-3">
@@ -144,53 +199,7 @@ export function GrantDetailsPage() {
 				className="card bg-base-100 shadow"
 				onSubmit={async (event) => {
 					event.preventDefault();
-					if (quotaLimit < 0) {
-						setFormError("Quota limit must be zero or greater.");
-						return;
-					}
-					if (cyclePolicy !== "inherit_user") {
-						if (cycleDay < 1 || cycleDay > 31) {
-							setFormError("Cycle day must be between 1 and 31.");
-							return;
-						}
-					}
-					setFormError(null);
-					setIsSaving(true);
-					try {
-						const payload: AdminGrantPatchRequest = {
-							enabled,
-							quota_limit_bytes: quotaLimit,
-							cycle_policy: cyclePolicy,
-							cycle_day_of_month:
-								cyclePolicy === "inherit_user" ? null : cycleDay,
-						};
-						const currentNote = grant.note ?? null;
-						const nextNote = note.trim() ? note.trim() : null;
-						if (nextNote !== currentNote) {
-							payload.note = nextNote;
-						}
-						const updated = await patchAdminGrant(
-							adminToken,
-							grant.grant_id,
-							payload,
-						);
-						queryClient.setQueryData(
-							["adminGrant", adminToken, grantId],
-							updated,
-						);
-						pushToast({
-							variant: "success",
-							message: "Grant updated.",
-						});
-					} catch (err) {
-						setFormError(formatError(err));
-						pushToast({
-							variant: "error",
-							message: "Failed to update grant.",
-						});
-					} finally {
-						setIsSaving(false);
-					}
+					await handleSave(false);
 				}}
 			>
 				<div className="card-body space-y-4">
@@ -416,6 +425,16 @@ export function GrantDetailsPage() {
 				</div>
 			</div>
 
+			<ConfirmDialog
+				open={disableOpen}
+				title="Disable grant"
+				description="Disabling a grant revokes access immediately. Are you sure?"
+				confirmLabel={isSaving ? "Disabling..." : "Disable"}
+				onCancel={() => setDisableOpen(false)}
+				onConfirm={() => {
+					void handleSave(true);
+				}}
+			/>
 			<ConfirmDialog
 				open={deleteOpen}
 				title="Delete grant"
