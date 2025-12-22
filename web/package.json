@@ -14,7 +14,7 @@
 		"test:watch": "vitest",
 		"storybook": "storybook dev -p 60081 --host 127.0.0.1",
 		"build-storybook": "storybook build",
-		"test-storybook": "storybook test --url http://127.0.0.1:60081",
+		"test-storybook": "test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole",
 		"test:e2e": "playwright test"
 	},
 	"dependencies": {

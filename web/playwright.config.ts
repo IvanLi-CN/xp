@@ -23,7 +23,7 @@ export default defineConfig({
 		viewport: { width: 1280, height: 900 },
 	},
 	webServer: {
-		command: "npm run dev",
+		command: "bun run dev",
 		url: baseURL,
 		reuseExistingServer: !process.env.CI,
 	},

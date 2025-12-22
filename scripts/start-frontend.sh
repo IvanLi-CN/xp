@@ -2,4 +2,4 @@
 set -eu
 
 cd web
-npm run dev
+bun run dev
