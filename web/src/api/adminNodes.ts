@@ -17,6 +17,12 @@ export const AdminNodesResponseSchema = z.object({
 
 export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 
+export type AdminNodePatchRequest = {
+	node_name?: string;
+	public_domain?: string;
+	api_base_url?: string;
+};
+
 export async function fetchAdminNodes(
 	adminToken: string,
 	signal?: AbortSignal,
@@ -34,4 +40,47 @@ export async function fetchAdminNodes(
 
 	const json: unknown = await res.json();
 	return AdminNodesResponseSchema.parse(json);
+}
+
+export async function fetchAdminNode(
+	adminToken: string,
+	nodeId: string,
+	signal?: AbortSignal,
+): Promise<AdminNode> {
+	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
+		method: "GET",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+		},
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminNodeSchema.parse(json);
+}
+
+export async function patchAdminNode(
+	adminToken: string,
+	nodeId: string,
+	payload: AdminNodePatchRequest,
+	signal?: AbortSignal,
+): Promise<AdminNode> {
+	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
+		method: "PATCH",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(payload),
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminNodeSchema.parse(json);
 }
