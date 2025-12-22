@@ -11,18 +11,20 @@
 
 ## 2. 前端质量门禁（web/）
 
+- Web 工具链：Bun（版本由仓库根 `.bun-version` 固定）；命令优先使用 `bun run ...` 与 `bunx --no-install ...`。
+
 ### 2.1 Biome（格式化 + lint）
 
 - 使用 Biome 完全替代 ESLint/Prettier
 - pre-commit 建议对 staged 文件执行并自动修复：
-  - `npx @biomejs/biome check --write --staged --files-ignore-unknown=true --no-errors-on-unmatched`
+  - `cd web && bunx --no-install biome check --write --staged --files-ignore-unknown=true --no-errors-on-unmatched`
 - 规则要求：
   - 禁止未使用变量（由 Biome/TS 配合）
   - 禁止明显的可疑模式（例如空依赖的 hooks 等）
 
 ### 2.2 TypeScript 类型检查
 
-- `npx tsc -b`（project references）
+- `cd web && bunx --no-install tsc -b`（project references）
 - 要求：CI 中 `tsc -b` 必须 0 error
 
 ### 2.3 Zod（运行时数据校验，必须）
@@ -75,8 +77,8 @@
 
 建议方案：
 
-- `storybook build` 生成静态站点
-- 运行 `@storybook/test-runner`（Playwright）对 stories 做 smoke/interaction 测试
+- 启动 Storybook dev server（固定 host/port）
+- 运行 `test-storybook`（`@storybook/test-runner`，Playwright）对 stories 做 smoke/interaction 测试
 
 最低要求（MVP）：
 
@@ -153,23 +155,24 @@ scripts/e2e/run-local-xray-e2e.sh
 建议的 hooks（摘要）：
 
 - pre-commit（并行）：
-  - `biome check --write --staged`（stage_fixed）
-  - `tsc -b`
-  - `dprint fmt`（仅 Markdown，stage_fixed）
+  - `cd web && bunx --no-install biome check --write --staged`（stage_fixed）
+  - `cd web && bunx --no-install tsc -b`
+  - `bunx --no-install dprint fmt`（仅 Markdown，stage_fixed）
   - `cargo fmt`（stage_fixed）
-  - `cargo clippy -D warnings`
-- commit-msg：commitlint（Conventional Commits，英文）
+  - `cargo clippy -- -D warnings`
+- commit-msg：`bunx --no-install commitlint --edit {1}`（Conventional Commits，英文）
 
 ## 6. CI 建议流水线（摘要）
 
 1. Web：
-   - `biome check`（不写入）
-   - `tsc -b`
-   - `vitest`
-   - `storybook build` + `test-runner`
+   - `cd web && bun run lint`（不写入）
+   - `cd web && bun run typecheck`
+   - `cd web && bun run test`
+   - `cd web && bun run storybook` + `cd web && bunx --no-install test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole`
+   - `cd web && bun run test:e2e`
 2. Rust：
    - `cargo fmt --check`
    - `cargo clippy -- -D warnings`
    - `cargo test`
 3. Docs：
-   - `dprint check`（或 fmt 后检查无 diff）
+   - `bunx --no-install dprint check`（或 fmt 后检查无 diff）

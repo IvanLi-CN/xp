@@ -65,8 +65,9 @@
 
 ## 7. 质量门禁与交付
 
+- 细化方案：`docs/plan/m7-quality-gates-delivery.md`
 - Rust：`cargo fmt` / `clippy -D warnings` / 单测 / 集成测试（mock xray gRPC）
-- Web：Biome check + `tsc -b` + 组件 stories 测试 + E2E
+- Web（Bun）：Biome check + `tsc -b` + 组件 stories 测试 + E2E
 - 运维：systemd/openrc 示例、最小配置模板、升级/回滚与数据目录说明
 
 ## 8. MVP 验收（DoD 摘要）
