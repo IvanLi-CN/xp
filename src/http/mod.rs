@@ -20,6 +20,7 @@ use crate::{
     config::Config,
     cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
     domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
+    protocol::VlessRealityVisionTcpEndpointMeta,
     raft::{
         app::RaftFacade,
         types::{
@@ -191,6 +192,24 @@ struct CreateUserRequest {
 }
 
 #[derive(Deserialize)]
+struct PatchNodeRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    node_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    public_domain: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    api_base_url: Option<Option<String>>,
+}
+
+#[derive(Deserialize)]
+struct PatchUserRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    display_name: Option<Option<String>>,
+    cycle_policy_default: Option<CyclePolicyDefault>,
+    cycle_day_of_month_default: Option<u8>,
+}
+
+#[derive(Deserialize)]
 struct CreateGrantRequest {
     user_id: String,
     endpoint_id: String,
@@ -203,6 +222,8 @@ struct CreateGrantRequest {
 #[derive(Deserialize)]
 struct PatchGrantRequest {
     enabled: bool,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    note: Option<Option<String>>,
     quota_limit_bytes: u64,
     cycle_policy: CyclePolicy,
     cycle_day_of_month: Option<u8>,
@@ -216,6 +237,24 @@ struct RealityConfig {
     fingerprint: String,
 }
 
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
+fn deserialize_optional_reality<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<RealityConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<RealityConfig>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CreateEndpointRequest {
@@ -227,6 +266,15 @@ enum CreateEndpointRequest {
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
     Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
+}
+
+#[derive(Deserialize)]
+struct PatchEndpointRequest {
+    port: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    public_domain: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_reality")]
+    reality: Option<Option<RealityConfig>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -259,14 +307,19 @@ pub fn build_router(
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/nodes", get(admin_list_nodes))
-        .route("/nodes/:node_id", get(admin_get_node))
+        .route(
+            "/nodes/:node_id",
+            get(admin_get_node).patch(admin_patch_node),
+        )
         .route(
             "/endpoints",
             post(admin_create_endpoint).get(admin_list_endpoints),
         )
         .route(
             "/endpoints/:endpoint_id",
-            get(admin_get_endpoint).delete(admin_delete_endpoint),
+            get(admin_get_endpoint)
+                .delete(admin_delete_endpoint)
+                .patch(admin_patch_endpoint),
         )
         .route(
             "/endpoints/:endpoint_id/rotate-shortid",
@@ -275,7 +328,9 @@ pub fn build_router(
         .route("/users", post(admin_create_user).get(admin_list_users))
         .route(
             "/users/:user_id",
-            get(admin_get_user).delete(admin_delete_user),
+            get(admin_get_user)
+                .delete(admin_delete_user)
+                .patch(admin_patch_user),
         )
         .route("/users/:user_id/reset-token", post(admin_reset_user_token))
         .route("/grants", post(admin_create_grant).get(admin_list_grants))
@@ -661,6 +716,45 @@ async fn admin_get_node(
     Ok(Json(node))
 }
 
+async fn admin_patch_node(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    ApiJson(req): ApiJson<PatchNodeRequest>,
+) -> Result<Json<Node>, ApiError> {
+    let mut node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    if let Some(node_name) = req.node_name {
+        let Some(node_name) = node_name else {
+            return Err(ApiError::invalid_request("node_name cannot be null"));
+        };
+        node.node_name = node_name;
+    }
+    if let Some(public_domain) = req.public_domain {
+        let Some(public_domain) = public_domain else {
+            return Err(ApiError::invalid_request("public_domain cannot be null"));
+        };
+        node.public_domain = public_domain;
+    }
+    if let Some(api_base_url) = req.api_base_url {
+        let Some(api_base_url) = api_base_url else {
+            return Err(ApiError::invalid_request("api_base_url cannot be null"));
+        };
+        node.api_base_url = api_base_url;
+    }
+
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
+    )
+    .await?;
+    Ok(Json(node))
+}
+
 async fn admin_create_endpoint(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateEndpointRequest>,
@@ -717,6 +811,73 @@ async fn admin_get_endpoint(
     let endpoint = store
         .get_endpoint(&endpoint_id)
         .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+    Ok(Json(endpoint))
+}
+
+async fn admin_patch_endpoint(
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
+    ApiJson(req): ApiJson<PatchEndpointRequest>,
+) -> Result<Json<Endpoint>, ApiError> {
+    let mut endpoint = {
+        let store = state.store.lock().await;
+        store
+            .get_endpoint(&endpoint_id)
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?
+    };
+
+    if let Some(port) = req.port {
+        endpoint.port = port;
+    }
+
+    match endpoint.kind {
+        EndpointKind::VlessRealityVisionTcp => {
+            let mut meta: VlessRealityVisionTcpEndpointMeta =
+                serde_json::from_value(endpoint.meta.clone())
+                    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+            if let Some(public_domain) = req.public_domain {
+                let Some(public_domain) = public_domain else {
+                    return Err(ApiError::invalid_request(
+                        "public_domain cannot be null for vless endpoints",
+                    ));
+                };
+                meta.public_domain = public_domain;
+            }
+
+            if let Some(reality) = req.reality {
+                let Some(reality) = reality else {
+                    return Err(ApiError::invalid_request(
+                        "reality cannot be null for vless endpoints",
+                    ));
+                };
+                meta.reality = crate::protocol::RealityConfig {
+                    dest: reality.dest,
+                    server_names: reality.server_names,
+                    fingerprint: reality.fingerprint,
+                };
+            }
+
+            endpoint.meta =
+                serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
+        }
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            if req.public_domain.is_some() || req.reality.is_some() {
+                return Err(ApiError::invalid_request(
+                    "ss2022 endpoints only support port updates",
+                ));
+            }
+        }
+    }
+
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+        },
+    )
+    .await?;
+    state.reconcile.request_full();
     Ok(Json(endpoint))
 }
 
@@ -832,6 +993,39 @@ async fn admin_get_user(
     Ok(Json(user))
 }
 
+async fn admin_patch_user(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    ApiJson(req): ApiJson<PatchUserRequest>,
+) -> Result<Json<User>, ApiError> {
+    let mut user = {
+        let store = state.store.lock().await;
+        store
+            .get_user(&user_id)
+            .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?
+    };
+
+    if let Some(display_name) = req.display_name {
+        let Some(display_name) = display_name else {
+            return Err(ApiError::invalid_request("display_name cannot be null"));
+        };
+        user.display_name = display_name;
+    }
+    if let Some(cycle_policy_default) = req.cycle_policy_default {
+        user.cycle_policy_default = cycle_policy_default;
+    }
+    if let Some(cycle_day_of_month_default) = req.cycle_day_of_month_default {
+        user.cycle_day_of_month_default = cycle_day_of_month_default;
+    }
+
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertUser { user: user.clone() },
+    )
+    .await?;
+    Ok(Json(user))
+}
+
 async fn admin_delete_user(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
@@ -915,6 +1109,7 @@ async fn admin_patch_grant(
         crate::state::DesiredStateCommand::UpdateGrantFields {
             grant_id: grant_id.clone(),
             enabled: req.enabled,
+            note: req.note,
             quota_limit_bytes: req.quota_limit_bytes,
             cycle_policy: req.cycle_policy,
             cycle_day_of_month: req.cycle_day_of_month,

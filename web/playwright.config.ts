@@ -22,5 +22,9 @@ export default defineConfig({
 		video: "retain-on-failure",
 		viewport: { width: 1280, height: 900 },
 	},
-	webServer: undefined,
+	webServer: {
+		command: "npm run dev",
+		url: baseURL,
+		reuseExistingServer: !process.env.CI,
+	},
 });

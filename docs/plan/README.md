@@ -55,17 +55,18 @@
 - 写转发：follower 将写请求转发 leader（或返回 leader 地址供客户端重试）
 - Reconcile 分工：仅对“本节点拥有的端点”调用本机 xray；其余只复制状态
 
-## 6. Milestone：Web 面板（面向日常使用）
+## 6. Milestone：Web 面板（基础功能完整：CRUD）
 
-- 基础体验：登录（admin token）、全局错误提示、加载/空态/危险操作确认
-- 视图与操作：Nodes/Endpoints/Users/Grants 的列表与详情、创建/删除、启用/禁用、rotate shortId、reset token
-- 订阅：一键复制、格式切换、快速校验（客户端配置可用性以最小校验为主）
-- 质量：Storybook 覆盖组件态；Playwright 做关键路径 E2E
+- 细化方案：`docs/plan/m6-web-panel.md`
+- 基础体验：登录/退出（admin token）、路由守卫、全局错误提示、加载/空态、危险操作确认
+- 资源管理（CRUD 完整）：Nodes/Endpoints/Users/Grants 的列表/详情/创建/更新/删除（与 `docs/desgin/api.md` 对齐）
+- 关键动作：rotate shortId、reset subscription token、Grant 启用/禁用与配额/周期更新、usage/alerts 可视化
+- 订阅工具：一键复制订阅链接、raw/base64/clash 切换、最小可用性校验
 
 ## 7. 质量门禁与交付
 
-- Rust：`cargo fmt` / `clippy -D warnings` / 单测 /（可选）集成测试（mock xray gRPC）
-- Web：Biome check + `tsc -b` + 组件 stories 测试 + E2E（可按 CI 分层）
+- Rust：`cargo fmt` / `clippy -D warnings` / 单测 / 集成测试（mock xray gRPC）
+- Web：Biome check + `tsc -b` + 组件 stories 测试 + E2E
 - 运维：systemd/openrc 示例、最小配置模板、升级/回滚与数据目录说明
 
 ## 8. MVP 验收（DoD 摘要）
