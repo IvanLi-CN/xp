@@ -90,7 +90,7 @@ See:
 Suggested workflow:
 
 1. Copy scripts to `/etc/init.d/` and make executable.
-2. Create `/etc/xp/xp.env` from `docs/ops/env/xp.env.example`.
+2. (Optional) Configure environment variables via OpenRC's `/etc/conf.d/<service>` mechanism.
 3. Add to default runlevel and start:
 
 ```
