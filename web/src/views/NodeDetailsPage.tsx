@@ -3,9 +3,9 @@ import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+	type AdminNodePatchRequest,
 	fetchAdminNode,
 	patchAdminNode,
-	type AdminNodePatchRequest,
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
@@ -22,7 +22,7 @@ function formatErrorMessage(error: unknown): string {
 }
 
 export function NodeDetailsPage() {
-	const { nodeId } = useParams({ from: "/nodes/$nodeId" });
+	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
 

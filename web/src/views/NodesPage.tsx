@@ -169,12 +169,8 @@ export function NodesPage() {
 									{node.node_name || "(unnamed)"}
 								</Link>
 							</td>
-							<td className="font-mono text-sm">
-								{node.public_domain || "-"}
-							</td>
-							<td className="font-mono text-sm">
-								{node.api_base_url || "-"}
-							</td>
+							<td className="font-mono text-sm">{node.public_domain || "-"}</td>
+							<td className="font-mono text-sm">{node.api_base_url || "-"}</td>
 						</tr>
 					))}
 				</ResourceTable>
@@ -228,9 +224,7 @@ export function NodesPage() {
 						</div>
 					</div>
 					{joinTokenError ? (
-						<p className="text-sm text-error font-mono">
-							{joinTokenError}
-						</p>
+						<p className="text-sm text-error font-mono">{joinTokenError}</p>
 					) : null}
 					{joinToken ? (
 						<div className="space-y-4 rounded-box bg-base-200 p-4">
@@ -239,9 +233,7 @@ export function NodesPage() {
 									<p className="text-xs uppercase tracking-wide opacity-60">
 										Join token
 									</p>
-									<p className="font-mono text-sm break-all">
-										{joinToken}
-									</p>
+									<p className="font-mono text-sm break-all">{joinToken}</p>
 								</div>
 								<CopyButton text={joinToken} label="Copy token" />
 							</div>
@@ -250,9 +242,7 @@ export function NodesPage() {
 									<p className="text-xs uppercase tracking-wide opacity-60">
 										xp join command
 									</p>
-									<p className="font-mono text-sm break-all">
-										{joinCommand}
-									</p>
+									<p className="font-mono text-sm break-all">{joinCommand}</p>
 								</div>
 								<CopyButton text={joinCommand} label="Copy command" />
 							</div>
