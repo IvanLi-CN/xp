@@ -7,21 +7,17 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { Button } from "../components/Button";
-
-const ADMIN_TOKEN_STORAGE_KEY = "xp_admin_token";
-
-function readStoredAdminToken(): string {
-	try {
-		return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ?? "";
-	} catch {
-		return "";
-	}
-}
+import {
+	ADMIN_TOKEN_STORAGE_KEY,
+	clearAdminToken,
+	readAdminToken,
+	writeAdminToken,
+} from "../components/auth";
 
 export function HomePage() {
-	const [adminToken, setAdminToken] = useState(() => readStoredAdminToken());
+	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
-		readStoredAdminToken(),
+		readAdminToken(),
 	);
 
 	const health = useQuery({
@@ -113,7 +109,7 @@ export function HomePage() {
 							variant="secondary"
 							onClick={() => {
 								const next = adminTokenDraft.trim();
-								localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, next);
+								writeAdminToken(next);
 								setAdminToken(next);
 								setAdminTokenDraft(next);
 							}}
@@ -123,7 +119,7 @@ export function HomePage() {
 						<Button
 							variant="ghost"
 							onClick={() => {
-								localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+								clearAdminToken();
 								setAdminToken("");
 								setAdminTokenDraft("");
 							}}
