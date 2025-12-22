@@ -90,6 +90,7 @@ export function EndpointDetailsPage() {
 	const [realityDest, setRealityDest] = useState("");
 	const [realityServerNames, setRealityServerNames] = useState("");
 	const [realityFingerprint, setRealityFingerprint] = useState("");
+	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
 	useEffect(() => {
@@ -478,7 +479,7 @@ export function EndpointDetailsPage() {
 							<Button
 								variant="secondary"
 								loading={rotateMutation.isPending}
-								onClick={() => rotateMutation.mutate()}
+								onClick={() => setConfirmRotateOpen(true)}
 							>
 								Rotate shortId
 							</Button>
@@ -504,6 +505,20 @@ export function EndpointDetailsPage() {
 				</div>
 			</div>
 
+			<ConfirmDialog
+				open={confirmRotateOpen}
+				title="Rotate shortId"
+				description="This will generate a new shortId for this VLESS endpoint. Existing client configs may stop working until clients refresh. Continue?"
+				confirmLabel={
+					rotateMutation.isPending ? "Rotating..." : "Rotate shortId"
+				}
+				onCancel={() => setConfirmRotateOpen(false)}
+				onConfirm={() => {
+					if (rotateMutation.isPending) return;
+					setConfirmRotateOpen(false);
+					rotateMutation.mutate();
+				}}
+			/>
 			<ConfirmDialog
 				open={confirmDeleteOpen}
 				title="Delete endpoint"
