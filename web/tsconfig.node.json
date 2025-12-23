@@ -9,7 +9,9 @@
 		"moduleResolution": "node",
 		"baseUrl": ".",
 		"paths": {
-			"@vitejs/plugin-react": ["./node_modules/@vitejs/plugin-react/dist/index.d.ts"]
+			"@vitejs/plugin-react": [
+				"./node_modules/@vitejs/plugin-react/dist/index.d.ts"
+			]
 		},
 		"resolveJsonModule": true,
 		"allowImportingTsExtensions": true,
