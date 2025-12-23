@@ -8,9 +8,10 @@
 		"types": ["vite/client"],
 		"skipLibCheck": true,
 
-		"moduleResolution": "bundler",
+		"moduleResolution": "node",
 		"resolveJsonModule": true,
 		"allowImportingTsExtensions": true,
+		"allowSyntheticDefaultImports": true,
 		"verbatimModuleSyntax": true,
 		"moduleDetection": "force",
 		"noEmit": true,
