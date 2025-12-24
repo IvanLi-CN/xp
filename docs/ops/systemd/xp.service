@@ -1,0 +1,33 @@
+[Unit]
+Description=xp (Xray control plane)
+After=network.target
+# Suggested if you manage xray via systemd on the same host:
+# Wants=xray.service
+# After=xray.service
+
+[Service]
+Type=simple
+
+# Run as a non-root user by default.
+# Create this user/group (example): useradd --system --home /var/lib/xp --shell /usr/sbin/nologin xp
+User=xp
+Group=xp
+
+# Explicit working directory and data dir (XP_DATA_DIR default is ./data).
+WorkingDirectory=/var/lib/xp
+Environment=XP_DATA_DIR=/var/lib/xp/data
+
+# Optional: additional env vars (XP_ADMIN_TOKEN, XP_XRAY_API_ADDR, quota knobs, etc.)
+EnvironmentFile=-/etc/xp/xp.env
+
+ExecStart=/usr/local/bin/xp run
+Restart=on-failure
+RestartSec=2s
+
+# Tighten file access as a baseline; adjust to your environment.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

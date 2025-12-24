@@ -14,7 +14,7 @@
 		"test:watch": "vitest",
 		"storybook": "storybook dev -p 60081 --host 127.0.0.1",
 		"build-storybook": "storybook build",
-		"test-storybook": "storybook test --url http://127.0.0.1:60081",
+		"test-storybook": "test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole",
 		"test:e2e": "playwright test"
 	},
 	"dependencies": {
@@ -45,5 +45,9 @@
 		"typescript": "~5.9.0",
 		"vite": "^6.0.0",
 		"vitest": "^3.0.0"
+	},
+	"overrides": {
+		"whatwg-url": "14.1.0",
+		"tr46": "5.1.0"
 	}
 }

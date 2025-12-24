@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+
+name="xray"
+description="xray (local proxy runtime)"
+
+command="/usr/local/bin/xray"
+command_args="run -c /etc/xray/config.json"
+command_user="xray:xray"
+
+depend() {
+  need net
+}
+

@@ -12,6 +12,7 @@
 - 框架：React
 - 路由：TanStack Router（替代 React Router，类型化路由更适合面板类应用）
 - 语言：TypeScript（使用 `tsc -b` 做 typecheck）
+- 包管理与脚本：Bun（版本由仓库根 `.bun-version` 固定；命令统一使用 `bun` / `bunx --no-install`）
 - 数据校验：Zod（对 API 请求/响应做运行时校验，并可从 schema 推导 TypeScript 类型）
 - 数据请求与缓存：TanStack Query（统一管理 server-state：缓存、去重、重试、刷新、失效）
 - 样式：Tailwind CSS + DaisyUI（快速出可用 UI）
@@ -71,11 +72,11 @@
 参考 `codex-vibe-monitor` 的 lefthook 结构，但 Web 改用 Biome：
 
 - pre-commit（并行）：
-  - `cd web && npx @biomejs/biome check --write --staged ...`（并 `stage_fixed: true`）
-  - `cd web && npx tsc -b`
-  - `npx dprint fmt`（仅 Markdown，stage_fixed）
+  - `cd web && bun run format`（并 `stage_fixed: true`）
+  - `cd web && bun run typecheck`
+  - `bunx --no-install dprint fmt`（仅 Markdown，stage_fixed）
   - `cargo fmt`（stage_fixed）
   - `cargo clippy -- -D warnings`
-- commit-msg：commitlint（Conventional Commits，英文）
+- commit-msg：`bunx --no-install commitlint --edit {1}`（Conventional Commits，英文）
 
 细节见：`docs/desgin/quality.md`。

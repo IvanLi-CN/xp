@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+name="xp"
+description="xp (Xray control plane)"
+
+command="/usr/local/bin/xp"
+command_args="run"
+command_user="xp:xp"
+
+depend() {
+  need net
+  # Suggested if xray is managed on the same host:
+  use xray
+}

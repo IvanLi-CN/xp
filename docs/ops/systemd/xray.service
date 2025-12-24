@@ -1,0 +1,25 @@
+[Unit]
+Description=xray (local proxy runtime)
+After=network.target
+
+[Service]
+Type=simple
+
+# Run as a non-root user by default.
+# Create this user/group (example): useradd --system --home /var/lib/xray --shell /usr/sbin/nologin xray
+User=xray
+Group=xray
+
+ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json
+Restart=on-failure
+RestartSec=2s
+
+# Config is expected at /etc/xray/config.json (aligns with scripts/e2e/docker-compose.xray.yml).
+WorkingDirectory=/var/lib/xray
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

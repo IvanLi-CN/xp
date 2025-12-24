@@ -12,21 +12,21 @@
 
 ## Build, Test, and Development Commands
 
-- Install repo tooling (commitlint + dprint): `npm install`
+- Install repo tooling (commitlint + dprint): `bun install`
 - Install Git hooks (required): `lefthook install`
 - Run backend locally: `cargo run` (default bind `127.0.0.1:62416`)
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
-- Install frontend deps: `cd web && npm install`
-- Run frontend dev server: `cd web && npm run dev` (binds `127.0.0.1:60080`)
-- Frontend checks: `cd web && npm run lint`, `cd web && npm run typecheck`, `cd web && npm test`
-- UI regression: `cd web && npm run storybook`, `cd web && npm run test-storybook`
-- E2E: `cd web && npm run test:e2e` (Playwright)
+- Install frontend deps: `cd web && bun install`
+- Run frontend dev server: `cd web && bun run dev` (binds `127.0.0.1:60080`)
+- Frontend checks: `cd web && bun run lint`, `cd web && bun run typecheck`, `cd web && bun run test`
+- UI regression: `cd web && bun run storybook`, `cd web && bun run test-storybook`
+- E2E: `cd web && bun run test:e2e` (Playwright)
 
 ## Coding Style & Naming Conventions
 
 - Rust: format with rustfmt (`cargo fmt`); keep Clippy clean (warnings are errors).
 - TypeScript/React: Biome handles formatting + linting (`web/` scripts `format` / `lint`).
-- Markdown: formatted via `npx dprint fmt` (see `dprint.json`).
+- Markdown: formatted via `bunx --no-install dprint fmt` (see `dprint.json`).
 - Naming: Rust modules/functions `snake_case`, types `CamelCase`; React components `PascalCase`.
 
 ## Testing Guidelines

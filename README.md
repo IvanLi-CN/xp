@@ -24,15 +24,15 @@
 工具链（commitlint + dprint）：
 
 ```bash
-npm install
+bun install
 ```
 
 前端：
 
 ```bash
 cd web
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 后端：
