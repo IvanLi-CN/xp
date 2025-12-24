@@ -94,6 +94,9 @@ jobs:
       - name: install
         run: bun install --frozen-lockfile
 
+      - name: install playwright chromium
+        run: bunx --no-install playwright install --with-deps chromium
+
       - name: storybook + test-storybook
         shell: bash
         run: |
