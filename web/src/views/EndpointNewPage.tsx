@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
 	type AdminEndpointKind,
@@ -14,6 +14,17 @@ import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 
+const kindOptions = [
+	{
+		value: "vless_reality_vision_tcp" as const,
+		label: "VLESS Reality Vision TCP",
+	},
+	{
+		value: "ss2022_2022_blake3_aes_128_gcm" as const,
+		label: "SS2022 BLAKE3 AES-128-GCM",
+	},
+];
+
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
 		const code = error.code ? ` ${error.code}` : "";
@@ -23,11 +34,17 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function parseServerNames(value: string): string[] {
-	return value
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
+function normalizeRealityServerName(value: string): string {
+	return value.trim();
+}
+
+function isValidRealityServerName(value: string): boolean {
+	if (!value) return false;
+	if (/\s/.test(value)) return false;
+	if (value.includes("://")) return false;
+	if (value.includes("/")) return false;
+	if (value.includes(":")) return false;
+	return true;
 }
 
 export function EndpointNewPage() {
@@ -46,10 +63,8 @@ export function EndpointNewPage() {
 	);
 	const [nodeId, setNodeId] = useState("");
 	const [port, setPort] = useState("443");
-	const [publicDomain, setPublicDomain] = useState("");
-	const [realityDest, setRealityDest] = useState("");
-	const [realityServerNames, setRealityServerNames] = useState("");
-	const [realityFingerprint, setRealityFingerprint] = useState("");
+	const [realityServerName, setRealityServerName] = useState("");
+	const [realityFingerprint, setRealityFingerprint] = useState("chrome");
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -70,32 +85,22 @@ export function EndpointNewPage() {
 			}
 
 			if (kind === "vless_reality_vision_tcp") {
-				const publicDomainTrimmed = publicDomain.trim();
-				const destTrimmed = realityDest.trim();
-				const fingerprintTrimmed = realityFingerprint.trim();
-				const serverNames = parseServerNames(realityServerNames);
-				if (!publicDomainTrimmed) {
-					throw new Error("Public domain is required for VLESS endpoints.");
+				const serverNameTrimmed = normalizeRealityServerName(realityServerName);
+				if (!serverNameTrimmed) throw new Error("serverName is required.");
+				if (!isValidRealityServerName(serverNameTrimmed)) {
+					throw new Error("serverName must be a domain (no scheme/path/port).");
 				}
-				if (!destTrimmed) {
-					throw new Error("Reality destination is required.");
-				}
-				if (serverNames.length === 0) {
-					throw new Error("Provide at least one reality server name.");
-				}
-				if (!fingerprintTrimmed) {
-					throw new Error("Reality fingerprint is required.");
-				}
+
+				const fingerprintValue = realityFingerprint.trim() || "chrome";
 
 				return createAdminEndpoint(adminToken, {
 					kind,
 					node_id: nodeId,
 					port: portNumber,
-					public_domain: publicDomainTrimmed,
 					reality: {
-						dest: destTrimmed,
-						server_names: serverNames,
-						fingerprint: fingerprintTrimmed,
+						dest: `${serverNameTrimmed}:443`,
+						server_names: [serverNameTrimmed],
+						fingerprint: fingerprintValue,
 					},
 				});
 			}
@@ -182,20 +187,6 @@ export function EndpointNewPage() {
 		);
 	}
 
-	const kindOptions = useMemo(
-		() => [
-			{
-				value: "vless_reality_vision_tcp" as const,
-				label: "VLESS Reality Vision TCP",
-			},
-			{
-				value: "ss2022_2022_blake3_aes_128_gcm" as const,
-				label: "SS2022 BLAKE3 AES-128-GCM",
-			},
-		],
-		[],
-	);
-
 	return (
 		<div className="space-y-6">
 			<div>
@@ -233,98 +224,127 @@ export function EndpointNewPage() {
 									))}
 								</select>
 							</label>
-							<label className="form-control">
-								<div className="label">
-									<span className="label-text">Node</span>
+							{nodes.length <= 1 ? (
+								<div className="form-control">
+									<div className="label">
+										<span className="label-text">Node</span>
+									</div>
+									<div className="rounded-lg border border-base-300 bg-base-200 px-3 py-3 text-sm">
+										<span className="font-medium">
+											{nodes[0]?.node_name ?? "Node"}
+										</span>{" "}
+										<span className="font-mono text-xs opacity-70">
+											({nodes[0]?.node_id ?? nodeId})
+										</span>
+									</div>
 								</div>
-								<select
-									className="select select-bordered"
-									value={nodeId}
-									onChange={(event) => setNodeId(event.target.value)}
-								>
-									{nodes.map((node) => (
-										<option key={node.node_id} value={node.node_id}>
-											{node.node_name} ({node.node_id})
-										</option>
-									))}
-								</select>
-							</label>
-							<label className="form-control">
-								<div className="label">
-									<span className="label-text">Port</span>
-								</div>
-								<input
-									type="number"
-									className="input input-bordered"
-									value={port}
-									min={1}
-									onChange={(event) => setPort(event.target.value)}
-								/>
-							</label>
+							) : (
+								<label className="form-control">
+									<div className="label">
+										<span className="label-text">Node</span>
+									</div>
+									<select
+										className="select select-bordered"
+										value={nodeId}
+										onChange={(event) => setNodeId(event.target.value)}
+									>
+										{nodes.map((node) => (
+											<option key={node.node_id} value={node.node_id}>
+												{node.node_name} ({node.node_id})
+											</option>
+										))}
+									</select>
+								</label>
+							)}
 						</div>
 
 						{kind === "vless_reality_vision_tcp" ? (
 							<div className="space-y-4 border-t border-base-200 pt-4">
 								<h2 className="text-lg font-semibold">VLESS settings</h2>
 								<div className="grid gap-4 md:grid-cols-2">
-									<label className="form-control md:col-span-2">
+									<label className="form-control">
 										<div className="label">
-											<span className="label-text">Public domain</span>
+											<span className="label-text font-mono">port</span>
 										</div>
 										<input
-											type="text"
+											type="number"
 											className="input input-bordered"
-											value={publicDomain}
-											placeholder="example.com"
-											onChange={(event) => setPublicDomain(event.target.value)}
+											value={port}
+											min={1}
+											onChange={(event) => setPort(event.target.value)}
 										/>
+										<p className="text-xs opacity-70">
+											The inbound listen port on this node.
+										</p>
 									</label>
-									<label className="form-control md:col-span-2">
+									<label className="form-control">
 										<div className="label">
-											<span className="label-text">Reality destination</span>
+											<span className="label-text font-mono">serverName</span>
 										</div>
 										<input
 											type="text"
 											className="input input-bordered"
-											value={realityDest}
-											placeholder="example.com:443"
-											onChange={(event) => setRealityDest(event.target.value)}
-										/>
-									</label>
-									<label className="form-control md:col-span-2">
-										<div className="label">
-											<span className="label-text">Reality server names</span>
-										</div>
-										<input
-											type="text"
-											className="input input-bordered"
-											value={realityServerNames}
-											placeholder="example.com, edge.example.com"
+											value={realityServerName}
+											placeholder="chatgpt.com"
 											onChange={(event) =>
-												setRealityServerNames(event.target.value)
+												setRealityServerName(event.target.value)
 											}
 										/>
 										<p className="text-xs opacity-70">
-											Comma-separated list of server names.
+											Camouflage domain (TLS SNI). Upstream port defaults to{" "}
+											<span className="font-mono">443</span>.
 										</p>
 									</label>
-									<label className="form-control md:col-span-2">
+									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40 md:col-span-2">
+										<summary className="collapse-title text-sm font-medium">
+											Advanced (optional)
+										</summary>
+										<div className="collapse-content space-y-4">
+											<label className="form-control">
+												<div className="label">
+													<span className="label-text font-mono">
+														fingerprint
+													</span>
+												</div>
+												<input
+													type="text"
+													className="input input-bordered"
+													value={realityFingerprint}
+													placeholder="chrome"
+													onChange={(event) =>
+														setRealityFingerprint(event.target.value)
+													}
+												/>
+												<p className="text-xs opacity-70">
+													Defaults to <span className="font-mono">chrome</span>.
+												</p>
+											</label>
+										</div>
+									</details>
+								</div>
+							</div>
+						) : (
+							<div className="space-y-4 border-t border-base-200 pt-4">
+								<h2 className="text-lg font-semibold">SS2022 settings</h2>
+								<div className="grid gap-4 md:grid-cols-2">
+									<label className="form-control">
 										<div className="label">
-											<span className="label-text">Fingerprint</span>
+											<span className="label-text font-mono">port</span>
 										</div>
 										<input
-											type="text"
+											type="number"
 											className="input input-bordered"
-											value={realityFingerprint}
-											placeholder="chrome"
-											onChange={(event) =>
-												setRealityFingerprint(event.target.value)
-											}
+											value={port}
+											min={1}
+											onChange={(event) => setPort(event.target.value)}
 										/>
+										<p className="text-xs opacity-70">
+											The inbound listen port on this node.
+										</p>
 									</label>
 								</div>
 							</div>
-						) : null}
+						)}
 
 						<div className="card-actions justify-end">
 							<Button loading={createMutation.isPending} type="submit">

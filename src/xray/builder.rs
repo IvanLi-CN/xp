@@ -96,6 +96,22 @@ fn parse_vless_meta(endpoint: &Endpoint) -> Result<VlessRealityVisionTcpEndpoint
     })
 }
 
+fn normalize_reality_dest_for_xray(dest: &str) -> String {
+    let trimmed = dest.trim();
+    let trimmed = trimmed.strip_prefix("tcp://").unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix("tcp:").unwrap_or(trimmed);
+    trimmed.to_string()
+}
+
+fn normalize_reality_fingerprint(fingerprint: &str) -> String {
+    let trimmed = fingerprint.trim();
+    if trimmed.is_empty() {
+        "chrome".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn parse_ss2022_meta(endpoint: &Endpoint) -> Result<Ss2022EndpointMeta, BuildError> {
     serde_json::from_value(endpoint.meta.clone()).map_err(|e| BuildError::InvalidEndpointMeta {
         endpoint_id: endpoint.endpoint_id.clone(),
@@ -245,7 +261,7 @@ pub fn build_add_user_operation(
             let account = xray::proxy::vless::Account {
                 id: vless.uuid.clone(),
                 flow: "xtls-rprx-vision".to_string(),
-                encryption: String::new(),
+                encryption: "none".to_string(),
                 xor_mode: 0,
                 seconds: 0,
                 padding: String::new(),
@@ -362,10 +378,13 @@ pub fn build_add_inbound_request(
                 .map(|s| decode_short_id_hex(endpoint, s))
                 .collect::<Result<Vec<_>, _>>()?;
 
+            let dest = normalize_reality_dest_for_xray(&meta.reality.dest);
+            let fingerprint = normalize_reality_fingerprint(&meta.reality.fingerprint);
+
             let reality = xray::transport::internet::reality::Config {
                 show: false,
-                dest: meta.reality.dest,
-                r#type: String::new(),
+                dest,
+                r#type: "tcp".to_string(),
                 xver: 0,
                 server_names: meta.reality.server_names,
                 private_key,
@@ -376,7 +395,7 @@ pub fn build_add_inbound_request(
                 mldsa65_seed: vec![],
                 limit_fallback_upload: None,
                 limit_fallback_download: None,
-                fingerprint: meta.reality.fingerprint,
+                fingerprint,
                 server_name: String::new(),
                 public_key: vec![],
                 short_id: vec![],
@@ -531,7 +550,6 @@ mod tests {
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
-                "public_domain": "example.com",
                 "reality": {"dest": "example.com:443", "server_names": ["example.com"], "fingerprint": "chrome"},
                 "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": ""},
                 "short_ids": ["0123456789abcdef"],
@@ -625,7 +643,6 @@ mod tests {
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
-                "public_domain": "example.com",
                 "reality": {"dest": "example.com:443", "server_names": ["example.com"], "fingerprint": "chrome"},
                 "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": ""},
                 "short_ids": ["0123456789abcdef"],

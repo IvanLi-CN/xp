@@ -772,7 +772,6 @@ mod tests {
                     EndpointKind::VlessRealityVisionTcp,
                     443,
                     json!({
-                        "public_domain": "example.com",
                         "reality": {
                             "dest": "example.com:443",
                             "server_names": ["example.com"],

@@ -28,6 +28,19 @@ jobs:
           toolchain: 1.91.0
           components: rustfmt, clippy
 
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: build embedded web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd web
+          bun install --frozen-lockfile
+          bun run build
+
       - name: login ghcr (retry)
         shell: bash
         env:

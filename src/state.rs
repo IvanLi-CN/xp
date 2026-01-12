@@ -371,7 +371,7 @@ impl JsonSnapshotStore {
         fs::create_dir_all(&init.data_dir)?;
 
         let state_path = init.data_dir.join("state.json");
-        let (state, is_new_state) = if state_path.exists() {
+        let (mut state, is_new_state) = if state_path.exists() {
             let bytes = fs::read(&state_path)?;
             let state: PersistedState = serde_json::from_slice(&bytes)?;
             if state.schema_version != SCHEMA_VERSION {
@@ -395,6 +395,18 @@ impl JsonSnapshotStore {
             (state, true)
         };
 
+        // Backward-compatible cleanup: `public_domain` used to exist in VLESS endpoint meta,
+        // but it's a redundant xp-only field and is not used by the system.
+        let mut migrated = false;
+        for endpoint in state.endpoints.values_mut() {
+            if endpoint.kind == EndpointKind::VlessRealityVisionTcp
+                && let Some(meta) = endpoint.meta.as_object_mut()
+                && meta.remove("public_domain").is_some()
+            {
+                migrated = true;
+            }
+        }
+
         let usage_path = init.data_dir.join("usage.json");
         let usage = if usage_path.exists() {
             let bytes = fs::read(&usage_path)?;
@@ -417,7 +429,7 @@ impl JsonSnapshotStore {
             usage,
         };
 
-        if is_new_state {
+        if is_new_state || migrated {
             store.save()?;
         }
 
@@ -894,7 +906,6 @@ impl JsonSnapshotStore {
 
 #[derive(Debug, Deserialize)]
 struct VlessRealityEndpointMetaInput {
-    public_domain: String,
     reality: crate::protocol::RealityConfig,
 }
 
@@ -911,7 +922,6 @@ fn build_endpoint_meta(
             let short_id = generate_short_id_16hex(&mut rng);
 
             let meta = VlessRealityVisionTcpEndpointMeta {
-                public_domain: input.public_domain,
                 reality: input.reality,
                 reality_keys: RealityKeys {
                     private_key: keypair.private_key,
@@ -1076,7 +1086,6 @@ mod tests {
         let kind = EndpointKind::VlessRealityVisionTcp;
 
         let meta = VlessRealityVisionTcpEndpointMeta {
-            public_domain: "example.com".to_string(),
             reality: RealityConfig {
                 dest: "example.com:443".to_string(),
                 server_names: vec!["example.com".to_string()],

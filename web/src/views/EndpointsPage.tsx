@@ -110,7 +110,7 @@ export function EndpointsPage() {
 				headers={[
 					{ key: "kind", label: "Kind" },
 					{ key: "node", label: "Node" },
-					{ key: "port", label: "Port" },
+					{ key: "port", label: "Listen port" },
 					{ key: "tag", label: "Tag" },
 					{ key: "endpoint", label: "Endpoint ID" },
 				]}

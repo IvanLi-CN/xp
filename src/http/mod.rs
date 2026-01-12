@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Extension, FromRequest, Path, Query, Request, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -32,6 +32,8 @@ use crate::{
     state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
     subscription, xray,
 };
+
+mod web_assets;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -261,7 +263,6 @@ enum CreateEndpointRequest {
     VlessRealityVisionTcp {
         node_id: String,
         port: u16,
-        public_domain: String,
         reality: RealityConfig,
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
@@ -271,8 +272,6 @@ enum CreateEndpointRequest {
 #[derive(Deserialize)]
 struct PatchEndpointRequest {
     port: Option<u16>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    public_domain: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_optional_reality")]
     reality: Option<Option<RealityConfig>>,
 }
@@ -344,13 +343,18 @@ pub fn build_router(
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
-    let mut app = Router::new()
-        .route("/api/health", get(health))
-        .route("/api/cluster/info", get(cluster_info))
-        .route("/api/cluster/join", post(cluster_join))
-        .route("/api/sub/:subscription_token", get(get_subscription))
-        .nest("/api/admin", admin)
+    let api = Router::new()
+        .route("/health", get(health))
+        .route("/cluster/info", get(cluster_info))
+        .route("/cluster/join", post(cluster_join))
+        .route("/sub/:subscription_token", get(get_subscription))
+        .nest("/admin", admin)
         .fallback(fallback_not_found);
+
+    let mut app = Router::new()
+        .nest("/api", api)
+        .route("/assets/*path", get(embedded_asset))
+        .fallback(embedded_spa_fallback);
 
     if let Some(raft) = raft_rpc {
         app = app.merge(crate::raft::http_rpc::build_raft_rpc_router(
@@ -763,13 +767,12 @@ async fn admin_create_endpoint(
         CreateEndpointRequest::VlessRealityVisionTcp {
             node_id,
             port,
-            public_domain,
             reality,
         } => (
             node_id,
             crate::domain::EndpointKind::VlessRealityVisionTcp,
             port,
-            json!({ "public_domain": public_domain, "reality": reality }),
+            json!({ "reality": reality }),
         ),
         CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm { node_id, port } => (
             node_id,
@@ -836,15 +839,6 @@ async fn admin_patch_endpoint(
                 serde_json::from_value(endpoint.meta.clone())
                     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-            if let Some(public_domain) = req.public_domain {
-                let Some(public_domain) = public_domain else {
-                    return Err(ApiError::invalid_request(
-                        "public_domain cannot be null for vless endpoints",
-                    ));
-                };
-                meta.public_domain = public_domain;
-            }
-
             if let Some(reality) = req.reality {
                 let Some(reality) = reality else {
                     return Err(ApiError::invalid_request(
@@ -862,7 +856,7 @@ async fn admin_patch_endpoint(
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            if req.public_domain.is_some() || req.reality.is_some() {
+            if req.reality.is_some() {
                 return Err(ApiError::invalid_request(
                     "ss2022 endpoints only support port updates",
                 ));
@@ -1435,6 +1429,110 @@ async fn admin_get_alerts(
 
 async fn fallback_not_found() -> ApiError {
     ApiError::not_found("not found")
+}
+
+const CSP_HEADER_VALUE: &str = concat!(
+    "default-src 'self'; ",
+    "base-uri 'self'; ",
+    "object-src 'none'; ",
+    "frame-ancestors 'none'; ",
+    "connect-src 'self'; ",
+    "img-src 'self' data: blob:; ",
+    "script-src 'self'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "font-src 'self';"
+);
+
+fn embedded_content_type(path: &str) -> &'static str {
+    match std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+    {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("json") => "application/json; charset=utf-8",
+        Some("map") => "application/json; charset=utf-8",
+        Some("woff2") => "font/woff2",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("webmanifest") => "application/manifest+json; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+fn embedded_bytes_response(
+    body: &'static [u8],
+    content_type: &'static str,
+    cache_control: &'static str,
+    csp: bool,
+) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
+    headers.insert(
+        header::HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    if csp {
+        headers.insert(
+            header::HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static(CSP_HEADER_VALUE),
+        );
+    }
+    (headers, body).into_response()
+}
+
+fn embedded_index_response() -> Response {
+    let Some(index) = web_assets::get("index.html") else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    embedded_bytes_response(index, "text/html; charset=utf-8", "no-cache", true)
+}
+
+async fn embedded_asset(Path(path): Path<String>) -> Response {
+    let key = format!("assets/{path}");
+    let Some(asset) = web_assets::get(&key) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    embedded_bytes_response(
+        asset,
+        embedded_content_type(&key),
+        "public, max-age=31536000, immutable",
+        false,
+    )
+}
+
+async fn embedded_spa_fallback(req: Request<Body>) -> Response {
+    if !matches!(*req.method(), Method::GET | Method::HEAD) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let path = req.uri().path().trim_start_matches('/');
+    if path.is_empty() {
+        return embedded_index_response();
+    }
+
+    if let Some(bytes) = web_assets::get(path) {
+        let cache_control = if path.starts_with("assets/") {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        };
+        return embedded_bytes_response(
+            bytes,
+            embedded_content_type(path),
+            cache_control,
+            path == "index.html",
+        );
+    }
+
+    embedded_index_response()
 }
 
 #[derive(Debug, Deserialize)]
