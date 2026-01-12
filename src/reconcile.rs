@@ -382,14 +382,14 @@ async fn reconcile_once(
             if marker_path.exists() {
                 continue;
             }
-            if let Some(parent) = marker_path.parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    warn!(
-                        path = %parent.display(),
-                        error = %e,
-                        "failed to create migration dir"
-                    );
-                }
+            if let Some(parent) = marker_path.parent()
+                && let Err(e) = fs::create_dir_all(parent)
+            {
+                warn!(
+                    path = %parent.display(),
+                    error = %e,
+                    "failed to create migration dir"
+                );
             }
             if let Err(e) = fs::write(marker_path, b"") {
                 warn!(path = %marker_path.display(), error = %e, "failed to write migration marker");

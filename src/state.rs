@@ -399,12 +399,11 @@ impl JsonSnapshotStore {
         // but it's a redundant xp-only field and is not used by the system.
         let mut migrated = false;
         for endpoint in state.endpoints.values_mut() {
-            if endpoint.kind == EndpointKind::VlessRealityVisionTcp {
-                if let Some(meta) = endpoint.meta.as_object_mut() {
-                    if meta.remove("public_domain").is_some() {
-                        migrated = true;
-                    }
-                }
+            if endpoint.kind == EndpointKind::VlessRealityVisionTcp
+                && let Some(meta) = endpoint.meta.as_object_mut()
+                && meta.remove("public_domain").is_some()
+            {
+                migrated = true;
             }
         }
 
