@@ -1,6 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { verifyAdminToken } from "../api/adminAuth";
+import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
@@ -8,11 +10,23 @@ import {
 	readAdminToken,
 	writeAdminToken,
 } from "../components/auth";
+import { parseAdminTokenInput } from "../utils/adminToken";
+
+function formatError(err: unknown): string {
+	if (isBackendApiError(err)) {
+		const code = err.code ? ` ${err.code}` : "";
+		return `${err.status}${code}: ${err.message}`;
+	}
+	if (err instanceof Error) return err.message;
+	return String(err);
+}
 
 export function LoginPage() {
 	const navigate = useNavigate();
 	const [token, setToken] = useState(() => readAdminToken());
 	const [draft, setDraft] = useState(() => readAdminToken());
+	const [isVerifying, setIsVerifying] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	return (
 		<div className="min-h-screen bg-base-200 flex items-center justify-center px-6">
@@ -39,7 +53,10 @@ export function LoginPage() {
 							className="input input-bordered font-mono"
 							placeholder="e.g. admin-token"
 							value={draft}
-							onChange={(event) => setDraft(event.target.value)}
+							onChange={(event) => {
+								setDraft(event.target.value);
+								setError(null);
+							}}
 						/>
 					</label>
 					{token.length === 0 ? (
@@ -51,6 +68,7 @@ export function LoginPage() {
 							Token stored (length {token.length}).
 						</p>
 					)}
+					{error ? <p className="text-sm text-error">{error}</p> : null}
 					<div className="card-actions justify-end gap-2">
 						<Button
 							variant="ghost"
@@ -58,19 +76,33 @@ export function LoginPage() {
 								clearAdminToken();
 								setToken("");
 								setDraft("");
+								setError(null);
 							}}
 						>
 							Clear
 						</Button>
 						<Button
 							variant="secondary"
-							onClick={() => {
-								const next = draft.trim();
-								writeAdminToken(next);
-								setToken(next);
-								setDraft(next);
-								if (next.length > 0) {
+							loading={isVerifying}
+							disabled={isVerifying}
+							onClick={async () => {
+								const parsed = parseAdminTokenInput(draft);
+								if ("error" in parsed) {
+									setError(parsed.error);
+									return;
+								}
+								setIsVerifying(true);
+								setError(null);
+								try {
+									await verifyAdminToken(parsed.token);
+									writeAdminToken(parsed.token);
+									setToken(parsed.token);
+									setDraft(parsed.token);
 									navigate({ to: "/" });
+								} catch (err) {
+									setError(formatError(err));
+								} finally {
+									setIsVerifying(false);
 								}
 							}}
 						>
