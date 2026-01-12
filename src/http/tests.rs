@@ -163,6 +163,26 @@ fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
         .unwrap()
 }
 
+fn extract_asset_paths_from_index_html(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+
+    for needle in ["src=\"/assets/", "href=\"/assets/"] {
+        let mut rest = html;
+        while let Some(start) = rest.find(needle) {
+            let after = &rest[start + needle.len()..];
+            let Some(end) = after.find('"') else {
+                break;
+            };
+            out.push(format!("/assets/{}", &after[..end]));
+            rest = &after[end..];
+        }
+    }
+
+    out.sort();
+    out.dedup();
+    out
+}
+
 async fn body_bytes(res: axum::response::Response) -> Bytes {
     res.into_body().collect().await.unwrap().to_bytes()
 }
@@ -196,6 +216,45 @@ async fn set_bootstrap_node_public_domain(
         .unwrap()
         .public_domain = public_domain.to_string();
     store.save().unwrap();
+}
+
+#[tokio::test]
+async fn ui_serves_index_at_root_and_embedded_assets() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app.clone().oneshot(req("GET", "/")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let content_type = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(content_type.starts_with("text/html"));
+    assert!(res.headers().contains_key("content-security-policy"));
+
+    let html = body_text(res).await;
+    let assets = extract_asset_paths_from_index_html(&html);
+    assert!(!assets.is_empty());
+
+    for asset in assets {
+        let res = app.clone().oneshot(req("GET", &asset)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let content_type = res
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        if asset.ends_with(".js") {
+            assert_eq!(content_type, "text/javascript; charset=utf-8");
+        } else if asset.ends_with(".css") {
+            assert_eq!(content_type, "text/css; charset=utf-8");
+        }
+    }
 }
 
 async fn setup_subscription_fixtures(app: &axum::Router) -> (String, String, String, String) {
@@ -703,7 +762,6 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "public_domain": "example.com",
               "reality": {
                 "dest": "example.com:443",
                 "server_names": ["example.com"],
@@ -735,36 +793,13 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     let updated = body_json(res).await;
     assert_eq!(updated["endpoint_id"], endpoint_id);
     assert_eq!(updated["port"], 8443);
-    assert_eq!(updated["meta"]["public_domain"], "example.com");
     assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
     assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
     assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
     assert_eq!(updated["meta"]["reality_keys"], reality_keys);
     assert_eq!(updated["meta"]["short_ids"], short_ids);
     assert_eq!(updated["meta"]["active_short_id"], active_short_id);
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/endpoints/{endpoint_id}"),
-            json!({
-              "public_domain": "edge.example.com"
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let updated = body_json(res).await;
-    assert_eq!(updated["endpoint_id"], endpoint_id);
-    assert_eq!(updated["port"], 8443);
-    assert_eq!(updated["meta"]["public_domain"], "edge.example.com");
-    assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
-    assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
-    assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
-    assert_eq!(updated["meta"]["reality_keys"], reality_keys);
-    assert_eq!(updated["meta"]["short_ids"], short_ids);
-    assert_eq!(updated["meta"]["active_short_id"], active_short_id);
+    assert_eq!(updated["meta"].get("public_domain"), None);
 
     let res = app
         .clone()
@@ -785,7 +820,6 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     let updated = body_json(res).await;
     assert_eq!(updated["endpoint_id"], endpoint_id);
     assert_eq!(updated["port"], 8443);
-    assert_eq!(updated["meta"]["public_domain"], "edge.example.com");
     assert_eq!(updated["meta"]["reality"]["dest"], "edge.example.com:443");
     assert_eq!(
         updated["meta"]["reality"]["server_names"][0],
@@ -795,6 +829,7 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     assert_eq!(updated["meta"]["reality_keys"], reality_keys);
     assert_eq!(updated["meta"]["short_ids"], short_ids);
     assert_eq!(updated["meta"]["active_short_id"], active_short_id);
+    assert_eq!(updated["meta"].get("public_domain"), None);
 }
 
 #[tokio::test]
@@ -834,7 +869,6 @@ async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
               "port": 8389,
-              "public_domain": "example.com",
               "reality": {
                 "dest": "example.com:443",
                 "server_names": ["example.com"],
@@ -1211,7 +1245,6 @@ async fn post_rotate_shortid_schedules_rebuild_inbound() {
                 EndpointKind::VlessRealityVisionTcp,
                 443,
                 json!({
-                  "public_domain": "example.com",
                   "reality": {
                     "dest": "example.com:443",
                     "server_names": ["example.com"],
@@ -2178,7 +2211,6 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "public_domain": "example.com",
               "reality": {
                 "dest": "example.com:443",
                 "server_names": ["example.com"],
@@ -2359,7 +2391,6 @@ async fn rotate_shortid_updates_persisted_meta_and_rejects_non_vless_endpoints()
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "public_domain": "example.com",
               "reality": {
                 "dest": "example.com:443",
                 "server_names": ["example.com"],

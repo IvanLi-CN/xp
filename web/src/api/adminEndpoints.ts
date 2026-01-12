@@ -51,7 +51,6 @@ export type AdminEndpointCreateRequest =
 			kind: "vless_reality_vision_tcp";
 			node_id: string;
 			port: number;
-			public_domain: string;
 			reality: RealityConfig;
 	  }
 	| {
@@ -62,7 +61,6 @@ export type AdminEndpointCreateRequest =
 
 export type AdminEndpointPatchRequest = {
 	port?: number;
-	public_domain?: string;
 	reality?: RealityConfig;
 };
 

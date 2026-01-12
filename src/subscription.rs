@@ -643,7 +643,6 @@ mod tests {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "example.com");
         let meta = serde_json::json!({
-          "public_domain": "example.com",
           "reality": {"dest": "example.com:443", "server_names": [], "fingerprint": "chrome"},
           "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},
           "short_ids": ["0123456789abcdef"],
@@ -677,7 +676,6 @@ mod tests {
         let g1 = grant_ss("u1", "g1", "e1", true, Some("a"), "server:users");
 
         let meta = serde_json::json!({
-          "public_domain": "example.com",
           "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
           "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PUBKEY"},
           "short_ids": ["0123456789abcdef"],
@@ -703,7 +701,6 @@ mod tests {
                 "vless",
                 8443,
                 serde_json::json!({
-                  "public_domain": "example.com",
                   "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
                   "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PUBKEY"},
                   "short_ids": ["0123456789abcdef"],
@@ -737,7 +734,6 @@ mod tests {
         let n = node("n1", "node-1", "example.com");
 
         let meta = serde_json::json!({
-          "public_domain": "example.com",
           "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
           "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
           "short_ids": ["0123456789abcdef"],

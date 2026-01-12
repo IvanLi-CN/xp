@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     net::SocketAddr,
     sync::Arc,
     time::Duration,
@@ -14,11 +15,14 @@ use tracing::{debug, warn};
 
 use crate::{
     config::Config,
-    domain::{Endpoint, Grant},
+    domain::{Endpoint, EndpointKind, Grant},
     state::JsonSnapshotStore,
     xray,
     xray::builder,
 };
+
+const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
+const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
 
 pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
     let nodes = store.list_nodes();
@@ -300,7 +304,7 @@ async fn reconcile_once(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     pending: &PendingBatch,
 ) -> Result<(), xray::XrayError> {
-    let (local_node_id, snapshot) = {
+    let (local_node_id, snapshot, local_vless_endpoint_ids) = {
         let store = store.lock().await;
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
@@ -315,6 +319,11 @@ async fn reconcile_once(
         let local_endpoint_ids = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
+            .map(|e| e.endpoint_id.clone())
+            .collect::<BTreeSet<_>>();
+        let local_vless_endpoint_ids = endpoints
+            .iter()
+            .filter(|e| e.node_id == local_node_id && e.kind == EndpointKind::VlessRealityVisionTcp)
             .map(|e| e.endpoint_id.clone())
             .collect::<BTreeSet<_>>();
         let mut quota_banned_by_grant = BTreeMap::new();
@@ -336,10 +345,57 @@ async fn reconcile_once(
                 grants,
                 quota_banned_by_grant,
             },
+            local_vless_endpoint_ids,
         )
     };
 
-    reconcile_snapshot(config.xray_api_addr, &local_node_id, snapshot, pending).await
+    let migration_marker_user_encryption_path =
+        config.data_dir.join(MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE);
+    let migration_marker_reality_type_path =
+        config.data_dir.join(MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP);
+    let should_force_rebuild_vless_inbounds = !local_vless_endpoint_ids.is_empty()
+        && (!migration_marker_user_encryption_path.exists()
+            || !migration_marker_reality_type_path.exists());
+
+    let forced_rebuild_inbounds = if should_force_rebuild_vless_inbounds {
+        local_vless_endpoint_ids.clone()
+    } else {
+        BTreeSet::new()
+    };
+
+    let result = reconcile_snapshot(
+        config.xray_api_addr,
+        &local_node_id,
+        snapshot,
+        pending,
+        &forced_rebuild_inbounds,
+    )
+    .await;
+
+    if result.is_ok() && should_force_rebuild_vless_inbounds {
+        for marker_path in [
+            &migration_marker_user_encryption_path,
+            &migration_marker_reality_type_path,
+        ] {
+            if marker_path.exists() {
+                continue;
+            }
+            if let Some(parent) = marker_path.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    warn!(
+                        path = %parent.display(),
+                        error = %e,
+                        "failed to create migration dir"
+                    );
+                }
+            }
+            if let Err(e) = fs::write(marker_path, b"") {
+                warn!(path = %marker_path.display(), error = %e, "failed to write migration marker");
+            }
+        }
+    }
+
+    result
 }
 
 async fn reconcile_snapshot(
@@ -347,6 +403,7 @@ async fn reconcile_snapshot(
     local_node_id: &str,
     snapshot: Snapshot,
     pending: &PendingBatch,
+    forced_rebuild_inbounds: &BTreeSet<String>,
 ) -> Result<(), xray::XrayError> {
     use crate::xray::proto::xray::app::proxyman::command::{
         AlterInboundRequest, RemoveInboundRequest,
@@ -450,7 +507,10 @@ async fn reconcile_snapshot(
         }
     }
 
-    for endpoint_id in pending.rebuild_inbounds.iter() {
+    let mut rebuild_inbounds = pending.rebuild_inbounds.clone();
+    rebuild_inbounds.extend(forced_rebuild_inbounds.iter().cloned());
+
+    for endpoint_id in rebuild_inbounds.iter() {
         let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
             continue;
         };

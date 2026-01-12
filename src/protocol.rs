@@ -24,7 +24,6 @@ pub struct RealityKeys {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VlessRealityVisionTcpEndpointMeta {
-    pub public_domain: String,
     pub reality: RealityConfig,
     pub reality_keys: RealityKeys,
     pub short_ids: Vec<String>,

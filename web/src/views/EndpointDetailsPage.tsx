@@ -16,7 +16,6 @@ import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 
 type VlessMetaSnapshot = {
-	publicDomain: string;
 	realityDest: string;
 	realityServerNames: string[];
 	realityFingerprint: string;
@@ -31,11 +30,17 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function parseServerNames(value: string): string[] {
-	return value
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
+function normalizeRealityServerName(value: string): string {
+	return value.trim();
+}
+
+function isValidRealityServerName(value: string): boolean {
+	if (!value) return false;
+	if (/\s/.test(value)) return false;
+	if (value.includes("://")) return false;
+	if (value.includes("/")) return false;
+	if (value.includes(":")) return false;
+	return true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,14 +58,12 @@ function asStringArray(value: unknown): string[] | undefined {
 }
 
 function parseVlessMeta(meta: Record<string, unknown>): VlessMetaSnapshot {
-	const publicDomain = asString(meta.public_domain) ?? "";
 	const reality = isRecord(meta.reality) ? meta.reality : undefined;
 	const realityDest = asString(reality?.dest) ?? "";
 	const realityServerNames = asStringArray(reality?.server_names) ?? [];
 	const realityFingerprint = asString(reality?.fingerprint) ?? "";
 
 	return {
-		publicDomain,
 		realityDest,
 		realityServerNames,
 		realityFingerprint,
@@ -86,9 +89,7 @@ export function EndpointDetailsPage() {
 	});
 
 	const [port, setPort] = useState("");
-	const [publicDomain, setPublicDomain] = useState("");
-	const [realityDest, setRealityDest] = useState("");
-	const [realityServerNames, setRealityServerNames] = useState("");
+	const [realityServerName, setRealityServerName] = useState("");
 	const [realityFingerprint, setRealityFingerprint] = useState("");
 	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -100,14 +101,10 @@ export function EndpointDetailsPage() {
 		setPort(String(endpoint.port));
 		if (endpoint.kind === "vless_reality_vision_tcp") {
 			const metaSnapshot = parseVlessMeta(endpoint.meta);
-			setPublicDomain(metaSnapshot.publicDomain);
-			setRealityDest(metaSnapshot.realityDest);
-			setRealityServerNames(metaSnapshot.realityServerNames.join(", "));
+			setRealityServerName(metaSnapshot.realityServerNames[0] ?? "");
 			setRealityFingerprint(metaSnapshot.realityFingerprint);
 		} else {
-			setPublicDomain("");
-			setRealityDest("");
-			setRealityServerNames("");
+			setRealityServerName("");
 			setRealityFingerprint("");
 		}
 	}, [endpointQuery.data]);
@@ -125,7 +122,6 @@ export function EndpointDetailsPage() {
 
 			const payload: {
 				port?: number;
-				public_domain?: string;
 				reality?: {
 					dest: string;
 					server_names: string[];
@@ -135,36 +131,26 @@ export function EndpointDetailsPage() {
 
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
-				const publicDomainTrimmed = publicDomain.trim();
-				const destTrimmed = realityDest.trim();
-				const fingerprintTrimmed = realityFingerprint.trim();
-				const serverNames = parseServerNames(realityServerNames);
+				const serverNameTrimmed = normalizeRealityServerName(realityServerName);
+				const fingerprintValue = realityFingerprint.trim() || "chrome";
+				const serverNames = serverNameTrimmed ? [serverNameTrimmed] : [];
+				const destValue = serverNameTrimmed ? `${serverNameTrimmed}:443` : "";
 				const realityChanged =
-					destTrimmed !== metaSnapshot.realityDest ||
-					fingerprintTrimmed !== metaSnapshot.realityFingerprint ||
+					destValue !== metaSnapshot.realityDest ||
+					fingerprintValue !== metaSnapshot.realityFingerprint ||
 					!arraysEqual(serverNames, metaSnapshot.realityServerNames);
 
-				if (publicDomainTrimmed !== metaSnapshot.publicDomain) {
-					if (!publicDomainTrimmed) {
-						throw new Error("Public domain is required for VLESS endpoints.");
-					}
-					payload.public_domain = publicDomainTrimmed;
-				}
-
 				if (realityChanged) {
-					if (!destTrimmed) {
-						throw new Error("Reality destination is required.");
-					}
-					if (serverNames.length === 0) {
-						throw new Error("Provide at least one reality server name.");
-					}
-					if (!fingerprintTrimmed) {
-						throw new Error("Reality fingerprint is required.");
+					if (!serverNameTrimmed) throw new Error("serverName is required.");
+					if (!isValidRealityServerName(serverNameTrimmed)) {
+						throw new Error(
+							"serverName must be a domain (no scheme/path/port).",
+						);
 					}
 					payload.reality = {
-						dest: destTrimmed,
+						dest: destValue,
 						server_names: serverNames,
-						fingerprint: fingerprintTrimmed,
+						fingerprint: fingerprintValue,
 					};
 				}
 			}
@@ -319,7 +305,7 @@ export function EndpointDetailsPage() {
 								Node ID: <span className="font-mono">{endpoint.node_id}</span>
 							</p>
 							<p>
-								Port: <span className="font-mono">{endpoint.port}</span>
+								Listen port: <span className="font-mono">{endpoint.port}</span>
 							</p>
 							<p>
 								Tag: <span className="font-mono">{endpoint.tag}</span>
@@ -338,21 +324,13 @@ export function EndpointDetailsPage() {
 						{endpoint.kind === "vless_reality_vision_tcp" && vlessMeta ? (
 							<div className="space-y-2 text-sm">
 								<p>
-									Public domain:{" "}
-									<span className="font-mono">{vlessMeta.publicDomain}</span>
-								</p>
-								<p>
-									Reality dest:{" "}
-									<span className="font-mono">{vlessMeta.realityDest}</span>
-								</p>
-								<p>
-									Server names:{" "}
+									<span className="font-mono">serverName</span>:{" "}
 									<span className="font-mono">
-										{vlessMeta.realityServerNames.join(", ") || "-"}
+										{vlessMeta.realityServerNames[0] ?? "-"}
 									</span>
 								</p>
 								<p>
-									Fingerprint:{" "}
+									<span className="font-mono">fingerprint</span>:{" "}
 									<span className="font-mono">
 										{vlessMeta.realityFingerprint}
 									</span>
@@ -377,86 +355,92 @@ export function EndpointDetailsPage() {
 							patchMutation.mutate();
 						}}
 					>
-						<div className="grid gap-4 md:grid-cols-2">
-							<label className="form-control">
-								<div className="label">
-									<span className="label-text">Port</span>
-								</div>
-								<input
-									type="number"
-									className="input input-bordered"
-									value={port}
-									min={1}
-									onChange={(event) => setPort(event.target.value)}
-								/>
-							</label>
-						</div>
-
 						{endpoint.kind === "vless_reality_vision_tcp" ? (
 							<div className="space-y-4 border-t border-base-200 pt-4">
 								<h3 className="text-lg font-semibold">VLESS settings</h3>
 								<div className="grid gap-4 md:grid-cols-2">
-									<label className="form-control md:col-span-2">
+									<label className="form-control">
 										<div className="label">
-											<span className="label-text">Public domain</span>
+											<span className="label-text font-mono">port</span>
 										</div>
 										<input
-											type="text"
+											type="number"
 											className="input input-bordered"
-											value={publicDomain}
-											placeholder="example.com"
-											onChange={(event) => setPublicDomain(event.target.value)}
+											value={port}
+											min={1}
+											onChange={(event) => setPort(event.target.value)}
 										/>
+										<p className="text-xs opacity-70">
+											The inbound listen port on this node.
+										</p>
 									</label>
-									<label className="form-control md:col-span-2">
+									<label className="form-control">
 										<div className="label">
-											<span className="label-text">Reality destination</span>
+											<span className="label-text font-mono">serverName</span>
 										</div>
 										<input
 											type="text"
 											className="input input-bordered"
-											value={realityDest}
-											placeholder="example.com:443"
-											onChange={(event) => setRealityDest(event.target.value)}
-										/>
-									</label>
-									<label className="form-control md:col-span-2">
-										<div className="label">
-											<span className="label-text">Reality server names</span>
-										</div>
-										<input
-											type="text"
-											className="input input-bordered"
-											value={realityServerNames}
-											placeholder="example.com, edge.example.com"
+											value={realityServerName}
+											placeholder="chatgpt.com"
 											onChange={(event) =>
-												setRealityServerNames(event.target.value)
+												setRealityServerName(event.target.value)
 											}
 										/>
 										<p className="text-xs opacity-70">
-											Comma-separated list of server names.
+											Camouflage domain (TLS SNI). Upstream port defaults to{" "}
+											<span className="font-mono">443</span>.
 										</p>
 									</label>
-									<label className="form-control md:col-span-2">
-										<div className="label">
-											<span className="label-text">Fingerprint</span>
+									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40 md:col-span-2">
+										<summary className="collapse-title text-sm font-medium">
+											Advanced (optional)
+										</summary>
+										<div className="collapse-content space-y-4">
+											<label className="form-control">
+												<div className="label">
+													<span className="label-text font-mono">
+														fingerprint
+													</span>
+												</div>
+												<input
+													type="text"
+													className="input input-bordered"
+													value={realityFingerprint}
+													placeholder="chrome"
+													onChange={(event) =>
+														setRealityFingerprint(event.target.value)
+													}
+												/>
+												<p className="text-xs opacity-70">
+													Defaults to <span className="font-mono">chrome</span>.
+												</p>
+											</label>
 										</div>
-										<input
-											type="text"
-											className="input input-bordered"
-											value={realityFingerprint}
-											placeholder="chrome"
-											onChange={(event) =>
-												setRealityFingerprint(event.target.value)
-											}
-										/>
-									</label>
+									</details>
 								</div>
 							</div>
 						) : (
-							<p className="text-sm opacity-70">
-								SS2022 endpoints only support port updates.
-							</p>
+							<div className="space-y-4 border-t border-base-200 pt-4">
+								<h3 className="text-lg font-semibold">SS2022 settings</h3>
+								<div className="grid gap-4 md:grid-cols-2">
+									<label className="form-control">
+										<div className="label">
+											<span className="label-text font-mono">port</span>
+										</div>
+										<input
+											type="number"
+											className="input input-bordered"
+											value={port}
+											min={1}
+											onChange={(event) => setPort(event.target.value)}
+										/>
+										<p className="text-xs opacity-70">
+											The inbound listen port on this node.
+										</p>
+									</label>
+								</div>
+							</div>
 						)}
 
 						<div className="card-actions justify-end">

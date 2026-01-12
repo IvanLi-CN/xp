@@ -440,7 +440,7 @@ async function handleRequest(
 		const tag = `${payload.kind}-${endpointId}`;
 		let meta: Record<string, unknown> = {};
 		if (payload.kind === "vless_reality_vision_tcp") {
-			if (!payload.public_domain || !payload.reality) {
+			if (!payload.reality) {
 				return errorResponse(
 					400,
 					"invalid_request",
@@ -448,7 +448,6 @@ async function handleRequest(
 				);
 			}
 			meta = {
-				public_domain: payload.public_domain,
 				reality: payload.reality,
 			};
 		}
@@ -510,9 +509,6 @@ async function handleRequest(
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
 			const nextMeta = { ...endpoint.meta } as Record<string, unknown>;
-			if (payload.public_domain !== undefined) {
-				nextMeta.public_domain = payload.public_domain;
-			}
 			if (payload.reality !== undefined) {
 				nextMeta.reality = payload.reality;
 			}
