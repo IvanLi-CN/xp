@@ -349,10 +349,12 @@ async fn reconcile_once(
         )
     };
 
-    let migration_marker_user_encryption_path =
-        config.data_dir.join(MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE);
-    let migration_marker_reality_type_path =
-        config.data_dir.join(MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP);
+    let migration_marker_user_encryption_path = config
+        .data_dir
+        .join(MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE);
+    let migration_marker_reality_type_path = config
+        .data_dir
+        .join(MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP);
     let should_force_rebuild_vless_inbounds = !local_vless_endpoint_ids.is_empty()
         && (!migration_marker_user_encryption_path.exists()
             || !migration_marker_reality_type_path.exists());
