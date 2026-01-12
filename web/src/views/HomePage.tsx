@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
+import { verifyAdminToken } from "../api/adminAuth";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
@@ -13,12 +14,24 @@ import {
 	readAdminToken,
 	writeAdminToken,
 } from "../components/auth";
+import { parseAdminTokenInput } from "../utils/adminToken";
+
+function formatError(err: unknown): string {
+	if (isBackendApiError(err)) {
+		const code = err.code ? ` ${err.code}` : "";
+		return `${err.status}${code}: ${err.message}`;
+	}
+	if (err instanceof Error) return err.message;
+	return String(err);
+}
 
 export function HomePage() {
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
 		readAdminToken(),
 	);
+	const [adminTokenError, setAdminTokenError] = useState<string | null>(null);
+	const [isSavingAdminToken, setIsSavingAdminToken] = useState(false);
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -92,7 +105,10 @@ export function HomePage() {
 							className="input input-bordered font-mono"
 							placeholder="e.g. testtoken"
 							value={adminTokenDraft}
-							onChange={(e) => setAdminTokenDraft(e.target.value)}
+							onChange={(e) => {
+								setAdminTokenDraft(e.target.value);
+								setAdminTokenError(null);
+							}}
 						/>
 					</label>
 					{adminToken.length === 0 ? (
@@ -104,14 +120,32 @@ export function HomePage() {
 							Token is set (length {adminToken.length}).
 						</p>
 					)}
+					{adminTokenError ? (
+						<p className="text-sm text-error">{adminTokenError}</p>
+					) : null}
 					<div className="card-actions justify-end">
 						<Button
 							variant="secondary"
-							onClick={() => {
-								const next = adminTokenDraft.trim();
-								writeAdminToken(next);
-								setAdminToken(next);
-								setAdminTokenDraft(next);
+							loading={isSavingAdminToken}
+							disabled={isSavingAdminToken}
+							onClick={async () => {
+								const parsed = parseAdminTokenInput(adminTokenDraft);
+								if ("error" in parsed) {
+									setAdminTokenError(parsed.error);
+									return;
+								}
+								setIsSavingAdminToken(true);
+								setAdminTokenError(null);
+								try {
+									await verifyAdminToken(parsed.token);
+									writeAdminToken(parsed.token);
+									setAdminToken(parsed.token);
+									setAdminTokenDraft(parsed.token);
+								} catch (err) {
+									setAdminTokenError(formatError(err));
+								} finally {
+									setIsSavingAdminToken(false);
+								}
 							}}
 						>
 							Save
@@ -122,6 +156,7 @@ export function HomePage() {
 								clearAdminToken();
 								setAdminToken("");
 								setAdminTokenDraft("");
+								setAdminTokenError(null);
 							}}
 						>
 							Clear
