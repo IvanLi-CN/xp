@@ -1,6 +1,59 @@
+# Milestone 5 收尾 · Quota 强约束与 Raft 一致性（#0007）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-21
+- Last: 2025-12-21
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] Raft 状态机命令：为 `SetGrantEnabled` 增加 `source`（manual/quota），并调整 apply 的副作用规则。
+- [x] 写入转发：实现一个通用的 `ForwardingRaftFacade`，对非 leader 的 `client_write` 自动转发到 leader。
+- [x] 策略 H：reconcile 在 owner 节点以 `effective_enabled` 为准执行 AddUser/RemoveUser。
+- [x] 可观测性：
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # xp · M5 收尾：Quota 强约束与 Raft 一致性（策略 H + Forwarding Writes）
 
-> 对齐：`docs/plan/m5-raft-cluster.md` / `docs/plan/m4-quota-system.md`\
+> 对齐：`docs/plan/0006:m5-raft-cluster/PLAN.md` / `docs/plan/0005:m4-quota-system/PLAN.md`\
 > 参考：`docs/desgin/quota.md` / `docs/desgin/api.md` / `docs/desgin/cluster.md`\
 > 本文档位于 `docs/plan/`，作为 Milestone 5 的收尾补充设计。
 
@@ -186,3 +239,4 @@ Milestone 5 引入 Raft 后，Nodes/Endpoints/Users/Grants 需要通过 leader �
   - 在非 leader（且为 owner）节点触发超限：能通过转发写入 Raft，并最终全局 `desired_enabled=false`。
   - Raft 暂不可写时：owner 节点仍保持断连，alerts/usage 明确提示异常。
 - E2E（可选）：复用现有 xray e2e 验证真实流量增长下的封禁链路。
+

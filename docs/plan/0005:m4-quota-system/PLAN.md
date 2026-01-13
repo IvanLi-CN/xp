@@ -1,3 +1,56 @@
+# Milestone 4 · 配额系统（单机强约束）（#0005）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-18
+- Last: 2025-12-19
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] **用量采集（后台轮询）**：周期性从 xray `StatsService` 拉取每个 Grant 的 uplink/downlink 累计值，并做增量累计（用量落本地文件，不进 Raft）。
+- [x] **周期窗口计算**：支持 `ByUser(UTC+8)` 与 `ByNode(本地时区)`，并遵循“缺日取月末”。
+- [x] **超限动作**（当 `quota_limit_bytes > 0`）：
+- [x] **周期切换与自动解封（可配置）**：到达下一周期时，重置 `used_bytes` 并按策略将“配额封禁”的 Grant 自动设回 `enabled=true`，由 reconcile 重新 AddUser。
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # Milestone 4 · 配额系统（单机强约束）— 需求与概要设计
 
 > 对齐计划：`docs/plan/README.md` 的 **Milestone 4**。\
@@ -127,3 +180,4 @@ Milestone 1–3 已完成：
 1. 轮询粒度与性能：Grant 数量增大时是否需要 `QueryStats` 批量拉取（本里程碑可先逐个拉取）。
 2. 自动解封默认值：建议默认开启，但是否需要“全局开关 + 每 Grant 覆盖”？
 3. 手动禁用的语义：管理员在超限后再次禁用/启用时，对 `quota_banned` 的处理以“人工优先”为推荐方案。
+

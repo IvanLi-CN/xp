@@ -1,3 +1,63 @@
+# Milestone 6 · Web 面板（基础功能完整：CRUD）（#0008）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-22
+- Last: 2025-12-22
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] 登录：输入 `admin_token` 并保存到浏览器本地（localStorage），提供退出/清除能力。
+- [x] 全局反馈：统一的错误提示（可读的后端 error.code/message）、加载态与空态组件。
+- [x] 危险操作确认：删除、重置 token、rotate shortId、禁用授权等操作需要二次确认。
+- [x] Nodes：
+- [x] Endpoints：列表 + 详情；创建/更新/删除；VLESS 端点支持 rotate shortId。
+- [x] Users：列表 + 详情；创建/更新/删除；重置订阅 token。
+- [x] Grants：列表 + 详情；创建/更新/删除；启用/禁用与配额/周期策略修改；可编辑 `note`；展示 credentials；展示 usage（不可用时显示 N/A）。
+- [x] 在 User 详情中提供订阅入口：raw/base64/clash 的一键复制与格式切换。
+- [x] 快速校验：对订阅请求做最小校验（HTTP 200 + 非空 + 基本格式），并提供可读错误。
+- [x] Storybook：覆盖新增组件的典型/异常状态（loading/empty/error/disabled）。
+- [x] Playwright：覆盖关键路径 E2E（登录、资源列表可见、创建/删除最小闭环等）。
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # Milestone 6 · Web 面板（基础功能完整：CRUD）— 需求与概要设计
 
 > 对齐计划：`docs/plan/README.md` 的 **Milestone 6**。\
@@ -208,3 +268,4 @@ Milestone 6 的目标是交付一个 **基础功能完整（CRUD 完整）** 的
 1. Nodes 的“删除/移除”与 Raft membership 变更：属于高风险能力，不纳入 M6；如需纳入 MVP，请主人明确拍板并另立工作项。
 2. Endpoints/Users 的更新语义：哪些字段可变、哪些不可变（例如 Endpoint.kind/tag 是否固定）需在 API 文档中写死规则。
 3. 订阅“最小校验”的边界：必须坚持最小化（HTTP 200 + 非空 + 基础前缀/可读错误），避免把客户端兼容性问题转嫁到服务端。
+
