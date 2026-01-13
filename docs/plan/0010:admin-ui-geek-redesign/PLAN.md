@@ -62,14 +62,14 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `UiThemeConfig` | Config | internal | New | ./contracts/config.md | web | `AppLayout` / 全站 | theme + follow-system + persist |
-| `UiDensityConfig` | Config | internal | New | ./contracts/config.md | web | Table/Form | compact vs comfortable |
-| `Icon` | UI Component | internal | New | ./contracts/ui-components.md | web | 全站 | Iconify-only |
-| `AppShell` | UI Component | internal | Modify | ./contracts/ui-components.md | web | 全站 | 替换现有 `AppLayout` 结构 |
-| `PageHeader` | UI Component | internal | New | ./contracts/ui-components.md | web | views/* | 标题/描述/操作区统一 |
-| `DataTable`（或 `ResourceTable` v2） | UI Component | internal | Modify | ./contracts/ui-components.md | web | list pages | 列对齐/空态/加载态一致 |
+| 接口（Name）                         | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）     | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                   |
+| ------------------------------------ | ------------ | ------------- | -------------- | ---------------------------- | --------------- | ------------------- | ------------------------------- |
+| `UiThemeConfig`                      | Config       | internal      | New            | ./contracts/config.md        | web             | `AppLayout` / 全站  | theme + follow-system + persist |
+| `UiDensityConfig`                    | Config       | internal      | New            | ./contracts/config.md        | web             | Table/Form          | compact vs comfortable          |
+| `Icon`                               | UI Component | internal      | New            | ./contracts/ui-components.md | web             | 全站                | Iconify-only                    |
+| `AppShell`                           | UI Component | internal      | Modify         | ./contracts/ui-components.md | web             | 全站                | 替换现有 `AppLayout` 结构       |
+| `PageHeader`                         | UI Component | internal      | New            | ./contracts/ui-components.md | web             | views/*             | 标题/描述/操作区统一            |
+| `DataTable`（或 `ResourceTable` v2） | UI Component | internal      | Modify         | ./contracts/ui-components.md | web             | list pages          | 列对齐/空态/加载态一致          |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -153,25 +153,25 @@ None
   - `tabler:plug` → Sidebar / Endpoints
   - `tabler:users` → Sidebar / Users
   - `tabler:key` → Sidebar / Grants
-  -（实现阶段补齐：Top bar / Theme toggle、Search、Logout、Copy、Refresh、New、Back 等动作图标，统一在契约文档中冻结）
+    -（实现阶段补齐：Top bar / Theme toggle、Search、Logout、Copy、Refresh、New、Back 等动作图标，统一在契约文档中冻结）
 
 ### 页面一览（Routes）
 
-| Route | Page | Light | Dark |
-| --- | --- | --- | --- |
-| `/login` | Login | ![Login light](./assets/login-light.svg) | ![Login dark](./assets/login-dark.svg) |
-| `/` | Dashboard | ![Dashboard light](./assets/dashboard-light.svg) | ![Dashboard dark](./assets/dashboard-dark.svg) |
-| `/nodes` | Nodes list | ![Nodes light](./assets/nodes-light.svg) | ![Nodes dark](./assets/nodes-dark.svg) |
-| `/nodes/$nodeId` | Node details | ![Node details light](./assets/node-details-light.svg) | ![Node details dark](./assets/node-details-dark.svg) |
-| `/endpoints` | Endpoints list | ![Endpoints light](./assets/endpoints-light.svg) | ![Endpoints dark](./assets/endpoints-dark.svg) |
-| `/endpoints/new` | New endpoint | ![Endpoint new light](./assets/endpoint-new-light.svg) | ![Endpoint new dark](./assets/endpoint-new-dark.svg) |
+| Route                    | Page             | Light                                                          | Dark                                                         |
+| ------------------------ | ---------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| `/login`                 | Login            | ![Login light](./assets/login-light.svg)                       | ![Login dark](./assets/login-dark.svg)                       |
+| `/`                      | Dashboard        | ![Dashboard light](./assets/dashboard-light.svg)               | ![Dashboard dark](./assets/dashboard-dark.svg)               |
+| `/nodes`                 | Nodes list       | ![Nodes light](./assets/nodes-light.svg)                       | ![Nodes dark](./assets/nodes-dark.svg)                       |
+| `/nodes/$nodeId`         | Node details     | ![Node details light](./assets/node-details-light.svg)         | ![Node details dark](./assets/node-details-dark.svg)         |
+| `/endpoints`             | Endpoints list   | ![Endpoints light](./assets/endpoints-light.svg)               | ![Endpoints dark](./assets/endpoints-dark.svg)               |
+| `/endpoints/new`         | New endpoint     | ![Endpoint new light](./assets/endpoint-new-light.svg)         | ![Endpoint new dark](./assets/endpoint-new-dark.svg)         |
 | `/endpoints/$endpointId` | Endpoint details | ![Endpoint details light](./assets/endpoint-details-light.svg) | ![Endpoint details dark](./assets/endpoint-details-dark.svg) |
-| `/users` | Users list | ![Users light](./assets/users-light.svg) | ![Users dark](./assets/users-dark.svg) |
-| `/users/new` | New user | ![User new light](./assets/user-new-light.svg) | ![User new dark](./assets/user-new-dark.svg) |
-| `/users/$userId` | User details | ![User details light](./assets/user-details-light.svg) | ![User details dark](./assets/user-details-dark.svg) |
-| `/grants` | Grants list | ![Grants light](./assets/grants-light.svg) | ![Grants dark](./assets/grants-dark.svg) |
-| `/grants/new` | New grant | ![Grant new light](./assets/grant-new-light.svg) | ![Grant new dark](./assets/grant-new-dark.svg) |
-| `/grants/$grantId` | Grant details | ![Grant details light](./assets/grant-details-light.svg) | ![Grant details dark](./assets/grant-details-dark.svg) |
+| `/users`                 | Users list       | ![Users light](./assets/users-light.svg)                       | ![Users dark](./assets/users-dark.svg)                       |
+| `/users/new`             | New user         | ![User new light](./assets/user-new-light.svg)                 | ![User new dark](./assets/user-new-dark.svg)                 |
+| `/users/$userId`         | User details     | ![User details light](./assets/user-details-light.svg)         | ![User details dark](./assets/user-details-dark.svg)         |
+| `/grants`                | Grants list      | ![Grants light](./assets/grants-light.svg)                     | ![Grants dark](./assets/grants-dark.svg)                     |
+| `/grants/new`            | New grant        | ![Grant new light](./assets/grant-new-light.svg)               | ![Grant new dark](./assets/grant-new-dark.svg)               |
+| `/grants/$grantId`       | Grant details    | ![Grant details light](./assets/grant-details-light.svg)       | ![Grant details dark](./assets/grant-details-dark.svg)       |
 
 ### App shell 基准图
 
@@ -195,7 +195,7 @@ None
 - `cd web && bun run lint`
 - `cd web && bun run typecheck`
 - `cd web && bun run test`
--（如启用）`cd web && bun run test:e2e` / `cd web && bun run test-storybook`
+  -（如启用）`cd web && bun run test:e2e` / `cd web && bun run test-storybook`
 
 ## 文档更新（Docs to Update）
 
