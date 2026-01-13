@@ -239,4 +239,3 @@ Milestone 5 引入 Raft 后，Nodes/Endpoints/Users/Grants 需要通过 leader �
   - 在非 leader（且为 owner）节点触发超限：能通过转发写入 Raft，并最终全局 `desired_enabled=false`。
   - Raft 暂不可写时：owner 节点仍保持断连，alerts/usage 明确提示异常。
 - E2E（可选）：复用现有 xray e2e 验证真实流量增长下的封禁链路。
-

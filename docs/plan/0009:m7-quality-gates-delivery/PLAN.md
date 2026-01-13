@@ -220,4 +220,3 @@ Milestone 7 的目标是交付一套 **可复现、可持续、可运维** 的�
 1. Lockfile 约束：仓库已迁移为 `bun.lock` 并删除 `package-lock.json`；需约定禁止回引 npm lockfile，避免双锁漂移。
 2. CI 资源消耗：Storybook + E2E 均为 PR 必跑，需要控制 job 并行与缓存策略，避免 PR 周期过长。
 3. 运维模板的路径约定：systemd/openrc 的安装路径与运行用户是否需要更严格约束。
-

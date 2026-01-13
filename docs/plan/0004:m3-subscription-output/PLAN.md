@@ -234,4 +234,3 @@ MVP 输出最小可导入 YAML：
 2. **NAME 编码**：对 URI 的 `#<NAME>` 做 URL encode（已定），避免空格/特殊字符导致解析差异。
 3. **输出范围**：仅输出 `enabled=true` 的 Grants（已定），避免“订阅里存在但实际连不上”的配置。
 4. **public_domain 必填**：`Node.public_domain` 为空时返回错误（已定），避免生成不可用订阅。
-

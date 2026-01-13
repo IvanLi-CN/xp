@@ -236,4 +236,3 @@ Milestone 1 的目标是把 `xp` 的“控制面骨架”在**单机**上跑通�
 
 1. **管理员 token 来源**：M1 是要求从配置读取（ENV/CLI/文件），还是需要额外的 `xp init`（后续 M5）来生成并落盘？
 2. **`/api/admin/grants/{id}/usage` 语义**：M1 无 Stats 来源时，是返回 501 更清晰，还是返回固定结构（`used_bytes=0`）以便前端先开发？
-
