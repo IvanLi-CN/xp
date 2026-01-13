@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #e2e8f0; }
+      .t1 { font-size: 14px; fill: #94a3b8; }
+      .t2 { font-size: 12px; fill: #94a3b8; }
+      .t3 { font-size: 13px; fill: #e2e8f0; }
+      .btn { font-size: 12px; font-weight: 750; fill: #e2e8f0; }
+      .stroke { stroke: #24324a; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="900" fill="#0b1020"/>
+
+  <!-- Top bar -->
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+  <rect x="320" y="36" width="420" height="32" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="346" y="52" class="sans t2" dominant-baseline="middle">Search / command palette</text>
+  <text x="700" y="52" class="mono t2" dominant-baseline="middle">Ctrl K</text>
+  <rect x="1190" y="36" width="104" height="32" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1242" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Theme</text>
+  <rect x="1306" y="36" width="86" height="32" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1349" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Logout</text>
+
+  <!-- Sidebar (Endpoints active) -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="140" class="sans t2">NAV</text>
+  <rect x="44" y="160" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 172) scale(.75)">
+    <path d="M5 4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1m0 12h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1m10-4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1m0-8h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1"/>
+  </g>
+  <text x="92" y="182" class="sans t3" dominant-baseline="middle">Dashboard</text>
+  <rect x="44" y="212" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 224) scale(.75)">
+    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3m0 6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zm4-7v.01M7 16v.01"/>
+  </g>
+  <text x="92" y="234" class="sans t3" dominant-baseline="middle">Nodes</text>
+  <rect x="44" y="264" width="240" height="44" rx="12" fill="#042f2e" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 276) scale(.75)">
+    <path d="M9.785 6L18 14.215l-2.054 2.054a5.81 5.81 0 1 1-8.215-8.215zM4 20l3.5-3.5M15 4l-3.5 3.5M20 9l-3.5 3.5"/>
+  </g>
+  <text x="92" y="286" class="sans t3" dominant-baseline="middle">Endpoints</text>
+  <rect x="44" y="316" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 328) scale(.75)">
+    <path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2m1-17.87a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.85"/>
+  </g>
+  <text x="92" y="338" class="sans t3" dominant-baseline="middle">Users</text>
+  <rect x="44" y="368" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 380) scale(.75)">
+    <path d="m16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1-4.069 0l-.301-.301l-6.558 6.558a2 2 0 0 1-1.239.578L5.172 21H4a1 1 0 0 1-.993-.883L3 20v-1.172a2 2 0 0 1 .467-1.284l.119-.13L4 17h2v-2h2v-2l2.144-2.144l-.301-.301a2.877 2.877 0 0 1 0-4.069l2.643-2.643a2.877 2.877 0 0 1 4.069 0M15 9h.01"/>
+  </g>
+  <text x="92" y="390" class="sans t3" dominant-baseline="middle">Grants</text>
+
+  <!-- Main content -->
+  <rect x="320" y="100" width="1096" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="356" y="144" class="sans t0">Endpoint details</text>
+  <text x="356" y="170" class="sans t1">Endpoint ep_01H...</text>
+  <rect x="1110" y="124" width="120" height="36" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1170" y="142" class="sans btn" text-anchor="middle" dominant-baseline="middle">Back</text>
+  <rect x="1240" y="124" width="150" height="36" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1315" y="142" class="sans btn" text-anchor="middle" dominant-baseline="middle">Refresh</text>
+
+  <rect x="356" y="200" width="508" height="170" rx="14" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="380" y="232" class="sans t3">Overview</text>
+  <text x="380" y="260" class="mono t2">kind</text>
+  <text x="480" y="260" class="mono t3">vless_reality_vision_tcp</text>
+  <text x="380" y="286" class="mono t2">node_id</text>
+  <text x="480" y="286" class="mono t3">n1</text>
+  <text x="380" y="312" class="mono t2">port</text>
+  <text x="480" y="312" class="mono t3">443</text>
+  <text x="380" y="338" class="mono t2">tag</text>
+  <text x="480" y="338" class="mono t3">tokyo-vless</text>
+
+  <rect x="882" y="200" width="508" height="170" rx="14" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="906" y="232" class="sans t3">Configuration</text>
+  <text x="906" y="262" class="mono t2">serverName</text>
+  <text x="1030" y="262" class="mono t3">chatgpt.com</text>
+  <text x="906" y="288" class="mono t2">fingerprint</text>
+  <text x="1030" y="288" class="mono t3">chrome</text>
+
+  <rect x="356" y="388" width="1034" height="260" rx="14" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="380" y="420" class="sans t3">Update endpoint</text>
+  <rect x="380" y="440" width="986" height="1" fill="#24324a"/>
+  <text x="380" y="472" class="sans t3">VLESS settings</text>
+  <text x="380" y="502" class="mono t2">port</text>
+  <rect x="380" y="512" width="320" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="396" y="534" class="mono t3" dominant-baseline="middle">443</text>
+  <text x="720" y="502" class="mono t2">serverName</text>
+  <rect x="720" y="512" width="440" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="736" y="534" class="mono t3" dominant-baseline="middle">chatgpt.com</text>
+  <text x="1180" y="502" class="mono t2">fingerprint</text>
+  <rect x="1180" y="512" width="186" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1196" y="534" class="mono t3" dominant-baseline="middle">chrome</text>
+  <rect x="1200" y="590" width="166" height="44" rx="12" fill="#22d3ee"/>
+  <text x="1283" y="612" class="sans btn" fill="#031c22" text-anchor="middle" dominant-baseline="middle">Save changes</text>
+
+  <rect x="356" y="664" width="1034" height="110" rx="14" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="380" y="696" class="sans t3">Rotate shortId</text>
+  <text x="380" y="720" class="sans t2">Generate a new shortId for this VLESS endpoint.</text>
+  <rect x="380" y="736" width="170" height="36" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="465" y="754" class="sans btn" text-anchor="middle" dominant-baseline="middle">Rotate shortId</text>
+
+  <rect x="356" y="786" width="1034" height="54" rx="14" fill="#2a0b14" class="stroke" stroke-width="1"/>
+  <text x="380" y="813" class="sans t3" dominant-baseline="middle">Danger zone</text>
+  <rect x="1200" y="798" width="166" height="34" rx="10" fill="#ef4444"/>
+  <text x="1283" y="815" class="sans btn" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">Delete endpoint</text>
+</svg>

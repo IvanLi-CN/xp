@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #0f172a; }
+      .t1 { font-size: 14px; fill: #475569; }
+      .t2 { font-size: 12px; fill: #64748b; }
+      .t3 { font-size: 13px; fill: #0f172a; }
+      .btn { font-size: 12px; font-weight: 750; fill: #0f172a; }
+      .stroke { stroke: #e2e8f0; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1440" height="900" fill="#f6f8fb"/>
+
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+  <rect x="1190" y="36" width="104" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1242" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Theme</text>
+  <rect x="1306" y="36" width="86" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1349" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Logout</text>
+
+  <!-- Sidebar (Grants active) -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="140" class="sans t2">NAV</text>
+  <rect x="44" y="368" width="240" height="44" rx="12" fill="#e6fbff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 380) scale(.75)">
+    <path d="m16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1-4.069 0l-.301-.301l-6.558 6.558a2 2 0 0 1-1.239.578L5.172 21H4a1 1 0 0 1-.993-.883L3 20v-1.172a2 2 0 0 1 .467-1.284l.119-.13L4 17h2v-2h2v-2l2.144-2.144l-.301-.301a2.877 2.877 0 0 1 0-4.069l2.643-2.643a2.877 2.877 0 0 1 4.069 0M15 9h.01"/>
+  </g>
+  <text x="92" y="390" class="sans t3" dominant-baseline="middle">Grants</text>
+
+  <rect x="320" y="100" width="1096" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="356" y="144" class="sans t0">Grants</text>
+  <text x="356" y="170" class="sans t1">Quota allocations per user and endpoint.</text>
+  <rect x="1218" y="124" width="172" height="36" rx="10" fill="#06b6d4"/>
+  <text x="1304" y="142" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">New grant</text>
+
+  <rect x="356" y="200" width="1034" height="640" rx="14" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <rect x="380" y="232" width="986" height="36" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="396" y="250" class="mono t2" dominant-baseline="middle">grant_id</text>
+  <text x="520" y="250" class="mono t2" dominant-baseline="middle">user_id</text>
+  <text x="650" y="250" class="mono t2" dominant-baseline="middle">endpoint_id</text>
+  <text x="830" y="250" class="mono t2" dominant-baseline="middle">enabled</text>
+  <text x="930" y="250" class="mono t2" dominant-baseline="middle">quota_bytes</text>
+  <text x="1080" y="250" class="mono t2" dominant-baseline="middle">cycle</text>
+  <text x="1180" y="250" class="mono t2" dominant-baseline="middle">note</text>
+
+  <rect x="380" y="276" width="986" height="52" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="396" y="302" class="mono t3" dominant-baseline="middle">g_01H...</text>
+  <text x="520" y="302" class="mono t3" dominant-baseline="middle">u_01H...</text>
+  <text x="650" y="302" class="mono t3" dominant-baseline="middle">ep_01H...</text>
+  <text x="830" y="302" class="sans t3" dominant-baseline="middle">Yes</text>
+  <text x="930" y="302" class="mono t3" dominant-baseline="middle">1073741824</text>
+  <text x="1080" y="302" class="mono t3" dominant-baseline="middle">inherit_user</text>
+  <text x="1180" y="302" class="sans t3" dominant-baseline="middle">enterprise</text>
+  <text x="1320" y="302" class="sans t2" text-anchor="end" dominant-baseline="middle">Details</text>
+</svg>
