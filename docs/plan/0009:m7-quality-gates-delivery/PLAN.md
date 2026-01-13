@@ -1,3 +1,58 @@
+# Milestone 7 · 质量门禁与交付（#0009）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-23
+- Last: 2025-12-23
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] 新增常规 CI 工作流（PR + push main）覆盖：
+- [x] 保留并稳定化现有 `xray-e2e` 工作流（Docker + ignored tests）。
+- [x] systemd 与 openrc 的启动样例（覆盖 `xp` + `xray`）；
+- [x] 最小配置模板（ENV 文件示例），明确必要参数与默认值；
+- [x] 数据目录说明（包含 `cluster/`、`raft/`、`state.json`、`usage.json`）；
+- [x] 升级/回滚策略（尤其是 schema mismatch 的应对与备份/恢复建议）。
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # Milestone 7 · 质量门禁与交付 — 需求与概要设计
 
 > 对齐计划：`docs/plan/README.md` 的 **Milestone 7**。\

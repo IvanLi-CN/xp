@@ -1,3 +1,57 @@
+# Milestone 1 · 控制面基础（单机可用）（#0002）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-17
+- Last: 2025-12-17
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] **HTTP API Server**：Axum 路由组织、中间件、统一错误返回。
+- [x] **认证**：管理员 Bearer token（仅覆盖管理员 API）。
+- [x] **期望状态（单机）**：在本机保存并持久化 Nodes/Endpoints/Users/Grants，重启可恢复（最小持久化）。
+- [x] **管理 API**：以 `docs/desgin/api.md` 为基准，补齐 Web 可用所需的读接口（列表/详情）。
+- [x] **Web 联调**：确保现有 `web/` 能成功访问后端健康检查，并能在 UI 侧对管理 API 做请求验证（不要求完成完整面板功能）。
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # Milestone 1 · 控制面基础（单机可用）— 需求与概要设计
 
 > 对齐计划：`docs/plan/README.md` 的 **Milestone 1**。\

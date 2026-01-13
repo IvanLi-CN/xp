@@ -1,3 +1,55 @@
+# Milestone 3 · 订阅输出（对用户可交付）（#0004）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-18
+- Last: 2025-12-18
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] **订阅 API**：`GET /api/sub/{subscription_token}` 默认输出 Base64；支持 `?format=raw|clash`（见 `subscription.md`）。
+- [x] **token 生命周期（只读边界清晰）**：
+- [x] **订阅内容拼装**：
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
 # Milestone 3 · 订阅输出（对用户可交付）— 需求与概要设计
 
 > 对齐计划：`docs/plan/README.md` 的 **Milestone 3**。\

@@ -1,0 +1,141 @@
+# MVP 大纲（目标与里程碑）（#0001）
+
+## 状态
+
+- Status: 已完成
+- Created: 2025-12-17
+- Last: 2025-12-23
+
+## 背景 / 问题陈述
+
+本计划由旧 planning/spec 文档迁移归档；主人已确认该计划对应功能**已实现**。
+
+## 目标 / 非目标
+
+详见下方“原始输入”中的相关章节（例如“背景与目标”“范围与非目标”等）。
+
+## 范围（Scope）
+
+详见下方“原始输入”。
+
+## 需求（Requirements）
+
+详见下方“原始输入”。
+
+## 接口契约（Interfaces & Contracts）
+
+详见下方“原始输入”（本计划为迁移归档，不在此额外新增契约文档）。
+
+## 验收标准（Acceptance Criteria）
+
+详见下方“原始输入”中的 DoD/验收清单/验收点等章节（如有）。
+
+## 里程碑（Milestones）
+
+- [x] M1: 控制面基础（单机可用）
+- [x] M2: Xray Controller + Reconcile（单机闭环）
+- [x] M3: 订阅输出（对用户可交付）
+- [x] M4: 配额系统（单机强约束）
+- [x] M5: Raft 集群（强一致 + HTTPS-only）
+- [x] M5 收尾: Quota 强约束与 Raft 一致性
+- [x] M6: Web 面板（基础功能完整：CRUD）
+- [x] M7: 质量门禁与交付
+
+## 方案概述（Approach, high-level）
+
+详见下方“原始输入”。
+
+## 风险与开放问题（Risks & Open Questions）
+
+- None noted in source.
+
+## 参考（References）
+
+- `docs/desgin/README.md`
+
+## 原始输入（迁移前版本）
+
+# xp · 开发计划（MVP · 大纲）
+
+> 参考：`docs/desgin/requirements.md` / `docs/desgin/architecture.md` / `docs/desgin/api.md` / `docs/desgin/quality.md`
+
+## 0. MVP 目标（约束不变）
+
+- 单机资源：`xp` 常驻内存 ≤32MiB（RSS，不含 xray）；每台服务器仅运行 `xp` + `xray`
+- 端点：VLESS+REALITY(vision/TCP)、SS2022(2022-blake3-aes-128-gcm/TCP+UDP)
+- 用户/授权：多端点、多节点；授权可禁用；订阅 token 可重置
+- 配额：月度周期（ByNode / ByUser=UTC+8），双向合计；超限自动禁用
+- 集群：1–20 节点，Raft 强一致；节点间 HTTPS-only（建议 mTLS）
+- 订阅：Raw URI / Base64 / Clash YAML
+
+## 1. Milestone：控制面基础（单机可用）
+
+- 细化方案：`docs/plan/0002:m1-control-plane-foundation/PLAN.md`
+- 工程与约定：配置加载（CLI/ENV/文件择一）、日志、错误格式、ID（ULID）
+- 领域模型：Node / Endpoint / User / Grant 的核心字段与校验规则
+- 管理员认证：`Authorization: Bearer <admin_token>` 的统一中间件
+- 管理 API（先单机）：按 `docs/desgin/api.md` 落地 CRUD + leader/follower 预留（先返回本机）
+- Web 联调：Vite proxy `/api` → `xp`；健康检查与最小页面贯通
+
+## 2. Milestone：Xray Controller + Reconcile（单机闭环）
+
+- 细化方案：`docs/plan/0003:m2-xray-controller-reconcile/PLAN.md`
+- Xray gRPC 适配：`AddInbound/RemoveInbound`、`AlterInbound(AddUser/RemoveUser)`、`StatsService`
+- 协议材料生成：
+  - VLESS/Reality：key pair、shortIds、active_short_id
+  - SS2022：server/user PSK（base64）与 password 组合规则
+- Reconciler：启动/变更触发/周期性兜底，保证“期望状态 → 运行态”可重试、幂等
+- 运行态恢复：检测 xray 重启后可重建 inbound 与 clients
+
+## 3. Milestone：订阅输出（对用户可交付）
+
+- 细化方案：`docs/plan/0004:m3-subscription-output/PLAN.md`
+- 订阅 API：`/api/sub/{token}` 输出 raw/base64/clash（按 `docs/desgin/subscription.md`）
+- token 生命周期：生成/重置/失效策略；只读权限边界清晰
+- 订阅内容：按 Node 的 `public_domain`/端点端口拼装，确保与 Web 展示一致
+
+## 4. Milestone：配额系统（单机强约束）
+
+- 细化方案：`docs/plan/0005:m4-quota-system/PLAN.md`
+- 用量采集：Stats 拉取 + 本地游标增量累计（用量不进 Raft）
+- 周期计算：ByUser(UTC+8)/ByNode(本地时区) 与 “缺日取月末” 规则
+- 超限动作：本机 RemoveUser + 写入期望状态 `Grant.enabled=false`（单机先本地落盘）
+- 周期切换：按策略自动解封/保持封禁（以 `docs/desgin/quota.md` 为准）
+
+## 5. Milestone：Raft 集群（强一致 + HTTPS-only）
+
+- 细化方案：`docs/plan/0006:m5-raft-cluster/PLAN.md`
+- 收尾补充：`docs/plan/0007:m5-quota-raft-consistency/PLAN.md`（Quota→Raft 强一致 + 策略 H + 异常提示）
+- Raft 选型与落地：WAL + snapshot；状态机仅存“期望状态”（Nodes/Endpoints/Users/Grants）
+- 节点身份：cluster CA + 节点证书（mTLS）；证书/密钥落盘与轮换策略
+- init/join：`xp init`、join token、`/api/cluster/join`（CSR 签发）与节点注册
+- 写转发：follower 将写请求转发 leader（或返回 leader 地址供客户端重试）
+- Reconcile 分工：仅对“本节点拥有的端点”调用本机 xray；其余只复制状态
+
+## 6. Milestone：Web 面板（基础功能完整：CRUD）
+
+- 细化方案：`docs/plan/0008:m6-web-panel/PLAN.md`
+- 基础体验：登录/退出（admin token）、路由守卫、全局错误提示、加载/空态、危险操作确认
+- 资源管理（CRUD 完整）：Nodes/Endpoints/Users/Grants 的列表/详情/创建/更新/删除（与 `docs/desgin/api.md` 对齐）
+- 关键动作：rotate shortId、reset subscription token、Grant 启用/禁用与配额/周期更新、usage/alerts 可视化
+- 订阅工具：一键复制订阅链接、raw/base64/clash 切换、最小可用性校验
+
+## 7. 质量门禁与交付
+
+- 细化方案：`docs/plan/0009:m7-quality-gates-delivery/PLAN.md`
+- Rust：`cargo fmt` / `clippy -D warnings` / 单测 / 集成测试（mock xray gRPC）
+- Web（Bun）：Biome check + `tsc -b` + 组件 stories 测试 + E2E
+- 运维：systemd/openrc 示例、最小配置模板、升级/回滚与数据目录说明
+
+## 8. MVP 验收（DoD 摘要）
+
+0. 内存：启动后空闲 60s，`xp` RSS ≤32MiB（Linux 口径，推荐读取 `/proc/<pid>/status` 的 `VmRSS`）
+
+   ```bash
+   pid="$(pidof xp)"
+   awk '/VmRSS/ { printf("xp RSS: %.2f MiB\\n", $2/1024) }' "/proc/${pid}/status"
+   ```
+
+1. 单机：创建端点 → 创建用户/授权 → 导出订阅 → 成功连通
+2. 单机配额：可统计 → 超限封禁（client 移除）→ 周期切换按策略恢复
+3. 集群：任意节点写入全局一致；节点重启后 reconcile 可恢复运行态
