@@ -156,7 +156,7 @@ export function UserDetailsPage() {
 				title="User not found"
 				description="The user ID does not exist."
 				action={
-					<Link to="/users" className="btn btn-secondary">
+					<Link to="/users" className="btn btn-outline btn-sm xp-btn-outline">
 						Back to users
 					</Link>
 				}

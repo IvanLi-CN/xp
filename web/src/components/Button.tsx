@@ -28,7 +28,7 @@ export function Button({
 
 	const variantClass =
 		variant === "secondary"
-			? "btn-secondary"
+			? "btn-outline xp-btn-outline"
 			: variant === "ghost"
 				? "btn-ghost"
 				: "btn-primary";

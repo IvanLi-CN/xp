@@ -129,7 +129,7 @@ export function GrantDetailsPage() {
 				title="Grant not found"
 				description="The grant ID does not exist."
 				action={
-					<Link to="/grants" className="btn btn-secondary">
+					<Link to="/grants" className="btn btn-outline btn-sm xp-btn-outline">
 						Back to grants
 					</Link>
 				}

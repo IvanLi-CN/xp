@@ -32,4 +32,76 @@
 		display: flex;
 		width: 100%;
 	}
+
+	/* daisyUI v5: btn-outline relies on --btn-color; provide a sensible default. */
+	:where(.btn-outline):not(
+			:where(
+					.btn-primary,
+					.btn-secondary,
+					.btn-accent,
+					.btn-neutral,
+					.btn-info,
+					.btn-success,
+					.btn-warning,
+					.btn-error
+				)
+		) {
+		--btn-color: var(--color-base-content);
+	}
+
+	:where(.xp-btn-outline) {
+		--btn-color: var(--color-base-content);
+		--btn-fg: var(--color-base-content);
+		--btn-border: color-mix(
+			in oklab,
+			var(--color-base-content) 22%,
+			transparent
+		);
+		--btn-shadow: "";
+	}
+
+	:where(.xp-btn-outline):hover {
+		--btn-bg: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+	}
+}
+
+/*
+Tailwind v3 preflight ships unlayered resets (padding: 0; border-width: 0).
+daisyUI v5 styles are inside CSS cascade layers and lose to unlayered rules.
+Re-assert core daisyUI sizing/border props unlayered so buttons/inputs render correctly.
+*/
+
+.btn {
+	border-width: var(--border);
+	border-style: solid;
+	border-color: var(--btn-border);
+	background-color: var(--btn-bg);
+	color: var(--btn-fg);
+	/*
+	Use physical paddings to override Tailwind preflight's physical `padding: 0`,
+	which otherwise wins over logical `padding-inline` on <button>.
+	*/
+	padding-left: var(--btn-p);
+	padding-right: var(--btn-p);
+}
+
+.input {
+	border-width: var(--border);
+	border-style: solid;
+	border-color: var(--input-color);
+	padding-left: 0.75rem;
+	padding-right: 0.75rem;
+}
+
+.select {
+	border-width: var(--border);
+	border-style: solid;
+	padding-left: 0.75rem;
+	padding-right: 0.75rem;
+}
+
+.textarea {
+	border-width: var(--border);
+	border-style: solid;
+	padding: 0.75rem;
 }

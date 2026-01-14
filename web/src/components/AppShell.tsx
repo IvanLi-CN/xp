@@ -229,7 +229,10 @@ export function AppShell({
 
 							<div className="flex items-center justify-end gap-2">
 								<div className="dropdown dropdown-end">
-									<button type="button" className="btn btn-outline btn-sm">
+									<button
+										type="button"
+										className="btn btn-outline btn-sm xp-btn-outline"
+									>
 										Theme
 									</button>
 									<div className="dropdown-content z-[1] w-72 rounded-box border border-base-200 bg-base-100 shadow">
@@ -295,7 +298,7 @@ export function AppShell({
 
 								<button
 									type="button"
-									className="btn btn-outline btn-sm"
+									className="btn btn-outline btn-sm xp-btn-outline"
 									onClick={() => {
 										clearAdminToken();
 										navigate({ to: "/login" });

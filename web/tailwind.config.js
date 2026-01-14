@@ -26,8 +26,8 @@ export default {
 			"--color-accent": "oklch(72% 0.20 150)", // mint
 			"--color-accent-content": "oklch(18% 0.02 150)",
 			"--radius-box": "0.75rem",
-			"--radius-field": "0.5rem",
-			"--depth": "1",
+			"--radius-field": "1.25rem",
+			"--depth": "0",
 			"--noise": "0",
 		}),
 		daisyuiTheme({
@@ -42,8 +42,8 @@ export default {
 			"--color-accent": "oklch(74% 0.16 150)",
 			"--color-accent-content": "oklch(16% 0.02 150)",
 			"--radius-box": "0.75rem",
-			"--radius-field": "0.5rem",
-			"--depth": "1",
+			"--radius-field": "1.25rem",
+			"--depth": "0",
 			"--noise": "0",
 		}),
 	],
