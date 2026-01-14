@@ -68,13 +68,15 @@ export function AppShell({
 			<span
 				key="health"
 				className={[
-					"badge badge-sm gap-1 font-mono",
+					"badge badge-sm gap-2 font-mono",
 					healthStatus === "ok" ? "badge-success" : "badge-error",
 				].join(" ")}
 				title="Backend health"
 			>
-				<span className="opacity-80">health</span>
-				<span>{healthStatus}</span>
+				<span>Health</span>
+				<span className="opacity-80">
+					{healthStatus === "ok" ? "OK" : "error"}
+				</span>
 			</span>,
 		);
 
@@ -82,21 +84,21 @@ export function AppShell({
 			items.push(
 				<span
 					key="role"
-					className="badge badge-sm gap-1 font-mono"
+					className="badge badge-sm gap-2 font-mono"
 					title="Cluster role"
 				>
-					<span className="opacity-80">role</span>
-					<span>{clusterInfo.data.role}</span>
+					<span>role</span>
+					<span className="opacity-80">{clusterInfo.data.role}</span>
 				</span>,
 			);
 			items.push(
 				<span
 					key="term"
-					className="badge badge-sm gap-1 font-mono"
+					className="badge badge-sm gap-2 font-mono"
 					title="Cluster term"
 				>
-					<span className="opacity-80">term</span>
-					<span>{clusterInfo.data.term}</span>
+					<span>term</span>
+					<span className="opacity-80">{clusterInfo.data.term}</span>
 				</span>,
 			);
 		}
@@ -112,10 +114,10 @@ export function AppShell({
 			items.push(
 				<span
 					key="alerts"
-					className={["badge badge-sm gap-1 font-mono", tone].join(" ")}
+					className={["badge badge-sm gap-2 font-mono", tone].join(" ")}
 					title="Admin alerts"
 				>
-					<span className="opacity-80">alerts</span>
+					<span>alerts</span>
 					<span>{count}</span>
 					{unreachable > 0 ? (
 						<span className="opacity-80">+{unreachable}n</span>
@@ -150,7 +152,7 @@ export function AppShell({
 								<Icon name="tabler:menu-2" ariaLabel="Menu" />
 							</label>
 						</div>
-						<div className="flex flex-1 items-center min-w-0 gap-3">
+						<div className="flex items-center gap-2 min-w-0">
 							<Link to="/" className="flex items-center gap-2">
 								<span className="font-semibold tracking-tight">
 									{brand.name}
@@ -161,58 +163,88 @@ export function AppShell({
 									</span>
 								) : null}
 							</Link>
-							<div className="hidden md:flex flex-wrap items-center gap-2">
+						</div>
+						<div className="flex flex-1 items-center justify-center px-3">
+							<button
+								type="button"
+								className="hidden lg:flex w-full max-w-md input input-bordered input-sm items-center justify-between gap-3 bg-base-200/40 hover:bg-base-200"
+								onClick={() => setCommandPalette({ open: true })}
+							>
+								<span className="text-sm opacity-60">
+									Search / command palette
+								</span>
+								<span className="font-mono text-xs opacity-60">Ctrl K</span>
+							</button>
+							<div className="hidden xl:flex items-center gap-2">
 								{headerStatus ?? statusBadges}
 							</div>
 						</div>
+
 						<div className="flex flex-none items-center gap-2">
-							<button
-								type="button"
-								className="btn btn-ghost btn-sm"
-								onClick={() => setCommandPalette({ open: true })}
-							>
-								<span className="hidden sm:inline">Ctrl/⌘K</span>
-								<span className="sm:hidden">K</span>
-							</button>
-
-							<label className="hidden sm:flex items-center gap-2">
-								<span className="text-xs opacity-60">Density</span>
-								<select
-									className="select select-bordered select-sm"
-									value={prefs.density}
-									onChange={(event) => {
-										const next = event.target.value;
-										prefs.setDensity(
-											next === "compact" ? "compact" : "comfortable",
-										);
-									}}
-								>
-									<option value="comfortable">Comfortable</option>
-									<option value="compact">Compact</option>
-								</select>
-							</label>
-
-							<label className="hidden sm:flex items-center gap-2">
-								<span className="text-xs opacity-60">Theme</span>
-								<select
-									className="select select-bordered select-sm"
-									value={prefs.theme}
-									onChange={(event) => {
-										const next = event.target.value;
-										if (
-											next === "dark" ||
-											next === "light" ||
-											next === "system"
-										) {
-											prefs.setTheme(next);
-										}
-									}}
-								>
-									<option value="system">System</option>
-									<option value="light">Light</option>
-									<option value="dark">Dark</option>
-								</select>
-							</label>
+							<div className="dropdown dropdown-end">
+								<button type="button" className="btn btn-ghost btn-sm">
+									Theme
+								</button>
+								<div className="dropdown-content z-[1] w-72 rounded-box border border-base-200 bg-base-100 shadow">
+									<div className="p-3 space-y-3">
+										<div className="space-y-1">
+											<p className="text-xs uppercase tracking-wide opacity-60">
+												Theme
+											</p>
+											<select
+												className="select select-bordered select-sm w-full"
+												aria-label="Theme"
+												value={prefs.theme}
+												onChange={(event) => {
+													const next = event.target.value;
+													if (
+														next === "dark" ||
+														next === "light" ||
+														next === "system"
+													) {
+														prefs.setTheme(next);
+													}
+												}}
+											>
+												<option value="system">System</option>
+												<option value="light">Light</option>
+												<option value="dark">Dark</option>
+											</select>
+										</div>
+										<div className="space-y-1">
+											<p className="text-xs uppercase tracking-wide opacity-60">
+												Density
+											</p>
+											<select
+												className="select select-bordered select-sm w-full"
+												aria-label="Density"
+												value={prefs.density}
+												onChange={(event) => {
+													const next = event.target.value;
+													prefs.setDensity(
+														next === "compact" ? "compact" : "comfortable",
+													);
+												}}
+											>
+												<option value="comfortable">Comfortable</option>
+												<option value="compact">Compact</option>
+											</select>
+										</div>
+										<div className="border-t border-base-200 pt-3">
+											<button
+												type="button"
+												className="btn btn-ghost btn-sm w-full justify-start"
+												onClick={() => setCommandPalette({ open: true })}
+											>
+												Command palette
+												<span className="ml-auto font-mono text-xs opacity-60">
+													Ctrl/⌘K
+												</span>
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
 
 							<button
 								type="button"
@@ -239,20 +271,18 @@ export function AppShell({
 					/>
 					<aside className="min-h-full w-72 bg-base-100 border-r border-base-200">
 						<div className="p-4">
-							<div className="flex items-baseline justify-between">
-								<div className="space-y-0.5">
-									<p className="font-semibold tracking-tight">{brand.name}</p>
-									{brand.subtitle ? (
-										<p className="text-xs opacity-60">{brand.subtitle}</p>
-									) : null}
-								</div>
-								<span className="badge badge-sm font-mono opacity-80">
-									{prefs.resolvedTheme}
-								</span>
+							<div className="space-y-0.5">
+								<p className="font-semibold tracking-tight">{brand.name}</p>
+								{brand.subtitle ? (
+									<p className="text-xs opacity-60">{brand.subtitle}</p>
+								) : null}
 							</div>
 						</div>
 
-						<nav className="px-3 pb-4">
+						<nav className="px-3 pb-6">
+							<p className="px-3 pb-2 text-xs uppercase tracking-wide opacity-50">
+								Nav
+							</p>
 							<ul className="menu gap-1">
 								{navItems.map((item) => (
 									<li key={item.to}>
@@ -268,48 +298,6 @@ export function AppShell({
 								))}
 							</ul>
 						</nav>
-
-						<div className="px-4 pb-6 lg:hidden">
-							<div className="space-y-3 rounded-box border border-base-200 bg-base-200 p-3">
-								<div className="flex items-center justify-between gap-3">
-									<span className="text-xs opacity-60">Theme</span>
-									<select
-										className="select select-bordered select-sm"
-										value={prefs.theme}
-										onChange={(event) => {
-											const next = event.target.value;
-											if (
-												next === "dark" ||
-												next === "light" ||
-												next === "system"
-											) {
-												prefs.setTheme(next);
-											}
-										}}
-									>
-										<option value="system">System</option>
-										<option value="light">Light</option>
-										<option value="dark">Dark</option>
-									</select>
-								</div>
-								<div className="flex items-center justify-between gap-3">
-									<span className="text-xs opacity-60">Density</span>
-									<select
-										className="select select-bordered select-sm"
-										value={prefs.density}
-										onChange={(event) => {
-											const next = event.target.value;
-											prefs.setDensity(
-												next === "compact" ? "compact" : "comfortable",
-											);
-										}}
-									>
-										<option value="comfortable">Comfortable</option>
-										<option value="compact">Compact</option>
-									</select>
-								</div>
-							</div>
-						</div>
 					</aside>
 				</div>
 			</div>
