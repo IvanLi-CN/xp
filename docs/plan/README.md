@@ -66,3 +66,4 @@
 | 0009 | Milestone 7 · 质量门禁与交付                          | 已完成 | `0009:m7-quality-gates-delivery/PLAN.md`    | 2025-12-23 | -                |
 | 0010 | 控制面 Web UI 重设计（Geek 风格 + Light/Dark）        | 待实现 | `0010:admin-ui-geek-redesign/PLAN.md`       | 2026-01-13 | -                |
 | 0011 | Storybook 启动不自动打开浏览器                        | 待实现 | `0011:storybook-no-auto-open/PLAN.md`       | 2026-01-14 | 默认 `--no-open` |
+| 0012 | Grant 接入点配置：协议 × 节点二维表格                 | 待设计 | `0012:grant-access-matrix/PLAN.md`          | 2026-01-14 | -                |
