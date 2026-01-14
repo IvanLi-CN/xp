@@ -12,6 +12,10 @@ import {
 import { AppLayout } from "../src/components/AppLayout";
 import { ToastProvider } from "../src/components/Toast";
 import { UiPrefsProvider } from "../src/components/UiPrefs";
+import {
+	UI_DENSITY_STORAGE_KEY,
+	UI_THEME_STORAGE_KEY,
+} from "../src/components/UiPrefs";
 import { clearAdminToken, writeAdminToken } from "../src/components/auth";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
@@ -39,7 +43,20 @@ type StorybookRouterParameters = {
 	initialEntry?: string;
 };
 
+type StorybookUiParameters = {
+	theme?: "system" | "light" | "dark";
+	density?: "comfortable" | "compact";
+};
+
 installStorybookFetchMock();
+
+function safeLocalStorageSet(key: string, value: string) {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		// ignore
+	}
+}
 
 const preview: Preview = {
 	decorators: [
@@ -51,8 +68,18 @@ const preview: Preview = {
 			const routerParams =
 				(context.parameters?.router as StorybookRouterParameters | undefined) ??
 				undefined;
+			const uiParams =
+				(context.parameters?.ui as StorybookUiParameters | undefined) ??
+				undefined;
 
 			configureStorybookApiMock(context.id, mockParams);
+
+			if (uiParams?.theme) {
+				safeLocalStorageSet(UI_THEME_STORAGE_KEY, uiParams.theme);
+			}
+			if (uiParams?.density) {
+				safeLocalStorageSet(UI_DENSITY_STORAGE_KEY, uiParams.density);
+			}
 
 			if (mockParams?.adminToken === null) {
 				clearAdminToken();
