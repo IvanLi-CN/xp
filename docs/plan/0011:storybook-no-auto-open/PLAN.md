@@ -55,10 +55,10 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）            | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| ----------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ------------ |
-| `bun run storybook`     | CLI          | internal      | Modify         | ./contracts/cli.md       | web             | 开发者 / CI          | 默认禁用 open |
-| `bun run test-storybook`| CLI          | internal      | None           | ./contracts/cli.md       | web             | CI                   | 已使用 `--ci` |
+| 接口（Name）             | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
+| ------------------------ | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ------------- |
+| `bun run storybook`      | CLI          | internal      | Modify         | ./contracts/cli.md       | web             | 开发者 / CI         | 默认禁用 open |
+| `bun run test-storybook` | CLI          | internal      | None           | ./contracts/cli.md       | web             | CI                  | 已使用 `--ci` |
 
 ## 6) 约束与风险
 

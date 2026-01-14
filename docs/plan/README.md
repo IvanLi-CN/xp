@@ -53,16 +53,16 @@
 
 ## Index（固定表格）
 
-|   ID | Title                                                 | Status | Plan                                        | Last       | Notes |
-| ---: | ----------------------------------------------------- | ------ | ------------------------------------------- | ---------- | ----- |
-| 0001 | MVP 大纲（目标与里程碑）                              | 已完成 | `0001:mvp-outline/PLAN.md`                  | 2025-12-23 | -     |
-| 0002 | Milestone 1 · 控制面基础（单机可用）                  | 已完成 | `0002:m1-control-plane-foundation/PLAN.md`  | 2025-12-17 | -     |
-| 0003 | Milestone 2 · Xray Controller + Reconcile（单机闭环） | 已完成 | `0003:m2-xray-controller-reconcile/PLAN.md` | 2025-12-18 | -     |
-| 0004 | Milestone 3 · 订阅输出（对用户可交付）                | 已完成 | `0004:m3-subscription-output/PLAN.md`       | 2025-12-18 | -     |
-| 0005 | Milestone 4 · 配额系统（单机强约束）                  | 已完成 | `0005:m4-quota-system/PLAN.md`              | 2025-12-19 | -     |
-| 0006 | Milestone 5 · Raft 集群（强一致 + HTTPS-only）        | 已完成 | `0006:m5-raft-cluster/PLAN.md`              | 2025-12-23 | -     |
-| 0007 | Milestone 5 收尾 · Quota 强约束与 Raft 一致性         | 已完成 | `0007:m5-quota-raft-consistency/PLAN.md`    | 2025-12-21 | -     |
-| 0008 | Milestone 6 · Web 面板（基础功能完整：CRUD）          | 已完成 | `0008:m6-web-panel/PLAN.md`                 | 2025-12-22 | -     |
-| 0009 | Milestone 7 · 质量门禁与交付                          | 已完成 | `0009:m7-quality-gates-delivery/PLAN.md`    | 2025-12-23 | -     |
-| 0010 | 控制面 Web UI 重设计（Geek 风格 + Light/Dark）        | 待实现 | `0010:admin-ui-geek-redesign/PLAN.md`       | 2026-01-13 | -     |
+|   ID | Title                                                 | Status | Plan                                        | Last       | Notes            |
+| ---: | ----------------------------------------------------- | ------ | ------------------------------------------- | ---------- | ---------------- |
+| 0001 | MVP 大纲（目标与里程碑）                              | 已完成 | `0001:mvp-outline/PLAN.md`                  | 2025-12-23 | -                |
+| 0002 | Milestone 1 · 控制面基础（单机可用）                  | 已完成 | `0002:m1-control-plane-foundation/PLAN.md`  | 2025-12-17 | -                |
+| 0003 | Milestone 2 · Xray Controller + Reconcile（单机闭环） | 已完成 | `0003:m2-xray-controller-reconcile/PLAN.md` | 2025-12-18 | -                |
+| 0004 | Milestone 3 · 订阅输出（对用户可交付）                | 已完成 | `0004:m3-subscription-output/PLAN.md`       | 2025-12-18 | -                |
+| 0005 | Milestone 4 · 配额系统（单机强约束）                  | 已完成 | `0005:m4-quota-system/PLAN.md`              | 2025-12-19 | -                |
+| 0006 | Milestone 5 · Raft 集群（强一致 + HTTPS-only）        | 已完成 | `0006:m5-raft-cluster/PLAN.md`              | 2025-12-23 | -                |
+| 0007 | Milestone 5 收尾 · Quota 强约束与 Raft 一致性         | 已完成 | `0007:m5-quota-raft-consistency/PLAN.md`    | 2025-12-21 | -                |
+| 0008 | Milestone 6 · Web 面板（基础功能完整：CRUD）          | 已完成 | `0008:m6-web-panel/PLAN.md`                 | 2025-12-22 | -                |
+| 0009 | Milestone 7 · 质量门禁与交付                          | 已完成 | `0009:m7-quality-gates-delivery/PLAN.md`    | 2025-12-23 | -                |
+| 0010 | 控制面 Web UI 重设计（Geek 风格 + Light/Dark）        | 待实现 | `0010:admin-ui-geek-redesign/PLAN.md`       | 2026-01-13 | -                |
 | 0011 | Storybook 启动不自动打开浏览器                        | 待实现 | `0011:storybook-no-auto-open/PLAN.md`       | 2026-01-14 | 默认 `--no-open` |

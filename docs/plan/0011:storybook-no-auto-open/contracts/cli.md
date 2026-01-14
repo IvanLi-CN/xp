@@ -44,4 +44,3 @@
 
 - Assumes Storybook is reachable at `http://127.0.0.1:60081`
 - Runs in CI mode (no browser auto-open; non-interactive)
-
