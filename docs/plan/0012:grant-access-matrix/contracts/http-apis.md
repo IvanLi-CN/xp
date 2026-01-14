@@ -74,4 +74,3 @@
   - `{ created: AdminGrant[]; deleted: string[] }`
 - Errors:
   - 对于局部失败策略（是否允许 partial success）需要在实现阶段定案；未定前默认要求“要么全成功要么全失败”（atomic best-effort）。
-

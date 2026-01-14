@@ -72,12 +72,12 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Grant 接入点二维表组件（`GrantAccessMatrix`） | UI Component | internal | New | ./contracts/ui-components.md | web | 管理端页面 | 草图见 `./assets/grant-access-matrix-wireframe.svg` |
-| Admin APIs：nodes/endpoints/grants | HTTP API | internal | None | ./contracts/http-apis.md | xp | web | 计划阶段仅复述依赖口径 |
-| （可选）Grants 查询过滤（按 user） | HTTP API | internal | Modify | ./contracts/http-apis.md | xp | web | 仅在数据量需要时启用 |
-| （可选）批量应用矩阵变更 | HTTP API | internal | New | ./contracts/http-apis.md | xp | web | 也可用多次 create/delete 替代 |
+| 接口（Name）                                  | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）     | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                                       |
+| --------------------------------------------- | ------------ | ------------- | -------------- | ---------------------------- | --------------- | ------------------- | --------------------------------------------------- |
+| Grant 接入点二维表组件（`GrantAccessMatrix`） | UI Component | internal      | New            | ./contracts/ui-components.md | web             | 管理端页面          | 草图见 `./assets/grant-access-matrix-wireframe.svg` |
+| Admin APIs：nodes/endpoints/grants            | HTTP API     | internal      | None           | ./contracts/http-apis.md     | xp              | web                 | 计划阶段仅复述依赖口径                              |
+| （可选）Grants 查询过滤（按 user）            | HTTP API     | internal      | Modify         | ./contracts/http-apis.md     | xp              | web                 | 仅在数据量需要时启用                                |
+| （可选）批量应用矩阵变更                      | HTTP API     | internal      | New            | ./contracts/http-apis.md     | xp              | web                 | 也可用多次 create/delete 替代                       |
 
 ## 6) 约束与风险
 
