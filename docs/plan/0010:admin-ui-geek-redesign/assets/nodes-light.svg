@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #0f172a; }
+      .t1 { font-size: 14px; fill: #475569; }
+      .t2 { font-size: 12px; fill: #64748b; }
+      .t3 { font-size: 13px; fill: #0f172a; }
+      .chip { font-size: 12px; font-weight: 650; fill: #0f172a; }
+      .btn { font-size: 12px; font-weight: 750; fill: #0f172a; }
+      .stroke { stroke: #e2e8f0; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="900" fill="#f6f8fb"/>
+
+  <!-- Top bar -->
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+  <rect x="320" y="36" width="420" height="32" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="346" y="52" class="sans t2" dominant-baseline="middle">Search / command palette</text>
+  <text x="700" y="52" class="mono t2" dominant-baseline="middle">Ctrl K</text>
+  <rect x="760" y="38" width="120" height="28" rx="14" fill="#ecfeff" class="stroke" stroke-width="1"/>
+  <text x="820" y="52" class="sans chip" text-anchor="middle" dominant-baseline="middle">Health OK</text>
+  <rect x="888" y="38" width="140" height="28" rx="14" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="958" y="52" class="mono chip" text-anchor="middle" dominant-baseline="middle">leader: n1</text>
+  <rect x="1036" y="38" width="116" height="28" rx="14" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1094" y="52" class="mono chip" text-anchor="middle" dominant-baseline="middle">term: 42</text>
+  <rect x="1190" y="36" width="104" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1242" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Theme</text>
+  <rect x="1306" y="36" width="86" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1349" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Logout</text>
+
+  <!-- Sidebar -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="140" class="sans t2">NAV</text>
+
+  <rect x="44" y="160" width="240" height="44" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 172) scale(.75)">
+    <path d="M5 4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1m0 12h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1m10-4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1m0-8h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1"/>
+  </g>
+  <text x="92" y="182" class="sans t3" dominant-baseline="middle">Dashboard</text>
+
+  <rect x="44" y="212" width="240" height="44" rx="12" fill="#e6fbff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 224) scale(.75)">
+    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3m0 6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zm4-7v.01M7 16v.01"/>
+  </g>
+  <text x="92" y="234" class="sans t3" dominant-baseline="middle">Nodes</text>
+
+  <rect x="44" y="264" width="240" height="44" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 276) scale(.75)">
+    <path d="M9.785 6L18 14.215l-2.054 2.054a5.81 5.81 0 1 1-8.215-8.215zM4 20l3.5-3.5M15 4l-3.5 3.5M20 9l-3.5 3.5"/>
+  </g>
+  <text x="92" y="286" class="sans t3" dominant-baseline="middle">Endpoints</text>
+
+  <rect x="44" y="316" width="240" height="44" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 328) scale(.75)">
+    <path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2m1-17.87a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.85"/>
+  </g>
+  <text x="92" y="338" class="sans t3" dominant-baseline="middle">Users</text>
+
+  <rect x="44" y="368" width="240" height="44" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#0f172a" transform="translate(62 380) scale(.75)">
+    <path d="m16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1-4.069 0l-.301-.301l-6.558 6.558a2 2 0 0 1-1.239.578L5.172 21H4a1 1 0 0 1-.993-.883L3 20v-1.172a2 2 0 0 1 .467-1.284l.119-.13L4 17h2v-2h2v-2l2.144-2.144l-.301-.301a2.877 2.877 0 0 1 0-4.069l2.643-2.643a2.877 2.877 0 0 1 4.069 0M15 9h.01"/>
+  </g>
+  <text x="92" y="390" class="sans t3" dominant-baseline="middle">Grants</text>
+
+  <!-- Main content -->
+  <rect x="320" y="100" width="1096" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="356" y="144" class="sans t0">Nodes</text>
+  <text x="356" y="170" class="sans t1">Inspect cluster nodes and issue join tokens.</text>
+
+  <!-- Join token card -->
+  <rect x="356" y="200" width="1034" height="260" rx="14" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="380" y="232" class="sans t3">Join token</text>
+  <text x="380" y="254" class="sans t2">Generate a token and share it with a node you want to join.</text>
+  <text x="380" y="292" class="sans t2">TTL (seconds)</text>
+  <rect x="380" y="302" width="280" height="44" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="396" y="324" class="mono t3" dominant-baseline="middle">3600</text>
+  <rect x="1218" y="302" width="148" height="44" rx="12" fill="#06b6d4"/>
+  <text x="1292" y="324" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Create token</text>
+
+  <!-- Token output -->
+  <rect x="380" y="366" width="986" height="70" rx="14" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="400" y="392" class="sans t2">Join token</text>
+  <text x="400" y="416" class="mono t3" dominant-baseline="middle">jt_9f2a...c17e</text>
+  <rect x="1240" y="380" width="110" height="42" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1295" y="401" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy</text>
+
+  <!-- Join command -->
+  <rect x="380" y="444" width="986" height="70" rx="14" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="400" y="470" class="sans t2">xp join command</text>
+  <text x="400" y="494" class="mono t3" dominant-baseline="middle">xp join --token jt_9f2a...c17e</text>
+  <rect x="1240" y="458" width="110" height="42" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1295" y="479" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy</text>
+
+  <!-- Inventory card -->
+  <rect x="356" y="488" width="1034" height="352" rx="14" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="380" y="520" class="sans t3">Node inventory</text>
+  <rect x="1240" y="504" width="126" height="36" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1303" y="522" class="sans btn" text-anchor="middle" dominant-baseline="middle">Refresh</text>
+  <text x="380" y="544" class="sans t2">3 nodes total</text>
+
+  <!-- Table header -->
+  <rect x="380" y="566" width="986" height="36" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="396" y="584" class="mono t2" dominant-baseline="middle">node_id</text>
+  <text x="520" y="584" class="mono t2" dominant-baseline="middle">name</text>
+  <text x="730" y="584" class="mono t2" dominant-baseline="middle">public_domain</text>
+  <text x="980" y="584" class="mono t2" dominant-baseline="middle">api_base_url</text>
+
+  <!-- Rows -->
+  <rect x="380" y="610" width="986" height="46" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="396" y="633" class="mono t3" dominant-baseline="middle">n1</text>
+  <text x="520" y="633" class="sans t3" dominant-baseline="middle">tokyo-1</text>
+  <text x="730" y="633" class="mono t3" dominant-baseline="middle">tokyo.example.com</text>
+  <text x="980" y="633" class="mono t3" dominant-baseline="middle">https://n1:62416</text>
+
+  <rect x="380" y="664" width="986" height="46" rx="10" fill="#f8fafc" class="stroke" stroke-width="1"/>
+  <text x="396" y="687" class="mono t3" dominant-baseline="middle">n2</text>
+  <text x="520" y="687" class="sans t3" dominant-baseline="middle">osaka-1</text>
+  <text x="730" y="687" class="mono t3" dominant-baseline="middle">-</text>
+  <text x="980" y="687" class="mono t3" dominant-baseline="middle">https://n2:62416</text>
+
+  <rect x="380" y="718" width="986" height="46" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="396" y="741" class="mono t3" dominant-baseline="middle">n3</text>
+  <text x="520" y="741" class="sans t3" dominant-baseline="middle">(unnamed)</text>
+  <text x="730" y="741" class="mono t3" dominant-baseline="middle">nagoya.example.com</text>
+  <text x="980" y="741" class="mono t3" dominant-baseline="middle">https://n3:62416</text>
+</svg>

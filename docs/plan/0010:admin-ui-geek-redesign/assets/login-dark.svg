@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .h0 { font-size: 34px; font-weight: 800; fill: #e2e8f0; }
+      .h1 { font-size: 16px; fill: #94a3b8; }
+      .t2 { font-size: 12px; fill: #94a3b8; }
+      .t3 { font-size: 14px; fill: #e2e8f0; }
+      .btn { font-size: 12px; font-weight: 800; fill: #031c22; }
+      .stroke { stroke: #24324a; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1440" height="900" fill="#0b1020"/>
+
+  <!-- Subtle grid -->
+  <g opacity="0.22">
+    <path d="M0 120H1440M0 240H1440M0 360H1440M0 480H1440M0 600H1440M0 720H1440M0 840H1440" stroke="#24324a"/>
+    <path d="M120 0V900M240 0V900M360 0V900M480 0V900M600 0V900M720 0V900M840 0V900M960 0V900M1080 0V900M1200 0V900M1320 0V900" stroke="#24324a"/>
+  </g>
+
+  <!-- Brand -->
+  <text x="88" y="126" class="sans h0">xp</text>
+  <text x="140" y="126" class="sans h1">control plane</text>
+  <text x="88" y="154" class="sans t2">Operator login • token-based</text>
+
+  <!-- Card -->
+  <rect x="460" y="220" width="520" height="460" rx="18" fill="#0f172a" class="stroke" stroke-width="1"/>
+
+  <text x="504" y="280" class="sans h0" font-size="26px">Admin login</text>
+  <text x="504" y="312" class="sans h1">Enter an admin token to access the control plane UI.</text>
+
+  <!-- Stored key -->
+  <text x="504" y="354" class="sans t2">Stored in localStorage key</text>
+  <rect x="504" y="366" width="432" height="34" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="518" y="389" class="mono t2">xp_admin_token</text>
+
+  <!-- Token input -->
+  <text x="504" y="438" class="sans t2">TOKEN</text>
+  <rect x="504" y="452" width="432" height="46" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="520" y="481" class="mono t2">••••••••••••••••</text>
+
+  <!-- Hint -->
+  <rect x="504" y="516" width="432" height="56" rx="14" fill="#042f2e" class="stroke" stroke-width="1"/>
+  <text x="520" y="546" class="sans t3">Tip: use a dedicated operator token (least privilege).</text>
+
+  <!-- Actions -->
+  <rect x="504" y="600" width="104" height="38" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="556" y="619" class="sans t2" text-anchor="middle" dominant-baseline="middle">Clear</text>
+  <rect x="832" y="600" width="104" height="38" rx="12" fill="#22d3ee"/>
+  <text x="884" y="619" class="sans btn" text-anchor="middle" dominant-baseline="middle">Verify</text>
+  <rect x="718" y="600" width="104" height="38" rx="12" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="770" y="619" class="sans t2" text-anchor="middle" dominant-baseline="middle">Save</text>
+
+  <!-- Footer -->
+  <text x="460" y="728" class="sans t2">Geek UI principle: clarity > decoration • dense but readable • monospace for identifiers</text>
+</svg>
