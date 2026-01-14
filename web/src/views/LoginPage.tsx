@@ -32,8 +32,8 @@ export function LoginPage() {
 
 	const inputClass =
 		prefs.density === "compact"
-			? "input input-bordered input-sm font-mono"
-			: "input input-bordered font-mono";
+			? "input input-bordered input-sm font-mono w-full"
+			: "input input-bordered font-mono w-full";
 
 	return (
 		<div className="min-h-screen bg-base-200 flex items-center justify-center px-6">
@@ -49,7 +49,9 @@ export function LoginPage() {
 						<p className="text-xs uppercase tracking-wide opacity-50">
 							Stored in localStorage key
 						</p>
-						<p className="font-mono text-sm">{ADMIN_TOKEN_STORAGE_KEY}</p>
+						<div className="rounded-box border border-base-200 bg-base-200/60 px-4 py-2 w-full">
+							<p className="font-mono text-sm">{ADMIN_TOKEN_STORAGE_KEY}</p>
+						</div>
 					</div>
 					<label className="form-control">
 						<div className="label">
