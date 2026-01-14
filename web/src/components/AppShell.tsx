@@ -151,36 +151,31 @@ export function AppShell({
 	]);
 
 	const navContent = (
-		<div className="rounded-box border border-base-200 bg-base-100 p-4">
-			<div className="space-y-0.5 pb-4">
-				<p className="font-semibold tracking-tight">{brand.name}</p>
-				{brand.subtitle ? (
-					<p className="text-xs opacity-60">{brand.subtitle}</p>
-				) : null}
-			</div>
-			<div className="rounded-box border border-base-200 bg-base-100 p-3">
-				<p className="px-2 pb-2 text-xs uppercase tracking-wide opacity-50">
-					Nav
-				</p>
-				<ul className="space-y-2">
-					{navItems.map((item) => (
-						<li key={item.to}>
-							<Link
-								to={item.to}
-								className="flex items-center gap-3 rounded-box px-3 py-2 border border-base-200 bg-base-100 hover:bg-base-200"
-								activeProps={{
-									className:
-										"bg-info/10 border-info/30 text-base-content hover:bg-info/10",
-								}}
-							>
-								<Icon name={item.icon} className="opacity-80" />
-								<span className="font-medium">{item.label}</span>
-							</Link>
-						</li>
-					))}
-				</ul>
-			</div>
-		</div>
+		<nav
+			aria-label="Primary navigation"
+			className="rounded-box border border-base-200 bg-base-100 p-4"
+		>
+			<p className="px-2 pb-3 text-xs uppercase tracking-wide opacity-50">
+				NAV
+			</p>
+			<ul className="space-y-2">
+				{navItems.map((item) => (
+					<li key={item.to}>
+						<Link
+							to={item.to}
+							className="flex items-center gap-3 rounded-box px-3 py-2 border border-base-200 bg-base-100 hover:bg-base-200 transition-colors"
+							activeProps={{
+								className:
+									"bg-info/10 border-info/30 text-base-content hover:bg-info/10",
+							}}
+						>
+							<Icon name={item.icon} className="size-5 opacity-80" />
+							<span className="font-medium">{item.label}</span>
+						</Link>
+					</li>
+				))}
+			</ul>
+		</nav>
 	);
 
 	return (
@@ -188,36 +183,36 @@ export function AppShell({
 			<div className="p-4">
 				<div className="mx-auto max-w-7xl space-y-4">
 					<header className="rounded-box border border-base-200 bg-base-100 px-4 py-3">
-						<div className="flex items-center gap-3">
-							<button
-								type="button"
-								className="btn btn-ghost btn-sm lg:hidden"
-								aria-label="Open menu"
-								onClick={() => setMobileNavOpen(true)}
-							>
-								<Icon name="tabler:menu-2" ariaLabel="Menu" />
-							</button>
+						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+							<div className="flex items-center gap-3 min-w-0">
+								<button
+									type="button"
+									className="btn btn-ghost btn-sm lg:hidden"
+									aria-label="Open menu"
+									onClick={() => setMobileNavOpen(true)}
+								>
+									<Icon name="tabler:menu-2" ariaLabel="Menu" />
+								</button>
 
-							<div className="flex items-center gap-2 min-w-0">
-								<Link to="/" className="flex items-center gap-2">
-									<span className="font-semibold tracking-tight">
+								<Link to="/" className="flex items-baseline gap-2 min-w-0">
+									<span className="font-semibold tracking-tight text-lg">
 										{brand.name}
 									</span>
 									{brand.subtitle ? (
-										<span className="hidden sm:inline text-xs opacity-60">
+										<span className="hidden sm:inline text-sm opacity-60 truncate">
 											{brand.subtitle}
 										</span>
 									) : null}
 								</Link>
 							</div>
 
-							<div className="hidden lg:flex flex-1 items-center justify-center">
+							<div className="hidden lg:flex items-center justify-center gap-4">
 								<div className="w-full max-w-md relative">
 									<input
 										type="text"
 										readOnly
 										placeholder="Search / command palette"
-										className="input input-bordered input-sm w-full pr-20 bg-base-200/40 cursor-pointer"
+										className="input input-bordered w-full pr-20 bg-base-200/40 cursor-pointer"
 										onClick={() => setCommandPalette({ open: true })}
 										onFocus={() => setCommandPalette({ open: true })}
 									/>
@@ -226,13 +221,13 @@ export function AppShell({
 										<kbd className="kbd kbd-sm">K</kbd>
 									</div>
 								</div>
+
+								<div className="flex items-center gap-2">
+									{headerStatus ?? statusBadges}
+								</div>
 							</div>
 
-							<div className="hidden lg:flex items-center gap-2">
-								{headerStatus ?? statusBadges}
-							</div>
-
-							<div className="flex flex-none items-center gap-2 ml-auto">
+							<div className="flex items-center justify-end gap-2">
 								<div className="dropdown dropdown-end">
 									<button type="button" className="btn btn-outline btn-sm">
 										Theme
@@ -312,8 +307,8 @@ export function AppShell({
 						</div>
 					</header>
 
-					<div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-						<aside className="hidden lg:block">{navContent}</aside>
+					<div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+						<aside>{navContent}</aside>
 						<main className="rounded-box border border-base-200 bg-base-100 p-[var(--xp-page-padding)]">
 							{children ?? <Outlet />}
 						</main>
