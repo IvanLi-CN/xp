@@ -9,8 +9,10 @@ import {
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatErrorMessage(error: unknown): string {
@@ -25,6 +27,7 @@ export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
 
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
@@ -164,7 +167,11 @@ export function NodeDetailsPage() {
 							</div>
 							<input
 								type="text"
-								className="input input-bordered"
+								className={
+									prefs.density === "compact"
+										? "input input-bordered input-sm"
+										: "input input-bordered"
+								}
 								value={nodeName}
 								onChange={(event) => setNodeName(event.target.value)}
 								placeholder="e.g. node-1"
@@ -176,7 +183,11 @@ export function NodeDetailsPage() {
 							</div>
 							<input
 								type="text"
-								className="input input-bordered font-mono"
+								className={
+									prefs.density === "compact"
+										? "input input-bordered input-sm font-mono"
+										: "input input-bordered font-mono"
+								}
 								value={publicDomain}
 								onChange={(event) => setPublicDomain(event.target.value)}
 								placeholder="example.com"
@@ -188,7 +199,11 @@ export function NodeDetailsPage() {
 							</div>
 							<input
 								type="text"
-								className="input input-bordered font-mono"
+								className={
+									prefs.density === "compact"
+										? "input input-bordered input-sm font-mono"
+										: "input input-bordered font-mono"
+								}
 								value={apiBaseUrl}
 								onChange={(event) => setApiBaseUrl(event.target.value)}
 								placeholder="https://node-1.internal:8443"
@@ -217,17 +232,15 @@ export function NodeDetailsPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div>
-					<h1 className="text-2xl font-bold">Node details</h1>
-					<p className="text-sm opacity-70">
-						Manage node metadata and routing configuration.
-					</p>
-				</div>
-				<Link to="/nodes" className="btn btn-ghost btn-sm">
-					Back
-				</Link>
-			</div>
+			<PageHeader
+				title="Node details"
+				description="Manage node metadata and routing configuration."
+				actions={
+					<Link to="/nodes" className="btn btn-ghost btn-sm">
+						Back
+					</Link>
+				}
+			/>
 			{content}
 		</div>
 	);

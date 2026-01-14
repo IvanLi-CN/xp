@@ -7,9 +7,11 @@ import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatErrorMessage(error: unknown): string {
@@ -23,6 +25,7 @@ function formatErrorMessage(error: unknown): string {
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
 	const [ttlSeconds, setTtlSeconds] = useState(3600);
 	const [joinToken, setJoinToken] = useState<string | null>(null);
 	const [joinTokenError, setJoinTokenError] = useState<string | null>(null);
@@ -180,12 +183,10 @@ export function NodesPage() {
 
 	return (
 		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">Nodes</h1>
-				<p className="text-sm opacity-70">
-					Inspect cluster nodes and issue join tokens for new members.
-				</p>
-			</div>
+			<PageHeader
+				title="Nodes"
+				description="Inspect cluster nodes and issue join tokens for new members."
+			/>
 
 			<div className="card bg-base-100 shadow">
 				<div className="card-body space-y-4">
@@ -204,7 +205,11 @@ export function NodesPage() {
 								type="number"
 								min={60}
 								step={60}
-								className="input input-bordered font-mono"
+								className={
+									prefs.density === "compact"
+										? "input input-bordered input-sm font-mono"
+										: "input input-bordered font-mono"
+								}
 								value={ttlSeconds}
 								onChange={(event) => {
 									const next = Number(event.target.value);

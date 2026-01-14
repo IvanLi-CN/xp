@@ -4,6 +4,7 @@ import { useState } from "react";
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { useUiPrefs } from "../components/UiPrefs";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
 	clearAdminToken,
@@ -23,10 +24,16 @@ function formatError(err: unknown): string {
 
 export function LoginPage() {
 	const navigate = useNavigate();
+	const prefs = useUiPrefs();
 	const [token, setToken] = useState(() => readAdminToken());
 	const [draft, setDraft] = useState(() => readAdminToken());
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm font-mono w-full"
+			: "input input-bordered font-mono w-full";
 
 	return (
 		<div className="min-h-screen bg-base-200 flex items-center justify-center px-6">
@@ -42,7 +49,9 @@ export function LoginPage() {
 						<p className="text-xs uppercase tracking-wide opacity-50">
 							Stored in localStorage key
 						</p>
-						<p className="font-mono text-sm">{ADMIN_TOKEN_STORAGE_KEY}</p>
+						<div className="rounded-box border border-base-200 bg-base-200/60 px-4 py-2 w-full">
+							<p className="font-mono text-sm">{ADMIN_TOKEN_STORAGE_KEY}</p>
+						</div>
 					</div>
 					<label className="form-control">
 						<div className="label">
@@ -50,7 +59,7 @@ export function LoginPage() {
 						</div>
 						<input
 							type="password"
-							className="input input-bordered font-mono"
+							className={inputClass}
 							placeholder="e.g. admin-token"
 							value={draft}
 							onChange={(event) => {

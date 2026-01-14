@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
@@ -25,87 +26,83 @@ export function EndpointsPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
-	if (adminToken.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="Admin token required"
-				description="Set an admin token to load endpoints."
-				action={
-					<Link className="btn btn-primary" to="/login">
-						Go to login
-					</Link>
-				}
-			/>
+	const actions =
+		adminToken.length === 0 ? (
+			<Link className="btn btn-primary" to="/login">
+				Go to login
+			</Link>
+		) : (
+			<>
+				<Link className="btn btn-primary" to="/endpoints/new">
+					New endpoint
+				</Link>
+				<Button
+					variant="secondary"
+					loading={endpointsQuery.isFetching}
+					onClick={() => endpointsQuery.refetch()}
+				>
+					Refresh
+				</Button>
+			</>
 		);
-	}
 
-	if (endpointsQuery.isLoading) {
+	const content = (() => {
+		if (adminToken.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Admin token required"
+					description="Set an admin token to load endpoints."
+				/>
+			);
+		}
+
+		if (endpointsQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading endpoints"
+					description="Fetching endpoints from the control plane."
+				/>
+			);
+		}
+
+		if (endpointsQuery.isError) {
+			const description = formatErrorMessage(endpointsQuery.error);
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load endpoints"
+					description={description}
+					action={
+						<Button
+							variant="secondary"
+							onClick={() => endpointsQuery.refetch()}
+						>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const endpoints = endpointsQuery.data?.items ?? [];
+		if (endpoints.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="No endpoints yet"
+					description="Create your first endpoint to start serving traffic."
+					action={
+						<Link className="btn btn-primary" to="/endpoints/new">
+							Create endpoint
+						</Link>
+					}
+				/>
+			);
+		}
+
 		return (
-			<PageState
-				variant="loading"
-				title="Loading endpoints"
-				description="Fetching endpoints from the control plane."
-			/>
-		);
-	}
-
-	if (endpointsQuery.isError) {
-		const description = formatErrorMessage(endpointsQuery.error);
-		return (
-			<PageState
-				variant="error"
-				title="Failed to load endpoints"
-				description={description}
-				action={
-					<Button variant="secondary" onClick={() => endpointsQuery.refetch()}>
-						Retry
-					</Button>
-				}
-			/>
-		);
-	}
-
-	const endpoints = endpointsQuery.data?.items ?? [];
-
-	if (endpoints.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="No endpoints yet"
-				description="Create your first endpoint to start serving traffic."
-				action={
-					<Link className="btn btn-primary" to="/endpoints/new">
-						Create endpoint
-					</Link>
-				}
-			/>
-		);
-	}
-
-	return (
-		<div className="space-y-6">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h1 className="text-2xl font-bold">Endpoints</h1>
-					<p className="text-sm opacity-70">
-						Manage ingress endpoints for the cluster.
-					</p>
-				</div>
-				<div className="flex gap-2">
-					<Link className="btn btn-primary" to="/endpoints/new">
-						New endpoint
-					</Link>
-					<Button
-						variant="secondary"
-						loading={endpointsQuery.isFetching}
-						onClick={() => endpointsQuery.refetch()}
-					>
-						Refresh
-					</Button>
-				</div>
-			</div>
-
 			<ResourceTable
 				headers={[
 					{ key: "kind", label: "Kind" },
@@ -141,6 +138,17 @@ export function EndpointsPage() {
 					</tr>
 				))}
 			</ResourceTable>
+		);
+	})();
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="Endpoints"
+				description="Manage ingress endpoints for the cluster."
+				actions={<div className="flex flex-wrap gap-2">{actions}</div>}
+			/>
+			{content}
 		</div>
 	);
 }

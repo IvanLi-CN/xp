@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
@@ -25,76 +26,66 @@ export function UsersPage() {
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 
-	if (adminToken.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="Admin token required"
-				description="Set an admin token to load users."
-				action={
-					<Link to="/login" className="btn btn-primary">
-						Go to login
-					</Link>
-				}
-			/>
+	const actions =
+		adminToken.length === 0 ? (
+			<Link to="/login" className="btn btn-primary">
+				Go to login
+			</Link>
+		) : (
+			<Link to="/users/new" className="btn btn-primary">
+				New user
+			</Link>
 		);
-	}
 
-	if (usersQuery.isLoading) {
+	const content = (() => {
+		if (adminToken.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Admin token required"
+					description="Set an admin token to load users."
+				/>
+			);
+		}
+
+		if (usersQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading users"
+					description="Fetching admin users from the control plane."
+				/>
+			);
+		}
+
+		if (usersQuery.isError) {
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load users"
+					description={formatError(usersQuery.error)}
+					action={
+						<Button variant="secondary" onClick={() => usersQuery.refetch()}>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const users = usersQuery.data?.items ?? [];
+
+		if (users.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="No users yet"
+					description="Create the first user to start managing subscriptions."
+				/>
+			);
+		}
+
 		return (
-			<PageState
-				variant="loading"
-				title="Loading users"
-				description="Fetching admin users from the control plane."
-			/>
-		);
-	}
-
-	if (usersQuery.isError) {
-		return (
-			<PageState
-				variant="error"
-				title="Failed to load users"
-				description={formatError(usersQuery.error)}
-				action={
-					<Button variant="secondary" onClick={() => usersQuery.refetch()}>
-						Retry
-					</Button>
-				}
-			/>
-		);
-	}
-
-	const users = usersQuery.data?.items ?? [];
-
-	if (users.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="No users yet"
-				description="Create the first user to start managing subscriptions."
-				action={
-					<Link to="/users/new" className="btn btn-primary">
-						New user
-					</Link>
-				}
-			/>
-		);
-	}
-
-	return (
-		<div className="space-y-4">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div>
-					<h1 className="text-2xl font-bold">Users</h1>
-					<p className="text-sm opacity-70">
-						Manage subscription owners and defaults.
-					</p>
-				</div>
-				<Link to="/users/new" className="btn btn-primary">
-					New user
-				</Link>
-			</div>
 			<ResourceTable
 				headers={[
 					{ key: "user_id", label: "User ID" },
@@ -134,6 +125,17 @@ export function UsersPage() {
 					</tr>
 				))}
 			</ResourceTable>
+		);
+	})();
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="Users"
+				description="Manage subscription owners and defaults."
+				actions={actions}
+			/>
+			{content}
 		</div>
 	);
 }
