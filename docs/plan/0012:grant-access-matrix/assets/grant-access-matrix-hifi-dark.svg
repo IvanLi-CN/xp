@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #e2e8f0; }
+      .t1 { font-size: 14px; fill: #94a3b8; }
+      .t2 { font-size: 12px; fill: #94a3b8; }
+      .t3 { font-size: 13px; fill: #e2e8f0; }
+      .btn { font-size: 12px; font-weight: 750; fill: #e2e8f0; }
+      .chip { font-size: 12px; font-weight: 650; fill: #e2e8f0; }
+      .stroke { stroke: #24324a; }
+      .mutedStroke { stroke: #3a4a68; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+      .tick { stroke: #062a30; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+      .dash { stroke: #e2e8f0; stroke-width: 2.6; stroke-linecap: round; }
+    </style>
+    <clipPath id="clipTable" clipPathUnits="userSpaceOnUse">
+      <!-- Inset clipping to avoid anti-alias stroke bleed on rounded corners -->
+      <rect x="372" y="306" width="1002" height="372" rx="0" />
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1440" height="900" fill="#0b1020"/>
+
+  <!-- Top bar -->
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+  <rect x="1190" y="36" width="104" height="32" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1242" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Theme</text>
+  <rect x="1306" y="36" width="86" height="32" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1349" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Logout</text>
+
+  <!-- Sidebar (Users active) -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="140" class="sans t2">NAV</text>
+  <rect x="44" y="316" width="240" height="44" rx="12" fill="#042f2e" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 328) scale(.75)">
+    <path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2m1-17.87a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.85"/>
+  </g>
+  <text x="92" y="338" class="sans t3" dominant-baseline="middle">Users</text>
+
+  <!-- Main -->
+  <rect id="main" x="320" y="100" width="1096" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="356" y="144" class="sans t0">Access points</text>
+  <text x="356" y="170" class="sans t1">User ID: <tspan class="mono">u_01H...</tspan> · Customer A</text>
+  <rect x="1250" y="124" width="140" height="36" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1320" y="142" class="sans btn" text-anchor="middle" dominant-baseline="middle">Back</text>
+
+  <!-- Action bar -->
+  <rect id="actionBar" x="356" y="196" width="1034" height="54" rx="14" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <rect x="380" y="208" width="320" height="30" rx="12" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="396" y="223" class="sans t2" dominant-baseline="middle">Filter nodes…</text>
+  <rect x="716" y="210" width="150" height="28" rx="14" fill="#042f2e" class="stroke" stroke-width="1"/>
+  <text x="791" y="224" class="sans chip" text-anchor="middle" dominant-baseline="middle">Selected 6 / 10</text>
+  <rect x="1030" y="208" width="110" height="32" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1085" y="224" class="sans btn" text-anchor="middle" dominant-baseline="middle">Reset</text>
+  <rect x="1150" y="208" width="240" height="32" rx="10" fill="#06b6d4"/>
+  <text x="1270" y="224" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Save changes</text>
+
+  <!-- Matrix card -->
+  <rect id="matrixCard" x="356" y="264" width="1034" height="600" rx="14" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="380" y="296" class="sans t3">Matrix</text>
+  <text x="444" y="296" class="sans t2">Batch rule: if any selected → clear; else select all (no invert)</text>
+
+  <!-- Table container + clipped content (flat, no inner card) -->
+  <rect id="tableFrame" x="368" y="302" width="1010" height="380" rx="0" fill="none" stroke="none"/>
+  <g clip-path="url(#clipTable)">
+    <!-- Table header background -->
+    <rect id="tableHeaderBg" x="380" y="314" width="986" height="44" rx="0" fill="#111c33"/>
+
+  <!-- Top-left (All) header -->
+  <rect id="hdrAll" x="392" y="324" width="312.6667" height="24" rx="0" fill="none" stroke="none"/>
+  <rect x="404" y="328" width="16" height="16" rx="4" fill="#111c33" class="mutedStroke" stroke-width="1"/>
+  <path class="dash" d="M408 336 H416"/>
+  <text x="432" y="336" class="sans t3" dominant-baseline="middle">All nodes</text>
+
+  <!-- Protocol columns -->
+  <rect id="hdrVless" x="716.6667" y="324" width="312.6667" height="24" rx="0" fill="none" stroke="none"/>
+  <rect x="728.6667" y="328" width="16" height="16" rx="4" fill="#06b6d4"/>
+  <path class="tick" d="M731.6667 336 L734.6667 340 L741.6667 331"/>
+  <text x="756.6667" y="336" class="sans t3" dominant-baseline="middle">VLESS</text>
+  <text id="protoVlessKindText" x="808.6667" y="336" class="mono t2" dominant-baseline="middle">vless_reality_vision_tcp</text>
+
+  <rect id="hdrSs2022" x="1041.3334" y="324" width="312.6667" height="24" rx="0" fill="none" stroke="none"/>
+  <rect x="1053.3334" y="328" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="1081.3334" y="336" class="sans t3" dominant-baseline="middle">SS2022</text>
+  <text id="protoSsKindText" x="1141.3334" y="336" class="mono t2" dominant-baseline="middle">ss2022_2022_…_gcm</text>
+
+  <!-- Rows -->
+  <!-- Row 1 -->
+  <rect id="rowA" x="380" y="366" width="986" height="70" rx="0" fill="#0f172a" stroke="none"/>
+  <rect id="rowA_hdr" x="392" y="380" width="312.6667" height="46" rx="0" fill="none" stroke="none"/>
+  <rect x="404" y="395" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <g id="rowA_text" transform="translate(432 404.5)">
+    <text id="rowA_name" x="0" y="-9" class="sans t3" dominant-baseline="middle">node-a</text>
+    <text id="rowA_id" x="0" y="9" class="mono t2" dominant-baseline="middle">n_01H...</text>
+  </g>
+
+  <rect id="rowA_vless" x="716.6667" y="380" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="728.6667" y="393" width="16" height="16" rx="4" fill="#06b6d4"/>
+  <path class="tick" d="M731.6667 401 L734.6667 405 L741.6667 396"/>
+  <text x="756.6667" y="401" class="mono t2" dominant-baseline="middle">port 443 · grant g-01</text>
+
+  <rect id="rowA_ss" x="1041.3334" y="380" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="1053.3334" y="393" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="1081.3334" y="401" class="mono t2" dominant-baseline="middle">port 8443</text>
+
+  <!-- Row 2 (zebra) -->
+  <rect id="rowB" x="380" y="444" width="986" height="70" rx="0" fill="#0d152b" stroke="none"/>
+  <rect id="rowB_hdr" x="392" y="458" width="312.6667" height="46" rx="0" fill="none" stroke="none"/>
+  <rect x="404" y="473" width="16" height="16" rx="4" fill="#06b6d4"/>
+  <path class="tick" d="M407 481 L410 485 L417 476"/>
+  <g id="rowB_text" transform="translate(432 482.5)">
+    <text id="rowB_name" x="0" y="-9" class="sans t3" dominant-baseline="middle">node-b</text>
+    <text id="rowB_id" x="0" y="9" class="mono t2" dominant-baseline="middle">n_01I...</text>
+  </g>
+
+  <rect id="rowB_vless" x="716.6667" y="458" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="728.6667" y="471" width="16" height="16" rx="4" fill="#06b6d4"/>
+  <path class="tick" d="M731.6667 479 L734.6667 483 L741.6667 474"/>
+  <text x="756.6667" y="479" class="mono t2" dominant-baseline="middle">port 443 · grant g-02</text>
+
+  <rect id="rowB_ss" x="1041.3334" y="458" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="1053.3334" y="471" width="16" height="16" rx="4" fill="#06b6d4"/>
+  <path class="tick" d="M1056.3334 479 L1059.3334 483 L1066.3334 474"/>
+  <text x="1081.3334" y="479" class="mono t2" dominant-baseline="middle">port 8443 · grant g-03</text>
+
+  <!-- Row 3 -->
+  <rect id="rowC" x="380" y="522" width="986" height="70" rx="0" fill="#0f172a" stroke="none"/>
+  <rect id="rowC_hdr" x="392" y="536" width="312.6667" height="46" rx="0" fill="none" stroke="none"/>
+  <rect x="404" y="551" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <g id="rowC_text" transform="translate(432 560.5)">
+    <text id="rowC_name" x="0" y="-9" class="sans t3" dominant-baseline="middle">node-c</text>
+    <text id="rowC_id" x="0" y="9" class="mono t2" dominant-baseline="middle">n_01J...</text>
+  </g>
+
+  <rect id="rowC_vless" x="716.6667" y="536" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="728.6667" y="549" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="756.6667" y="557" class="mono t2" dominant-baseline="middle">port 443</text>
+
+  <rect id="rowC_ss" x="1041.3334" y="536" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="1053.3334" y="549" width="16" height="16" rx="4" fill="#111c33" class="mutedStroke" stroke-width="1"/>
+  <path class="dash" d="M1057.3334 557 H1065.3334"/>
+  <rect x="1081.3334" y="547" width="140" height="20" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1151.3334" y="557" class="sans t2" text-anchor="middle" dominant-baseline="middle">Choose (2)</text>
+  <text id="rowC_ss_note" x="1233.3334" y="557" class="mono t2" dominant-baseline="middle">multiple…</text>
+
+  <!-- Row 4 (disabled example) -->
+  <rect id="rowD" x="380" y="600" width="986" height="70" rx="0" fill="#0d152b" stroke="none"/>
+  <rect id="rowD_hdr" x="392" y="614" width="312.6667" height="46" rx="0" fill="none" stroke="none"/>
+  <rect x="404" y="629" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <g id="rowD_text" transform="translate(432 638.5)">
+    <text id="rowD_name" x="0" y="-9" class="sans t3" dominant-baseline="middle">node-d</text>
+    <text id="rowD_id" x="0" y="9" class="mono t2" dominant-baseline="middle">n_01K...</text>
+  </g>
+
+  <rect id="rowD_vless" x="716.6667" y="614" width="312.6667" height="42" rx="0" fill="#111c33" stroke="none"/>
+  <text x="756.6667" y="635" class="sans t2" dominant-baseline="middle">No endpoint</text>
+  <text x="914.6667" y="635" class="sans t2" dominant-baseline="middle">(disabled)</text>
+
+  <rect id="rowD_ss" x="1041.3334" y="614" width="312.6667" height="42" rx="0" fill="none" stroke="none"/>
+  <rect x="1053.3334" y="627" width="16" height="16" rx="4" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="1081.3334" y="635" class="mono t2" dominant-baseline="middle">port 8443</text>
+
+  </g>
+
+  <!-- Footer hint -->
+  <text x="380" y="706" class="sans t2">Tip: header checkboxes can show indeterminate state, but clicking never inverts.</text>
+</svg>
