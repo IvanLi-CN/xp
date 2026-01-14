@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+	:root {
+		--xp-page-padding: 1.5rem;
+		--xp-card-padding: 1.5rem;
+		--xp-table-padding-y: 0.75rem;
+		--xp-table-padding-x: 0.75rem;
+	}
+
+	html[data-density="compact"] {
+		--xp-page-padding: 1rem;
+		--xp-card-padding: 1rem;
+		--xp-table-padding-y: 0.5rem;
+		--xp-table-padding-x: 0.5rem;
+	}
+}

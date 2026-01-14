@@ -21,6 +21,6 @@ test("saves token and reaches dashboard", async ({ page }) => {
 	await page.getByRole("button", { name: "Save & Continue" }).click();
 
 	await expect(page).toHaveURL(/\/$/);
-	await expect(page.getByRole("heading", { name: "xp" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 	await expect(page.getByText("Backend health")).toBeVisible();
 });

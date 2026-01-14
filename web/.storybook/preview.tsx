@@ -11,6 +11,7 @@ import {
 
 import { AppLayout } from "../src/components/AppLayout";
 import { ToastProvider } from "../src/components/Toast";
+import { UiPrefsProvider } from "../src/components/UiPrefs";
 import { clearAdminToken, writeAdminToken } from "../src/components/auth";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
@@ -184,9 +185,11 @@ const preview: Preview = {
 
 			return (
 				<QueryClientProvider client={queryClient}>
-					<ToastProvider>
-						<RouterProvider router={router} />
-					</ToastProvider>
+					<UiPrefsProvider>
+						<ToastProvider>
+							<RouterProvider router={router} />
+						</ToastProvider>
+					</UiPrefsProvider>
 				</QueryClientProvider>
 			);
 		},

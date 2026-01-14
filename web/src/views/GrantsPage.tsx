@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { fetchAdminGrants } from "../api/adminGrants";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
@@ -25,76 +26,71 @@ export function GrantsPage() {
 		queryFn: ({ signal }) => fetchAdminGrants(adminToken, signal),
 	});
 
-	if (adminToken.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="Admin token required"
-				description="Set an admin token to load grants."
-				action={
-					<Link to="/login" className="btn btn-primary">
-						Go to login
-					</Link>
-				}
-			/>
+	const actions =
+		adminToken.length === 0 ? (
+			<Link to="/login" className="btn btn-primary">
+				Go to login
+			</Link>
+		) : (
+			<Link to="/grants/new" className="btn btn-primary">
+				New grant
+			</Link>
 		);
-	}
 
-	if (grantsQuery.isLoading) {
+	const content = (() => {
+		if (adminToken.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Admin token required"
+					description="Set an admin token to load grants."
+				/>
+			);
+		}
+
+		if (grantsQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading grants"
+					description="Fetching grant list from the control plane."
+				/>
+			);
+		}
+
+		if (grantsQuery.isError) {
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load grants"
+					description={formatError(grantsQuery.error)}
+					action={
+						<Button variant="secondary" onClick={() => grantsQuery.refetch()}>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const grants = grantsQuery.data?.items ?? [];
+
+		if (grants.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="No grants yet"
+					description="Create the first grant to allocate quota."
+					action={
+						<Link to="/grants/new" className="btn btn-primary">
+							New grant
+						</Link>
+					}
+				/>
+			);
+		}
+
 		return (
-			<PageState
-				variant="loading"
-				title="Loading grants"
-				description="Fetching grant list from the control plane."
-			/>
-		);
-	}
-
-	if (grantsQuery.isError) {
-		return (
-			<PageState
-				variant="error"
-				title="Failed to load grants"
-				description={formatError(grantsQuery.error)}
-				action={
-					<Button variant="secondary" onClick={() => grantsQuery.refetch()}>
-						Retry
-					</Button>
-				}
-			/>
-		);
-	}
-
-	const grants = grantsQuery.data?.items ?? [];
-
-	if (grants.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="No grants yet"
-				description="Create the first grant to allocate quota."
-				action={
-					<Link to="/grants/new" className="btn btn-primary">
-						New grant
-					</Link>
-				}
-			/>
-		);
-	}
-
-	return (
-		<div className="space-y-4">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div>
-					<h1 className="text-2xl font-bold">Grants</h1>
-					<p className="text-sm opacity-70">
-						Quota allocations per user and endpoint.
-					</p>
-				</div>
-				<Link to="/grants/new" className="btn btn-primary">
-					New grant
-				</Link>
-			</div>
 			<ResourceTable
 				headers={[
 					{ key: "grant_id", label: "Grant ID" },
@@ -136,6 +132,17 @@ export function GrantsPage() {
 					</tr>
 				))}
 			</ResourceTable>
+		);
+	})();
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="Grants"
+				description="Quota allocations per user and endpoint."
+				actions={actions}
+			/>
+			{content}
 		</div>
 	);
 }

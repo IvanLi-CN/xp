@@ -1,15 +1,20 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
+import { useUiPrefsOptional } from "./UiPrefs";
+
 type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonSize = "md" | "sm";
 
 export interface ButtonProps extends ComponentPropsWithoutRef<"button"> {
 	variant?: ButtonVariant;
+	size?: ButtonSize;
 	loading?: boolean;
 	iconLeft?: ReactNode;
 }
 
 export function Button({
 	variant = "primary",
+	size,
 	loading = false,
 	iconLeft,
 	disabled,
@@ -17,6 +22,10 @@ export function Button({
 	className,
 	...rest
 }: ButtonProps) {
+	const prefs = useUiPrefsOptional();
+	const effectiveSize: ButtonSize =
+		size ?? (prefs?.density === "compact" ? "sm" : "md");
+
 	const variantClass =
 		variant === "secondary"
 			? "btn-secondary"
@@ -27,7 +36,13 @@ export function Button({
 	return (
 		<button
 			type="button"
-			className={["btn", variantClass, loading ? "btn-disabled" : "", className]
+			className={[
+				"btn",
+				variantClass,
+				effectiveSize === "sm" ? "btn-sm" : "",
+				loading ? "btn-disabled" : "",
+				className,
+			]
 				.filter(Boolean)
 				.join(" ")}
 			disabled={disabled || loading}

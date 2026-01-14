@@ -10,8 +10,10 @@ import {
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 const kindOptions = [
@@ -50,7 +52,17 @@ function isValidRealityServerName(value: string): boolean {
 export function EndpointNewPage() {
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
 	const adminToken = readAdminToken();
+
+	const selectClass =
+		prefs.density === "compact"
+			? "select select-bordered select-sm"
+			: "select select-bordered";
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -129,73 +141,65 @@ export function EndpointNewPage() {
 		},
 	});
 
-	if (adminToken.length === 0) {
+	const content = (() => {
+		if (adminToken.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Admin token required"
+					description="Set an admin token to create endpoints."
+					action={
+						<Link className="btn btn-primary" to="/login">
+							Go to login
+						</Link>
+					}
+				/>
+			);
+		}
+
+		if (nodesQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading nodes"
+					description="Fetching nodes for endpoint assignment."
+				/>
+			);
+		}
+
+		if (nodesQuery.isError) {
+			const description = formatErrorMessage(nodesQuery.error);
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load nodes"
+					description={description}
+					action={
+						<Button variant="secondary" onClick={() => nodesQuery.refetch()}>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const nodes = nodesQuery.data?.items ?? [];
+		if (nodes.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="No nodes available"
+					description="Create or register a node before adding endpoints."
+					action={
+						<Link className="btn btn-primary" to="/nodes">
+							Go to nodes
+						</Link>
+					}
+				/>
+			);
+		}
+
 		return (
-			<PageState
-				variant="empty"
-				title="Admin token required"
-				description="Set an admin token to create endpoints."
-				action={
-					<Link className="btn btn-primary" to="/login">
-						Go to login
-					</Link>
-				}
-			/>
-		);
-	}
-
-	if (nodesQuery.isLoading) {
-		return (
-			<PageState
-				variant="loading"
-				title="Loading nodes"
-				description="Fetching nodes for endpoint assignment."
-			/>
-		);
-	}
-
-	if (nodesQuery.isError) {
-		const description = formatErrorMessage(nodesQuery.error);
-		return (
-			<PageState
-				variant="error"
-				title="Failed to load nodes"
-				description={description}
-				action={
-					<Button variant="secondary" onClick={() => nodesQuery.refetch()}>
-						Retry
-					</Button>
-				}
-			/>
-		);
-	}
-
-	const nodes = nodesQuery.data?.items ?? [];
-
-	if (nodes.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="No nodes available"
-				description="Create or register a node before adding endpoints."
-				action={
-					<Link className="btn btn-primary" to="/nodes">
-						Go to nodes
-					</Link>
-				}
-			/>
-		);
-	}
-
-	return (
-		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">New endpoint</h1>
-				<p className="text-sm opacity-70">
-					Create an ingress endpoint for a node.
-				</p>
-			</div>
-
 			<div className="card bg-base-100 shadow">
 				<div className="card-body space-y-4">
 					<form
@@ -211,7 +215,7 @@ export function EndpointNewPage() {
 									<span className="label-text">Kind</span>
 								</div>
 								<select
-									className="select select-bordered"
+									className={selectClass}
 									value={kind}
 									onChange={(event) =>
 										setKind(AdminEndpointKindSchema.parse(event.target.value))
@@ -224,6 +228,7 @@ export function EndpointNewPage() {
 									))}
 								</select>
 							</label>
+
 							{nodes.length <= 1 ? (
 								<div className="form-control">
 									<div className="label">
@@ -244,7 +249,7 @@ export function EndpointNewPage() {
 										<span className="label-text">Node</span>
 									</div>
 									<select
-										className="select select-bordered"
+										className={selectClass}
 										value={nodeId}
 										onChange={(event) => setNodeId(event.target.value)}
 									>
@@ -268,7 +273,7 @@ export function EndpointNewPage() {
 										</div>
 										<input
 											type="number"
-											className="input input-bordered"
+											className={inputClass}
 											value={port}
 											min={1}
 											onChange={(event) => setPort(event.target.value)}
@@ -283,7 +288,7 @@ export function EndpointNewPage() {
 										</div>
 										<input
 											type="text"
-											className="input input-bordered"
+											className={inputClass}
 											value={realityServerName}
 											placeholder="chatgpt.com"
 											onChange={(event) =>
@@ -308,7 +313,7 @@ export function EndpointNewPage() {
 												</div>
 												<input
 													type="text"
-													className="input input-bordered"
+													className={inputClass}
 													value={realityFingerprint}
 													placeholder="chrome"
 													onChange={(event) =>
@@ -333,7 +338,7 @@ export function EndpointNewPage() {
 										</div>
 										<input
 											type="number"
-											className="input input-bordered"
+											className={inputClass}
 											value={port}
 											min={1}
 											onChange={(event) => setPort(event.target.value)}
@@ -346,14 +351,36 @@ export function EndpointNewPage() {
 							</div>
 						)}
 
-						<div className="card-actions justify-end">
-							<Button loading={createMutation.isPending} type="submit">
+						<div className="card-actions justify-end gap-2">
+							<Link className="btn btn-ghost" to="/endpoints">
+								Cancel
+							</Link>
+							<Button
+								loading={createMutation.isPending}
+								disabled={createMutation.isPending}
+								type="submit"
+							>
 								Create endpoint
 							</Button>
 						</div>
 					</form>
 				</div>
 			</div>
+		);
+	})();
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="New endpoint"
+				description="Create an ingress endpoint for a node."
+				actions={
+					<Link className="btn btn-ghost btn-sm" to="/endpoints">
+						Back
+					</Link>
+				}
+			/>
+			{content}
 		</div>
 	);
 }

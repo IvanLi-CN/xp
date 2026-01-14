@@ -4,8 +4,10 @@ import { useState } from "react";
 import { type CyclePolicyDefault, createAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatError(err: unknown): string {
@@ -21,14 +23,24 @@ export function UserNewPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
 	const [displayName, setDisplayName] = useState("");
 	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicyDefault>("by_user");
 	const [cycleDay, setCycleDay] = useState(1);
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
-	if (adminToken.length === 0) {
-		return (
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
+	const selectClass =
+		prefs.density === "compact"
+			? "select select-bordered select-sm"
+			: "select select-bordered";
+
+	const content =
+		adminToken.length === 0 ? (
 			<PageState
 				variant="empty"
 				title="Admin token required"
@@ -39,15 +51,7 @@ export function UserNewPage() {
 					</Link>
 				}
 			/>
-		);
-	}
-
-	return (
-		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">New user</h1>
-				<p className="text-sm opacity-70">Create a new subscription owner.</p>
-			</div>
+		) : (
 			<form
 				className="card bg-base-100 shadow"
 				onSubmit={async (event) => {
@@ -94,7 +98,7 @@ export function UserNewPage() {
 							<span className="label-text">Display name</span>
 						</div>
 						<input
-							className="input input-bordered"
+							className={inputClass}
 							value={displayName}
 							onChange={(event) => setDisplayName(event.target.value)}
 							placeholder="e.g. Customer A"
@@ -107,7 +111,7 @@ export function UserNewPage() {
 								<span className="label-text">Cycle policy</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={cyclePolicy}
 								onChange={(event) =>
 									setCyclePolicy(event.target.value as CyclePolicyDefault)
@@ -122,7 +126,7 @@ export function UserNewPage() {
 								<span className="label-text">Cycle day of month</span>
 							</div>
 							<input
-								className="input input-bordered"
+								className={inputClass}
 								type="number"
 								min={1}
 								max={31}
@@ -140,6 +144,20 @@ export function UserNewPage() {
 					</div>
 				</div>
 			</form>
+		);
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="New user"
+				description="Create a new subscription owner."
+				actions={
+					<Link to="/users" className="btn btn-ghost btn-sm">
+						Back
+					</Link>
+				}
+			/>
+			{content}
 		</div>
 	);
 }

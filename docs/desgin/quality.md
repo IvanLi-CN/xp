@@ -61,6 +61,11 @@
 - 新增/修改业务逻辑必须有对应单测
 - 覆盖率门槛建议先从“关键模块”开始设置（避免一开始因为覆盖率拖慢迭代）
 
+针对 Web UI（#0010）补充要求：
+
+- 核心可复用组件（例如 `Icon`、`PageHeader`、`DataTable`、`AppShell`）必须有渲染与交互单测（Vitest + Testing Library）。
+- E2E（Playwright）至少覆盖 1 条关键路径，并包含主题切换与刷新持久化验证（`xp_ui_theme` / `data-theme`）。
+
 ## 3. Storybook（必须，且每个组件都要 stories）
 
 ### 3.1 强制要求

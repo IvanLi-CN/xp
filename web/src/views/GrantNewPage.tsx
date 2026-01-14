@@ -7,8 +7,10 @@ import { type CyclePolicy, createAdminGrant } from "../api/adminGrants";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatError(err: unknown): string {
@@ -24,6 +26,20 @@ export function GrantNewPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
+
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
+	const selectClass =
+		prefs.density === "compact"
+			? "select select-bordered select-sm"
+			: "select select-bordered";
+	const textareaClass =
+		prefs.density === "compact"
+			? "textarea textarea-bordered textarea-sm"
+			: "textarea textarea-bordered";
 
 	const usersQuery = useQuery({
 		queryKey: ["adminUsers", adminToken],
@@ -60,82 +76,76 @@ export function GrantNewPage() {
 		}
 	}, [endpointId, endpointsQuery.data]);
 
-	if (adminToken.length === 0) {
+	const content = (() => {
+		if (adminToken.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Admin token required"
+					description="Set an admin token to create grants."
+					action={
+						<Link to="/login" className="btn btn-primary">
+							Go to login
+						</Link>
+					}
+				/>
+			);
+		}
+
+		if (usersQuery.isLoading || endpointsQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading grant form"
+					description="Fetching users and endpoints."
+				/>
+			);
+		}
+
+		if (usersQuery.isError || endpointsQuery.isError) {
+			const message = usersQuery.isError
+				? formatError(usersQuery.error)
+				: endpointsQuery.isError
+					? formatError(endpointsQuery.error)
+					: "Unknown error";
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load grant form"
+					description={message}
+					action={
+						<Button
+							variant="secondary"
+							onClick={() => {
+								usersQuery.refetch();
+								endpointsQuery.refetch();
+							}}
+						>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const users = usersQuery.data?.items ?? [];
+		const endpoints = endpointsQuery.data?.items ?? [];
+
+		if (users.length === 0 || endpoints.length === 0) {
+			return (
+				<PageState
+					variant="empty"
+					title="Missing dependencies"
+					description={
+						users.length === 0
+							? "Create a user before creating grants."
+							: "Create an endpoint before creating grants."
+					}
+				/>
+			);
+		}
+
 		return (
-			<PageState
-				variant="empty"
-				title="Admin token required"
-				description="Set an admin token to create grants."
-				action={
-					<Link to="/login" className="btn btn-primary">
-						Go to login
-					</Link>
-				}
-			/>
-		);
-	}
-
-	if (usersQuery.isLoading || endpointsQuery.isLoading) {
-		return (
-			<PageState
-				variant="loading"
-				title="Loading grant form"
-				description="Fetching users and endpoints."
-			/>
-		);
-	}
-
-	if (usersQuery.isError || endpointsQuery.isError) {
-		const message = usersQuery.isError
-			? formatError(usersQuery.error)
-			: endpointsQuery.isError
-				? formatError(endpointsQuery.error)
-				: "Unknown error";
-		return (
-			<PageState
-				variant="error"
-				title="Failed to load grant form"
-				description={message}
-				action={
-					<Button
-						variant="secondary"
-						onClick={() => {
-							usersQuery.refetch();
-							endpointsQuery.refetch();
-						}}
-					>
-						Retry
-					</Button>
-				}
-			/>
-		);
-	}
-
-	const users = usersQuery.data?.items ?? [];
-	const endpoints = endpointsQuery.data?.items ?? [];
-
-	if (users.length === 0 || endpoints.length === 0) {
-		return (
-			<PageState
-				variant="empty"
-				title="Missing dependencies"
-				description={
-					users.length === 0
-						? "Create a user before creating grants."
-						: "Create an endpoint before creating grants."
-				}
-			/>
-		);
-	}
-
-	return (
-		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">New grant</h1>
-				<p className="text-sm opacity-70">
-					Allocate quota to a user on an endpoint.
-				</p>
-			</div>
 			<form
 				className="card bg-base-100 shadow"
 				onSubmit={async (event) => {
@@ -193,7 +203,7 @@ export function GrantNewPage() {
 								<span className="label-text">User</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={userId}
 								onChange={(event) => setUserId(event.target.value)}
 							>
@@ -209,7 +219,7 @@ export function GrantNewPage() {
 								<span className="label-text">Endpoint</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={endpointId}
 								onChange={(event) => setEndpointId(event.target.value)}
 							>
@@ -230,7 +240,7 @@ export function GrantNewPage() {
 								<span className="label-text">Quota limit (bytes)</span>
 							</div>
 							<input
-								className="input input-bordered"
+								className={inputClass}
 								type="number"
 								min={0}
 								value={quotaLimit}
@@ -242,7 +252,7 @@ export function GrantNewPage() {
 								<span className="label-text">Cycle policy</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={cyclePolicy}
 								onChange={(event) => {
 									const next = event.target.value as CyclePolicy;
@@ -263,7 +273,7 @@ export function GrantNewPage() {
 							<span className="label-text">Cycle day of month</span>
 						</div>
 						<input
-							className="input input-bordered"
+							className={inputClass}
 							type="number"
 							min={1}
 							max={31}
@@ -282,7 +292,7 @@ export function GrantNewPage() {
 							<span className="label-text">Note (optional)</span>
 						</div>
 						<textarea
-							className="textarea textarea-bordered"
+							className={textareaClass}
 							value={note}
 							onChange={(event) => setNote(event.target.value)}
 							placeholder="e.g. enterprise quota"
@@ -296,6 +306,21 @@ export function GrantNewPage() {
 					</div>
 				</div>
 			</form>
+		);
+	})();
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="New grant"
+				description="Allocate quota to a user on an endpoint."
+				actions={
+					<Link to="/grants" className="btn btn-ghost btn-sm">
+						Back
+					</Link>
+				}
+			/>
+			{content}
 		</div>
 	);
 }
