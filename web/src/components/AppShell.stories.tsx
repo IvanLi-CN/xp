@@ -1,16 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { useEffect } from "react";
 
 import { AppShell } from "./AppShell";
-import { useUiPrefs } from "./UiPrefs";
-
-function SetTheme({ theme }: { theme: "light" | "dark" }) {
-	const prefs = useUiPrefs();
-	useEffect(() => {
-		prefs.setTheme(theme);
-	}, [prefs, theme]);
-	return null;
-}
 
 const meta: Meta<typeof AppShell> = {
 	title: "Components/AppShell",
@@ -37,20 +27,4 @@ export default meta;
 
 type Story = StoryObj<typeof AppShell>;
 
-export const Light: Story = {
-	render: (args) => (
-		<>
-			<SetTheme theme="light" />
-			<AppShell {...args} />
-		</>
-	),
-};
-
-export const Dark: Story = {
-	render: (args) => (
-		<>
-			<SetTheme theme="dark" />
-			<AppShell {...args} />
-		</>
-	),
-};
+export const Default: Story = {};

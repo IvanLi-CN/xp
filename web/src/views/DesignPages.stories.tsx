@@ -186,15 +186,13 @@ const DESIGN_MOCK_API = {
 
 function pageStory(options: {
 	path: string;
-	theme: "light" | "dark";
 	adminToken?: string | null;
 }) {
-	const { path, theme, adminToken } = options;
+	const { path, adminToken } = options;
 	return {
 		render: () => <></>,
 		parameters: {
 			router: { initialEntry: path },
-			ui: { theme },
 			mockApi:
 				adminToken === undefined
 					? DESIGN_MOCK_API
@@ -203,101 +201,20 @@ function pageStory(options: {
 	} satisfies Story;
 }
 
-export const LoginLight: Story = pageStory({
-	path: "/login",
-	theme: "light",
-	adminToken: null,
-});
-
-export const LoginDark: Story = pageStory({
-	path: "/login",
-	theme: "dark",
-	adminToken: null,
-});
-
-export const DashboardLight: Story = pageStory({ path: "/", theme: "light" });
-export const DashboardDark: Story = pageStory({ path: "/", theme: "dark" });
-
-export const NodesLight: Story = pageStory({ path: "/nodes", theme: "light" });
-export const NodesDark: Story = pageStory({ path: "/nodes", theme: "dark" });
-
-export const NodeDetailsLight: Story = pageStory({
-	path: "/nodes/n2",
-	theme: "light",
-});
-export const NodeDetailsDark: Story = pageStory({
-	path: "/nodes/n2",
-	theme: "dark",
-});
-
-export const EndpointsLight: Story = pageStory({
-	path: "/endpoints",
-	theme: "light",
-});
-export const EndpointsDark: Story = pageStory({
-	path: "/endpoints",
-	theme: "dark",
-});
-
-export const EndpointNewLight: Story = pageStory({
-	path: "/endpoints/new",
-	theme: "light",
-});
-export const EndpointNewDark: Story = pageStory({
-	path: "/endpoints/new",
-	theme: "dark",
-});
-
-export const EndpointDetailsLight: Story = pageStory({
+export const Login: Story = pageStory({ path: "/login", adminToken: null });
+export const Dashboard: Story = pageStory({ path: "/" });
+export const Nodes: Story = pageStory({ path: "/nodes" });
+export const NodeDetails: Story = pageStory({ path: "/nodes/n2" });
+export const Endpoints: Story = pageStory({ path: "/endpoints" });
+export const EndpointNew: Story = pageStory({ path: "/endpoints/new" });
+export const EndpointDetails: Story = pageStory({
 	path: "/endpoints/ep_01HENDPTAAAAAA",
-	theme: "light",
 });
-export const EndpointDetailsDark: Story = pageStory({
-	path: "/endpoints/ep_01HENDPTAAAAAA",
-	theme: "dark",
-});
-
-export const UsersLight: Story = pageStory({ path: "/users", theme: "light" });
-export const UsersDark: Story = pageStory({ path: "/users", theme: "dark" });
-
-export const UserNewLight: Story = pageStory({
-	path: "/users/new",
-	theme: "light",
-});
-export const UserNewDark: Story = pageStory({
-	path: "/users/new",
-	theme: "dark",
-});
-
-export const UserDetailsLight: Story = pageStory({
-	path: "/users/u_01HUSERAAAAAA",
-	theme: "light",
-});
-export const UserDetailsDark: Story = pageStory({
-	path: "/users/u_01HUSERAAAAAA",
-	theme: "dark",
-});
-
-export const GrantsLight: Story = pageStory({
-	path: "/grants",
-	theme: "light",
-});
-export const GrantsDark: Story = pageStory({ path: "/grants", theme: "dark" });
-
-export const GrantNewLight: Story = pageStory({
-	path: "/grants/new",
-	theme: "light",
-});
-export const GrantNewDark: Story = pageStory({
-	path: "/grants/new",
-	theme: "dark",
-});
-
-export const GrantDetailsLight: Story = pageStory({
+export const Users: Story = pageStory({ path: "/users" });
+export const UserNew: Story = pageStory({ path: "/users/new" });
+export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });
+export const Grants: Story = pageStory({ path: "/grants" });
+export const GrantNew: Story = pageStory({ path: "/grants/new" });
+export const GrantDetails: Story = pageStory({
 	path: "/grants/g_01HGRANTAAAAAA",
-	theme: "light",
-});
-export const GrantDetailsDark: Story = pageStory({
-	path: "/grants/g_01HGRANTAAAAAA",
-	theme: "dark",
 });

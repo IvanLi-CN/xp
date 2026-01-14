@@ -43,11 +43,6 @@ type StorybookRouterParameters = {
 	initialEntry?: string;
 };
 
-type StorybookUiParameters = {
-	theme?: "system" | "light" | "dark";
-	density?: "comfortable" | "compact";
-};
-
 installStorybookFetchMock();
 
 function safeLocalStorageSet(key: string, value: string) {
@@ -57,6 +52,38 @@ function safeLocalStorageSet(key: string, value: string) {
 		// ignore
 	}
 }
+
+export const globalTypes = {
+	theme: {
+		name: "Theme",
+		description: "UI theme used by UiPrefsProvider",
+		toolbar: {
+			icon: "circlehollow",
+			dynamicTitle: true,
+			items: [
+				{ value: "dark", title: "dark" },
+				{ value: "light", title: "light" },
+			],
+		},
+	},
+	density: {
+		name: "Density",
+		description: "UI density used by UiPrefsProvider",
+		toolbar: {
+			icon: "compress",
+			dynamicTitle: true,
+			items: [
+				{ value: "comfortable", title: "comfortable" },
+				{ value: "compact", title: "compact" },
+			],
+		},
+	},
+} as const;
+
+export const initialGlobals = {
+	theme: "dark",
+	density: "comfortable",
+} as const;
 
 const preview: Preview = {
 	decorators: [
@@ -68,18 +95,14 @@ const preview: Preview = {
 			const routerParams =
 				(context.parameters?.router as StorybookRouterParameters | undefined) ??
 				undefined;
-			const uiParams =
-				(context.parameters?.ui as StorybookUiParameters | undefined) ??
-				undefined;
+			const theme = context.globals.theme === "light" ? "light" : "dark";
+			const density =
+				context.globals.density === "compact" ? "compact" : "comfortable";
 
 			configureStorybookApiMock(context.id, mockParams);
 
-			if (uiParams?.theme) {
-				safeLocalStorageSet(UI_THEME_STORAGE_KEY, uiParams.theme);
-			}
-			if (uiParams?.density) {
-				safeLocalStorageSet(UI_DENSITY_STORAGE_KEY, uiParams.density);
-			}
+			safeLocalStorageSet(UI_THEME_STORAGE_KEY, theme);
+			safeLocalStorageSet(UI_DENSITY_STORAGE_KEY, density);
 
 			if (mockParams?.adminToken === null) {
 				clearAdminToken();
@@ -212,7 +235,7 @@ const preview: Preview = {
 
 			return (
 				<QueryClientProvider client={queryClient}>
-					<UiPrefsProvider>
+					<UiPrefsProvider key={`${theme}-${density}`}>
 						<ToastProvider>
 							<RouterProvider router={router} />
 						</ToastProvider>
