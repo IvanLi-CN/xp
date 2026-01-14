@@ -8,6 +8,8 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
+import { useUiPrefs } from "../components/UiPrefs";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
 	clearAdminToken,
@@ -26,6 +28,7 @@ function formatError(err: unknown): string {
 }
 
 export function HomePage() {
+	const prefs = useUiPrefs();
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
 		readAdminToken(),
@@ -55,12 +58,14 @@ export function HomePage() {
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm font-mono"
+			: "input input-bordered font-mono";
+
 	return (
 		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">xp</h1>
-				<p className="text-sm opacity-70">Control plane bootstrap UI.</p>
-			</div>
+			<PageHeader title="Dashboard" description="Control plane bootstrap UI." />
 
 			<div className="card bg-base-100 shadow">
 				<div className="card-body">
@@ -102,7 +107,7 @@ export function HomePage() {
 						</div>
 						<input
 							type="password"
-							className="input input-bordered font-mono"
+							className={inputClass}
 							placeholder="e.g. testtoken"
 							value={adminTokenDraft}
 							onChange={(e) => {

@@ -11,8 +11,10 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 type VlessMetaSnapshot = {
@@ -81,6 +83,12 @@ export function EndpointDetailsPage() {
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
+	const prefs = useUiPrefs();
+
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
 
 	const endpointQuery = useQuery({
 		queryKey: ["adminEndpoint", adminToken, endpointId],
@@ -274,24 +282,24 @@ export function EndpointDetailsPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h1 className="text-2xl font-bold">Endpoint details</h1>
-					<p className="text-sm opacity-70">Endpoint {endpoint.endpoint_id}</p>
-				</div>
-				<div className="flex gap-2">
-					<Link className="btn btn-ghost" to="/endpoints">
-						Back
-					</Link>
-					<Button
-						variant="secondary"
-						loading={endpointQuery.isFetching}
-						onClick={() => endpointQuery.refetch()}
-					>
-						Refresh
-					</Button>
-				</div>
-			</div>
+			<PageHeader
+				title="Endpoint details"
+				description={`Endpoint ${endpoint.endpoint_id}`}
+				actions={
+					<div className="flex gap-2">
+						<Link className="btn btn-ghost btn-sm" to="/endpoints">
+							Back
+						</Link>
+						<Button
+							variant="secondary"
+							loading={endpointQuery.isFetching}
+							onClick={() => endpointQuery.refetch()}
+						>
+							Refresh
+						</Button>
+					</div>
+				}
+			/>
 
 			<div className="grid gap-6 lg:grid-cols-2">
 				<div className="card bg-base-100 shadow">
@@ -365,7 +373,7 @@ export function EndpointDetailsPage() {
 										</div>
 										<input
 											type="number"
-											className="input input-bordered"
+											className={inputClass}
 											value={port}
 											min={1}
 											onChange={(event) => setPort(event.target.value)}
@@ -380,7 +388,7 @@ export function EndpointDetailsPage() {
 										</div>
 										<input
 											type="text"
-											className="input input-bordered"
+											className={inputClass}
 											value={realityServerName}
 											placeholder="chatgpt.com"
 											onChange={(event) =>
@@ -405,7 +413,7 @@ export function EndpointDetailsPage() {
 												</div>
 												<input
 													type="text"
-													className="input input-bordered"
+													className={inputClass}
 													value={realityFingerprint}
 													placeholder="chrome"
 													onChange={(event) =>
@@ -430,7 +438,7 @@ export function EndpointDetailsPage() {
 										</div>
 										<input
 											type="number"
-											className="input input-bordered"
+											className={inputClass}
 											value={port}
 											min={1}
 											onChange={(event) => setPort(event.target.value)}

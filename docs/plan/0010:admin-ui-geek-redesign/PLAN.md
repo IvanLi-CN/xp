@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-13
-- Last: 2026-01-13
+- Last: 2026-01-14
 
 ## 1) 问题陈述
 
@@ -204,11 +204,11 @@ None
 
 ## 里程碑（Milestones）
 
-- [ ] M1: 冻结视觉规范（主题 token、图标集、密度策略、App Shell 信息层级）
-- [ ] M2: App Shell 落地（导航/顶部状态栏/主题切换/响应式）
-- [ ] M3: 组件落地（Icon、PageHeader、DataTable、表单区块模板）
-- [ ] M4: 覆盖所有页面（list/details/new/login/dashboard）
-- [ ] M5: 质量门槛补齐（Storybook + Vitest + E2E）
+- [x] M1: 冻结视觉规范（主题 token、图标集、密度策略、App Shell 信息层级）
+- [x] M2: App Shell 落地（导航/顶部状态栏/主题切换/响应式）
+- [x] M3: 组件落地（Icon、PageHeader、DataTable、表单区块模板）
+- [x] M4: 覆盖所有页面（list/details/new/login/dashboard）
+- [x] M5: 质量门槛补齐（Storybook + Vitest + E2E）
 
 ## 方案概述（Approach, high-level）
 

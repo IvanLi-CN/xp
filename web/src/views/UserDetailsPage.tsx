@@ -15,8 +15,10 @@ import { fetchSubscription } from "../api/subscription";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatError(err: unknown): string {
@@ -45,6 +47,20 @@ export function UserDetailsPage() {
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
 	const queryClient = useQueryClient();
+	const prefs = useUiPrefs();
+
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
+	const selectClass =
+		prefs.density === "compact"
+			? "select select-bordered select-sm"
+			: "select select-bordered";
+	const textareaClass =
+		prefs.density === "compact"
+			? "textarea textarea-bordered textarea-sm h-40 font-mono text-xs"
+			: "textarea textarea-bordered h-40 font-mono text-xs";
 
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
@@ -140,7 +156,7 @@ export function UserDetailsPage() {
 				title="User not found"
 				description="The user ID does not exist."
 				action={
-					<Link to="/users" className="btn btn-secondary">
+					<Link to="/users" className="btn btn-outline btn-sm xp-btn-outline">
 						Back to users
 					</Link>
 				}
@@ -156,17 +172,19 @@ export function UserDetailsPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div>
-					<h1 className="text-2xl font-bold">User details</h1>
-					<p className="text-sm opacity-70">
+			<PageHeader
+				title="User details"
+				description={
+					<>
 						User ID: <span className="font-mono">{user.user_id}</span>
-					</p>
-				</div>
-				<Link to="/users" className="btn btn-ghost">
-					Back
-				</Link>
-			</div>
+					</>
+				}
+				actions={
+					<Link to="/users" className="btn btn-ghost btn-sm">
+						Back
+					</Link>
+				}
+			/>
 
 			<form
 				className="card bg-base-100 shadow"
@@ -231,7 +249,7 @@ export function UserDetailsPage() {
 							<span className="label-text">Display name</span>
 						</div>
 						<input
-							className="input input-bordered"
+							className={inputClass}
 							value={displayName}
 							onChange={(event) => setDisplayName(event.target.value)}
 						/>
@@ -242,7 +260,7 @@ export function UserDetailsPage() {
 								<span className="label-text">Cycle policy</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={cyclePolicy}
 								onChange={(event) =>
 									setCyclePolicy(event.target.value as CyclePolicyDefault)
@@ -257,7 +275,7 @@ export function UserDetailsPage() {
 								<span className="label-text">Cycle day of month</span>
 							</div>
 							<input
-								className="input input-bordered"
+								className={inputClass}
 								type="number"
 								min={1}
 								max={31}
@@ -288,7 +306,7 @@ export function UserDetailsPage() {
 								<span className="label-text">Format</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={subscriptionFormat}
 								onChange={(event) => {
 									setSubscriptionFormat(
@@ -370,7 +388,7 @@ export function UserDetailsPage() {
 					) : null}
 					{subscriptionContent ? (
 						<textarea
-							className="textarea textarea-bordered h-40 font-mono text-xs"
+							className={textareaClass}
 							value={subscriptionContent}
 							readOnly
 						/>

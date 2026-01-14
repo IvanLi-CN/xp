@@ -4,6 +4,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./styles.css";
+import { UiPrefsProvider } from "./components/UiPrefs";
 import { createQueryClient } from "./queryClient";
 import { createAppRouter } from "./router";
 
@@ -18,7 +19,9 @@ if (!rootElement) {
 ReactDOM.createRoot(rootElement).render(
 	<React.StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<RouterProvider router={router} />
+			<UiPrefsProvider>
+				<RouterProvider router={router} />
+			</UiPrefsProvider>
 		</QueryClientProvider>
 	</React.StrictMode>,
 );

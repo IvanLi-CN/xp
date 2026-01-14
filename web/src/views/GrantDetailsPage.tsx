@@ -14,8 +14,10 @@ import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
+import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 
 function formatError(err: unknown): string {
@@ -33,6 +35,20 @@ export function GrantDetailsPage() {
 	const { grantId } = useParams({ from: "/app/grants/$grantId" });
 	const { pushToast } = useToast();
 	const queryClient = useQueryClient();
+	const prefs = useUiPrefs();
+
+	const inputClass =
+		prefs.density === "compact"
+			? "input input-bordered input-sm"
+			: "input input-bordered";
+	const selectClass =
+		prefs.density === "compact"
+			? "select select-bordered select-sm"
+			: "select select-bordered";
+	const textareaClass =
+		prefs.density === "compact"
+			? "textarea textarea-bordered textarea-sm"
+			: "textarea textarea-bordered";
 
 	const grantQuery = useQuery({
 		queryKey: ["adminGrant", adminToken, grantId],
@@ -113,7 +129,7 @@ export function GrantDetailsPage() {
 				title="Grant not found"
 				description="The grant ID does not exist."
 				action={
-					<Link to="/grants" className="btn btn-secondary">
+					<Link to="/grants" className="btn btn-outline btn-sm xp-btn-outline">
 						Back to grants
 					</Link>
 				}
@@ -183,17 +199,19 @@ export function GrantDetailsPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div>
-					<h1 className="text-2xl font-bold">Grant details</h1>
-					<p className="text-sm opacity-70">
+			<PageHeader
+				title="Grant details"
+				description={
+					<>
 						Grant ID: <span className="font-mono">{grant.grant_id}</span>
-					</p>
-				</div>
-				<Link to="/grants" className="btn btn-ghost">
-					Back
-				</Link>
-			</div>
+					</>
+				}
+				actions={
+					<Link to="/grants" className="btn btn-ghost btn-sm">
+						Back
+					</Link>
+				}
+			/>
 
 			<form
 				className="card bg-base-100 shadow"
@@ -227,7 +245,7 @@ export function GrantDetailsPage() {
 								<span className="label-text">Quota limit (bytes)</span>
 							</div>
 							<input
-								className="input input-bordered"
+								className={inputClass}
 								type="number"
 								min={0}
 								value={quotaLimit}
@@ -239,7 +257,7 @@ export function GrantDetailsPage() {
 								<span className="label-text">Cycle policy</span>
 							</div>
 							<select
-								className="select select-bordered"
+								className={selectClass}
 								value={cyclePolicy}
 								onChange={(event) => {
 									const next = event.target.value as CyclePolicy;
@@ -260,7 +278,7 @@ export function GrantDetailsPage() {
 							<span className="label-text">Cycle day of month</span>
 						</div>
 						<input
-							className="input input-bordered"
+							className={inputClass}
 							type="number"
 							min={1}
 							max={31}
@@ -280,7 +298,7 @@ export function GrantDetailsPage() {
 							<span className="label-text-alt">Leave empty to clear</span>
 						</div>
 						<textarea
-							className="textarea textarea-bordered"
+							className={textareaClass}
 							value={note}
 							onChange={(event) => setNote(event.target.value)}
 						/>

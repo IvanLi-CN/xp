@@ -11,6 +11,11 @@ import {
 
 import { AppLayout } from "../src/components/AppLayout";
 import { ToastProvider } from "../src/components/Toast";
+import { UiPrefsProvider } from "../src/components/UiPrefs";
+import {
+	UI_DENSITY_STORAGE_KEY,
+	UI_THEME_STORAGE_KEY,
+} from "../src/components/UiPrefs";
 import { clearAdminToken, writeAdminToken } from "../src/components/auth";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
@@ -40,6 +45,46 @@ type StorybookRouterParameters = {
 
 installStorybookFetchMock();
 
+function safeLocalStorageSet(key: string, value: string) {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		// ignore
+	}
+}
+
+export const globalTypes = {
+	theme: {
+		name: "Theme",
+		description: "UI theme used by UiPrefsProvider",
+		toolbar: {
+			icon: "circlehollow",
+			dynamicTitle: true,
+			items: [
+				{ value: "dark", title: "dark" },
+				{ value: "light", title: "light" },
+			],
+		},
+	},
+	density: {
+		name: "Density",
+		description: "UI density used by UiPrefsProvider",
+		toolbar: {
+			icon: "compress",
+			dynamicTitle: true,
+			items: [
+				{ value: "comfortable", title: "comfortable" },
+				{ value: "compact", title: "compact" },
+			],
+		},
+	},
+} as const;
+
+export const initialGlobals = {
+	theme: "dark",
+	density: "comfortable",
+} as const;
+
 const preview: Preview = {
 	decorators: [
 		(Story, context) => {
@@ -50,8 +95,14 @@ const preview: Preview = {
 			const routerParams =
 				(context.parameters?.router as StorybookRouterParameters | undefined) ??
 				undefined;
+			const theme = context.globals.theme === "light" ? "light" : "dark";
+			const density =
+				context.globals.density === "compact" ? "compact" : "comfortable";
 
 			configureStorybookApiMock(context.id, mockParams);
+
+			safeLocalStorageSet(UI_THEME_STORAGE_KEY, theme);
+			safeLocalStorageSet(UI_DENSITY_STORAGE_KEY, density);
 
 			if (mockParams?.adminToken === null) {
 				clearAdminToken();
@@ -184,9 +235,11 @@ const preview: Preview = {
 
 			return (
 				<QueryClientProvider client={queryClient}>
-					<ToastProvider>
-						<RouterProvider router={router} />
-					</ToastProvider>
+					<UiPrefsProvider key={`${theme}-${density}`}>
+						<ToastProvider>
+							<RouterProvider router={router} />
+						</ToastProvider>
+					</UiPrefsProvider>
 				</QueryClientProvider>
 			);
 		},
