@@ -21,7 +21,15 @@
 }
 
 @layer components {
+	.form-control {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--xp-form-label-gap);
+	}
+
 	.form-control > .label {
-		margin-bottom: var(--xp-form-label-gap);
+		display: flex;
+		width: 100%;
 	}
 }
