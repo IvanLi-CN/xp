@@ -150,7 +150,7 @@ export function AppShell({
 								<Icon name="tabler:menu-2" ariaLabel="Menu" />
 							</label>
 						</div>
-						<div className="flex-1 min-w-0 gap-3">
+						<div className="flex flex-1 items-center min-w-0 gap-3">
 							<Link to="/" className="flex items-center gap-2">
 								<span className="font-semibold tracking-tight">
 									{brand.name}
@@ -165,7 +165,7 @@ export function AppShell({
 								{headerStatus ?? statusBadges}
 							</div>
 						</div>
-						<div className="flex-none gap-2">
+						<div className="flex flex-none items-center gap-2">
 							<button
 								type="button"
 								className="btn btn-ghost btn-sm"
