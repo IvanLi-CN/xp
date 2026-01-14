@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 待实现
 - Created: 2026-01-14
 - Last: 2026-01-14
 
