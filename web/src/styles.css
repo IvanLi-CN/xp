@@ -8,6 +8,7 @@
 		--xp-card-padding: 1.5rem;
 		--xp-table-padding-y: 0.75rem;
 		--xp-table-padding-x: 0.75rem;
+		--xp-form-label-gap: 0.5rem;
 	}
 
 	html[data-density="compact"] {
@@ -15,5 +16,12 @@
 		--xp-card-padding: 1rem;
 		--xp-table-padding-y: 0.5rem;
 		--xp-table-padding-x: 0.5rem;
+		--xp-form-label-gap: 0.375rem;
+	}
+}
+
+@layer components {
+	.form-control > .label {
+		margin-bottom: var(--xp-form-label-gap);
 	}
 }

@@ -7,14 +7,22 @@ test("renders nodes, endpoints, users, and grants pages", async ({ page }) => {
 	await setupApiMocks(page);
 
 	await page.goto("/nodes");
-	await expect(page.getByRole("heading", { name: "Nodes" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Nodes", exact: true }),
+	).toBeVisible();
 
 	await page.goto("/endpoints");
-	await expect(page.getByRole("heading", { name: "Endpoints" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Endpoints", exact: true }),
+	).toBeVisible();
 
 	await page.goto("/users");
-	await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Users", exact: true }),
+	).toBeVisible();
 
 	await page.goto("/grants");
-	await expect(page.getByRole("heading", { name: "Grants" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Grants", exact: true }),
+	).toBeVisible();
 });
