@@ -12,7 +12,7 @@
 		"typecheck": "tsc -b",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"storybook": "storybook dev -p 60081 --host 127.0.0.1",
+		"storybook": "storybook dev -p 60081 --host 127.0.0.1 --no-open",
 		"build-storybook": "storybook build",
 		"test-storybook": "test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole",
 		"test:e2e": "playwright test"
