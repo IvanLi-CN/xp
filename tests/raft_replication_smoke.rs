@@ -158,12 +158,17 @@ async fn wait_for_snapshot(
 ) -> anyhow::Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
-        let snapshot = raft
-            .get_snapshot()
-            .await
-            .map_err(|e| anyhow::anyhow!("raft get_snapshot: {e}"))?;
-        if snapshot.is_some() {
-            return Ok(());
+        match raft.get_snapshot().await {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(e) => {
+                // `get_snapshot()` may transiently error while a freshly-triggered snapshot is
+                // being materialized on disk (e.g. metadata points to a snapshot file not yet
+                // present). Treat "NotFound" as retriable within the timeout window.
+                if !error_chain_has_not_found(&e) {
+                    return Err(anyhow::anyhow!("raft get_snapshot: {e}"));
+                }
+            }
         }
 
         if Instant::now() >= deadline {
@@ -171,6 +176,21 @@ async fn wait_for_snapshot(
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn error_chain_has_not_found(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current: &(dyn std::error::Error + 'static) = err;
+    loop {
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            if io.kind() == std::io::ErrorKind::NotFound {
+                return true;
+            }
+        }
+        match current.source() {
+            Some(next) => current = next,
+            None => return false,
+        }
     }
 }
 

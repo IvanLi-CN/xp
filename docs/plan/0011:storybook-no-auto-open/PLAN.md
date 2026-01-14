@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-14
 - Last: 2026-01-14
 
@@ -104,8 +104,8 @@ None
 ## 里程碑（Milestones）
 
 - [x] M1: 冻结方案与口径（默认使用 `--no-open`；不提供 `storybook:open`）
-- [ ] M2: 实现脚本变更并验证（本地 + CI 口径）
-- [ ] M3:（可选）补充文档说明
+- [x] M2: 实现脚本变更并验证（本地 + CI 口径）
+- [x] M3:（可选）补充文档说明（以 contracts/cli.md 为准）
 
 ## 参考（References）
 
