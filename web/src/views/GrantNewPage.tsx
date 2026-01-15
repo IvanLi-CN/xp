@@ -4,9 +4,14 @@ import { useEffect, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { type CyclePolicy, createAdminGrant } from "../api/adminGrants";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import {
+	GrantAccessMatrix,
+	type GrantAccessMatrixCellState,
+} from "../components/GrantAccessMatrix";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
@@ -41,6 +46,12 @@ export function GrantNewPage() {
 			? "textarea textarea-bordered textarea-sm"
 			: "textarea textarea-bordered";
 
+	const nodesQuery = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+
 	const usersQuery = useQuery({
 		queryKey: ["adminUsers", adminToken],
 		enabled: adminToken.length > 0,
@@ -54,7 +65,10 @@ export function GrantNewPage() {
 	});
 
 	const [userId, setUserId] = useState("");
-	const [endpointId, setEndpointId] = useState("");
+	const [nodeFilter, setNodeFilter] = useState("");
+	const [selectedByCell, setSelectedByCell] = useState<Record<string, string>>(
+		{},
+	);
 	const [quotaLimit, setQuotaLimit] = useState(0);
 	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicy>("inherit_user");
 	const [cycleDay, setCycleDay] = useState(1);
@@ -62,19 +76,15 @@ export function GrantNewPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
+	const selectedUser =
+		usersQuery.data?.items.find((u) => u.user_id === userId) ?? null;
+
 	useEffect(() => {
 		if (!usersQuery.data) return;
 		if (!userId && usersQuery.data.items.length > 0) {
 			setUserId(usersQuery.data.items[0].user_id);
 		}
 	}, [userId, usersQuery.data]);
-
-	useEffect(() => {
-		if (!endpointsQuery.data) return;
-		if (!endpointId && endpointsQuery.data.items.length > 0) {
-			setEndpointId(endpointsQuery.data.items[0].endpoint_id);
-		}
-	}, [endpointId, endpointsQuery.data]);
 
 	const content = (() => {
 		if (adminToken.length === 0) {
@@ -92,22 +102,28 @@ export function GrantNewPage() {
 			);
 		}
 
-		if (usersQuery.isLoading || endpointsQuery.isLoading) {
+		if (
+			nodesQuery.isLoading ||
+			usersQuery.isLoading ||
+			endpointsQuery.isLoading
+		) {
 			return (
 				<PageState
 					variant="loading"
 					title="Loading grant form"
-					description="Fetching users and endpoints."
+					description="Fetching nodes, users and endpoints."
 				/>
 			);
 		}
 
-		if (usersQuery.isError || endpointsQuery.isError) {
+		if (nodesQuery.isError || usersQuery.isError || endpointsQuery.isError) {
 			const message = usersQuery.isError
 				? formatError(usersQuery.error)
-				: endpointsQuery.isError
-					? formatError(endpointsQuery.error)
-					: "Unknown error";
+				: nodesQuery.isError
+					? formatError(nodesQuery.error)
+					: endpointsQuery.isError
+						? formatError(endpointsQuery.error)
+						: "Unknown error";
 			return (
 				<PageState
 					variant="error"
@@ -117,6 +133,7 @@ export function GrantNewPage() {
 						<Button
 							variant="secondary"
 							onClick={() => {
+								nodesQuery.refetch();
 								usersQuery.refetch();
 								endpointsQuery.refetch();
 							}}
@@ -128,30 +145,205 @@ export function GrantNewPage() {
 			);
 		}
 
+		const nodes = nodesQuery.data?.items ?? [];
 		const users = usersQuery.data?.items ?? [];
 		const endpoints = endpointsQuery.data?.items ?? [];
 
-		if (users.length === 0 || endpoints.length === 0) {
+		if (nodes.length === 0 || users.length === 0 || endpoints.length === 0) {
 			return (
 				<PageState
 					variant="empty"
 					title="Missing dependencies"
 					description={
-						users.length === 0
-							? "Create a user before creating grants."
-							: "Create an endpoint before creating grants."
+						nodes.length === 0
+							? "Create a node before creating grants."
+							: users.length === 0
+								? "Create a user before creating grants."
+								: "Create an endpoint before creating grants."
 					}
 				/>
 			);
 		}
 
+		const PROTOCOLS = [
+			{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
+			{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
+		] as const;
+
+		const cellKey = (nodeId: string, protocolId: string) =>
+			`${nodeId}::${protocolId}`;
+
+		const endpointsByNodeProtocol = (() => {
+			const map = new Map<string, Map<string, typeof endpoints>>();
+			for (const ep of endpoints) {
+				const protocolId = ep.kind;
+				const supported = PROTOCOLS.some((p) => p.protocolId === protocolId);
+				if (!supported) continue;
+				if (!map.has(ep.node_id)) map.set(ep.node_id, new Map());
+				const byProtocol = map.get(ep.node_id);
+				if (!byProtocol) continue;
+				if (!byProtocol.has(protocolId)) byProtocol.set(protocolId, []);
+				byProtocol.get(protocolId)?.push(ep);
+			}
+			// Stable ordering for deterministic UI.
+			for (const [, byProtocol] of map) {
+				for (const [, list] of byProtocol) {
+					list.sort((a, b) => a.port - b.port || a.tag.localeCompare(b.tag));
+				}
+			}
+			return map;
+		})();
+
+		const visibleNodes = nodes.filter((n) => {
+			const q = nodeFilter.trim().toLowerCase();
+			if (!q) return true;
+			return (
+				n.node_name.toLowerCase().includes(q) ||
+				n.node_id.toLowerCase().includes(q)
+			);
+		});
+
+		const selectedEndpointIds = Object.values(selectedByCell);
+		const totalEndpointOptions = endpoints.filter((ep) =>
+			PROTOCOLS.some((p) => p.protocolId === ep.kind),
+		).length;
+
+		const cells: Record<
+			string,
+			Record<string, GrantAccessMatrixCellState>
+		> = {};
+		for (const n of visibleNodes) {
+			const row: Record<string, GrantAccessMatrixCellState> = {};
+			for (const p of PROTOCOLS) {
+				const options =
+					endpointsByNodeProtocol.get(n.node_id)?.get(p.protocolId) ?? [];
+				if (options.length === 0) {
+					row[p.protocolId] = { value: "disabled", reason: "No endpoint" };
+					continue;
+				}
+
+				const key = cellKey(n.node_id, p.protocolId);
+				const selected = selectedByCell[key];
+				const selectedEp = selected
+					? (options.find((ep) => ep.endpoint_id === selected) ?? null)
+					: null;
+				row[p.protocolId] = {
+					value: selectedEp ? "on" : "off",
+					meta:
+						options.length > 1
+							? {
+									options: options.map((ep) => ({
+										endpointId: ep.endpoint_id,
+										tag: ep.tag,
+										port: ep.port,
+									})),
+									selectedEndpointId: selectedEp?.endpoint_id,
+									port: selectedEp?.port,
+								}
+							: {
+									endpointId: options[0].endpoint_id,
+									tag: options[0].tag,
+									port: options[0].port,
+								},
+				};
+			}
+			cells[n.node_id] = row;
+		}
+
+		const onToggleCell = (nodeId: string, protocolId: string) => {
+			const options =
+				endpointsByNodeProtocol.get(nodeId)?.get(protocolId) ?? [];
+			if (options.length === 0) return;
+			const key = cellKey(nodeId, protocolId);
+			setSelectedByCell((prev) => {
+				const next = { ...prev };
+				if (next[key]) delete next[key];
+				else next[key] = options[0].endpoint_id;
+				return next;
+			});
+		};
+
+		const onSelectCellEndpoint = (
+			nodeId: string,
+			protocolId: string,
+			endpointId: string,
+		) => {
+			const options =
+				endpointsByNodeProtocol.get(nodeId)?.get(protocolId) ?? [];
+			if (!options.some((ep) => ep.endpoint_id === endpointId)) return;
+			const key = cellKey(nodeId, protocolId);
+			setSelectedByCell((prev) => ({ ...prev, [key]: endpointId }));
+		};
+
+		const onToggleRow = (nodeId: string) => {
+			const protocolIds = PROTOCOLS.map((p) => p.protocolId);
+			setSelectedByCell((prev) => {
+				const hasAny = protocolIds.some((pid) =>
+					Boolean(prev[cellKey(nodeId, pid)]),
+				);
+				const next = { ...prev };
+				for (const pid of protocolIds) {
+					const key = cellKey(nodeId, pid);
+					const options = endpointsByNodeProtocol.get(nodeId)?.get(pid) ?? [];
+					if (options.length === 0) continue;
+					if (hasAny) delete next[key];
+					else next[key] = options[0].endpoint_id;
+				}
+				return next;
+			});
+		};
+
+		const onToggleColumn = (protocolId: string) => {
+			setSelectedByCell((prev) => {
+				const hasAny = visibleNodes.some((n) =>
+					Boolean(prev[cellKey(n.node_id, protocolId)]),
+				);
+				const next = { ...prev };
+				for (const n of visibleNodes) {
+					const key = cellKey(n.node_id, protocolId);
+					const options =
+						endpointsByNodeProtocol.get(n.node_id)?.get(protocolId) ?? [];
+					if (options.length === 0) continue;
+					if (hasAny) delete next[key];
+					else next[key] = options[0].endpoint_id;
+				}
+				return next;
+			});
+		};
+
+		const onToggleAll = () => {
+			setSelectedByCell((prev) => {
+				const hasAny = Object.keys(prev).length > 0;
+				if (hasAny) return {};
+				const next: Record<string, string> = {};
+				for (const n of visibleNodes) {
+					for (const p of PROTOCOLS) {
+						const key = cellKey(n.node_id, p.protocolId);
+						const options =
+							endpointsByNodeProtocol.get(n.node_id)?.get(p.protocolId) ?? [];
+						if (options.length === 0) continue;
+						next[key] = options[0].endpoint_id;
+					}
+				}
+				return next;
+			});
+		};
+
 		return (
 			<form
-				className="card bg-base-100 shadow"
+				className="rounded-box border border-base-200 bg-base-100 p-6 space-y-6"
 				onSubmit={async (event) => {
 					event.preventDefault();
-					if (!userId || !endpointId) {
-						setError("User and endpoint are required.");
+					const selectedOne =
+						selectedEndpointIds.length === 1 ? selectedEndpointIds[0] : null;
+					if (!userId || !selectedOne) {
+						setError(
+							selectedEndpointIds.length === 0
+								? "User and access point are required."
+								: selectedEndpointIds.length > 1
+									? "Select exactly one access point to create a single grant."
+									: "User and access point are required.",
+						);
 						return;
 					}
 					if (quotaLimit < 0) {
@@ -169,7 +361,7 @@ export function GrantNewPage() {
 					try {
 						const payload = {
 							user_id: userId,
-							endpoint_id: endpointId,
+							endpoint_id: selectedOne,
 							quota_limit_bytes: quotaLimit,
 							cycle_policy: cyclePolicy,
 							cycle_day_of_month:
@@ -196,8 +388,8 @@ export function GrantNewPage() {
 					}
 				}}
 			>
-				<div className="card-body space-y-4">
-					<div className="grid gap-4 md:grid-cols-2">
+				<div className="space-y-6">
+					<div className="max-w-xl">
 						<label className="form-control">
 							<div className="label">
 								<span className="label-text">User</span>
@@ -214,26 +406,80 @@ export function GrantNewPage() {
 								))}
 							</select>
 						</label>
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">Endpoint</span>
-							</div>
-							<select
-								className={selectClass}
-								value={endpointId}
-								onChange={(event) => setEndpointId(event.target.value)}
-							>
-								{endpoints.map((endpoint) => (
-									<option
-										key={endpoint.endpoint_id}
-										value={endpoint.endpoint_id}
-									>
-										{endpoint.tag} ({endpoint.endpoint_id})
-									</option>
-								))}
-							</select>
-						</label>
 					</div>
+
+					<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
+						<div className="flex flex-col gap-3 md:flex-row md:items-center">
+							<input
+								className={[
+									inputClass,
+									"w-full md:max-w-sm bg-base-200/30",
+								].join(" ")}
+								placeholder="Filter nodes..."
+								value={nodeFilter}
+								onChange={(event) => setNodeFilter(event.target.value)}
+							/>
+
+							<div className="flex items-center gap-2">
+								<span className="rounded-full border border-base-200 bg-base-200/40 px-4 py-2 font-mono text-xs">
+									Selected {selectedEndpointIds.length} / {totalEndpointOptions}
+								</span>
+							</div>
+
+							<div className="flex-1" />
+
+							<Button
+								variant="secondary"
+								size="sm"
+								onClick={() => setSelectedByCell({})}
+								disabled={selectedEndpointIds.length === 0}
+							>
+								Reset
+							</Button>
+							<Button
+								type="submit"
+								size="sm"
+								loading={isSubmitting}
+								disabled={
+									isSubmitting ||
+									userId.length === 0 ||
+									selectedEndpointIds.length !== 1
+								}
+							>
+								Create grant
+							</Button>
+						</div>
+
+						<div className="flex items-baseline gap-4">
+							<span className="text-sm font-semibold">Matrix</span>
+							<span className="text-xs opacity-60">
+								Batch rule: if any selected, clear; else select all (no invert)
+							</span>
+						</div>
+
+						<GrantAccessMatrix
+							nodes={visibleNodes.map((n) => ({
+								nodeId: n.node_id,
+								label: n.node_name,
+							}))}
+							protocols={PROTOCOLS.map((p) => ({
+								protocolId: p.protocolId,
+								label: p.label,
+							}))}
+							cells={cells}
+							onToggleCell={onToggleCell}
+							onToggleRow={onToggleRow}
+							onToggleColumn={onToggleColumn}
+							onToggleAll={onToggleAll}
+							onSelectCellEndpoint={onSelectCellEndpoint}
+						/>
+
+						<p className="text-xs opacity-60">
+							Tip: header checkboxes can show indeterminate state, but clicking
+							never inverts.
+						</p>
+					</div>
+
 					<div className="grid gap-4 md:grid-cols-2">
 						<label className="form-control">
 							<div className="label">
@@ -299,11 +545,6 @@ export function GrantNewPage() {
 						/>
 					</label>
 					{error ? <p className="text-sm text-error">{error}</p> : null}
-					<div className="card-actions justify-end">
-						<Button type="submit" loading={isSubmitting}>
-							Create grant
-						</Button>
-					</div>
 				</div>
 			</form>
 		);
@@ -312,8 +553,17 @@ export function GrantNewPage() {
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				title="New grant"
-				description="Allocate quota to a user on an endpoint."
+				title="Access points"
+				description={
+					selectedUser ? (
+						<>
+							User ID: <span className="font-mono">{selectedUser.user_id}</span>{" "}
+							- {selectedUser.display_name}
+						</>
+					) : (
+						"Select a node and protocol combination to create one grant."
+					)
+				}
 				actions={
 					<Link to="/grants" className="btn btn-ghost btn-sm">
 						Back

@@ -110,3 +110,66 @@ Re-assert core daisyUI sizing/border props unlayered so buttons/inputs render co
 	border-style: solid;
 	padding: 0.75rem;
 }
+
+.checkbox {
+	border-width: var(--border);
+	border-style: solid;
+	border-color: var(
+		--input-color,
+		color-mix(in oklab, var(--color-base-content) 20%, #0000)
+	);
+	padding: 0.25rem;
+}
+
+/* daisyUI v5: ensure checkbox variant foreground colors win over unlayered resets. */
+.checkbox-xs {
+	padding: 0.125rem;
+}
+
+.checkbox-sm {
+	padding: 0.1875rem;
+}
+
+.checkbox-md {
+	padding: 0.25rem;
+}
+
+.checkbox-lg {
+	padding: 0.3125rem;
+}
+
+.checkbox-xl {
+	padding: 0.375rem;
+}
+
+.checkbox-primary {
+	color: var(--color-primary-content);
+}
+
+.checkbox-secondary {
+	color: var(--color-secondary-content);
+}
+
+.checkbox-accent {
+	color: var(--color-accent-content);
+}
+
+.checkbox-neutral {
+	color: var(--color-neutral-content);
+}
+
+.checkbox-info {
+	color: var(--color-info-content);
+}
+
+.checkbox-success {
+	color: var(--color-success-content);
+}
+
+.checkbox-warning {
+	color: var(--color-warning-content);
+}
+
+.checkbox-error {
+	color: var(--color-error-content);
+}
