@@ -90,6 +90,26 @@ Re-assert core daisyUI sizing/border props unlayered so buttons/inputs render co
 	padding-right: var(--btn-p);
 }
 
+.btn-disabled,
+.btn:disabled,
+.btn[disabled] {
+	pointer-events: none;
+	--btn-border: #0000;
+	--btn-noise: none;
+	--btn-fg: color-mix(in oklch, var(--color-base-content) 20%, #0000);
+}
+
+.btn-disabled:not(.btn-link, .btn-ghost),
+.btn:disabled:not(.btn-link, .btn-ghost),
+.btn[disabled]:not(.btn-link, .btn-ghost) {
+	background-color: color-mix(
+		in oklab,
+		var(--color-base-content) 10%,
+		transparent
+	);
+	box-shadow: none;
+}
+
 .input {
 	border-width: var(--border);
 	border-style: solid;
