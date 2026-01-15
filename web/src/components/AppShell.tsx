@@ -310,7 +310,7 @@ export function AppShell({
 						</div>
 					</header>
 
-					<div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside>{navContent}</aside>
 						<main className="rounded-box border border-base-200 bg-base-100 p-[var(--xp-page-padding)]">
 							{children ?? <Outlet />}
