@@ -224,7 +224,7 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 										<td key={protocol.protocolId}>
 											<div
 												className={[
-													"flex items-center gap-3 rounded-box px-3 py-2",
+													"flex items-center gap-3 rounded-box py-2",
 													cell.value === "disabled"
 														? "bg-base-200/35 opacity-70"
 														: "hover:bg-base-200/25",
