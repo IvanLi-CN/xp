@@ -72,4 +72,3 @@ Cloudflare Tunnel publishes your hostname on the public Internet. Strongly consi
 
 - a Cloudflare Access policy, and/or
 - strict authentication on `xp` (ensure `XP_ADMIN_TOKEN` is set and not empty).
-
