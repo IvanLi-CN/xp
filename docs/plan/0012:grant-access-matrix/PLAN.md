@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-14
-- Last: 2026-01-14
+- Last: 2026-01-16
 
 ## 1) 问题陈述
 
@@ -163,9 +163,9 @@
 ## 里程碑（Milestones）
 
 - [x] M1: 交互与信息架构对齐（低保真草图确认）
-- [ ] M2: 冻结“单元格 ↔ endpoint ↔ grant”的映射与保存策略（含异常：无 endpoint / 多 endpoint）
-- [ ] M3: 高保真设计稿确认（Light/Dark，含表格细节）
-- [ ] M4: 实现与自测（UI + 必要的 API 支撑）
+- [x] M2: 冻结“单元格 ↔ endpoint ↔ grant”的映射与保存策略（含异常：无 endpoint / 多 endpoint）
+- [x] M3: 高保真设计稿确认（Light/Dark，含表格细节）
+- [x] M4: 实现与自测（UI + 必要的 API 支撑）
 
 ## 设计稿（Assets）
 
