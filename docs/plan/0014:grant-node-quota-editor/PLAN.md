@@ -86,10 +86,10 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）                                              | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）      | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 节点配额矩阵 UI（`GrantAccessMatrix` 扩展）                | UI Component | internal      | Modify         | ./contracts/ui-components.md  | web             | 管理端              | 行头编辑节点配额 |
-| Admin API：User node quotas（list/set）                    | HTTP API     | internal      | New            | ./contracts/http-apis.md      | xp              | web                 | 统一后端语义与写入 |
+| 接口（Name）                                | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）     | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）      |
+| ------------------------------------------- | ------------ | ------------- | -------------- | ---------------------------- | --------------- | ------------------- | ------------------ |
+| 节点配额矩阵 UI（`GrantAccessMatrix` 扩展） | UI Component | internal      | Modify         | ./contracts/ui-components.md | web             | 管理端              | 行头编辑节点配额   |
+| Admin API：User node quotas（list/set）     | HTTP API     | internal      | New            | ./contracts/http-apis.md     | xp              | web                 | 统一后端语义与写入 |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -124,18 +124,18 @@
 
 以下示例中，`GiB = 2^30 bytes`，`MiB = 2^20 bytes`：
 
-| 输入 | 期望 |
-| --- | --- |
-| `10GiB` / `10 gib` / `10 GiByte` / `10 gibibyte` | 解析为 `10 * 2^30` bytes |
-| `512MiB` / `512 mib` / `512 MiByte` / `512 mebibyte` | 解析为 `512 * 2^20` bytes |
-| `  10  GiB  `（前后空格） | 解析成功 |
-| `10`（无单位） | 解析为 `10 MiB` |
-| `1.5GiB` | 解析为 `round(1.5 * 2^30)` bytes |
-| `10GB` / `10MB` | 兼容识别为 `10GiB` / `10MiB` |
-| `0` / `0MiB` | 解析为 `0` bytes（系统语义：不做配额封禁） |
-| ``（空字符串） | 解析失败（必须输入数字） |
-| `-1GiB` | 解析失败（非负约束） |
-| `abc` / `10XB` | 解析失败（无法识别单位/数值） |
+| 输入                                                 | 期望                                       |
+| ---------------------------------------------------- | ------------------------------------------ |
+| `10GiB` / `10 gib` / `10 GiByte` / `10 gibibyte`     | 解析为 `10 * 2^30` bytes                   |
+| `512MiB` / `512 mib` / `512 MiByte` / `512 mebibyte` | 解析为 `512 * 2^20` bytes                  |
+| `10  GiB`（前后空格）                                | 解析成功                                   |
+| `10`（无单位）                                       | 解析为 `10 MiB`                            |
+| `1.5GiB`                                             | 解析为 `round(1.5 * 2^30)` bytes           |
+| `10GB` / `10MB`                                      | 兼容识别为 `10GiB` / `10MiB`               |
+| `0` / `0MiB`                                         | 解析为 `0` bytes（系统语义：不做配额封禁） |
+| ``（空字符串）                                       | 解析失败（必须输入数字）                   |
+| `-1GiB`                                              | 解析失败（非负约束）                       |
+| `abc` / `10XB`                                       | 解析失败（无法识别单位/数值）              |
 
 ## 7) 非功能性验收 / 质量门槛（Quality Gates）
 

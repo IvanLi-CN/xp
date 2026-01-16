@@ -15,7 +15,7 @@
     - `value: "known" | "mixed" | "unset";`
     - `quotaLimitBytes?: number;`（当 value=known）
     - `reason?: string;`（可选：例如 mixed 的提示）
-    - `}`  
+    - `}`
 - Node quota edit callback（新增）：
   - `onEditNodeQuota?: (nodeId: string, quotaInput: string) => void`
     - `quotaInput` 使用字符串，便于输入单位与做本地校验。
