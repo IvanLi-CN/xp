@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #0f172a; }
+      .t1 { font-size: 14px; fill: #475569; }
+      .t2 { font-size: 12px; fill: #64748b; }
+      .t3 { font-size: 13px; fill: #0f172a; }
+      .btn { font-size: 12px; font-weight: 750; fill: #0f172a; }
+      .chip { font-size: 12px; font-weight: 650; fill: #0f172a; }
+      .stroke { stroke: #e2e8f0; }
+      .mutedStroke { stroke: #cbd5e1; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+      .tick { stroke: #062a30; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <clipPath id="clipTable" clipPathUnits="userSpaceOnUse">
+      <rect x="372" y="320" width="1002" height="416" rx="0" />
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1440" height="900" fill="#f6f8fb"/>
+
+  <!-- Top bar -->
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+  <rect x="1190" y="36" width="104" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1242" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Theme</text>
+  <rect x="1306" y="36" width="86" height="32" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1349" y="52" class="sans btn" text-anchor="middle" dominant-baseline="middle">Logout</text>
+
+  <!-- Sidebar -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="52" y="146" class="sans t2" font-weight="750">NAV</text>
+  <rect x="44" y="248" width="240" height="44" rx="12" fill="#e6fbff" class="stroke" stroke-width="1"/>
+  <text x="66" y="275" class="sans t3" font-weight="750">Users</text>
+  <text x="66" y="316" class="sans t3" opacity="0.7">Grants</text>
+  <text x="66" y="356" class="sans t3" opacity="0.7">Nodes</text>
+  <text x="66" y="396" class="sans t3" opacity="0.7">Endpoints</text>
+
+  <!-- Main -->
+  <rect x="320" y="100" width="1096" height="780" rx="16" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="356" y="150" class="sans t0">User details</text>
+  <text x="356" y="176" class="sans t2">User ID: <tspan class="mono">u_01HZZ…9K2M</tspan></text>
+
+  <!-- Access & quota card -->
+  <rect x="356" y="210" width="1034" height="654" rx="14" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="380" y="248" class="sans t3" font-weight="800">Access &amp; quota</text>
+  <text x="380" y="272" class="sans t2">Node quota input: MiB/GiB (default MiB). GB/MB treated as GiB/MiB. Quota applies across protocols.</text>
+
+  <!-- Action bar -->
+  <rect x="380" y="292" width="986" height="54" rx="14" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <rect x="404" y="304" width="320" height="30" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="420" y="323" class="sans t2">Filter nodes…</text>
+  <rect x="740" y="306" width="162" height="28" rx="14" fill="#ecfeff" class="stroke" stroke-width="1"/>
+  <text x="821" y="320" class="mono chip" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Selected 2 / 6</text>
+  <rect x="1160" y="304" width="92" height="32" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1206" y="320" class="sans btn" text-anchor="middle" dominant-baseline="middle">Reset</text>
+  <rect x="1260" y="304" width="106" height="32" rx="10" fill="#06b6d4"/>
+  <text x="1313" y="320" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Save changes</text>
+
+  <!-- Table -->
+  <g clip-path="url(#clipTable)">
+    <!-- header bg -->
+    <rect x="380" y="360" width="986" height="44" fill="#f1f5f9"/>
+    <!-- vertical separators -->
+    <line x1="700" y1="360" x2="700" y2="736" class="stroke" stroke-width="1"/>
+    <line x1="1033" y1="360" x2="1033" y2="736" class="stroke" stroke-width="1"/>
+    <!-- header text -->
+    <text x="404" y="387" class="sans t2" font-weight="750">Node (quota)</text>
+    <text x="866" y="387" class="sans t2" font-weight="750" text-anchor="middle">VLESS</text>
+    <text x="1199" y="387" class="sans t2" font-weight="750" text-anchor="middle">SS2022</text>
+
+    <!-- Row 1 -->
+    <rect x="380" y="404" width="986" height="110" fill="#ffffff"/>
+    <line x1="380" y1="514" x2="1366" y2="514" class="stroke" stroke-width="1"/>
+    <!-- node header -->
+    <text x="404" y="438" class="sans t3" font-weight="800">Tokyo-01</text>
+    <text x="404" y="460" class="mono t2">n_01HZ…V9C1</text>
+    <text x="404" y="488" class="sans t2">Quota:</text>
+    <text x="452" y="488" class="mono t2" fill="#0f172a">10 GiB</text>
+    <g transform="translate(642,476)" style="color:#475569">
+      <path class="ico" d="M1 11 L1 13 L3 13 L11 5 L9 3 L1 11 Z"/>
+      <path class="ico" d="M7 5 L9 7"/>
+    </g>
+
+    <!-- cell VLESS on -->
+    <rect x="720" y="420" width="296" height="78" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+    <rect x="736" y="432" width="16" height="16" rx="4" fill="#06b6d4"/>
+    <path d="M740 440 L743 443 L749 435" class="tick"/>
+    <text x="762" y="444" class="mono t2">port 443 - vless</text>
+    <text x="762" y="470" class="mono t2" fill="#94a3b8">endpoint 01ab…9c</text>
+
+    <!-- cell SS2022 on -->
+    <rect x="1053" y="420" width="296" height="78" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+    <rect x="1069" y="432" width="16" height="16" rx="4" fill="#06b6d4"/>
+    <path d="M1073 440 L1076 443 L1082 435" class="tick"/>
+    <text x="1095" y="444" class="mono t2">port 8443 - ss2022</text>
+    <text x="1095" y="470" class="mono t2" fill="#94a3b8">endpoint 7f22…1a</text>
+
+    <!-- Row 2 (editing quota) -->
+    <rect x="380" y="514" width="986" height="110" fill="#ffffff"/>
+    <line x1="380" y1="624" x2="1366" y2="624" class="stroke" stroke-width="1"/>
+    <text x="404" y="548" class="sans t3" font-weight="800">Singapore-02</text>
+    <text x="404" y="570" class="mono t2">n_01HZ…A1F0</text>
+    <text x="404" y="596" class="sans t2">Quota:</text>
+    <rect x="452" y="580" width="120" height="26" rx="10" fill="#ffffff" class="mutedStroke" stroke-width="1"/>
+    <text x="464" y="597" class="mono t2" fill="#0f172a">1.5GiB</text>
+    <rect x="578" y="580" width="56" height="26" rx="10" fill="#06b6d4"/>
+    <text x="606" y="593" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Apply</text>
+    <rect x="638" y="580" width="56" height="26" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+    <text x="666" y="593" class="sans btn" text-anchor="middle" dominant-baseline="middle">Cancel</text>
+
+    <!-- cell VLESS off -->
+    <rect x="720" y="530" width="296" height="78" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+    <rect x="736" y="542" width="16" height="16" rx="4" fill="#ffffff" class="mutedStroke" stroke-width="1"/>
+    <text x="762" y="554" class="mono t2" fill="#94a3b8">port 443 - vless</text>
+    <text x="762" y="580" class="sans t2" fill="#94a3b8">(off)</text>
+
+    <!-- cell SS2022 disabled -->
+    <rect x="1053" y="530" width="296" height="78" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1" opacity="0.85"/>
+    <rect x="1069" y="542" width="16" height="16" rx="4" fill="#e2e8f0" class="mutedStroke" stroke-width="1"/>
+    <text x="1095" y="554" class="sans t2" fill="#64748b">No endpoint</text>
+    <text x="1095" y="580" class="mono t2" fill="#94a3b8">(disabled)</text>
+
+    <!-- Row 3 (invalid input) -->
+    <rect x="380" y="624" width="986" height="112" fill="#ffffff"/>
+    <text x="404" y="658" class="sans t3" font-weight="800">Frankfurt-03</text>
+    <text x="404" y="680" class="mono t2">n_01HZ…2Q9B</text>
+    <text x="404" y="706" class="sans t2">Quota:</text>
+    <rect x="452" y="690" width="120" height="26" rx="10" fill="#ffffff" stroke="#ef4444" stroke-width="1.5"/>
+    <text x="464" y="707" class="mono t2" fill="#0f172a">abc</text>
+    <!-- error tooltip rendered via portal (always below input; no layout shift) -->
+
+    <!-- simple cells -->
+    <rect x="720" y="640" width="296" height="84" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+    <rect x="736" y="652" width="16" height="16" rx="4" fill="#06b6d4"/>
+    <path d="M740 660 L743 663 L749 655" class="tick"/>
+    <text x="762" y="664" class="mono t2">port 443 - vless</text>
+
+    <rect x="1053" y="640" width="296" height="84" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+    <rect x="1069" y="652" width="16" height="16" rx="4" fill="#06b6d4"/>
+    <path d="M1073 660 L1076 663 L1082 655" class="tick"/>
+    <text x="1095" y="664" class="mono t2">port 8443 - ss2022</text>
+  </g>
+
+  <!-- floating error tooltip (portal; always below; ensure visible by auto-scroll if near viewport bottom) -->
+  <rect x="434" y="724" width="190" height="24" rx="6" fill="#fff1f2" stroke="#fda4af" stroke-width="1"/>
+  <text x="444" y="736" class="sans t2" fill="#881337" text-anchor="start" dominant-baseline="middle">Invalid quota. Use MiB/GiB.</text>
+
+  <text x="380" y="846" class="sans t2">Tip: Node quota is edited in the row header. Enter applies; Esc or click outside cancels.</text>
+</svg>
