@@ -32,7 +32,7 @@ Base:
 - Path: `/client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations`
 - Request (minimal):
   - Body:
-    - `config.ingress[]`: first rule uses `{ hostname, path: "*", service: origin_url }`
+    - `config.ingress[]`: first rule uses `{ hostname, service: origin_url }`（不使用 `path` 字段）
     - final catch-all uses `{ service: "http_status:404" }`
 
 ### Create DNS record for public hostname

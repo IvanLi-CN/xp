@@ -189,7 +189,7 @@ xp-ops deploy \
   --node-name <name> \
   --public-domain <domain> \
   [--cloudflare | --no-cloudflare] \
-  [--account-id <id> --zone-id <id> --hostname <fqdn> --origin-url <url> --path '*'] \
+  [--account-id <id> --zone-id <id> --hostname <fqdn> --origin-url <url>] \
   [--api-base-url <https-origin>] \
   [--xray-version <semver|latest>] \
   [--enable-services | --no-enable-services] \
@@ -273,7 +273,6 @@ xp-ops cloudflare provision \
   --zone-id <id> \
   --hostname <fqdn> \
   --origin-url <url> \
-  [--path '*'] \
   [--enable | --no-enable] \
   [--dry-run]
 ```
@@ -289,10 +288,10 @@ Behavior (normative):
 - 幂等：重复执行时应复用 `settings.json` 中的 `tunnel_id`/`dns_record_id`（若存在），否则创建新的。
 - 维护 `settings.json`：MUST 写入/更新（见 `contracts/config.md`）：
   - `enabled`（与 `--enable/--no-enable` 一致）
-  - `account_id/zone_id/hostname/origin_url/path`
+  - `account_id/zone_id/hostname/origin_url`
   - `tunnel_id/dns_record_id`（用于幂等重跑）
 - 始终确保最终 ingress 为：
-  - `hostname + path="*"` → `origin_url`
+  - `hostname` → `origin_url`（不使用 `path` 字段）
   - catch-all → `http_status:404`
 - DNS：确保 `hostname` 存在 CNAME 到 `${tunnel_id}.cfargotunnel.com`，且 `proxied=true`
 - 本地文件：MUST 写入/更新（见 `contracts/config.md`）：

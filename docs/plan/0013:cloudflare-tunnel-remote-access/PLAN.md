@@ -30,7 +30,7 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
   - 初始化 `XP_DATA_DIR`、权限，并完成 `xp` 的**首次引导配置**（节点信息、token、对外访问地址）
   - 注册并启用开机自启（Arch/Debian: systemd；Alpine: OpenRC）
 - 目标服务器上的 `xp` 以普通用户身份运行；`xp` 由 `xp-ops` 安装部署；Cloudflare 集成不通过 Web 管理端配置。
-- 公网暴露范围为“全部”（Web UI + 目标服务器对外 API）：对外 hostname 的 `path="*"` 转发到 `origin_url`。
+- 公网暴露范围为“全部”（Web UI + 目标服务器对外 API）：对外 hostname 统一转发到 `origin_url`（不使用 `path` 字段）。
 
 ### Non-goals
 
@@ -264,7 +264,7 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
 - 目标服务器为 `xp-ops` 实际运行的机器：`xp-ops` 在该机器上安装部署 `xp`、`xray`，并管理其开机自启。
 - 目标发行版必须支持：Arch Linux / Arch Linux ARM / Debian / Alpine。
 - Cloudflare Tunnel 为选配：未启用时不安装/不自启动 `cloudflared`；启用时通过 Cloudflare API 创建 tunnel + ingress + DNS，并启用 `cloudflared` 自启动。
-- 只考虑“单目标服务器 + 单 hostname + path='*' + 暴露范围为全部”的情况；不考虑 Cloudflare Private Network/WARP 等私网路由。
+- 只考虑“单目标服务器 + 单 hostname + 暴露范围为全部”的情况；不考虑 Cloudflare Private Network/WARP 等私网路由。
 - `xray` 配置由 `xp-ops` 生成：`/etc/xray/config.json` 最小可用模板（不擅自开放任何入站）。
 - Cloudflare API token **允许**以严格权限落盘保存（便于重复执行）；TUI/CLI 输入后可默认保存到 `/etc/xp-ops/cloudflare_tunnel/api_token`。
 - 目标服务器 CPU 架构仅需支持：`x86_64`、`aarch64`。

@@ -30,7 +30,6 @@
   "account_id": "699d98642c564d2e855e9661899b7252",
   "zone_id": "023e105f4ecef8ad9ca31a8372d0c353",
   "hostname": "app.example.com",
-  "path": "*",
   "tunnel_id": "c1744f8b-faa1-48a4-9e5c-02ac921467fa",
   "dns_record_id": "372e67954025e0ba6aaa6d586b9e0b59"
 }
