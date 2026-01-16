@@ -109,13 +109,13 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Cloudflare Tunnel 本地配置与密钥存储 | Config | internal | New | ./contracts/config.md | ops | xp-ops、cloudflared | 需明确路径/权限/脱敏 |
-| Cloudflare REST API（tunnel/config/dns） | HTTP API | external | New | ./contracts/http-apis.md | cloudflare | ops | 账号/域名需已接入 Cloudflare |
-| 运维 CLI（`xp-ops`） | CLI | internal | New | ./contracts/cli.md | ops | 管理员 | root 运行，用于安装/初始化 |
-| `xp` 运行配置（env file） | File format | internal | New | ./contracts/file-formats.md | ops | xp-ops、xp | `/etc/xp/xp.env`（含 `XP_ADMIN_TOKEN` 等） |
-| 自启动服务文件（systemd/OpenRC） | File format | internal | New | ./contracts/file-formats.md | ops | ops | unit/service 文件落盘约定 |
+| 接口（Name）                             | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                              |
+| ---------------------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | ------------------- | ------------------------------------------ |
+| Cloudflare Tunnel 本地配置与密钥存储     | Config       | internal      | New            | ./contracts/config.md       | ops             | xp-ops、cloudflared | 需明确路径/权限/脱敏                       |
+| Cloudflare REST API（tunnel/config/dns） | HTTP API     | external      | New            | ./contracts/http-apis.md    | cloudflare      | ops                 | 账号/域名需已接入 Cloudflare               |
+| 运维 CLI（`xp-ops`）                     | CLI          | internal      | New            | ./contracts/cli.md          | ops             | 管理员              | root 运行，用于安装/初始化                 |
+| `xp` 运行配置（env file）                | File format  | internal      | New            | ./contracts/file-formats.md | ops             | xp-ops、xp          | `/etc/xp/xp.env`（含 `XP_ADMIN_TOKEN` 等） |
+| 自启动服务文件（systemd/OpenRC）         | File format  | internal      | New            | ./contracts/file-formats.md | ops             | ops                 | unit/service 文件落盘约定                  |
 
 ## 6) 约束与风险
 

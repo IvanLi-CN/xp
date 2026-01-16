@@ -20,7 +20,7 @@
   - `xp.service` → `xp:xp`
   - `xray.service` → `xray:xray`
   - `cloudflared.service` → `cloudflared:cloudflared`
-  ）
+    ）
 - `WorkingDirectory=`：
   - `xp.service` → `/var/lib/xp`
   - `xray.service` → `/var/lib/xray`
