@@ -41,6 +41,32 @@ jobs:
       - name: test
         run: cargo test
 
+      - name: xp-ops dry-run contracts (distro matrix)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: dummy
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          for distro in arch debian alpine; do
+            echo "== xp-ops dry-run: ${distro} =="
+
+            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" install --only cloudflared --dry-run
+            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" install --only xray --dry-run
+            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" init --init-system auto --dry-run
+
+            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" cloudflare provision \
+              --account-id acc \
+              --zone-id zone \
+              --hostname app.example.com \
+              --origin-url http://127.0.0.1:62416 \
+              --dry-run \
+              --no-enable
+          done
+
   docs:
     runs-on: ubuntu-latest
     steps:
