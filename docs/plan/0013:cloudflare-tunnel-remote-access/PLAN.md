@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-15
 - Last: 2026-01-16
 
@@ -301,5 +301,5 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
 
 - [x] M1: 需求口径冻结：运维 CLI 安装/部署/自启动策略（回答开放问题并冻结口径）
 - [x] M2: 冻结契约：HTTP APIs / Config / CLI / File formats（contracts 完整、可测试）
-- [ ] M3: 实现运维 CLI：安装依赖（xray/cloudflared）+ 初始化目录与权限 + 注册自启动服务（root）
-- [ ] M4: 文档与手册：三发行版安装/排障指南（含 Cloudflare API 权限与 DNS 说明）
+- [x] M3: 实现运维 CLI：安装依赖（xray/cloudflared）+ 初始化目录与权限 + 注册自启动服务（root）
+- [x] M4: 文档与手册：三发行版安装/排障指南（含 Cloudflare API 权限与 DNS 说明）

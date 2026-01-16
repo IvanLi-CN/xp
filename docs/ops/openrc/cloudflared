@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+
+name="cloudflared"
+description="cloudflared (Cloudflare Tunnel)"
+
+command="/usr/local/bin/cloudflared"
+command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_user="cloudflared:cloudflared"
+
+depend() {
+  need net
+}
+
