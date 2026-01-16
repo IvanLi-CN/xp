@@ -67,3 +67,4 @@
 | 0011 | Storybook 启动不自动打开浏览器                              | 已完成 | `0011:storybook-no-auto-open/PLAN.md`          | 2026-01-14 | 默认 `--no-open` |
 | 0012 | Grant 接入点配置：协议 × 节点二维表格                       | 已完成 | `0012:grant-access-matrix/PLAN.md`             | 2026-01-16 | PR #18           |
 | 0013 | Cloudflare Tunnel 公网访问与互联（API 自动创建 + 应用路由） | 已完成 | `0013:cloudflare-tunnel-remote-access/PLAN.md` | 2026-01-16 | -                |
+| 0014 | Grant 按节点配额编辑（GiB/MiB 智能解析）                    | 待实现 | `0014:grant-node-quota-editor/PLAN.md`         | 2026-01-16 | -                |
