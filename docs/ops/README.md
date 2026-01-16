@@ -8,6 +8,12 @@ This directory contains sample service definitions and an environment template t
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 
+## Optional: public access via Cloudflare Tunnel
+
+If you want to reach `xp` from the public Internet without opening inbound ports, see:
+
+- `docs/ops/cloudflare-tunnel.md`
+
 ## Environment variables
 
 These names and defaults are sourced from `src/config.rs`.
@@ -66,6 +72,7 @@ See:
 
 - `docs/ops/systemd/xp.service`
 - `docs/ops/systemd/xray.service`
+- (optional) `docs/ops/systemd/cloudflared.service`
 
 Recommended workflow:
 
@@ -86,6 +93,7 @@ See:
 
 - `docs/ops/openrc/xp`
 - `docs/ops/openrc/xray`
+- (optional) `docs/ops/openrc/cloudflared`
 
 Suggested workflow:
 

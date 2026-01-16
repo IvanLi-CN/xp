@@ -1,0 +1,21 @@
+[Unit]
+Description=cloudflared (Cloudflare Tunnel)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Run as a non-root user by default.
+# Create this user/group (example): useradd --system --home /var/lib/cloudflared --shell /usr/sbin/nologin --user-group cloudflared
+User=cloudflared
+Group=cloudflared
+
+# Avoid putting any API tokens on the command line.
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
+
