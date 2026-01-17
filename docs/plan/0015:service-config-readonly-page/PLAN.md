@@ -73,13 +73,13 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| AdminServiceConfig | HTTP API | internal | New | ./contracts/http-apis.md | backend | web | 新增只读配置读取接口 |
-| AdminNodes | HTTP API | internal | Modify | ./contracts/http-apis.md | backend | web | Node 字段改名 |
-| ServiceConfigPage | UI Component | internal | New | ./contracts/ui-components.md | web | app | 只读展示视图模型 |
-| XpCliConfig | CLI | internal | Modify | ./contracts/cli.md | backend | ops | 配置参数改名 |
-| PersistedState | File format | internal | Modify | ./contracts/file-formats.md | backend | ops | state/metadata 结构改名 |
+| 接口（Name）       | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）     | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）           |
+| ------------------ | ------------ | ------------- | -------------- | ---------------------------- | --------------- | ------------------- | ----------------------- |
+| AdminServiceConfig | HTTP API     | internal      | New            | ./contracts/http-apis.md     | backend         | web                 | 新增只读配置读取接口    |
+| AdminNodes         | HTTP API     | internal      | Modify         | ./contracts/http-apis.md     | backend         | web                 | Node 字段改名           |
+| ServiceConfigPage  | UI Component | internal      | New            | ./contracts/ui-components.md | web             | app                 | 只读展示视图模型        |
+| XpCliConfig        | CLI          | internal      | Modify         | ./contracts/cli.md           | backend         | ops                 | 配置参数改名            |
+| PersistedState     | File format  | internal      | Modify         | ./contracts/file-formats.md  | backend         | ops                 | state/metadata 结构改名 |
 
 ### 契约文档（按 Kind 拆分）
 
