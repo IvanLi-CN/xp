@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xp · Service Config</title>
+    <style>
+      :root {
+        --bg: #f3f4f6;
+        --bg-strong: #e5e7eb;
+        --card: #ffffff;
+        --card-muted: #f8fafc;
+        --ink: #0f172a;
+        --ink-soft: #475569;
+        --ink-faint: #94a3b8;
+        --line: #e5e7eb;
+        --primary: #00a9c7;
+        --primary-weak: rgba(0, 169, 199, 0.12);
+        --secondary: #ff6600;
+        --secondary-weak: rgba(255, 102, 0, 0.14);
+        --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        --radius-lg: 12px;
+        --radius-md: 10px;
+        --radius-sm: 8px;
+        --pad-page: 24px;
+        --mono: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft Yahei", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: var(--sans);
+        color: var(--ink);
+        background: var(--bg);
+      }
+      .frame {
+        min-height: 100vh;
+        padding: 24px 24px 48px;
+      }
+      .shell {
+        max-width: 1240px;
+        margin: 0 auto;
+        display: grid;
+        gap: 18px;
+      }
+      .topbar {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: 16px 20px;
+        display: grid;
+        grid-template-columns: 1fr 1.2fr 1fr;
+        align-items: center;
+        gap: 18px;
+        box-shadow: var(--shadow);
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-weight: 600;
+      }
+      .brand span {
+        font-size: 20px;
+      }
+      .brand small {
+        font-size: 12px;
+        color: var(--ink-faint);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .search {
+        background: var(--bg-strong);
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        padding: 10px 16px;
+        color: var(--ink-faint);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+      }
+      .badges {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-soft);
+      }
+      .badge strong {
+        font-family: var(--mono);
+        font-weight: 500;
+      }
+      .badge.ok {
+        background: var(--primary-weak);
+        color: var(--primary);
+        border-color: rgba(0, 169, 199, 0.28);
+      }
+      .badge.warn {
+        background: var(--secondary-weak);
+        color: #b45309;
+        border-color: rgba(255, 102, 0, 0.3);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        gap: 20px;
+      }
+      .nav {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        height: fit-content;
+      }
+      .nav section {
+        display: grid;
+        gap: 10px;
+      }
+      .nav h4 {
+        margin: 0;
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .nav a {
+        text-decoration: none;
+        color: var(--ink);
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+      }
+      .nav a.active {
+        background: var(--primary-weak);
+        border-color: rgba(0, 169, 199, 0.35);
+        color: var(--primary);
+        font-weight: 600;
+      }
+      .main {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: var(--pad-page);
+        box-shadow: var(--shadow);
+      }
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .title {
+        display: grid;
+        gap: 6px;
+      }
+      .title h1 {
+        margin: 0;
+        font-size: 26px;
+      }
+      .title p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 14px;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+      }
+      .btn {
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card-muted);
+        padding: 8px 16px;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      .btn.primary {
+        background: var(--primary);
+        color: #fff;
+        border-color: var(--primary);
+      }
+      .summary {
+        margin-top: 22px;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .summary .chip {
+        background: var(--card-muted);
+        border-radius: var(--radius-md);
+        padding: 14px;
+        border: 1px solid var(--line);
+        display: grid;
+        gap: 6px;
+      }
+      .chip span {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .chip strong {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .grid {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+      .card {
+        border-radius: var(--radius-md);
+        border: 1px solid var(--line);
+        background: #fff;
+        padding: 18px;
+        display: grid;
+        gap: 14px;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+      .card p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 13px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--card-muted);
+        border: 1px solid var(--line);
+      }
+      .field label {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .field .value {
+        font-family: var(--mono);
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .value span {
+        overflow-wrap: anywhere;
+      }
+      .copy {
+        font-size: 11px;
+        color: var(--primary);
+        border: 1px solid rgba(0, 169, 199, 0.25);
+        border-radius: 8px;
+        padding: 2px 6px;
+        background: #fff;
+      }
+      .footer-note {
+        margin-top: 22px;
+        font-size: 12px;
+        color: var(--ink-faint);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .topbar {
+          grid-template-columns: 1fr;
+        }
+        .badges {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="shell">
+        <header class="topbar">
+          <div class="brand">
+            <span>xp</span>
+            <small>control plane</small>
+          </div>
+          <div class="search">
+            <span>Search / command palette</span>
+            <span>Ctrl · K</span>
+          </div>
+          <div class="badges">
+            <span class="badge ok">Health <strong>OK</strong></span>
+            <span class="badge">leader <strong>node-1</strong></span>
+            <span class="badge">term <strong>42</strong></span>
+            <span class="badge warn">alerts <strong>1</strong></span>
+          </div>
+        </header>
+
+        <div class="layout">
+          <aside class="nav">
+            <section>
+              <h4>Nav</h4>
+              <a href="#">Dashboard</a>
+              <a href="#">Nodes</a>
+              <a href="#">Endpoints</a>
+              <a href="#">Users</a>
+              <a href="#">Grants</a>
+            </section>
+            <section>
+              <h4>Settings</h4>
+              <a class="active" href="#">Service config</a>
+            </section>
+          </aside>
+
+          <main class="main">
+            <div class="page-header">
+              <div class="title">
+                <h1>服务配置</h1>
+                <p>只读展示当前进程配置与订阅入口，便于部署核对与排障。</p>
+              </div>
+              <div class="actions">
+                <button class="btn">Copy JSON</button>
+                <button class="btn primary">Refresh</button>
+              </div>
+            </div>
+
+            <div class="summary">
+              <div class="chip">
+                <span>status</span>
+                <strong>Healthy · leader</strong>
+              </div>
+              <div class="chip">
+                <span>node</span>
+                <strong>node-1 (01H...)</strong>
+              </div>
+              <div class="chip">
+                <span>last refresh</span>
+                <strong>2026-01-17 10:24</strong>
+              </div>
+              <div class="chip">
+                <span>access host</span>
+                <strong>edge.example.com</strong>
+              </div>
+            </div>
+
+            <div class="grid">
+              <section class="card">
+                <div>
+                  <h3>Network</h3>
+                  <p>控制面监听与对外 API 地址。</p>
+                </div>
+                <div class="field">
+                  <label>bind</label>
+                  <div class="value"><span>127.0.0.1:62416</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>xray api addr</label>
+                  <div class="value"><span>127.0.0.1:10085</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>api base url</label>
+                  <div class="value"><span>https://127.0.0.1:62416</span><span class="copy">copy</span></div>
+                </div>
+              </section>
+
+              <section class="card">
+                <div>
+                  <h3>Node</h3>
+                  <p>用于订阅与客户端连接的对外 host。</p>
+                </div>
+                <div class="field">
+                  <label>node name</label>
+                  <div class="value"><span>node-1</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>access host</label>
+                  <div class="value"><span>edge.example.com</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>data dir</label>
+                  <div class="value"><span>./data</span><span class="copy">copy</span></div>
+                </div>
+              </section>
+
+              <section class="card">
+                <div>
+                  <h3>Quota</h3>
+                  <p>流量统计与自动解封策略。</p>
+                </div>
+                <div class="field">
+                  <label>poll interval</label>
+                  <div class="value"><span>10 sec</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>auto unban</label>
+                  <div class="value"><span>true</span><span class="copy">copy</span></div>
+                </div>
+              </section>
+
+              <section class="card">
+                <div>
+                  <h3>Security</h3>
+                  <p>仅展示可公开信息，敏感字段全量脱敏。</p>
+                </div>
+                <div class="field">
+                  <label>admin token</label>
+                  <div class="value"><span>****************</span><span class="copy">copy</span></div>
+                </div>
+                <div class="field">
+                  <label>admin token present</label>
+                  <div class="value"><span>true</span><span class="copy">copy</span></div>
+                </div>
+              </section>
+            </div>
+
+            <div class="footer-note">
+              <span>Settings / Service config</span>
+              <span>All fields are read-only · JSON export logs hidden</span>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
