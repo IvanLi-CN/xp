@@ -26,36 +26,8 @@ function isInDom(
 	return container.contains(target);
 }
 
-function ErrorPopover(props: {
-	anchorRect: DOMRect;
-	message: string;
-	id: string;
-}) {
-	const { anchorRect, message, id } = props;
-	const margin = 12;
-	const left = Math.max(margin, anchorRect.left);
-	const top = anchorRect.bottom + 8;
-	const maxWidth = Math.max(160, window.innerWidth - left - margin);
-
-	return createPortal(
-		<div
-			id={id}
-			role="alert"
-			className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-900 shadow-md"
-			style={{
-				position: "fixed",
-				left,
-				top,
-				zIndex: 1000,
-				maxWidth,
-				width: "fit-content",
-				whiteSpace: "normal",
-			}}
-		>
-			{message}
-		</div>,
-		document.body,
-	);
+function clamp(n: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, n));
 }
 
 export function NodeQuotaEditor(props: {
@@ -72,15 +44,23 @@ export function NodeQuotaEditor(props: {
 	const [isSaving, setIsSaving] = useState(false);
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const triggerRef = useRef<HTMLButtonElement | null>(null);
+	const editorRef = useRef<HTMLDialogElement | null>(null);
 	const inputRef = useRef<HTMLInputElement | null>(null);
-	const popoverId = useMemo(
-		() => `quota-error-${Math.random().toString(16).slice(2)}`,
+	const editorId = useMemo(
+		() => `quota-editor-${Math.random().toString(16).slice(2)}`,
 		[],
 	);
 
 	const display = value === "mixed" ? "Mixed" : formatQuotaBytesHuman(value);
 	const editableDefault =
 		value === "mixed" ? "" : formatQuotaBytesCompactInput(value);
+
+	const measureAnchor = useCallback(() => {
+		const trigger = triggerRef.current;
+		if (!trigger) return;
+		setAnchorRect(trigger.getBoundingClientRect());
+	}, []);
 
 	const cancel = useCallback(() => {
 		setIsEditing(false);
@@ -93,24 +73,23 @@ export function NodeQuotaEditor(props: {
 		if (!isEditing) return;
 		setDraft(editableDefault);
 		setError(null);
-		setAnchorRect(null);
-	}, [editableDefault, isEditing]);
+		measureAnchor();
+	}, [editableDefault, isEditing, measureAnchor]);
 
 	useEffect(() => {
 		if (!isEditing) return;
 
 		function onPointerDown(event: PointerEvent) {
 			const target = event.target;
-			const popover = document.getElementById(popoverId);
 			if (isInDom(target, containerRef.current)) return;
-			if (isInDom(target, popover)) return;
+			if (isInDom(target, editorRef.current)) return;
 			cancel();
 		}
 
 		document.addEventListener("pointerdown", onPointerDown, true);
 		return () =>
 			document.removeEventListener("pointerdown", onPointerDown, true);
-	}, [cancel, isEditing, popoverId]);
+	}, [cancel, isEditing]);
 
 	useLayoutEffect(() => {
 		if (!isEditing) return;
@@ -120,16 +99,15 @@ export function NodeQuotaEditor(props: {
 	}, [isEditing]);
 
 	useLayoutEffect(() => {
-		if (!isEditing || !error) return;
+		if (!isEditing) return;
 
-		const input = inputRef.current;
-		if (!input) return;
+		const trigger = triggerRef.current;
+		if (!trigger) return;
 
-		input.scrollIntoView({ block: "center", inline: "nearest" });
+		trigger.scrollIntoView({ block: "center", inline: "nearest" });
 
-		const update = () => setAnchorRect(input.getBoundingClientRect());
+		const update = () => measureAnchor();
 
-		// First measurement after scroll.
 		requestAnimationFrame(update);
 
 		window.addEventListener("scroll", update, true);
@@ -138,7 +116,7 @@ export function NodeQuotaEditor(props: {
 			window.removeEventListener("scroll", update, true);
 			window.removeEventListener("resize", update);
 		};
-	}, [error, isEditing]);
+	}, [isEditing, measureAnchor]);
 
 	async function apply() {
 		if (disabled || isSaving) return;
@@ -161,75 +139,120 @@ export function NodeQuotaEditor(props: {
 		}
 	}
 
-	return (
-		<div ref={containerRef} className="mt-2">
-			{isEditing ? (
-				<div className="flex flex-wrap items-center gap-2">
-					<div className="relative">
-						<input
-							ref={inputRef}
-							className={[
-								"input input-bordered input-xs font-mono",
-								error ? "input-error" : "",
-							]
-								.filter(Boolean)
-								.join(" ")}
-							value={draft}
-							disabled={disabled || isSaving}
-							aria-invalid={Boolean(error)}
-							aria-describedby={error ? popoverId : undefined}
-							placeholder={value === "mixed" ? "e.g. 10GiB" : undefined}
-							onChange={(event) => {
-								setDraft(event.target.value);
-								setError(null);
-							}}
-							onKeyDown={(event) => {
-								if (event.key === "Escape") {
+	const editorPopover =
+		isEditing && anchorRect
+			? createPortal(
+					(() => {
+						const margin = 12;
+						const desiredWidth = 320;
+						const left = clamp(
+							anchorRect.left,
+							margin,
+							window.innerWidth - desiredWidth - margin,
+						);
+						const top = anchorRect.bottom + 8;
+						const maxWidth = Math.max(220, window.innerWidth - left - margin);
+
+						return (
+							<dialog
+								ref={editorRef}
+								id={editorId}
+								aria-label="Edit node quota"
+								className="rounded-xl border border-base-300 bg-base-100 p-3 shadow-lg"
+								open
+								onCancel={(event) => {
 									event.preventDefault();
 									cancel();
-								}
-								if (event.key === "Enter") {
-									event.preventDefault();
-									void apply();
-								}
-							}}
-						/>
-						{error && anchorRect ? (
-							<ErrorPopover
-								anchorRect={anchorRect}
-								message={error}
-								id={popoverId}
-							/>
-						) : null}
-					</div>
-					<Button
-						size="sm"
-						loading={isSaving}
-						disabled={disabled || isSaving}
-						onClick={() => void apply()}
-					>
-						Apply
-					</Button>
-					<Button
-						size="sm"
-						variant="ghost"
-						disabled={disabled || isSaving}
-						onClick={cancel}
-					>
-						Cancel
-					</Button>
-				</div>
-			) : (
-				<button
-					type="button"
-					className="btn btn-ghost btn-xs px-2"
-					disabled={disabled}
-					onClick={() => setIsEditing(true)}
-				>
-					<span className="font-mono text-xs opacity-70">Quota: {display}</span>
-					<span className="font-mono text-[10px] opacity-50">(edit)</span>
-				</button>
-			)}
+								}}
+								onClose={() => cancel()}
+								style={{
+									position: "fixed",
+									left,
+									top,
+									zIndex: 1000,
+									width: desiredWidth,
+									maxWidth,
+								}}
+							>
+								<div className="flex items-start gap-2">
+									<div className="w-full">
+										<input
+											ref={inputRef}
+											className={[
+												"input input-bordered input-sm w-full font-mono",
+												error ? "input-error" : "",
+											]
+												.filter(Boolean)
+												.join(" ")}
+											value={draft}
+											disabled={disabled || isSaving}
+											aria-invalid={Boolean(error)}
+											placeholder={value === "mixed" ? "e.g. 10GiB" : undefined}
+											onChange={(event) => {
+												setDraft(event.target.value);
+												setError(null);
+											}}
+											onKeyDown={(event) => {
+												if (event.key === "Escape") {
+													event.preventDefault();
+													cancel();
+												}
+												if (event.key === "Enter") {
+													event.preventDefault();
+													void apply();
+												}
+											}}
+										/>
+										{error ? (
+											<div className="mt-2 text-xs text-error">{error}</div>
+										) : null}
+									</div>
+
+									<div className="flex flex-col gap-2">
+										<Button
+											size="sm"
+											loading={isSaving}
+											disabled={disabled || isSaving}
+											onClick={() => void apply()}
+										>
+											Apply
+										</Button>
+										<Button
+											size="sm"
+											variant="ghost"
+											disabled={disabled || isSaving}
+											onClick={cancel}
+										>
+											Cancel
+										</Button>
+									</div>
+								</div>
+							</dialog>
+						);
+					})(),
+					document.body,
+				)
+			: null;
+
+	return (
+		<div ref={containerRef} className="mt-2">
+			<button
+				ref={triggerRef}
+				type="button"
+				className="btn btn-ghost btn-xs px-2"
+				disabled={disabled}
+				aria-expanded={isEditing}
+				aria-controls={isEditing ? editorId : undefined}
+				onClick={() => {
+					if (disabled) return;
+					setIsEditing(true);
+					measureAnchor();
+				}}
+			>
+				<span className="font-mono text-xs opacity-70">Quota: {display}</span>
+				<span className="font-mono text-[10px] opacity-50">(edit)</span>
+			</button>
+			{editorPopover}
 		</div>
 	);
 }
