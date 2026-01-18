@@ -2,8 +2,7 @@ use crate::ops::cli::{ExitError, InstallArgs, InstallOnly};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, Distro, detect_cpu_arch, detect_distro};
 use crate::ops::util::{
-    Mode, chmod, ensure_dir, is_executable, is_test_root, tmp_path_next_to,
-    write_bytes_if_changed,
+    Mode, chmod, ensure_dir, is_executable, is_test_root, tmp_path_next_to, write_bytes_if_changed,
 };
 use anyhow::Context;
 use futures_util::StreamExt;

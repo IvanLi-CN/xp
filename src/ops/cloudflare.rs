@@ -618,7 +618,10 @@ impl CloudflareClient {
         let tunnels = parse_cloudflare_response::<Vec<TunnelResult>>(resp).await?;
         Ok(tunnels
             .into_iter()
-            .map(|t| TunnelInfo { id: t.id, name: t.name })
+            .map(|t| TunnelInfo {
+                id: t.id,
+                name: t.name,
+            })
             .collect())
     }
 }

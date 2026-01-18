@@ -79,9 +79,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     let mut plan = build_plan(&paths, &args).await?;
     let has_conflict = plan.cloudflare_enabled
-        && plan.cloudflare.as_ref().is_some_and(|cf| {
-            cf.dns_conflict.is_some() || cf.tunnel_conflict.is_some()
-        });
+        && plan
+            .cloudflare
+            .as_ref()
+            .is_some_and(|cf| cf.dns_conflict.is_some() || cf.tunnel_conflict.is_some());
     let suppress_preflight = has_conflict && (interactive || auto_yes);
 
     if !suppress_preflight {
@@ -131,13 +132,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             }
         }
 
-        if plan
-            .cloudflare
-            .as_ref()
-            .unwrap()
-            .tunnel_conflict
-            .is_some()
-        {
+        if plan.cloudflare.as_ref().unwrap().tunnel_conflict.is_some() {
             if force_overwrite {
                 let (_new_args, new_plan) =
                     force_overwrite_tunnel_conflict(&paths, args, plan, mode == Mode::DryRun)
@@ -493,8 +488,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             token.as_ref(),
             !tunnel_name.trim().is_empty() && !account_id.trim().is_empty(),
         ) {
-            match cloudflare::find_tunnel_by_name(&api_base, token, &account_id, &tunnel_name)
-                .await
+            match cloudflare::find_tunnel_by_name(&api_base, token, &account_id, &tunnel_name).await
             {
                 Ok(v) => v,
                 Err(e) => {
@@ -772,8 +766,17 @@ async fn resolve_tunnel_conflict(
             return Ok((args, plan));
         };
 
-        eprintln!("{}", warn("tunnel name already exists; choose how to proceed"));
-        eprintln!("{}", warn(&format!("current tunnel: {} ({})", conflict.name, conflict.id)));
+        eprintln!(
+            "{}",
+            warn("tunnel name already exists; choose how to proceed")
+        );
+        eprintln!(
+            "{}",
+            warn(&format!(
+                "current tunnel: {} ({})",
+                conflict.name, conflict.id
+            ))
+        );
 
         let options = vec![
             "overwrite existing tunnel".to_string(),
@@ -1269,7 +1272,9 @@ fn confirm_overwrite_tunnel(tunnel: &TunnelInfo) -> Result<bool, ExitError> {
 }
 
 fn tunnel_credentials_path(paths: &Paths, tunnel_id: &str) -> PathBuf {
-    paths.etc_cloudflared_dir().join(format!("{tunnel_id}.json"))
+    paths
+        .etc_cloudflared_dir()
+        .join(format!("{tunnel_id}.json"))
 }
 
 fn select_menu(options: &[String]) -> Result<usize, ExitError> {

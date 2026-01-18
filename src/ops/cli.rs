@@ -1,9 +1,9 @@
+use crate::ops::admin_token;
 use crate::ops::cloudflare;
 use crate::ops::deploy;
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
-use crate::ops::admin_token;
 use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::xp;

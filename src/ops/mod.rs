@@ -1,7 +1,7 @@
 pub mod cli;
 
-mod cloudflare;
 mod admin_token;
+mod cloudflare;
 mod deploy;
 mod init;
 mod install;
