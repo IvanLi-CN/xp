@@ -189,10 +189,15 @@ xp-ops deploy \
   --node-name <name> \
   --public-domain <domain> \
   [--cloudflare | --no-cloudflare] \
-  [--account-id <id> --zone-id <id> --hostname <fqdn> --origin-url <url>] \
+  [--account-id <id> --zone-id <id>] \
+  [--hostname <fqdn>] \
+  [--tunnel-name <name>] \
+  [--origin-url <url>] \
   [--api-base-url <https-origin>] \
   [--xray-version <semver|latest>] \
   [--enable-services | --no-enable-services] \
+  [-y] \
+  [--non-interactive] \
   [--dry-run]
 ```
 
@@ -202,16 +207,39 @@ Behavior (normative):
   - 必须安装依赖并初始化目录/权限。
   - 必须安装 `xp` 并启用 `xp`、`xray` 自启动服务。
   - Cloudflare Tunnel 默认启用：
-    - 若缺少 `account_id/zone_id/hostname/origin_url` 或 token，必须失败并给出下一步提示（例如改用 `--no-cloudflare` 或先设置 token/参数）；不得静默跳过。
+    - 若缺少 `account_id` 或 token，必须失败并给出下一步提示（例如改用 `--no-cloudflare` 或先设置 token/参数）；不得静默跳过。
+    - 若未提供 `zone-id`，必须通过 hostname 或 public-domain 反查 zone-id；无法确定时必须失败并提示显式提供 `--zone-id` 或 `--hostname`。
+- preflight 解析与展示（每次 deploy 必须执行）：
+  - 先完成可预读取的配置解析（含 Cloudflare zone/hostname 预检查），输出完整配置清单。
+  - 自动推导/生成的值必须 **加粗** 标识；警告信息黄色提示；错误信息红色提示。
+  - 若存在错误项必须失败退出（不进入安装/写入/启用阶段）。
+- hostname 推导与校验（仅 `--cloudflare`）：
+  - 若未显式提供 `--hostname`，必须通过 `zone-id` 查询 zone domain，并将 `node-name` 规范化为合法 DNS label 后生成 `<label>.<zone>`。
+  - 若 `node-name` 被规范化（包含非法字符或前后 `-`），必须提示 warning。
+  - `hostname` 必须为合法 DNS 名称；若不在当前 zone 下需提示 warning（允许继续）。
+- zone-id 反查（仅 `--cloudflare` 且未提供 `--zone-id`）：
+  - 必须使用 hostname 生成候选域名，并从 Cloudflare API 查询匹配的 zone-id。
+  - 若出现多个匹配，必须失败并要求显式提供 `--zone-id`。
+- tunnel 命名：
+  - 若未提供 `--tunnel-name`，默认使用 `xp-<node-name>`（用于避免 Cloudflare account 内同名冲突）。
+- origin-url 默认值：
+  - 若未提供 `--origin-url`，默认使用 `http://127.0.0.1:62416`（对应 `xp` 本机 bind）。
 - `xp` 引导（bootstrap）：
   - 若 `--cloudflare`：`api_base_url` MUST 推导为 `https://<hostname>`（默认 443；不得携带自定义端口），并调用 `xp-ops xp bootstrap`。
   - 若 `--no-cloudflare`：必须显式提供 `--api-base-url <https-origin>`，并调用 `xp-ops xp bootstrap`。
 - `--no-cloudflare`：跳过 Cloudflare API provisioning 与 `cloudflared` 服务启用。
+- 交互与确认：
+  - 默认交互（TTY）：发现 DNS 冲突时必须提示冲突原因并提供选项：输入新 hostname、输入新 node-name（仅当未显式提供 hostname）、自动生成 hostname（nanoid 4 位小写字母）、覆盖现有 DNS 记录（仅限 A/AAAA/CNAME，需二次确认）、或取消部署。
+  - 默认交互（TTY）：发现 tunnel 名称冲突时必须提示冲突原因并提供选项：覆盖/复用现有 tunnel、输入新 tunnel 名称、自动生成新 tunnel 名称、或取消部署。
+  - `-y`：跳过确认并自动同意；若存在 DNS 冲突，必须自动生成新 hostname（nanoid 4 位小写字母）并继续。
+  - `-y`：若存在 tunnel 名称冲突，必须自动生成新 tunnel 名称并继续。
+  - `--non-interactive`：严格无交互；若存在 DNS 冲突必须失败退出，并提示“使用 `-y` 自动处理或在交互环境中运行”。
+  - `--non-interactive`：若存在 tunnel 名称冲突必须失败退出，并提示“使用 `-y` 自动处理或在交互环境中运行”。
 - 依赖安装来源：与 `xp-ops install` 保持一致（同一套 actions）：
   - `xray`：固定为官方 GitHub Releases 下载；`--xray-version` 用于 pin 版本
   - `cloudflared`：按发行版固定来源（Arch pacman / Debian Cloudflare APT / Alpine GitHub Releases）
 - 幂等：重复执行应复用既有 `settings.json`（tunnel_id/dns_record_id）并确保最终状态一致。
-- `--dry-run`：不调用 Cloudflare API、不落盘、不启用服务；仅打印将要执行的步骤清单与关键命令（用于自动化测试与预演）。
+- `--dry-run`：仅做 preflight 与步骤清单输出；允许进行只读的 Cloudflare API 查询（zone/hostname 校验），但不得写入/变更任何远端或本地状态，也不启用服务。
 
 Exit codes:
 
@@ -269,6 +297,7 @@ Usage:
 
 ```bash
 xp-ops cloudflare provision \
+  [--tunnel-name <name>] \
   --account-id <id> \
   --zone-id <id> \
   --hostname <fqdn> \
@@ -290,6 +319,7 @@ Behavior (normative):
   - `enabled`（与 `--enable/--no-enable` 一致）
   - `account_id/zone_id/hostname/origin_url`
   - `tunnel_id/dns_record_id`（用于幂等重跑）
+- `--tunnel-name`：用于指定 Cloudflare Tunnel 的名称；若未提供，默认使用 `xp`。
 - 始终确保最终 ingress 为：
   - `hostname` → `origin_url`（不使用 `path` 字段）
   - catch-all → `http_status:404`
@@ -327,23 +357,32 @@ Usage:
 xp-ops tui
 ```
 
+Behavior (normative):
+
+- 不带子命令运行时，默认等价于 `xp-ops tui`。
+
 Screens (v1):
 
 - Overview：显示当前环境探测（OS、init system）、依赖程序状态、工作目录/权限状态
 - Deploy（recommended）：一键部署向导（收集必要参数并串联 install/init/xp install/cloudflare provision）
+- Save config（new）：仅保存当前配置，不执行部署（写入 `/etc/xp-ops/deploy/settings.json`）
 - Install：选择并执行依赖安装（cloudflared/xray）
 - Init：初始化目录与权限（user/group、init system auto）
 - XP：安装/更新 `xp` 可执行文件（从本地路径选择/粘贴路径；实现阶段定案交互形态）
 - Cloudflare：输入 `account_id/zone_id/hostname/origin_url`，并执行 provision
+  - `zone-id` 可选：若留空则尝试通过 hostname/public-domain 反查
   - Token input：读取 `/etc/xp-ops/cloudflare_tunnel/api_token` 或 `CLOUDFLARE_API_TOKEN`，或在 TUI 内手工粘贴（mask）；**默认保存**到 `/etc/xp-ops/cloudflare_tunnel/api_token`（root-only），并允许在界面上显式关闭“保存 token”。
 - Services：启用/禁用并启动/停止 systemd/OpenRC 服务（xp/cloudflared/xray）
 - Logs (optional)：展示关键日志摘要（脱敏）
 
 Keybindings (v1, normative):
 
-- `q` / `Esc`: quit（若存在未应用变更，需要二次确认）
+- `q` / `Esc`: quit（仅在非编辑模式；若存在未应用变更，需要二次确认）
 - `Tab` / `Shift+Tab`: focus switch
-- `Enter`: confirm / run action
+- `Enter`: enter/exit edit mode or toggle booleans
+- `s`: save config（保持在界面内）
+- `S`: save config + exit
+- `d` / `D`: deploy
 - `↑↓`/`jk`: navigate list
 
 Errors:

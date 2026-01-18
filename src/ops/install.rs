@@ -2,11 +2,12 @@ use crate::ops::cli::{ExitError, InstallArgs, InstallOnly};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, Distro, detect_cpu_arch, detect_distro};
 use crate::ops::util::{
-    Mode, chmod, ensure_dir, is_executable, is_test_root, write_bytes_if_changed,
+    Mode, chmod, ensure_dir, is_executable, is_test_root, tmp_path_next_to, write_bytes_if_changed,
 };
 use anyhow::Context;
+use futures_util::StreamExt;
 use std::fs;
-use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -160,14 +161,11 @@ async fn install_xray(
         .await
         .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
 
-    let xray_bytes = extract_xray_binary_from_zip(&zip_path)
-        .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
-
     let dest = paths.usr_local_bin_xray();
     if let Some(parent) = dest.parent() {
         ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
     }
-    write_bytes_if_changed(&dest, &xray_bytes)
+    extract_xray_binary_from_zip_to_path(&zip_path, &dest)
         .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
     chmod(&dest, 0o755).ok();
 
@@ -258,11 +256,18 @@ async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
         .build()
         .context("build http client")?;
     let resp = client.get(url).send().await?.error_for_status()?;
-    let bytes = resp.bytes().await?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(dest, &bytes)?;
+    let tmp = tmp_path_next_to(dest);
+    let mut file = fs::File::create(&tmp)?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let buf = chunk?;
+        file.write_all(&buf)?;
+    }
+    file.flush()?;
+    fs::rename(&tmp, dest)?;
     Ok(())
 }
 
@@ -302,7 +307,7 @@ async fn fetch_github_release(
     Ok(resp.json::<GitHubRelease>().await?)
 }
 
-fn extract_xray_binary_from_zip(zip_path: &Path) -> anyhow::Result<Vec<u8>> {
+fn extract_xray_binary_from_zip_to_path(zip_path: &Path, dest: &Path) -> anyhow::Result<()> {
     let f = fs::File::open(zip_path)?;
     let mut archive = zip::ZipArchive::new(f)?;
 
@@ -313,9 +318,15 @@ fn extract_xray_binary_from_zip(zip_path: &Path) -> anyhow::Result<Vec<u8>> {
         }
         let name = file.name().replace('\\', "/");
         if name.ends_with("/xray") || name == "xray" {
-            let mut buf = Vec::with_capacity(file.size() as usize);
-            file.read_to_end(&mut buf)?;
-            return Ok(buf);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let tmp = tmp_path_next_to(dest);
+            let mut out = fs::File::create(&tmp)?;
+            std::io::copy(&mut file, &mut out)?;
+            out.flush()?;
+            fs::rename(&tmp, dest)?;
+            return Ok(());
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::ops::admin_token;
 use crate::ops::cloudflare;
 use crate::ops::deploy;
 use crate::ops::init;
@@ -17,7 +18,7 @@ pub struct Cli {
     pub root: PathBuf,
 
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -29,6 +30,9 @@ pub enum Command {
     Xp(XpCommand),
 
     Deploy(DeployArgs),
+
+    #[command(subcommand)]
+    AdminToken(AdminTokenCommand),
 
     #[command(subcommand)]
     Cloudflare(CloudflareCommand),
@@ -90,6 +94,17 @@ pub enum XpCommand {
     Bootstrap(XpBootstrapArgs),
 }
 
+#[derive(Subcommand, Debug)]
+pub enum AdminTokenCommand {
+    Show(AdminTokenShowArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AdminTokenShowArgs {
+    #[arg(long)]
+    pub redacted: bool,
+}
+
 #[derive(Args, Debug, Clone)]
 pub struct XpInstallArgs {
     #[arg(long, value_name = "PATH")]
@@ -143,6 +158,9 @@ pub struct DeployArgs {
     #[arg(long, value_name = "FQDN")]
     pub hostname: Option<String>,
 
+    #[arg(long, value_name = "NAME")]
+    pub tunnel_name: Option<String>,
+
     #[arg(long, value_name = "URL")]
     pub origin_url: Option<String>,
 
@@ -154,6 +172,15 @@ pub struct DeployArgs {
 
     #[command(flatten)]
     pub enable_services_toggle: EnableServicesToggle,
+
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+
+    #[arg(long)]
+    pub overwrite_existing: bool,
+
+    #[arg(long, alias = "no-prompt")]
+    pub non_interactive: bool,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -220,6 +247,9 @@ pub struct CloudflareTokenSetArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct CloudflareProvisionArgs {
+    #[arg(long, value_name = "NAME")]
+    pub tunnel_name: Option<String>,
+
     #[arg(long, value_name = "ID")]
     pub account_id: String,
 
@@ -231,6 +261,12 @@ pub struct CloudflareProvisionArgs {
 
     #[arg(long, value_name = "URL")]
     pub origin_url: String,
+
+    #[arg(long, hide = true, value_name = "ID")]
+    pub dns_record_id_override: Option<String>,
+
+    #[arg(long, hide = true, value_name = "ID")]
+    pub tunnel_id_override: Option<String>,
 
     #[arg(long, conflicts_with = "no_enable")]
     pub enable: bool,
@@ -277,14 +313,17 @@ pub async fn run() -> i32 {
     let paths = Paths::new(cli.root);
 
     let res: Result<(), ExitError> = match cli.command {
-        Command::Install(args) => install::cmd_install(paths, args).await,
-        Command::Init(args) => init::cmd_init(paths, args).await,
-        Command::Xp(cmd) => match cmd {
+        Some(Command::Install(args)) => install::cmd_install(paths, args).await,
+        Some(Command::Init(args)) => init::cmd_init(paths, args).await,
+        Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
         },
-        Command::Deploy(args) => deploy::cmd_deploy(paths, args).await,
-        Command::Cloudflare(cmd) => match cmd {
+        Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
+        Some(Command::AdminToken(cmd)) => match cmd {
+            AdminTokenCommand::Show(args) => admin_token::cmd_admin_token_show(paths, args).await,
+        },
+        Some(Command::Cloudflare(cmd)) => match cmd {
             CloudflareCommand::Token(token) => match token.command {
                 CloudflareTokenCommand::Set(args) => {
                     cloudflare::cmd_cloudflare_token_set(paths, args).await
@@ -294,8 +333,9 @@ pub async fn run() -> i32 {
                 cloudflare::cmd_cloudflare_provision(paths, args).await
             }
         },
-        Command::Status(args) => status::cmd_status(paths, args).await,
-        Command::Tui(_args) => tui::cmd_tui(paths).await,
+        Some(Command::Status(args)) => status::cmd_status(paths, args).await,
+        Some(Command::Tui(_args)) => tui::cmd_tui(paths).await,
+        None => tui::cmd_tui(paths).await,
     };
 
     match res {

@@ -44,11 +44,28 @@ sudo -E xp-ops cloudflare token set --from-env CLOUDFLARE_API_TOKEN
 
 ```
 sudo xp-ops cloudflare provision \
+  --tunnel-name xp-node-1 \
   --account-id <id> \
   --zone-id <id> \
   --hostname app.example.com \
   --origin-url http://127.0.0.1:62416
 ```
+
+If you are using the recommended one-shot deploy flow, `xp-ops deploy` can infer missing values:
+
+```
+sudo -E xp-ops deploy \
+  --xp-bin /path/to/xp \
+  --node-name node-1 \
+  --public-domain node-1.example.net \
+  --account-id <id> \
+  --hostname node-1.example.com \
+  -y
+```
+
+- `--zone-id` is optional for `deploy`: it will be resolved from `hostname` (or `public-domain` if hostname is not provided).
+- `--hostname` is optional for `deploy` if `zone-id` is provided; the hostname will be derived as `<node-name>.<zone>`.
+- `-y` enables interactive preflight confirmation and hostname conflict resolution.
 
 3. Verify services:
 

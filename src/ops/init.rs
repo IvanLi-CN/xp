@@ -259,11 +259,11 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
 }
 
 fn openrc_xp_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xp\"\ndescription=\"xp (Xray control plane)\"\n\ncommand=\"/usr/local/bin/xp\"\ncommand_args=\"run\"\ncommand_user=\"xp:xp\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"xp\"\ndescription=\"xp (Xray control plane)\"\n\ncommand=\"/bin/sh\"\ncommand_args=\"-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'\"\ncommand_user=\"xp:xp\"\ncommand_background=\"yes\"\npidfile=\"/run/xp.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 fn openrc_xray_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\ncommand_background=\"yes\"\npidfile=\"/run/xray.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {

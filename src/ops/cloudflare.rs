@@ -5,6 +5,7 @@ use crate::ops::platform::{Distro, InitSystem, detect_distro, detect_init_system
 use crate::ops::util::{
     Mode, chmod, ensure_dir, is_executable, is_test_root, write_string_if_changed,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Read};
@@ -60,6 +61,7 @@ pub async fn cmd_cloudflare_provision(
     let token = load_cloudflare_token(&paths).map_err(|e| ExitError::new(3, e))?;
 
     ensure_cloudflared_present(&paths, distro, mode).await?;
+    ensure_cloudflared_service(&paths, distro, init_system, mode)?;
 
     if mode == Mode::DryRun {
         eprintln!("would call Cloudflare API (token redacted)");
@@ -90,12 +92,24 @@ pub async fn cmd_cloudflare_provision(
     settings.zone_id = args.zone_id.clone();
     settings.hostname = args.hostname.clone();
     settings.origin_url = args.origin_url.clone();
+    if let Some(id) = args.dns_record_id_override.clone() {
+        settings.dns_record_id = Some(id);
+    }
+    if let Some(id) = args.tunnel_id_override.clone() {
+        settings.tunnel_id = Some(id);
+    }
+
+    let tunnel_name = args
+        .tunnel_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "xp".to_string());
 
     let (tunnel_id, created_new) = if let Some(id) = settings.tunnel_id.clone() {
         (id, false)
     } else {
         let created = client
-            .create_tunnel(&args.account_id, "xp")
+            .create_tunnel(&args.account_id, &tunnel_name)
             .await
             .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
         let tunnel_id = created.id.clone();
@@ -127,6 +141,7 @@ pub async fn cmd_cloudflare_provision(
         ));
     }
     write_cloudflared_config(&paths, &tunnel_id, &cred_path_abs)?;
+    ensure_cloudflared_file_ownership(&paths, &tunnel_id, mode)?;
 
     client
         .put_tunnel_config(
@@ -157,7 +172,6 @@ pub async fn cmd_cloudflare_provision(
     settings.dns_record_id = Some(dns_record_id);
     save_settings(&paths, &settings)?;
 
-    ensure_cloudflared_service(&paths, distro, init_system, mode)?;
     if args.enabled() {
         enable_cloudflared_service(init_system, mode, &paths)?;
     }
@@ -346,6 +360,34 @@ fn write_cloudflared_config(
     Ok(())
 }
 
+fn ensure_cloudflared_file_ownership(
+    paths: &Paths,
+    tunnel_id: &str,
+    mode: Mode,
+) -> Result<(), ExitError> {
+    if mode == Mode::DryRun || is_test_root(paths.root()) {
+        return Ok(());
+    }
+    let config = paths.etc_cloudflared_config();
+    let cred = paths
+        .etc_cloudflared_dir()
+        .join(format!("{tunnel_id}.json"));
+    for p in [config, cred] {
+        let path = p.display().to_string();
+        let status = Command::new("chown")
+            .args(["cloudflared:cloudflared", path.as_str()])
+            .status()
+            .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
+        if !status.success() {
+            return Err(ExitError::new(
+                6,
+                format!("filesystem_error: chown {}", p.display()),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn systemd_cloudflared_unit() -> String {
     "[Unit]\n\
 Description=cloudflared (Cloudflare Tunnel)\n\
@@ -366,7 +408,7 @@ WantedBy=multi-user.target\n"
 }
 
 fn openrc_cloudflared_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\ncommand_background=\"yes\"\npidfile=\"/run/cloudflared.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -436,12 +478,8 @@ impl CloudflareClient {
             .bearer_auth(&self.token)
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
-        let api = resp
-            .json::<CloudflareResponse<CreateTunnelResult>>()
             .await?;
-        api.into_result()
+        parse_cloudflare_response::<CreateTunnelResult>(resp).await
     }
 
     async fn put_tunnel_config(
@@ -469,10 +507,9 @@ impl CloudflareClient {
             .bearer_auth(&self.token)
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
-        let api = resp.json::<CloudflareResponse<serde_json::Value>>().await?;
-        api.into_result().map(|_| ())
+            .await?;
+        let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
+        Ok(())
     }
 
     async fn create_dns_record(
@@ -498,10 +535,8 @@ impl CloudflareClient {
             .bearer_auth(&self.token)
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
-        let api = resp.json::<CloudflareResponse<DnsRecordResult>>().await?;
-        Ok(api.into_result()?.id)
+            .await?;
+        Ok(parse_cloudflare_response::<DnsRecordResult>(resp).await?.id)
     }
 
     async fn patch_dns_record(
@@ -528,10 +563,66 @@ impl CloudflareClient {
             .bearer_auth(&self.token)
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
-        let api = resp.json::<CloudflareResponse<serde_json::Value>>().await?;
-        api.into_result().map(|_| ())
+            .await?;
+        let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
+        Ok(())
+    }
+
+    async fn get_zone(&self, zone_id: &str) -> anyhow::Result<ZoneResult> {
+        let url = format!(
+            "{}/client/v4/zones/{zone_id}",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self.client.get(url).bearer_auth(&self.token).send().await?;
+        parse_cloudflare_response::<ZoneResult>(resp).await
+    }
+
+    async fn list_dns_records(
+        &self,
+        zone_id: &str,
+        hostname: &str,
+    ) -> anyhow::Result<Vec<DnsRecordInfo>> {
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/client/v4/zones/{zone_id}/dns_records",
+            self.base.trim_end_matches('/')
+        ))?;
+        url.query_pairs_mut().append_pair("name", hostname);
+        let resp = self.client.get(url).bearer_auth(&self.token).send().await?;
+        parse_cloudflare_response::<Vec<DnsRecordInfo>>(resp).await
+    }
+
+    async fn list_zones_by_name(&self, name: &str) -> anyhow::Result<Vec<ZoneLookup>> {
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/client/v4/zones",
+            self.base.trim_end_matches('/')
+        ))?;
+        url.query_pairs_mut().append_pair("name", name);
+        let resp = self.client.get(url).bearer_auth(&self.token).send().await?;
+        let zones = parse_cloudflare_response::<Vec<ZoneListResult>>(resp).await?;
+        Ok(zones
+            .into_iter()
+            .map(|z| ZoneLookup {
+                id: z.id,
+                name: z.name,
+                account_id: z.account.id,
+            })
+            .collect())
+    }
+
+    async fn list_tunnels(&self, account_id: &str) -> anyhow::Result<Vec<TunnelInfo>> {
+        let url = format!(
+            "{}/client/v4/accounts/{account_id}/cfd_tunnel",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self.client.get(url).bearer_auth(&self.token).send().await?;
+        let tunnels = parse_cloudflare_response::<Vec<TunnelResult>>(resp).await?;
+        Ok(tunnels
+            .into_iter()
+            .map(|t| TunnelInfo {
+                id: t.id,
+                name: t.name,
+            })
+            .collect())
     }
 }
 
@@ -549,21 +640,12 @@ struct CloudflareApiError {
 }
 
 impl<T> CloudflareResponse<T> {
-    fn into_result(self) -> anyhow::Result<T> {
+    fn into_result(self, status: reqwest::StatusCode) -> anyhow::Result<T> {
         if self.success {
             return self.result.ok_or_else(|| anyhow::anyhow!("missing result"));
         }
-        let mut msgs = Vec::new();
-        for e in self.errors {
-            let msg = match (e.code, e.message) {
-                (Some(c), Some(m)) => format!("{c}:{m}"),
-                (Some(c), None) => format!("{c}"),
-                (None, Some(m)) => m,
-                (None, None) => "unknown".to_string(),
-            };
-            msgs.push(msg);
-        }
-        anyhow::bail!("cloudflare error: {}", msgs.join(", "))
+        let msg = format_cloudflare_errors(self.errors);
+        anyhow::bail!("cloudflare error (status {status}): {msg}")
     }
 }
 
@@ -576,4 +658,151 @@ struct CreateTunnelResult {
 #[derive(Debug, Deserialize)]
 struct DnsRecordResult {
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneAccount {
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneResult {
+    name: String,
+    account: ZoneAccount,
+}
+
+#[derive(Debug, Deserialize)]
+struct TunnelResult {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneListResult {
+    id: String,
+    name: String,
+    account: ZoneAccount,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DnsRecordInfo {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub record_type: String,
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ZoneInfo {
+    pub name: String,
+    pub account_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TunnelInfo {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ZoneLookup {
+    pub id: String,
+    pub name: String,
+    pub account_id: Option<String>,
+}
+
+fn format_cloudflare_errors(errors: Vec<CloudflareApiError>) -> String {
+    if errors.is_empty() {
+        return "unknown".to_string();
+    }
+    let mut msgs = Vec::new();
+    for e in errors {
+        let msg = match (e.code, e.message) {
+            (Some(81053), Some(m)) => format!(
+                "81053:{m} (hint: a record with this hostname already exists; delete the existing A/AAAA/CNAME or choose a different hostname)"
+            ),
+            (Some(c), Some(m)) => format!("{c}:{m}"),
+            (Some(c), None) => format!("{c}"),
+            (None, Some(m)) => m,
+            (None, None) => "unknown".to_string(),
+        };
+        msgs.push(msg);
+    }
+    msgs.join(", ")
+}
+
+async fn parse_cloudflare_response<T: DeserializeOwned>(
+    resp: reqwest::Response,
+) -> anyhow::Result<T> {
+    let status = resp.status();
+    let text = resp.text().await?;
+    let api: CloudflareResponse<T> = serde_json::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("cloudflare invalid json (status {status}): {e}"))?;
+    api.into_result(status)
+}
+
+pub fn cloudflare_api_base() -> String {
+    std::env::var("CLOUDFLARE_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.cloudflare.com".to_string())
+}
+
+pub fn load_cloudflare_token_for_ops(paths: &Paths) -> Result<String, ExitError> {
+    load_cloudflare_token(paths).map_err(|e| ExitError::new(3, e))
+}
+
+pub async fn fetch_zone_info(
+    api_base: &str,
+    token: &str,
+    zone_id: &str,
+) -> Result<ZoneInfo, ExitError> {
+    let client = CloudflareClient::new(api_base.to_string(), token.to_string());
+    let zone = client
+        .get_zone(zone_id)
+        .await
+        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+    Ok(ZoneInfo {
+        name: zone.name,
+        account_id: zone.account.id,
+    })
+}
+
+pub async fn find_dns_record(
+    api_base: &str,
+    token: &str,
+    zone_id: &str,
+    hostname: &str,
+) -> Result<Option<DnsRecordInfo>, ExitError> {
+    let client = CloudflareClient::new(api_base.to_string(), token.to_string());
+    let records = client
+        .list_dns_records(zone_id, hostname)
+        .await
+        .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
+    Ok(records.into_iter().next())
+}
+
+pub async fn find_zone_by_name(
+    api_base: &str,
+    token: &str,
+    name: &str,
+) -> Result<Vec<ZoneLookup>, ExitError> {
+    let client = CloudflareClient::new(api_base.to_string(), token.to_string());
+    client
+        .list_zones_by_name(name)
+        .await
+        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))
+}
+
+pub async fn find_tunnel_by_name(
+    api_base: &str,
+    token: &str,
+    account_id: &str,
+    name: &str,
+) -> Result<Option<TunnelInfo>, ExitError> {
+    let client = CloudflareClient::new(api_base.to_string(), token.to_string());
+    let tunnels = client
+        .list_tunnels(account_id)
+        .await
+        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+    Ok(tunnels.into_iter().find(|t| t.name == name))
 }

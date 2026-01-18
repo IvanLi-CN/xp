@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-01-15
-- Last: 2026-01-16
+- Last: 2026-01-17
 
 ## 1) 问题陈述
 
@@ -71,6 +71,10 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
 - 运维 CLI 同时支持“无交互（non-interactive）”模式：
   - 所有关键操作都必须有等价的子命令（见 `contracts/cli.md`），可在 CI/脚本中直接调用
   - 无交互模式下不得弹出任何提示；需要分支行为必须以显式 flag 表达（例如 `--disallow-additional-repos`、`--enable/--no-enable`、`--dry-run`）
+- 运维 CLI 必须处理 tunnel 名称冲突：
+  - 交互模式提供覆盖/复用、指定新名称、自动生成新名称、取消部署等选项
+  - `-y` 自动生成新名称继续
+  - `--non-interactive` 遇冲突必须失败并提示改用 `-y` 或交互模式
 - 启用流程（对齐 Cloudflare Dashboard 的“已发布应用程序路由”）：
   - 通过 API 创建 tunnel（得到 `tunnel_id` 与 `credentials_file`/`token`）
   - 通过 API 配置 ingress（hostname → origin service）
@@ -168,6 +172,35 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
   And `XP_DATA_DIR/cluster/metadata.json` 中的 `api_base_url` 必须为 `https://<hostname>`（默认 443；不得携带自定义端口），
   And `XP_DATA_DIR/cluster/metadata.json` 中的 `node_name/public_domain` 与输入一致。
 
+- Given 启用 Cloudflare 且未提供 `hostname`，
+  When 运行 `xp-ops deploy`，
+  Then 运维 CLI 必须通过 `zone-id` 解析出 zone domain，并基于 `node-name` 生成合法的 `hostname`（自动规范化非法字符）。
+
+- Given 启用 Cloudflare 且未提供 `zone-id`，
+  When 运行 `xp-ops deploy`，
+  Then 运维 CLI 必须基于 hostname 反查出 zone-id；
+  And 若出现多个匹配必须失败并要求显式提供 `zone-id`。
+
+- Given 启用 Cloudflare 且未显式指定 tunnel 名称，
+  When 运行 `xp-ops deploy`，
+  Then tunnel 名称默认使用 `xp-<node-name>`，以支持多套部署并避免同名冲突。
+
+- Given 运行 `xp-ops deploy`（TTY 交互环境），
+  When 运维 CLI 完成可预读取的配置解析（含 Cloudflare zone/hostname 预检查），
+  Then 必须展示完整预览清单并要求用户确认后才继续执行。
+
+- Given 运行 `xp-ops deploy -y`，
+  When 运维 CLI 完成可预读取的配置解析，
+  Then 跳过确认并直接继续执行；若出现 DNS 冲突，必须自动生成新 hostname（nanoid 4 位小写字母）后继续。
+
+- Given 运行 `xp-ops deploy --non-interactive`，
+  When 发生 DNS 冲突，
+  Then 必须失败退出并提示使用 `-y` 自动处理或在交互环境中运行。
+
+- Given 管理员使用 TUI，
+  When 选择“保存配置”而不执行部署，
+  Then 运维程序必须仅写入 `/etc/xp-ops/deploy/settings.json`，并在下次打开 TUI 时自动回填配置。
+
 - Given 已完成 provision 且服务已启用，
   When 重启机器，
   Then `xp` 与 `xray` 自动启动并保持运行（可通过 `xp-ops status` 验证），
@@ -188,6 +221,16 @@ Cloudflare Tunnel 的创建、路由与 DNS 配置**全部由单独的运维 CLI
 - Given 未提供 Cloudflare API token，
   When 运行 provision 命令，
   Then 运维 CLI 失败并给出可理解错误（不泄露敏感信息）。
+
+- Given 目标 `hostname` 已存在 A/AAAA/CNAME 记录，
+  When 运行 `xp-ops deploy`（交互环境，未指定 `-y`），
+  Then 运维 CLI 必须提示冲突原因，并提供选项：输入新 hostname、输入新 node-name（仅当未显式提供 hostname）、自动生成（nanoid 4 位小写字母）、覆盖现有 DNS 记录（需二次确认）、或取消部署。
+
+- Given 目标 tunnel 名称已在 Cloudflare account 内存在，
+  When 运行 `xp-ops deploy`（交互环境，未指定 `-y`），
+  Then 运维 CLI 必须提示冲突原因，并提供选项：覆盖/复用现有 tunnel、指定新 tunnel 名称、自动生成新 tunnel 名称、或取消部署；
+  And `-y` 必须自动生成新 tunnel 名称继续；
+  And `--non-interactive` 必须失败退出并提示改用 `-y` 或交互模式。
 
 - Given 系统内存在包管理器但仓库中无对应包，
   When 运维 CLI 尝试安装依赖，
