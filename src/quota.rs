@@ -62,12 +62,24 @@ pub fn spawn_quota_worker(
 #[derive(Debug, Clone)]
 struct GrantQuotaSnapshot {
     grant_id: String,
+    user_id: String,
+    node_id: String,
     endpoint_tag: Option<String>,
     quota_limit_bytes: u64,
+    user_node_quota_limit_bytes: Option<u64>,
     cycle_policy: crate::cycle::EffectiveCyclePolicy,
     cycle_day_of_month: u8,
     prev_cycle_start_at: Option<String>,
     prev_cycle_end_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GrantUsageTick {
+    snapshot: GrantQuotaSnapshot,
+    used_bytes: u64,
+    window_changed: bool,
+    quota_banned: bool,
+    grant_enabled: bool,
 }
 
 fn map_cycle_error(grant_id: &str, err: CycleWindowError) -> anyhow::Error {
@@ -130,6 +142,10 @@ pub async fn run_quota_tick_at(
             {
                 continue;
             }
+            let node_id = endpoint
+                .as_ref()
+                .map(|e| e.node_id.clone())
+                .unwrap_or_else(|| local_node_id.clone());
 
             let (policy, day) = match effective_cycle_policy_and_day(&store, &grant) {
                 Ok(v) => v,
@@ -144,10 +160,15 @@ pub async fn run_quota_tick_at(
             };
 
             let usage = store.get_grant_usage(&grant.grant_id);
+            let user_node_quota_limit_bytes =
+                store.get_user_node_quota_limit_bytes(&grant.user_id, &node_id);
             out.push(GrantQuotaSnapshot {
                 grant_id: grant.grant_id,
+                user_id: grant.user_id,
+                node_id,
                 endpoint_tag: endpoint.map(|e| e.tag.clone()),
                 quota_limit_bytes: grant.quota_limit_bytes,
+                user_node_quota_limit_bytes,
                 cycle_policy: policy,
                 cycle_day_of_month: day,
                 prev_cycle_start_at: usage.as_ref().map(|u| u.cycle_start_at.clone()),
@@ -169,26 +190,84 @@ pub async fn run_quota_tick_at(
         }
     };
 
+    let mut ticks = Vec::new();
     for snapshot in snapshots {
-        if let Err(err) =
-            process_grant_once(now, config, store, reconcile, raft, &mut client, snapshot).await
-        {
-            warn!(%err, "quota tick: grant processing failed");
+        match update_grant_usage_once(now, store, &mut client, snapshot).await {
+            Ok(tick) => ticks.push(tick),
+            Err(err) => warn!(%err, "quota tick: grant processing failed"),
+        }
+    }
+
+    let mut groups: std::collections::BTreeMap<(String, String), Vec<GrantUsageTick>> =
+        std::collections::BTreeMap::new();
+    for tick in ticks {
+        groups
+            .entry((tick.snapshot.user_id.clone(), tick.snapshot.node_id.clone()))
+            .or_default()
+            .push(tick);
+    }
+
+    for ((_user_id, _node_id), group) in groups {
+        if group.is_empty() {
+            continue;
+        }
+
+        let explicit = group
+            .iter()
+            .find_map(|g| g.snapshot.user_node_quota_limit_bytes);
+        let uniform_grant_quota = {
+            let first = group[0].snapshot.quota_limit_bytes;
+            if group.iter().all(|g| g.snapshot.quota_limit_bytes == first) {
+                Some(first)
+            } else {
+                None
+            }
+        };
+        let node_quota_limit_bytes = explicit.or(uniform_grant_quota);
+
+        if let Some(limit) = node_quota_limit_bytes {
+            if let Err(err) = enforce_node_quota_group(
+                now,
+                config,
+                store,
+                reconcile,
+                raft,
+                &mut client,
+                &group,
+                limit,
+            )
+            .await
+            {
+                warn!(%err, "quota tick: node quota enforcement failed");
+            }
+        } else {
+            for tick in group {
+                if let Err(err) = enforce_grant_quota_legacy(
+                    now,
+                    config,
+                    store,
+                    reconcile,
+                    raft,
+                    &mut client,
+                    tick,
+                )
+                .await
+                {
+                    warn!(%err, "quota tick: grant quota enforcement failed");
+                }
+            }
         }
     }
 
     Ok(())
 }
 
-async fn process_grant_once(
+async fn update_grant_usage_once(
     now: DateTime<Utc>,
-    config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
-    reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
     client: &mut xray::XrayClient,
     snapshot: GrantQuotaSnapshot,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<GrantUsageTick> {
     let (cycle_start, cycle_end) =
         current_cycle_window_at(snapshot.cycle_policy, snapshot.cycle_day_of_month, now)
             .map_err(|err| map_cycle_error(&snapshot.grant_id, err))?;
@@ -204,7 +283,10 @@ async fn process_grant_once(
                 %status,
                 "quota tick: xray get_user_traffic_totals failed"
             );
-            return Ok(());
+            return Err(anyhow::anyhow!(
+                "xray get_user_traffic_totals failed for grant_id={}: {status}",
+                snapshot.grant_id
+            ));
         }
     };
 
@@ -245,27 +327,49 @@ async fn process_grant_once(
         )
     };
 
-    if window_changed && config.quota_auto_unban && quota_banned {
+    Ok(GrantUsageTick {
+        snapshot,
+        used_bytes,
+        window_changed,
+        quota_banned,
+        grant_enabled,
+    })
+}
+
+async fn enforce_grant_quota_legacy(
+    now: DateTime<Utc>,
+    config: &Config,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    reconcile: &ReconcileHandle,
+    raft: &Arc<dyn RaftFacade>,
+    client: &mut xray::XrayClient,
+    tick: GrantUsageTick,
+) -> anyhow::Result<()> {
+    let snapshot = tick.snapshot;
+    let grant_id = snapshot.grant_id.clone();
+    let email = format!("grant:{grant_id}");
+
+    if tick.window_changed && config.quota_auto_unban && tick.quota_banned {
         debug!(
-            grant_id = snapshot.grant_id,
+            grant_id = grant_id,
             "quota tick: cycle rollover detected, auto-unbanning"
         );
-        if grant_enabled {
+        if tick.grant_enabled {
             let mut store = store.lock().await;
-            store.clear_quota_banned(&snapshot.grant_id)?;
+            store.clear_quota_banned(&grant_id)?;
             reconcile.request_full();
             return Ok(());
         }
 
-        match set_grant_enabled_via_raft(raft, &snapshot.grant_id, true).await {
+        match set_grant_enabled_via_raft(raft, &grant_id, true).await {
             Ok(_) => {
                 let mut store = store.lock().await;
-                store.clear_quota_banned(&snapshot.grant_id)?;
+                store.clear_quota_banned(&grant_id)?;
                 reconcile.request_full();
             }
             Err(err) => {
                 warn!(
-                    grant_id = snapshot.grant_id,
+                    grant_id = grant_id,
                     %err,
                     "quota tick: auto-unban enable via raft failed"
                 );
@@ -274,10 +378,10 @@ async fn process_grant_once(
         return Ok(());
     }
 
-    if quota_banned && grant_enabled {
-        if let Err(err) = set_grant_enabled_via_raft(raft, &snapshot.grant_id, false).await {
+    if tick.quota_banned && tick.grant_enabled {
+        if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
             debug!(
-                grant_id = snapshot.grant_id,
+                grant_id = grant_id,
                 %err,
                 "quota tick: raft disable retry failed"
             );
@@ -290,15 +394,15 @@ async fn process_grant_once(
     }
 
     let threshold_reached =
-        used_bytes.saturating_add(QUOTA_TOLERANCE_BYTES) >= snapshot.quota_limit_bytes;
-    if !threshold_reached || !grant_enabled {
+        tick.used_bytes.saturating_add(QUOTA_TOLERANCE_BYTES) >= snapshot.quota_limit_bytes;
+    if !threshold_reached || !tick.grant_enabled {
         return Ok(());
     }
 
     {
         let mut store = store.lock().await;
-        if !quota_banned {
-            store.set_quota_banned(&snapshot.grant_id, now.to_rfc3339())?;
+        if !tick.quota_banned {
+            store.set_quota_banned(&grant_id, now.to_rfc3339())?;
         }
     }
     reconcile.request_full();
@@ -314,7 +418,7 @@ async fn process_grant_once(
             Ok(_) => {}
             Err(status) if xray::is_not_found(&status) => {}
             Err(status) => warn!(
-                grant_id = snapshot.grant_id,
+                grant_id = grant_id,
                 endpoint_tag = tag,
                 %status,
                 "quota tick: xray alter_inbound remove_user failed"
@@ -322,18 +426,143 @@ async fn process_grant_once(
         }
     } else {
         warn!(
-            grant_id = snapshot.grant_id,
+            grant_id = grant_id,
             "quota tick: missing endpoint tag, skipping xray remove_user"
         );
     }
 
-    if let Err(err) = set_grant_enabled_via_raft(raft, &snapshot.grant_id, false).await {
+    if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
         warn!(
-            grant_id = snapshot.grant_id,
+            grant_id = grant_id,
             %err,
             "quota tick: raft disable failed"
         );
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn enforce_node_quota_group(
+    now: DateTime<Utc>,
+    config: &Config,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    reconcile: &ReconcileHandle,
+    raft: &Arc<dyn RaftFacade>,
+    client: &mut xray::XrayClient,
+    group: &[GrantUsageTick],
+    quota_limit_bytes: u64,
+) -> anyhow::Result<()> {
+    let any_window_changed = group.iter().any(|g| g.window_changed);
+    let any_quota_banned = group.iter().any(|g| g.quota_banned);
+
+    if any_window_changed && config.quota_auto_unban && any_quota_banned {
+        debug!("quota tick: node cycle rollover detected, auto-unbanning");
+        for g in group {
+            let grant_id = &g.snapshot.grant_id;
+            if g.grant_enabled {
+                let mut store = store.lock().await;
+                store.clear_quota_banned(grant_id)?;
+                continue;
+            }
+            match set_grant_enabled_via_raft(raft, grant_id, true).await {
+                Ok(_) => {
+                    let mut store = store.lock().await;
+                    store.clear_quota_banned(grant_id)?;
+                }
+                Err(err) => warn!(
+                    grant_id = grant_id,
+                    %err,
+                    "quota tick: auto-unban enable via raft failed"
+                ),
+            }
+        }
+        reconcile.request_full();
         return Ok(());
+    }
+
+    for g in group {
+        if g.quota_banned
+            && g.grant_enabled
+            && let Err(err) = set_grant_enabled_via_raft(raft, &g.snapshot.grant_id, false).await
+        {
+            debug!(
+                grant_id = g.snapshot.grant_id,
+                %err,
+                "quota tick: raft disable retry failed"
+            );
+        }
+    }
+    if group.iter().any(|g| g.quota_banned && g.grant_enabled) {
+        return Ok(());
+    }
+
+    if quota_limit_bytes == 0 {
+        return Ok(());
+    }
+
+    let total_used = group
+        .iter()
+        .fold(0u64, |acc, g| acc.saturating_add(g.used_bytes));
+    let threshold_reached = total_used.saturating_add(QUOTA_TOLERANCE_BYTES) >= quota_limit_bytes;
+    if !threshold_reached {
+        return Ok(());
+    }
+
+    let enabled: Vec<&GrantUsageTick> = group.iter().filter(|g| g.grant_enabled).collect();
+    if enabled.is_empty() {
+        return Ok(());
+    }
+
+    let banned_at = now.to_rfc3339();
+    let mut ban_set = false;
+    {
+        let mut store = store.lock().await;
+        for g in &enabled {
+            if !g.quota_banned {
+                store.set_quota_banned(&g.snapshot.grant_id, banned_at.clone())?;
+                ban_set = true;
+            }
+        }
+    }
+    if ban_set {
+        reconcile.request_full();
+    }
+
+    for g in enabled {
+        let grant_id = &g.snapshot.grant_id;
+        let email = format!("grant:{grant_id}");
+        if let Some(tag) = g.snapshot.endpoint_tag.as_deref() {
+            use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
+            let op = crate::xray::builder::build_remove_user_operation(&email);
+            let req = AlterInboundRequest {
+                tag: tag.to_string(),
+                operation: Some(op),
+            };
+            match client.alter_inbound(req).await {
+                Ok(_) => {}
+                Err(status) if xray::is_not_found(&status) => {}
+                Err(status) => warn!(
+                    grant_id = grant_id,
+                    endpoint_tag = tag,
+                    %status,
+                    "quota tick: xray alter_inbound remove_user failed"
+                ),
+            }
+        } else {
+            warn!(
+                grant_id = grant_id,
+                "quota tick: missing endpoint tag, skipping xray remove_user"
+            );
+        }
+
+        if let Err(err) = set_grant_enabled_via_raft(raft, grant_id, false).await {
+            warn!(
+                grant_id = grant_id,
+                %err,
+                "quota tick: raft disable failed"
+            );
+        }
     }
 
     Ok(())

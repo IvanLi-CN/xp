@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 
 export type GrantAccessMatrixNode = {
 	nodeId: string;
 	label: string;
+	details?: ReactNode;
 };
 
 export type GrantAccessMatrixProtocol = {
@@ -212,6 +213,9 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 											<div className="font-mono text-xs opacity-60 truncate">
 												{node.nodeId}
 											</div>
+											{node.details ? (
+												<div className="min-w-0">{node.details}</div>
+											) : null}
 										</div>
 									</div>
 								</th>

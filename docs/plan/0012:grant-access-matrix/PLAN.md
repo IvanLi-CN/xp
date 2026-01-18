@@ -158,6 +158,7 @@
 ## 文档更新（Docs to Update）
 
 - `docs/plan/0010:admin-ui-geek-redesign/PLAN.md`：如本计划落地后的 UI 信息架构与 0010 有冲突/重叠，需补充交叉引用与边界说明。
+- `docs/plan/0014:grant-node-quota-editor/PLAN.md`：本计划的矩阵在 0014 上追加“按节点配额（行头）编辑”，并收敛配额编辑入口到 User details。
 - （可选）`README.md` 或 `web/README.md`：补充“Grant 接入点矩阵”的入口与使用说明（仅在实现完成后再写）。
 
 ## 里程碑（Milestones）

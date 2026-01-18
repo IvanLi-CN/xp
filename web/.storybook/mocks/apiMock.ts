@@ -12,6 +12,7 @@ import type {
 	GrantCredentials,
 } from "../../src/api/adminGrants";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type {
 	AdminUser,
 	AdminUserCreateRequest,
@@ -43,6 +44,7 @@ type MockStateSeed = {
 	endpoints: MockEndpointSeed[];
 	users: AdminUser[];
 	grants: AdminGrant[];
+	nodeQuotas: AdminUserNodeQuota[];
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
 };
@@ -269,6 +271,7 @@ function createDefaultSeed(): MockStateSeed {
 		endpoints,
 		users,
 		grants,
+		nodeQuotas: [],
 		alerts,
 		subscriptions,
 	};
@@ -285,6 +288,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		users: overrides?.users ?? base.users,
 		grants: overrides?.grants ?? base.grants,
+		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
 			...base.subscriptions,
@@ -372,6 +376,72 @@ async function handleRequest(
 
 	if (path === "/api/admin/nodes" && method === "GET") {
 		return jsonResponse({ items: clone(state.nodes) });
+	}
+
+	const userNodeQuotasMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-quotas$/,
+	);
+	if (userNodeQuotasMatch && method === "GET") {
+		const userId = decodeURIComponent(userNodeQuotasMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const items = state.nodeQuotas.filter((q) => q.user_id === userId);
+		return jsonResponse({ items: clone(items) });
+	}
+
+	const userNodeQuotaPutMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-quotas\/([^/]+)$/,
+	);
+	if (userNodeQuotaPutMatch && method === "PUT") {
+		const userId = decodeURIComponent(userNodeQuotaPutMatch[1]);
+		const nodeId = decodeURIComponent(userNodeQuotaPutMatch[2]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const nodeExists = state.nodes.some((n) => n.node_id === nodeId);
+		if (!nodeExists) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		const payload = await readJson<{ quota_limit_bytes?: number }>(req);
+		if (!payload || typeof payload.quota_limit_bytes !== "number") {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+		if (payload.quota_limit_bytes < 0) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"quota_limit_bytes must be non-negative",
+			);
+		}
+		const quota = Math.floor(payload.quota_limit_bytes);
+		const updated: AdminUserNodeQuota = {
+			user_id: userId,
+			node_id: nodeId,
+			quota_limit_bytes: quota,
+		};
+
+		state.nodeQuotas = [
+			...state.nodeQuotas.filter(
+				(q) => !(q.user_id === userId && q.node_id === nodeId),
+			),
+			updated,
+		];
+
+		// Best-effort unification for existing grants on the node.
+		const endpointsById = new Map(
+			state.endpoints.map((ep) => [ep.endpoint_id, ep]),
+		);
+		state.grants = state.grants.map((g) => {
+			if (g.user_id !== userId) return g;
+			const ep = endpointsById.get(g.endpoint_id);
+			if (!ep || ep.node_id !== nodeId) return g;
+			return { ...g, quota_limit_bytes: quota };
+		});
+
+		return jsonResponse(clone(updated));
 	}
 
 	const nodeMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);

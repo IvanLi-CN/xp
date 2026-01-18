@@ -5,6 +5,7 @@ import {
 	GrantAccessMatrix,
 	type GrantAccessMatrixCellState,
 } from "./GrantAccessMatrix";
+import { NodeQuotaEditor, type NodeQuotaEditorValue } from "./NodeQuotaEditor";
 
 function HifiDemo() {
 	const nodes = useMemo(
@@ -73,6 +74,15 @@ function HifiDemo() {
 				meta: { port: 8443 },
 			},
 		},
+	}));
+
+	const [nodeQuotas, setNodeQuotas] = useState<
+		Record<string, NodeQuotaEditorValue>
+	>(() => ({
+		n_01HnodeA: 10 * 2 ** 30,
+		n_01HnodeB: "mixed",
+		n_01HnodeC: 0,
+		n_01HnodeD: 512 * 2 ** 20,
 	}));
 
 	function ensureSelectedOption(nextCell: GrantAccessMatrixCellState) {
@@ -204,7 +214,17 @@ function HifiDemo() {
 					</span>
 				</div>
 				<GrantAccessMatrix
-					nodes={nodes}
+					nodes={nodes.map((n) => ({
+						...n,
+						details: (
+							<NodeQuotaEditor
+								value={nodeQuotas[n.nodeId] ?? 0}
+								onApply={async (nextBytes) => {
+									setNodeQuotas((prev) => ({ ...prev, [n.nodeId]: nextBytes }));
+								}}
+							/>
+						),
+					}))}
 					protocols={protocols}
 					cells={cells}
 					onToggleCell={toggleCell}
