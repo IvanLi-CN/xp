@@ -55,6 +55,14 @@ impl Paths {
         self.map_abs(Path::new("/etc/xp-ops/cloudflare_tunnel"))
     }
 
+    pub fn etc_xp_ops_deploy_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/xp-ops/deploy"))
+    }
+
+    pub fn etc_xp_ops_deploy_settings(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/xp-ops/deploy/settings.json"))
+    }
+
     pub fn etc_xp_ops_cloudflare_settings(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xp-ops/cloudflare_tunnel/settings.json"))
     }
