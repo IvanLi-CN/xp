@@ -237,19 +237,19 @@ export function NodeQuotaEditor(props: {
 								<div className="flex items-center justify-end gap-2">
 									<Button
 										size="sm"
-										loading={isSaving}
-										disabled={disabled || isSaving}
-										onClick={() => void apply()}
-									>
-										Apply
-									</Button>
-									<Button
-										size="sm"
 										variant="ghost"
 										disabled={disabled || isSaving}
 										onClick={cancel}
 									>
 										Cancel
+									</Button>
+									<Button
+										size="sm"
+										loading={isSaving}
+										disabled={disabled || isSaving}
+										onClick={() => void apply()}
+									>
+										Apply
 									</Button>
 								</div>
 							</div>
