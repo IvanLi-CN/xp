@@ -201,41 +201,40 @@ export function NodeQuotaEditor(props: {
 								margin: 0,
 							}}
 						>
-							<div className="flex items-start gap-2">
-								<div className="w-full">
-									<input
-										ref={inputRef}
-										className={[
-											"input input-bordered input-sm w-full font-mono",
-											error ? "input-error" : "",
-										]
-											.filter(Boolean)
-											.join(" ")}
-										value={draft}
-										disabled={disabled || isSaving}
-										aria-invalid={Boolean(error)}
-										placeholder={value === "mixed" ? "e.g. 10GiB" : undefined}
-										onChange={(event) => {
-											setDraft(event.target.value);
-											setError(null);
-										}}
-										onKeyDown={(event) => {
-											if (event.key === "Escape") {
-												event.preventDefault();
-												cancel();
-											}
-											if (event.key === "Enter") {
-												event.preventDefault();
-												void apply();
-											}
-										}}
-									/>
-									{error ? (
-										<div className="mt-2 text-xs text-error">{error}</div>
-									) : null}
-								</div>
+							<div className="flex flex-col gap-2">
+								<input
+									ref={inputRef}
+									className={[
+										"input input-bordered input-sm w-full font-mono",
+										error ? "input-error" : "",
+									]
+										.filter(Boolean)
+										.join(" ")}
+									value={draft}
+									disabled={disabled || isSaving}
+									aria-invalid={Boolean(error)}
+									placeholder={value === "mixed" ? "e.g. 10GiB" : undefined}
+									onChange={(event) => {
+										setDraft(event.target.value);
+										setError(null);
+									}}
+									onKeyDown={(event) => {
+										if (event.key === "Escape") {
+											event.preventDefault();
+											cancel();
+										}
+										if (event.key === "Enter") {
+											event.preventDefault();
+											void apply();
+										}
+									}}
+								/>
 
-								<div className="flex flex-col gap-2">
+								{error ? (
+									<div className="text-xs text-error">{error}</div>
+								) : null}
+
+								<div className="flex items-center justify-end gap-2">
 									<Button
 										size="sm"
 										loading={isSaving}
