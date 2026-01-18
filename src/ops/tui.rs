@@ -382,9 +382,9 @@ impl App {
 
     fn is_editable_field(&self) -> bool {
         match self.focus {
-            0 | 1 | 2 => true,
+            0..=2 => true,
             4 => !self.cloudflare_enabled,
-            5 | 6 | 7 | 8 => self.cloudflare_enabled,
+            5..=8 => self.cloudflare_enabled,
             9 => true,
             _ => false,
         }

@@ -413,18 +413,16 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             }
         }
 
-        if let Some(id) = zone_id.clone() {
-            if zone_name.is_empty() {
-                if let Some(token) = token.as_ref() {
-                    match cloudflare::fetch_zone_info(&api_base, token, &id).await {
-                        Ok(info) => {
-                            zone_name = info.name;
-                            zone_account_id = info.account_id;
-                        }
-                        Err(e) => {
-                            errors.push(format!("cloudflare zone error: {}", e.message));
-                        }
-                    }
+        if zone_name.is_empty()
+            && let (Some(token), Some(id)) = (token.as_deref(), zone_id.as_deref())
+        {
+            match cloudflare::fetch_zone_info(&api_base, token, id).await {
+                Ok(info) => {
+                    zone_name = info.name;
+                    zone_account_id = info.account_id;
+                }
+                Err(e) => {
+                    errors.push(format!("cloudflare zone error: {}", e.message));
                 }
             }
         }
@@ -465,10 +463,10 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             api_base_url_source = ValueSource::Derived;
             format!("https://{hostname}")
         };
-        if !api_base_url.is_empty() {
-            if let Err(e) = validate_https_origin_no_port(&api_base_url) {
-                errors.push(e.message);
-            }
+        if !api_base_url.is_empty()
+            && let Err(e) = validate_https_origin_no_port(&api_base_url)
+        {
+            errors.push(e.message);
         }
 
         let (origin_url, origin_source) = match args.origin_url.clone() {
@@ -554,10 +552,10 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
                 String::new()
             }
         };
-        if !base.is_empty() {
-            if let Err(e) = validate_https_origin_no_port(&base) {
-                errors.push(e.message);
-            }
+        if !base.is_empty()
+            && let Err(e) = validate_https_origin_no_port(&base)
+        {
+            errors.push(e.message);
         }
         base
     };
@@ -679,10 +677,8 @@ async fn resolve_hostname_conflict(
         }
 
         plan = build_plan(paths, &args).await?;
-        if auto_generated {
-            if let Some(cf_plan) = plan.cloudflare.as_mut() {
-                cf_plan.hostname_source = ValueSource::Generated;
-            }
+        if auto_generated && let Some(cf_plan) = plan.cloudflare.as_mut() {
+            cf_plan.hostname_source = ValueSource::Generated;
         }
 
         if dry_run {
@@ -834,10 +830,8 @@ async fn resolve_tunnel_conflict(
         }
 
         plan = build_plan(paths, &args).await?;
-        if auto_generated {
-            if let Some(cf_plan) = plan.cloudflare.as_mut() {
-                cf_plan.tunnel_name_source = ValueSource::Generated;
-            }
+        if auto_generated && let Some(cf_plan) = plan.cloudflare.as_mut() {
+            cf_plan.tunnel_name_source = ValueSource::Generated;
         }
 
         if dry_run {
@@ -1061,8 +1055,8 @@ async fn resolve_zone_from_domain(
         if !account_id.trim().is_empty() {
             let filtered: Vec<ZoneLookup> = zones
                 .iter()
-                .cloned()
                 .filter(|z| z.account_id.as_deref() == Some(account_id))
+                .cloned()
                 .collect();
             if filtered.is_empty() {
                 warnings.push(format!(
