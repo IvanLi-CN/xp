@@ -173,7 +173,7 @@ export function NodeQuotaEditor(props: {
 		? createPortal(
 				(() => {
 					const margin = 12;
-					const desiredWidth = 320;
+					const desiredWidth = 260;
 					const left = popoverPos ? popoverPos.left : margin;
 					const top = popoverPos ? popoverPos.top : margin;
 					const maxWidth = Math.max(220, window.innerWidth - left - margin);
