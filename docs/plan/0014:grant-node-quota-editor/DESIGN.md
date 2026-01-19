@@ -38,6 +38,11 @@
 
 - Node label（加粗）
 - Node id（mono、弱化）
+- Reset source 区（流量重置参考来源）：
+  - 展示态：`Reset: User` / `Reset: Node`
+  - 编辑态：下拉或 segmented control（二选一）
+  - 默认：`User`（参考用户配置）
+  - 写入：通过 `UserNodeQuota.quota_reset_source`（见 contracts）
 - Quota 区：
   - 展示态：`Quota: 10 GiB` + 编辑图标
   - 编辑态：输入框 + Apply/Cancel +（可选）错误提示
@@ -94,6 +99,13 @@ Mixed 状态（当后端返回“该节点下 grants 配额不一致”）：
   - 输入框与 Apply/Cancel 禁用（避免并发）
   - Apply 展示 loading
   - 成功后更新展示态数值
+
+### 4.5 Reset source 切换
+
+- 切换 `Reset: User/Node` 只影响“本节点行”的重置配置引用来源：
+  - `User`：使用用户级重置配置
+  - `Node`：使用节点级重置配置
+- 该开关不改变 Quota 输入值本身，但会影响后端实际执行的“按月/无限”语义（见 #0017）。
 
 ## 5) 单位解析与格式化（与计划一致）
 

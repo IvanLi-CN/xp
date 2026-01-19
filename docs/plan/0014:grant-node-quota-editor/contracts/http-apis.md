@@ -14,12 +14,16 @@
 {
   "user_id": "u_...",
   "node_id": "n_...",
-  "quota_limit_bytes": 10737418240
+  "quota_limit_bytes": 10737418240,
+  "quota_reset_source": "user"
 }
 ```
 
 - `quota_limit_bytes`: integer, `>= 0`
   - `0` 表示“无限制/不触发配额封禁”（与现有 `quota_limit_bytes == 0` 语义一致）
+- `quota_reset_source`: `"user" | "node"`
+  - 默认 `"user"`（参考用户配置）
+  - `"node"` 表示参考节点配置（见 #0017 的流量重置配置口径）
 
 ## APIs
 
@@ -35,7 +39,8 @@
     {
       "user_id": "u_...",
       "node_id": "n_...",
-      "quota_limit_bytes": 10737418240
+      "quota_limit_bytes": 10737418240,
+      "quota_reset_source": "user"
     }
   ]
 }
@@ -49,7 +54,8 @@
 
 ```json
 {
-  "quota_limit_bytes": 10737418240
+  "quota_limit_bytes": 10737418240,
+  "quota_reset_source": "user"
 }
 ```
 
@@ -59,7 +65,8 @@
 {
   "user_id": "u_...",
   "node_id": "n_...",
-  "quota_limit_bytes": 10737418240
+  "quota_limit_bytes": 10737418240,
+  "quota_reset_source": "user"
 }
 ```
 
@@ -72,5 +79,5 @@
 
 ## Compatibility & rollout notes
 
-- 本 API 为新增接口，不影响既有 `/api/admin/grants` 的字段与行为。
+- 本 API 为新增接口，不依赖 `/api/admin/grants*`（后续将以 group-level APIs 替代，见 #0017）。
 - 若历史数据存在“同一节点下不同 grants 的 `quota_limit_bytes` 不一致”，该接口设置节点配额后应统一该节点下所有相关 grants 的视角（具体策略在实现阶段落地，但对外口径以本 API 的返回为准）。
