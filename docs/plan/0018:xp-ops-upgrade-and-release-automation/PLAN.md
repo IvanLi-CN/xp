@@ -73,13 +73,13 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）                 | 类型（Kind）   | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）     | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                          |
-| ---------------------------- | -------------- | ------------- | -------------- | ---------------------------- | --------------- | ------------------- | -------------------------------------- |
-| `xp-ops self-upgrade`        | CLI            | internal      | New            | ./contracts/cli.md           | ops             | 管理员 / CI         | 自我升级（下载/校验/原子替换/回滚）    |
-| `xp-ops xp upgrade`          | CLI            | internal      | New            | ./contracts/cli.md           | ops             | 管理员 / CI         | `xp` 升级（下载/安装/重启/回滚）       |
-| Release assets layout        | File format    | external      | New            | ./contracts/file-formats.md  | ci              | `xp-ops`            | tag + assets + checksums 命名与格式     |
-| Upgrade config & env         | Config         | internal      | New            | ./contracts/config.md        | ops             | `xp-ops`            | repo/api-base 等输入口径               |
-| Release automation workflow  | Config         | internal      | New            | ./contracts/github-automation.md | ci          | ops                 | version 计算 + env 注入 + 串行发布      |
+| 接口（Name）                | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）         | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                       |
+| --------------------------- | ------------ | ------------- | -------------- | -------------------------------- | --------------- | ------------------- | ----------------------------------- |
+| `xp-ops self-upgrade`       | CLI          | internal      | New            | ./contracts/cli.md               | ops             | 管理员 / CI         | 自我升级（下载/校验/原子替换/回滚） |
+| `xp-ops xp upgrade`         | CLI          | internal      | New            | ./contracts/cli.md               | ops             | 管理员 / CI         | `xp` 升级（下载/安装/重启/回滚）    |
+| Release assets layout       | File format  | external      | New            | ./contracts/file-formats.md      | ci              | `xp-ops`            | tag + assets + checksums 命名与格式 |
+| Upgrade config & env        | Config       | internal      | New            | ./contracts/config.md            | ops             | `xp-ops`            | repo/api-base 等输入口径            |
+| Release automation workflow | Config       | internal      | New            | ./contracts/github-automation.md | ci              | ops                 | version 计算 + env 注入 + 串行发布  |
 
 ### 契约文档
 
