@@ -155,7 +155,7 @@ Usage:
 ```bash
 xp-ops xp bootstrap \
   --node-name <name> \
-  --public-domain <domain> \
+  --access-host <host> \
   --api-base-url <https-origin> \
   [--dry-run]
 ```
@@ -187,7 +187,7 @@ Usage:
 xp-ops deploy \
   --xp-bin <path> \
   --node-name <name> \
-  --public-domain <domain> \
+  --access-host <host> \
   [--cloudflare | --no-cloudflare] \
   [--account-id <id> --zone-id <id>] \
   [--hostname <fqdn>] \

@@ -902,7 +902,7 @@ mod tests {
             data_dir: tmp_dir.to_path_buf(),
             admin_token: "testtoken".to_string(),
             node_name: "node-1".to_string(),
-            public_domain: "".to_string(),
+            access_host: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
             quota_poll_interval_secs: 10,
             quota_auto_unban: true,
@@ -912,7 +912,7 @@ mod tests {
             data_dir: config.data_dir.clone(),
             bootstrap_node_id: None,
             bootstrap_node_name: config.node_name.clone(),
-            bootstrap_public_domain: config.public_domain.clone(),
+            bootstrap_access_host: config.access_host.clone(),
             bootstrap_api_base_url: config.api_base_url.clone(),
         })
         .unwrap();
@@ -983,7 +983,7 @@ mod tests {
                 .upsert_node(Node {
                     node_id: remote_node_id.clone(),
                     node_name: "node-2".to_string(),
-                    public_domain: "".to_string(),
+                    access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
                 })
                 .unwrap();

@@ -57,7 +57,7 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
     let args = DeployArgs {
         xp_bin: PathBuf::from(values.xp_bin),
         node_name: values.node_name,
-        public_domain: values.public_domain,
+        access_host: values.access_host,
         cloudflare_toggle: crate::ops::cli::CloudflareToggle {
             cloudflare: values.cloudflare_enabled,
             no_cloudflare: !values.cloudflare_enabled,
@@ -166,7 +166,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 struct AppValues {
     xp_bin: String,
     node_name: String,
-    public_domain: String,
+    access_host: String,
     cloudflare_enabled: bool,
     account_id: Option<String>,
     zone_id: Option<String>,
@@ -198,7 +198,7 @@ struct App {
 
     xp_bin: String,
     node_name: String,
-    public_domain: String,
+    access_host: String,
 
     cloudflare_enabled: bool,
     account_id: String,
@@ -224,7 +224,7 @@ impl App {
             paths: paths.clone(),
             xp_bin: String::new(),
             node_name: "node-1".to_string(),
-            public_domain: String::new(),
+            access_host: String::new(),
             cloudflare_enabled: true,
             account_id: String::new(),
             zone_id: String::new(),
@@ -252,7 +252,7 @@ impl App {
         let mut v = Vec::new();
         v.push(item("xp_bin", &self.xp_bin));
         v.push(item("node_name", &self.node_name));
-        v.push(item("public_domain", &self.public_domain));
+        v.push(item("access_host", &self.access_host));
 
         v.push(item(
             "cloudflare_enabled",
@@ -394,7 +394,7 @@ impl App {
         match self.focus {
             0 => self.xp_bin.push(c),
             1 => self.node_name.push(c),
-            2 => self.public_domain.push(c),
+            2 => self.access_host.push(c),
             4 if !self.cloudflare_enabled => self.api_base_url.push(c),
             5 if self.cloudflare_enabled => self.account_id.push(c),
             6 if self.cloudflare_enabled => self.zone_id.push(c),
@@ -433,7 +433,7 @@ impl App {
                 self.node_name.pop();
             }
             2 => {
-                self.public_domain.pop();
+                self.access_host.pop();
             }
             4 if !self.cloudflare_enabled => {
                 self.api_base_url.pop();
@@ -461,7 +461,7 @@ impl App {
         AppValues {
             xp_bin: self.xp_bin.clone(),
             node_name: self.node_name.clone(),
-            public_domain: self.public_domain.clone(),
+            access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
             account_id: if self.cloudflare_enabled {
                 Some(self.account_id.clone()).filter(|s| !s.trim().is_empty())
@@ -503,8 +503,8 @@ impl App {
         if let Some(v) = cfg.node_name {
             self.node_name = v;
         }
-        if let Some(v) = cfg.public_domain {
-            self.public_domain = v;
+        if let Some(v) = cfg.access_host {
+            self.access_host = v;
         }
         if let Some(v) = cfg.cloudflare_enabled {
             self.cloudflare_enabled = v;
@@ -567,7 +567,8 @@ fn help_text(app: &App) -> String {
 struct TuiConfig {
     xp_bin: Option<String>,
     node_name: Option<String>,
-    public_domain: Option<String>,
+    #[serde(alias = "public_domain")]
+    access_host: Option<String>,
     cloudflare_enabled: Option<bool>,
     account_id: Option<String>,
     zone_id: Option<String>,
@@ -597,7 +598,7 @@ fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::
     let cfg = TuiConfig {
         xp_bin: Some(values.xp_bin.clone()),
         node_name: Some(values.node_name.clone()),
-        public_domain: Some(values.public_domain.clone()),
+        access_host: Some(values.access_host.clone()),
         cloudflare_enabled: Some(values.cloudflare_enabled),
         account_id: values.account_id.clone(),
         zone_id: values.zone_id.clone(),

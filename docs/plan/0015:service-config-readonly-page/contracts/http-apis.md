@@ -28,7 +28,7 @@
     "quota_poll_interval_secs": 10,
     "quota_auto_unban": true,
     "admin_token_present": true,
-    "admin_token_masked": "****1a2b"
+    "admin_token_masked": "********"
   }
   ```
 

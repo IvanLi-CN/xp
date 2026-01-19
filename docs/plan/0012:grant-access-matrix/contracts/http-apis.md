@@ -17,7 +17,7 @@
 
 - Method: `GET`
 - Path: `/api/admin/nodes`
-- Response (success): `{ items: Array<{ node_id: string; node_name: string; api_base_url: string; public_domain: string }> }`
+- Response (success): `{ items: Array<{ node_id: string; node_name: string; api_base_url: string; access_host: string }> }`
 
 ### List endpoints
 

@@ -12,7 +12,11 @@ import { clearAdminToken, readAdminToken } from "./auth";
 
 type AppShellProps = {
 	brand: { name: string; subtitle?: string };
-	navItems: Array<{ label: string; to: string; icon: string }>;
+	navItems?: Array<{ label: string; to: string; icon: string }>;
+	navGroups?: Array<{
+		title: string;
+		items: Array<{ label: string; to: string; icon: string }>;
+	}>;
 	headerStatus?: ReactNode;
 	children?: ReactNode;
 };
@@ -31,6 +35,7 @@ function safeHostFromUrl(value: string): string | null {
 export function AppShell({
 	brand,
 	navItems,
+	navGroups,
 	headerStatus,
 	children,
 }: AppShellProps) {
@@ -150,31 +155,48 @@ export function AppShell({
 		health.isSuccess,
 	]);
 
+	const effectiveNavGroups =
+		navGroups ??
+		(navItems
+			? [
+					{
+						title: "NAV",
+						items: navItems,
+					},
+				]
+			: []);
+
 	const navContent = (
 		<nav
 			aria-label="Primary navigation"
 			className="rounded-box border border-base-200 bg-base-100 p-4"
 		>
-			<p className="px-2 pb-3 text-xs uppercase tracking-wide opacity-50">
-				NAV
-			</p>
-			<ul className="space-y-2">
-				{navItems.map((item) => (
-					<li key={item.to}>
-						<Link
-							to={item.to}
-							className="flex items-center gap-3 rounded-box px-3 py-2 border border-base-200 bg-base-100 hover:bg-base-200 transition-colors"
-							activeProps={{
-								className:
-									"bg-info/10 border-info/30 text-base-content hover:bg-info/10",
-							}}
-						>
-							<Icon name={item.icon} className="size-5 opacity-80" />
-							<span className="font-medium">{item.label}</span>
-						</Link>
-					</li>
+			<div className="space-y-6">
+				{effectiveNavGroups.map((group) => (
+					<div key={group.title} className="space-y-2">
+						<p className="px-2 text-xs uppercase tracking-wide opacity-50">
+							{group.title}
+						</p>
+						<ul className="space-y-2">
+							{group.items.map((item) => (
+								<li key={item.to}>
+									<Link
+										to={item.to}
+										className="flex items-center gap-3 rounded-box px-3 py-2 border border-base-200 bg-base-100 hover:bg-base-200 transition-colors"
+										activeProps={{
+											className:
+												"bg-info/10 border-info/30 text-base-content hover:bg-info/10",
+										}}
+									>
+										<Icon name={item.icon} className="size-5 opacity-80" />
+										<span className="font-medium">{item.label}</span>
+									</Link>
+								</li>
+							))}
+						</ul>
+					</div>
 				))}
-			</ul>
+			</div>
 		</nav>
 	);
 

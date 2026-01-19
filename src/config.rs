@@ -74,8 +74,13 @@ pub struct Config {
     #[arg(long, global = true, value_name = "NAME", default_value = "node-1")]
     pub node_name: String,
 
-    #[arg(long, global = true, value_name = "DOMAIN", default_value = "")]
-    pub public_domain: String,
+    #[arg(
+        long = "access-host",
+        global = true,
+        value_name = "HOST",
+        default_value = ""
+    )]
+    pub access_host: String,
 
     #[arg(
         long,

@@ -148,7 +148,7 @@ export function NodesPage() {
 					headers={[
 						{ key: "node_id", label: "Node ID" },
 						{ key: "node_name", label: "Name" },
-						{ key: "public_domain", label: "Public domain" },
+						{ key: "access_host", label: "Access host" },
 						{ key: "api_base_url", label: "API base URL" },
 					]}
 				>
@@ -172,7 +172,7 @@ export function NodesPage() {
 									{node.node_name || "(unnamed)"}
 								</Link>
 							</td>
-							<td className="font-mono text-sm">{node.public_domain || "-"}</td>
+							<td className="font-mono text-sm">{node.access_host || "-"}</td>
 							<td className="font-mono text-sm">{node.api_base_url || "-"}</td>
 						</tr>
 					))}

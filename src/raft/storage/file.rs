@@ -741,7 +741,7 @@ mod tests {
             data_dir: tmp_dir.to_path_buf(),
             bootstrap_node_id: None,
             bootstrap_node_name: "node-1".to_string(),
-            bootstrap_public_domain: "".to_string(),
+            bootstrap_access_host: "".to_string(),
             bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
         }
     }

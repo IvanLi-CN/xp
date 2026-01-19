@@ -159,7 +159,6 @@ async function main() {
 		kind: "vless_reality_vision_tcp",
 		node_id: node.node_id,
 		port: 443,
-		public_domain: "demo.example.com",
 		reality: {
 			dest: "demo.example.com:443",
 			server_names: ["demo.example.com"],

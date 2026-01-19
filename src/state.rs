@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ pub struct StoreInit {
     pub data_dir: PathBuf,
     pub bootstrap_node_id: Option<String>,
     pub bootstrap_node_name: String,
-    pub bootstrap_public_domain: String,
+    pub bootstrap_access_host: String,
     pub bootstrap_api_base_url: String,
 }
 
@@ -445,19 +445,13 @@ impl JsonSnapshotStore {
         let (mut state, is_new_state) = if state_path.exists() {
             let bytes = fs::read(&state_path)?;
             let state: PersistedState = serde_json::from_slice(&bytes)?;
-            if state.schema_version != SCHEMA_VERSION {
-                return Err(StoreError::SchemaVersionMismatch {
-                    expected: SCHEMA_VERSION,
-                    got: state.schema_version,
-                });
-            }
             (state, false)
         } else {
             let node_id = init.bootstrap_node_id.unwrap_or_else(new_ulid_string);
             let node = Node {
                 node_id: node_id.clone(),
                 node_name: init.bootstrap_node_name,
-                public_domain: init.bootstrap_public_domain,
+                access_host: init.bootstrap_access_host,
                 api_base_url: init.bootstrap_api_base_url,
             };
 
@@ -466,9 +460,21 @@ impl JsonSnapshotStore {
             (state, true)
         };
 
+        let mut migrated = false;
+        if state.schema_version != SCHEMA_VERSION {
+            if state.schema_version == 1 && SCHEMA_VERSION == 2 {
+                state.schema_version = SCHEMA_VERSION;
+                migrated = true;
+            } else {
+                return Err(StoreError::SchemaVersionMismatch {
+                    expected: SCHEMA_VERSION,
+                    got: state.schema_version,
+                });
+            }
+        }
+
         // Backward-compatible cleanup: `public_domain` used to exist in VLESS endpoint meta,
         // but it's a redundant xp-only field and is not used by the system.
-        let mut migrated = false;
         for endpoint in state.endpoints.values_mut() {
             if endpoint.kind == EndpointKind::VlessRealityVisionTcp
                 && let Some(meta) = endpoint.meta.as_object_mut()
@@ -1134,7 +1140,7 @@ mod tests {
             data_dir: tmp_dir.to_path_buf(),
             bootstrap_node_id: None,
             bootstrap_node_name: "node-1".to_string(),
-            bootstrap_public_domain: "".to_string(),
+            bootstrap_access_host: "".to_string(),
             bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
         }
     }
@@ -1160,9 +1166,52 @@ mod tests {
         let (node_id, node) = state.nodes.iter().next().unwrap();
         assert_eq!(node_id, &node.node_id);
         assert_eq!(node.node_name, "node-1");
-        assert_eq!(node.public_domain, "");
+        assert_eq!(node.access_host, "");
         assert_eq!(node.api_base_url, "https://127.0.0.1:62416");
         assert!(is_ulid_string(&node.node_id));
+    }
+
+    #[test]
+    fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+
+        let state_path = data_dir.join("state.json");
+        fs::write(
+            &state_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+              "schema_version": 1,
+              "nodes": {
+                "node_1": {
+                  "node_id": "node_1",
+                  "node_name": "node-1",
+                  "public_domain": "example.com",
+                  "api_base_url": "https://127.0.0.1:62416"
+                }
+              }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: data_dir.to_path_buf(),
+            bootstrap_node_id: None,
+            bootstrap_node_name: "node-1".to_string(),
+            bootstrap_access_host: "".to_string(),
+            bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+        let node = store.state().nodes.get("node_1").unwrap();
+        assert_eq!(node.access_host, "example.com");
+
+        let bytes = fs::read(&state_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["schema_version"], SCHEMA_VERSION);
+        assert!(saved["nodes"]["node_1"].get("access_host").is_some());
+        assert!(saved["nodes"]["node_1"].get("public_domain").is_none());
     }
 
     #[test]
@@ -1399,7 +1448,7 @@ mod tests {
         let node = Node {
             node_id: "node_1".to_string(),
             node_name: "node-1".to_string(),
-            public_domain: "example.com".to_string(),
+            access_host: "example.com".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
         };
 

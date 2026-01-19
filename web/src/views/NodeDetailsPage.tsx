@@ -36,7 +36,7 @@ export function NodeDetailsPage() {
 	});
 
 	const [nodeName, setNodeName] = useState("");
-	const [publicDomain, setPublicDomain] = useState("");
+	const [accessHost, setAccessHost] = useState("");
 	const [apiBaseUrl, setApiBaseUrl] = useState("");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
@@ -44,7 +44,7 @@ export function NodeDetailsPage() {
 	useEffect(() => {
 		if (nodeQuery.data) {
 			setNodeName(nodeQuery.data.node_name);
-			setPublicDomain(nodeQuery.data.public_domain);
+			setAccessHost(nodeQuery.data.access_host);
 			setApiBaseUrl(nodeQuery.data.api_base_url);
 		}
 	}, [nodeQuery.data]);
@@ -53,10 +53,10 @@ export function NodeDetailsPage() {
 		if (!nodeQuery.data) return false;
 		return (
 			nodeName !== nodeQuery.data.node_name ||
-			publicDomain !== nodeQuery.data.public_domain ||
+			accessHost !== nodeQuery.data.access_host ||
 			apiBaseUrl !== nodeQuery.data.api_base_url
 		);
-	}, [apiBaseUrl, nodeName, nodeQuery.data, publicDomain]);
+	}, [accessHost, apiBaseUrl, nodeName, nodeQuery.data]);
 
 	const handleSave = async () => {
 		if (!nodeQuery.data) return;
@@ -72,8 +72,8 @@ export function NodeDetailsPage() {
 		if (nodeName !== nodeQuery.data.node_name) {
 			payload.node_name = nodeName;
 		}
-		if (publicDomain !== nodeQuery.data.public_domain) {
-			payload.public_domain = publicDomain;
+		if (accessHost !== nodeQuery.data.access_host) {
+			payload.access_host = accessHost;
 		}
 		if (apiBaseUrl !== nodeQuery.data.api_base_url) {
 			payload.api_base_url = apiBaseUrl;
@@ -179,7 +179,7 @@ export function NodeDetailsPage() {
 						</label>
 						<label className="form-control">
 							<div className="label">
-								<span className="label-text">Public domain</span>
+								<span className="label-text">Access host</span>
 							</div>
 							<input
 								type="text"
@@ -188,8 +188,8 @@ export function NodeDetailsPage() {
 										? "input input-bordered input-sm font-mono"
 										: "input input-bordered font-mono"
 								}
-								value={publicDomain}
-								onChange={(event) => setPublicDomain(event.target.value)}
+								value={accessHost}
+								onChange={(event) => setAccessHost(event.target.value)}
 								placeholder="example.com"
 							/>
 						</label>

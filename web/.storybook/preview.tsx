@@ -28,6 +28,7 @@ import { HomePage } from "../src/views/HomePage";
 import { LoginPage } from "../src/views/LoginPage";
 import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
 import { NodesPage } from "../src/views/NodesPage";
+import { ServiceConfigPage } from "../src/views/ServiceConfigPage";
 import { UserDetailsPage } from "../src/views/UserDetailsPage";
 import { UserNewPage } from "../src/views/UserNewPage";
 import { UsersPage } from "../src/views/UsersPage";
@@ -198,6 +199,12 @@ const preview: Preview = {
 				component: GrantsPage,
 			});
 
+			const serviceConfigRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/service-config",
+				component: ServiceConfigPage,
+			});
+
 			const grantNewRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/grants/new",
@@ -223,6 +230,7 @@ const preview: Preview = {
 				grantsRoute,
 				grantNewRoute,
 				grantDetailsRoute,
+				serviceConfigRoute,
 			]);
 
 			const routeTree = rootRoute.addChildren([

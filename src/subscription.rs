@@ -19,7 +19,7 @@ pub enum SubscriptionError {
         endpoint_id: String,
         grant_id: String,
     },
-    EmptyNodePublicDomain {
+    EmptyNodeAccessHost {
         node_id: String,
         endpoint_id: String,
         grant_id: String,
@@ -78,13 +78,13 @@ impl std::fmt::Display for SubscriptionError {
                 f,
                 "node not found: node_id={node_id} (endpoint_id={endpoint_id}, grant_id={grant_id})"
             ),
-            Self::EmptyNodePublicDomain {
+            Self::EmptyNodeAccessHost {
                 node_id,
                 endpoint_id,
                 grant_id,
             } => write!(
                 f,
-                "node public_domain is empty: node_id={node_id} (endpoint_id={endpoint_id}, grant_id={grant_id})"
+                "node access_host is empty: node_id={node_id} (endpoint_id={endpoint_id}, grant_id={grant_id})"
             ),
             Self::MissingCredentialsVless {
                 grant_id,
@@ -243,8 +243,8 @@ fn build_items(
                 grant_id: grant.grant_id.clone(),
             })?;
 
-        if node.public_domain.is_empty() {
-            return Err(SubscriptionError::EmptyNodePublicDomain {
+        if node.access_host.is_empty() {
+            return Err(SubscriptionError::EmptyNodeAccessHost {
                 node_id: node.node_id.clone(),
                 endpoint_id: endpoint.endpoint_id.clone(),
                 grant_id: grant.grant_id.clone(),
@@ -254,7 +254,7 @@ fn build_items(
         let name = build_name(user, grant, node, endpoint);
         let name_encoded = percent_encode_rfc3986(&name);
 
-        let host = node.public_domain.as_str();
+        let host = node.access_host.as_str();
         let port = endpoint.port;
 
         let (raw_uri, clash_proxy) = match &endpoint.kind {
@@ -486,11 +486,11 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_yaml::Value;
 
-    fn node(node_id: &str, node_name: &str, public_domain: &str) -> Node {
+    fn node(node_id: &str, node_name: &str, access_host: &str) -> Node {
         Node {
             node_id: node_id.to_string(),
             node_name: node_name.to_string(),
-            public_domain: public_domain.to_string(),
+            access_host: access_host.to_string(),
             api_base_url: "http://127.0.0.1:0".to_string(),
         }
     }
@@ -621,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_node_public_domain_is_error() {
+    fn empty_node_access_host_is_error() {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "");
         let ep = endpoint_ss("e1", "n1", "ss", 443);
@@ -630,7 +630,7 @@ mod tests {
         let err = build_raw_lines(&u, &[g], &[ep], &[n]).unwrap_err();
         assert_eq!(
             err,
-            SubscriptionError::EmptyNodePublicDomain {
+            SubscriptionError::EmptyNodeAccessHost {
                 node_id: "n1".to_string(),
                 endpoint_id: "e1".to_string(),
                 grant_id: "g1".to_string(),
