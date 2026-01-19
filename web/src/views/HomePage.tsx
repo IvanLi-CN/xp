@@ -348,7 +348,7 @@ export function HomePage() {
 										<th>node_name</th>
 										<th>node_id</th>
 										<th>api_base_url</th>
-										<th>public_domain</th>
+										<th>access_host</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -357,7 +357,7 @@ export function HomePage() {
 											<td className="font-mono">{n.node_name}</td>
 											<td className="font-mono">{n.node_id}</td>
 											<td className="font-mono">{n.api_base_url}</td>
-											<td className="font-mono">{n.public_domain}</td>
+											<td className="font-mono">{n.access_host}</td>
 										</tr>
 									))}
 								</tbody>

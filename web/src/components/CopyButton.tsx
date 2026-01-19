@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button } from "./Button";
+import { Button, type ButtonProps } from "./Button";
 
 type CopyButtonProps = {
 	text: string;
@@ -8,6 +8,8 @@ type CopyButtonProps = {
 	copiedLabel?: string;
 	errorLabel?: string;
 	variant?: "primary" | "secondary" | "ghost";
+	size?: ButtonProps["size"];
+	className?: string;
 };
 
 function sleep(ms: number) {
@@ -22,6 +24,8 @@ export function CopyButton({
 	copiedLabel = "Copied",
 	errorLabel = "Copy failed",
 	variant = "secondary",
+	size,
+	className,
 }: CopyButtonProps) {
 	const [state, setState] = useState<"idle" | "copied" | "error">("idle");
 
@@ -31,6 +35,8 @@ export function CopyButton({
 	return (
 		<Button
 			variant={variant}
+			size={size}
+			className={className}
 			onClick={async () => {
 				try {
 					await navigator.clipboard.writeText(text);
