@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #e2e8f0; }
+      .t1 { font-size: 14px; fill: #94a3b8; }
+      .t2 { font-size: 12px; fill: #94a3b8; }
+      .t3 { font-size: 13px; fill: #e2e8f0; }
+      .btn { font-size: 12px; font-weight: 750; fill: #e2e8f0; }
+      .stroke { stroke: #24324a; }
+      .mutedStroke { stroke: #3a4a68; }
+      .ico { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="900" fill="#0b1020"/>
+
+  <!-- Top bar -->
+  <rect x="24" y="20" width="1392" height="64" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="60" class="sans t0">xp</text>
+  <text x="92" y="60" class="sans t1">control plane</text>
+
+  <!-- Sidebar -->
+  <rect x="24" y="100" width="280" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="52" y="140" class="sans t2">NAV</text>
+
+  <!-- Nav items (Users active) -->
+  <rect x="44" y="160" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 172) scale(.75)">
+    <path d="M5 4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1m0 12h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1m10-4h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1m0-8h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1"/>
+  </g>
+  <text x="92" y="182" class="sans t3" dominant-baseline="middle">Dashboard</text>
+
+  <rect x="44" y="212" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 224) scale(.75)">
+    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3m0 6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zm4-7v.01M7 16v.01"/>
+  </g>
+  <text x="92" y="234" class="sans t3" dominant-baseline="middle">Nodes</text>
+
+  <rect x="44" y="264" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 276) scale(.75)">
+    <path d="M9.785 6L18 14.215l-2.054 2.054a5.81 5.81 0 1 1-8.215-8.215zM4 20l3.5-3.5M15 4l-3.5 3.5M20 9l-3.5 3.5"/>
+  </g>
+  <text x="92" y="286" class="sans t3" dominant-baseline="middle">Endpoints</text>
+
+  <rect x="44" y="316" width="240" height="44" rx="12" fill="#042f2e" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 328) scale(.75)">
+    <path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M3 21v-2a4 4 0 0 1 4-4h4a4 0 0 1 4 4v2m1-17.87a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.85"/>
+  </g>
+  <text x="92" y="338" class="sans t3" dominant-baseline="middle">Users</text>
+
+  <rect x="44" y="368" width="240" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <g class="ico" style="color:#e2e8f0" transform="translate(62 380) scale(.75)">
+    <path d="m16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1-4.069 0l-.301-.301l-6.558 6.558a2 2 0 0 1-1.239.578L5.172 21H4a1 1 0 0 1-.993-.883L3 20v-1.172a2 2 0 0 1 .467-1.284l.119-.13L4 17h2v-2h2v-2l2.144-2.144l-.301-.301a2.877 2.877 0 0 1 0-4.069l2.643-2.643a2.877 2.877 0 0 1 4.069 0M15 9h.01"/>
+  </g>
+  <text x="92" y="390" class="sans t3" dominant-baseline="middle">Grants</text>
+
+  <!-- Main -->
+  <rect x="320" y="100" width="1096" height="780" rx="16" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="356" y="150" class="sans t0">User details</text>
+  <text x="356" y="176" class="sans t2">User ID: <tspan class="mono">u_01HZZ…9K2M</tspan></text>
+
+  <!-- Profile card -->
+  <rect x="356" y="210" width="1034" height="430" rx="14" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="380" y="248" class="sans t3" font-weight="800">Profile</text>
+  <text x="380" y="272" class="sans t2">Quota reset is configured on the user (Grant does not carry reset settings).</text>
+
+  <text x="404" y="316" class="sans t2" font-weight="750">Display name</text>
+  <rect x="404" y="328" width="360" height="32" rx="10" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="416" y="352" class="sans t3">alice</text>
+
+  <text x="404" y="396" class="sans t2" font-weight="750">Quota reset</text>
+
+  <rect x="404" y="410" width="260" height="32" rx="12" fill="#111b33" class="stroke" stroke-width="1"/>
+  <rect x="406" y="412" width="128" height="28" rx="10" fill="#06b6d4"/>
+  <text x="470" y="426" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Monthly</text>
+  <text x="600" y="426" class="sans btn" opacity="0.7" text-anchor="middle" dominant-baseline="middle">Unlimited</text>
+
+  <text x="404" y="474" class="sans t2" font-weight="750">Reset day (1–31)</text>
+  <rect x="404" y="486" width="140" height="32" rx="10" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="416" y="506" class="mono t2" fill="#e2e8f0">1</text>
+
+  <text x="564" y="474" class="sans t2" font-weight="750">Timezone</text>
+  <rect x="564" y="486" width="200" height="32" rx="10" fill="#0f172a" class="mutedStroke" stroke-width="1"/>
+  <text x="576" y="506" class="mono t2" fill="#e2e8f0">UTC+08:00</text>
+
+  <text x="404" y="544" class="sans t2">Monthly reset happens at 00:00 in the selected timezone (date only, no time-of-day config).</text>
+
+  <rect x="1276" y="588" width="90" height="32" rx="10" fill="#06b6d4"/>
+  <text x="1321" y="604" class="sans btn" fill="#062a30" text-anchor="middle" dominant-baseline="middle">Save</text>
+</svg>
