@@ -297,6 +297,29 @@ impl RaftFacade for LocalRaft {
                         .map_err(anyhow::Error::new)?;
                 }
                 (
+                    DesiredStateCommand::SetUserNodeQuota {
+                        user_id, node_id, ..
+                    },
+                    _,
+                ) => {
+                    let affected: Vec<String> = store
+                        .list_grants()
+                        .into_iter()
+                        .filter(|g| g.user_id == *user_id)
+                        .filter(|g| {
+                            store
+                                .get_endpoint(&g.endpoint_id)
+                                .is_some_and(|ep| ep.node_id == *node_id)
+                        })
+                        .map(|g| g.grant_id)
+                        .collect();
+                    for grant_id in affected {
+                        store
+                            .clear_quota_banned(&grant_id)
+                            .map_err(anyhow::Error::new)?;
+                    }
+                }
+                (
                     DesiredStateCommand::SetGrantEnabled {
                         grant_id,
                         source: GrantEnabledSource::Manual,
@@ -326,13 +349,13 @@ impl RaftFacade for LocalRaft {
 fn map_store_error(err: StoreError) -> ClientResponse {
     match err {
         StoreError::Domain(domain) => match domain {
-            DomainError::MissingUser { .. } | DomainError::MissingEndpoint { .. } => {
-                ClientResponse::Err {
-                    status: 404,
-                    code: "not_found".to_string(),
-                    message: domain.to_string(),
-                }
-            }
+            DomainError::MissingUser { .. }
+            | DomainError::MissingNode { .. }
+            | DomainError::MissingEndpoint { .. } => ClientResponse::Err {
+                status: 404,
+                code: "not_found".to_string(),
+                message: domain.to_string(),
+            },
             _ => ClientResponse::Err {
                 status: 400,
                 code: "invalid_request".to_string(),

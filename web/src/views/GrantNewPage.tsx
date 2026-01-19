@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { type CyclePolicy, createAdminGrant } from "../api/adminGrants";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
@@ -46,6 +47,17 @@ export function GrantNewPage() {
 			? "textarea textarea-bordered textarea-sm"
 			: "textarea textarea-bordered";
 
+	const [userId, setUserId] = useState("");
+	const [nodeFilter, setNodeFilter] = useState("");
+	const [selectedByCell, setSelectedByCell] = useState<Record<string, string>>(
+		{},
+	);
+	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicy>("inherit_user");
+	const [cycleDay, setCycleDay] = useState(1);
+	const [note, setNote] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const [isSubmitting, setIsSubmitting] = useState(false);
+
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
@@ -64,17 +76,12 @@ export function GrantNewPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
-	const [userId, setUserId] = useState("");
-	const [nodeFilter, setNodeFilter] = useState("");
-	const [selectedByCell, setSelectedByCell] = useState<Record<string, string>>(
-		{},
-	);
-	const [quotaLimit, setQuotaLimit] = useState(0);
-	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicy>("inherit_user");
-	const [cycleDay, setCycleDay] = useState(1);
-	const [note, setNote] = useState("");
-	const [error, setError] = useState<string | null>(null);
-	const [isSubmitting, setIsSubmitting] = useState(false);
+	const nodeQuotasQuery = useQuery({
+		queryKey: ["adminUserNodeQuotas", adminToken, userId],
+		enabled: adminToken.length > 0 && userId.length > 0,
+		queryFn: ({ signal }) =>
+			fetchAdminUserNodeQuotas(adminToken, userId, signal),
+	});
 
 	const selectedUser =
 		usersQuery.data?.items.find((u) => u.user_id === userId) ?? null;
@@ -105,25 +112,33 @@ export function GrantNewPage() {
 		if (
 			nodesQuery.isLoading ||
 			usersQuery.isLoading ||
-			endpointsQuery.isLoading
+			endpointsQuery.isLoading ||
+			nodeQuotasQuery.isLoading
 		) {
 			return (
 				<PageState
 					variant="loading"
 					title="Loading grant form"
-					description="Fetching nodes, users and endpoints."
+					description="Fetching nodes, users, endpoints and node quotas."
 				/>
 			);
 		}
 
-		if (nodesQuery.isError || usersQuery.isError || endpointsQuery.isError) {
+		if (
+			nodesQuery.isError ||
+			usersQuery.isError ||
+			endpointsQuery.isError ||
+			nodeQuotasQuery.isError
+		) {
 			const message = usersQuery.isError
 				? formatError(usersQuery.error)
 				: nodesQuery.isError
 					? formatError(nodesQuery.error)
 					: endpointsQuery.isError
 						? formatError(endpointsQuery.error)
-						: "Unknown error";
+						: nodeQuotasQuery.isError
+							? formatError(nodeQuotasQuery.error)
+							: "Unknown error";
 			return (
 				<PageState
 					variant="error"
@@ -136,6 +151,7 @@ export function GrantNewPage() {
 								nodesQuery.refetch();
 								usersQuery.refetch();
 								endpointsQuery.refetch();
+								nodeQuotasQuery.refetch();
 							}}
 						>
 							Retry
@@ -148,6 +164,7 @@ export function GrantNewPage() {
 		const nodes = nodesQuery.data?.items ?? [];
 		const users = usersQuery.data?.items ?? [];
 		const endpoints = endpointsQuery.data?.items ?? [];
+		const nodeQuotas = nodeQuotasQuery.data?.items ?? [];
 
 		if (nodes.length === 0 || users.length === 0 || endpoints.length === 0) {
 			return (
@@ -346,10 +363,6 @@ export function GrantNewPage() {
 						);
 						return;
 					}
-					if (quotaLimit < 0) {
-						setError("Quota limit must be zero or greater.");
-						return;
-					}
 					if (cyclePolicy !== "inherit_user") {
 						if (cycleDay < 1 || cycleDay > 31) {
 							setError("Cycle day must be between 1 and 31.");
@@ -359,10 +372,17 @@ export function GrantNewPage() {
 					setError(null);
 					setIsSubmitting(true);
 					try {
+						const selectedEndpoint =
+							endpoints.find((ep) => ep.endpoint_id === selectedOne) ?? null;
+						const quotaLimitBytes = selectedEndpoint
+							? (nodeQuotas.find((q) => q.node_id === selectedEndpoint.node_id)
+									?.quota_limit_bytes ?? 0)
+							: 0;
+
 						const payload = {
 							user_id: userId,
 							endpoint_id: selectedOne,
-							quota_limit_bytes: quotaLimit,
+							quota_limit_bytes: quotaLimitBytes,
 							cycle_policy: cyclePolicy,
 							cycle_day_of_month:
 								cyclePolicy === "inherit_user" ? null : cycleDay,
@@ -481,18 +501,22 @@ export function GrantNewPage() {
 					</div>
 
 					<div className="grid gap-4 md:grid-cols-2">
-						<label className="form-control">
+						<div className="form-control">
 							<div className="label">
-								<span className="label-text">Quota limit (bytes)</span>
+								<span className="label-text">Quota</span>
 							</div>
-							<input
-								className={inputClass}
-								type="number"
-								min={0}
-								value={quotaLimit}
-								onChange={(event) => setQuotaLimit(Number(event.target.value))}
-							/>
-						</label>
+							<p className="text-sm opacity-70">
+								Quota is configured per node in{" "}
+								<Link
+									to="/users/$userId"
+									params={{ userId }}
+									className="link link-primary"
+								>
+									user details
+								</Link>
+								.
+							</p>
+						</div>
 						<label className="form-control">
 							<div className="label">
 								<span className="label-text">Cycle policy</span>

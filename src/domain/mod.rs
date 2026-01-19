@@ -5,6 +5,7 @@ pub enum DomainError {
     InvalidPort { port: u16 },
     InvalidCycleDayOfMonth { day_of_month: u8 },
     MissingUser { user_id: String },
+    MissingNode { node_id: String },
     MissingEndpoint { endpoint_id: String },
     MissingCycleDayOfMonth { cycle_policy: CyclePolicy },
 }
@@ -15,7 +16,9 @@ impl DomainError {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
             | Self::MissingCycleDayOfMonth { .. } => "invalid_request",
-            Self::MissingUser { .. } | Self::MissingEndpoint { .. } => "invalid_request",
+            Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
+                "invalid_request"
+            }
         }
     }
 }
@@ -28,6 +31,7 @@ impl std::fmt::Display for DomainError {
                 write!(f, "invalid cycle_day_of_month: {day_of_month}")
             }
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
+            Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
             Self::MissingCycleDayOfMonth { cycle_policy } => write!(
                 f,
@@ -102,6 +106,13 @@ pub struct User {
     pub subscription_token: String,
     pub cycle_policy_default: CyclePolicyDefault,
     pub cycle_day_of_month_default: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserNodeQuota {
+    pub user_id: String,
+    pub node_id: String,
+    pub quota_limit_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

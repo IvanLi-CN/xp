@@ -7,7 +7,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,9 @@ use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
     cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
-    domain::{CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User},
+    domain::{
+        CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User, UserNodeQuota,
+    },
     protocol::VlessRealityVisionTcpEndpointMeta,
     raft::{
         app::RaftFacade,
@@ -90,6 +92,7 @@ impl From<StoreError> for ApiError {
         match value {
             StoreError::Domain(domain) => match domain {
                 crate::domain::DomainError::MissingUser { .. }
+                | crate::domain::DomainError::MissingNode { .. }
                 | crate::domain::DomainError::MissingEndpoint { .. } => {
                     ApiError::not_found(domain.to_string())
                 }
@@ -209,6 +212,11 @@ struct PatchUserRequest {
     display_name: Option<Option<String>>,
     cycle_policy_default: Option<CyclePolicyDefault>,
     cycle_day_of_month_default: Option<u8>,
+}
+
+#[derive(Deserialize)]
+struct PutUserNodeQuotaRequest {
+    quota_limit_bytes: u64,
 }
 
 #[derive(Deserialize)]
@@ -332,6 +340,14 @@ pub fn build_router(
                 .patch(admin_patch_user),
         )
         .route("/users/:user_id/reset-token", post(admin_reset_user_token))
+        .route(
+            "/users/:user_id/node-quotas",
+            get(admin_list_user_node_quotas),
+        )
+        .route(
+            "/users/:user_id/node-quotas/:node_id",
+            put(admin_put_user_node_quota),
+        )
         .route("/grants", post(admin_create_grant).get(admin_list_grants))
         .route(
             "/grants/:grant_id",
@@ -1065,6 +1081,36 @@ async fn admin_reset_user_token(
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
     Ok(Json(ResetTokenResponse { subscription_token }))
+}
+
+async fn admin_list_user_node_quotas(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<Items<UserNodeQuota>>, ApiError> {
+    let store = state.store.lock().await;
+    let items = store.list_user_node_quotas(&user_id)?;
+    Ok(Json(Items { items }))
+}
+
+async fn admin_put_user_node_quota(
+    Extension(state): Extension<AppState>,
+    Path((user_id, node_id)): Path<(String, String)>,
+    ApiJson(req): ApiJson<PutUserNodeQuotaRequest>,
+) -> Result<Json<UserNodeQuota>, ApiError> {
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::SetUserNodeQuota {
+            user_id: user_id.clone(),
+            node_id: node_id.clone(),
+            quota_limit_bytes: req.quota_limit_bytes,
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::UserNodeQuotaSet { quota } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+    state.reconcile.request_full();
+    Ok(Json(quota))
 }
 
 async fn admin_create_grant(

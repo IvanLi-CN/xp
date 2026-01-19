@@ -63,7 +63,6 @@ export function GrantDetailsPage() {
 	});
 
 	const [enabled, setEnabled] = useState(true);
-	const [quotaLimit, setQuotaLimit] = useState(0);
 	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicy>("inherit_user");
 	const [cycleDay, setCycleDay] = useState(1);
 	const [note, setNote] = useState("");
@@ -76,7 +75,6 @@ export function GrantDetailsPage() {
 	useEffect(() => {
 		if (!grantQuery.data) return;
 		setEnabled(grantQuery.data.enabled);
-		setQuotaLimit(grantQuery.data.quota_limit_bytes);
 		setCyclePolicy(grantQuery.data.cycle_policy);
 		setCycleDay(grantQuery.data.cycle_day_of_month ?? 1);
 		setNote(grantQuery.data.note ?? "");
@@ -145,10 +143,6 @@ export function GrantDetailsPage() {
 
 	const handleSave = async (confirmedDisable: boolean) => {
 		if (isSaving) return;
-		if (quotaLimit < 0) {
-			setFormError("Quota limit must be zero or greater.");
-			return;
-		}
 		if (cyclePolicy !== "inherit_user") {
 			if (cycleDay < 1 || cycleDay > 31) {
 				setFormError("Cycle day must be between 1 and 31.");
@@ -166,7 +160,7 @@ export function GrantDetailsPage() {
 		try {
 			const payload: AdminGrantPatchRequest = {
 				enabled,
-				quota_limit_bytes: quotaLimit,
+				quota_limit_bytes: grant.quota_limit_bytes,
 				cycle_policy: cyclePolicy,
 				cycle_day_of_month: cyclePolicy === "inherit_user" ? null : cycleDay,
 			};
@@ -240,18 +234,23 @@ export function GrantDetailsPage() {
 						</p>
 					</div>
 					<div className="grid gap-4 md:grid-cols-2">
-						<label className="form-control">
+						<div className="form-control">
 							<div className="label">
-								<span className="label-text">Quota limit (bytes)</span>
+								<span className="label-text">Quota (node)</span>
 							</div>
-							<input
-								className={inputClass}
-								type="number"
-								min={0}
-								value={quotaLimit}
-								onChange={(event) => setQuotaLimit(Number(event.target.value))}
-							/>
-						</label>
+							<div className="flex flex-wrap items-baseline gap-3">
+								<span className="font-mono text-sm">
+									{grant.quota_limit_bytes} bytes
+								</span>
+								<Link
+									to="/users/$userId"
+									params={{ userId: grant.user_id }}
+									className="link link-primary text-sm"
+								>
+									Edit node quota in user details
+								</Link>
+							</div>
+						</div>
 						<label className="form-control">
 							<div className="label">
 								<span className="label-text">Cycle policy</span>

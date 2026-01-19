@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     domain::{
         CyclePolicy, CyclePolicyDefault, DomainError, Endpoint, EndpointKind, Grant,
-        GrantCredentials, Node, Ss2022Credentials, User, VlessCredentials,
+        GrantCredentials, Node, Ss2022Credentials, User, UserNodeQuota, VlessCredentials,
         validate_cycle_day_of_month, validate_port,
     },
     id::new_ulid_string,
@@ -96,6 +96,8 @@ pub struct PersistedState {
     pub users: BTreeMap<String, User>,
     #[serde(default)]
     pub grants: BTreeMap<String, Grant>,
+    #[serde(default)]
+    pub user_node_quotas: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
 impl PersistedState {
@@ -106,6 +108,7 @@ impl PersistedState {
             endpoints: BTreeMap::new(),
             users: BTreeMap::new(),
             grants: BTreeMap::new(),
+            user_node_quotas: BTreeMap::new(),
         }
     }
 }
@@ -148,6 +151,11 @@ pub enum DesiredStateCommand {
         user_id: String,
         subscription_token: String,
     },
+    SetUserNodeQuota {
+        user_id: String,
+        node_id: String,
+        quota_limit_bytes: u64,
+    },
     UpsertGrant {
         grant: Grant,
     },
@@ -178,6 +186,7 @@ pub enum DesiredStateApplyResult {
     EndpointDeleted { deleted: bool },
     UserDeleted { deleted: bool },
     UserTokenReset { applied: bool },
+    UserNodeQuotaSet { quota: UserNodeQuota },
     GrantDeleted { deleted: bool },
     GrantUpdated { grant: Option<Grant> },
     GrantEnabledSet { grant: Option<Grant>, changed: bool },
@@ -221,6 +230,51 @@ impl DesiredStateCommand {
                 user.subscription_token = subscription_token.clone();
                 Ok(DesiredStateApplyResult::UserTokenReset { applied: true })
             }
+            Self::SetUserNodeQuota {
+                user_id,
+                node_id,
+                quota_limit_bytes,
+            } => {
+                if !state.users.contains_key(user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: user_id.clone(),
+                    }
+                    .into());
+                }
+                if !state.nodes.contains_key(node_id) {
+                    return Err(DomainError::MissingNode {
+                        node_id: node_id.clone(),
+                    }
+                    .into());
+                }
+
+                state
+                    .user_node_quotas
+                    .entry(user_id.clone())
+                    .or_default()
+                    .insert(node_id.clone(), *quota_limit_bytes);
+
+                // Best-effort: unify existing grants on that node to keep legacy API behavior consistent.
+                for grant in state.grants.values_mut() {
+                    if grant.user_id != *user_id {
+                        continue;
+                    }
+                    let Some(endpoint) = state.endpoints.get(&grant.endpoint_id) else {
+                        continue;
+                    };
+                    if endpoint.node_id == *node_id {
+                        grant.quota_limit_bytes = *quota_limit_bytes;
+                    }
+                }
+
+                Ok(DesiredStateApplyResult::UserNodeQuotaSet {
+                    quota: UserNodeQuota {
+                        user_id: user_id.clone(),
+                        node_id: node_id.clone(),
+                        quota_limit_bytes: *quota_limit_bytes,
+                    },
+                })
+            }
             Self::UpsertGrant { grant } => {
                 if !state.users.contains_key(&grant.user_id) {
                     return Err(DomainError::MissingUser {
@@ -233,6 +287,14 @@ impl DesiredStateCommand {
                         endpoint_id: grant.endpoint_id.clone(),
                     }
                     .into());
+                }
+
+                let mut grant = grant.clone();
+                if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
+                    && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
+                    && let Some(quota) = user_map.get(&endpoint.node_id)
+                {
+                    grant.quota_limit_bytes = *quota;
                 }
 
                 if grant.cycle_policy != CyclePolicy::InheritUser
@@ -278,7 +340,16 @@ impl DesiredStateCommand {
                 }
 
                 grant.enabled = *enabled;
-                grant.quota_limit_bytes = *quota_limit_bytes;
+                let effective_quota = if let Some(endpoint) =
+                    state.endpoints.get(&grant.endpoint_id)
+                    && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
+                    && let Some(quota) = user_map.get(&endpoint.node_id)
+                {
+                    *quota
+                } else {
+                    *quota_limit_bytes
+                };
+                grant.quota_limit_bytes = effective_quota;
                 grant.cycle_policy = cycle_policy.clone();
                 grant.cycle_day_of_month = *cycle_day_of_month;
                 if let Some(note) = note {
@@ -657,6 +728,13 @@ impl JsonSnapshotStore {
                     endpoint_id: endpoint_id.clone(),
                 })?;
 
+        let quota_limit_bytes = self
+            .state
+            .user_node_quotas
+            .get(&user_id)
+            .and_then(|m| m.get(&endpoint.node_id).copied())
+            .unwrap_or(quota_limit_bytes);
+
         let grant_id = new_ulid_string();
         let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
 
@@ -671,6 +749,34 @@ impl JsonSnapshotStore {
             note,
             credentials,
         })
+    }
+
+    pub fn get_user_node_quota_limit_bytes(&self, user_id: &str, node_id: &str) -> Option<u64> {
+        self.state
+            .user_node_quotas
+            .get(user_id)
+            .and_then(|m| m.get(node_id).copied())
+    }
+
+    pub fn list_user_node_quotas(&self, user_id: &str) -> Result<Vec<UserNodeQuota>, StoreError> {
+        if !self.state.users.contains_key(user_id) {
+            return Err(DomainError::MissingUser {
+                user_id: user_id.to_string(),
+            }
+            .into());
+        }
+
+        let mut out = Vec::new();
+        if let Some(nodes) = self.state.user_node_quotas.get(user_id) {
+            for (node_id, quota_limit_bytes) in nodes {
+                out.push(UserNodeQuota {
+                    user_id: user_id.to_string(),
+                    node_id: node_id.clone(),
+                    quota_limit_bytes: *quota_limit_bytes,
+                });
+            }
+        }
+        Ok(out)
     }
 
     pub fn create_grant(
