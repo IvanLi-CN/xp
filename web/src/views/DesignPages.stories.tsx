@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, userEvent, within } from "@storybook/test";
 
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
+import type { AdminGrantGroupDetail } from "../api/adminGrantGroups";
 import type { AdminGrant } from "../api/adminGrants";
 import type { AdminNode } from "../api/adminNodes";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
@@ -161,6 +163,40 @@ const DESIGN_GRANTS: AdminGrant[] = [
 	},
 ];
 
+const DESIGN_GRANT_GROUPS: AdminGrantGroupDetail[] = [
+	{
+		group: { group_name: "group-20260119-demo" },
+		members: [
+			{
+				user_id: "u_01HUSERAAAAAA",
+				endpoint_id: "ep_01HENDPTAAAAAA",
+				enabled: true,
+				quota_limit_bytes: 10_000_000,
+				note: null,
+				credentials: {
+					vless: {
+						uuid: "11111111-1111-1111-1111-111111111111",
+						email: "customer-a@example.com",
+					},
+				},
+			},
+			{
+				user_id: "u_01HUSERBBBBBB",
+				endpoint_id: "ep_01HENDPTBBBBBB",
+				enabled: true,
+				quota_limit_bytes: 5_000_000,
+				note: null,
+				credentials: {
+					ss2022: {
+						method: "2022-blake3-aes-128-gcm",
+						password: "mock-password",
+					},
+				},
+			},
+		],
+	},
+];
+
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
 		user_id: "u_01HUSERAAAAAA",
@@ -188,6 +224,7 @@ const DESIGN_MOCK_API = {
 		endpoints: DESIGN_ENDPOINTS,
 		users: DESIGN_USERS,
 		grants: DESIGN_GRANTS,
+		grantGroups: DESIGN_GRANT_GROUPS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
 		alerts: DESIGN_ALERTS,
 		subscriptions: DESIGN_SUBSCRIPTIONS,
@@ -227,8 +264,61 @@ export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });
 export const Grants: Story = pageStory({ path: "/grants" });
 export const GrantNew: Story = pageStory({ path: "/grants/new" });
+export const GrantNewMultiSelect: Story = {
+	...pageStory({ path: "/grants/new" }),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.findByText("Create grant group")).resolves.toBeTruthy();
+		await canvas.findByText("Selected 0 / 2");
+
+		const toggleAll = await canvas.findByRole("checkbox", {
+			name: "Toggle all nodes and protocols",
+		});
+		await userEvent.click(toggleAll);
+		await canvas.findByText("Selected 2 / 2");
+
+		await expect(
+			await canvas.findByRole("button", { name: "Create group (2 members)" }),
+		).toBeEnabled();
+	},
+};
+
+export const GrantNewConflict: Story = {
+	...pageStory({ path: "/grants/new" }),
+	parameters: {
+		router: { initialEntry: "/grants/new" },
+		mockApi: {
+			...DESIGN_MOCK_API,
+			delayGrantGroupCreateMs: 200,
+			failGrantGroupCreate: true,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByText("Selected 0 / 2");
+		const toggleAll = await canvas.findByRole("checkbox", {
+			name: "Toggle all nodes and protocols",
+		});
+		await userEvent.click(toggleAll);
+		await canvas.findByText("Selected 2 / 2");
+
+		const button = await canvas.findByRole("button", {
+			name: "Create group (2 members)",
+		});
+
+		await userEvent.click(button);
+		await expect(
+			await canvas.findByText("409 conflict: group_name already exists", {
+				selector: "p",
+			}),
+		).toBeInTheDocument();
+	},
+};
 export const GrantDetails: Story = pageStory({
 	path: "/grants/g_01HGRANTAAAAAA",
+});
+export const GrantGroupDetails: Story = pageStory({
+	path: "/grant-groups/group-20260119-demo",
 });
 export const ServiceConfig: Story = pageStory({ path: "/service-config" });
 export const ServiceConfigError: Story = pageStory({

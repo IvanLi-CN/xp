@@ -5,6 +5,10 @@ import type {
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
 import type {
+	AdminGrantGroupCreateRequest,
+	AdminGrantGroupDetail,
+} from "../../src/api/adminGrantGroups";
+import type {
 	AdminGrant,
 	AdminGrantCreateRequest,
 	AdminGrantPatchRequest,
@@ -26,6 +30,8 @@ export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
+	failGrantGroupCreate?: boolean;
+	delayGrantGroupCreateMs?: number;
 };
 
 type MockEndpointSeed = AdminEndpoint & {
@@ -45,6 +51,7 @@ type MockStateSeed = {
 	endpoints: MockEndpointSeed[];
 	users: AdminUser[];
 	grants: AdminGrant[];
+	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
@@ -53,9 +60,13 @@ type MockStateSeed = {
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
 	failAdminConfig: boolean;
+	failGrantGroupCreate: boolean;
+	delayGrantGroupCreateMs: number;
+	grantGroupsByName: Record<string, AdminGrantGroupDetail>;
 	counters: {
 		endpoint: number;
 		grant: number;
+		grantGroup: number;
 		joinToken: number;
 		shortId: number;
 		subscription: number;
@@ -273,6 +284,7 @@ function createDefaultSeed(): MockStateSeed {
 		endpoints,
 		users,
 		grants,
+		grantGroups: [],
 		nodeQuotas: [],
 		alerts,
 		subscriptions,
@@ -290,6 +302,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		users: overrides?.users ?? base.users,
 		grants: overrides?.grants ?? base.grants,
+		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
@@ -301,6 +314,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	const counters = {
 		endpoint: 1,
 		grant: 1,
+		grantGroup: 1,
 		joinToken: 1,
 		shortId: 1,
 		subscription: 1,
@@ -311,10 +325,18 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		ensureEndpointRecord(endpoint, counters),
 	);
 
+	const grantGroupsByName: Record<string, AdminGrantGroupDetail> = {};
+	for (const group of merged.grantGroups) {
+		grantGroupsByName[group.group.group_name] = clone(group);
+	}
+
 	return {
 		...clone(merged),
 		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
+		failGrantGroupCreate: config?.failGrantGroupCreate ?? false,
+		delayGrantGroupCreateMs: config?.delayGrantGroupCreateMs ?? 0,
+		grantGroupsByName,
 		counters,
 	};
 }
@@ -707,6 +729,76 @@ async function handleRequest(
 		return jsonResponse({ items: clone(state.grants) });
 	}
 
+	if (path === "/api/admin/grant-groups" && method === "POST") {
+		if (state.delayGrantGroupCreateMs > 0) {
+			await new Promise((resolve) =>
+				setTimeout(resolve, state.delayGrantGroupCreateMs),
+			);
+		}
+
+		if (state.failGrantGroupCreate) {
+			return errorResponse(409, "conflict", "group_name already exists");
+		}
+
+		const payload = await readJson<AdminGrantGroupCreateRequest>(req);
+		if (!payload) {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+		if (!payload.group_name) {
+			return errorResponse(400, "invalid_request", "group_name is required");
+		}
+		if (!payload.members || payload.members.length === 0) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"members must have at least 1 item",
+			);
+		}
+		if (state.grantGroupsByName[payload.group_name]) {
+			return errorResponse(409, "conflict", "group_name already exists");
+		}
+
+		const endpointsById = new Map(
+			state.endpoints.map(({ active_short_id, short_ids, ...rest }) => [
+				rest.endpoint_id,
+				rest,
+			]),
+		);
+
+		const detail: AdminGrantGroupDetail = {
+			group: { group_name: payload.group_name },
+			members: payload.members.map((m) => {
+				const endpoint = endpointsById.get(m.endpoint_id);
+				return {
+					user_id: m.user_id,
+					endpoint_id: m.endpoint_id,
+					enabled: m.enabled,
+					quota_limit_bytes: Math.floor(m.quota_limit_bytes),
+					note: m.note ?? null,
+					credentials: createGrantCredentials(
+						endpoint,
+						state.counters.grantGroup++,
+					),
+				};
+			}),
+		};
+
+		state.grantGroupsByName[payload.group_name] = clone(detail);
+		return jsonResponse(detail);
+	}
+
+	const grantGroupGetMatch = path.match(
+		/^\/api\/admin\/grant-groups\/([^/]+)$/,
+	);
+	if (grantGroupGetMatch && method === "GET") {
+		const groupName = decodeURIComponent(grantGroupGetMatch[1]);
+		const group = state.grantGroupsByName[groupName];
+		if (!group) {
+			return errorResponse(404, "not_found", "grant group not found");
+		}
+		return jsonResponse(clone(group));
+	}
+
 	if (path === "/api/admin/grants" && method === "POST") {
 		const payload = await readJson<AdminGrantCreateRequest>(req);
 		if (!payload) {
@@ -836,7 +928,7 @@ export function configureStorybookApiMock(
 	storyId: string,
 	config?: StorybookApiMockConfig,
 ): void {
-	const key = JSON.stringify({ storyId, data: config?.data ?? null });
+	const key = JSON.stringify({ storyId, config: config ?? null });
 	if (key === lastStoryKey) return;
 	if (!singletonMock) {
 		singletonMock = createMockApi(config);

@@ -21,6 +21,7 @@ use crate::{
     cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
     domain::{
         CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User, UserNodeQuota,
+        validate_group_name,
     },
     protocol::VlessRealityVisionTcpEndpointMeta,
     raft::{
@@ -82,6 +83,10 @@ impl ApiError {
         Self::new("not_implemented", StatusCode::NOT_IMPLEMENTED, message)
     }
 
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new("conflict", StatusCode::CONFLICT, message)
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new("internal", StatusCode::INTERNAL_SERVER_ERROR, message)
     }
@@ -95,6 +100,10 @@ impl From<StoreError> for ApiError {
                 | crate::domain::DomainError::MissingNode { .. }
                 | crate::domain::DomainError::MissingEndpoint { .. } => {
                     ApiError::not_found(domain.to_string())
+                }
+                crate::domain::DomainError::GroupNameConflict { .. }
+                | crate::domain::DomainError::GrantPairConflict { .. } => {
+                    ApiError::conflict(domain.to_string())
                 }
                 _ => ApiError::invalid_request(domain.to_string()),
             },
@@ -258,6 +267,43 @@ struct PatchGrantRequest {
     cycle_day_of_month: Option<u8>,
 }
 
+#[derive(Deserialize)]
+struct CreateGrantGroupMemberRequest {
+    user_id: String,
+    endpoint_id: String,
+    enabled: bool,
+    quota_limit_bytes: u64,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateGrantGroupRequest {
+    group_name: String,
+    members: Vec<CreateGrantGroupMemberRequest>,
+}
+
+#[derive(Serialize)]
+struct AdminGrantGroup {
+    group_name: String,
+}
+
+#[derive(Serialize)]
+struct AdminGrantGroupMember {
+    user_id: String,
+    endpoint_id: String,
+    enabled: bool,
+    quota_limit_bytes: u64,
+    note: Option<String>,
+    credentials: crate::domain::GrantCredentials,
+}
+
+#[derive(Serialize)]
+struct AdminGrantGroupDetail {
+    group: AdminGrantGroup,
+    members: Vec<AdminGrantGroupMember>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct RealityConfig {
@@ -376,6 +422,8 @@ pub fn build_router(
                 .patch(admin_patch_grant),
         )
         .route("/grants/:grant_id/usage", get(admin_get_grant_usage))
+        .route("/grant-groups", post(admin_create_grant_group))
+        .route("/grant-groups/:group_name", get(admin_get_grant_group))
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
@@ -1182,6 +1230,112 @@ async fn admin_create_grant(
     .await?;
     state.reconcile.request_full();
     Ok(Json(grant))
+}
+
+async fn admin_create_grant_group(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<CreateGrantGroupRequest>,
+) -> Result<Json<AdminGrantGroupDetail>, ApiError> {
+    validate_group_name(&req.group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    if req.members.is_empty() {
+        return Err(ApiError::invalid_request(
+            "grant group must have at least 1 member",
+        ));
+    }
+
+    let mut grants = Vec::with_capacity(req.members.len());
+    {
+        let store = state.store.lock().await;
+        for m in req.members {
+            let mut grant = store.build_grant(
+                m.user_id,
+                m.endpoint_id,
+                m.quota_limit_bytes,
+                CyclePolicy::InheritUser,
+                None,
+                m.note,
+            )?;
+            grant.enabled = m.enabled;
+            grant.group_name = Some(req.group_name.clone());
+            grants.push(grant);
+        }
+    }
+
+    let out = raft_write(
+        &state,
+        DesiredStateCommand::CreateGrantGroup {
+            group_name: req.group_name.clone(),
+            grants: grants.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::GrantGroupCreated { .. } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+
+    state.reconcile.request_full();
+
+    let mut members: Vec<AdminGrantGroupMember> = grants
+        .into_iter()
+        .map(|g| AdminGrantGroupMember {
+            user_id: g.user_id,
+            endpoint_id: g.endpoint_id,
+            enabled: g.enabled,
+            quota_limit_bytes: g.quota_limit_bytes,
+            note: g.note,
+            credentials: g.credentials,
+        })
+        .collect();
+    members.sort_by(|a, b| {
+        a.user_id
+            .cmp(&b.user_id)
+            .then_with(|| a.endpoint_id.cmp(&b.endpoint_id))
+    });
+
+    Ok(Json(AdminGrantGroupDetail {
+        group: AdminGrantGroup {
+            group_name: req.group_name,
+        },
+        members,
+    }))
+}
+
+async fn admin_get_grant_group(
+    Extension(state): Extension<AppState>,
+    Path(group_name): Path<String>,
+) -> Result<Json<AdminGrantGroupDetail>, ApiError> {
+    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    let store = state.store.lock().await;
+    let mut members: Vec<AdminGrantGroupMember> = store
+        .list_grants()
+        .into_iter()
+        .filter(|g| g.group_name.as_deref() == Some(group_name.as_str()))
+        .map(|g| AdminGrantGroupMember {
+            user_id: g.user_id,
+            endpoint_id: g.endpoint_id,
+            enabled: g.enabled,
+            quota_limit_bytes: g.quota_limit_bytes,
+            note: g.note,
+            credentials: g.credentials,
+        })
+        .collect();
+
+    if members.is_empty() {
+        return Err(ApiError::not_found(format!(
+            "grant group not found: {group_name}"
+        )));
+    }
+
+    members.sort_by(|a, b| {
+        a.user_id
+            .cmp(&b.user_id)
+            .then_with(|| a.endpoint_id.cmp(&b.endpoint_id))
+    });
+
+    Ok(Json(AdminGrantGroupDetail {
+        group: AdminGrantGroup { group_name },
+        members,
+    }))
 }
 
 async fn admin_patch_grant(

@@ -22,6 +22,7 @@ import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
 import { EndpointsPage } from "../src/views/EndpointsPage";
 import { GrantDetailsPage } from "../src/views/GrantDetailsPage";
+import { GrantGroupDetailsPage } from "../src/views/GrantGroupDetailsPage";
 import { GrantNewPage } from "../src/views/GrantNewPage";
 import { GrantsPage } from "../src/views/GrantsPage";
 import { HomePage } from "../src/views/HomePage";
@@ -217,6 +218,12 @@ const preview: Preview = {
 				component: GrantDetailsPage,
 			});
 
+			const grantGroupDetailsRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/grant-groups/$groupName",
+				component: GrantGroupDetailsPage,
+			});
+
 			const appRouteTree = appRoute.addChildren([
 				dashboardRoute,
 				nodesRoute,
@@ -230,6 +237,7 @@ const preview: Preview = {
 				grantsRoute,
 				grantNewRoute,
 				grantDetailsRoute,
+				grantGroupDetailsRoute,
 				serviceConfigRoute,
 			]);
 

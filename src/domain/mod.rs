@@ -2,12 +2,39 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
-    InvalidPort { port: u16 },
-    InvalidCycleDayOfMonth { day_of_month: u8 },
-    MissingUser { user_id: String },
-    MissingNode { node_id: String },
-    MissingEndpoint { endpoint_id: String },
-    MissingCycleDayOfMonth { cycle_policy: CyclePolicy },
+    InvalidPort {
+        port: u16,
+    },
+    InvalidCycleDayOfMonth {
+        day_of_month: u8,
+    },
+    InvalidGroupName {
+        group_name: String,
+    },
+    EmptyGrantGroup,
+    DuplicateGrantGroupMember {
+        user_id: String,
+        endpoint_id: String,
+    },
+    MissingUser {
+        user_id: String,
+    },
+    MissingNode {
+        node_id: String,
+    },
+    MissingEndpoint {
+        endpoint_id: String,
+    },
+    MissingCycleDayOfMonth {
+        cycle_policy: CyclePolicy,
+    },
+    GroupNameConflict {
+        group_name: String,
+    },
+    GrantPairConflict {
+        user_id: String,
+        endpoint_id: String,
+    },
 }
 
 impl DomainError {
@@ -15,10 +42,14 @@ impl DomainError {
         match self {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
+            | Self::InvalidGroupName { .. }
+            | Self::EmptyGrantGroup
+            | Self::DuplicateGrantGroupMember { .. }
             | Self::MissingCycleDayOfMonth { .. } => "invalid_request",
             Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
                 "invalid_request"
             }
+            Self::GroupNameConflict { .. } | Self::GrantPairConflict { .. } => "conflict",
         }
     }
 }
@@ -30,12 +61,31 @@ impl std::fmt::Display for DomainError {
             Self::InvalidCycleDayOfMonth { day_of_month } => {
                 write!(f, "invalid cycle_day_of_month: {day_of_month}")
             }
+            Self::InvalidGroupName { group_name } => write!(f, "invalid group_name: {group_name}"),
+            Self::EmptyGrantGroup => write!(f, "grant group must have at least 1 member"),
+            Self::DuplicateGrantGroupMember {
+                user_id,
+                endpoint_id,
+            } => write!(
+                f,
+                "duplicate group member: user_id={user_id} endpoint_id={endpoint_id}"
+            ),
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
             Self::MissingCycleDayOfMonth { cycle_policy } => write!(
                 f,
                 "cycle_day_of_month is required when cycle_policy is {cycle_policy:?}"
+            ),
+            Self::GroupNameConflict { group_name } => {
+                write!(f, "group_name already exists: {group_name}")
+            }
+            Self::GrantPairConflict {
+                user_id,
+                endpoint_id,
+            } => write!(
+                f,
+                "grant pair already exists: user_id={user_id} endpoint_id={endpoint_id}"
             ),
         }
     }
@@ -53,6 +103,35 @@ pub fn validate_port(port: u16) -> Result<(), DomainError> {
 pub fn validate_cycle_day_of_month(day_of_month: u8) -> Result<(), DomainError> {
     if !(1..=31).contains(&day_of_month) {
         return Err(DomainError::InvalidCycleDayOfMonth { day_of_month });
+    }
+    Ok(())
+}
+
+pub fn validate_group_name(group_name: &str) -> Result<(), DomainError> {
+    if group_name.is_empty() || group_name.len() > 64 {
+        return Err(DomainError::InvalidGroupName {
+            group_name: group_name.to_string(),
+        });
+    }
+    let mut chars = group_name.chars();
+    let Some(first) = chars.next() else {
+        return Err(DomainError::InvalidGroupName {
+            group_name: group_name.to_string(),
+        });
+    };
+    let is_first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
+    if !is_first_ok {
+        return Err(DomainError::InvalidGroupName {
+            group_name: group_name.to_string(),
+        });
+    }
+    for ch in chars {
+        let ok = ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_';
+        if !ok {
+            return Err(DomainError::InvalidGroupName {
+                group_name: group_name.to_string(),
+            });
+        }
     }
     Ok(())
 }
@@ -121,6 +200,8 @@ pub struct Grant {
     pub grant_id: String,
     pub user_id: String,
     pub endpoint_id: String,
+    #[serde(default)]
+    pub group_name: Option<String>,
     pub enabled: bool,
     pub quota_limit_bytes: u64,
     pub cycle_policy: CyclePolicy,

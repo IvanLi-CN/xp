@@ -356,6 +356,13 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
+            DomainError::GroupNameConflict { .. } | DomainError::GrantPairConflict { .. } => {
+                ClientResponse::Err {
+                    status: 409,
+                    code: "conflict".to_string(),
+                    message: domain.to_string(),
+                }
+            }
             _ => ClientResponse::Err {
                 status: 400,
                 code: "invalid_request".to_string(),

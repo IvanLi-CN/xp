@@ -12,7 +12,7 @@ use crate::{
     domain::{
         CyclePolicy, CyclePolicyDefault, DomainError, Endpoint, EndpointKind, Grant,
         GrantCredentials, Node, Ss2022Credentials, User, UserNodeQuota, VlessCredentials,
-        validate_cycle_day_of_month, validate_port,
+        validate_cycle_day_of_month, validate_group_name, validate_port,
     },
     id::new_ulid_string,
     protocol::{
@@ -162,6 +162,10 @@ pub enum DesiredStateCommand {
     DeleteGrant {
         grant_id: String,
     },
+    CreateGrantGroup {
+        group_name: String,
+        grants: Vec<Grant>,
+    },
     UpdateGrantFields {
         grant_id: String,
         enabled: bool,
@@ -188,6 +192,7 @@ pub enum DesiredStateApplyResult {
     UserTokenReset { applied: bool },
     UserNodeQuotaSet { quota: UserNodeQuota },
     GrantDeleted { deleted: bool },
+    GrantGroupCreated { created: usize },
     GrantUpdated { grant: Option<Grant> },
     GrantEnabledSet { grant: Option<Grant>, changed: bool },
 }
@@ -315,6 +320,97 @@ impl DesiredStateCommand {
             Self::DeleteGrant { grant_id } => {
                 let deleted = state.grants.remove(grant_id).is_some();
                 Ok(DesiredStateApplyResult::GrantDeleted { deleted })
+            }
+            Self::CreateGrantGroup { group_name, grants } => {
+                validate_group_name(group_name)?;
+                if grants.is_empty() {
+                    return Err(DomainError::EmptyGrantGroup.into());
+                }
+
+                // group_name uniqueness.
+                if state
+                    .grants
+                    .values()
+                    .any(|g| g.group_name.as_deref() == Some(group_name.as_str()))
+                {
+                    return Err(DomainError::GroupNameConflict {
+                        group_name: group_name.clone(),
+                    }
+                    .into());
+                }
+
+                // members validation and global pair uniqueness.
+                let mut seen_pairs = std::collections::BTreeSet::<(String, String)>::new();
+                for grant in grants {
+                    if !state.users.contains_key(&grant.user_id) {
+                        return Err(DomainError::MissingUser {
+                            user_id: grant.user_id.clone(),
+                        }
+                        .into());
+                    }
+                    if !state.endpoints.contains_key(&grant.endpoint_id) {
+                        return Err(DomainError::MissingEndpoint {
+                            endpoint_id: grant.endpoint_id.clone(),
+                        }
+                        .into());
+                    }
+
+                    if grant.cycle_policy != CyclePolicy::InheritUser
+                        && grant.cycle_day_of_month.is_none()
+                    {
+                        return Err(DomainError::MissingCycleDayOfMonth {
+                            cycle_policy: grant.cycle_policy.clone(),
+                        }
+                        .into());
+                    }
+                    if let Some(day) = grant.cycle_day_of_month {
+                        validate_cycle_day_of_month(day)?;
+                    }
+
+                    if grant.group_name.as_deref() != Some(group_name.as_str()) {
+                        return Err(DomainError::InvalidGroupName {
+                            group_name: group_name.clone(),
+                        }
+                        .into());
+                    }
+
+                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
+                    if !seen_pairs.insert(key.clone()) {
+                        return Err(DomainError::DuplicateGrantGroupMember {
+                            user_id: key.0,
+                            endpoint_id: key.1,
+                        }
+                        .into());
+                    }
+
+                    // Global uniqueness: no existing (user_id, endpoint_id).
+                    if state
+                        .grants
+                        .values()
+                        .any(|g| g.user_id == key.0 && g.endpoint_id == key.1)
+                    {
+                        return Err(DomainError::GrantPairConflict {
+                            user_id: key.0,
+                            endpoint_id: key.1,
+                        }
+                        .into());
+                    }
+
+                    if state.grants.contains_key(&grant.grant_id) {
+                        return Err(DomainError::InvalidGroupName {
+                            group_name: group_name.clone(),
+                        }
+                        .into());
+                    }
+                }
+
+                for grant in grants {
+                    state.grants.insert(grant.grant_id.clone(), grant.clone());
+                }
+
+                Ok(DesiredStateApplyResult::GrantGroupCreated {
+                    created: seen_pairs.len(),
+                })
             }
             Self::UpdateGrantFields {
                 grant_id,
@@ -748,6 +844,7 @@ impl JsonSnapshotStore {
             grant_id,
             user_id,
             endpoint_id,
+            group_name: None,
             enabled: true,
             quota_limit_bytes,
             cycle_policy,
@@ -1416,6 +1513,7 @@ mod tests {
                 grant_id: grant_id.to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
+                group_name: None,
                 enabled: true,
                 quota_limit_bytes: 0,
                 cycle_policy: CyclePolicy::InheritUser,
@@ -1586,6 +1684,7 @@ mod tests {
             grant_id: "grant_1".to_string(),
             user_id: "user_1".to_string(),
             endpoint_id: "endpoint_1".to_string(),
+            group_name: None,
             enabled: true,
             quota_limit_bytes: 10,
             cycle_policy: CyclePolicy::InheritUser,

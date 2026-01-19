@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-18
 - Last: 2026-01-19
 
@@ -122,9 +122,9 @@ Grant 新建页（`GrantNewPage`）使用“节点 × 协议”的二维矩阵�
 
 ## 10) 里程碑（Milestones）
 
-- [ ] M1: Web：Grant 新建页多选 CTA 与提交流程（创建 1 个 group，N members）
-- [ ] M2: Web：创建结果反馈（成功/失败）与可重试
-- [ ] M3: Web：补齐测试（Vitest）与 Storybook 场景
+- [x] M1: Web：Grant 新建页多选 CTA 与提交流程（创建 1 个 group，N members）
+- [x] M2: Web：创建结果反馈（成功/失败）与可重试
+- [x] M3: Web：补齐测试（Vitest）与 Storybook 场景
 
 ## 11) 方案概述（Approach, high-level）
 
@@ -155,3 +155,8 @@ Grant 新建页（`GrantNewPage`）使用“节点 × 协议”的二维矩阵�
 ## 设计稿（Assets）
 
 - `./DESIGN.md`
+
+## Change log
+
+- 实现“多选创建 1 个 group（N members）”的提交流程，新增 `/api/admin/grant-groups` 后端接口与前端对接。
+- 交互与反馈对齐：0/1/N 选择态 CTA、提交 loading、防重复提交、冲突（409）可重试。
