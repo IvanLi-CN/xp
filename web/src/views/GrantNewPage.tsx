@@ -2,9 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import type { AdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
-import { type CyclePolicy, createAdminGrant } from "../api/adminGrants";
+import {
+	type AdminGrantGroupCreateRequest,
+	createAdminGrantGroup,
+} from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
+import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
@@ -26,6 +31,72 @@ function formatError(err: unknown): string {
 	}
 	if (err instanceof Error) return err.message;
 	return String(err);
+}
+
+function generateDefaultGroupName(): string {
+	const date = new Date();
+	const yyyymmdd = [
+		date.getFullYear(),
+		String(date.getMonth() + 1).padStart(2, "0"),
+		String(date.getDate()).padStart(2, "0"),
+	].join("");
+
+	let rand = "";
+	if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+		const bytes = new Uint8Array(4);
+		crypto.getRandomValues(bytes);
+		rand = Array.from(bytes)
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
+	} else {
+		rand = Math.random().toString(16).slice(2, 10);
+	}
+
+	return `group-${yyyymmdd}-${rand}`.slice(0, 64);
+}
+
+function validateGroupNameInput(raw: string): string | null {
+	const name = raw.trim();
+	if (name.length === 0) return "Group name is required.";
+	if (name.length > 64) return "Group name must be 64 characters or fewer.";
+	if (!/^[a-z0-9][a-z0-9-_]*$/.test(name)) {
+		return "Group name must match: [a-z0-9][a-z0-9-_]*";
+	}
+	return null;
+}
+
+export function buildGrantGroupCreateRequest(args: {
+	groupName: string;
+	userId: string;
+	selectedEndpointIds: string[];
+	endpoints: AdminEndpoint[];
+	nodeQuotas: AdminUserNodeQuota[];
+	note: string;
+}): AdminGrantGroupCreateRequest {
+	const groupName = args.groupName.trim();
+	const noteValue = args.note.trim() ? args.note.trim() : null;
+
+	const members = args.selectedEndpointIds.map((endpointId) => {
+		const endpoint = args.endpoints.find((ep) => ep.endpoint_id === endpointId);
+		if (!endpoint) {
+			throw new Error(`endpoint not found: ${endpointId}`);
+		}
+		const quotaLimitBytes =
+			args.nodeQuotas.find((q) => q.node_id === endpoint.node_id)
+				?.quota_limit_bytes ?? 0;
+		return {
+			user_id: args.userId,
+			endpoint_id: endpointId,
+			enabled: true,
+			quota_limit_bytes: quotaLimitBytes,
+			note: noteValue,
+		};
+	});
+
+	return {
+		group_name: groupName,
+		members,
+	};
 }
 
 export function GrantNewPage() {
@@ -52,8 +123,8 @@ export function GrantNewPage() {
 	const [selectedByCell, setSelectedByCell] = useState<Record<string, string>>(
 		{},
 	);
-	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicy>("inherit_user");
-	const [cycleDay, setCycleDay] = useState(1);
+	const [groupName, setGroupName] = useState(generateDefaultGroupName);
+	const [groupNameTouched, setGroupNameTouched] = useState(false);
 	const [note, setNote] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -225,6 +296,19 @@ export function GrantNewPage() {
 			PROTOCOLS.some((p) => p.protocolId === ep.kind),
 		).length;
 
+		const groupNameError = validateGroupNameInput(groupName);
+
+		const submitDisabled =
+			isSubmitting ||
+			userId.length === 0 ||
+			selectedEndpointIds.length === 0 ||
+			groupNameError !== null;
+
+		const submitLabel =
+			selectedEndpointIds.length <= 1
+				? "Create group"
+				: `Create group (${selectedEndpointIds.length} members)`;
+
 		const cells: Record<
 			string,
 			Record<string, GrantAccessMatrixCellState>
@@ -351,57 +435,44 @@ export function GrantNewPage() {
 				className="rounded-box border border-base-200 bg-base-100 p-6 space-y-6"
 				onSubmit={async (event) => {
 					event.preventDefault();
-					const selectedOne =
-						selectedEndpointIds.length === 1 ? selectedEndpointIds[0] : null;
-					if (!userId || !selectedOne) {
-						setError(
-							selectedEndpointIds.length === 0
-								? "User and access point are required."
-								: selectedEndpointIds.length > 1
-									? "Select exactly one access point to create a single grant."
-									: "User and access point are required.",
-						);
+					if (!userId) {
+						setError("User is required.");
 						return;
 					}
-					if (cyclePolicy !== "inherit_user") {
-						if (cycleDay < 1 || cycleDay > 31) {
-							setError("Cycle day must be between 1 and 31.");
-							return;
-						}
+					if (selectedEndpointIds.length === 0) {
+						setError("Select at least 1 access point.");
+						return;
+					}
+					if (groupNameError) {
+						setError(groupNameError);
+						return;
 					}
 					setError(null);
 					setIsSubmitting(true);
 					try {
-						const selectedEndpoint =
-							endpoints.find((ep) => ep.endpoint_id === selectedOne) ?? null;
-						const quotaLimitBytes = selectedEndpoint
-							? (nodeQuotas.find((q) => q.node_id === selectedEndpoint.node_id)
-									?.quota_limit_bytes ?? 0)
-							: 0;
-
-						const payload = {
-							user_id: userId,
-							endpoint_id: selectedOne,
-							quota_limit_bytes: quotaLimitBytes,
-							cycle_policy: cyclePolicy,
-							cycle_day_of_month:
-								cyclePolicy === "inherit_user" ? null : cycleDay,
-							note: note.trim() ? note.trim() : null,
-						};
-						const created = await createAdminGrant(adminToken, payload);
+						const payload = buildGrantGroupCreateRequest({
+							groupName,
+							userId,
+							selectedEndpointIds,
+							endpoints,
+							nodeQuotas,
+							note,
+						});
+						const created = await createAdminGrantGroup(adminToken, payload);
 						pushToast({
 							variant: "success",
-							message: "Grant created.",
+							message: `Created group with ${payload.members.length} members.`,
 						});
 						navigate({
-							to: "/grants/$grantId",
-							params: { grantId: created.grant_id },
+							to: "/grant-groups/$groupName",
+							params: { groupName: created.group.group_name },
 						});
 					} catch (err) {
-						setError(formatError(err));
+						const message = formatError(err);
+						setError(message);
 						pushToast({
 							variant: "error",
-							message: "Failed to create grant.",
+							message: `Failed to create group: ${message}`,
 						});
 					} finally {
 						setIsSubmitting(false);
@@ -410,22 +481,46 @@ export function GrantNewPage() {
 			>
 				<div className="space-y-6">
 					<div className="max-w-xl">
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">User</span>
-							</div>
-							<select
-								className={selectClass}
-								value={userId}
-								onChange={(event) => setUserId(event.target.value)}
-							>
-								{users.map((user) => (
-									<option key={user.user_id} value={user.user_id}>
-										{user.display_name} ({user.user_id})
-									</option>
-								))}
-							</select>
-						</label>
+						<div className="grid gap-4 md:grid-cols-2">
+							<label className="form-control">
+								<div className="label">
+									<span className="label-text">User</span>
+								</div>
+								<select
+									className={selectClass}
+									value={userId}
+									onChange={(event) => setUserId(event.target.value)}
+									disabled={isSubmitting}
+								>
+									{users.map((user) => (
+										<option key={user.user_id} value={user.user_id}>
+											{user.display_name} ({user.user_id})
+										</option>
+									))}
+								</select>
+							</label>
+							<label className="form-control">
+								<div className="label">
+									<span className="label-text">Group name</span>
+								</div>
+								<input
+									className={inputClass}
+									value={groupName}
+									disabled={isSubmitting}
+									onChange={(event) => {
+										setGroupNameTouched(true);
+										setGroupName(event.target.value);
+									}}
+								/>
+								{groupNameError ? (
+									<p className="text-xs text-error">{groupNameError}</p>
+								) : !groupNameTouched ? (
+									<p className="text-xs opacity-70">
+										A default name is generated, but you can edit it.
+									</p>
+								) : null}
+							</label>
+						</div>
 					</div>
 
 					<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
@@ -452,7 +547,7 @@ export function GrantNewPage() {
 								variant="secondary"
 								size="sm"
 								onClick={() => setSelectedByCell({})}
-								disabled={selectedEndpointIds.length === 0}
+								disabled={isSubmitting || selectedEndpointIds.length === 0}
 							>
 								Reset
 							</Button>
@@ -460,15 +555,17 @@ export function GrantNewPage() {
 								type="submit"
 								size="sm"
 								loading={isSubmitting}
-								disabled={
-									isSubmitting ||
-									userId.length === 0 ||
-									selectedEndpointIds.length !== 1
-								}
+								disabled={submitDisabled}
 							>
-								Create grant
+								{submitLabel}
 							</Button>
 						</div>
+
+						{selectedEndpointIds.length === 0 ? (
+							<p className="text-xs text-warning">
+								Select at least 1 access point to create a group.
+							</p>
+						) : null}
 
 						<div className="flex items-baseline gap-4">
 							<span className="text-sm font-semibold">Matrix</span>
@@ -517,46 +614,7 @@ export function GrantNewPage() {
 								.
 							</p>
 						</div>
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">Cycle policy</span>
-							</div>
-							<select
-								className={selectClass}
-								value={cyclePolicy}
-								onChange={(event) => {
-									const next = event.target.value as CyclePolicy;
-									setCyclePolicy(next);
-									if (next === "inherit_user") {
-										setCycleDay(1);
-									}
-								}}
-							>
-								<option value="inherit_user">inherit_user</option>
-								<option value="by_user">by_user</option>
-								<option value="by_node">by_node</option>
-							</select>
-						</label>
 					</div>
-					<label className="form-control">
-						<div className="label">
-							<span className="label-text">Cycle day of month</span>
-						</div>
-						<input
-							className={inputClass}
-							type="number"
-							min={1}
-							max={31}
-							value={cycleDay}
-							onChange={(event) => setCycleDay(Number(event.target.value))}
-							disabled={cyclePolicy === "inherit_user"}
-						/>
-						{cyclePolicy === "inherit_user" ? (
-							<p className="text-xs opacity-70">
-								Cycle day is inherited from the user.
-							</p>
-						) : null}
-					</label>
 					<label className="form-control">
 						<div className="label">
 							<span className="label-text">Note (optional)</span>
@@ -566,6 +624,7 @@ export function GrantNewPage() {
 							value={note}
 							onChange={(event) => setNote(event.target.value)}
 							placeholder="e.g. enterprise quota"
+							disabled={isSubmitting}
 						/>
 					</label>
 					{error ? <p className="text-sm text-error">{error}</p> : null}
@@ -577,7 +636,7 @@ export function GrantNewPage() {
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				title="Access points"
+				title="Create grant group"
 				description={
 					selectedUser ? (
 						<>
@@ -585,7 +644,7 @@ export function GrantNewPage() {
 							- {selectedUser.display_name}
 						</>
 					) : (
-						"Select a node and protocol combination to create one grant."
+						"Select access points to create a grant group."
 					)
 				}
 				actions={
