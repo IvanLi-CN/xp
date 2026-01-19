@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 待实现
 - Created: 2026-01-18
-- Last: 2026-01-18
+- Last: 2026-01-19
 
 ## 1) 问题陈述
 
@@ -51,13 +51,13 @@ Grant 新建页（`GrantNewPage`）使用“节点 × 协议”的二维矩阵�
   - 页面给出明确提示：需要选择至少 1 个接入点。
 - 选择数为 1 时（创建一个包含 1 个成员的 group）：
   - CTA 文案：`Create group`；
-  - 成功后跳转到该 group 的详情页（或列表页；见开放问题 2）。
+  - 成功后跳转到该 group 的详情页。
 - 选择数大于 1 时（创建一个包含 N 个成员的 group）：
   - CTA 文案体现数量（例如 `Create group (N members)`），且按钮可点击；
   - 点击后一次性提交整组 payload，服务端原子创建该 group 与其成员集合；
   - 提交期间显示 loading，且避免重复提交（按钮与关键输入禁用）。
 - 批量创建的结果反馈必须可操作：
-  - 成功：toast 明确提示“Created group with N members.”，并跳转到 group 详情页或 group 列表页（以最终口径为准）。
+  - 成功：toast 明确提示“Created group with N members.”，并跳转到 group 详情页。
   - 失败：toast 提示失败原因（如可读），并允许重试（不会产生部分提交）。
 - 校验口径清晰一致：
   - `quota_limit_bytes` 必须是 `>= 0`；
@@ -86,13 +86,13 @@ Grant 新建页（`GrantNewPage`）使用“节点 × 协议”的二维矩阵�
 
 - Given 已选择 1 个接入点，
   When 点击 `Create group`，
-  Then 发送 1 次 `POST /api/admin/grant-groups` 请求且成功后跳转到该 group 详情页（或列表页）。
+  Then 发送 1 次 `POST /api/admin/grant-groups` 请求且成功后跳转到该 group 详情页。
 
 - Given 已选择 N>1 个接入点，
   When 点击 `Create group (N members)`，
   Then 发送 1 次 `POST /api/admin/grant-groups` 创建请求，
   And UI 在提交期间显示 loading 并阻止重复提交，
-  And 全部成功时提示“Created group with N members.”并跳转到目标页。
+  And 全部成功时提示“Created group with N members.”并跳转到 group 详情页。
 
 ### 表单校验
 
@@ -138,16 +138,14 @@ Grant 新建页（`GrantNewPage`）使用“节点 × 协议”的二维矩阵�
   - 单次请求的 payload 可能较大；需要定义上限与失败提示策略（避免“看起来卡住”）。
   - 是否允许创建时与既有 group 成员重复（去重/迁移策略）需要后端口径配合（#0017）。
 
-- 需要决策的问题（请逐条回答）：
-  1. 多选时的最终产品口径是否确认是“创建 1 个 group（N members）”？还是希望改为“强制单选”？
-  2. 创建成功后，期望跳转到哪里：group 详情页、group 列表页、留在当前页、还是新建结果页？
-  3. 当 N 较大（例如全选）时，是否需要二次确认（confirm）以防误触？
-  4. 如果成员 `(user_id, endpoint_id)` 已经存在于某个 group，期望行为是：允许重复、拒绝并提示、还是做“迁移到新 group”？
+- 开放问题：
+  - None（关键口径已对齐至 #0017：多选创建 1 个组；冲突返回 409。）
 
-## 13) 假设（需主人确认）
+## 13) 假设（已确认）
 
-- 假设：多选场景默认走“创建 1 个 group（N members）”，单选场景保持“创建后跳 group 详情”的体验。
-- 假设：实现阶段由 #0017 提供 `grant-groups` API；本页面不再调用 `grants` API。
+- 多选创建 1 个 group（N members），提交整组 payload。
+- 创建成功后跳转到 group 详情页。
+- 实现阶段由 #0017 提供 `grant-groups` API；本页面不再调用 `grants` API。
 
 ## 参考（References）
 

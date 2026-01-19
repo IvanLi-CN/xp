@@ -69,5 +69,5 @@
 | 0013 | Cloudflare Tunnel 公网访问与互联（API 自动创建 + 应用路由） | 已完成 | `0013:cloudflare-tunnel-remote-access/PLAN.md`    | 2026-01-16 | -                |
 | 0014 | Grant 按节点配额编辑（GiB/MiB 智能解析）                    | 待实现 | `0014:grant-node-quota-editor/PLAN.md`            | 2026-01-18 | -                |
 | 0015 | 服务配置只读展示页                                          | 待实现 | `0015:service-config-readonly-page/PLAN.md`       | 2026-01-17 | -                |
-| 0016 | Grant 新建页：接入点选择与创建交互优化                      | 待设计 | `0016:grant-new-access-selection/PLAN.md`         | 2026-01-18 | -                |
+| 0016 | Grant 新建页：接入点选择与创建交互优化                      | 待实现 | `0016:grant-new-access-selection/PLAN.md`         | 2026-01-19 | -                |
 | 0017 | Grant 模型：分组与配额周期归属                              | 待实现 | `0017:grant-grouping-and-cycle-ownership/PLAN.md` | 2026-01-19 | -                |
