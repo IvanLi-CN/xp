@@ -147,4 +147,55 @@ describe("storybook api mock", () => {
 		const text = await subRes.text();
 		expect(text).toContain(token);
 	});
+
+	it("supports user node quotas", async () => {
+		const mock = createMockApi();
+
+		const listUsers = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(listUsers.ok).toBe(true);
+		const usersData = (await listUsers.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "user-1";
+
+		const listNodes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		expect(listNodes.ok).toBe(true);
+		const nodesData = (await listNodes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+
+		const putRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/node-quotas/${nodeId}`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ quota_limit_bytes: 10 * 2 ** 30 }),
+			}),
+		);
+		expect(putRes.ok).toBe(true);
+
+		const listRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/node-quotas`, { method: "GET" }),
+		);
+		expect(listRes.ok).toBe(true);
+		const listData = (await listRes.json()) as {
+			items: Array<{
+				user_id: string;
+				node_id: string;
+				quota_limit_bytes: number;
+			}>;
+		};
+		expect(
+			listData.items.some(
+				(item) =>
+					item.user_id === userId &&
+					item.node_id === nodeId &&
+					item.quota_limit_bytes === 10 * 2 ** 30,
+			),
+		).toBe(true);
+	});
 });

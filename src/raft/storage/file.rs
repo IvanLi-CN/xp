@@ -491,6 +491,33 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     })?;
                                 }
                                 (
+                                    DesiredStateCommand::SetUserNodeQuota {
+                                        user_id, node_id, ..
+                                    },
+                                    _,
+                                ) => {
+                                    let affected: Vec<String> = store
+                                        .list_grants()
+                                        .into_iter()
+                                        .filter(|g| g.user_id == *user_id)
+                                        .filter(|g| {
+                                            store
+                                                .get_endpoint(&g.endpoint_id)
+                                                .is_some_and(|ep| ep.node_id == *node_id)
+                                        })
+                                        .map(|g| g.grant_id)
+                                        .collect();
+                                    for grant_id in affected {
+                                        store.clear_quota_banned(&grant_id).map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                    }
+                                }
+                                (
                                     DesiredStateCommand::SetGrantEnabled {
                                         grant_id,
                                         source: GrantEnabledSource::Manual,
@@ -516,6 +543,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                         Err(crate::state::StoreError::Domain(domain)) => {
                             let (status, code) = match domain {
                                 crate::domain::DomainError::MissingUser { .. }
+                                | crate::domain::DomainError::MissingNode { .. }
                                 | crate::domain::DomainError::MissingEndpoint { .. } => {
                                     (404, "not_found")
                                 }

@@ -4,6 +4,7 @@ import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminGrant } from "../api/adminGrants";
 import type { AdminNode } from "../api/adminNodes";
+import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
 
 function Empty() {
@@ -160,6 +161,14 @@ const DESIGN_GRANTS: AdminGrant[] = [
 	},
 ];
 
+const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
+	{
+		user_id: "u_01HUSERAAAAAA",
+		node_id: "n1",
+		quota_limit_bytes: 10 * 2 ** 30,
+	},
+];
+
 const DESIGN_SUBSCRIPTIONS: Record<string, string> = {
 	sub_9c1234d2: "# raw subscription for sub_9c1234d2\nnode: n1",
 	sub_af5678e9: "# raw subscription for sub_af5678e9\nnode: n2",
@@ -179,6 +188,7 @@ const DESIGN_MOCK_API = {
 		endpoints: DESIGN_ENDPOINTS,
 		users: DESIGN_USERS,
 		grants: DESIGN_GRANTS,
+		nodeQuotas: DESIGN_NODE_QUOTAS,
 		alerts: DESIGN_ALERTS,
 		subscriptions: DESIGN_SUBSCRIPTIONS,
 	},

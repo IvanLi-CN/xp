@@ -566,6 +566,125 @@ async fn create_user_then_list_contains_it() {
 }
 
 #[tokio::test]
+async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    // Create user.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice",
+              "cycle_policy_default": "by_user",
+              "cycle_day_of_month_default": 1
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+
+    // Bootstrap node exists.
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    // Create endpoint on that node.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created_ep = body_json(res).await;
+    let endpoint_id = created_ep["endpoint_id"].as_str().unwrap().to_string();
+
+    // Create grant.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grants",
+            json!({
+              "user_id": user_id.clone(),
+              "endpoint_id": endpoint_id.clone(),
+              "quota_limit_bytes": 123,
+              "cycle_policy": "inherit_user",
+              "cycle_day_of_month": null
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created_grant = body_json(res).await;
+    let grant_id = created_grant["grant_id"].as_str().unwrap().to_string();
+
+    // Set node quota.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
+            json!({
+              "quota_limit_bytes": 456
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let quota = body_json(res).await;
+    assert_eq!(quota["user_id"], user_id);
+    assert_eq!(quota["node_id"], node_id);
+    assert_eq!(quota["quota_limit_bytes"], 456);
+
+    // List node quotas for user.
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/node-quotas"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    assert!(
+        listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 456)
+    );
+
+    // Grant quota should be unified.
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", &format!("/api/admin/grants/{grant_id}")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let fetched_grant = body_json(res).await;
+    assert_eq!(fetched_grant["quota_limit_bytes"], 456);
+}
+
+#[tokio::test]
 async fn create_endpoint_then_list_contains_it() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
