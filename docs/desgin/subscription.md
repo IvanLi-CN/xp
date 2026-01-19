@@ -10,7 +10,7 @@
 
 ### 2.1 host 与端口
 
-- `host`：使用 Endpoint 所属节点的 `Node.public_domain`
+- `host`：使用 Endpoint 所属节点的 `Node.access_host`
 - `port`：使用 Endpoint 的入站端口
 
 ### 2.2 命名（显示名）
@@ -35,7 +35,7 @@ vless://<UUID>@<HOST>:<PORT>?encryption=none&security=reality&type=tcp&sni=<SNI>
 字段说明：
 
 - `UUID`：Grant 的 vless uuid
-- `HOST`：Node.public_domain
+- `HOST`：Node.access_host
 - `PORT`：Endpoint.port
 - `SNI`：Endpoint.reality.server_names 的首选项
 - `FP`：Endpoint.reality.fingerprint（默认 `chrome`）

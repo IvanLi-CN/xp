@@ -42,7 +42,7 @@
 
 关键实体：
 
-- Node：节点信息（public_domain、api_base_url、时区等）
+- Node：节点信息（access_host、api_base_url、时区等）
 - Endpoint：一个 inbound（属于某个 node）
 - User：订阅 token、周期默认策略（ByUser=UTC+8）
 - Grant：用户在端点上的授权（凭据、配额、enabled）

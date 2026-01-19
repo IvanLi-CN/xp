@@ -42,7 +42,7 @@
    - 生成集群 CA（自签）与首节点证书；
    - 生成 `admin_token`；
    - 初始化 Raft 存储目录；
-   - 写入本机配置（node_id、public_domain、对外 api_base_url 等）。
+   - 写入本机配置（node_id、access_host、对外 api_base_url 等）。
 2. 启动 `xp` 与 `xray`（`xray` 使用“基础配置”，入站由 `xp` 动态注入）。
 
 ### 3.2 加入新节点
@@ -155,7 +155,7 @@
 1. 通过 token 查找 User；
 2. 获取该 User 的所有 enabled Grants；
 3. 对每个 Grant 生成对应 URI：
-   - host = Endpoint 所属 Node.public_domain
+   - host = Endpoint 所属 Node.access_host
    - port = Endpoint.port
    - VLESS：携带 pbk、active shortId(sid)、fp、flow、sni 等
    - SS2022：method 固定；password=`server_psk:user_psk`
