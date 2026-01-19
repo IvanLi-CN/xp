@@ -25,6 +25,7 @@ import type { HealthResponse } from "../../src/api/health";
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
+	failAdminConfig?: boolean;
 };
 
 type MockEndpointSeed = AdminEndpoint & {
@@ -51,6 +52,7 @@ type MockStateSeed = {
 
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
+	failAdminConfig: boolean;
 	counters: {
 		endpoint: number;
 		grant: number;
@@ -140,13 +142,13 @@ function createDefaultSeed(): MockStateSeed {
 			node_id: "node-1",
 			node_name: "tokyo-1",
 			api_base_url: "https://tokyo-1.example.com",
-			public_domain: "tokyo-1.example.com",
+			access_host: "tokyo-1.example.com",
 		},
 		{
 			node_id: "node-2",
 			node_name: "osaka-1",
 			api_base_url: "https://osaka-1.example.com",
-			public_domain: "osaka-1.example.com",
+			access_host: "osaka-1.example.com",
 		},
 	];
 
@@ -312,6 +314,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	return {
 		...clone(merged),
 		endpoints,
+		failAdminConfig: config?.failAdminConfig ?? false,
 		counters,
 	};
 }
@@ -372,6 +375,26 @@ async function handleRequest(
 
 	if (path === "/api/cluster/info" && method === "GET") {
 		return jsonResponse(state.clusterInfo);
+	}
+
+	if (path === "/api/admin/config" && method === "GET") {
+		if (state.failAdminConfig) {
+			return errorResponse(500, "internal", "mock admin config failure");
+		}
+		const node = state.nodes[0];
+		const token = "storybook-admin-token";
+		return jsonResponse({
+			bind: "127.0.0.1:62416",
+			xray_api_addr: "127.0.0.1:10085",
+			data_dir: "./data",
+			node_name: node?.node_name ?? "node-1",
+			access_host: node?.access_host ?? "",
+			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
+			quota_poll_interval_secs: 10,
+			quota_auto_unban: true,
+			admin_token_present: true,
+			admin_token_masked: "*".repeat(token.length),
+		});
 	}
 
 	if (path === "/api/admin/nodes" && method === "GET") {
@@ -457,7 +480,7 @@ async function handleRequest(
 		if (method === "PATCH") {
 			const payload = await readJson<{
 				node_name?: string;
-				public_domain?: string;
+				access_host?: string;
 				api_base_url?: string;
 			}>(req);
 			if (!payload) {
@@ -466,7 +489,7 @@ async function handleRequest(
 			const updated: AdminNode = {
 				...node,
 				node_name: payload.node_name ?? node.node_name,
-				public_domain: payload.public_domain ?? node.public_domain,
+				access_host: payload.access_host ?? node.access_host,
 				api_base_url: payload.api_base_url ?? node.api_base_url,
 			};
 			state.nodes = state.nodes.map((item) =>

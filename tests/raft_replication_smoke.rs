@@ -76,7 +76,7 @@ fn store_init(data_dir: &Path, bootstrap_node_id: String, node_name: String) -> 
         data_dir: data_dir.to_path_buf(),
         bootstrap_node_id: Some(bootstrap_node_id),
         bootstrap_node_name: node_name,
-        bootstrap_public_domain: "".to_string(),
+        bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     }
 }

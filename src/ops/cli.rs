@@ -122,8 +122,8 @@ pub struct XpBootstrapArgs {
     #[arg(long, value_name = "NAME")]
     pub node_name: String,
 
-    #[arg(long, value_name = "DOMAIN")]
-    pub public_domain: String,
+    #[arg(long = "access-host", value_name = "HOST")]
+    pub access_host: String,
 
     #[arg(long, value_name = "ORIGIN")]
     pub api_base_url: String,
@@ -143,8 +143,8 @@ pub struct DeployArgs {
     #[arg(long, value_name = "NAME")]
     pub node_name: String,
 
-    #[arg(long, value_name = "DOMAIN")]
-    pub public_domain: String,
+    #[arg(long = "access-host", value_name = "HOST")]
+    pub access_host: String,
 
     #[command(flatten)]
     pub cloudflare_toggle: CloudflareToggle,

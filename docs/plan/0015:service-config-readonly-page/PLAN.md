@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-17
-- Last: 2026-01-17
+- Last: 2026-01-19
 
 ## 背景 / 问题陈述
 
@@ -147,9 +147,9 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: 冻结接口契约（HTTP API + UI 视图模型）。
-- [ ] M2: UI 与 API 的实现与自测完成。
-- [ ] M3: 测试/Storybook/文档更新完成并满足质量门槛。
+- [x] M1: 冻结接口契约（HTTP API + UI 视图模型）。
+- [x] M2: UI 与 API 的实现与自测完成。
+- [x] M3: 测试/Storybook/文档更新完成并满足质量门槛。
 
 ## 方案概述（Approach, high-level）
 
@@ -180,3 +180,8 @@
 - `src/config.rs`
 - `web/src/api/backendError.ts`
 - `web/src/router.tsx`
+
+## Change log
+
+- 2026-01-19: 实现 `/api/admin/config` 与 `/service-config` 只读页；全量重命名 `public_domain` → `access_host`，并加入持久化迁移与测试覆盖。
+- 2026-01-19: 对齐 DESIGN.md 高保真稿：补齐 Settings 分组导航、Page header actions（Copy JSON/Refresh）、Summary chips 与 2×2 配置卡片布局；字段值保持单行并支持水平滚动查看全量内容。

@@ -59,7 +59,7 @@ describe("AdminNodesResponseSchema", () => {
 						node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
 						node_name: "node-1",
 						api_base_url: "https://127.0.0.1:62416",
-						public_domain: "",
+						access_host: "",
 					},
 				],
 			}),
@@ -69,7 +69,7 @@ describe("AdminNodesResponseSchema", () => {
 					node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
 					node_name: "node-1",
 					api_base_url: "https://127.0.0.1:62416",
-					public_domain: "",
+					access_host: "",
 				},
 			],
 		});

@@ -176,7 +176,8 @@ struct CreateJoinTokenResponse {
 struct ClusterJoinRequest {
     join_token: String,
     node_name: String,
-    public_domain: String,
+    #[serde(alias = "public_domain")]
+    access_host: String,
     api_base_url: String,
     csr_pem: String,
 }
@@ -200,10 +201,28 @@ struct CreateUserRequest {
 struct PatchNodeRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     node_name: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    public_domain: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        alias = "public_domain"
+    )]
+    access_host: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     api_base_url: Option<Option<String>>,
+}
+
+#[derive(Serialize)]
+struct AdminServiceConfigResponse {
+    bind: String,
+    xray_api_addr: String,
+    data_dir: String,
+    node_name: String,
+    access_host: String,
+    api_base_url: String,
+    quota_poll_interval_secs: u64,
+    quota_auto_unban: bool,
+    admin_token_present: bool,
+    admin_token_masked: String,
 }
 
 #[derive(Deserialize)]
@@ -313,6 +332,7 @@ pub fn build_router(
             post(admin_internal_raft_client_write),
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
+        .route("/config", get(admin_get_config))
         .route("/nodes", get(admin_list_nodes))
         .route(
             "/nodes/:node_id",
@@ -591,7 +611,7 @@ async fn cluster_join(
     let node = Node {
         node_id: node_id.clone(),
         node_name: req.node_name.clone(),
-        public_domain: req.public_domain.clone(),
+        access_host: req.access_host.clone(),
         api_base_url: req.api_base_url.clone(),
     };
 
@@ -754,11 +774,11 @@ async fn admin_patch_node(
         };
         node.node_name = node_name;
     }
-    if let Some(public_domain) = req.public_domain {
-        let Some(public_domain) = public_domain else {
-            return Err(ApiError::invalid_request("public_domain cannot be null"));
+    if let Some(access_host) = req.access_host {
+        let Some(access_host) = access_host else {
+            return Err(ApiError::invalid_request("access_host cannot be null"));
         };
-        node.public_domain = public_domain;
+        node.access_host = access_host;
     }
     if let Some(api_base_url) = req.api_base_url {
         let Some(api_base_url) = api_base_url else {
@@ -773,6 +793,31 @@ async fn admin_patch_node(
     )
     .await?;
     Ok(Json(node))
+}
+
+async fn admin_get_config(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
+    let admin_token = state.config.admin_token.as_str();
+    let admin_token_present = !admin_token.is_empty();
+    let admin_token_masked = if admin_token_present {
+        "*".repeat(admin_token.chars().count())
+    } else {
+        String::new()
+    };
+
+    Ok(Json(AdminServiceConfigResponse {
+        bind: state.config.bind.to_string(),
+        xray_api_addr: state.config.xray_api_addr.to_string(),
+        data_dir: state.config.data_dir.display().to_string(),
+        node_name: state.config.node_name.clone(),
+        access_host: state.config.access_host.clone(),
+        api_base_url: state.config.api_base_url.clone(),
+        quota_poll_interval_secs: state.config.quota_poll_interval_secs,
+        quota_auto_unban: state.config.quota_auto_unban,
+        admin_token_present,
+        admin_token_masked,
+    }))
 }
 
 async fn admin_create_endpoint(

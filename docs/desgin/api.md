@@ -84,7 +84,7 @@
 {
   "join_token": "base64url(...)",
   "node_name": "node-1",
-  "public_domain": "example.com",
+  "access_host": "example.com",
   "api_base_url": "https://node-1.internal:8443",
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n"
 }
@@ -115,7 +115,7 @@
     {
       "node_id": "01J...",
       "node_name": "node-1",
-      "public_domain": "example.com",
+      "access_host": "example.com",
       "api_base_url": "https://node-1.internal:8443"
     }
   ]
@@ -130,7 +130,7 @@
 
 ### 2.6 更新节点（管理员）
 
-> 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `public_domain`），**不涉及** Raft membership 变更与节点移除。
+> 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `access_host`），**不涉及** Raft membership 变更与节点移除。
 
 `PATCH /api/admin/nodes/{node_id}`
 
@@ -139,7 +139,7 @@
 ```json
 {
   "node_name": "node-1",
-  "public_domain": "example.com",
+  "access_host": "example.com",
   "api_base_url": "https://node-1.internal:8443"
 }
 ```
@@ -159,7 +159,6 @@
   "node_id": "01J...",
   "kind": "vless_reality_vision_tcp",
   "port": 443,
-  "public_domain": "example.com",
   "reality": {
     "dest": "example.com:443",
     "server_names": ["example.com"],
@@ -229,7 +228,6 @@
 ```json
 {
   "port": 443,
-  "public_domain": "example.com",
   "reality": {
     "dest": "example.com:443",
     "server_names": ["example.com"],

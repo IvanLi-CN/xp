@@ -55,7 +55,7 @@ struct CloudflarePlan {
 struct DeployPlan {
     xp_bin: PathBuf,
     node_name: String,
-    public_domain: String,
+    access_host: String,
     api_base_url: String,
     api_base_url_source: ValueSource,
     xray_version: String,
@@ -241,7 +241,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         paths.clone(),
         XpBootstrapArgs {
             node_name: plan.node_name.clone(),
-            public_domain: plan.public_domain.clone(),
+            access_host: plan.access_host.clone(),
             api_base_url: plan.api_base_url.clone(),
             xp_data_dir: Path::new("/var/lib/xp/data").to_path_buf(),
             dry_run: mode == Mode::DryRun,
@@ -345,8 +345,8 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         errors.push("xp-bin does not exist".to_string());
     }
 
-    if args.public_domain.trim().is_empty() {
-        warnings.push("public_domain is empty".to_string());
+    if args.access_host.trim().is_empty() {
+        warnings.push("access_host is empty".to_string());
     }
 
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
@@ -563,7 +563,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     Ok(DeployPlan {
         xp_bin: args.xp_bin.clone(),
         node_name: args.node_name.clone(),
-        public_domain: args.public_domain.clone(),
+        access_host: args.access_host.clone(),
         api_base_url,
         api_base_url_source,
         xray_version: args.xray_version.clone(),
@@ -1087,7 +1087,7 @@ fn render_plan(plan: &DeployPlan) {
 
     line("xp_bin", plan.xp_bin.display().to_string());
     line("node_name", plan.node_name.clone());
-    line("public_domain", plan.public_domain.clone());
+    line("access_host", plan.access_host.clone());
     line(
         "cloudflare",
         if plan.cloudflare_enabled {

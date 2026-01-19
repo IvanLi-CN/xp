@@ -85,7 +85,7 @@ fn store_init(
         data_dir: data_dir.to_path_buf(),
         bootstrap_node_id,
         bootstrap_node_name: node_name.to_string(),
-        bootstrap_public_domain: "".to_string(),
+        bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: api_base_url.to_string(),
     }
 }
@@ -284,7 +284,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         data_dir: leader_dir.clone(),
         admin_token: admin_token.clone(),
         node_name: cluster.node_name.clone(),
-        public_domain: cluster.public_domain.clone(),
+        access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,

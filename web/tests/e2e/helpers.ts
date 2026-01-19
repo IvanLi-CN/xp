@@ -12,7 +12,7 @@ type AdminNode = {
 	node_id: string;
 	node_name: string;
 	api_base_url: string;
-	public_domain: string;
+	access_host: string;
 };
 
 type AdminEndpoint = {
@@ -91,7 +91,7 @@ const defaultNodes: AdminNode[] = [
 		node_id: "node-1",
 		node_name: "alpha",
 		api_base_url: "http://127.0.0.1:62416",
-		public_domain: "alpha.example.com",
+		access_host: "alpha.example.com",
 	},
 ];
 

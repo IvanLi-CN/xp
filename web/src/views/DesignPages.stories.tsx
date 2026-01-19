@@ -58,19 +58,19 @@ const DESIGN_NODES: AdminNode[] = [
 	{
 		node_id: "n1",
 		node_name: "tokyo-1",
-		public_domain: "tokyo.example.com",
+		access_host: "tokyo.example.com",
 		api_base_url: "https://n1:62416",
 	},
 	{
 		node_id: "n2",
 		node_name: "osaka-1",
-		public_domain: "osaka.example.com",
+		access_host: "osaka.example.com",
 		api_base_url: "https://n2:62416",
 	},
 	{
 		node_id: "n3",
 		node_name: "nagoya-1",
-		public_domain: "nagoya.example.com",
+		access_host: "nagoya.example.com",
 		api_base_url: "https://n3:62416",
 	},
 ];
@@ -197,16 +197,18 @@ const DESIGN_MOCK_API = {
 function pageStory(options: {
 	path: string;
 	adminToken?: string | null;
+	failAdminConfig?: boolean;
 }) {
-	const { path, adminToken } = options;
+	const { path, adminToken, failAdminConfig } = options;
 	return {
 		render: () => <></>,
 		parameters: {
 			router: { initialEntry: path },
-			mockApi:
-				adminToken === undefined
-					? DESIGN_MOCK_API
-					: { ...DESIGN_MOCK_API, adminToken },
+			mockApi: {
+				...DESIGN_MOCK_API,
+				adminToken,
+				failAdminConfig,
+			},
 		},
 	} satisfies Story;
 }
@@ -227,4 +229,9 @@ export const Grants: Story = pageStory({ path: "/grants" });
 export const GrantNew: Story = pageStory({ path: "/grants/new" });
 export const GrantDetails: Story = pageStory({
 	path: "/grants/g_01HGRANTAAAAAA",
+});
+export const ServiceConfig: Story = pageStory({ path: "/service-config" });
+export const ServiceConfigError: Story = pageStory({
+	path: "/service-config",
+	failAdminConfig: true,
 });

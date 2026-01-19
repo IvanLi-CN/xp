@@ -40,7 +40,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         data_dir,
         admin_token: "testtoken".to_string(),
         node_name: "node-1".to_string(),
-        public_domain: "".to_string(),
+        access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
@@ -52,7 +52,7 @@ fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id,
         bootstrap_node_name: config.node_name.clone(),
-        bootstrap_public_domain: config.public_domain.clone(),
+        bootstrap_access_host: config.access_host.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
     }
 }
@@ -201,7 +201,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
@@ -399,7 +399,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();

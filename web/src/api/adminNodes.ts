@@ -6,7 +6,7 @@ export const AdminNodeSchema = z.object({
 	node_id: z.string(),
 	node_name: z.string(),
 	api_base_url: z.string(),
-	public_domain: z.string(),
+	access_host: z.string(),
 });
 
 export type AdminNode = z.infer<typeof AdminNodeSchema>;
@@ -19,7 +19,7 @@ export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 
 export type AdminNodePatchRequest = {
 	node_name?: string;
-	public_domain?: string;
+	access_host?: string;
 	api_base_url?: string;
 };
 
