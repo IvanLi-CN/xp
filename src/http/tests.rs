@@ -45,7 +45,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         data_dir,
         admin_token: "testtoken".to_string(),
         node_name: "node-1".to_string(),
-        public_domain: "".to_string(),
+        access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
@@ -57,7 +57,7 @@ fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreI
         data_dir: config.data_dir.clone(),
         bootstrap_node_id,
         bootstrap_node_name: config.node_name.clone(),
-        bootstrap_public_domain: config.public_domain.clone(),
+        bootstrap_access_host: config.access_host.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
     }
 }
@@ -70,7 +70,7 @@ fn app_with(
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
@@ -197,10 +197,7 @@ async fn body_text(res: axum::response::Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-async fn set_bootstrap_node_public_domain(
-    store: &Arc<Mutex<JsonSnapshotStore>>,
-    public_domain: &str,
-) {
+async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, access_host: &str) {
     let mut store = store.lock().await;
     let node_id = store
         .state()
@@ -214,7 +211,7 @@ async fn set_bootstrap_node_public_domain(
         .nodes
         .get_mut(&node_id)
         .unwrap()
-        .public_domain = public_domain.to_string();
+        .access_host = access_host.to_string();
     store.save().unwrap();
 }
 
@@ -435,7 +432,7 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
                     serde_json::to_vec(&json!({
                         "join_token": join_token,
                         "node_name": "node-2",
-                        "public_domain": "example.com",
+                        "access_host": "example.com",
                         "api_base_url": "https://node-2.internal:8443",
                         "csr_pem": csr.csr_pem,
                     }))
@@ -474,7 +471,7 @@ async fn follower_admin_write_does_not_redirect() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
@@ -744,7 +741,7 @@ async fn patch_admin_node_updates_fields() {
             "PATCH",
             &format!("/api/admin/nodes/{node_id}"),
             json!({
-              "public_domain": "node.example.com"
+              "access_host": "node.example.com"
             }),
         ))
         .await
@@ -753,7 +750,7 @@ async fn patch_admin_node_updates_fields() {
     let updated = body_json(res).await;
     assert_eq!(updated["node_id"], node_id);
     assert_eq!(updated["node_name"], original_node_name);
-    assert_eq!(updated["public_domain"], "node.example.com");
+    assert_eq!(updated["access_host"], "node.example.com");
     assert_eq!(updated["api_base_url"], original_api_base_url);
 }
 
@@ -768,7 +765,7 @@ async fn patch_admin_node_unknown_returns_404() {
             "PATCH",
             &format!("/api/admin/nodes/{node_id}"),
             json!({
-              "public_domain": "node.example.com"
+              "access_host": "node.example.com"
             }),
         ))
         .await
@@ -776,6 +773,42 @@ async fn patch_admin_node_unknown_returns_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn admin_config_requires_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app.oneshot(req("GET", "/api/admin/config")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "unauthorized");
+}
+
+#[tokio::test]
+async fn admin_config_returns_safe_view_and_masks_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/config"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["bind"], "127.0.0.1:0");
+    assert_eq!(json["xray_api_addr"], "127.0.0.1:10085");
+    assert_eq!(json["node_name"], "node-1");
+    assert_eq!(json["access_host"], "");
+    assert_eq!(json["api_base_url"], "https://127.0.0.1:62416");
+    assert_eq!(json["quota_poll_interval_secs"], 10);
+    assert_eq!(json["quota_auto_unban"], true);
+
+    assert_eq!(json["admin_token_present"], true);
+    assert_eq!(json["admin_token_masked"], "*********");
+    assert_ne!(json["admin_token_masked"], "testtoken");
 }
 
 #[tokio::test]
@@ -1558,7 +1591,7 @@ async fn grant_usage_includes_warning_fields() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
@@ -1741,7 +1774,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
@@ -1853,7 +1886,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
 async fn subscription_endpoint_does_not_require_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
 
@@ -1872,7 +1905,7 @@ async fn subscription_endpoint_does_not_require_auth() {
 async fn subscription_default_base64_matches_raw_and_content_type() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
 
@@ -1910,7 +1943,7 @@ async fn subscription_default_base64_matches_raw_and_content_type() {
 async fn subscription_format_clash_returns_yaml_with_proxies() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
 
@@ -1942,7 +1975,7 @@ async fn subscription_format_clash_returns_yaml_with_proxies() {
 async fn subscription_token_reset_invalidates_old_token() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (old_token, _grant_id, user_id, _password) = setup_subscription_fixtures(&app).await;
 
@@ -1976,7 +2009,7 @@ async fn subscription_token_reset_invalidates_old_token() {
 async fn subscription_disabled_grant_not_in_output() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (token, grant_id, _user_id, password) = setup_subscription_fixtures(&app).await;
 
@@ -2157,7 +2190,7 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
             .upsert_node(Node {
                 node_id: remote_node_id.clone(),
                 node_name: "node-unreachable".to_string(),
-                public_domain: "".to_string(),
+                access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:1".to_string(),
             })
             .unwrap();
@@ -2205,7 +2238,7 @@ async fn admin_delete_grant_removes_usage_entry() {
 async fn subscription_invalid_format_returns_400_invalid_request() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-    set_bootstrap_node_public_domain(&store, "example.com").await;
+    set_bootstrap_node_access_host(&store, "example.com").await;
 
     let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
 
@@ -2238,7 +2271,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();

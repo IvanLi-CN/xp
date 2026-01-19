@@ -115,18 +115,18 @@ pub async fn cmd_xp_bootstrap(paths: Paths, args: XpBootstrapArgs) -> Result<(),
             args.xp_data_dir.to_string_lossy().as_ref(),
             "--node-name",
             &args.node_name,
-            "--public-domain",
-            &args.public_domain,
+            "--access-host",
+            &args.access_host,
             "--api-base-url",
             &args.api_base_url,
         ]);
         c.status()
     } else {
         let cmdline = format!(
-            "/usr/local/bin/xp init --data-dir {} --node-name {} --public-domain {} --api-base-url {}",
+            "/usr/local/bin/xp init --data-dir {} --node-name {} --access-host {} --api-base-url {}",
             sh_quote(&args.xp_data_dir.to_string_lossy()),
             sh_quote(&args.node_name),
-            sh_quote(&args.public_domain),
+            sh_quote(&args.access_host),
             sh_quote(&args.api_base_url),
         );
         Command::new("su")

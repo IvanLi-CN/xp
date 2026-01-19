@@ -84,7 +84,8 @@ pub enum CyclePolicy {
 pub struct Node {
     pub node_id: String,
     pub node_name: String,
-    pub public_domain: String,
+    #[serde(alias = "public_domain")]
+    pub access_host: String,
     pub api_base_url: String,
 }
 

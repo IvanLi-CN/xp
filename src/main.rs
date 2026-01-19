@@ -26,7 +26,7 @@ fn init_cluster(config: &xp::config::Config) -> Result<()> {
     let meta = xp::cluster_metadata::ClusterMetadata::init_new_cluster(
         &config.data_dir,
         config.node_name.clone(),
-        config.public_domain.clone(),
+        config.access_host.clone(),
         config.api_base_url.clone(),
     )?;
 
@@ -34,7 +34,7 @@ fn init_cluster(config: &xp::config::Config) -> Result<()> {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(meta.node_id.clone()),
         bootstrap_node_name: meta.node_name.clone(),
-        bootstrap_public_domain: meta.public_domain.clone(),
+        bootstrap_access_host: meta.access_host.clone(),
         bootstrap_api_base_url: meta.api_base_url.clone(),
     })?;
 
@@ -67,13 +67,13 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .build()?;
 
     let node_name = config.node_name.clone();
-    let public_domain = config.public_domain.clone();
+    let access_host = config.access_host.clone();
     let api_base_url = config.api_base_url.clone();
 
     let req = serde_json::json!({
         "join_token": join_token,
         "node_name": node_name,
-        "public_domain": public_domain,
+        "access_host": access_host,
         "api_base_url": api_base_url,
         "csr_pem": csr.csr_pem,
     });
@@ -128,7 +128,7 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         cluster_id: token.cluster_id,
         node_id: node_id.clone(),
         node_name,
-        public_domain,
+        access_host,
         api_base_url,
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(false),
@@ -139,7 +139,7 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(node_id),
         bootstrap_node_name: meta.node_name.clone(),
-        bootstrap_public_domain: meta.public_domain.clone(),
+        bootstrap_access_host: meta.access_host.clone(),
         bootstrap_api_base_url: meta.api_base_url.clone(),
     })?;
 
@@ -155,7 +155,7 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
 
     // Prefer persisted cluster metadata for node identity fields.
     config.node_name = cluster.node_name.clone();
-    config.public_domain = cluster.public_domain.clone();
+    config.access_host = cluster.access_host.clone();
     config.api_base_url = cluster.api_base_url.clone();
 
     let config_arc = Arc::new(config.clone());
@@ -163,7 +163,7 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(cluster.node_id.clone()),
         bootstrap_node_name: cluster.node_name.clone(),
-        bootstrap_public_domain: cluster.public_domain.clone(),
+        bootstrap_access_host: cluster.access_host.clone(),
         bootstrap_api_base_url: cluster.api_base_url.clone(),
     })?;
     let store = Arc::new(Mutex::new(store));

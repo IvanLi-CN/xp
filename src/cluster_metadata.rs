@@ -14,7 +14,7 @@ use crate::{
     id::new_ulid_string,
 };
 
-pub const CLUSTER_METADATA_SCHEMA_VERSION: u32 = 1;
+pub const CLUSTER_METADATA_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClusterPaths {
@@ -48,7 +48,8 @@ pub struct ClusterMetadata {
     pub cluster_id: String,
     pub node_id: String,
     pub node_name: String,
-    pub public_domain: String,
+    #[serde(alias = "public_domain")]
+    pub access_host: String,
     pub api_base_url: String,
     /// `true` if this node has the cluster CA private key.
     pub has_cluster_ca_key: bool,
@@ -68,7 +69,7 @@ impl ClusterMetadata {
     pub fn init_new_cluster(
         data_dir: &Path,
         node_name: String,
-        public_domain: String,
+        access_host: String,
         api_base_url: String,
     ) -> anyhow::Result<Self> {
         let paths = ClusterPaths::new(data_dir);
@@ -107,7 +108,7 @@ impl ClusterMetadata {
             cluster_id,
             node_id,
             node_name,
-            public_domain,
+            access_host,
             api_base_url,
             has_cluster_ca_key: true,
             is_bootstrap_node: Some(true),
@@ -131,14 +132,21 @@ impl ClusterMetadata {
         let paths = ClusterPaths::new(data_dir);
         let bytes = fs::read(&paths.metadata_json)
             .with_context(|| format!("read {}", paths.metadata_json.display()))?;
-        let meta: Self = serde_json::from_slice(&bytes).context("parse cluster metadata")?;
+        let mut meta: Self = serde_json::from_slice(&bytes).context("parse cluster metadata")?;
+
         if meta.schema_version != CLUSTER_METADATA_SCHEMA_VERSION {
-            anyhow::bail!(
-                "cluster metadata schema_version mismatch: expected {}, got {}",
-                CLUSTER_METADATA_SCHEMA_VERSION,
-                meta.schema_version
-            );
+            if meta.schema_version == 1 && CLUSTER_METADATA_SCHEMA_VERSION == 2 {
+                meta.schema_version = CLUSTER_METADATA_SCHEMA_VERSION;
+                meta.save(data_dir)?;
+            } else {
+                anyhow::bail!(
+                    "cluster metadata schema_version mismatch: expected {}, got {}",
+                    CLUSTER_METADATA_SCHEMA_VERSION,
+                    meta.schema_version
+                );
+            }
         }
+
         Ok(meta)
     }
 
@@ -198,5 +206,42 @@ fn best_effort_chmod_0600(path: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_migrates_v1_metadata_public_domain_to_access_host() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = ClusterPaths::new(tmp.path());
+        fs::create_dir_all(&paths.dir).unwrap();
+
+        let v1 = serde_json::json!({
+          "schema_version": 1,
+          "cluster_id": "cluster_1",
+          "node_id": "node_1",
+          "node_name": "node-1",
+          "public_domain": "example.com",
+          "api_base_url": "https://127.0.0.1:62416",
+          "has_cluster_ca_key": false
+        });
+        fs::write(
+            &paths.metadata_json,
+            serde_json::to_vec_pretty(&v1).unwrap(),
+        )
+        .unwrap();
+
+        let meta = ClusterMetadata::load(tmp.path()).unwrap();
+        assert_eq!(meta.schema_version, CLUSTER_METADATA_SCHEMA_VERSION);
+        assert_eq!(meta.access_host, "example.com");
+
+        let bytes = fs::read(&paths.metadata_json).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["schema_version"], CLUSTER_METADATA_SCHEMA_VERSION);
+        assert!(saved.get("access_host").is_some());
+        assert!(saved.get("public_domain").is_none());
     }
 }
