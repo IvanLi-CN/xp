@@ -476,7 +476,7 @@ pub async fn cmd_xp_upgrade(paths: Paths, args: XpUpgradeArgs) -> Result<(), Exi
 
     chmod(&dest, 0o755).ok();
 
-    if !is_test_root(paths.root()) {
+    if !is_test_root(paths.root()) || test_enable_service_restart() {
         let status = Command::new("systemctl")
             .args(["restart", "xp.service"])
             .status()
@@ -510,4 +510,14 @@ pub async fn cmd_xp_upgrade(paths: Paths, args: XpUpgradeArgs) -> Result<(), Exi
     }
 
     Ok(())
+}
+
+fn test_enable_service_restart() -> bool {
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+    matches!(
+        std::env::var("XP_OPS_TEST_ENABLE_SERVICE").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
 }

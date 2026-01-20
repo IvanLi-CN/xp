@@ -5,7 +5,7 @@ mod linux {
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn sha256_hex(bytes: &[u8]) -> String {
@@ -286,7 +286,8 @@ mod linux {
         let xp_ops_asset = xp_ops_asset_name();
 
         Mock::given(method("GET"))
-            .and(path("/repos/o/r/releases?per_page=100"))
+            .and(path("/repos/o/r/releases"))
+            .and(query_param("per_page", "100"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
               {
                 "tag_name": "v0.1.998-rc.1",
