@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-19
-- Last: 2026-01-19
+- Last: 2026-01-20
 
 ## 1) 问题陈述
 
@@ -153,10 +153,14 @@
 
 ## 10) 里程碑（Milestones）
 
-- [ ] M1: Release 自动发布工作流落地（产出 `xp`/`xp-ops` assets + checksums）
-- [ ] M2: `xp-ops self-upgrade` 落地（下载/校验/替换/回滚 + 测试）
-- [ ] M3: `xp-ops xp upgrade` 落地（下载/校验/安装/重启/回滚 + 测试）
-- [ ] M4: 文档补齐（ops guide 更新）与 CI 覆盖回归
+- [x] M1: Release 自动发布工作流落地（产出 `xp`/`xp-ops` assets + checksums）
+- [x] M2: `xp-ops self-upgrade` 落地（下载/校验/替换/回滚 + 测试）
+- [x] M3: `xp-ops xp upgrade` 落地（下载/校验/安装/重启/回滚 + 测试）
+- [x] M4: 文档补齐（ops guide 更新）与 CI 覆盖回归
+
+## Change log
+
+- 2026-01-20: Landed release automation + upgrade commands + tests/docs sync.
 
 ## 11) 方案概述（Approach, high-level）
 

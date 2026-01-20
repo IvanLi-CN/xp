@@ -110,6 +110,33 @@ sudo rc-service xp start
 
 ## Upgrade and rollback strategy
 
+### Recommended: upgrade via `xp-ops` (GitHub Releases)
+
+`xp-ops` can upgrade itself and `xp` from GitHub Releases (Linux musl assets).
+
+Self-upgrade `xp-ops`:
+
+```
+sudo xp-ops self-upgrade --version latest
+```
+
+Upgrade `xp` (installs to `/usr/local/bin/xp` and restarts the service):
+
+```
+sudo xp-ops xp upgrade --version latest
+```
+
+Useful flags:
+
+- `--dry-run` prints the resolved release + actions without downloading/writing/restarting.
+- `--prerelease` (only with `--version latest`) selects the newest prerelease instead of stable.
+- `--repo <owner/repo>` (or `XP_OPS_GITHUB_REPO=<owner/repo>`) overrides the default source repo.
+
+Rollback notes:
+
+- Both upgrade commands keep a backup next to the install path as `<path>.bak.<unix-ts>`.
+- On upgrade failures, `xp-ops xp upgrade` automatically rolls back to the previous `xp` binary.
+
 ### Backup before upgrade
 
 Before upgrading the binary, stop the service and back up the entire `XP_DATA_DIR`. The most critical parts are:

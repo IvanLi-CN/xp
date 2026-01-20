@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: compute version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/compute-version.sh
+          .github/scripts/compute-version.sh
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.0
+          components: rustfmt, clippy
+
+      - name: rustfmt
+        env:
+          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: cargo fmt --check
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: build embedded web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd web
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: clippy
+        env:
+          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: cargo clippy -- -D warnings
+
+      - name: test
+        env:
+          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: cargo test
+
+      - name: install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: build assets (linux musl)
+        shell: bash
+        env:
+          XP_EFFECTIVE_VERSION: ${{ steps.version.outputs.version }}
+          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
+          CROSS_CONTAINER_OPTS: -e XP_BUILD_VERSION=${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p release
+
+          cross build --release --locked --target x86_64-unknown-linux-musl --bin xp
+          cross build --release --locked --target x86_64-unknown-linux-musl --bin xp-ops
+          cp target/x86_64-unknown-linux-musl/release/xp release/xp-linux-x86_64
+          cp target/x86_64-unknown-linux-musl/release/xp-ops release/xp-ops-linux-x86_64
+
+          cross build --release --locked --target aarch64-unknown-linux-musl --bin xp
+          cross build --release --locked --target aarch64-unknown-linux-musl --bin xp-ops
+          cp target/aarch64-unknown-linux-musl/release/xp release/xp-linux-aarch64
+          cp target/aarch64-unknown-linux-musl/release/xp-ops release/xp-ops-linux-aarch64
+
+          cd release
+          sha256sum xp-* > checksums.txt
+
+      - name: create release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          artifacts: release/*
+          artifactErrorsFailBuild: true
+
