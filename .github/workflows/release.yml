@@ -79,15 +79,19 @@ jobs:
 
           mkdir -p release
 
+          # NOTE: Use separate CARGO_TARGET_DIR per target to avoid reusing host build-script
+          # binaries across different cross images (glibc version mismatch).
+          export CARGO_TARGET_DIR=target/cross-x86_64-unknown-linux-musl
           cross build --release --locked --target x86_64-unknown-linux-musl --bin xp
           cross build --release --locked --target x86_64-unknown-linux-musl --bin xp-ops
-          cp target/x86_64-unknown-linux-musl/release/xp release/xp-linux-x86_64
-          cp target/x86_64-unknown-linux-musl/release/xp-ops release/xp-ops-linux-x86_64
+          cp "${CARGO_TARGET_DIR}/x86_64-unknown-linux-musl/release/xp" release/xp-linux-x86_64
+          cp "${CARGO_TARGET_DIR}/x86_64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-x86_64
 
+          export CARGO_TARGET_DIR=target/cross-aarch64-unknown-linux-musl
           cross build --release --locked --target aarch64-unknown-linux-musl --bin xp
           cross build --release --locked --target aarch64-unknown-linux-musl --bin xp-ops
-          cp target/aarch64-unknown-linux-musl/release/xp release/xp-linux-aarch64
-          cp target/aarch64-unknown-linux-musl/release/xp-ops release/xp-ops-linux-aarch64
+          cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp" release/xp-linux-aarch64
+          cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-aarch64
 
           cd release
           sha256sum xp-* > checksums.txt
@@ -99,4 +103,3 @@ jobs:
           name: v${{ steps.version.outputs.version }}
           artifacts: release/*
           artifactErrorsFailBuild: true
-
