@@ -9,5 +9,6 @@ mod paths;
 mod platform;
 mod status;
 mod tui;
+mod upgrade;
 mod util;
 mod xp;

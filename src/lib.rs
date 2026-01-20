@@ -12,4 +12,5 @@ pub mod raft;
 pub mod reconcile;
 pub mod state;
 pub mod subscription;
+pub mod version;
 pub mod xray;

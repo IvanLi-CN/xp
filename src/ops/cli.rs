@@ -6,12 +6,17 @@ use crate::ops::install;
 use crate::ops::paths::Paths;
 use crate::ops::status;
 use crate::ops::tui;
+use crate::ops::upgrade;
 use crate::ops::xp;
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "xp-ops", disable_help_subcommand = true)]
+#[command(
+    name = "xp-ops",
+    version = crate::version::VERSION,
+    disable_help_subcommand = true
+)]
 pub struct Cli {
     /// Redirect all filesystem writes under this root (test-only).
     #[arg(long, global = true, hide = true, default_value = "/")]
@@ -25,6 +30,7 @@ pub struct Cli {
 pub enum Command {
     Install(InstallArgs),
     Init(InitArgs),
+    SelfUpgrade(SelfUpgradeArgs),
 
     #[command(subcommand)]
     Xp(XpCommand),
@@ -91,6 +97,7 @@ pub enum InitSystemArg {
 #[derive(Subcommand, Debug)]
 pub enum XpCommand {
     Install(XpInstallArgs),
+    Upgrade(XpUpgradeArgs),
     Bootstrap(XpBootstrapArgs),
 }
 
@@ -112,6 +119,36 @@ pub struct XpInstallArgs {
 
     #[arg(long)]
     pub enable: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct UpgradeReleaseArgs {
+    #[arg(long, value_name = "SEMVER|latest", default_value = "latest")]
+    pub version: String,
+
+    #[arg(long)]
+    pub prerelease: bool,
+
+    #[arg(long, value_name = "OWNER/REPO")]
+    pub repo: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SelfUpgradeArgs {
+    #[command(flatten)]
+    pub release: UpgradeReleaseArgs,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpUpgradeArgs {
+    #[command(flatten)]
+    pub release: UpgradeReleaseArgs,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -315,8 +352,10 @@ pub async fn run() -> i32 {
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
+        Some(Command::SelfUpgrade(args)) => upgrade::cmd_self_upgrade(paths, args).await,
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
+            XpCommand::Upgrade(args) => upgrade::cmd_xp_upgrade(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
