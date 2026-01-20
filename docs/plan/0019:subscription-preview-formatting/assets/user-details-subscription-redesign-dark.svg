@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .t0 { font-size: 22px; font-weight: 750; fill: #e2e8f0; }
+      .t1 { font-size: 14px; fill: #94a3b8; }
+      .t2 { font-size: 12px; fill: #94a3b8; }
+      .t3 { font-size: 13px; fill: #e2e8f0; }
+      .btn { font-size: 12px; font-weight: 750; fill: #e2e8f0; }
+      .stroke { stroke: #24324a; }
+
+      .codeBg { fill: #050817; }
+      .codeStroke { stroke: #22304a; }
+      .codeText { font-size: 12px; fill: #e2e8f0; }
+      .codeDim { font-size: 11px; fill: #94a3b8; }
+      .pillText { font-size: 11px; font-weight: 750; fill: #031c22; }
+    </style>
+  </defs>
+
+  <!-- Dimmed app background -->
+  <rect x="0" y="0" width="1440" height="900" fill="#0b1020"/>
+  <rect x="0" y="0" width="1440" height="900" fill="#000000" opacity="0.38"/>
+
+  <!-- Modal -->
+  <rect x="140" y="120" width="1160" height="660" rx="18" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="176" y="162" class="sans t0">Subscription preview</text>
+  <rect x="408" y="142" width="90" height="28" rx="10" fill="#22d3ee" opacity="0.18" class="stroke" stroke-width="1"/>
+  <text x="453" y="156" class="sans btn" text-anchor="middle" dominant-baseline="middle">clash</text>
+  <text x="516" y="162" class="mono t2">no wrap · scroll</text>
+
+  <!-- Top actions -->
+  <rect x="928" y="138" width="120" height="34" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="988" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy URL</text>
+  <rect x="1056" y="138" width="140" height="34" rx="10" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1126" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy content</text>
+  <rect x="1204" y="138" width="72" height="34" rx="10" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1240" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Close</text>
+
+  <!-- Search row -->
+  <text x="176" y="208" class="sans t2" dominant-baseline="middle">Search</text>
+  <rect x="228" y="190" width="688" height="36" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="244" y="208" class="mono t2" dominant-baseline="middle">e.g. public-key / short-id / servername</text>
+  <rect x="928" y="190" width="120" height="36" rx="12" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="988" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find next</text>
+  <rect x="1056" y="190" width="120" height="36" rx="12" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1116" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find prev</text>
+
+  <!-- Two columns -->
+  <!-- Left: code viewer -->
+  <rect x="176" y="244" width="820" height="508" rx="14" class="codeBg codeStroke" stroke-width="1"/>
+  <rect x="176" y="244" width="56" height="508" rx="14" fill="#0f172a" opacity="0.9"/>
+
+  <text x="202" y="278" class="mono codeDim">01</text>
+  <text x="202" y="300" class="mono codeDim">02</text>
+  <text x="202" y="322" class="mono codeDim">03</text>
+  <text x="202" y="344" class="mono codeDim">04</text>
+  <text x="202" y="366" class="mono codeDim">05</text>
+  <text x="202" y="388" class="mono codeDim">06</text>
+  <text x="202" y="410" class="mono codeDim">07</text>
+  <text x="202" y="432" class="mono codeDim">08</text>
+  <text x="202" y="454" class="mono codeDim">09</text>
+  <text x="202" y="476" class="mono codeDim">10</text>
+  <text x="202" y="498" class="mono codeDim">11</text>
+  <text x="202" y="520" class="mono codeDim">12</text>
+
+  <text x="250" y="278" class="mono codeText" xml:space="preserve">proxies:</text>
+  <text x="250" y="300" class="mono codeText" xml:space="preserve">- name: "alice-alpha-edge-1"</text>
+  <text x="250" y="322" class="mono codeText" xml:space="preserve">  type: vless</text>
+  <text x="250" y="344" class="mono codeText" xml:space="preserve">  server: "chatgpt.com"</text>
+  <text x="250" y="366" class="mono codeText" xml:space="preserve">  port: 443</text>
+  <text x="250" y="388" class="mono codeText" xml:space="preserve">  flow: xtls-rprx-vision</text>
+  <text x="250" y="410" class="mono codeText" xml:space="preserve">  servername: "chatgpt.com"</text>
+  <text x="250" y="432" class="mono codeText" xml:space="preserve">  client-fingerprint: chrome</text>
+  <text x="250" y="454" class="mono codeText" xml:space="preserve">  reality-opts:</text>
+  <text x="250" y="476" class="mono codeText" xml:space="preserve">    public-key: TMuezmWCsXxGSHGkRqr9Yyyc9kJpkmipw8gCD6VnPmM</text>
+  <text x="250" y="498" class="mono codeText" xml:space="preserve">    short-id: b4ddd2affe2585a0</text>
+
+  <!-- Faux scrollbars (left) -->
+  <rect x="244" y="742" width="740" height="6" rx="3" fill="#111c33" opacity="0.95"/>
+  <rect x="244" y="742" width="260" height="6" rx="3" fill="#22d3ee" opacity="0.85"/>
+  <rect x="984" y="262" width="6" height="476" rx="3" fill="#111c33" opacity="0.95"/>
+  <rect x="984" y="308" width="6" height="140" rx="3" fill="#22d3ee" opacity="0.85"/>
+
+  <!-- Right: fields panel -->
+  <rect x="1012" y="244" width="264" height="508" rx="14" fill="#111c33" class="stroke" stroke-width="1"/>
+  <text x="1028" y="278" class="sans t3">Fields</text>
+  <text x="1028" y="304" class="sans t2">Click Copy to copy exact value</text>
+
+  <text x="1028" y="344" class="mono t2">public-key</text>
+  <rect x="1028" y="354" width="154" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1044" y="376" class="mono t3" dominant-baseline="middle">TMue…VnPmM</text>
+  <rect x="1190" y="360" width="70" height="32" rx="10" fill="#22d3ee" class="stroke" stroke-width="1"/>
+  <text x="1225" y="376" class="sans pillText" text-anchor="middle" dominant-baseline="middle">Copy</text>
+
+  <text x="1028" y="440" class="mono t2">short-id</text>
+  <rect x="1028" y="450" width="154" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1044" y="472" class="mono t3" dominant-baseline="middle">b4ddd2…85a0</text>
+  <rect x="1190" y="456" width="70" height="32" rx="10" fill="#22d3ee" class="stroke" stroke-width="1"/>
+  <text x="1225" y="472" class="sans pillText" text-anchor="middle" dominant-baseline="middle">Copy</text>
+
+  <text x="1028" y="536" class="mono t2">servername</text>
+  <rect x="1028" y="546" width="154" height="44" rx="12" fill="#0f172a" class="stroke" stroke-width="1"/>
+  <text x="1044" y="568" class="mono t3" dominant-baseline="middle">chatgpt.com</text>
+  <rect x="1190" y="552" width="70" height="32" rx="10" fill="#22d3ee" class="stroke" stroke-width="1"/>
+  <text x="1225" y="568" class="sans pillText" text-anchor="middle" dominant-baseline="middle">Copy</text>
+
+  <rect x="1028" y="620" width="232" height="40" rx="12" fill="#22d3ee" opacity="0.18" class="stroke" stroke-width="1"/>
+  <text x="1144" y="640" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy all fields</text>
+
+  <text x="1028" y="694" class="sans t2">Tip: horizontal scroll for long lines</text>
+</svg>
