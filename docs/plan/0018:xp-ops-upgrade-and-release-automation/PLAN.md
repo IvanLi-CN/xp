@@ -161,6 +161,7 @@
 ## Change log
 
 - 2026-01-20: Landed release automation + upgrade commands + tests/docs sync.
+- 2026-01-20: Fixed cross multi-target build (per-target `CARGO_TARGET_DIR` to avoid glibc mismatch).
 
 ## 11) 方案概述（Approach, high-level）
 
