@@ -70,7 +70,7 @@
 
 ## 1. Milestone：控制面基础（单机可用）
 
-- 细化方案：`docs/plan/0002:m1-control-plane-foundation/PLAN.md`
+- 细化方案：`docs/plan/0002:m1-management-foundation/PLAN.md`
 - 工程与约定：配置加载（CLI/ENV/文件择一）、日志、错误格式、ID（ULID）
 - 领域模型：Node / Endpoint / User / Grant 的核心字段与校验规则
 - 管理员认证：`Authorization: Bearer <admin_token>` 的统一中间件

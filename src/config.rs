@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "xp",
-    about = "Xray control plane",
+    about = "Xray cluster manager",
     version = crate::version::VERSION,
     disable_help_subcommand = true
 )]
@@ -19,7 +19,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
-    /// Start the control-plane HTTP server (default).
+    /// Start the cluster manager HTTP server (default).
     Run,
 
     /// Initialize cluster identity and bootstrap state under --data-dir.

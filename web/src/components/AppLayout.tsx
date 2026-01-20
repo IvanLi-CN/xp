@@ -9,7 +9,7 @@ type AppLayoutProps = {
 export function AppLayout({ children }: AppLayoutProps) {
 	return (
 		<AppShell
-			brand={{ name: "xp", subtitle: "control plane" }}
+			brand={{ name: "xp", subtitle: "cluster manager" }}
 			navGroups={[
 				{
 					title: "Nav",

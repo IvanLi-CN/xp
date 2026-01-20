@@ -53,7 +53,7 @@ export function UsersPage() {
 				<PageState
 					variant="loading"
 					title="Loading users"
-					description="Fetching admin users from the control plane."
+					description="Fetching admin users from the xp API."
 				/>
 			);
 		}

@@ -23,14 +23,14 @@
 
   <!-- Brand -->
   <text x="88" y="126" class="sans h0">xp</text>
-  <text x="140" y="126" class="sans h1">control plane</text>
+  <text x="140" y="126" class="sans h1">cluster manager</text>
   <text x="88" y="154" class="sans t2">Operator login • token-based</text>
 
   <!-- Card -->
   <rect x="460" y="220" width="520" height="460" rx="18" fill="#0f172a" class="stroke" stroke-width="1"/>
 
   <text x="504" y="280" class="sans h0" font-size="26px">Admin login</text>
-  <text x="504" y="312" class="sans h1">Enter an admin token to access the control plane UI.</text>
+  <text x="504" y="312" class="sans h1">Enter an admin token to access the admin UI.</text>
 
   <!-- Stored key -->
   <text x="504" y="354" class="sans t2">Stored in localStorage key</text>

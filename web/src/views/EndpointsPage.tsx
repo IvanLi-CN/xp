@@ -62,7 +62,7 @@ export function EndpointsPage() {
 				<PageState
 					variant="loading"
 					title="Loading endpoints"
-					description="Fetching endpoints from the control plane."
+					description="Fetching endpoints from the xp API."
 				/>
 			);
 		}

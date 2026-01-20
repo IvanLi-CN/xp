@@ -53,7 +53,7 @@ export function GrantsPage() {
 				<PageState
 					variant="loading"
 					title="Loading grants"
-					description="Fetching grant list from the control plane."
+					description="Fetching grant list from the xp API."
 				/>
 			);
 		}

@@ -1,5 +1,5 @@
 [Unit]
-Description=xp (Xray control plane)
+Description=xp (Xray cluster manager)
 After=network.target
 # Suggested if you manage xray via systemd on the same host:
 # Wants=xray.service
@@ -30,4 +30,3 @@ PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
-

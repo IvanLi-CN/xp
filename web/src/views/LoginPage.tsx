@@ -42,7 +42,7 @@ export function LoginPage() {
 					<div>
 						<h1 className="text-2xl font-bold">Admin login</h1>
 						<p className="text-sm opacity-70">
-							Enter the admin token to access the control plane UI.
+							Enter the admin token to access the admin UI.
 						</p>
 					</div>
 					<div className="space-y-2">

@@ -55,7 +55,7 @@
 |   ID | Title                                                       | Status | Plan                                                 | Last       | Notes            |
 | ---: | ----------------------------------------------------------- | ------ | ---------------------------------------------------- | ---------- | ---------------- |
 | 0001 | MVP 大纲（目标与里程碑）                                    | 已完成 | `0001:mvp-outline/PLAN.md`                           | 2025-12-23 | -                |
-| 0002 | Milestone 1 · 控制面基础（单机可用）                        | 已完成 | `0002:m1-control-plane-foundation/PLAN.md`           | 2025-12-17 | -                |
+| 0002 | Milestone 1 · 控制面基础（单机可用）                        | 已完成 | `0002:m1-management-foundation/PLAN.md`              | 2025-12-17 | -                |
 | 0003 | Milestone 2 · Xray Controller + Reconcile（单机闭环）       | 已完成 | `0003:m2-xray-controller-reconcile/PLAN.md`          | 2025-12-18 | -                |
 | 0004 | Milestone 3 · 订阅输出（对用户可交付）                      | 已完成 | `0004:m3-subscription-output/PLAN.md`                | 2025-12-18 | -                |
 | 0005 | Milestone 4 · 配额系统（单机强约束）                        | 已完成 | `0005:m4-quota-system/PLAN.md`                       | 2025-12-19 | -                |

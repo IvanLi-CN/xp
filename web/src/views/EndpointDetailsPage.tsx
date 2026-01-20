@@ -237,7 +237,7 @@ export function EndpointDetailsPage() {
 			<PageState
 				variant="loading"
 				title="Loading endpoint"
-				description="Fetching endpoint details from the control plane."
+				description="Fetching endpoint details from the xp API."
 			/>
 		);
 	}
