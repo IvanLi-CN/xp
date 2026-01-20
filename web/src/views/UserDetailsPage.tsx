@@ -386,7 +386,7 @@ export function UserDetailsPage() {
 			<PageState
 				variant="loading"
 				title="Loading user"
-				description="Fetching user details from the control plane."
+				description="Fetching user details from the xp API."
 			/>
 		);
 	}

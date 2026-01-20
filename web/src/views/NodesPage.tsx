@@ -86,7 +86,7 @@ export function NodesPage() {
 				<PageState
 					variant="loading"
 					title="Loading nodes"
-					description="Fetching nodes from the control plane."
+					description="Fetching nodes from the xp API."
 				/>
 			);
 		}

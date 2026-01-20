@@ -6,7 +6,7 @@ const meta: Meta<typeof AppShell> = {
 	title: "Components/AppShell",
 	component: AppShell,
 	args: {
-		brand: { name: "xp", subtitle: "control plane" },
+		brand: { name: "xp", subtitle: "cluster manager" },
 		navItems: [
 			{ label: "Dashboard", to: "/", icon: "tabler:layout-dashboard" },
 			{ label: "Nodes", to: "/nodes", icon: "tabler:server" },

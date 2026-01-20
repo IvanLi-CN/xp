@@ -48,7 +48,7 @@ export function GrantGroupDetailsPage() {
 			<PageState
 				variant="loading"
 				title="Loading grant group"
-				description="Fetching grant group details from the control plane."
+				description="Fetching grant group details from the xp API."
 			/>
 		);
 	}

@@ -1,7 +1,7 @@
 #!/sbin/openrc-run
 
 name="xp"
-description="xp (Xray control plane)"
+description="xp (Xray cluster manager)"
 
 command="/usr/local/bin/xp"
 command_args="run"

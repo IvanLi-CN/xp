@@ -65,7 +65,7 @@ export function HomePage() {
 
 	return (
 		<div className="space-y-6">
-			<PageHeader title="Dashboard" description="Control plane bootstrap UI." />
+			<PageHeader title="Dashboard" description="Cluster bootstrap UI." />
 
 			<div className="card bg-base-100 shadow">
 				<div className="card-body">
