@@ -247,14 +247,21 @@ fi
 
 sudo_prefix=""
 if [ "$(id -u)" -ne 0 ]; then
-  writable_dir=1
-  if [ -d "$INSTALL_DIR" ]; then
-    [ -w "$INSTALL_DIR" ] || writable_dir=0
-  else
-    writable_dir=0
+  # If INSTALL_DIR does not exist yet, try to create it as the current user first.
+  # This avoids creating user-home paths as root-owned when `sudo` is available.
+  if [ ! -d "$INSTALL_DIR" ]; then
+    if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+      :
+    else
+      if command -v sudo >/dev/null 2>&1; then
+        sudo mkdir -p "$INSTALL_DIR"
+      else
+        die "permission_denied: cannot create ${INSTALL_DIR} (run as root or install sudo)"
+      fi
+    fi
   fi
 
-  if [ "$writable_dir" -ne 1 ] || { [ -e "$dest_xp_ops" ] && [ ! -w "$dest_xp_ops" ]; } || { [ -e "$dest_xp" ] && [ ! -w "$dest_xp" ]; }; then
+  if [ ! -w "$INSTALL_DIR" ] || { [ -e "$dest_xp_ops" ] && [ ! -w "$dest_xp_ops" ]; } || { [ -e "$dest_xp" ] && [ ! -w "$dest_xp" ]; }; then
     if command -v sudo >/dev/null 2>&1; then
       sudo_prefix="sudo"
     else
