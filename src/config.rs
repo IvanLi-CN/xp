@@ -6,6 +6,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "xp",
     about = "Xray control plane",
+    version = crate::version::VERSION,
     disable_help_subcommand = true
 )]
 pub struct Cli {
