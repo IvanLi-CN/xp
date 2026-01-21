@@ -68,7 +68,7 @@
 
 - `xp` 常驻内存目标：≤32MiB（RSS，不含 `xray`）；新增监测/恢复逻辑不应引入重型常驻结构。
 - 运行环境覆盖：Arch/Debian/Alpine（systemd/OpenRC 皆存在的现实）；但本计划默认以“无外部依赖”实现为优先。
-- `xp` 仅能直接访问 `XP_XRAY_API_ADDR` 指向的本机 gRPC seevice；不引入跨节点操作。
+- `xp` 仅能直接访问 `XP_XRAY_API_ADDR` 指向的本机 gRPC service；不引入跨节点操作。
 
 风险：
 
@@ -104,6 +104,7 @@
 
 ## 项目文档更新（Docs to update）
 
+- `docs/desgin/api.md`：更新 `GET /api/health` 的响应体说明（保留 `{ "status": "ok" }`，增量追加 `xray.*`）。
 - `docs/desgin/workflows.md`：补充“xray Down/Up 边沿触发 reconcile”的口径与流程图/文字说明。
 - `docs/ops/README.md`：补充新的 `xp` 环境变量/参数说明与推荐部署方式（与 systemd/OpenRC 的职责边界）。
 - `docs/ops/systemd/xray.service`：确认并明确推荐的 `Restart=` 策略（目标：OOM/崩溃可自动恢复；不引入 crash-loop 忙等）。

@@ -26,9 +26,10 @@
   "xray": {
     "status": "unknown|up|down",
     "last_ok_at": "RFC3339|null",
+    "last_fail_at": "RFC3339|null",
     "down_since": "RFC3339|null",
     "consecutive_failures": 0,
-    "restart_attempts": 0
+    "recoveries_observed": 0
   }
 }
 ```
@@ -40,9 +41,10 @@
   - `up`: 最近一次探活成功
   - `down`: 已连续失败达到阈值
 - `xray.last_ok_at`：最近一次探活成功的时间；若从未成功则为 `null`
+- `xray.last_fail_at`：最近一次探活失败的时间；若从未失败则为 `null`
 - `xray.down_since`：进入 `down` 状态的起始时间；若当前非 down 则为 `null`
 - `xray.consecutive_failures`：当前连续失败次数（成功后归零）
-- `xray.restart_attempts`：自进程启动以来观察到的恢复次数（`down -> up` 的次数）
+- `xray.recoveries_observed`：自进程启动以来观察到的恢复次数（`down -> up` 的次数；不代表由 `xp` 执行重启）
 
 ### Errors
 
