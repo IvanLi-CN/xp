@@ -14,6 +14,33 @@ If you want to reach `xp` from the public Internet without opening inbound ports
 
 - `docs/ops/cloudflare-tunnel.md`
 
+## `xp-ops tui` (deploy wizard)
+
+`xp-ops tui` provides an interactive deploy wizard for `xp-ops deploy`.
+
+Persistence:
+
+- Deploy settings are stored at `/etc/xp-ops/deploy/settings.json`.
+- Cloudflare API token is stored at `/etc/xp-ops/cloudflare_tunnel/api_token`.
+  - The TUI never prints the token value; it shows `(saved)` or a mask.
+  - Leaving the token input empty keeps the existing token unchanged (does not delete or overwrite it).
+
+Key bindings:
+
+- Focus: `Tab` / `Shift+Tab`, `↑` / `↓`, mouse left click
+- Editing: type directly into the focused field (use `Backspace` to delete; paste supported)
+- Toggles: `Space` (or `Enter`) on boolean fields
+- Commands:
+  - `Ctrl+S`: save settings (and token if non-empty)
+  - `Ctrl+D`: autosave, then deploy (autosave also runs in `dry_run`)
+  - `Ctrl+Q`: quit (asks to save if there are unsaved changes)
+
+Quit confirmation (only when there are unsaved changes):
+
+- `Ctrl+S`: save and exit
+- `Ctrl+Q`: exit without saving
+- `Esc` / `Enter`: cancel
+
 ## Environment variables
 
 These names and defaults are sourced from `src/config.rs`.
