@@ -1,17 +1,17 @@
 use crate::ops::cli::DeployArgs;
-use crate::ops::cloudflare;
 use crate::ops::deploy;
 use crate::ops::paths::Paths;
-use crate::ops::util::{Mode, chmod, ensure_dir, write_string_if_changed};
+use crate::ops::util::{chmod, ensure_dir, write_string_if_changed};
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{event, execute};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Stdout};
 use std::path::PathBuf;
@@ -20,8 +20,13 @@ use std::time::Duration;
 pub async fn cmd_tui(paths: Paths) -> Result<(), crate::ops::cli::ExitError> {
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|e| crate::ops::cli::ExitError::new(2, format!("{e}")))?;
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
-        .map_err(|e| crate::ops::cli::ExitError::new(2, format!("{e}")))?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )
+    .map_err(|e| crate::ops::cli::ExitError::new(2, format!("{e}")))?;
 
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal =
@@ -33,27 +38,21 @@ pub async fn cmd_tui(paths: Paths) -> Result<(), crate::ops::cli::ExitError> {
     // Restore terminal.
     disable_raw_mode().ok();
     let mut stdout = io::stdout();
-    execute!(stdout, DisableBracketedPaste, LeaveAlternateScreen).ok();
+    execute!(
+        stdout,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    )
+    .ok();
 
     match outcome {
         TuiOutcome::Quit => Ok(()),
-        TuiOutcome::SaveConfig { .. } => Ok(()),
         TuiOutcome::RunDeploy(values) => run_deploy(paths, *values).await,
     }
 }
 
 async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::cli::ExitError> {
-    let mode = if values.dry_run {
-        Mode::DryRun
-    } else {
-        Mode::Real
-    };
-
-    if values.cloudflare_enabled && values.save_token && !values.cloudflare_token.trim().is_empty()
-    {
-        cloudflare::set_token_value(&paths, &values.cloudflare_token, mode)?;
-    }
-
     let args = DeployArgs {
         xp_bin: PathBuf::from(values.xp_bin),
         node_name: values.node_name,
@@ -98,42 +97,58 @@ fn run_loop(
         };
         match ev {
             Event::Key(key) => {
-                if let Some(outcome) = app.handle_key(key) {
-                    match outcome {
-                        TuiOutcome::Quit => return TuiOutcome::Quit,
-                        TuiOutcome::RunDeploy(values) => {
-                            return TuiOutcome::RunDeploy(values);
-                        }
-                        TuiOutcome::SaveConfig { values, exit_after } => {
-                            match save_tui_config(&app.paths, &values) {
-                                Ok(()) => {
-                                    if let Err(e) = save_token_if_needed(&app.paths, &values) {
-                                        app.status_message =
-                                            Some(format!("save failed: {}", e.message));
-                                    } else {
-                                        app.status_message = Some("saved".to_string());
-                                        if exit_after {
-                                            return TuiOutcome::Quit;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    app.status_message =
-                                        Some(format!("save failed: {}", e.message));
-                                }
-                            }
-                        }
-                    }
+                if let Some(action) = app.handle_key(key)
+                    && let Some(outcome) = run_action(app, action)
+                {
+                    return outcome;
                 }
             }
             Event::Paste(text) => {
-                if app.editing {
+                if app.is_editable_field() {
                     app.push_str(&text);
                 }
             }
+            Event::Mouse(m) => app.handle_mouse(m),
             _ => {}
         }
     }
+}
+
+fn run_action(app: &mut App, action: AppAction) -> Option<TuiOutcome> {
+    match action {
+        AppAction::Quit => return Some(TuiOutcome::Quit),
+        AppAction::Save { exit_after } => {
+            let values = app.to_values();
+            if let Err(e) = save_tui_config(&app.paths, &values) {
+                app.status_message = Some(format!("save failed: {}", e.message));
+                return None;
+            }
+            if let Err(e) = save_token_if_needed(&app.paths, &values) {
+                app.status_message = Some(format!("save failed: {}", e.message));
+                return None;
+            }
+            app.status_message = Some("saved".to_string());
+            app.baseline = app.snapshot();
+            if exit_after {
+                return Some(TuiOutcome::Quit);
+            }
+        }
+        AppAction::Deploy => {
+            let values = app.to_values();
+            if let Err(e) = save_tui_config(&app.paths, &values) {
+                app.status_message = Some(format!("autosave failed: {}", e.message));
+                return None;
+            }
+            if let Err(e) = save_token_if_needed(&app.paths, &values) {
+                app.status_message = Some(format!("autosave failed: {}", e.message));
+                return None;
+            }
+            app.status_message = Some("saved".to_string());
+            app.baseline = app.snapshot();
+            return Some(TuiOutcome::RunDeploy(Box::new(values)));
+        }
+    }
+    None
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
@@ -156,10 +171,15 @@ fn ui(f: &mut Frame, app: &mut App) {
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
         .highlight_symbol(">");
     f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    app.fields_area = chunks[1];
 
     let help =
         Paragraph::new(help_text(app)).block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(help, chunks[2]);
+
+    if app.mode == UiMode::ConfirmQuit {
+        render_quit_confirm(f);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,25 +195,51 @@ struct AppValues {
     api_base_url: Option<String>,
     xray_version: String,
     cloudflare_token: String,
-    save_token: bool,
     enable_services: bool,
     dry_run: bool,
 }
 
 enum TuiOutcome {
     Quit,
-    SaveConfig {
-        values: Box<AppValues>,
-        exit_after: bool,
-    },
     RunDeploy(Box<AppValues>),
+}
+
+enum AppAction {
+    Quit,
+    Save { exit_after: bool },
+    Deploy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppSnapshot {
+    xp_bin: String,
+    node_name: String,
+    access_host: String,
+    cloudflare_enabled: bool,
+    account_id: String,
+    zone_id: String,
+    hostname: String,
+    origin_url: String,
+    api_base_url: String,
+    xray_version: String,
+    cloudflare_token: String,
+    enable_services: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiMode {
+    Nav,
+    ConfirmQuit,
 }
 
 struct App {
     list_state: ListState,
     focus: usize,
-    editing: bool,
+    mode: UiMode,
     status_message: Option<String>,
+    baseline: AppSnapshot,
+    fields_area: Rect,
     paths: Paths,
 
     xp_bin: String,
@@ -209,7 +255,6 @@ struct App {
 
     xray_version: String,
     cloudflare_token: String,
-    save_token: bool,
     enable_services: bool,
     dry_run: bool,
 }
@@ -219,8 +264,24 @@ impl App {
         let mut s = Self {
             list_state: ListState::default(),
             focus: 0,
-            editing: false,
+            mode: UiMode::Nav,
             status_message: None,
+            baseline: AppSnapshot {
+                xp_bin: String::new(),
+                node_name: String::new(),
+                access_host: String::new(),
+                cloudflare_enabled: true,
+                account_id: String::new(),
+                zone_id: String::new(),
+                hostname: String::new(),
+                origin_url: String::new(),
+                api_base_url: String::new(),
+                xray_version: String::new(),
+                cloudflare_token: String::new(),
+                enable_services: true,
+                dry_run: false,
+            },
+            fields_area: Rect::default(),
             paths: paths.clone(),
             xp_bin: String::new(),
             node_name: "node-1".to_string(),
@@ -233,7 +294,6 @@ impl App {
             api_base_url: String::new(),
             xray_version: "latest".to_string(),
             cloudflare_token: String::new(),
-            save_token: true,
             enable_services: true,
             dry_run: false,
         };
@@ -241,11 +301,12 @@ impl App {
             s.apply_config(cfg);
         }
         s.list_state.select(Some(0));
+        s.baseline = s.snapshot();
         s
     }
 
     fn items_len(&self) -> usize {
-        13
+        12
     }
 
     fn render_items(&self) -> Vec<ListItem<'static>> {
@@ -288,10 +349,6 @@ impl App {
 
         v.push(item("cloudflare_token", &self.token_display()));
         v.push(item(
-            "save_token",
-            if self.save_token { "true" } else { "false" },
-        ));
-        v.push(item(
             "enable_services",
             if self.enable_services {
                 "true"
@@ -303,31 +360,42 @@ impl App {
         v
     }
 
-    fn handle_key(&mut self, key: KeyEvent) -> Option<TuiOutcome> {
-        if self.editing {
-            return self.handle_edit_key(key);
+    fn handle_key(&mut self, key: KeyEvent) -> Option<AppAction> {
+        if self.mode == UiMode::ConfirmQuit {
+            return self.handle_quit_confirm_key(key);
         }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s' | 'S') => Some(AppAction::Save { exit_after: false }),
+                KeyCode::Char('d' | 'D') => Some(AppAction::Deploy),
+                KeyCode::Char('q' | 'Q') => {
+                    if self.is_dirty() {
+                        self.mode = UiMode::ConfirmQuit;
+                        None
+                    } else {
+                        Some(AppAction::Quit)
+                    }
+                }
+                _ => None,
+            };
+        }
+
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Some(TuiOutcome::Quit),
             KeyCode::Tab => self.next(),
             KeyCode::BackTab => self.prev(),
-            KeyCode::Down | KeyCode::Char('j') => self.next(),
-            KeyCode::Up | KeyCode::Char('k') => self.prev(),
-            KeyCode::Enter => self.handle_enter(),
-            KeyCode::Char('s') => {
-                return Some(TuiOutcome::SaveConfig {
-                    values: Box::new(self.to_values()),
-                    exit_after: false,
-                });
+            KeyCode::Down => self.next(),
+            KeyCode::Up => self.prev(),
+            KeyCode::Enter | KeyCode::Char(' ') => self.handle_toggle(),
+            KeyCode::Backspace => {
+                if self.is_editable_field() {
+                    self.backspace();
+                }
             }
-            KeyCode::Char('S') => {
-                return Some(TuiOutcome::SaveConfig {
-                    values: Box::new(self.to_values()),
-                    exit_after: true,
-                });
-            }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
-                return Some(TuiOutcome::RunDeploy(Box::new(self.to_values())));
+            KeyCode::Char(c) => {
+                if self.is_editable_field() {
+                    self.push_char(c);
+                }
             }
             _ => {}
         }
@@ -335,22 +403,53 @@ impl App {
         None
     }
 
-    fn handle_edit_key(&mut self, key: KeyEvent) -> Option<TuiOutcome> {
+    fn handle_quit_confirm_key(&mut self, key: KeyEvent) -> Option<AppAction> {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s' | 'S') => Some(AppAction::Save { exit_after: true }),
+                KeyCode::Char('q' | 'Q') => Some(AppAction::Quit),
+                _ => None,
+            };
+        }
+
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => {
-                self.editing = false;
-            }
-            KeyCode::Backspace => self.backspace(),
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return None;
-                }
-                self.push_char(c);
-            }
+            KeyCode::Esc | KeyCode::Enter => self.mode = UiMode::Nav,
             _ => {}
         }
-        self.list_state.select(Some(self.focus));
         None
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+        if self.mode == UiMode::ConfirmQuit {
+            return;
+        }
+
+        let position = Position::new(mouse.column, mouse.row);
+        if !self.fields_area.contains(position) {
+            return;
+        }
+
+        // List has a border, so the first item starts at y+1.
+        let inner_top = self.fields_area.y.saturating_add(1);
+        let inner_bottom = self
+            .fields_area
+            .y
+            .saturating_add(self.fields_area.height.saturating_sub(1));
+        if mouse.row < inner_top || mouse.row >= inner_bottom {
+            return;
+        }
+
+        let relative_y = mouse.row.saturating_sub(inner_top) as usize;
+        let idx = self.list_state.offset().saturating_add(relative_y);
+        if idx >= self.items_len() {
+            return;
+        }
+
+        self.focus = idx;
+        self.list_state.select(Some(self.focus));
     }
 
     fn next(&mut self) {
@@ -364,19 +463,12 @@ impl App {
         self.focus -= 1;
     }
 
-    fn handle_enter(&mut self) {
+    fn handle_toggle(&mut self) {
         match self.focus {
             3 => self.cloudflare_enabled = !self.cloudflare_enabled,
-            10 => self.save_token = !self.save_token,
-            11 => self.enable_services = !self.enable_services,
-            12 => self.dry_run = !self.dry_run,
-            _ => {
-                if self.is_editable_field() {
-                    self.editing = true;
-                } else {
-                    self.next();
-                }
-            }
+            10 => self.enable_services = !self.enable_services,
+            11 => self.dry_run = !self.dry_run,
+            _ => {}
         }
     }
 
@@ -490,10 +582,31 @@ impl App {
             },
             xray_version: self.xray_version.clone(),
             cloudflare_token: self.cloudflare_token.clone(),
-            save_token: self.save_token,
             enable_services: self.enable_services,
             dry_run: self.dry_run,
         }
+    }
+
+    fn snapshot(&self) -> AppSnapshot {
+        AppSnapshot {
+            xp_bin: self.xp_bin.clone(),
+            node_name: self.node_name.clone(),
+            access_host: self.access_host.clone(),
+            cloudflare_enabled: self.cloudflare_enabled,
+            account_id: self.account_id.clone(),
+            zone_id: self.zone_id.clone(),
+            hostname: self.hostname.clone(),
+            origin_url: self.origin_url.clone(),
+            api_base_url: self.api_base_url.clone(),
+            xray_version: self.xray_version.clone(),
+            cloudflare_token: self.cloudflare_token.clone(),
+            enable_services: self.enable_services,
+            dry_run: self.dry_run,
+        }
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.snapshot() != self.baseline
     }
 
     fn apply_config(&mut self, cfg: TuiConfig) {
@@ -527,9 +640,6 @@ impl App {
         if let Some(v) = cfg.xray_version {
             self.xray_version = v;
         }
-        if let Some(v) = cfg.save_token {
-            self.save_token = v;
-        }
         if let Some(v) = cfg.enable_services {
             self.enable_services = v;
         }
@@ -551,16 +661,52 @@ fn mask_token(token: &str) -> String {
 }
 
 fn help_text(app: &App) -> String {
-    if app.editing {
-        "Mode: EDIT · Enter/Esc: finish · Type: input · Backspace: delete · q: literal".to_string()
-    } else {
-        let base = "Mode: NAV · Tab/Shift+Tab: focus · Enter: edit/toggle · s: save · S: save+exit · d: deploy · q/Esc: quit";
-        if let Some(msg) = app.status_message.as_ref() {
-            format!("{base} · Status: {msg}")
-        } else {
-            base.to_string()
+    let base = match app.mode {
+        UiMode::Nav => {
+            "Tab/Shift+Tab/↑/↓/Click: focus · Type/Backspace/Paste: edit · Space/Enter: toggle · Ctrl+S: save · Ctrl+D: autosave+deploy · Ctrl+Q: quit (asks to save if dirty)"
         }
+        UiMode::ConfirmQuit => {
+            "Mode: CONFIRM QUIT · Ctrl+S: save+exit · Ctrl+Q: exit without save · Esc/Enter: cancel"
+        }
+    };
+    if let Some(msg) = app.status_message.as_ref() {
+        format!("{base} · Status: {msg}")
+    } else {
+        base.to_string()
     }
+}
+
+fn render_quit_confirm(f: &mut Frame) {
+    let area = centered_rect(60, 30, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Unsaved changes");
+    let msg = Paragraph::new(
+        "You have unsaved changes.\n\nCtrl+S: save and exit\nCtrl+Q: exit without saving\nEsc/Enter: cancel",
+    )
+    .block(block);
+    f.render_widget(msg, area);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -576,7 +722,6 @@ struct TuiConfig {
     origin_url: Option<String>,
     api_base_url: Option<String>,
     xray_version: Option<String>,
-    save_token: Option<bool>,
     enable_services: Option<bool>,
 }
 
@@ -606,17 +751,27 @@ fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::
         origin_url: values.origin_url.clone(),
         api_base_url: values.api_base_url.clone(),
         xray_version: Some(values.xray_version.clone()),
-        save_token: Some(values.save_token),
         enable_services: Some(values.enable_services),
     };
 
     let path = paths.etc_xp_ops_deploy_settings();
-    ensure_dir(&paths.etc_xp_ops_deploy_dir())
-        .map_err(|e| crate::ops::cli::ExitError::new(4, format!("filesystem_error: {e}")))?;
+    ensure_dir(&paths.etc_xp_ops_deploy_dir()).map_err(|e| {
+        crate::ops::cli::ExitError::new(
+            4,
+            format!(
+                "filesystem_error: ensure dir {}: {e}",
+                paths.etc_xp_ops_deploy_dir().display()
+            ),
+        )
+    })?;
     let content = serde_json::to_string_pretty(&cfg)
         .map_err(|e| crate::ops::cli::ExitError::new(4, format!("filesystem_error: {e}")))?;
-    write_string_if_changed(&path, &(content + "\n"))
-        .map_err(|e| crate::ops::cli::ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&path, &(content + "\n")).map_err(|e| {
+        crate::ops::cli::ExitError::new(
+            4,
+            format!("filesystem_error: write {}: {e}", path.display()),
+        )
+    })?;
     chmod(&path, 0o640).ok();
     Ok(())
 }
@@ -625,8 +780,243 @@ fn save_token_if_needed(
     paths: &Paths,
     values: &AppValues,
 ) -> Result<(), crate::ops::cli::ExitError> {
-    if values.save_token && !values.cloudflare_token.trim().is_empty() {
-        cloudflare::set_token_value(paths, &values.cloudflare_token, Mode::Real)?;
+    let token = values.cloudflare_token.trim();
+    if token.is_empty() {
+        // Keep existing token unchanged when input is empty.
+        return Ok(());
     }
+
+    let token_dir = paths.etc_xp_ops_cloudflare_dir();
+    ensure_dir(&token_dir).map_err(|e| {
+        crate::ops::cli::ExitError::new(
+            4,
+            format!("filesystem_error: ensure dir {}: {e}", token_dir.display()),
+        )
+    })?;
+
+    let token_path = paths.etc_xp_ops_cloudflare_token();
+    write_string_if_changed(&token_path, token).map_err(|e| {
+        crate::ops::cli::ExitError::new(
+            4,
+            format!("filesystem_error: write {}: {e}", token_path.display()),
+        )
+    })?;
+    chmod(&token_path, 0o600).ok();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn test_paths() -> (tempfile::TempDir, Paths) {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        (tmp, paths)
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_q_exits_when_not_dirty() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        let action = app.handle_key(ctrl('q'));
+        assert!(matches!(action, Some(AppAction::Quit)));
+    }
+
+    #[test]
+    fn ctrl_q_enters_confirm_quit_when_dirty() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        app.node_name.push('x');
+
+        let action = app.handle_key(ctrl('q'));
+        assert!(action.is_none());
+        assert_eq!(app.mode, UiMode::ConfirmQuit);
+    }
+
+    #[test]
+    fn confirm_quit_cancel_returns_to_nav() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        app.node_name.push('x');
+        let _ = app.handle_key(ctrl('q'));
+        assert_eq!(app.mode, UiMode::ConfirmQuit);
+
+        let action = app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(action.is_none());
+        assert_eq!(app.mode, UiMode::Nav);
+    }
+
+    #[test]
+    fn confirm_quit_ctrl_s_means_save_and_exit() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        app.node_name.push('x');
+        let _ = app.handle_key(ctrl('q'));
+
+        let action = app.handle_key(ctrl('s'));
+        assert!(matches!(action, Some(AppAction::Save { exit_after: true })));
+    }
+
+    #[test]
+    fn plain_q_does_not_quit() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        let action = app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(action.is_none());
+        assert_eq!(app.mode, UiMode::Nav);
+    }
+
+    #[test]
+    fn save_tui_config_omits_legacy_save_token_field() {
+        let (tmp, paths) = test_paths();
+        let values = AppValues {
+            xp_bin: "/usr/local/bin/xp".to_string(),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_enabled: true,
+            account_id: Some("acc".to_string()),
+            zone_id: Some("zone".to_string()),
+            hostname: Some("node-1.example.com".to_string()),
+            origin_url: Some("http://127.0.0.1:62416".to_string()),
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            cloudflare_token: String::new(),
+            enable_services: true,
+            dry_run: false,
+        };
+
+        save_tui_config(&paths, &values).unwrap();
+        let raw = fs::read_to_string(tmp.path().join("etc/xp-ops/deploy/settings.json")).unwrap();
+        assert!(raw.contains("\"node_name\""));
+        assert!(!raw.contains("save_token"));
+    }
+
+    #[test]
+    fn load_tui_config_supports_public_domain_alias() {
+        let (tmp, paths) = test_paths();
+        let p = tmp.path().join("etc/xp-ops/deploy/settings.json");
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, r#"{ "public_domain": "node-1.example.net" }"#).unwrap();
+
+        let app = App::new(&paths);
+        assert_eq!(app.access_host, "node-1.example.net");
+    }
+
+    #[test]
+    fn save_token_empty_keeps_existing_token_unchanged() {
+        let (tmp, paths) = test_paths();
+        let token_path = tmp.path().join("etc/xp-ops/cloudflare_tunnel/api_token");
+        fs::create_dir_all(token_path.parent().unwrap()).unwrap();
+        fs::write(&token_path, "oldtoken").unwrap();
+
+        let values = AppValues {
+            xp_bin: String::new(),
+            node_name: String::new(),
+            access_host: String::new(),
+            cloudflare_enabled: true,
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            origin_url: None,
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            cloudflare_token: String::new(),
+            enable_services: true,
+            dry_run: false,
+        };
+        save_token_if_needed(&paths, &values).unwrap();
+
+        let raw = fs::read_to_string(token_path).unwrap();
+        assert_eq!(raw, "oldtoken");
+    }
+
+    #[test]
+    fn save_token_non_empty_writes_trimmed_value() {
+        let (tmp, paths) = test_paths();
+        let token_path = tmp.path().join("etc/xp-ops/cloudflare_tunnel/api_token");
+        fs::create_dir_all(token_path.parent().unwrap()).unwrap();
+        fs::write(&token_path, "oldtoken").unwrap();
+
+        let values = AppValues {
+            xp_bin: String::new(),
+            node_name: String::new(),
+            access_host: String::new(),
+            cloudflare_enabled: true,
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            origin_url: None,
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            cloudflare_token: " newtoken \n".to_string(),
+            enable_services: true,
+            dry_run: false,
+        };
+        save_token_if_needed(&paths, &values).unwrap();
+
+        let raw = fs::read_to_string(token_path).unwrap();
+        assert_eq!(raw, "newtoken");
+    }
+
+    #[test]
+    fn save_tui_config_error_includes_deploy_dir() {
+        let (tmp, paths) = test_paths();
+        let deploy_dir = tmp.path().join("etc/xp-ops/deploy");
+        fs::create_dir_all(deploy_dir.parent().unwrap()).unwrap();
+        fs::write(&deploy_dir, "not a dir").unwrap();
+
+        let values = AppValues {
+            xp_bin: String::new(),
+            node_name: String::new(),
+            access_host: String::new(),
+            cloudflare_enabled: true,
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            origin_url: None,
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            cloudflare_token: String::new(),
+            enable_services: true,
+            dry_run: false,
+        };
+        let err = save_tui_config(&paths, &values).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("ensure dir"));
+        assert!(err.message.contains("etc/xp-ops/deploy"));
+    }
+
+    #[test]
+    fn save_token_error_includes_token_dir() {
+        let (tmp, paths) = test_paths();
+        let token_dir = tmp.path().join("etc/xp-ops/cloudflare_tunnel");
+        fs::create_dir_all(token_dir.parent().unwrap()).unwrap();
+        fs::write(&token_dir, "not a dir").unwrap();
+
+        let values = AppValues {
+            xp_bin: String::new(),
+            node_name: String::new(),
+            access_host: String::new(),
+            cloudflare_enabled: true,
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            origin_url: None,
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            cloudflare_token: "tok".to_string(),
+            enable_services: true,
+            dry_run: false,
+        };
+        let err = save_token_if_needed(&paths, &values).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("ensure dir"));
+        assert!(err.message.contains("etc/xp-ops/cloudflare_tunnel"));
+    }
 }
