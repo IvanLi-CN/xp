@@ -57,10 +57,10 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）          | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）                               | 负责人（Owner） | 使用方（Consumers）    | 备注（Notes）                           |
-| --------------------- | ------------ | ------------- | -------------- | ------------------------------------------------------ | --------------- | ---------------------- | -------------------------------------- |
-| `xp` runtime config   | CLI / Config | external      | Modify         | [contracts/cli.md](./contracts/cli.md)                 | core            | operators              | 探活参数（interval/threshold）         |
-| `GET /api/health`     | HTTP API     | external      | Modify         | [contracts/http-apis.md](./contracts/http-apis.md)     | core            | monitors / operators   | 追加 `xray.*` 字段（向后兼容）         |
+| 接口（Name）        | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）                           | 负责人（Owner） | 使用方（Consumers）  | 备注（Notes）                  |
+| ------------------- | ------------ | ------------- | -------------- | -------------------------------------------------- | --------------- | -------------------- | ------------------------------ |
+| `xp` runtime config | CLI / Config | external      | Modify         | [contracts/cli.md](./contracts/cli.md)             | core            | operators            | 探活参数（interval/threshold） |
+| `GET /api/health`   | HTTP API     | external      | Modify         | [contracts/http-apis.md](./contracts/http-apis.md) | core            | monitors / operators | 追加 `xray.*` 字段（向后兼容） |
 
 ## 约束与风险（Constraints & Risks）
 
