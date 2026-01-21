@@ -73,4 +73,4 @@
 | 0017 | Grant 模型：分组与配额周期归属                              | 待实现 | `0017:grant-grouping-and-cycle-ownership/PLAN.md`    | 2026-01-19 | -                |
 | 0018 | xp-ops：自我升级、xp 升级与 Release 自动发布                | 已完成 | `0018:xp-ops-upgrade-and-release-automation/PLAN.md` | 2026-01-20 | -                |
 | 0019 | Subscription 预览格式（不折行 + 复制一致性）                | 待实现 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-20 | -                |
-| 0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 待实现 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |
+| 0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 已完成 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |

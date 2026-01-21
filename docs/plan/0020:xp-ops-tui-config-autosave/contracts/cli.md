@@ -20,6 +20,10 @@ xp-ops tui
   - `↑` / `↓`
   - 鼠标左键点击（选择字段/切换编辑项）
 
+- 编辑：
+  - 直接输入（`Backspace` 删除；支持粘贴）
+  - 布尔字段用 `Space`（或 `Enter`）切换
+
 - 命令操作（Ctrl 组合键）：
   - `Ctrl+S`: 保存当前配置（写入 deploy settings；按策略处理 token）
   - `Ctrl+D`: **自动保存后**开始 deploy
