@@ -257,8 +257,11 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
             "/api/admin/users",
             json!({
               "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "quota_reset": {
+                "policy": "monthly",
+                "day_of_month": 1,
+                "tz_offset_minutes": 480
+              }
             }),
         ))
         .await
@@ -322,48 +325,52 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id_ss,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "xray-e2e-group",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id_ss,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }, {
+                "user_id": user_id,
+                "endpoint_id": endpoint_id_vless,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let grant_ss: serde_json::Value = {
+    let _group_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let grant_id_ss = grant_ss["grant_id"].as_str().unwrap().to_string();
 
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "/api/admin/grants",
-            json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id_vless,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let grant_vless: serde_json::Value = {
-        use http_body_util::BodyExt as _;
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
+    let grant_id_ss = {
+        let store = store.lock().await;
+        store
+            .list_grants()
+            .into_iter()
+            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_ss)
+            .map(|g| g.grant_id)
+            .expect("expected grant to exist for ss endpoint")
     };
-    let grant_id_vless = grant_vless["grant_id"].as_str().unwrap().to_string();
+
+    let grant_id_vless = {
+        let store = store.lock().await;
+        store
+            .list_grants()
+            .into_iter()
+            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_vless)
+            .map(|g| g.grant_id)
+            .expect("expected grant to exist for vless endpoint")
+    };
 
     let mut client = xray::connect(xray_api_addr).await.unwrap();
     wait_for_remove_user(
@@ -455,8 +462,11 @@ async fn xray_e2e_quota_enforcement_ss2022() {
             "/api/admin/users",
             json!({
               "display_name": "quota-e2e",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "quota_reset": {
+                "policy": "monthly",
+                "day_of_month": 1,
+                "tz_offset_minutes": 480
+              }
             }),
         ))
         .await
@@ -494,29 +504,40 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id_ss,
-              "quota_limit_bytes": quota_limit_bytes,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "quota-e2e-group",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id_ss,
+                "enabled": true,
+                "quota_limit_bytes": quota_limit_bytes,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let grant_ss: serde_json::Value = {
+    let group_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let grant_id_ss = grant_ss["grant_id"].as_str().unwrap().to_string();
-    let ss_password = grant_ss["credentials"]["ss2022"]["password"]
+    let ss_password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
+
+    let grant_id_ss = {
+        let store = store.lock().await;
+        store
+            .list_grants()
+            .into_iter()
+            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_ss)
+            .map(|g| g.grant_id)
+            .expect("expected grant to exist for ss endpoint")
+    };
 
     let (dest_port, echo_task) = spawn_echo_server().await;
 
