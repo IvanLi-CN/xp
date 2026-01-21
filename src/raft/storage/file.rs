@@ -453,6 +453,33 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             .map(|_| endpoint.endpoint_id.clone()),
                         _ => None,
                     };
+                    let (deleted_usage, clear_bans) = match &cmd {
+                        DesiredStateCommand::DeleteGrantGroup { group_name } => {
+                            let ids: Vec<String> = store
+                                .list_grants()
+                                .into_iter()
+                                .filter(|g| g.group_name == *group_name)
+                                .map(|g| g.grant_id)
+                                .collect();
+                            (ids, Vec::new())
+                        }
+                        DesiredStateCommand::ReplaceGrantGroup {
+                            group_name, grants, ..
+                        } => {
+                            let old: std::collections::BTreeSet<String> = store
+                                .list_grants()
+                                .into_iter()
+                                .filter(|g| g.group_name == *group_name)
+                                .map(|g| g.grant_id)
+                                .collect();
+                            let new: std::collections::BTreeSet<String> =
+                                grants.iter().map(|g| g.grant_id.clone()).collect();
+                            let deleted: Vec<String> = old.difference(&new).cloned().collect();
+                            let clear_bans: Vec<String> = new.into_iter().collect();
+                            (deleted, clear_bans)
+                        }
+                        _ => (Vec::new(), Vec::new()),
+                    };
                     match cmd.apply(store.state_mut()) {
                         Ok(apply_result) => {
                             store.save().map_err(|e| {
@@ -481,14 +508,36 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                         })?;
                                     }
                                 }
-                                (DesiredStateCommand::UpdateGrantFields { grant_id, .. }, _) => {
-                                    store.clear_quota_banned(grant_id).map_err(|e| {
-                                        io_err(
-                                            ErrorSubject::StateMachine,
-                                            ErrorVerb::Write,
-                                            std::io::Error::other(e.to_string()),
-                                        )
-                                    })?;
+                                (DesiredStateCommand::ReplaceGrantGroup { .. }, _) => {
+                                    for grant_id in deleted_usage.iter() {
+                                        store.clear_grant_usage(grant_id).map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                    }
+                                    for grant_id in clear_bans.iter() {
+                                        store.clear_quota_banned(grant_id).map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                    }
+                                }
+                                (DesiredStateCommand::DeleteGrantGroup { .. }, _) => {
+                                    for grant_id in deleted_usage.iter() {
+                                        store.clear_grant_usage(grant_id).map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                    }
                                 }
                                 (
                                     DesiredStateCommand::SetUserNodeQuota {
@@ -544,8 +593,13 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             let (status, code) = match domain {
                                 crate::domain::DomainError::MissingUser { .. }
                                 | crate::domain::DomainError::MissingNode { .. }
-                                | crate::domain::DomainError::MissingEndpoint { .. } => {
+                                | crate::domain::DomainError::MissingEndpoint { .. }
+                                | crate::domain::DomainError::MissingGrantGroup { .. } => {
                                     (404, "not_found")
+                                }
+                                crate::domain::DomainError::GroupNameConflict { .. }
+                                | crate::domain::DomainError::GrantPairConflict { .. } => {
+                                    (409, "conflict")
                                 }
                                 _ => (400, "invalid_request"),
                             };
@@ -731,7 +785,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind},
+        domain::EndpointKind,
         reconcile::ReconcileRequest,
         state::{GrantEnabledSource, JsonSnapshotStore, StoreInit},
     };
@@ -749,9 +803,7 @@ mod tests {
     fn store_with_banned_grant(tmp_dir: &Path) -> (Arc<Mutex<JsonSnapshotStore>>, String) {
         let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp_dir)).unwrap();
         let node_id = store.list_nodes()[0].node_id.clone();
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
             .create_endpoint(
                 node_id,
@@ -762,11 +814,11 @@ mod tests {
             .unwrap();
         let grant = store
             .create_grant(
+                "test-group".to_string(),
                 user.user_id,
                 endpoint.endpoint_id,
                 1,
-                CyclePolicy::InheritUser,
-                None,
+                true,
                 None,
             )
             .unwrap();

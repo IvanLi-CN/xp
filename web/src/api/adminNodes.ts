@@ -1,12 +1,14 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { type NodeQuotaReset, NodeQuotaResetSchema } from "./quotaReset";
 
 export const AdminNodeSchema = z.object({
 	node_id: z.string(),
 	node_name: z.string(),
 	api_base_url: z.string(),
 	access_host: z.string(),
+	quota_reset: NodeQuotaResetSchema,
 });
 
 export type AdminNode = z.infer<typeof AdminNodeSchema>;
@@ -21,6 +23,7 @@ export type AdminNodePatchRequest = {
 	node_name?: string;
 	access_host?: string;
 	api_base_url?: string;
+	quota_reset?: NodeQuotaReset;
 };
 
 export async function fetchAdminNodes(

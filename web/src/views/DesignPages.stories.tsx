@@ -4,10 +4,10 @@ import { expect, userEvent, within } from "@storybook/test";
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminGrantGroupDetail } from "../api/adminGrantGroups";
-import type { AdminGrant } from "../api/adminGrants";
 import type { AdminNode } from "../api/adminNodes";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
+import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
 
 function Empty() {
 	return <></>;
@@ -62,18 +62,32 @@ const DESIGN_NODES: AdminNode[] = [
 		node_name: "tokyo-1",
 		access_host: "tokyo.example.com",
 		api_base_url: "https://n1:62416",
+		quota_reset: {
+			policy: "monthly",
+			day_of_month: 1,
+			tz_offset_minutes: null,
+		} satisfies NodeQuotaReset,
 	},
 	{
 		node_id: "n2",
 		node_name: "osaka-1",
 		access_host: "osaka.example.com",
 		api_base_url: "https://n2:62416",
+		quota_reset: {
+			policy: "monthly",
+			day_of_month: 15,
+			tz_offset_minutes: null,
+		} satisfies NodeQuotaReset,
 	},
 	{
 		node_id: "n3",
 		node_name: "nagoya-1",
 		access_host: "nagoya.example.com",
 		api_base_url: "https://n3:62416",
+		quota_reset: {
+			policy: "unlimited",
+			tz_offset_minutes: null,
+		} satisfies NodeQuotaReset,
 	},
 ];
 
@@ -116,50 +130,21 @@ const DESIGN_USERS: AdminUser[] = [
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Customer A",
 		subscription_token: "sub_9c1234d2",
-		cycle_policy_default: "by_user",
-		cycle_day_of_month_default: 1,
+		quota_reset: {
+			policy: "monthly",
+			day_of_month: 1,
+			tz_offset_minutes: 480,
+		} satisfies UserQuotaReset,
 	},
 	{
 		user_id: "u_01HUSERBBBBBB",
 		display_name: "Customer B",
 		subscription_token: "sub_af5678e9",
-		cycle_policy_default: "by_node",
-		cycle_day_of_month_default: 15,
-	},
-];
-
-const DESIGN_GRANTS: AdminGrant[] = [
-	{
-		grant_id: "g_01HGRANTAAAAAA",
-		user_id: "u_01HUSERAAAAAA",
-		endpoint_id: "ep_01HENDPTAAAAAA",
-		enabled: true,
-		quota_limit_bytes: 10_000_000,
-		cycle_policy: "inherit_user",
-		cycle_day_of_month: null,
-		note: "Priority",
-		credentials: {
-			vless: {
-				uuid: "11111111-1111-1111-1111-111111111111",
-				email: "customer-a@example.com",
-			},
-		},
-	},
-	{
-		grant_id: "g_01HGRANTBBBBBB",
-		user_id: "u_01HUSERBBBBBB",
-		endpoint_id: "ep_01HENDPTBBBBBB",
-		enabled: true,
-		quota_limit_bytes: 5_000_000,
-		cycle_policy: "by_user",
-		cycle_day_of_month: 15,
-		note: null,
-		credentials: {
-			ss2022: {
-				method: "2022-blake3-aes-128-gcm",
-				password: "mock-password",
-			},
-		},
+		quota_reset: {
+			policy: "monthly",
+			day_of_month: 15,
+			tz_offset_minutes: 480,
+		} satisfies UserQuotaReset,
 	},
 ];
 
@@ -202,6 +187,7 @@ const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 		user_id: "u_01HUSERAAAAAA",
 		node_id: "n1",
 		quota_limit_bytes: 10 * 2 ** 30,
+		quota_reset_source: "user",
 	},
 ];
 
@@ -223,7 +209,6 @@ const DESIGN_MOCK_API = {
 		nodes: DESIGN_NODES,
 		endpoints: DESIGN_ENDPOINTS,
 		users: DESIGN_USERS,
-		grants: DESIGN_GRANTS,
 		grantGroups: DESIGN_GRANT_GROUPS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
 		alerts: DESIGN_ALERTS,
@@ -262,10 +247,10 @@ export const EndpointDetails: Story = pageStory({
 export const Users: Story = pageStory({ path: "/users" });
 export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });
-export const Grants: Story = pageStory({ path: "/grants" });
-export const GrantNew: Story = pageStory({ path: "/grants/new" });
+export const GrantGroups: Story = pageStory({ path: "/grant-groups" });
+export const GrantGroupNew: Story = pageStory({ path: "/grant-groups/new" });
 export const GrantNewMultiSelect: Story = {
-	...pageStory({ path: "/grants/new" }),
+	...pageStory({ path: "/grant-groups/new" }),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.findByText("Create grant group")).resolves.toBeTruthy();
@@ -284,9 +269,9 @@ export const GrantNewMultiSelect: Story = {
 };
 
 export const GrantNewConflict: Story = {
-	...pageStory({ path: "/grants/new" }),
+	...pageStory({ path: "/grant-groups/new" }),
 	parameters: {
-		router: { initialEntry: "/grants/new" },
+		router: { initialEntry: "/grant-groups/new" },
 		mockApi: {
 			...DESIGN_MOCK_API,
 			delayGrantGroupCreateMs: 200,
@@ -314,9 +299,6 @@ export const GrantNewConflict: Story = {
 		).toBeInTheDocument();
 	},
 };
-export const GrantDetails: Story = pageStory({
-	path: "/grants/g_01HGRANTAAAAAA",
-});
 export const GrantGroupDetails: Story = pageStory({
 	path: "/grant-groups/group-20260119-demo",
 });

@@ -6,9 +6,9 @@ import {
 	AdminEndpointsResponseSchema,
 } from "./adminEndpoints";
 import {
-	AdminGrantUsageResponseSchema,
-	AdminGrantsResponseSchema,
-} from "./adminGrants";
+	AdminGrantGroupDetailSchema,
+	AdminGrantGroupsResponseSchema,
+} from "./adminGrantGroups";
 import { AdminJoinTokenResponseSchema } from "./adminJoinTokens";
 import { AdminNodesResponseSchema } from "./adminNodes";
 import {
@@ -60,6 +60,11 @@ describe("AdminNodesResponseSchema", () => {
 						node_name: "node-1",
 						api_base_url: "https://127.0.0.1:62416",
 						access_host: "",
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
 					},
 				],
 			}),
@@ -70,6 +75,11 @@ describe("AdminNodesResponseSchema", () => {
 					node_name: "node-1",
 					api_base_url: "https://127.0.0.1:62416",
 					access_host: "",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: null,
+					},
 				},
 			],
 		});
@@ -153,8 +163,11 @@ describe("AdminUsersResponseSchema", () => {
 						user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 						display_name: "alice",
 						subscription_token: "sub_123",
-						cycle_policy_default: "by_user",
-						cycle_day_of_month_default: 1,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: 480,
+						},
 					},
 				],
 			}),
@@ -164,8 +177,11 @@ describe("AdminUsersResponseSchema", () => {
 					user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 					display_name: "alice",
 					subscription_token: "sub_123",
-					cycle_policy_default: "by_user",
-					cycle_day_of_month_default: 1,
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 480,
+					},
 				},
 			],
 		});
@@ -184,19 +200,39 @@ describe("AdminUserTokenResponseSchema", () => {
 	});
 });
 
-describe("AdminGrantsResponseSchema", () => {
+describe("AdminGrantGroupsResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
-			AdminGrantsResponseSchema.parse({
+			AdminGrantGroupsResponseSchema.parse({
 				items: [
 					{
-						grant_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+						group_name: "group-1",
+						member_count: 2,
+					},
+				],
+			}),
+		).toEqual({
+			items: [
+				{
+					group_name: "group-1",
+					member_count: 2,
+				},
+			],
+		});
+	});
+});
+
+describe("AdminGrantGroupDetailSchema", () => {
+	it("accepts expected shape", () => {
+		expect(
+			AdminGrantGroupDetailSchema.parse({
+				group: { group_name: "group-1" },
+				members: [
+					{
+						user_id: "user-1",
+						endpoint_id: "endpoint-1",
 						enabled: true,
 						quota_limit_bytes: 10737418240,
-						cycle_policy: "inherit_user",
-						cycle_day_of_month: null,
 						note: null,
 						credentials: {
 							vless: {
@@ -208,15 +244,13 @@ describe("AdminGrantsResponseSchema", () => {
 				],
 			}),
 		).toEqual({
-			items: [
+			group: { group_name: "group-1" },
+			members: [
 				{
-					grant_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+					user_id: "user-1",
+					endpoint_id: "endpoint-1",
 					enabled: true,
 					quota_limit_bytes: 10737418240,
-					cycle_policy: "inherit_user",
-					cycle_day_of_month: null,
 					note: null,
 					credentials: {
 						vless: {
@@ -226,36 +260,6 @@ describe("AdminGrantsResponseSchema", () => {
 					},
 				},
 			],
-		});
-	});
-});
-
-describe("AdminGrantUsageResponseSchema", () => {
-	it("accepts expected shape", () => {
-		expect(
-			AdminGrantUsageResponseSchema.parse({
-				grant_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				cycle_start_at: "2025-12-01T00:00:00+08:00",
-				cycle_end_at: "2026-01-01T00:00:00+08:00",
-				used_bytes: 123456789,
-				owner_node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				desired_enabled: true,
-				quota_banned: false,
-				quota_banned_at: null,
-				effective_enabled: true,
-				warning: null,
-			}),
-		).toEqual({
-			grant_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			cycle_start_at: "2025-12-01T00:00:00+08:00",
-			cycle_end_at: "2026-01-01T00:00:00+08:00",
-			used_bytes: 123456789,
-			owner_node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			desired_enabled: true,
-			quota_banned: false,
-			quota_banned_at: null,
-			effective_enabled: true,
-			warning: null,
 		});
 	});
 });

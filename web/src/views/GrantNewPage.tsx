@@ -170,7 +170,7 @@ export function GrantNewPage() {
 				<PageState
 					variant="empty"
 					title="Admin token required"
-					description="Set an admin token to create grants."
+					description="Set an admin token to create grant groups."
 					action={
 						<Link to="/login" className="btn btn-primary">
 							Go to login
@@ -189,7 +189,7 @@ export function GrantNewPage() {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading grant form"
+					title="Loading grant group form"
 					description="Fetching nodes, users, endpoints and node quotas."
 				/>
 			);
@@ -213,7 +213,7 @@ export function GrantNewPage() {
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load grant form"
+					title="Failed to load grant group form"
 					description={message}
 					action={
 						<Button
@@ -244,10 +244,10 @@ export function GrantNewPage() {
 					title="Missing dependencies"
 					description={
 						nodes.length === 0
-							? "Create a node before creating grants."
+							? "Create a node before creating grant groups."
 							: users.length === 0
-								? "Create a user before creating grants."
-								: "Create an endpoint before creating grants."
+								? "Create a user before creating grant groups."
+								: "Create an endpoint before creating grant groups."
 					}
 				/>
 			);
@@ -648,7 +648,7 @@ export function GrantNewPage() {
 					)
 				}
 				actions={
-					<Link to="/grants" className="btn btn-ghost btn-sm">
+					<Link to="/grant-groups" className="btn btn-ghost btn-sm">
 						Back
 					</Link>
 				}

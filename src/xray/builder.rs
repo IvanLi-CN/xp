@@ -559,13 +559,11 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g1".to_string(),
+            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e1".to_string(),
-            group_name: None,
             enabled: true,
             quota_limit_bytes: 0,
-            cycle_policy: crate::domain::CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: None,
             credentials: crate::domain::GrantCredentials {
                 vless: Some(crate::domain::VlessCredentials {
@@ -606,13 +604,11 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g2".to_string(),
+            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e2".to_string(),
-            group_name: None,
             enabled: true,
             quota_limit_bytes: 0,
-            cycle_policy: crate::domain::CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: None,
             credentials: crate::domain::GrantCredentials {
                 vless: None,
@@ -739,13 +735,11 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g2".to_string(),
+            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e2".to_string(),
-            group_name: None,
             enabled: true,
             quota_limit_bytes: 0,
-            cycle_policy: crate::domain::CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: None,
             credentials: crate::domain::GrantCredentials {
                 vless: None,

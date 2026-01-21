@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-18
-- Last: 2026-01-19
+- Last: 2026-01-21
 
 ## 1) 问题陈述
 
@@ -130,9 +130,13 @@
 
 ## 10) 里程碑（Milestones）
 
-- [ ] M1: Backend 落地 schema v2（含迁移）与 grant-groups APIs（删除 grants APIs）
-- [ ] M2: Web 适配 grant-groups 交互（创建/列表/编辑以“组”为单位）
-- [ ] M3: 补齐测试与质量门槛（迁移测试 + web typecheck/lint/test）
+- [x] M1: Backend 落地 schema v3（含迁移）与 grant-groups APIs（删除 grants APIs）
+- [x] M2: Web 适配 grant-groups 交互（创建/列表/编辑以“组”为单位）
+- [x] M3: 补齐测试与质量门槛（迁移测试 + web typecheck/lint/test）
+
+## Change log
+
+- 2026-01-21: 完成后端 schema 迁移与 `grant-groups` APIs；Web 完成迁移并跑通质量门槛（lint/typecheck/test）。
 
 ## 11) 方案概述（Approach, high-level）
 
@@ -178,5 +182,5 @@ None（关键口径已定案）
 
 - 现状类型：`src/domain/mod.rs`（`Grant`、`User`、`Node`）
 - 周期计算：`src/cycle.rs`
-- Legacy admin grants API（待删除）：`src/http/mod.rs`（`/api/admin/grants`）
+- Legacy admin grants API（已删除）：`src/http/mod.rs`（`/api/admin/grants`）
 - Admin grant groups API（新增）：`src/http/mod.rs`（`/api/admin/grant-groups`）

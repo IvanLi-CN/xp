@@ -679,7 +679,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
+        domain::{EndpointKind, Node, NodeQuotaReset},
         state::StoreInit,
         xray::proto::xray::app::proxyman::command::handler_service_server::{
             HandlerService, HandlerServiceServer,
@@ -931,9 +931,7 @@ mod tests {
         {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let _user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let _user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -944,11 +942,11 @@ mod tests {
                 .unwrap();
             let _grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     _user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -985,12 +983,11 @@ mod tests {
                     node_name: "node-2".to_string(),
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
+                    quota_reset: NodeQuotaReset::default(),
                 })
                 .unwrap();
 
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
 
             let local_endpoint = store
                 .create_endpoint(
@@ -1011,21 +1008,21 @@ mod tests {
 
             let _ = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id.clone(),
                     local_endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
             let _ = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     remote_endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1081,9 +1078,7 @@ mod tests {
         let (endpoint_tag, grant_id) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1094,24 +1089,13 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
-                    None,
-                )
-                .unwrap();
-            let grant = store
-                .update_grant(
-                    &grant.grant_id,
                     false,
-                    1,
-                    CyclePolicy::InheritUser,
-                    None,
                     None,
                 )
-                .unwrap()
                 .unwrap();
             (endpoint.tag, grant.grant_id)
         };
@@ -1139,9 +1123,7 @@ mod tests {
         let (endpoint_tag, grant_id) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1152,11 +1134,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1191,9 +1173,7 @@ mod tests {
         let (endpoint_id, endpoint_tag) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1204,11 +1184,11 @@ mod tests {
                 .unwrap();
             let _grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1300,9 +1280,7 @@ mod tests {
         let (endpoint, grant) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1313,11 +1291,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id.clone(),
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();

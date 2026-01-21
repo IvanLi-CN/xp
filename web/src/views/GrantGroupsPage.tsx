@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
-import { fetchAdminUsers } from "../api/adminUsers";
+import { fetchAdminGrantGroups } from "../api/adminGrantGroups";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
@@ -18,12 +18,12 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
-export function UsersPage() {
+export function GrantGroupsPage() {
 	const adminToken = readAdminToken();
-	const usersQuery = useQuery({
-		queryKey: ["adminUsers", adminToken],
+	const groupsQuery = useQuery({
+		queryKey: ["adminGrantGroups", adminToken],
 		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
+		queryFn: ({ signal }) => fetchAdminGrantGroups(adminToken, signal),
 	});
 
 	const actions =
@@ -32,8 +32,8 @@ export function UsersPage() {
 				Go to login
 			</Link>
 		) : (
-			<Link to="/users/new" className="btn btn-primary">
-				New user
+			<Link to="/grant-groups/new" className="btn btn-primary">
+				New group
 			</Link>
 		);
 
@@ -43,29 +43,29 @@ export function UsersPage() {
 				<PageState
 					variant="empty"
 					title="Admin token required"
-					description="Set an admin token to load users."
+					description="Set an admin token to load grant groups."
 				/>
 			);
 		}
 
-		if (usersQuery.isLoading) {
+		if (groupsQuery.isLoading) {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading users"
-					description="Fetching admin users from the xp API."
+					title="Loading grant groups"
+					description="Fetching grant groups from the xp API."
 				/>
 			);
 		}
 
-		if (usersQuery.isError) {
+		if (groupsQuery.isError) {
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load users"
-					description={formatError(usersQuery.error)}
+					title="Failed to load grant groups"
+					description={formatError(groupsQuery.error)}
 					action={
-						<Button variant="secondary" onClick={() => usersQuery.refetch()}>
+						<Button variant="secondary" onClick={() => groupsQuery.refetch()}>
 							Retry
 						</Button>
 					}
@@ -73,14 +73,19 @@ export function UsersPage() {
 			);
 		}
 
-		const users = usersQuery.data?.items ?? [];
+		const groups = groupsQuery.data?.items ?? [];
 
-		if (users.length === 0) {
+		if (groups.length === 0) {
 			return (
 				<PageState
 					variant="empty"
-					title="No users yet"
-					description="Create the first user to start managing subscriptions."
+					title="No grant groups yet"
+					description="Create the first group to manage access."
+					action={
+						<Link to="/grant-groups/new" className="btn btn-primary">
+							New group
+						</Link>
+					}
 				/>
 			);
 		}
@@ -88,35 +93,27 @@ export function UsersPage() {
 		return (
 			<ResourceTable
 				headers={[
-					{ key: "user_id", label: "User ID" },
-					{ key: "display_name", label: "Display name" },
-					{ key: "quota_reset", label: "Quota reset" },
-					{ key: "subscription_token", label: "Subscription token" },
+					{ key: "group_name", label: "Group name" },
+					{ key: "member_count", label: "Members" },
 					{ key: "actions", label: "" },
 				]}
 			>
-				{users.map((user) => (
-					<tr key={user.user_id}>
+				{groups.map((g) => (
+					<tr key={g.group_name}>
 						<td className="font-mono text-xs">
 							<Link
-								to="/users/$userId"
-								params={{ userId: user.user_id }}
+								to="/grant-groups/$groupName"
+								params={{ groupName: g.group_name }}
 								className="link link-primary"
 							>
-								{user.user_id}
+								{g.group_name}
 							</Link>
 						</td>
-						<td>{user.display_name}</td>
-						<td className="font-mono text-xs">
-							{user.quota_reset.policy === "monthly"
-								? `monthly@${user.quota_reset.day_of_month} tz=${user.quota_reset.tz_offset_minutes}`
-								: `unlimited tz=${user.quota_reset.tz_offset_minutes}`}
-						</td>
-						<td className="font-mono text-xs">{user.subscription_token}</td>
+						<td className="font-mono text-xs">{g.member_count}</td>
 						<td>
 							<Link
-								to="/users/$userId"
-								params={{ userId: user.user_id }}
+								to="/grant-groups/$groupName"
+								params={{ groupName: g.group_name }}
 								className="link"
 							>
 								Details
@@ -131,8 +128,8 @@ export function UsersPage() {
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				title="Users"
-				description="Manage subscription owners and defaults."
+				title="Grant groups"
+				description="Manage access in group-level transactions."
 				actions={actions}
 			/>
 			{content}

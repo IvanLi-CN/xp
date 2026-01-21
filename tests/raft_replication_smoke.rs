@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use xp::{
-    domain::{CyclePolicyDefault, User},
+    domain::{User, UserQuotaReset},
     raft::storage::StorePaths,
     raft::{
         NodeId, NodeMeta,
@@ -291,8 +291,10 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
         user_id: "user-1".to_string(),
         display_name: "replication-smoke".to_string(),
         subscription_token: "sub_test_token".to_string(),
-        cycle_policy_default: CyclePolicyDefault::ByUser,
-        cycle_day_of_month_default: 1,
+        quota_reset: UserQuotaReset::Monthly {
+            day_of_month: 1,
+            tz_offset_minutes: 480,
+        },
     };
     leader
         .client_write(DesiredStateCommand::UpsertUser { user: user.clone() })
@@ -382,8 +384,10 @@ async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow:
             user_id: "user-restart".to_string(),
             display_name: "restart-smoke".to_string(),
             subscription_token: "sub_test_token".to_string(),
-            cycle_policy_default: CyclePolicyDefault::ByUser,
-            cycle_day_of_month_default: 1,
+            quota_reset: UserQuotaReset::Monthly {
+                day_of_month: 1,
+                tz_offset_minutes: 480,
+            },
         };
         raft.client_write(DesiredStateCommand::UpsertUser { user: user.clone() })
             .await

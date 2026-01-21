@@ -492,6 +492,7 @@ mod tests {
             node_name: node_name.to_string(),
             access_host: access_host.to_string(),
             api_base_url: "http://127.0.0.1:0".to_string(),
+            quota_reset: crate::domain::NodeQuotaReset::default(),
         }
     }
 
@@ -500,8 +501,7 @@ mod tests {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
             subscription_token: "token".to_string(),
-            cycle_policy_default: crate::domain::CyclePolicyDefault::ByUser,
-            cycle_day_of_month_default: 1,
+            quota_reset: crate::domain::UserQuotaReset::default(),
         }
     }
 
@@ -543,13 +543,11 @@ mod tests {
     ) -> Grant {
         Grant {
             grant_id: grant_id.to_string(),
+            group_name: "test-group".to_string(),
             user_id: user_id.to_string(),
             endpoint_id: endpoint_id.to_string(),
-            group_name: None,
             enabled,
             quota_limit_bytes: 0,
-            cycle_policy: crate::domain::CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: note.map(|s| s.to_string()),
             credentials: crate::domain::GrantCredentials {
                 vless: None,
@@ -571,13 +569,11 @@ mod tests {
     ) -> Grant {
         Grant {
             grant_id: grant_id.to_string(),
+            group_name: "test-group".to_string(),
             user_id: user_id.to_string(),
             endpoint_id: endpoint_id.to_string(),
-            group_name: None,
             enabled,
             quota_limit_bytes: 0,
-            cycle_policy: crate::domain::CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: note.map(|s| s.to_string()),
             credentials: crate::domain::GrantCredentials {
                 vless: Some(crate::domain::VlessCredentials {

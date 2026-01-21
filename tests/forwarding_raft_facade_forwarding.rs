@@ -11,7 +11,7 @@ use tokio::{
 use xp::{
     cluster_metadata::ClusterMetadata,
     config::Config,
-    domain::{CyclePolicyDefault, User},
+    domain::{User, UserQuotaReset},
     http::build_router,
     id::new_ulid_string,
     raft::{
@@ -318,8 +318,10 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         user_id: "user-forward".to_string(),
         display_name: "forwarded-write".to_string(),
         subscription_token: "sub_test_token".to_string(),
-        cycle_policy_default: CyclePolicyDefault::ByUser,
-        cycle_day_of_month_default: 1,
+        quota_reset: UserQuotaReset::Monthly {
+            day_of_month: 1,
+            tz_offset_minutes: 480,
+        },
     };
     let cmd = DesiredStateCommand::UpsertUser { user: user.clone() };
 

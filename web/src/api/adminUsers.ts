@@ -1,17 +1,13 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
-
-export const CyclePolicyDefaultSchema = z.enum(["by_user", "by_node"]);
-
-export type CyclePolicyDefault = z.infer<typeof CyclePolicyDefaultSchema>;
+import { type UserQuotaReset, UserQuotaResetSchema } from "./quotaReset";
 
 export const AdminUserSchema = z.object({
 	user_id: z.string(),
 	display_name: z.string(),
 	subscription_token: z.string(),
-	cycle_policy_default: CyclePolicyDefaultSchema,
-	cycle_day_of_month_default: z.number().int().min(1).max(31),
+	quota_reset: UserQuotaResetSchema,
 });
 
 export type AdminUser = z.infer<typeof AdminUserSchema>;
@@ -32,14 +28,12 @@ export type AdminUserTokenResponse = z.infer<
 
 export type AdminUserCreateRequest = {
 	display_name: string;
-	cycle_policy_default: CyclePolicyDefault;
-	cycle_day_of_month_default: number;
+	quota_reset?: UserQuotaReset;
 };
 
 export type AdminUserPatchRequest = {
 	display_name?: string;
-	cycle_policy_default?: CyclePolicyDefault;
-	cycle_day_of_month_default?: number;
+	quota_reset?: UserQuotaReset;
 };
 
 export async function fetchAdminUsers(

@@ -1,8 +1,9 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { type CyclePolicyDefault, createAdminUser } from "../api/adminUsers";
+import { createAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
+import type { UserQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -25,8 +26,11 @@ export function UserNewPage() {
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
 	const [displayName, setDisplayName] = useState("");
-	const [cyclePolicy, setCyclePolicy] = useState<CyclePolicyDefault>("by_user");
-	const [cycleDay, setCycleDay] = useState(1);
+	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
+		"monthly",
+	);
+	const [resetDay, setResetDay] = useState(1);
+	const [resetTzOffsetMinutes, setResetTzOffsetMinutes] = useState(480);
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -61,17 +65,31 @@ export function UserNewPage() {
 						setError("Display name is required.");
 						return;
 					}
-					if (cycleDay < 1 || cycleDay > 31) {
-						setError("Cycle day must be between 1 and 31.");
+					if (resetPolicy === "monthly" && (resetDay < 1 || resetDay > 31)) {
+						setError("Reset day must be between 1 and 31.");
+						return;
+					}
+					if (!Number.isFinite(resetTzOffsetMinutes)) {
+						setError("tz_offset_minutes must be a number.");
 						return;
 					}
 					setError(null);
 					setIsSubmitting(true);
 					try {
+						const quotaReset: UserQuotaReset =
+							resetPolicy === "monthly"
+								? {
+										policy: "monthly",
+										day_of_month: resetDay,
+										tz_offset_minutes: resetTzOffsetMinutes,
+									}
+								: {
+										policy: "unlimited",
+										tz_offset_minutes: resetTzOffsetMinutes,
+									};
 						const created = await createAdminUser(adminToken, {
 							display_name: trimmedName,
-							cycle_policy_default: cyclePolicy,
-							cycle_day_of_month_default: cycleDay,
+							quota_reset: quotaReset,
 						});
 						pushToast({
 							variant: "success",
@@ -108,31 +126,44 @@ export function UserNewPage() {
 					<div className="grid gap-4 md:grid-cols-2">
 						<label className="form-control">
 							<div className="label">
-								<span className="label-text">Cycle policy</span>
+								<span className="label-text">Quota reset policy</span>
 							</div>
 							<select
 								className={selectClass}
-								value={cyclePolicy}
+								value={resetPolicy}
 								onChange={(event) =>
-									setCyclePolicy(event.target.value as CyclePolicyDefault)
+									setResetPolicy(event.target.value as "monthly" | "unlimited")
 								}
 							>
-								<option value="by_user">by_user</option>
-								<option value="by_node">by_node</option>
+								<option value="monthly">monthly</option>
+								<option value="unlimited">unlimited</option>
 							</select>
 						</label>
 						<label className="form-control">
 							<div className="label">
-								<span className="label-text">Cycle day of month</span>
+								<span className="label-text">Reset day of month</span>
 							</div>
 							<input
 								className={inputClass}
 								type="number"
 								min={1}
 								max={31}
-								value={cycleDay}
-								onChange={(event) => setCycleDay(Number(event.target.value))}
-								required
+								disabled={resetPolicy !== "monthly"}
+								value={resetDay}
+								onChange={(event) => setResetDay(Number(event.target.value))}
+							/>
+						</label>
+						<label className="form-control">
+							<div className="label">
+								<span className="label-text">User tz_offset_minutes</span>
+							</div>
+							<input
+								className={inputClass}
+								type="number"
+								value={resetTzOffsetMinutes}
+								onChange={(event) =>
+									setResetTzOffsetMinutes(Number(event.target.value))
+								}
 							/>
 						</label>
 					</div>
