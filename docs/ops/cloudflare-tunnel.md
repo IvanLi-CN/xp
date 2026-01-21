@@ -55,7 +55,6 @@ If you are using the recommended one-shot deploy flow, `xp-ops deploy` can infer
 
 ```
 sudo -E xp-ops deploy \
-  --xp-bin /path/to/xp \
   --node-name node-1 \
   --access-host node-1.example.net \
   --account-id <id> \
@@ -65,6 +64,7 @@ sudo -E xp-ops deploy \
 
 - `--zone-id` is optional for `deploy`: it will be resolved from `hostname` (or `access-host` if hostname is not provided).
 - `--hostname` is optional for `deploy` if `zone-id` is provided; the hostname will be derived as `<node-name>.<zone>`.
+- `--xp-bin` is optional for `deploy`: omit it if `xp` is already installed at `/usr/local/bin/xp`.
 - `-y` enables interactive preflight confirmation and hostname conflict resolution.
 
 3. Verify services:

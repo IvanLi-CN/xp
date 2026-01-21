@@ -53,7 +53,8 @@ struct CloudflarePlan {
 
 #[derive(Debug, Clone)]
 struct DeployPlan {
-    xp_bin: PathBuf,
+    xp_install_from: Option<PathBuf>,
+    xp_path: PathBuf,
     node_name: String,
     access_host: String,
     api_base_url: String,
@@ -225,15 +226,17 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     )
     .await?;
 
-    xp::cmd_xp_install(
-        paths.clone(),
-        XpInstallArgs {
-            xp_bin: plan.xp_bin.clone(),
-            enable: false,
-            dry_run: mode == Mode::DryRun,
-        },
-    )
-    .await?;
+    if let Some(xp_bin) = plan.xp_install_from.clone() {
+        xp::cmd_xp_install(
+            paths.clone(),
+            XpInstallArgs {
+                xp_bin,
+                enable: false,
+                dry_run: mode == Mode::DryRun,
+            },
+        )
+        .await?;
+    }
 
     ensure_xp_env_admin_token(&paths, mode)?;
 
@@ -341,8 +344,21 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
 
-    if !args.xp_bin.exists() {
-        errors.push("xp-bin does not exist".to_string());
+    let xp_path = paths.usr_local_bin_xp();
+    match args.xp_bin.as_ref() {
+        Some(v) => {
+            if !v.exists() {
+                errors.push("xp-bin does not exist".to_string());
+            }
+        }
+        None => {
+            if !xp_path.exists() {
+                errors.push(format!(
+                    "xp is not installed: {} (install xp first, or pass --xp-bin)",
+                    xp_path.display()
+                ));
+            }
+        }
     }
 
     if args.access_host.trim().is_empty() {
@@ -561,7 +577,8 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     };
 
     Ok(DeployPlan {
-        xp_bin: args.xp_bin.clone(),
+        xp_install_from: args.xp_bin.clone(),
+        xp_path,
         node_name: args.node_name.clone(),
         access_host: args.access_host.clone(),
         api_base_url,
@@ -1085,7 +1102,25 @@ fn render_plan(plan: &DeployPlan) {
         idx += 1;
     };
 
-    line("xp_bin", plan.xp_bin.display().to_string());
+    line(
+        "xp",
+        match plan.xp_install_from.as_ref() {
+            Some(src) => {
+                if src == &plan.xp_path {
+                    format!("use existing {}", plan.xp_path.display())
+                } else {
+                    format!("install {} -> {}", src.display(), plan.xp_path.display())
+                }
+            }
+            None => {
+                if plan.xp_path.exists() {
+                    format!("use existing {}", plan.xp_path.display())
+                } else {
+                    format!("missing {}", plan.xp_path.display())
+                }
+            }
+        },
+    );
     line("node_name", plan.node_name.clone());
     line("access_host", plan.access_host.clone());
     line(

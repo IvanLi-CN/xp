@@ -18,6 +18,10 @@ If you want to reach `xp` from the public Internet without opening inbound ports
 
 `xp-ops tui` provides an interactive deploy wizard for `xp-ops deploy`.
 
+Note:
+
+- The TUI assumes `xp` is already installed at `/usr/local/bin/xp` (e.g., via `scripts/install-from-github.sh`).
+
 Persistence:
 
 - Deploy settings are stored at `/etc/xp-ops/deploy/settings.json`.

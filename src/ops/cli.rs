@@ -175,7 +175,7 @@ pub struct XpBootstrapArgs {
 #[derive(Args, Debug, Clone)]
 pub struct DeployArgs {
     #[arg(long, value_name = "PATH")]
-    pub xp_bin: PathBuf,
+    pub xp_bin: Option<PathBuf>,
 
     #[arg(long, value_name = "NAME")]
     pub node_name: String,

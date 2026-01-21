@@ -10,7 +10,6 @@
 
 JSON object（字段均为可选；缺失表示使用 TUI 默认值或运行时推导）：
 
-- `xp_bin`: string（`xp` 二进制路径）
 - `node_name`: string
 - `access_host`: string
   - 兼容别名：`public_domain`
@@ -27,12 +26,12 @@ JSON object（字段均为可选；缺失表示使用 TUI 默认值或运行时�
 
 - Cloudflare token **不写入**本文件；token 持久化使用 `/etc/xp-ops/cloudflare_tunnel/api_token`（敏感文件）。
 - `save_token`（历史字段）若存在将被忽略；TUI 不再提供该开关，token 与其他字段一样参与保存链路。
+- `xp` 二进制路径不在本文件中配置：`xp-ops tui` 默认使用 `/usr/local/bin/xp`（可用发布安装脚本完成初次安装）。
 
 ### Examples（示例）
 
 ```json
 {
-  "xp_bin": "/usr/local/bin/xp",
   "node_name": "node-1",
   "access_host": "node-1.example.net",
   "cloudflare_enabled": true,

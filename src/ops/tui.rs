@@ -14,7 +14,6 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Stdout};
-use std::path::PathBuf;
 use std::time::Duration;
 
 pub async fn cmd_tui(paths: Paths) -> Result<(), crate::ops::cli::ExitError> {
@@ -54,7 +53,7 @@ pub async fn cmd_tui(paths: Paths) -> Result<(), crate::ops::cli::ExitError> {
 
 async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::cli::ExitError> {
     let args = DeployArgs {
-        xp_bin: PathBuf::from(values.xp_bin),
+        xp_bin: None,
         node_name: values.node_name,
         access_host: values.access_host,
         cloudflare_toggle: crate::ops::cli::CloudflareToggle {
@@ -184,7 +183,6 @@ fn ui(f: &mut Frame, app: &mut App) {
 
 #[derive(Debug, Clone)]
 struct AppValues {
-    xp_bin: String,
     node_name: String,
     access_host: String,
     cloudflare_enabled: bool,
@@ -212,7 +210,6 @@ enum AppAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AppSnapshot {
-    xp_bin: String,
     node_name: String,
     access_host: String,
     cloudflare_enabled: bool,
@@ -242,7 +239,6 @@ struct App {
     fields_area: Rect,
     paths: Paths,
 
-    xp_bin: String,
     node_name: String,
     access_host: String,
 
@@ -267,7 +263,6 @@ impl App {
             mode: UiMode::Nav,
             status_message: None,
             baseline: AppSnapshot {
-                xp_bin: String::new(),
                 node_name: String::new(),
                 access_host: String::new(),
                 cloudflare_enabled: true,
@@ -283,7 +278,6 @@ impl App {
             },
             fields_area: Rect::default(),
             paths: paths.clone(),
-            xp_bin: String::new(),
             node_name: "node-1".to_string(),
             access_host: String::new(),
             cloudflare_enabled: true,
@@ -306,12 +300,11 @@ impl App {
     }
 
     fn items_len(&self) -> usize {
-        12
+        11
     }
 
     fn render_items(&self) -> Vec<ListItem<'static>> {
         let mut v = Vec::new();
-        v.push(item("xp_bin", &self.xp_bin));
         v.push(item("node_name", &self.node_name));
         v.push(item("access_host", &self.access_host));
 
@@ -465,34 +458,33 @@ impl App {
 
     fn handle_toggle(&mut self) {
         match self.focus {
-            3 => self.cloudflare_enabled = !self.cloudflare_enabled,
-            10 => self.enable_services = !self.enable_services,
-            11 => self.dry_run = !self.dry_run,
+            2 => self.cloudflare_enabled = !self.cloudflare_enabled,
+            9 => self.enable_services = !self.enable_services,
+            10 => self.dry_run = !self.dry_run,
             _ => {}
         }
     }
 
     fn is_editable_field(&self) -> bool {
         match self.focus {
-            0..=2 => true,
-            4 => !self.cloudflare_enabled,
-            5..=8 => self.cloudflare_enabled,
-            9 => true,
+            0..=1 => true,
+            3 => !self.cloudflare_enabled,
+            4..=7 => self.cloudflare_enabled,
+            8 => true,
             _ => false,
         }
     }
 
     fn push_char(&mut self, c: char) {
         match self.focus {
-            0 => self.xp_bin.push(c),
-            1 => self.node_name.push(c),
-            2 => self.access_host.push(c),
-            4 if !self.cloudflare_enabled => self.api_base_url.push(c),
-            5 if self.cloudflare_enabled => self.account_id.push(c),
-            6 if self.cloudflare_enabled => self.zone_id.push(c),
-            7 if self.cloudflare_enabled => self.hostname.push(c),
-            8 if self.cloudflare_enabled => self.origin_url.push(c),
-            9 => self.cloudflare_token.push(c),
+            0 => self.node_name.push(c),
+            1 => self.access_host.push(c),
+            3 if !self.cloudflare_enabled => self.api_base_url.push(c),
+            4 if self.cloudflare_enabled => self.account_id.push(c),
+            5 if self.cloudflare_enabled => self.zone_id.push(c),
+            6 if self.cloudflare_enabled => self.hostname.push(c),
+            7 if self.cloudflare_enabled => self.origin_url.push(c),
+            8 => self.cloudflare_token.push(c),
             _ => {}
         }
     }
@@ -519,30 +511,27 @@ impl App {
     fn backspace(&mut self) {
         match self.focus {
             0 => {
-                self.xp_bin.pop();
-            }
-            1 => {
                 self.node_name.pop();
             }
-            2 => {
+            1 => {
                 self.access_host.pop();
             }
-            4 if !self.cloudflare_enabled => {
+            3 if !self.cloudflare_enabled => {
                 self.api_base_url.pop();
             }
-            5 if self.cloudflare_enabled => {
+            4 if self.cloudflare_enabled => {
                 self.account_id.pop();
             }
-            6 if self.cloudflare_enabled => {
+            5 if self.cloudflare_enabled => {
                 self.zone_id.pop();
             }
-            7 if self.cloudflare_enabled => {
+            6 if self.cloudflare_enabled => {
                 self.hostname.pop();
             }
-            8 if self.cloudflare_enabled => {
+            7 if self.cloudflare_enabled => {
                 self.origin_url.pop();
             }
-            9 => {
+            8 => {
                 self.cloudflare_token.pop();
             }
             _ => {}
@@ -551,7 +540,6 @@ impl App {
 
     fn to_values(&self) -> AppValues {
         AppValues {
-            xp_bin: self.xp_bin.clone(),
             node_name: self.node_name.clone(),
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
@@ -589,7 +577,6 @@ impl App {
 
     fn snapshot(&self) -> AppSnapshot {
         AppSnapshot {
-            xp_bin: self.xp_bin.clone(),
             node_name: self.node_name.clone(),
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
@@ -610,9 +597,6 @@ impl App {
     }
 
     fn apply_config(&mut self, cfg: TuiConfig) {
-        if let Some(v) = cfg.xp_bin {
-            self.xp_bin = v;
-        }
         if let Some(v) = cfg.node_name {
             self.node_name = v;
         }
@@ -711,7 +695,6 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct TuiConfig {
-    xp_bin: Option<String>,
     node_name: Option<String>,
     #[serde(alias = "public_domain")]
     access_host: Option<String>,
@@ -741,7 +724,6 @@ fn load_tui_config(paths: &Paths) -> Option<TuiConfig> {
 
 fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::cli::ExitError> {
     let cfg = TuiConfig {
-        xp_bin: Some(values.xp_bin.clone()),
         node_name: Some(values.node_name.clone()),
         access_host: Some(values.access_host.clone()),
         cloudflare_enabled: Some(values.cloudflare_enabled),
@@ -876,7 +858,6 @@ mod tests {
     fn save_tui_config_omits_legacy_save_token_field() {
         let (tmp, paths) = test_paths();
         let values = AppValues {
-            xp_bin: "/usr/local/bin/xp".to_string(),
             node_name: "node-1".to_string(),
             access_host: "node-1.example.net".to_string(),
             cloudflare_enabled: true,
@@ -916,7 +897,6 @@ mod tests {
         fs::write(&token_path, "oldtoken").unwrap();
 
         let values = AppValues {
-            xp_bin: String::new(),
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
@@ -944,7 +924,6 @@ mod tests {
         fs::write(&token_path, "oldtoken").unwrap();
 
         let values = AppValues {
-            xp_bin: String::new(),
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
@@ -972,7 +951,6 @@ mod tests {
         fs::write(&deploy_dir, "not a dir").unwrap();
 
         let values = AppValues {
-            xp_bin: String::new(),
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
@@ -1000,7 +978,6 @@ mod tests {
         fs::write(&token_dir, "not a dir").unwrap();
 
         let values = AppValues {
-            xp_bin: String::new(),
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
