@@ -18,10 +18,9 @@ use crate::{
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
     config::Config,
-    cycle::{CycleWindowError, current_cycle_window_now, effective_cycle_policy_and_day},
     domain::{
-        CyclePolicy, CyclePolicyDefault, Endpoint, EndpointKind, Grant, Node, User, UserNodeQuota,
-        validate_group_name,
+        Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, User, UserNodeQuota,
+        UserQuotaReset, validate_group_name,
     },
     protocol::VlessRealityVisionTcpEndpointMeta,
     raft::{
@@ -33,7 +32,7 @@ use crate::{
     },
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
-    subscription, xray,
+    subscription,
 };
 
 mod web_assets;
@@ -98,7 +97,8 @@ impl From<StoreError> for ApiError {
             StoreError::Domain(domain) => match domain {
                 crate::domain::DomainError::MissingUser { .. }
                 | crate::domain::DomainError::MissingNode { .. }
-                | crate::domain::DomainError::MissingEndpoint { .. } => {
+                | crate::domain::DomainError::MissingEndpoint { .. }
+                | crate::domain::DomainError::MissingGrantGroup { .. } => {
                     ApiError::not_found(domain.to_string())
                 }
                 crate::domain::DomainError::GroupNameConflict { .. }
@@ -108,6 +108,7 @@ impl From<StoreError> for ApiError {
                 _ => ApiError::invalid_request(domain.to_string()),
             },
             StoreError::SchemaVersionMismatch { .. } => ApiError::internal(value.to_string()),
+            StoreError::Migration { .. } => ApiError::internal(value.to_string()),
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
     }
@@ -202,8 +203,8 @@ struct ClusterJoinResponse {
 #[derive(Deserialize)]
 struct CreateUserRequest {
     display_name: String,
-    cycle_policy_default: CyclePolicyDefault,
-    cycle_day_of_month_default: u8,
+    #[serde(default)]
+    quota_reset: Option<UserQuotaReset>,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +219,8 @@ struct PatchNodeRequest {
     access_host: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     api_base_url: Option<Option<String>>,
+    #[serde(default)]
+    quota_reset: Option<NodeQuotaReset>,
 }
 
 #[derive(Serialize)]
@@ -238,33 +241,15 @@ struct AdminServiceConfigResponse {
 struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     display_name: Option<Option<String>>,
-    cycle_policy_default: Option<CyclePolicyDefault>,
-    cycle_day_of_month_default: Option<u8>,
+    #[serde(default)]
+    quota_reset: Option<UserQuotaReset>,
 }
 
 #[derive(Deserialize)]
 struct PutUserNodeQuotaRequest {
     quota_limit_bytes: u64,
-}
-
-#[derive(Deserialize)]
-struct CreateGrantRequest {
-    user_id: String,
-    endpoint_id: String,
-    quota_limit_bytes: u64,
-    cycle_policy: CyclePolicy,
-    cycle_day_of_month: Option<u8>,
-    note: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct PatchGrantRequest {
-    enabled: bool,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    note: Option<Option<String>>,
-    quota_limit_bytes: u64,
-    cycle_policy: CyclePolicy,
-    cycle_day_of_month: Option<u8>,
+    #[serde(default)]
+    quota_reset_source: Option<QuotaResetSource>,
 }
 
 #[derive(Deserialize)]
@@ -283,9 +268,22 @@ struct CreateGrantGroupRequest {
     members: Vec<CreateGrantGroupMemberRequest>,
 }
 
+#[derive(Deserialize)]
+struct ReplaceGrantGroupRequest {
+    #[serde(default)]
+    rename_to: Option<String>,
+    members: Vec<CreateGrantGroupMemberRequest>,
+}
+
 #[derive(Serialize)]
 struct AdminGrantGroup {
     group_name: String,
+}
+
+#[derive(Serialize)]
+struct AdminGrantGroupSummary {
+    group_name: String,
+    member_count: usize,
 }
 
 #[derive(Serialize)]
@@ -414,16 +412,16 @@ pub fn build_router(
             "/users/:user_id/node-quotas/:node_id",
             put(admin_put_user_node_quota),
         )
-        .route("/grants", post(admin_create_grant).get(admin_list_grants))
         .route(
-            "/grants/:grant_id",
-            get(admin_get_grant)
-                .delete(admin_delete_grant)
-                .patch(admin_patch_grant),
+            "/grant-groups",
+            get(admin_list_grant_groups).post(admin_create_grant_group),
         )
-        .route("/grants/:grant_id/usage", get(admin_get_grant_usage))
-        .route("/grant-groups", post(admin_create_grant_group))
-        .route("/grant-groups/:group_name", get(admin_get_grant_group))
+        .route(
+            "/grant-groups/:group_name",
+            get(admin_get_grant_group)
+                .put(admin_replace_grant_group)
+                .delete(admin_delete_grant_group),
+        )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(admin_token, admin_auth));
 
@@ -512,6 +510,7 @@ async fn raft_write(
             let code_static = match code.as_str() {
                 "invalid_request" => "invalid_request",
                 "not_found" => "not_found",
+                "conflict" => "conflict",
                 "unauthorized" => "unauthorized",
                 _ => "internal",
             };
@@ -661,6 +660,7 @@ async fn cluster_join(
         node_name: req.node_name.clone(),
         access_host: req.access_host.clone(),
         api_base_url: req.api_base_url.clone(),
+        quota_reset: NodeQuotaReset::default(),
     };
 
     let raft_node_id =
@@ -833,6 +833,9 @@ async fn admin_patch_node(
             return Err(ApiError::invalid_request("api_base_url cannot be null"));
         };
         node.api_base_url = api_base_url;
+    }
+    if let Some(quota_reset) = req.quota_reset {
+        node.quota_reset = quota_reset;
     }
 
     let _ = raft_write(
@@ -1062,11 +1065,7 @@ async fn admin_create_user(
 ) -> Result<Json<User>, ApiError> {
     let user = {
         let store = state.store.lock().await;
-        store.build_user(
-            req.display_name,
-            req.cycle_policy_default,
-            req.cycle_day_of_month_default,
-        )?
+        store.build_user(req.display_name, req.quota_reset)?
     };
     let _ = raft_write(
         &state,
@@ -1114,11 +1113,8 @@ async fn admin_patch_user(
         };
         user.display_name = display_name;
     }
-    if let Some(cycle_policy_default) = req.cycle_policy_default {
-        user.cycle_policy_default = cycle_policy_default;
-    }
-    if let Some(cycle_day_of_month_default) = req.cycle_day_of_month_default {
-        user.cycle_day_of_month_default = cycle_day_of_month_default;
+    if let Some(quota_reset) = req.quota_reset {
+        user.quota_reset = quota_reset;
     }
 
     let _ = raft_write(
@@ -1190,12 +1186,23 @@ async fn admin_put_user_node_quota(
     Path((user_id, node_id)): Path<(String, String)>,
     ApiJson(req): ApiJson<PutUserNodeQuotaRequest>,
 ) -> Result<Json<UserNodeQuota>, ApiError> {
+    let quota_reset_source = match req.quota_reset_source {
+        Some(v) => v,
+        None => {
+            let store = state.store.lock().await;
+            store
+                .get_user_node_quota_reset_source(&user_id, &node_id)
+                .unwrap_or_default()
+        }
+    };
+
     let out = raft_write(
         &state,
         crate::state::DesiredStateCommand::SetUserNodeQuota {
             user_id: user_id.clone(),
             node_id: node_id.clone(),
             quota_limit_bytes: req.quota_limit_bytes,
+            quota_reset_source,
         },
     )
     .await?;
@@ -1206,57 +1213,51 @@ async fn admin_put_user_node_quota(
     Ok(Json(quota))
 }
 
-async fn admin_create_grant(
+async fn admin_list_grant_groups(
     Extension(state): Extension<AppState>,
-    ApiJson(req): ApiJson<CreateGrantRequest>,
-) -> Result<Json<Grant>, ApiError> {
-    let grant = {
-        let store = state.store.lock().await;
-        store.build_grant(
-            req.user_id,
-            req.endpoint_id,
-            req.quota_limit_bytes,
-            req.cycle_policy,
-            req.cycle_day_of_month,
-            req.note,
-        )?
-    };
-    let _ = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::UpsertGrant {
-            grant: grant.clone(),
-        },
-    )
-    .await?;
-    state.reconcile.request_full();
-    Ok(Json(grant))
+) -> Result<Json<Items<AdminGrantGroupSummary>>, ApiError> {
+    let store = state.store.lock().await;
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for grant in store.list_grants() {
+        *counts.entry(grant.group_name).or_default() += 1;
+    }
+    let items = counts
+        .into_iter()
+        .map(|(group_name, member_count)| AdminGrantGroupSummary {
+            group_name,
+            member_count,
+        })
+        .collect();
+    Ok(Json(Items { items }))
 }
 
 async fn admin_create_grant_group(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateGrantGroupRequest>,
 ) -> Result<Json<AdminGrantGroupDetail>, ApiError> {
-    validate_group_name(&req.group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    if req.members.is_empty() {
+    let CreateGrantGroupRequest {
+        group_name,
+        members,
+    } = req;
+    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    if members.is_empty() {
         return Err(ApiError::invalid_request(
             "grant group must have at least 1 member",
         ));
     }
 
-    let mut grants = Vec::with_capacity(req.members.len());
+    let mut grants = Vec::with_capacity(members.len());
     {
         let store = state.store.lock().await;
-        for m in req.members {
-            let mut grant = store.build_grant(
+        for m in members {
+            let grant = store.build_grant(
+                group_name.clone(),
                 m.user_id,
                 m.endpoint_id,
                 m.quota_limit_bytes,
-                CyclePolicy::InheritUser,
-                None,
+                m.enabled,
                 m.note,
             )?;
-            grant.enabled = m.enabled;
-            grant.group_name = Some(req.group_name.clone());
             grants.push(grant);
         }
     }
@@ -1264,7 +1265,7 @@ async fn admin_create_grant_group(
     let out = raft_write(
         &state,
         DesiredStateCommand::CreateGrantGroup {
-            group_name: req.group_name.clone(),
+            group_name: group_name.clone(),
             grants: grants.clone(),
         },
     )
@@ -1293,9 +1294,7 @@ async fn admin_create_grant_group(
     });
 
     Ok(Json(AdminGrantGroupDetail {
-        group: AdminGrantGroup {
-            group_name: req.group_name,
-        },
+        group: AdminGrantGroup { group_name },
         members,
     }))
 }
@@ -1309,7 +1308,7 @@ async fn admin_get_grant_group(
     let mut members: Vec<AdminGrantGroupMember> = store
         .list_grants()
         .into_iter()
-        .filter(|g| g.group_name.as_deref() == Some(group_name.as_str()))
+        .filter(|g| g.group_name == group_name)
         .map(|g| AdminGrantGroupMember {
             user_id: g.user_id,
             endpoint_id: g.endpoint_id,
@@ -1338,98 +1337,126 @@ async fn admin_get_grant_group(
     }))
 }
 
-async fn admin_patch_grant(
+#[derive(Serialize)]
+struct AdminGrantGroupReplaceResponse {
+    group: AdminGrantGroup,
+    created: usize,
+    updated: usize,
+    deleted: usize,
+}
+
+async fn admin_replace_grant_group(
     Extension(state): Extension<AppState>,
-    Path(grant_id): Path<String>,
-    ApiJson(req): ApiJson<PatchGrantRequest>,
-) -> Result<Json<Grant>, ApiError> {
+    Path(group_name): Path<String>,
+    ApiJson(req): ApiJson<ReplaceGrantGroupRequest>,
+) -> Result<Json<AdminGrantGroupReplaceResponse>, ApiError> {
+    let ReplaceGrantGroupRequest { rename_to, members } = req;
+    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    if let Some(rename_to) = rename_to.as_deref() {
+        validate_group_name(rename_to).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    }
+    if members.is_empty() {
+        return Err(ApiError::invalid_request(
+            "grant group must have at least 1 member",
+        ));
+    }
+
+    let grants = {
+        let store = state.store.lock().await;
+        let existing: Vec<Grant> = store
+            .list_grants()
+            .into_iter()
+            .filter(|g| g.group_name == group_name)
+            .collect();
+        if existing.is_empty() {
+            return Err(ApiError::not_found(format!(
+                "grant group not found: {group_name}"
+            )));
+        }
+
+        let mut existing_by_pair = std::collections::BTreeMap::<(String, String), Grant>::new();
+        for g in existing {
+            existing_by_pair.insert((g.user_id.clone(), g.endpoint_id.clone()), g);
+        }
+
+        let mut out = Vec::with_capacity(members.len());
+        for m in members {
+            let key = (m.user_id.clone(), m.endpoint_id.clone());
+            if let Some(existing) = existing_by_pair.get(&key) {
+                out.push(Grant {
+                    grant_id: existing.grant_id.clone(),
+                    group_name: group_name.clone(),
+                    user_id: m.user_id,
+                    endpoint_id: m.endpoint_id,
+                    enabled: m.enabled,
+                    quota_limit_bytes: m.quota_limit_bytes,
+                    note: m.note,
+                    credentials: existing.credentials.clone(),
+                });
+            } else {
+                out.push(store.build_grant(
+                    group_name.clone(),
+                    m.user_id,
+                    m.endpoint_id,
+                    m.quota_limit_bytes,
+                    m.enabled,
+                    m.note,
+                )?);
+            }
+        }
+        out
+    };
+
     let out = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpdateGrantFields {
-            grant_id: grant_id.clone(),
-            enabled: req.enabled,
-            note: req.note,
-            quota_limit_bytes: req.quota_limit_bytes,
-            cycle_policy: req.cycle_policy,
-            cycle_day_of_month: req.cycle_day_of_month,
+        DesiredStateCommand::ReplaceGrantGroup {
+            group_name: group_name.clone(),
+            rename_to: rename_to.map(Some),
+            grants,
         },
     )
     .await?;
-    let crate::state::DesiredStateApplyResult::GrantUpdated { grant } = out else {
+    let crate::state::DesiredStateApplyResult::GrantGroupReplaced {
+        group_name,
+        created,
+        updated,
+        deleted,
+    } = out
+    else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
-    let grant = grant.ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-    state.reconcile.request_full();
-    Ok(Json(grant))
-}
 
-async fn admin_list_grants(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<Items<Grant>>, ApiError> {
-    let store = state.store.lock().await;
-    Ok(Json(Items {
-        items: store.list_grants(),
+    state.reconcile.request_full();
+    Ok(Json(AdminGrantGroupReplaceResponse {
+        group: AdminGrantGroup { group_name },
+        created,
+        updated,
+        deleted,
     }))
 }
 
-async fn admin_get_grant(
-    Extension(state): Extension<AppState>,
-    Path(grant_id): Path<String>,
-) -> Result<Json<Grant>, ApiError> {
-    let store = state.store.lock().await;
-    let grant = store
-        .get_grant(&grant_id)
-        .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-    Ok(Json(grant))
+#[derive(Serialize)]
+struct AdminGrantGroupDeleteResponse {
+    deleted: usize,
 }
 
-async fn admin_delete_grant(
+async fn admin_delete_grant_group(
     Extension(state): Extension<AppState>,
-    Path(grant_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    let (endpoint_tag, email) = {
-        let store = state.store.lock().await;
-        let grant = store
-            .get_grant(&grant_id)
-            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-        let email = format!("grant:{grant_id}");
-        let endpoint_tag = store.get_endpoint(&grant.endpoint_id).map(|e| e.tag);
-        (endpoint_tag, email)
-    };
-
+    Path(group_name): Path<String>,
+) -> Result<Json<AdminGrantGroupDeleteResponse>, ApiError> {
+    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
     let out = raft_write(
         &state,
-        crate::state::DesiredStateCommand::DeleteGrant {
-            grant_id: grant_id.clone(),
+        DesiredStateCommand::DeleteGrantGroup {
+            group_name: group_name.clone(),
         },
     )
     .await?;
-    let crate::state::DesiredStateApplyResult::GrantDeleted { deleted } = out else {
+    let crate::state::DesiredStateApplyResult::GrantGroupDeleted { deleted } = out else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
-    if !deleted {
-        return Err(ApiError::not_found(format!("grant not found: {grant_id}")));
-    }
-
-    if let Some(tag) = endpoint_tag {
-        state.reconcile.request_remove_user(tag, email);
-    }
     state.reconcile.request_full();
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Serialize)]
-struct GrantUsageResponse {
-    grant_id: String,
-    cycle_start_at: String,
-    cycle_end_at: String,
-    used_bytes: u64,
-    owner_node_id: String,
-    desired_enabled: bool,
-    quota_banned: bool,
-    quota_banned_at: Option<String>,
-    effective_enabled: bool,
-    warning: Option<String>,
+    Ok(Json(AdminGrantGroupDeleteResponse { deleted }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1459,96 +1486,10 @@ struct AlertsResponse {
     items: Vec<AlertItem>,
 }
 
-fn map_cycle_window_error(err: CycleWindowError) -> ApiError {
-    match err {
-        CycleWindowError::UserNotFound { user_id } => ApiError::not_found(format!(
-            "user not found (cycle_policy=inherit_user): {user_id}"
-        )),
-        CycleWindowError::MissingCycleDayOfMonth => {
-            ApiError::invalid_request("cycle_day_of_month is required")
-        }
-        _ => ApiError::internal(err.to_string()),
-    }
-}
-
 const ALERT_TYPE_QUOTA_ENFORCED: &str = "quota_enforced_but_desired_enabled";
 const ALERT_MESSAGE_QUOTA_ENFORCED: &str =
     "quota enforced on owner node but desired state is still enabled";
 const ALERT_ACTION_HINT_QUOTA_ENFORCED: &str = "check raft leader/quorum and retry status";
-
-async fn admin_get_grant_usage(
-    Extension(state): Extension<AppState>,
-    Path(grant_id): Path<String>,
-) -> Result<Json<GrantUsageResponse>, ApiError> {
-    let (grant, policy, day_of_month, owner_node_id) = {
-        let store = state.store.lock().await;
-        let grant = store
-            .get_grant(&grant_id)
-            .ok_or_else(|| ApiError::not_found(format!("grant not found: {grant_id}")))?;
-        let endpoint = store.get_endpoint(&grant.endpoint_id).ok_or_else(|| {
-            ApiError::internal(format!("endpoint not found for grant: {grant_id}"))
-        })?;
-        let (policy, day_of_month) =
-            effective_cycle_policy_and_day(&store, &grant).map_err(map_cycle_window_error)?;
-        (grant, policy, day_of_month, endpoint.node_id)
-    };
-
-    let (cycle_start, cycle_end) =
-        current_cycle_window_now(policy, day_of_month).map_err(map_cycle_window_error)?;
-    let cycle_start_at = cycle_start.to_rfc3339();
-    let cycle_end_at = cycle_end.to_rfc3339();
-
-    let email = format!("grant:{grant_id}");
-    let (uplink_total, downlink_total) = {
-        let mut client = xray::connect(state.config.xray_api_addr)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        client
-            .get_user_traffic_totals(&email)
-            .await
-            .map_err(|status| ApiError::internal(format!("xray get_stats failed: {status}")))?
-    };
-    let seen_at = Utc::now().to_rfc3339();
-
-    let (snapshot, usage) = {
-        let mut store = state.store.lock().await;
-        let snapshot = store.apply_grant_usage_sample(
-            &grant.grant_id,
-            cycle_start_at.clone(),
-            cycle_end_at.clone(),
-            uplink_total,
-            downlink_total,
-            seen_at,
-        )?;
-        let usage = store.get_grant_usage(&grant.grant_id).ok_or_else(|| {
-            ApiError::internal(format!("grant usage missing after sampling: {grant_id}"))
-        })?;
-        (snapshot, usage)
-    };
-
-    let desired_enabled = grant.enabled;
-    let quota_banned = usage.quota_banned;
-    let quota_banned_at = usage.quota_banned_at;
-    let effective_enabled = desired_enabled && !quota_banned;
-    let warning = if desired_enabled != effective_enabled {
-        Some(ALERT_MESSAGE_QUOTA_ENFORCED.to_string())
-    } else {
-        None
-    };
-
-    Ok(Json(GrantUsageResponse {
-        grant_id,
-        cycle_start_at: snapshot.cycle_start_at,
-        cycle_end_at: snapshot.cycle_end_at,
-        used_bytes: snapshot.used_bytes,
-        owner_node_id,
-        desired_enabled,
-        quota_banned,
-        quota_banned_at,
-        effective_enabled,
-        warning,
-    }))
-}
 
 fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<AlertItem> {
     let mut items = Vec::new();

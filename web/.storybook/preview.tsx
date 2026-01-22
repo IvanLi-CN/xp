@@ -21,10 +21,9 @@ import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
 import { EndpointsPage } from "../src/views/EndpointsPage";
-import { GrantDetailsPage } from "../src/views/GrantDetailsPage";
 import { GrantGroupDetailsPage } from "../src/views/GrantGroupDetailsPage";
+import { GrantGroupsPage } from "../src/views/GrantGroupsPage";
 import { GrantNewPage } from "../src/views/GrantNewPage";
-import { GrantsPage } from "../src/views/GrantsPage";
 import { HomePage } from "../src/views/HomePage";
 import { LoginPage } from "../src/views/LoginPage";
 import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
@@ -194,10 +193,10 @@ const preview: Preview = {
 				component: UserDetailsPage,
 			});
 
-			const grantsRoute = createRoute({
+			const grantGroupsRoute = createRoute({
 				getParentRoute: () => appRoute,
-				path: "/grants",
-				component: GrantsPage,
+				path: "/grant-groups",
+				component: GrantGroupsPage,
 			});
 
 			const serviceConfigRoute = createRoute({
@@ -206,16 +205,10 @@ const preview: Preview = {
 				component: ServiceConfigPage,
 			});
 
-			const grantNewRoute = createRoute({
+			const grantGroupNewRoute = createRoute({
 				getParentRoute: () => appRoute,
-				path: "/grants/new",
+				path: "/grant-groups/new",
 				component: GrantNewPage,
-			});
-
-			const grantDetailsRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/grants/$grantId",
-				component: GrantDetailsPage,
 			});
 
 			const grantGroupDetailsRoute = createRoute({
@@ -234,9 +227,8 @@ const preview: Preview = {
 				usersRoute,
 				userNewRoute,
 				userDetailsRoute,
-				grantsRoute,
-				grantNewRoute,
-				grantDetailsRoute,
+				grantGroupsRoute,
+				grantGroupNewRoute,
 				grantGroupDetailsRoute,
 				serviceConfigRoute,
 			]);

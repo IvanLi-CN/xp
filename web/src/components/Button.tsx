@@ -2,7 +2,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 import { useUiPrefsOptional } from "./UiPrefs";
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "md" | "sm";
 
 export interface ButtonProps extends ComponentPropsWithoutRef<"button"> {
@@ -27,11 +27,13 @@ export function Button({
 		size ?? (prefs?.density === "compact" ? "sm" : "md");
 
 	const variantClass =
-		variant === "secondary"
-			? "btn-outline xp-btn-outline"
-			: variant === "ghost"
-				? "btn-ghost"
-				: "btn-primary";
+		variant === "danger"
+			? "btn-error"
+			: variant === "secondary"
+				? "btn-outline xp-btn-outline"
+				: variant === "ghost"
+					? "btn-ghost"
+					: "btn-primary";
 
 	return (
 		<button

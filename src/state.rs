@@ -10,9 +10,10 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        CyclePolicy, CyclePolicyDefault, DomainError, Endpoint, EndpointKind, Grant,
-        GrantCredentials, Node, Ss2022Credentials, User, UserNodeQuota, VlessCredentials,
+        DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
+        QuotaResetSource, Ss2022Credentials, User, UserNodeQuota, UserQuotaReset, VlessCredentials,
         validate_cycle_day_of_month, validate_group_name, validate_port,
+        validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
@@ -23,7 +24,7 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,7 @@ pub enum StoreError {
     Io(io::Error),
     SerdeJson(serde_json::Error),
     Domain(DomainError),
+    Migration { message: String },
     SchemaVersionMismatch { expected: u32, got: u32 },
 }
 
@@ -49,6 +51,7 @@ impl std::fmt::Display for StoreError {
             Self::Io(e) => write!(f, "io error: {e}"),
             Self::SerdeJson(e) => write!(f, "json error: {e}"),
             Self::Domain(e) => write!(f, "{e}"),
+            Self::Migration { message } => write!(f, "migration error: {message}"),
             Self::SchemaVersionMismatch { expected, got } => {
                 write!(f, "schema_version mismatch: expected {expected}, got {got}")
             }
@@ -62,6 +65,7 @@ impl std::error::Error for StoreError {
             Self::Io(e) => Some(e),
             Self::SerdeJson(e) => Some(e),
             Self::Domain(e) => Some(e),
+            Self::Migration { .. } => None,
             Self::SchemaVersionMismatch { .. } => None,
         }
     }
@@ -97,7 +101,7 @@ pub struct PersistedState {
     #[serde(default)]
     pub grants: BTreeMap<String, Grant>,
     #[serde(default)]
-    pub user_node_quotas: BTreeMap<String, BTreeMap<String, u64>>,
+    pub user_node_quotas: BTreeMap<String, BTreeMap<String, UserNodeQuotaConfig>>,
 }
 
 impl PersistedState {
@@ -110,6 +114,412 @@ impl PersistedState {
             grants: BTreeMap::new(),
             user_node_quotas: BTreeMap::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserNodeQuotaConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quota_limit_bytes: Option<u64>,
+    #[serde(default)]
+    pub quota_reset_source: QuotaResetSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CyclePolicyDefaultV2 {
+    ByUser,
+    ByNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CyclePolicyV2 {
+    InheritUser,
+    ByUser,
+    ByNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct UserV2 {
+    user_id: String,
+    display_name: String,
+    subscription_token: String,
+    cycle_policy_default: CyclePolicyDefaultV2,
+    cycle_day_of_month_default: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct GrantV2 {
+    grant_id: String,
+    user_id: String,
+    endpoint_id: String,
+    #[serde(default)]
+    group_name: Option<String>,
+    enabled: bool,
+    quota_limit_bytes: u64,
+    cycle_policy: CyclePolicyV2,
+    cycle_day_of_month: Option<u8>,
+    note: Option<String>,
+    credentials: GrantCredentials,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PersistedStateV2Like {
+    schema_version: u32,
+    #[serde(default)]
+    nodes: BTreeMap<String, Node>,
+    #[serde(default)]
+    endpoints: BTreeMap<String, Endpoint>,
+    #[serde(default)]
+    users: BTreeMap<String, UserV2>,
+    #[serde(default)]
+    grants: BTreeMap<String, GrantV2>,
+    #[serde(default)]
+    user_node_quotas: BTreeMap<String, BTreeMap<String, u64>>,
+}
+
+fn sanitize_group_name_fragment(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('-');
+        }
+    }
+    out
+}
+
+fn make_legacy_group_name(user_id: &str) -> String {
+    let fragment = sanitize_group_name_fragment(user_id);
+    let mut out = format!("legacy-{fragment}");
+    if out.len() > 64 {
+        out.truncate(64);
+    }
+    if out.is_empty() {
+        out = "legacy".to_string();
+    }
+    out
+}
+
+fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, StoreError> {
+    let PersistedStateV2Like {
+        schema_version: _,
+        nodes,
+        endpoints,
+        users,
+        grants,
+        user_node_quotas,
+    } = input;
+
+    let users_v2 = users;
+
+    let mut out = PersistedState::empty();
+    out.schema_version = SCHEMA_VERSION;
+    out.nodes = nodes;
+    out.endpoints = endpoints;
+
+    // Users: cycle_* -> quota_reset (monthly@day, tz=UTC+8).
+    for (user_id, user) in &users_v2 {
+        validate_cycle_day_of_month(user.cycle_day_of_month_default).map_err(StoreError::Domain)?;
+        out.users.insert(
+            user_id.clone(),
+            User {
+                user_id: user.user_id.clone(),
+                display_name: user.display_name.clone(),
+                subscription_token: user.subscription_token.clone(),
+                quota_reset: UserQuotaReset::Monthly {
+                    day_of_month: user.cycle_day_of_month_default,
+                    tz_offset_minutes: 480,
+                },
+            },
+        );
+    }
+
+    // Preserve explicit user-node quotas (quota only; reset source migrated below).
+    for (user_id, nodes) in user_node_quotas {
+        for (node_id, quota_limit_bytes) in nodes {
+            out.user_node_quotas
+                .entry(user_id.clone())
+                .or_default()
+                .insert(
+                    node_id,
+                    UserNodeQuotaConfig {
+                        quota_limit_bytes: Some(quota_limit_bytes),
+                        // In v2 this field did not exist; seed with the default and allow it to be
+                        // overridden based on grants later in this migration.
+                        quota_reset_source: QuotaResetSource::User,
+                    },
+                );
+        }
+    }
+
+    let mut group_key_to_name = std::collections::BTreeMap::<String, String>::new();
+    let mut used_group_names = std::collections::BTreeSet::<String>::new();
+    let mut seen_pairs = std::collections::BTreeSet::<(String, String)>::new();
+    let mut node_day_by_node_id = std::collections::BTreeMap::<String, u8>::new();
+
+    for (_grant_id, grant) in grants {
+        let endpoint =
+            out.endpoints
+                .get(&grant.endpoint_id)
+                .ok_or_else(|| StoreError::Migration {
+                    message: format!("missing endpoint for grant_id={}", grant.grant_id),
+                })?;
+        let node_id = endpoint.node_id.clone();
+
+        let (effective_source, effective_day) = match grant.cycle_policy {
+            CyclePolicyV2::InheritUser => {
+                let user = users_v2
+                    .get(&grant.user_id)
+                    .ok_or_else(|| StoreError::Migration {
+                        message: format!("missing user for grant_id={}", grant.grant_id),
+                    })?;
+                let source = match user.cycle_policy_default {
+                    CyclePolicyDefaultV2::ByUser => QuotaResetSource::User,
+                    CyclePolicyDefaultV2::ByNode => QuotaResetSource::Node,
+                };
+                (source, user.cycle_day_of_month_default)
+            }
+            CyclePolicyV2::ByUser => (
+                QuotaResetSource::User,
+                grant
+                    .cycle_day_of_month
+                    .ok_or_else(|| StoreError::Migration {
+                        message: format!(
+                            "missing cycle_day_of_month for grant_id={} (cycle_policy=by_user)",
+                            grant.grant_id
+                        ),
+                    })?,
+            ),
+            CyclePolicyV2::ByNode => (
+                QuotaResetSource::Node,
+                grant
+                    .cycle_day_of_month
+                    .ok_or_else(|| StoreError::Migration {
+                        message: format!(
+                            "missing cycle_day_of_month for grant_id={} (cycle_policy=by_node)",
+                            grant.grant_id
+                        ),
+                    })?,
+            ),
+        };
+
+        validate_cycle_day_of_month(effective_day).map_err(StoreError::Domain)?;
+
+        if effective_source == QuotaResetSource::Node {
+            match node_day_by_node_id.get(&node_id) {
+                Some(existing) if *existing != effective_day => {
+                    return Err(StoreError::Migration {
+                        message: format!(
+                            "conflicting node day_of_month for node_id={node_id}: {existing} vs {effective_day}"
+                        ),
+                    });
+                }
+                None => {
+                    node_day_by_node_id.insert(node_id.clone(), effective_day);
+                }
+                _ => {}
+            }
+        }
+
+        let pair = (grant.user_id.clone(), grant.endpoint_id.clone());
+        if !seen_pairs.insert(pair.clone()) {
+            return Err(StoreError::Migration {
+                message: format!(
+                    "duplicate (user_id, endpoint_id) detected: user_id={} endpoint_id={}",
+                    pair.0, pair.1
+                ),
+            });
+        }
+
+        let cfg_effective_source = effective_source.clone();
+        let cfg = out
+            .user_node_quotas
+            .entry(grant.user_id.clone())
+            .or_default()
+            .entry(node_id.clone())
+            .or_insert(UserNodeQuotaConfig {
+                quota_limit_bytes: None,
+                quota_reset_source: cfg_effective_source,
+            });
+        // If this config came from the legacy v2 `user_node_quotas` map, its `quota_reset_source`
+        // was seeded with the default and should be replaced with the effective source derived
+        // from grants.
+        if cfg.quota_limit_bytes.is_some() && cfg.quota_reset_source == QuotaResetSource::User {
+            cfg.quota_reset_source = effective_source.clone();
+        }
+        if cfg.quota_reset_source != effective_source {
+            return Err(StoreError::Migration {
+                message: format!(
+                    "conflicting quota_reset_source for user_id={} node_id={}: {:?} vs {:?}",
+                    grant.user_id, node_id, cfg.quota_reset_source, effective_source
+                ),
+            });
+        }
+
+        let group_key = grant
+            .group_name
+            .as_deref()
+            .map(|raw| format!("raw:{raw}"))
+            .unwrap_or_else(|| format!("legacy-user:{}", grant.user_id));
+        let group_name = group_key_to_name.entry(group_key).or_insert_with(|| {
+            let base = grant
+                .group_name
+                .as_deref()
+                .map(sanitize_group_name_fragment)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| make_legacy_group_name(&grant.user_id));
+            let mut candidate = base;
+            if candidate.len() > 64 {
+                candidate.truncate(64);
+            }
+            if candidate.is_empty() {
+                candidate = make_legacy_group_name(&grant.user_id);
+            }
+            if validate_group_name(&candidate).is_err() {
+                candidate = make_legacy_group_name(&grant.user_id);
+            }
+            let base_candidate = candidate.clone();
+            if used_group_names.insert(candidate.clone()) {
+                return candidate;
+            }
+            let mut i = 2u32;
+            loop {
+                let suffix = format!("-{i}");
+                let mut with_suffix = base_candidate.clone();
+                if with_suffix.len() + suffix.len() > 64 {
+                    with_suffix.truncate(64 - suffix.len());
+                }
+                with_suffix.push_str(&suffix);
+                if used_group_names.insert(with_suffix.clone()) {
+                    return with_suffix;
+                }
+                i += 1;
+            }
+        });
+
+        out.grants.insert(
+            grant.grant_id.clone(),
+            Grant {
+                grant_id: grant.grant_id,
+                group_name: group_name.clone(),
+                user_id: grant.user_id,
+                endpoint_id: grant.endpoint_id,
+                enabled: grant.enabled,
+                quota_limit_bytes: grant.quota_limit_bytes,
+                note: grant.note,
+                credentials: grant.credentials,
+            },
+        );
+    }
+
+    for (node_id, node) in out.nodes.iter_mut() {
+        let day = node_day_by_node_id.get(node_id).copied().unwrap_or(1);
+        node.quota_reset = NodeQuotaReset::Monthly {
+            day_of_month: day,
+            tz_offset_minutes: None,
+        };
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod migrate_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn migrate_v2_like_to_v3_overrides_seeded_quota_reset_source_from_grants() {
+        let node_id = "node_1".to_string();
+        let endpoint_id = "endpoint_1".to_string();
+        let user_id = "user_1".to_string();
+
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            node_id.clone(),
+            Node {
+                node_id: node_id.clone(),
+                node_name: "node-1".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+
+        let mut endpoints = BTreeMap::new();
+        endpoints.insert(
+            endpoint_id.clone(),
+            Endpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id: node_id.clone(),
+                tag: "test".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 12345,
+                meta: serde_json::json!({}),
+            },
+        );
+
+        let mut users = BTreeMap::new();
+        users.insert(
+            user_id.clone(),
+            UserV2 {
+                user_id: user_id.clone(),
+                display_name: "alice".to_string(),
+                subscription_token: "token".to_string(),
+                cycle_policy_default: CyclePolicyDefaultV2::ByUser,
+                cycle_day_of_month_default: 1,
+            },
+        );
+
+        let mut grants = BTreeMap::new();
+        grants.insert(
+            "grant_1".to_string(),
+            GrantV2 {
+                grant_id: "grant_1".to_string(),
+                user_id: user_id.clone(),
+                endpoint_id: endpoint_id.clone(),
+                group_name: None,
+                enabled: true,
+                quota_limit_bytes: 123,
+                cycle_policy: CyclePolicyV2::ByNode,
+                cycle_day_of_month: Some(1),
+                note: None,
+                credentials: GrantCredentials {
+                    vless: None,
+                    ss2022: None,
+                },
+            },
+        );
+
+        let mut user_node_quotas = BTreeMap::new();
+        user_node_quotas
+            .entry(user_id.clone())
+            .or_insert_with(BTreeMap::new)
+            .insert(node_id.clone(), 456);
+
+        let v2 = PersistedStateV2Like {
+            schema_version: 2,
+            nodes,
+            endpoints,
+            users,
+            grants,
+            user_node_quotas,
+        };
+
+        let v3 = migrate_v2_like_to_v3(v2).expect("migration should succeed");
+        let cfg = v3
+            .user_node_quotas
+            .get(&user_id)
+            .and_then(|m| m.get(&node_id))
+            .expect("user node quota cfg should exist");
+
+        assert_eq!(cfg.quota_limit_bytes, Some(456));
+        assert_eq!(cfg.quota_reset_source, QuotaResetSource::Node);
     }
 }
 
@@ -155,6 +565,8 @@ pub enum DesiredStateCommand {
         user_id: String,
         node_id: String,
         quota_limit_bytes: u64,
+        #[serde(default)]
+        quota_reset_source: QuotaResetSource,
     },
     UpsertGrant {
         grant: Grant,
@@ -166,14 +578,14 @@ pub enum DesiredStateCommand {
         group_name: String,
         grants: Vec<Grant>,
     },
-    UpdateGrantFields {
-        grant_id: String,
-        enabled: bool,
-        quota_limit_bytes: u64,
-        cycle_policy: CyclePolicy,
-        cycle_day_of_month: Option<u8>,
+    ReplaceGrantGroup {
+        group_name: String,
         #[serde(default, deserialize_with = "deserialize_optional_string")]
-        note: Option<Option<String>>,
+        rename_to: Option<Option<String>>,
+        grants: Vec<Grant>,
+    },
+    DeleteGrantGroup {
+        group_name: String,
     },
     SetGrantEnabled {
         grant_id: String,
@@ -187,20 +599,80 @@ pub enum DesiredStateCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateApplyResult {
     Applied,
-    EndpointDeleted { deleted: bool },
-    UserDeleted { deleted: bool },
-    UserTokenReset { applied: bool },
-    UserNodeQuotaSet { quota: UserNodeQuota },
-    GrantDeleted { deleted: bool },
-    GrantGroupCreated { created: usize },
-    GrantUpdated { grant: Option<Grant> },
-    GrantEnabledSet { grant: Option<Grant>, changed: bool },
+    EndpointDeleted {
+        deleted: bool,
+    },
+    UserDeleted {
+        deleted: bool,
+    },
+    UserTokenReset {
+        applied: bool,
+    },
+    UserNodeQuotaSet {
+        quota: UserNodeQuota,
+    },
+    GrantDeleted {
+        deleted: bool,
+    },
+    GrantGroupCreated {
+        created: usize,
+    },
+    GrantGroupReplaced {
+        group_name: String,
+        created: usize,
+        updated: usize,
+        deleted: usize,
+    },
+    GrantGroupDeleted {
+        deleted: usize,
+    },
+    GrantEnabledSet {
+        grant: Option<Grant>,
+        changed: bool,
+    },
+}
+
+fn validate_user_quota_reset(reset: &UserQuotaReset) -> Result<(), DomainError> {
+    match reset {
+        UserQuotaReset::Unlimited { tz_offset_minutes } => {
+            validate_tz_offset_minutes(*tz_offset_minutes)?;
+        }
+        UserQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes,
+        } => {
+            validate_cycle_day_of_month(*day_of_month)?;
+            validate_tz_offset_minutes(*tz_offset_minutes)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> {
+    match reset {
+        NodeQuotaReset::Unlimited { tz_offset_minutes } => {
+            if let Some(tz_offset_minutes) = tz_offset_minutes {
+                validate_tz_offset_minutes(*tz_offset_minutes)?;
+            }
+        }
+        NodeQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes,
+        } => {
+            validate_cycle_day_of_month(*day_of_month)?;
+            if let Some(tz_offset_minutes) = tz_offset_minutes {
+                validate_tz_offset_minutes(*tz_offset_minutes)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl DesiredStateCommand {
     pub fn apply(&self, state: &mut PersistedState) -> Result<DesiredStateApplyResult, StoreError> {
         match self {
             Self::UpsertNode { node } => {
+                validate_node_quota_reset(&node.quota_reset)?;
                 state.nodes.insert(node.node_id.clone(), node.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
@@ -216,7 +688,7 @@ impl DesiredStateCommand {
                 Ok(DesiredStateApplyResult::EndpointDeleted { deleted })
             }
             Self::UpsertUser { user } => {
-                validate_cycle_day_of_month(user.cycle_day_of_month_default)?;
+                validate_user_quota_reset(&user.quota_reset)?;
                 state.users.insert(user.user_id.clone(), user.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
@@ -239,6 +711,7 @@ impl DesiredStateCommand {
                 user_id,
                 node_id,
                 quota_limit_bytes,
+                quota_reset_source,
             } => {
                 if !state.users.contains_key(user_id) {
                     return Err(DomainError::MissingUser {
@@ -257,7 +730,13 @@ impl DesiredStateCommand {
                     .user_node_quotas
                     .entry(user_id.clone())
                     .or_default()
-                    .insert(node_id.clone(), *quota_limit_bytes);
+                    .insert(
+                        node_id.clone(),
+                        UserNodeQuotaConfig {
+                            quota_limit_bytes: Some(*quota_limit_bytes),
+                            quota_reset_source: quota_reset_source.clone(),
+                        },
+                    );
 
                 // Best-effort: unify existing grants on that node to keep legacy API behavior consistent.
                 for grant in state.grants.values_mut() {
@@ -277,6 +756,7 @@ impl DesiredStateCommand {
                         user_id: user_id.clone(),
                         node_id: node_id.clone(),
                         quota_limit_bytes: *quota_limit_bytes,
+                        quota_reset_source: quota_reset_source.clone(),
                     },
                 })
             }
@@ -295,23 +775,25 @@ impl DesiredStateCommand {
                 }
 
                 let mut grant = grant.clone();
+                validate_group_name(&grant.group_name)?;
                 if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
                     && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
-                    && let Some(quota) = user_map.get(&endpoint.node_id)
+                    && let Some(cfg) = user_map.get(&endpoint.node_id)
+                    && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
                 {
-                    grant.quota_limit_bytes = *quota;
+                    grant.quota_limit_bytes = quota_limit_bytes;
                 }
 
-                if grant.cycle_policy != CyclePolicy::InheritUser
-                    && grant.cycle_day_of_month.is_none()
-                {
-                    return Err(DomainError::MissingCycleDayOfMonth {
-                        cycle_policy: grant.cycle_policy.clone(),
+                if state.grants.values().any(|g| {
+                    g.grant_id != grant.grant_id
+                        && g.user_id == grant.user_id
+                        && g.endpoint_id == grant.endpoint_id
+                }) {
+                    return Err(DomainError::GrantPairConflict {
+                        user_id: grant.user_id.clone(),
+                        endpoint_id: grant.endpoint_id.clone(),
                     }
                     .into());
-                }
-                if let Some(day) = grant.cycle_day_of_month {
-                    validate_cycle_day_of_month(day)?;
                 }
 
                 state.grants.insert(grant.grant_id.clone(), grant.clone());
@@ -328,11 +810,7 @@ impl DesiredStateCommand {
                 }
 
                 // group_name uniqueness.
-                if state
-                    .grants
-                    .values()
-                    .any(|g| g.group_name.as_deref() == Some(group_name.as_str()))
-                {
+                if state.grants.values().any(|g| g.group_name == *group_name) {
                     return Err(DomainError::GroupNameConflict {
                         group_name: group_name.clone(),
                     }
@@ -355,19 +833,7 @@ impl DesiredStateCommand {
                         .into());
                     }
 
-                    if grant.cycle_policy != CyclePolicy::InheritUser
-                        && grant.cycle_day_of_month.is_none()
-                    {
-                        return Err(DomainError::MissingCycleDayOfMonth {
-                            cycle_policy: grant.cycle_policy.clone(),
-                        }
-                        .into());
-                    }
-                    if let Some(day) = grant.cycle_day_of_month {
-                        validate_cycle_day_of_month(day)?;
-                    }
-
-                    if grant.group_name.as_deref() != Some(group_name.as_str()) {
+                    if grant.group_name != *group_name {
                         return Err(DomainError::InvalidGroupName {
                             group_name: group_name.clone(),
                         }
@@ -412,49 +878,156 @@ impl DesiredStateCommand {
                     created: seen_pairs.len(),
                 })
             }
-            Self::UpdateGrantFields {
-                grant_id,
-                enabled,
-                quota_limit_bytes,
-                cycle_policy,
-                cycle_day_of_month,
-                note,
+            Self::ReplaceGrantGroup {
+                group_name,
+                rename_to,
+                grants,
             } => {
-                let grant = match state.grants.get_mut(grant_id) {
-                    Some(grant) => grant,
-                    None => return Ok(DesiredStateApplyResult::GrantUpdated { grant: None }),
-                };
+                validate_group_name(group_name)?;
+                if grants.is_empty() {
+                    return Err(DomainError::EmptyGrantGroup.into());
+                }
 
-                if *cycle_policy != CyclePolicy::InheritUser && cycle_day_of_month.is_none() {
-                    return Err(DomainError::MissingCycleDayOfMonth {
-                        cycle_policy: cycle_policy.clone(),
+                let rename_to = rename_to.clone().flatten();
+                if let Some(rename_to) = rename_to.as_deref() {
+                    validate_group_name(rename_to)?;
+                }
+
+                let existing_ids: Vec<String> = state
+                    .grants
+                    .values()
+                    .filter(|g| g.group_name == *group_name)
+                    .map(|g| g.grant_id.clone())
+                    .collect();
+                if existing_ids.is_empty() {
+                    return Err(DomainError::MissingGrantGroup {
+                        group_name: group_name.clone(),
                     }
                     .into());
                 }
-                if let Some(day) = cycle_day_of_month {
-                    validate_cycle_day_of_month(*day)?;
-                }
 
-                grant.enabled = *enabled;
-                let effective_quota = if let Some(endpoint) =
-                    state.endpoints.get(&grant.endpoint_id)
-                    && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
-                    && let Some(quota) = user_map.get(&endpoint.node_id)
+                let target_group_name = rename_to.clone().unwrap_or_else(|| group_name.clone());
+                if target_group_name != *group_name
+                    && state
+                        .grants
+                        .values()
+                        .any(|g| g.group_name == target_group_name)
                 {
-                    *quota
-                } else {
-                    *quota_limit_bytes
-                };
-                grant.quota_limit_bytes = effective_quota;
-                grant.cycle_policy = cycle_policy.clone();
-                grant.cycle_day_of_month = *cycle_day_of_month;
-                if let Some(note) = note {
-                    grant.note = note.clone();
+                    return Err(DomainError::GroupNameConflict {
+                        group_name: target_group_name,
+                    }
+                    .into());
                 }
 
-                Ok(DesiredStateApplyResult::GrantUpdated {
-                    grant: Some(grant.clone()),
+                let mut desired_pairs = std::collections::BTreeSet::<(String, String)>::new();
+                for grant in grants {
+                    if grant.group_name != *group_name {
+                        return Err(DomainError::InvalidGroupName {
+                            group_name: group_name.clone(),
+                        }
+                        .into());
+                    }
+                    if !state.users.contains_key(&grant.user_id) {
+                        return Err(DomainError::MissingUser {
+                            user_id: grant.user_id.clone(),
+                        }
+                        .into());
+                    }
+                    if !state.endpoints.contains_key(&grant.endpoint_id) {
+                        return Err(DomainError::MissingEndpoint {
+                            endpoint_id: grant.endpoint_id.clone(),
+                        }
+                        .into());
+                    }
+
+                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
+                    if !desired_pairs.insert(key.clone()) {
+                        return Err(DomainError::DuplicateGrantGroupMember {
+                            user_id: key.0,
+                            endpoint_id: key.1,
+                        }
+                        .into());
+                    }
+
+                    // Global uniqueness: allow conflicts only with grants in this group.
+                    if state.grants.values().any(|g| {
+                        g.user_id == key.0 && g.endpoint_id == key.1 && g.group_name != *group_name
+                    }) {
+                        return Err(DomainError::GrantPairConflict {
+                            user_id: key.0,
+                            endpoint_id: key.1,
+                        }
+                        .into());
+                    }
+                }
+
+                let mut created = 0usize;
+                let mut updated = 0usize;
+                let mut deleted = 0usize;
+
+                let mut to_delete = Vec::new();
+                for grant in state.grants.values() {
+                    if grant.group_name != *group_name {
+                        continue;
+                    }
+                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
+                    if !desired_pairs.contains(&key) {
+                        to_delete.push(grant.grant_id.clone());
+                    }
+                }
+                for grant_id in &to_delete {
+                    if state.grants.remove(grant_id).is_some() {
+                        deleted += 1;
+                    }
+                }
+
+                for mut grant in grants.clone() {
+                    grant.group_name = target_group_name.clone();
+                    if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
+                        && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
+                        && let Some(cfg) = user_map.get(&endpoint.node_id)
+                        && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
+                    {
+                        grant.quota_limit_bytes = quota_limit_bytes;
+                    }
+
+                    if state.grants.contains_key(&grant.grant_id) {
+                        state.grants.insert(grant.grant_id.clone(), grant);
+                        updated += 1;
+                    } else {
+                        state.grants.insert(grant.grant_id.clone(), grant);
+                        created += 1;
+                    }
+                }
+
+                Ok(DesiredStateApplyResult::GrantGroupReplaced {
+                    group_name: target_group_name,
+                    created,
+                    updated,
+                    deleted,
                 })
+            }
+            Self::DeleteGrantGroup { group_name } => {
+                validate_group_name(group_name)?;
+                let ids: Vec<String> = state
+                    .grants
+                    .values()
+                    .filter(|g| g.group_name == *group_name)
+                    .map(|g| g.grant_id.clone())
+                    .collect();
+                if ids.is_empty() {
+                    return Err(DomainError::MissingGrantGroup {
+                        group_name: group_name.clone(),
+                    }
+                    .into());
+                }
+                let mut deleted = 0usize;
+                for grant_id in ids {
+                    if state.grants.remove(&grant_id).is_some() {
+                        deleted += 1;
+                    }
+                }
+                Ok(DesiredStateApplyResult::GrantGroupDeleted { deleted })
             }
             Self::SetGrantEnabled {
                 grant_id,
@@ -538,10 +1111,27 @@ impl JsonSnapshotStore {
         fs::create_dir_all(&init.data_dir)?;
 
         let state_path = init.data_dir.join("state.json");
-        let (mut state, is_new_state) = if state_path.exists() {
+        let (mut state, is_new_state, mut migrated) = if state_path.exists() {
             let bytes = fs::read(&state_path)?;
-            let state: PersistedState = serde_json::from_slice(&bytes)?;
-            (state, false)
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let schema_version = raw
+                .get("schema_version")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            match schema_version {
+                3 => (serde_json::from_value(raw)?, false, false),
+                2 | 1 => {
+                    let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
+                    let v3 = migrate_v2_like_to_v3(v2)?;
+                    (v3, false, true)
+                }
+                got => {
+                    return Err(StoreError::SchemaVersionMismatch {
+                        expected: SCHEMA_VERSION,
+                        got,
+                    });
+                }
+            }
         } else {
             let node_id = init.bootstrap_node_id.unwrap_or_else(new_ulid_string);
             let node = Node {
@@ -549,24 +1139,19 @@ impl JsonSnapshotStore {
                 node_name: init.bootstrap_node_name,
                 access_host: init.bootstrap_access_host,
                 api_base_url: init.bootstrap_api_base_url,
+                quota_reset: NodeQuotaReset::default(),
             };
 
             let mut state = PersistedState::empty();
             state.nodes.insert(node_id, node);
-            (state, true)
+            (state, true, false)
         };
 
-        let mut migrated = false;
         if state.schema_version != SCHEMA_VERSION {
-            if state.schema_version == 1 && SCHEMA_VERSION == 2 {
-                state.schema_version = SCHEMA_VERSION;
-                migrated = true;
-            } else {
-                return Err(StoreError::SchemaVersionMismatch {
-                    expected: SCHEMA_VERSION,
-                    got: state.schema_version,
-                });
-            }
+            return Err(StoreError::SchemaVersionMismatch {
+                expected: SCHEMA_VERSION,
+                got: state.schema_version,
+            });
         }
 
         // Backward-compatible cleanup: `public_domain` used to exist in VLESS endpoint meta,
@@ -777,10 +1362,10 @@ impl JsonSnapshotStore {
     pub fn build_user(
         &self,
         display_name: String,
-        cycle_policy_default: CyclePolicyDefault,
-        cycle_day_of_month_default: u8,
+        quota_reset: Option<UserQuotaReset>,
     ) -> Result<User, StoreError> {
-        validate_cycle_day_of_month(cycle_day_of_month_default)?;
+        let quota_reset = quota_reset.unwrap_or_default();
+        validate_user_quota_reset(&quota_reset)?;
 
         let user_id = new_ulid_string();
         let subscription_token = format!("sub_{}", new_ulid_string());
@@ -789,22 +1374,16 @@ impl JsonSnapshotStore {
             user_id,
             display_name,
             subscription_token,
-            cycle_policy_default,
-            cycle_day_of_month_default,
+            quota_reset,
         })
     }
 
     pub fn create_user(
         &mut self,
         display_name: String,
-        cycle_policy_default: CyclePolicyDefault,
-        cycle_day_of_month_default: u8,
+        quota_reset: Option<UserQuotaReset>,
     ) -> Result<User, StoreError> {
-        let user = self.build_user(
-            display_name,
-            cycle_policy_default,
-            cycle_day_of_month_default,
-        )?;
+        let user = self.build_user(display_name, quota_reset)?;
         DesiredStateCommand::UpsertUser { user: user.clone() }.apply(&mut self.state)?;
         self.save()?;
         Ok(user)
@@ -812,13 +1391,14 @@ impl JsonSnapshotStore {
 
     pub fn build_grant(
         &self,
+        group_name: String,
         user_id: String,
         endpoint_id: String,
         quota_limit_bytes: u64,
-        cycle_policy: CyclePolicy,
-        cycle_day_of_month: Option<u8>,
+        enabled: bool,
         note: Option<String>,
     ) -> Result<Grant, StoreError> {
+        validate_group_name(&group_name)?;
         if !self.state.users.contains_key(&user_id) {
             return Err(DomainError::MissingUser { user_id }.into());
         }
@@ -834,7 +1414,10 @@ impl JsonSnapshotStore {
             .state
             .user_node_quotas
             .get(&user_id)
-            .and_then(|m| m.get(&endpoint.node_id).copied())
+            .and_then(|m| {
+                m.get(&endpoint.node_id)
+                    .and_then(|cfg| cfg.quota_limit_bytes)
+            })
             .unwrap_or(quota_limit_bytes);
 
         let grant_id = new_ulid_string();
@@ -842,13 +1425,11 @@ impl JsonSnapshotStore {
 
         Ok(Grant {
             grant_id,
+            group_name,
             user_id,
             endpoint_id,
-            group_name: None,
-            enabled: true,
+            enabled,
             quota_limit_bytes,
-            cycle_policy,
-            cycle_day_of_month,
             note,
             credentials,
         })
@@ -858,7 +1439,18 @@ impl JsonSnapshotStore {
         self.state
             .user_node_quotas
             .get(user_id)
-            .and_then(|m| m.get(node_id).copied())
+            .and_then(|m| m.get(node_id).and_then(|cfg| cfg.quota_limit_bytes))
+    }
+
+    pub fn get_user_node_quota_reset_source(
+        &self,
+        user_id: &str,
+        node_id: &str,
+    ) -> Option<QuotaResetSource> {
+        self.state
+            .user_node_quotas
+            .get(user_id)
+            .and_then(|m| m.get(node_id).map(|cfg| cfg.quota_reset_source.clone()))
     }
 
     pub fn list_user_node_quotas(&self, user_id: &str) -> Result<Vec<UserNodeQuota>, StoreError> {
@@ -871,11 +1463,15 @@ impl JsonSnapshotStore {
 
         let mut out = Vec::new();
         if let Some(nodes) = self.state.user_node_quotas.get(user_id) {
-            for (node_id, quota_limit_bytes) in nodes {
+            for (node_id, cfg) in nodes {
+                let Some(quota_limit_bytes) = cfg.quota_limit_bytes else {
+                    continue;
+                };
                 out.push(UserNodeQuota {
                     user_id: user_id.to_string(),
                     node_id: node_id.clone(),
-                    quota_limit_bytes: *quota_limit_bytes,
+                    quota_limit_bytes,
+                    quota_reset_source: cfg.quota_reset_source.clone(),
                 });
             }
         }
@@ -884,19 +1480,19 @@ impl JsonSnapshotStore {
 
     pub fn create_grant(
         &mut self,
+        group_name: String,
         user_id: String,
         endpoint_id: String,
         quota_limit_bytes: u64,
-        cycle_policy: CyclePolicy,
-        cycle_day_of_month: Option<u8>,
+        enabled: bool,
         note: Option<String>,
     ) -> Result<Grant, StoreError> {
         let grant = self.build_grant(
+            group_name,
             user_id,
             endpoint_id,
             quota_limit_bytes,
-            cycle_policy,
-            cycle_day_of_month,
+            enabled,
             note,
         )?;
         DesiredStateCommand::UpsertGrant {
@@ -1064,33 +1660,6 @@ impl JsonSnapshotStore {
         Ok(deleted)
     }
 
-    pub fn update_grant(
-        &mut self,
-        grant_id: &str,
-        enabled: bool,
-        quota_limit_bytes: u64,
-        cycle_policy: CyclePolicy,
-        cycle_day_of_month: Option<u8>,
-        note: Option<Option<String>>,
-    ) -> Result<Option<Grant>, StoreError> {
-        let out = DesiredStateCommand::UpdateGrantFields {
-            grant_id: grant_id.to_string(),
-            enabled,
-            quota_limit_bytes,
-            cycle_policy,
-            cycle_day_of_month,
-            note,
-        }
-        .apply(&mut self.state)?;
-        let DesiredStateApplyResult::GrantUpdated { grant } = out else {
-            unreachable!("update grant must return GrantUpdated");
-        };
-        if grant.is_some() {
-            self.save()?;
-        }
-        Ok(grant)
-    }
-
     pub fn set_grant_enabled(
         &mut self,
         grant_id: &str,
@@ -1225,7 +1794,7 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
-            CyclePolicy, CyclePolicyDefault, DomainError, EndpointKind, Grant, GrantCredentials,
+            DomainError, EndpointKind, Grant, GrantCredentials, NodeQuotaReset, UserQuotaReset,
             validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
@@ -1386,9 +1955,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
 
         drop(store);
 
@@ -1511,13 +2078,11 @@ mod tests {
             grant_id.to_string(),
             Grant {
                 grant_id: grant_id.to_string(),
+                group_name: "test-group".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
-                group_name: None,
                 enabled: true,
                 quota_limit_bytes: 0,
-                cycle_policy: CyclePolicy::InheritUser,
-                cycle_day_of_month: None,
                 note: None,
                 credentials: GrantCredentials {
                     vless: None,
@@ -1548,6 +2113,7 @@ mod tests {
             node_name: "node-1".to_string(),
             access_host: "example.com".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_reset: NodeQuotaReset::default(),
         };
 
         DesiredStateCommand::UpsertNode { node: node.clone() }
@@ -1617,8 +2183,7 @@ mod tests {
             user_id: "user_1".to_string(),
             display_name: "alice".to_string(),
             subscription_token: "sub_1".to_string(),
-            cycle_policy_default: CyclePolicyDefault::ByUser,
-            cycle_day_of_month_default: 1,
+            quota_reset: UserQuotaReset::default(),
         };
 
         DesiredStateCommand::UpsertUser { user: user.clone() }
@@ -1664,8 +2229,7 @@ mod tests {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
-                cycle_policy_default: CyclePolicyDefault::ByUser,
-                cycle_day_of_month_default: 1,
+                quota_reset: UserQuotaReset::default(),
             },
         );
         state.endpoints.insert(
@@ -1682,13 +2246,11 @@ mod tests {
 
         let grant = Grant {
             grant_id: "grant_1".to_string(),
+            group_name: "test-group".to_string(),
             user_id: "user_1".to_string(),
             endpoint_id: "endpoint_1".to_string(),
-            group_name: None,
             enabled: true,
             quota_limit_bytes: 10,
-            cycle_policy: CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
             note: None,
             credentials: GrantCredentials {
                 vless: None,
@@ -1703,23 +2265,24 @@ mod tests {
         .unwrap();
         assert_eq!(state.grants.get(&grant.grant_id), Some(&grant));
 
-        let out = DesiredStateCommand::UpdateGrantFields {
+        let out = DesiredStateCommand::SetGrantEnabled {
             grant_id: grant.grant_id.clone(),
             enabled: false,
-            quota_limit_bytes: 123,
-            cycle_policy: CyclePolicy::InheritUser,
-            cycle_day_of_month: None,
-            note: None,
+            source: GrantEnabledSource::Manual,
         }
         .apply(&mut state)
         .unwrap();
-
-        let DesiredStateApplyResult::GrantUpdated { grant: updated } = out else {
-            panic!("expected GrantUpdated");
+        let DesiredStateApplyResult::GrantEnabledSet {
+            grant: updated,
+            changed,
+        } = out
+        else {
+            panic!("expected GrantEnabledSet");
         };
+        assert!(changed);
         let updated = updated.unwrap();
         assert!(!updated.enabled);
-        assert_eq!(updated.quota_limit_bytes, 123);
+        assert_eq!(updated.quota_limit_bytes, 10);
 
         let out = DesiredStateCommand::DeleteGrant {
             grant_id: grant.grant_id.clone(),
@@ -1735,9 +2298,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
 
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
             .create_endpoint(
                 store.list_nodes()[0].node_id.clone(),
@@ -1748,11 +2309,11 @@ mod tests {
             .unwrap();
         let grant = store
             .create_grant(
+                "test-group".to_string(),
                 user.user_id.clone(),
                 endpoint.endpoint_id.clone(),
                 1024,
-                CyclePolicy::InheritUser,
-                None,
+                true,
                 None,
             )
             .unwrap();
@@ -1761,20 +2322,6 @@ mod tests {
             .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
             .unwrap();
         assert!(store.get_grant_usage(&grant.grant_id).is_some());
-
-        let updated = store
-            .update_grant(
-                &grant.grant_id,
-                false,
-                2048,
-                CyclePolicy::InheritUser,
-                None,
-                None,
-            )
-            .unwrap()
-            .unwrap();
-        assert!(!updated.enabled);
-        assert_eq!(updated.quota_limit_bytes, 2048);
 
         assert!(store.delete_grant(&grant.grant_id).unwrap());
         assert!(store.get_grant_usage(&grant.grant_id).is_none());

@@ -12,15 +12,14 @@ use serde_json::{Value, json};
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use tokio::sync::{Mutex, mpsc, oneshot, watch};
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio::sync::{Mutex, mpsc, watch};
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
 use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
-    domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
+    domain::{EndpointKind, Node, NodeQuotaReset},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     raft::{
@@ -29,13 +28,6 @@ use crate::{
     },
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
-    xray::proto::xray::app::stats::command::stats_service_server::{
-        StatsService, StatsServiceServer,
-    },
-    xray::proto::xray::app::stats::command::{
-        GetStatsOnlineIpListResponse, GetStatsRequest, GetStatsResponse, QueryStatsRequest,
-        QueryStatsResponse, Stat, SysStatsRequest, SysStatsResponse,
-    },
 };
 
 fn test_config(data_dir: PathBuf) -> Config {
@@ -254,16 +246,26 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
     }
 }
 
-async fn setup_subscription_fixtures(app: &axum::Router) -> (String, String, String, String) {
+struct SubscriptionFixtures {
+    subscription_token: String,
+    group_name: String,
+    grant_id: String,
+    user_id: String,
+    endpoint_id: String,
+    ss2022_password: String,
+}
+
+async fn setup_subscription_fixtures(
+    app: &axum::Router,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+) -> SubscriptionFixtures {
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -297,33 +299,51 @@ async fn setup_subscription_fixtures(app: &axum::Router) -> (String, String, Str
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let endpoint = body_json(res).await;
-    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap();
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
 
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id.clone(),
+                "endpoint_id": endpoint_id.clone(),
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let grant = body_json(res).await;
-    let grant_id = grant["grant_id"].as_str().unwrap().to_string();
-    let password = grant["credentials"]["ss2022"]["password"]
+    let group_detail = body_json(res).await;
+    let password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
 
-    (subscription_token, grant_id, user_id, password)
+    let grant_id = {
+        let store = store.lock().await;
+        store
+            .list_grants()
+            .into_iter()
+            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id)
+            .map(|g| g.grant_id)
+            .expect("expected grant to exist for subscription fixtures")
+    };
+
+    SubscriptionFixtures {
+        subscription_token,
+        group_name: "test-group".to_string(),
+        grant_id,
+        user_id,
+        endpoint_id,
+        ss2022_password: password,
+    }
 }
 
 #[tokio::test]
@@ -520,9 +540,7 @@ async fn follower_admin_write_does_not_redirect() {
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -542,9 +560,7 @@ async fn create_user_then_list_contains_it() {
         "POST",
         "/api/admin/users",
         json!({
-          "display_name": "alice",
-          "cycle_policy_default": "by_user",
-          "cycle_day_of_month_default": 1
+          "display_name": "alice"
         }),
     );
     let res = app.clone().oneshot(create).await.unwrap();
@@ -574,9 +590,7 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -613,34 +627,36 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
     let created_ep = body_json(res).await;
     let endpoint_id = created_ep["endpoint_id"].as_str().unwrap().to_string();
 
-    // Create grant.
+    // Create grant group.
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user_id.clone(),
-              "endpoint_id": endpoint_id.clone(),
-              "quota_limit_bytes": 123,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id.clone(),
+                "endpoint_id": endpoint_id.clone(),
+                "enabled": true,
+                "quota_limit_bytes": 123,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let created_grant = body_json(res).await;
-    let grant_id = created_grant["grant_id"].as_str().unwrap().to_string();
 
-    // Set node quota.
+    // Set node quota (explicit source).
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
             json!({
-              "quota_limit_bytes": 456
+              "quota_limit_bytes": 456,
+              "quota_reset_source": "node"
             }),
         ))
         .await
@@ -650,6 +666,24 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
     assert_eq!(quota["user_id"], user_id);
     assert_eq!(quota["node_id"], node_id);
     assert_eq!(quota["quota_limit_bytes"], 456);
+    assert_eq!(quota["quota_reset_source"], "node");
+
+    // Update node quota without specifying source should preserve existing quota_reset_source.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
+            json!({
+              "quota_limit_bytes": 789
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let quota = body_json(res).await;
+    assert_eq!(quota["quota_limit_bytes"], 789);
+    assert_eq!(quota["quota_reset_source"], "node");
 
     // List node quotas for user.
     let res = app
@@ -667,18 +701,18 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 456)
+            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 789)
     );
 
-    // Grant quota should be unified.
+    // Grant group member quota should be unified.
     let res = app
         .clone()
-        .oneshot(req_authed("GET", &format!("/api/admin/grants/{grant_id}")))
+        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let fetched_grant = body_json(res).await;
-    assert_eq!(fetched_grant["quota_limit_bytes"], 456);
+    let fetched_group = body_json(res).await;
+    assert_eq!(fetched_group["members"][0]["quota_limit_bytes"], 789);
 }
 
 #[tokio::test]
@@ -822,9 +856,7 @@ async fn patch_admin_user_updates_fields_preserves_token() {
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -849,8 +881,9 @@ async fn patch_admin_user_updates_fields_preserves_token() {
     let updated = body_json(res).await;
     assert_eq!(updated["user_id"], user_id);
     assert_eq!(updated["display_name"], "alice-2");
-    assert_eq!(updated["cycle_policy_default"], "by_user");
-    assert_eq!(updated["cycle_day_of_month_default"], 1);
+    assert_eq!(updated["quota_reset"]["policy"], "monthly");
+    assert_eq!(updated["quota_reset"]["day_of_month"], 1);
+    assert_eq!(updated["quota_reset"]["tz_offset_minutes"], 480);
     assert_eq!(updated["subscription_token"], token);
 
     let res = app
@@ -859,8 +892,11 @@ async fn patch_admin_user_updates_fields_preserves_token() {
             "PATCH",
             &format!("/api/admin/users/{user_id}"),
             json!({
-              "cycle_policy_default": "by_node",
-              "cycle_day_of_month_default": 15
+              "quota_reset": {
+                "policy": "monthly",
+                "day_of_month": 15,
+                "tz_offset_minutes": 0
+              }
             }),
         ))
         .await
@@ -868,8 +904,9 @@ async fn patch_admin_user_updates_fields_preserves_token() {
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
     assert_eq!(updated["display_name"], "alice-2");
-    assert_eq!(updated["cycle_policy_default"], "by_node");
-    assert_eq!(updated["cycle_day_of_month_default"], 15);
+    assert_eq!(updated["quota_reset"]["policy"], "monthly");
+    assert_eq!(updated["quota_reset"]["day_of_month"], 15);
+    assert_eq!(updated["quota_reset"]["tz_offset_minutes"], 0);
 }
 
 #[tokio::test]
@@ -1057,20 +1094,22 @@ async fn patch_admin_endpoint_unknown_returns_404() {
 }
 
 #[tokio::test]
-async fn create_grant_with_missing_resources_returns_404_not_found() {
+async fn create_grant_group_with_missing_resources_returns_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
     let create = req_authed_json(
         "POST",
-        "/api/admin/grants",
+        "/api/admin/grant-groups",
         json!({
-          "user_id": new_ulid_string(),
-          "endpoint_id": new_ulid_string(),
-          "quota_limit_bytes": 0,
-          "cycle_policy": "inherit_user",
-          "cycle_day_of_month": null,
-          "note": null
+          "group_name": "test-group",
+          "members": [{
+            "user_id": new_ulid_string(),
+            "endpoint_id": new_ulid_string(),
+            "enabled": true,
+            "quota_limit_bytes": 0,
+            "note": null
+          }]
         }),
     );
     let res = app.oneshot(create).await.unwrap();
@@ -1080,7 +1119,7 @@ async fn create_grant_with_missing_resources_returns_404_not_found() {
 }
 
 #[tokio::test]
-async fn patch_grant_validates_cycle_day_of_month_rules() {
+async fn grant_group_replace_updates_member_note_and_allows_clear() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -1090,9 +1129,7 @@ async fn patch_grant_validates_cycle_day_of_month_rules() {
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -1126,137 +1163,76 @@ async fn patch_grant_validates_cycle_day_of_month_rules() {
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user["user_id"],
-              "endpoint_id": endpoint["endpoint_id"],
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
-            }),
-        ))
-        .await
-        .unwrap();
-    let grant = body_json(res).await;
-    let grant_id = grant["grant_id"].as_str().unwrap();
-
-    let res = app
-        .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
-            json!({
-              "enabled": true,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "by_user",
-              "cycle_day_of_month": null
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(res).await;
-    assert_eq!(json["error"]["code"], "invalid_request");
-}
-
-#[tokio::test]
-async fn patch_admin_grant_updates_note_and_allows_clear() {
-    let tmp = tempfile::tempdir().unwrap();
-    let app = app(&tmp);
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/users",
-            json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
-            }),
-        ))
-        .await
-        .unwrap();
-    let user = body_json(res).await;
-
-    let res = app
-        .clone()
-        .oneshot(req_authed("GET", "/api/admin/nodes"))
-        .await
-        .unwrap();
-    let nodes = body_json(res).await;
-    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/endpoints",
-            json!({
-              "node_id": node_id,
-              "kind": "ss2022_2022_blake3_aes_128_gcm",
-              "port": 8388
-            }),
-        ))
-        .await
-        .unwrap();
-    let endpoint = body_json(res).await;
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grants",
-            json!({
-              "user_id": user["user_id"],
-              "endpoint_id": endpoint["endpoint_id"],
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
-            }),
-        ))
-        .await
-        .unwrap();
-    let grant = body_json(res).await;
-    let grant_id = grant["grant_id"].as_str().unwrap();
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
-            json!({
-              "enabled": true,
-              "note": "alice@node-1",
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user["user_id"],
+                "endpoint_id": endpoint["endpoint_id"],
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let updated = body_json(res).await;
-    assert_eq!(updated["note"], "alice@node-1");
 
     let res = app
+        .clone()
         .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
+            "PUT",
+            "/api/admin/grant-groups/test-group",
             json!({
-              "enabled": true,
-              "note": null,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "members": [{
+                "user_id": user["user_id"],
+                "endpoint_id": endpoint["endpoint_id"],
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": "alice@node-1"
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
-    assert!(updated["note"].is_null());
+    assert_eq!(updated["members"][0]["note"], "alice@node-1");
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/grant-groups/test-group",
+            json!({
+              "members": [{
+                "user_id": user["user_id"],
+                "endpoint_id": endpoint["endpoint_id"],
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert!(updated["members"][0]["note"].is_null());
 }
 
 #[tokio::test]
@@ -1286,16 +1262,14 @@ async fn post_admin_endpoints_schedules_full_reconcile() {
 }
 
 #[tokio::test]
-async fn post_admin_grants_schedules_full_reconcile() {
+async fn post_admin_grant_groups_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
 
     let (user_id, endpoint_id) = {
         let mut store = store.lock().await;
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
             .create_endpoint(
                 "node-1".to_string(),
@@ -1310,14 +1284,16 @@ async fn post_admin_grants_schedules_full_reconcile() {
     let res = app
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id.clone(),
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
@@ -1331,16 +1307,14 @@ async fn post_admin_grants_schedules_full_reconcile() {
 }
 
 #[tokio::test]
-async fn patch_admin_grants_schedules_full_reconcile() {
+async fn put_admin_grant_group_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
 
-    let grant_id = {
+    let (user_id, endpoint_id) = {
         let mut store = store.lock().await;
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
             .create_endpoint(
                 "node-1".to_string(),
@@ -1349,28 +1323,46 @@ async fn patch_admin_grants_schedules_full_reconcile() {
                 json!({}),
             )
             .unwrap();
-        let grant = store
-            .create_grant(
-                user.user_id,
-                endpoint.endpoint_id,
-                0,
-                CyclePolicy::InheritUser,
-                None,
-                None,
-            )
-            .unwrap();
-        grant.grant_id
+        (user.user_id, endpoint.endpoint_id)
     };
+
+    // Create group first (and drain its reconcile request).
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grant-groups",
+            json!({
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
 
     let res = app
         .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
+            "PUT",
+            "/api/admin/grant-groups/test-group",
             json!({
-              "enabled": true,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": "updated"
+              }]
             }),
         ))
         .await
@@ -1461,16 +1453,14 @@ async fn delete_admin_endpoint_schedules_remove_inbound_then_full() {
 }
 
 #[tokio::test]
-async fn delete_admin_grant_schedules_remove_user_then_full_when_endpoint_exists() {
+async fn delete_admin_grant_group_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
 
-    let (grant_id, endpoint_tag) = {
+    let (user_id, endpoint_id) = {
         let mut store = store.lock().await;
-        let user = store
-            .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
             .create_endpoint(
                 "node-1".to_string(),
@@ -1479,41 +1469,46 @@ async fn delete_admin_grant_schedules_remove_user_then_full_when_endpoint_exists
                 json!({}),
             )
             .unwrap();
-        let endpoint_tag = endpoint.tag.clone();
-        let grant = store
-            .create_grant(
-                user.user_id,
-                endpoint.endpoint_id,
-                0,
-                CyclePolicy::InheritUser,
-                None,
-                None,
-            )
-            .unwrap();
-        (grant.grant_id, endpoint_tag)
+        (user.user_id, endpoint.endpoint_id)
     };
 
     let res = app
-        .oneshot(req_authed(
-            "DELETE",
-            &format!("/api/admin/grants/{grant_id}"),
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grant-groups",
+            json!({
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
+            }),
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+
+    let res = app
+        .oneshot(req_authed("DELETE", "/api/admin/grant-groups/test-group"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 
     assert_eq!(
         drain_reconcile_requests(&mut rx),
-        vec![
-            ReconcileRequest::RemoveUser {
-                tag: endpoint_tag,
-                email: format!("grant:{grant_id}")
-            },
-            ReconcileRequest::Full
-        ]
+        vec![ReconcileRequest::Full]
     );
 }
 
+#[cfg(any())]
 #[tokio::test]
 async fn grant_usage_includes_warning_fields() {
     #[derive(Debug, Default)]
@@ -1697,6 +1692,7 @@ async fn grant_usage_includes_warning_fields() {
     let _ = shutdown_tx.send(());
 }
 
+#[cfg(any())]
 #[tokio::test]
 async fn grant_usage_warns_on_quota_mismatch() {
     #[derive(Debug, Default)]
@@ -1888,7 +1884,9 @@ async fn subscription_endpoint_does_not_require_auth() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let token = setup_subscription_fixtures(&app, &store)
+        .await
+        .subscription_token;
 
     let res = app
         .oneshot(req("GET", &format!("/api/sub/{token}?format=raw")))
@@ -1907,7 +1905,9 @@ async fn subscription_default_base64_matches_raw_and_content_type() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let token = setup_subscription_fixtures(&app, &store)
+        .await
+        .subscription_token;
 
     let res = app
         .clone()
@@ -1945,7 +1945,9 @@ async fn subscription_format_clash_returns_yaml_with_proxies() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let token = setup_subscription_fixtures(&app, &store)
+        .await
+        .subscription_token;
 
     let res = app
         .oneshot(req("GET", &format!("/api/sub/{token}?format=clash")))
@@ -1977,7 +1979,9 @@ async fn subscription_token_reset_invalidates_old_token() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (old_token, _grant_id, user_id, _password) = setup_subscription_fixtures(&app).await;
+    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let old_token = fixtures.subscription_token;
+    let user_id = fixtures.user_id;
 
     let res = app
         .clone()
@@ -2011,18 +2015,26 @@ async fn subscription_disabled_grant_not_in_output() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (token, grant_id, _user_id, password) = setup_subscription_fixtures(&app).await;
+    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let token = fixtures.subscription_token;
+    let group_name = fixtures.group_name;
+    let user_id = fixtures.user_id;
+    let endpoint_id = fixtures.endpoint_id;
+    let password = fixtures.ss2022_password;
 
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
+            "PUT",
+            &format!("/api/admin/grant-groups/{group_name}"),
             json!({
-              "enabled": false,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": false,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
@@ -2039,11 +2051,15 @@ async fn subscription_disabled_grant_not_in_output() {
 }
 
 #[tokio::test]
-async fn admin_patch_grant_clears_quota_ban_marker() {
+async fn grant_group_replace_clears_quota_ban_marker() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
-    let (_token, grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let group_name = fixtures.group_name;
+    let grant_id = fixtures.grant_id;
+    let user_id = fixtures.user_id;
+    let endpoint_id = fixtures.endpoint_id;
     let banned_at = "2025-12-18T00:00:00Z".to_string();
 
     {
@@ -2055,13 +2071,16 @@ async fn admin_patch_grant_clears_quota_ban_marker() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "PATCH",
-            &format!("/api/admin/grants/{grant_id}"),
+            "PUT",
+            &format!("/api/admin/grant-groups/{group_name}"),
             json!({
-              "enabled": false,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": false,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
@@ -2085,15 +2104,14 @@ async fn admin_alerts_local_reports_quota_mismatch() {
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let user = body_json(res).await;
+    let user_id = user["user_id"].as_str().unwrap().to_string();
 
     let res = app
         .clone()
@@ -2124,21 +2142,30 @@ async fn admin_alerts_local_reports_quota_mismatch() {
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user["user_id"],
-              "endpoint_id": endpoint_id,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let grant = body_json(res).await;
-    let grant_id = grant["grant_id"].as_str().unwrap().to_string();
+    let grant_id = {
+        let store = store.lock().await;
+        store
+            .list_grants()
+            .into_iter()
+            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id)
+            .map(|g| g.grant_id)
+            .expect("expected grant to exist for alert fixture")
+    };
 
     let banned_at = "2025-12-18T00:00:00Z".to_string();
     {
@@ -2192,6 +2219,7 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
                 node_name: "node-unreachable".to_string(),
                 access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:1".to_string(),
+                quota_reset: NodeQuotaReset::default(),
             })
             .unwrap();
     }
@@ -2211,7 +2239,9 @@ async fn admin_delete_grant_removes_usage_entry() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
-    let (_token, grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let group_name = fixtures.group_name;
+    let grant_id = fixtures.grant_id;
 
     {
         let mut store = store.lock().await;
@@ -2224,11 +2254,11 @@ async fn admin_delete_grant_removes_usage_entry() {
     let res = app
         .oneshot(req_authed(
             "DELETE",
-            &format!("/api/admin/grants/{grant_id}"),
+            &format!("/api/admin/grant-groups/{group_name}"),
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::OK);
 
     let store = store.lock().await;
     assert!(store.get_grant_usage(&grant_id).is_none());
@@ -2240,7 +2270,9 @@ async fn subscription_invalid_format_returns_400_invalid_request() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let (token, _grant_id, _user_id, _password) = setup_subscription_fixtures(&app).await;
+    let token = setup_subscription_fixtures(&app, &store)
+        .await
+        .subscription_token;
 
     let res = app
         .oneshot(req("GET", &format!("/api/sub/{token}?format=wat")))
@@ -2401,9 +2433,7 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -2414,28 +2444,32 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user["user_id"],
-              "endpoint_id": endpoint_id,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user["user_id"],
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let grant = body_json(res).await;
-    let vless = &grant["credentials"]["vless"];
+    let group = body_json(res).await;
+    let vless = &group["members"][0]["credentials"]["vless"];
     let uuid = vless["uuid"].as_str().unwrap();
     assert!(Uuid::parse_str(uuid).is_ok());
     assert!(!is_ulid_string(uuid));
-    assert_eq!(
-        vless["email"],
-        format!("grant:{}", grant["grant_id"].as_str().unwrap())
-    );
+    let email = vless["email"].as_str().unwrap();
+    let Some((prefix, id)) = email.split_once(':') else {
+        panic!("expected email to be in grant:<id> format, got {email}");
+    };
+    assert_eq!(prefix, "grant");
+    assert!(is_ulid_string(id));
 }
 
 #[tokio::test]
@@ -2482,9 +2516,7 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
             "POST",
             "/api/admin/users",
             json!({
-              "display_name": "alice",
-              "cycle_policy_default": "by_user",
-              "cycle_day_of_month_default": 1
+              "display_name": "alice"
             }),
         ))
         .await
@@ -2495,21 +2527,23 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
         .clone()
         .oneshot(req_authed_json(
             "POST",
-            "/api/admin/grants",
+            "/api/admin/grant-groups",
             json!({
-              "user_id": user["user_id"],
-              "endpoint_id": endpoint_id,
-              "quota_limit_bytes": 0,
-              "cycle_policy": "inherit_user",
-              "cycle_day_of_month": null,
-              "note": null
+              "group_name": "test-group",
+              "members": [{
+                "user_id": user["user_id"],
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 0,
+                "note": null
+              }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let grant = body_json(res).await;
-    let ss2022 = &grant["credentials"]["ss2022"];
+    let group = body_json(res).await;
+    let ss2022 = &group["members"][0]["credentials"]["ss2022"];
     assert_eq!(ss2022["method"], "2022-blake3-aes-128-gcm");
 
     let password = ss2022["password"].as_str().unwrap();

@@ -1,11 +1,13 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { type QuotaResetSource, QuotaResetSourceSchema } from "./quotaReset";
 
 export const AdminUserNodeQuotaSchema = z.object({
 	user_id: z.string(),
 	node_id: z.string(),
 	quota_limit_bytes: z.number().int().nonnegative(),
+	quota_reset_source: QuotaResetSourceSchema,
 });
 
 export type AdminUserNodeQuota = z.infer<typeof AdminUserNodeQuotaSchema>;
@@ -43,6 +45,7 @@ export async function putAdminUserNodeQuota(
 	userId: string,
 	nodeId: string,
 	quotaLimitBytes: number,
+	quotaResetSource?: QuotaResetSource,
 	signal?: AbortSignal,
 ): Promise<AdminUserNodeQuota> {
 	const res = await fetch(`/api/admin/users/${userId}/node-quotas/${nodeId}`, {
@@ -52,7 +55,10 @@ export async function putAdminUserNodeQuota(
 			Authorization: `Bearer ${adminToken}`,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ quota_limit_bytes: quotaLimitBytes }),
+		body: JSON.stringify({
+			quota_limit_bytes: quotaLimitBytes,
+			quota_reset_source: quotaResetSource,
+		}),
 		signal,
 	});
 

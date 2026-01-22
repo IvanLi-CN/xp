@@ -13,10 +13,9 @@ import { hasAdminToken } from "./components/auth";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointsPage } from "./views/EndpointsPage";
-import { GrantDetailsPage } from "./views/GrantDetailsPage";
 import { GrantGroupDetailsPage } from "./views/GrantGroupDetailsPage";
+import { GrantGroupsPage } from "./views/GrantGroupsPage";
 import { GrantNewPage } from "./views/GrantNewPage";
-import { GrantsPage } from "./views/GrantsPage";
 import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
@@ -101,10 +100,10 @@ const userDetailsRoute = createRoute({
 	component: UserDetailsPage,
 });
 
-const grantsRoute = createRoute({
+const grantGroupsRoute = createRoute({
 	getParentRoute: () => appRoute,
-	path: "/grants",
-	component: GrantsPage,
+	path: "/grant-groups",
+	component: GrantGroupsPage,
 });
 
 const serviceConfigRoute = createRoute({
@@ -113,16 +112,10 @@ const serviceConfigRoute = createRoute({
 	component: ServiceConfigPage,
 });
 
-const grantNewRoute = createRoute({
+const grantGroupNewRoute = createRoute({
 	getParentRoute: () => appRoute,
-	path: "/grants/new",
+	path: "/grant-groups/new",
 	component: GrantNewPage,
-});
-
-const grantDetailsRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/grants/$grantId",
-	component: GrantDetailsPage,
 });
 
 const grantGroupDetailsRoute = createRoute({
@@ -141,9 +134,8 @@ const appRouteTree = appRoute.addChildren([
 	usersRoute,
 	userNewRoute,
 	userDetailsRoute,
-	grantsRoute,
-	grantNewRoute,
-	grantDetailsRoute,
+	grantGroupsRoute,
+	grantGroupNewRoute,
 	grantGroupDetailsRoute,
 	serviceConfigRoute,
 ]);

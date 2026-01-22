@@ -2,38 +2,21 @@ use chrono::{
     DateTime, Datelike, Duration, FixedOffset, Local, LocalResult, NaiveDate, TimeZone, Utc,
 };
 
-use crate::{
-    domain::{CyclePolicy, CyclePolicyDefault, Grant},
-    state::JsonSnapshotStore,
-};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectiveCyclePolicy {
-    ByUser,
-    ByNode,
-}
-
 #[derive(Debug)]
 pub enum CycleWindowError {
-    InvalidUtc8Offset,
+    InvalidTzOffsetMinutes,
     FailedToBuildLocalMidnight,
     FailedToBuildLocalOneAm,
     FailedToResolveLocalTime,
-    MissingCycleDayOfMonth,
-    UserNotFound { user_id: String },
 }
 
 impl std::fmt::Display for CycleWindowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidUtc8Offset => write!(f, "invalid UTC+8 offset"),
+            Self::InvalidTzOffsetMinutes => write!(f, "invalid tz_offset_minutes"),
             Self::FailedToBuildLocalMidnight => write!(f, "failed to build local midnight"),
             Self::FailedToBuildLocalOneAm => write!(f, "failed to build local 01:00"),
             Self::FailedToResolveLocalTime => write!(f, "failed to resolve local time"),
-            Self::MissingCycleDayOfMonth => write!(f, "cycle_day_of_month is required"),
-            Self::UserNotFound { user_id } => {
-                write!(f, "user not found (cycle_policy=inherit_user): {user_id}")
-            }
         }
     }
 }
@@ -122,40 +105,27 @@ where
 }
 
 pub fn current_cycle_window_now(
-    policy: EffectiveCyclePolicy,
+    tz: CycleTimeZone,
     day_of_month: u8,
 ) -> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), CycleWindowError> {
-    match policy {
-        EffectiveCyclePolicy::ByUser => {
-            let tz = FixedOffset::east_opt(8 * 3600).ok_or(CycleWindowError::InvalidUtc8Offset)?;
-            let now = Utc::now().with_timezone(&tz);
-            let (start, end) = cycle_window_at(&tz, now, day_of_month)?;
-            Ok((start, end))
-        }
-        EffectiveCyclePolicy::ByNode => {
-            let now = Local::now();
-            let (start, end) = cycle_window_at(&Local, now, day_of_month)?;
-            Ok((
-                start.with_timezone(start.offset()),
-                end.with_timezone(end.offset()),
-            ))
-        }
-    }
+    let now = Utc::now();
+    current_cycle_window_at(tz, day_of_month, now)
 }
 
 pub fn current_cycle_window_at(
-    policy: EffectiveCyclePolicy,
+    tz: CycleTimeZone,
     day_of_month: u8,
     now_utc: DateTime<Utc>,
 ) -> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), CycleWindowError> {
-    match policy {
-        EffectiveCyclePolicy::ByUser => {
-            let tz = FixedOffset::east_opt(8 * 3600).ok_or(CycleWindowError::InvalidUtc8Offset)?;
+    match tz {
+        CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes } => {
+            let tz = FixedOffset::east_opt(i32::from(tz_offset_minutes) * 60)
+                .ok_or(CycleWindowError::InvalidTzOffsetMinutes)?;
             let now = now_utc.with_timezone(&tz);
             let (start, end) = cycle_window_at(&tz, now, day_of_month)?;
             Ok((start, end))
         }
-        EffectiveCyclePolicy::ByNode => {
+        CycleTimeZone::Local => {
             let now = now_utc.with_timezone(&Local);
             let (start, end) = cycle_window_at(&Local, now, day_of_month)?;
             Ok((
@@ -166,37 +136,10 @@ pub fn current_cycle_window_at(
     }
 }
 
-pub fn effective_cycle_policy_and_day(
-    store: &JsonSnapshotStore,
-    grant: &Grant,
-) -> Result<(EffectiveCyclePolicy, u8), CycleWindowError> {
-    match grant.cycle_policy {
-        CyclePolicy::InheritUser => {
-            let user =
-                store
-                    .get_user(&grant.user_id)
-                    .ok_or_else(|| CycleWindowError::UserNotFound {
-                        user_id: grant.user_id.clone(),
-                    })?;
-            let policy = match user.cycle_policy_default {
-                CyclePolicyDefault::ByUser => EffectiveCyclePolicy::ByUser,
-                CyclePolicyDefault::ByNode => EffectiveCyclePolicy::ByNode,
-            };
-            Ok((policy, user.cycle_day_of_month_default))
-        }
-        CyclePolicy::ByUser => Ok((
-            EffectiveCyclePolicy::ByUser,
-            grant
-                .cycle_day_of_month
-                .ok_or(CycleWindowError::MissingCycleDayOfMonth)?,
-        )),
-        CyclePolicy::ByNode => Ok((
-            EffectiveCyclePolicy::ByNode,
-            grant
-                .cycle_day_of_month
-                .ok_or(CycleWindowError::MissingCycleDayOfMonth)?,
-        )),
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleTimeZone {
+    FixedOffsetMinutes { tz_offset_minutes: i16 },
+    Local,
 }
 
 #[cfg(test)]

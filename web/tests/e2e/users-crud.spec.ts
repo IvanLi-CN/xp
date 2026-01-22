@@ -17,14 +17,12 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await page.getByRole("button", { name: "Create user" }).click();
 
 	await expect(
-		page.getByRole("heading", { name: "User details" }),
+		page.getByRole("heading", { name: "User", exact: true }),
 	).toBeVisible();
 
-	await page.getByRole("button", { name: "Copy URL" }).click();
+	await page.getByRole("button", { name: "Copy", exact: true }).click();
 	await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
 
-	await page.getByLabel("Format").selectOption("raw");
-	await page.getByRole("button", { name: "Fetch subscription" }).click();
 	await expect(page.locator("textarea")).toHaveValue(/vless:\/\//);
 
 	await page.getByRole("button", { name: "Delete user" }).click();

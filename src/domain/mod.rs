@@ -8,6 +8,9 @@ pub enum DomainError {
     InvalidCycleDayOfMonth {
         day_of_month: u8,
     },
+    InvalidTzOffsetMinutes {
+        tz_offset_minutes: i16,
+    },
     InvalidGroupName {
         group_name: String,
     },
@@ -25,8 +28,8 @@ pub enum DomainError {
     MissingEndpoint {
         endpoint_id: String,
     },
-    MissingCycleDayOfMonth {
-        cycle_policy: CyclePolicy,
+    MissingGrantGroup {
+        group_name: String,
     },
     GroupNameConflict {
         group_name: String,
@@ -42,13 +45,14 @@ impl DomainError {
         match self {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
+            | Self::InvalidTzOffsetMinutes { .. }
             | Self::InvalidGroupName { .. }
             | Self::EmptyGrantGroup
-            | Self::DuplicateGrantGroupMember { .. }
-            | Self::MissingCycleDayOfMonth { .. } => "invalid_request",
+            | Self::DuplicateGrantGroupMember { .. } => "invalid_request",
             Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
                 "invalid_request"
             }
+            Self::MissingGrantGroup { .. } => "not_found",
             Self::GroupNameConflict { .. } | Self::GrantPairConflict { .. } => "conflict",
         }
     }
@@ -60,6 +64,9 @@ impl std::fmt::Display for DomainError {
             Self::InvalidPort { port } => write!(f, "invalid port: {port}"),
             Self::InvalidCycleDayOfMonth { day_of_month } => {
                 write!(f, "invalid cycle_day_of_month: {day_of_month}")
+            }
+            Self::InvalidTzOffsetMinutes { tz_offset_minutes } => {
+                write!(f, "invalid tz_offset_minutes: {tz_offset_minutes}")
             }
             Self::InvalidGroupName { group_name } => write!(f, "invalid group_name: {group_name}"),
             Self::EmptyGrantGroup => write!(f, "grant group must have at least 1 member"),
@@ -73,10 +80,9 @@ impl std::fmt::Display for DomainError {
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
-            Self::MissingCycleDayOfMonth { cycle_policy } => write!(
-                f,
-                "cycle_day_of_month is required when cycle_policy is {cycle_policy:?}"
-            ),
+            Self::MissingGrantGroup { group_name } => {
+                write!(f, "grant group not found: {group_name}")
+            }
             Self::GroupNameConflict { group_name } => {
                 write!(f, "group_name already exists: {group_name}")
             }
@@ -103,6 +109,14 @@ pub fn validate_port(port: u16) -> Result<(), DomainError> {
 pub fn validate_cycle_day_of_month(day_of_month: u8) -> Result<(), DomainError> {
     if !(1..=31).contains(&day_of_month) {
         return Err(DomainError::InvalidCycleDayOfMonth { day_of_month });
+    }
+    Ok(())
+}
+
+pub fn validate_tz_offset_minutes(tz_offset_minutes: i16) -> Result<(), DomainError> {
+    // UTC-12 .. UTC+14
+    if !(-720..=840).contains(&tz_offset_minutes) {
+        return Err(DomainError::InvalidTzOffsetMinutes { tz_offset_minutes });
     }
     Ok(())
 }
@@ -144,19 +158,56 @@ pub enum EndpointKind {
     Ss2022_2022Blake3Aes128Gcm,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum CyclePolicyDefault {
-    ByUser,
-    ByNode,
+pub enum QuotaResetSource {
+    #[default]
+    User,
+    Node,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CyclePolicy {
-    InheritUser,
-    ByUser,
-    ByNode,
+#[serde(tag = "policy", rename_all = "snake_case")]
+pub enum UserQuotaReset {
+    Unlimited {
+        tz_offset_minutes: i16,
+    },
+    Monthly {
+        day_of_month: u8,
+        tz_offset_minutes: i16,
+    },
+}
+
+impl Default for UserQuotaReset {
+    fn default() -> Self {
+        Self::Monthly {
+            day_of_month: 1,
+            tz_offset_minutes: 480,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "policy", rename_all = "snake_case")]
+pub enum NodeQuotaReset {
+    Unlimited {
+        #[serde(default)]
+        tz_offset_minutes: Option<i16>,
+    },
+    Monthly {
+        day_of_month: u8,
+        #[serde(default)]
+        tz_offset_minutes: Option<i16>,
+    },
+}
+
+impl Default for NodeQuotaReset {
+    fn default() -> Self {
+        Self::Monthly {
+            day_of_month: 1,
+            tz_offset_minutes: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -166,6 +217,8 @@ pub struct Node {
     #[serde(alias = "public_domain")]
     pub access_host: String,
     pub api_base_url: String,
+    #[serde(default)]
+    pub quota_reset: NodeQuotaReset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -184,8 +237,8 @@ pub struct User {
     pub user_id: String,
     pub display_name: String,
     pub subscription_token: String,
-    pub cycle_policy_default: CyclePolicyDefault,
-    pub cycle_day_of_month_default: u8,
+    #[serde(default)]
+    pub quota_reset: UserQuotaReset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,19 +246,18 @@ pub struct UserNodeQuota {
     pub user_id: String,
     pub node_id: String,
     pub quota_limit_bytes: u64,
+    #[serde(default)]
+    pub quota_reset_source: QuotaResetSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Grant {
     pub grant_id: String,
+    pub group_name: String,
     pub user_id: String,
     pub endpoint_id: String,
-    #[serde(default)]
-    pub group_name: Option<String>,
     pub enabled: bool,
     pub quota_limit_bytes: u64,
-    pub cycle_policy: CyclePolicy,
-    pub cycle_day_of_month: Option<u8>,
     pub note: Option<String>,
     pub credentials: GrantCredentials,
 }

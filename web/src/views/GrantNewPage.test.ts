@@ -31,6 +31,7 @@ describe("buildGrantGroupCreateRequest", () => {
 					user_id: "u_01HUSERAAAAAA",
 					node_id: "n1",
 					quota_limit_bytes: 10,
+					quota_reset_source: "user",
 				},
 			],
 			note: "  enterprise quota  ",

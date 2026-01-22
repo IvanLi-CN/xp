@@ -6,7 +6,8 @@ use tracing::{debug, warn};
 
 use crate::{
     config::Config,
-    cycle::{CycleWindowError, current_cycle_window_at, effective_cycle_policy_and_day},
+    cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
+    domain::{NodeQuotaReset, QuotaResetSource, UserQuotaReset},
     raft::app::RaftFacade,
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
@@ -67,10 +68,17 @@ struct GrantQuotaSnapshot {
     endpoint_tag: Option<String>,
     quota_limit_bytes: u64,
     user_node_quota_limit_bytes: Option<u64>,
-    cycle_policy: crate::cycle::EffectiveCyclePolicy,
+    quota_reset_policy: QuotaResetPolicy,
+    cycle_tz: CycleTimeZone,
     cycle_day_of_month: u8,
     prev_cycle_start_at: Option<String>,
     prev_cycle_end_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuotaResetPolicy {
+    Monthly,
+    Unlimited,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +92,75 @@ struct GrantUsageTick {
 
 fn map_cycle_error(grant_id: &str, err: CycleWindowError) -> anyhow::Error {
     anyhow::anyhow!("grant_id={grant_id} cycle window error: {err}")
+}
+
+fn resolve_user_node_quota_reset(
+    store: &JsonSnapshotStore,
+    user_id: &str,
+    node_id: &str,
+) -> anyhow::Result<(QuotaResetSource, QuotaResetPolicy, CycleTimeZone, u8)> {
+    let source = store
+        .get_user_node_quota_reset_source(user_id, node_id)
+        .unwrap_or_default();
+
+    let (policy, day_of_month, tz) = match source {
+        QuotaResetSource::User => {
+            let user = store
+                .get_user(user_id)
+                .ok_or_else(|| anyhow::anyhow!("user not found: {user_id}"))?;
+            match user.quota_reset {
+                UserQuotaReset::Unlimited { tz_offset_minutes } => (
+                    QuotaResetPolicy::Unlimited,
+                    1,
+                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                ),
+                UserQuotaReset::Monthly {
+                    day_of_month,
+                    tz_offset_minutes,
+                } => (
+                    QuotaResetPolicy::Monthly,
+                    day_of_month,
+                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                ),
+            }
+        }
+        QuotaResetSource::Node => {
+            let node = store
+                .get_node(node_id)
+                .ok_or_else(|| anyhow::anyhow!("node not found: {node_id}"))?;
+            match node.quota_reset {
+                NodeQuotaReset::Unlimited { tz_offset_minutes } => (
+                    QuotaResetPolicy::Unlimited,
+                    1,
+                    match tz_offset_minutes {
+                        Some(tz_offset_minutes) => {
+                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
+                        }
+                        None => CycleTimeZone::Local,
+                    },
+                ),
+                NodeQuotaReset::Monthly {
+                    day_of_month,
+                    tz_offset_minutes,
+                } => (
+                    QuotaResetPolicy::Monthly,
+                    day_of_month,
+                    match tz_offset_minutes {
+                        Some(tz_offset_minutes) => {
+                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
+                        }
+                        None => CycleTimeZone::Local,
+                    },
+                ),
+            }
+        }
+    };
+
+    if !(1..=31).contains(&day_of_month) {
+        return Err(anyhow::anyhow!("invalid day_of_month: {day_of_month}"));
+    }
+
+    Ok((source, policy, tz, day_of_month))
 }
 
 async fn set_grant_enabled_via_raft(
@@ -147,17 +224,18 @@ pub async fn run_quota_tick_at(
                 .map(|e| e.node_id.clone())
                 .unwrap_or_else(|| local_node_id.clone());
 
-            let (policy, day) = match effective_cycle_policy_and_day(&store, &grant) {
-                Ok(v) => v,
-                Err(err) => {
-                    warn!(
-                        grant_id = grant.grant_id,
-                        %err,
-                        "quota tick skip grant: cycle policy resolution failed"
-                    );
-                    continue;
-                }
-            };
+            let (_quota_reset_source, quota_reset_policy, cycle_tz, cycle_day_of_month) =
+                match resolve_user_node_quota_reset(&store, &grant.user_id, &node_id) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        warn!(
+                            grant_id = grant.grant_id,
+                            %err,
+                            "quota tick skip grant: quota reset resolution failed"
+                        );
+                        continue;
+                    }
+                };
 
             let usage = store.get_grant_usage(&grant.grant_id);
             let user_node_quota_limit_bytes =
@@ -169,8 +247,9 @@ pub async fn run_quota_tick_at(
                 endpoint_tag: endpoint.map(|e| e.tag.clone()),
                 quota_limit_bytes: grant.quota_limit_bytes,
                 user_node_quota_limit_bytes,
-                cycle_policy: policy,
-                cycle_day_of_month: day,
+                quota_reset_policy,
+                cycle_tz,
+                cycle_day_of_month,
                 prev_cycle_start_at: usage.as_ref().map(|u| u.cycle_start_at.clone()),
                 prev_cycle_end_at: usage.as_ref().map(|u| u.cycle_end_at.clone()),
             });
@@ -269,7 +348,7 @@ async fn update_grant_usage_once(
     snapshot: GrantQuotaSnapshot,
 ) -> anyhow::Result<GrantUsageTick> {
     let (cycle_start, cycle_end) =
-        current_cycle_window_at(snapshot.cycle_policy, snapshot.cycle_day_of_month, now)
+        current_cycle_window_at(snapshot.cycle_tz, snapshot.cycle_day_of_month, now)
             .map_err(|err| map_cycle_error(&snapshot.grant_id, err))?;
     let cycle_start_at = cycle_start.to_rfc3339();
     let cycle_end_at = cycle_end.to_rfc3339();
@@ -348,6 +427,21 @@ async fn enforce_grant_quota_legacy(
     let snapshot = tick.snapshot;
     let grant_id = snapshot.grant_id.clone();
     let email = format!("grant:{grant_id}");
+
+    if snapshot.quota_reset_policy == QuotaResetPolicy::Unlimited {
+        if tick.quota_banned {
+            if tick.grant_enabled {
+                let mut store = store.lock().await;
+                store.clear_quota_banned(&grant_id)?;
+            } else {
+                let _ = set_grant_enabled_via_raft(raft, &grant_id, true).await;
+                let mut store = store.lock().await;
+                store.clear_quota_banned(&grant_id)?;
+            }
+            reconcile.request_full();
+        }
+        return Ok(());
+    }
 
     if tick.window_changed && config.quota_auto_unban && tick.quota_banned {
         debug!(
@@ -455,6 +549,29 @@ async fn enforce_node_quota_group(
 ) -> anyhow::Result<()> {
     let any_window_changed = group.iter().any(|g| g.window_changed);
     let any_quota_banned = group.iter().any(|g| g.quota_banned);
+    let policy = group
+        .first()
+        .map(|g| g.snapshot.quota_reset_policy)
+        .unwrap_or(QuotaResetPolicy::Monthly);
+
+    if policy == QuotaResetPolicy::Unlimited {
+        if any_quota_banned {
+            debug!("quota tick: quota reset is unlimited, clearing quota bans");
+            for g in group {
+                let grant_id = &g.snapshot.grant_id;
+                if g.grant_enabled {
+                    let mut store = store.lock().await;
+                    store.clear_quota_banned(grant_id)?;
+                } else {
+                    let _ = set_grant_enabled_via_raft(raft, grant_id, true).await;
+                    let mut store = store.lock().await;
+                    store.clear_quota_banned(grant_id)?;
+                }
+            }
+            reconcile.request_full();
+        }
+        return Ok(());
+    }
 
     if any_window_changed && config.quota_auto_unban && any_quota_banned {
         debug!("quota tick: node cycle rollover detected, auto-unbanning");
@@ -578,7 +695,7 @@ mod tests {
     use tokio::sync::{Mutex, oneshot, watch};
 
     use crate::{
-        domain::{CyclePolicy, CyclePolicyDefault, EndpointKind, Node},
+        domain::{EndpointKind, Node, NodeQuotaReset},
         raft::app::{LocalRaft, RaftFacade},
         state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
         xray::proto::xray::{
@@ -1043,9 +1160,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1056,11 +1171,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     0,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1116,12 +1231,11 @@ mod tests {
                     node_name: "node-2".to_string(),
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
+                    quota_reset: NodeQuotaReset::default(),
                 })
                 .unwrap();
 
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     remote_node_id,
@@ -1132,11 +1246,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     0,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1188,12 +1302,11 @@ mod tests {
                     node_name: "node-2".to_string(),
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
+                    quota_reset: NodeQuotaReset::default(),
                 })
                 .unwrap();
 
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
 
             let local_endpoint = store
                 .create_endpoint(
@@ -1214,21 +1327,21 @@ mod tests {
 
             let local_grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id.clone(),
                     local_endpoint.endpoint_id,
                     0,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
             let remote_grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     remote_endpoint.endpoint_id,
                     0,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1289,9 +1402,7 @@ mod tests {
         let (grant_id, endpoint_tag) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1302,11 +1413,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id.clone(),
                     QUOTA_TOLERANCE_BYTES + 100,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1374,9 +1485,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1387,17 +1496,22 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     0,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
-            let (start, end) =
-                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, now)
-                    .unwrap();
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 480,
+                },
+                1,
+                now,
+            )
+            .unwrap();
             store
                 .apply_grant_usage_sample(
                     &grant.grant_id,
@@ -1459,9 +1573,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1472,11 +1584,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1487,9 +1599,14 @@ mod tests {
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc);
-            let (start, end) =
-                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, old_now)
-                    .unwrap();
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 480,
+                },
+                1,
+                old_now,
+            )
+            .unwrap();
             store
                 .apply_grant_usage_sample(
                     &grant.grant_id,
@@ -1548,9 +1665,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1561,11 +1676,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1576,9 +1691,14 @@ mod tests {
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc);
-            let (start, end) =
-                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, old_now)
-                    .unwrap();
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 480,
+                },
+                1,
+                old_now,
+            )
+            .unwrap();
             store
                 .apply_grant_usage_sample(
                     &grant.grant_id,
@@ -1629,9 +1749,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1642,11 +1760,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id.clone(),
                     QUOTA_TOLERANCE_BYTES + 100,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1699,9 +1817,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1712,11 +1828,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1727,9 +1843,14 @@ mod tests {
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc);
-            let (start, end) =
-                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, old_now)
-                    .unwrap();
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 480,
+                },
+                1,
+                old_now,
+            )
+            .unwrap();
             store
                 .apply_grant_usage_sample(
                     &grant.grant_id,
@@ -1786,9 +1907,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1799,11 +1918,11 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     1,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
@@ -1842,9 +1961,7 @@ mod tests {
         let grant_id = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store
-                .create_user("alice".to_string(), CyclePolicyDefault::ByUser, 1)
-                .unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1855,17 +1972,22 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
+                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id,
                     u64::MAX,
-                    CyclePolicy::InheritUser,
-                    None,
+                    true,
                     None,
                 )
                 .unwrap();
-            let (start, end) =
-                current_cycle_window_at(crate::cycle::EffectiveCyclePolicy::ByUser, 1, now)
-                    .unwrap();
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 480,
+                },
+                1,
+                now,
+            )
+            .unwrap();
             store
                 .apply_grant_usage_sample(
                     &grant.grant_id,
