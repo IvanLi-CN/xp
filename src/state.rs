@@ -249,6 +249,8 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
                     node_id,
                     UserNodeQuotaConfig {
                         quota_limit_bytes: Some(quota_limit_bytes),
+                        // In v2 this field did not exist; seed with the default and allow it to be
+                        // overridden based on grants later in this migration.
                         quota_reset_source: QuotaResetSource::User,
                     },
                 );
@@ -344,6 +346,12 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
                 quota_limit_bytes: None,
                 quota_reset_source: cfg_effective_source,
             });
+        // If this config came from the legacy v2 `user_node_quotas` map, its `quota_reset_source`
+        // was seeded with the default and should be replaced with the effective source derived
+        // from grants.
+        if cfg.quota_limit_bytes.is_some() && cfg.quota_reset_source == QuotaResetSource::User {
+            cfg.quota_reset_source = effective_source.clone();
+        }
         if cfg.quota_reset_source != effective_source {
             return Err(StoreError::Migration {
                 message: format!(
@@ -418,6 +426,101 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod migrate_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn migrate_v2_like_to_v3_overrides_seeded_quota_reset_source_from_grants() {
+        let node_id = "node_1".to_string();
+        let endpoint_id = "endpoint_1".to_string();
+        let user_id = "user_1".to_string();
+
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            node_id.clone(),
+            Node {
+                node_id: node_id.clone(),
+                node_name: "node-1".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+
+        let mut endpoints = BTreeMap::new();
+        endpoints.insert(
+            endpoint_id.clone(),
+            Endpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id: node_id.clone(),
+                tag: "test".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 12345,
+                meta: serde_json::json!({}),
+            },
+        );
+
+        let mut users = BTreeMap::new();
+        users.insert(
+            user_id.clone(),
+            UserV2 {
+                user_id: user_id.clone(),
+                display_name: "alice".to_string(),
+                subscription_token: "token".to_string(),
+                cycle_policy_default: CyclePolicyDefaultV2::ByUser,
+                cycle_day_of_month_default: 1,
+            },
+        );
+
+        let mut grants = BTreeMap::new();
+        grants.insert(
+            "grant_1".to_string(),
+            GrantV2 {
+                grant_id: "grant_1".to_string(),
+                user_id: user_id.clone(),
+                endpoint_id: endpoint_id.clone(),
+                group_name: None,
+                enabled: true,
+                quota_limit_bytes: 123,
+                cycle_policy: CyclePolicyV2::ByNode,
+                cycle_day_of_month: Some(1),
+                note: None,
+                credentials: GrantCredentials {
+                    vless: None,
+                    ss2022: None,
+                },
+            },
+        );
+
+        let mut user_node_quotas = BTreeMap::new();
+        user_node_quotas
+            .entry(user_id.clone())
+            .or_insert_with(BTreeMap::new)
+            .insert(node_id.clone(), 456);
+
+        let v2 = PersistedStateV2Like {
+            schema_version: 2,
+            nodes,
+            endpoints,
+            users,
+            grants,
+            user_node_quotas,
+        };
+
+        let v3 = migrate_v2_like_to_v3(v2).expect("migration should succeed");
+        let cfg = v3
+            .user_node_quotas
+            .get(&user_id)
+            .and_then(|m| m.get(&node_id))
+            .expect("user node quota cfg should exist");
+
+        assert_eq!(cfg.quota_limit_bytes, Some(456));
+        assert_eq!(cfg.quota_reset_source, QuotaResetSource::Node);
+    }
 }
 
 fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>

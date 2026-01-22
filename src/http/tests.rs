@@ -648,14 +648,15 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Set node quota.
+    // Set node quota (explicit source).
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
             json!({
-              "quota_limit_bytes": 456
+              "quota_limit_bytes": 456,
+              "quota_reset_source": "node"
             }),
         ))
         .await
@@ -665,7 +666,24 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
     assert_eq!(quota["user_id"], user_id);
     assert_eq!(quota["node_id"], node_id);
     assert_eq!(quota["quota_limit_bytes"], 456);
-    assert_eq!(quota["quota_reset_source"], "user");
+    assert_eq!(quota["quota_reset_source"], "node");
+
+    // Update node quota without specifying source should preserve existing quota_reset_source.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
+            json!({
+              "quota_limit_bytes": 789
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let quota = body_json(res).await;
+    assert_eq!(quota["quota_limit_bytes"], 789);
+    assert_eq!(quota["quota_reset_source"], "node");
 
     // List node quotas for user.
     let res = app
@@ -683,7 +701,7 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 456)
+            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 789)
     );
 
     // Grant group member quota should be unified.
@@ -694,7 +712,7 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let fetched_group = body_json(res).await;
-    assert_eq!(fetched_group["members"][0]["quota_limit_bytes"], 456);
+    assert_eq!(fetched_group["members"][0]["quota_limit_bytes"], 789);
 }
 
 #[tokio::test]

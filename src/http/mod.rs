@@ -249,7 +249,7 @@ struct PatchUserRequest {
 struct PutUserNodeQuotaRequest {
     quota_limit_bytes: u64,
     #[serde(default)]
-    quota_reset_source: QuotaResetSource,
+    quota_reset_source: Option<QuotaResetSource>,
 }
 
 #[derive(Deserialize)]
@@ -1186,13 +1186,23 @@ async fn admin_put_user_node_quota(
     Path((user_id, node_id)): Path<(String, String)>,
     ApiJson(req): ApiJson<PutUserNodeQuotaRequest>,
 ) -> Result<Json<UserNodeQuota>, ApiError> {
+    let quota_reset_source = match req.quota_reset_source {
+        Some(v) => v,
+        None => {
+            let store = state.store.lock().await;
+            store
+                .get_user_node_quota_reset_source(&user_id, &node_id)
+                .unwrap_or_default()
+        }
+    };
+
     let out = raft_write(
         &state,
         crate::state::DesiredStateCommand::SetUserNodeQuota {
             user_id: user_id.clone(),
             node_id: node_id.clone(),
             quota_limit_bytes: req.quota_limit_bytes,
-            quota_reset_source: req.quota_reset_source,
+            quota_reset_source,
         },
     )
     .await?;
