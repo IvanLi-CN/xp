@@ -42,9 +42,9 @@
 
 ## 5) 接口清单与契约（Interfaces & Contracts）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `xp-ops deploy` | CLI | external | Modify | [contracts/cli.md](./contracts/cli.md) | ops | operators / CI | 新增 token 参数与优先级规则 |
+| 接口（Name）    | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）               | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）               |
+| --------------- | ------------ | ------------- | -------------- | -------------------------------------- | --------------- | ------------------- | --------------------------- |
+| `xp-ops deploy` | CLI          | external      | Modify         | [contracts/cli.md](./contracts/cli.md) | ops             | operators / CI      | 新增 token 参数与优先级规则 |
 
 ## 6) 约束与风险
 
