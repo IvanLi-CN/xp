@@ -350,7 +350,9 @@ function TokenSpan({
 }
 
 async function writeClipboard(text: string): Promise<void> {
-	await navigator.clipboard.writeText(text);
+	try {
+		await navigator.clipboard.writeText(text);
+	} catch {}
 }
 
 function CodeView({
@@ -831,6 +833,10 @@ export function SubscriptionPreviewDialog({
 		<dialog
 			className="modal"
 			open={open}
+			onCancel={(e) => {
+				e.preventDefault();
+				onClose();
+			}}
 			style={{
 				backgroundColor:
 					resolvedTheme === "light"
