@@ -313,18 +313,38 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
 
 fn read_env_value(paths: &Paths, key: &str) -> Option<String> {
     let raw = fs::read_to_string(paths.etc_xp_env()).ok()?;
+    let mut out: Option<String> = None;
     for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+        if let Some((k, v)) = parse_env_kv(line)
+            && k == key
+        {
+            out = Some(v);
         }
-        let (k, v) = line.split_once('=')?;
-        if k.trim() != key {
-            continue;
-        }
-        return Some(v.trim().to_string());
     }
-    None
+    out
+}
+
+fn parse_env_kv(line: &str) -> Option<(String, String)> {
+    let mut s = line.trim();
+    if s.is_empty() || s.starts_with('#') {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix("export ") {
+        s = rest.trim_start();
+    }
+
+    let (k, v) = s.split_once('=')?;
+    let k = k.trim();
+    if k.is_empty() {
+        return None;
+    }
+    let mut v = v.trim().to_string();
+    let is_quoted =
+        (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''));
+    if is_quoted && v.len() >= 2 {
+        v = v[1..v.len() - 1].to_string();
+    }
+    Some((k.to_string(), v))
 }
 
 fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
@@ -377,7 +397,7 @@ fn openrc_xp_script() -> String {
 }
 
 fn openrc_xray_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ncommand_background=\"yes\"\npidfile=\"/run/xray.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {
@@ -466,4 +486,84 @@ fn run_or_fail_owned(program: &str, args: &[String]) -> Result<(), ExitError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn parse_env_kv_ignores_invalid_and_supports_export_and_quotes() {
+        assert!(parse_env_kv("").is_none());
+        assert!(parse_env_kv("# comment").is_none());
+        assert!(parse_env_kv("NOT_AN_ASSIGNMENT").is_none());
+
+        let (k, v) = parse_env_kv("export XP_XRAY_SYSTEMD_UNIT=\"custom-xray.service\"").unwrap();
+        assert_eq!(k, "XP_XRAY_SYSTEMD_UNIT");
+        assert_eq!(v, "custom-xray.service");
+
+        let (k, v) = parse_env_kv("XP_XRAY_OPENRC_SERVICE='xray'").unwrap();
+        assert_eq!(k, "XP_XRAY_OPENRC_SERVICE");
+        assert_eq!(v, "xray");
+    }
+
+    #[test]
+    fn read_env_value_returns_last_value() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            "XP_XRAY_SYSTEMD_UNIT=xray.service\nXP_XRAY_SYSTEMD_UNIT=custom-xray.service\n",
+        )
+        .unwrap();
+
+        let v = read_env_value(&paths, "XP_XRAY_SYSTEMD_UNIT").unwrap();
+        assert_eq!(v, "custom-xray.service");
+    }
+
+    #[test]
+    fn systemd_restart_policy_includes_configured_unit_and_creates_parent_dirs() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            "export XP_XRAY_SYSTEMD_UNIT=\"custom-xray.service\"\n",
+        )
+        .unwrap();
+
+        write_systemd_xray_restart_policy(&paths, Mode::Real).unwrap();
+
+        let p = paths.etc_polkit_xp_xray_restart_rule();
+        let content = fs::read_to_string(p).unwrap();
+        assert!(content.contains("xray.service"));
+        assert!(content.contains("custom-xray.service"));
+    }
+
+    #[test]
+    fn openrc_restart_policy_includes_configured_service() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(paths.etc_xp_env(), "XP_XRAY_OPENRC_SERVICE=my-xray\n").unwrap();
+        fs::write(paths.etc_doas_conf(), "permit nopass root\n").unwrap();
+
+        write_openrc_xray_restart_policy(&paths, Mode::Real).unwrap();
+
+        let doas = fs::read_to_string(paths.etc_doas_conf()).unwrap();
+        assert!(doas.contains("permit nopass root"));
+        assert!(
+            doas.contains("permit nopass xp as root cmd /sbin/rc-service args my-xray restart")
+        );
+    }
+
+    #[test]
+    fn openrc_xray_script_does_not_background_when_supervised() {
+        let script = openrc_xray_script();
+        assert!(script.contains("supervisor=supervise-daemon"));
+        assert!(!script.contains("command_background="));
+        assert!(!script.contains("pidfile="));
+    }
 }
