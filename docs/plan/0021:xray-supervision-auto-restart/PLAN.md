@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-21
-- Last: 2026-01-21
+- Last: 2026-01-23
 
 ## 背景 / 问题陈述
 
@@ -127,9 +127,13 @@ None
 
 ## 里程碑（Milestones）
 
-- [ ] M1: `xray` 探活与状态机（Up/Down/Unknown）+ Up 边沿触发 reconcile
-- [ ] M2: 完善 ops 文档：systemd/OpenRC 的自动重启建议与边界条件
-- [ ] M3: 测试与文档补齐（单测/集测 + ops/workflows 文档更新）
+- [x] M1: `xray` 探活与状态机（Up/Down/Unknown）+ Up 边沿触发 reconcile
+- [x] M2: 完善 ops 文档：systemd/OpenRC 的自动重启建议与边界条件
+- [x] M3: 测试与文档补齐（单测/集测 + ops/workflows 文档更新）
+
+## Change log
+
+- 2026-01-23: 增加 `xray` 探活状态机与 `/api/health` 的 `xray.*` 字段；`down -> up` 触发 full reconcile；补齐 ops 与设计文档。
 
 ## 方案概述（Approach, high-level）
 

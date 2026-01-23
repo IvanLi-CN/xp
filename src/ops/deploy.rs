@@ -1350,6 +1350,8 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     let mut admin_token: Option<String> = None;
     let mut has_data_dir = false;
     let mut has_xray_addr = false;
+    let mut has_xray_health_interval = false;
+    let mut has_xray_health_fails_before_down = false;
     if let Some(s) = existing {
         for line in s.lines() {
             if line.starts_with("XP_ADMIN_TOKEN=") {
@@ -1364,6 +1366,14 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
             }
             if line.starts_with("XP_XRAY_API_ADDR=") {
                 has_xray_addr = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_HEALTH_INTERVAL_SECS=") {
+                has_xray_health_interval = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=") {
+                has_xray_health_fails_before_down = true;
                 continue;
             }
             retained.push(line.to_string());
@@ -1382,6 +1392,12 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     }
     if !has_xray_addr {
         lines.push("XP_XRAY_API_ADDR=127.0.0.1:10085".to_string());
+    }
+    if !has_xray_health_interval {
+        lines.push("XP_XRAY_HEALTH_INTERVAL_SECS=2".to_string());
+    }
+    if !has_xray_health_fails_before_down {
+        lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
     }
 
     let content = format!("{}\n", lines.join("\n"));

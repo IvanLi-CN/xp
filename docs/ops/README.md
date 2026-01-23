@@ -7,6 +7,8 @@ This directory contains sample service definitions and an environment template t
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
+- `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
+- `xray` is expected to be supervised by the init system (systemd/OpenRC). `xp` does not start/restart `xray`.
 
 ## Optional: public access via Cloudflare Tunnel
 
@@ -57,6 +59,10 @@ Required (or commonly set):
   - Optional bearer token for admin endpoints. Leaving it empty effectively disables token checks.
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
+- `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
+  - Probe interval for `xray` gRPC availability.
+- `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` (default: `3`, allowed range `1..=10`)
+  - Consecutive probe failures before reporting `xray.status=down`.
 
 Optional quota knobs:
 

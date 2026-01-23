@@ -899,6 +899,8 @@ mod tests {
         let config = Arc::new(Config {
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             xray_api_addr,
+            xray_health_interval_secs: 2,
+            xray_health_fails_before_down: 3,
             data_dir: tmp_dir.to_path_buf(),
             admin_token: "testtoken".to_string(),
             node_name: "node-1".to_string(),

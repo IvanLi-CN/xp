@@ -169,6 +169,8 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
     let store = Arc::new(Mutex::new(store));
 
     let reconcile = xp::reconcile::spawn_reconciler(config_arc.clone(), store.clone());
+    let (xray_health, _xray_supervisor_task) =
+        xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
     let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
@@ -216,6 +218,7 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
         config.clone(),
         store.clone(),
         reconcile,
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

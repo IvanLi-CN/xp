@@ -112,6 +112,8 @@ VITE_BACKEND_PROXY=http://127.0.0.1:62416 bun run dev
 | `--bind <ADDR>`                     | -                             | `127.0.0.1:62416`         | `xp` HTTP bind address                        |
 | `--data-dir <PATH>`                 | `XP_DATA_DIR`                 | `./data`                  | Data directory (identity, Raft, snapshots, …) |
 | `--xray-api-addr <ADDR>`            | `XP_XRAY_API_ADDR`            | `127.0.0.1:10085`         | Local `xray` gRPC API address                 |
+| `--xray-health-interval-secs <SECS>` | `XP_XRAY_HEALTH_INTERVAL_SECS` | `2`                      | Xray gRPC probe interval (`1..=30`)           |
+| `--xray-health-fails-before-down <N>` | `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` | `3`                 | Consecutive probe failures to mark down (`1..=10`) |
 | `--admin-token <TOKEN>`             | `XP_ADMIN_TOKEN`              | `""`                      | Admin bearer token                            |
 | `--node-name <NAME>`                | -                             | `node-1`                  | Node display name                             |
 | `--access-host <HOST>`              | -                             | `""`                      | Host used for subscription output             |
@@ -127,10 +129,12 @@ Notes:
 Example:
 
 ```bash
-XP_ADMIN_TOKEN="$(openssl rand -hex 32)" \
-XP_DATA_DIR=/var/lib/xp/data \
-XP_XRAY_API_ADDR=127.0.0.1:10085 \
-xp
+	XP_ADMIN_TOKEN="$(openssl rand -hex 32)" \
+	XP_DATA_DIR=/var/lib/xp/data \
+	XP_XRAY_API_ADDR=127.0.0.1:10085 \
+	XP_XRAY_HEALTH_INTERVAL_SECS=2 \
+	XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3 \
+	xp
 ```
 
 ## API quick reference

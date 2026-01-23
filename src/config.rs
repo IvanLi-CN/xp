@@ -55,6 +55,26 @@ pub struct Config {
     pub xray_api_addr: SocketAddr,
 
     #[arg(
+        long = "xray-health-interval-secs",
+        global = true,
+        env = "XP_XRAY_HEALTH_INTERVAL_SECS",
+        value_name = "SECS",
+        default_value_t = 2,
+        value_parser = clap::value_parser!(u64).range(1..=30)
+    )]
+    pub xray_health_interval_secs: u64,
+
+    #[arg(
+        long = "xray-health-fails-before-down",
+        global = true,
+        env = "XP_XRAY_HEALTH_FAILS_BEFORE_DOWN",
+        value_name = "N",
+        default_value_t = 3,
+        value_parser = clap::value_parser!(u64).range(1..=10)
+    )]
+    pub xray_health_fails_before_down: u64,
+
+    #[arg(
         long,
         global = true,
         env = "XP_DATA_DIR",
@@ -120,8 +140,26 @@ mod tests {
     #[test]
     fn defaults_apply_when_flags_absent() {
         let cli = Cli::try_parse_from(["xp"]).unwrap();
+        assert_eq!(cli.config.xray_health_interval_secs, 2);
+        assert_eq!(cli.config.xray_health_fails_before_down, 3);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
+    }
+
+    #[test]
+    fn rejects_invalid_xray_health_interval_secs() {
+        let err = Cli::try_parse_from(["xp", "--xray-health-interval-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--xray-health-interval-secs"));
+        assert!(msg.contains("1..=30"));
+    }
+
+    #[test]
+    fn rejects_invalid_xray_health_fails_before_down() {
+        let err = Cli::try_parse_from(["xp", "--xray-health-fails-before-down", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--xray-health-fails-before-down"));
+        assert!(msg.contains("1..=10"));
     }
 
     #[test]

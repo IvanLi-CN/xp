@@ -14,3 +14,4 @@ pub mod state;
 pub mod subscription;
 pub mod version;
 pub mod xray;
+pub mod xray_supervisor;
