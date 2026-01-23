@@ -345,57 +345,61 @@ export function UserDetailsPage() {
 			</div>
 
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
-				<div className="flex flex-wrap items-center justify-between gap-3">
-					<div className="space-y-1">
+				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+					<div className="space-y-1 min-w-0">
 						<h2 className="text-lg font-semibold">Subscription</h2>
 						<div className="text-xs opacity-70">Subscription token</div>
-						<div className="flex items-center gap-2">
-							<span className="font-mono text-xs">
-								{user.subscription_token}
-							</span>
-							<CopyButton text={user.subscription_token} />
+						<div className="font-mono text-xs break-all">
+							{user.subscription_token}
 						</div>
+						<div className="text-xs opacity-70">No inline preview</div>
 						<div className="text-xs opacity-70">
-							Reset token invalidates the old URL immediately.
+							Click Fetch to open the full preview modal (no wrap).
 						</div>
 					</div>
 
-					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							variant="secondary"
-							onClick={() => setResetTokenOpen(true)}
-							disabled={isResettingToken}
-						>
-							Reset token
-						</Button>
-						<select
-							className={selectClass}
-							data-testid="subscription-format"
-							value={subFormat}
-							onChange={(e) =>
-								setSubFormat(e.target.value as SubscriptionFormat)
-							}
-						>
-							<option value="raw">raw</option>
-							<option value="clash">clash</option>
-						</select>
-						<Button
-							variant="secondary"
-							data-testid="subscription-fetch"
-							onClick={async () => {
-								setSubOpen(true);
-								await loadSubscriptionPreview();
-							}}
-							loading={subLoading}
-						>
-							Fetch
-						</Button>
-					</div>
-				</div>
+					<div className="flex flex-col gap-2 md:items-end">
+						<div className="flex flex-wrap items-center gap-2 md:justify-end">
+							<div className="flex items-center gap-2">
+								<span className="text-xs opacity-70">Format</span>
+								<select
+									className={selectClass}
+									data-testid="subscription-format"
+									value={subFormat}
+									onChange={(e) =>
+										setSubFormat(e.target.value as SubscriptionFormat)
+									}
+								>
+									<option value="raw">raw</option>
+									<option value="clash">clash</option>
+								</select>
+							</div>
 
-				<div className="text-xs opacity-70">
-					Fetch opens a read-only modal (no wrapping, horizontal scroll, syntax
-					highlight, line numbers).
+							<CopyButton text={subscriptionUrl} label="Copy URL" />
+
+							<Button
+								variant="primary"
+								data-testid="subscription-fetch"
+								onClick={async () => {
+									setSubOpen(true);
+									await loadSubscriptionPreview();
+								}}
+								loading={subLoading}
+							>
+								Fetch
+							</Button>
+						</div>
+
+						<div className="flex justify-end">
+							<Button
+								variant="secondary"
+								onClick={() => setResetTokenOpen(true)}
+								disabled={isResettingToken}
+							>
+								Reset token
+							</Button>
+						</div>
+					</div>
 				</div>
 			</div>
 
