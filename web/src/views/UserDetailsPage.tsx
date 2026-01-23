@@ -54,6 +54,12 @@ export function UserDetailsPage() {
 		prefs.density === "compact"
 			? "select select-bordered select-sm"
 			: "select select-bordered";
+	const subscriptionSelectClass = [
+		selectClass,
+		"w-[180px] rounded-xl font-mono text-xs h-10 min-h-10",
+	]
+		.filter(Boolean)
+		.join(" ");
 
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
@@ -359,11 +365,11 @@ export function UserDetailsPage() {
 					</div>
 
 					<div className="flex flex-col gap-2 md:items-end">
-						<div className="flex flex-wrap items-center gap-2 md:justify-end">
-							<div className="flex items-center gap-2">
-								<span className="text-xs opacity-70">Format</span>
+						<div className="flex flex-wrap items-end gap-3 md:justify-end">
+							<div className="space-y-1">
+								<div className="text-xs opacity-70">Format</div>
 								<select
-									className={selectClass}
+									className={subscriptionSelectClass}
 									data-testid="subscription-format"
 									value={subFormat}
 									onChange={(e) =>
@@ -375,11 +381,16 @@ export function UserDetailsPage() {
 								</select>
 							</div>
 
-							<CopyButton text={subscriptionUrl} label="Copy URL" />
+							<CopyButton
+								text={subscriptionUrl}
+								label="Copy URL"
+								className="h-10 min-h-10 rounded-xl px-6"
+							/>
 
 							<Button
 								variant="primary"
 								data-testid="subscription-fetch"
+								className="h-10 min-h-10 rounded-xl px-6"
 								onClick={async () => {
 									setSubOpen(true);
 									await loadSubscriptionPreview();
