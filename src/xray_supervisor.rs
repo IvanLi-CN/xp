@@ -394,7 +394,7 @@ async fn run_command_with_timeout(
         cmd.args(args);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::null());
 
         let status = match tokio::time::timeout(timeout, cmd.status()).await {
             Ok(Ok(status)) => status,

@@ -223,9 +223,20 @@ fn write_systemd_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Ex
         return Ok(());
     }
 
-    // Allow `xp` service user to restart `xray.service` without interactive auth.
+    let mut allowed_units = vec!["xray.service".to_string()];
+    if let Some(unit) = read_env_value(paths, "XP_XRAY_SYSTEMD_UNIT")
+        && !unit.trim().is_empty()
+        && !allowed_units.contains(&unit)
+    {
+        allowed_units.push(unit);
+    }
+
+    let allowed_units_json = serde_json::to_string(&allowed_units)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+
+    // Allow `xp` service user to restart specific xray unit(s) without interactive auth.
     // This does not grant broader systemd management rights.
-    let content = r#"// Managed by xp-ops (xp init)
+    let template = r#"// Managed by xp-ops (xp init)
 polkit.addRule(function(action, subject) {
   if (action.id != "org.freedesktop.systemd1.manage-units") {
     return null;
@@ -238,14 +249,16 @@ polkit.addRule(function(action, subject) {
   if (!unit || !verb) {
     return null;
   }
-  if (unit == "xray.service" && verb == "restart") {
+  var allowedUnits = __ALLOWED_UNITS__;
+  if (verb == "restart" && allowedUnits.indexOf(unit) >= 0) {
     return polkit.Result.YES;
   }
   return null;
 });
 "#;
+    let content = template.replace("__ALLOWED_UNITS__", &allowed_units_json);
 
-    write_string_if_changed(&p, content)
+    write_string_if_changed(&p, &content)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&p, 0o644).ok();
     Ok(())
@@ -258,12 +271,26 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
         return Ok(());
     }
 
-    // Keep existing doas.conf intact; append our minimal rule if missing.
-    let marker = "# Managed by xp-ops: allow xp to restart xray";
-    let rule = "permit nopass xp as root cmd /sbin/rc-service args xray restart";
-
     let existing = fs::read_to_string(&p).unwrap_or_default();
-    if existing.contains(rule) {
+
+    let mut services = vec!["xray".to_string()];
+    if let Some(name) = read_env_value(paths, "XP_XRAY_OPENRC_SERVICE")
+        && !name.trim().is_empty()
+        && !services.contains(&name)
+    {
+        services.push(name);
+    }
+
+    let marker = "# Managed by xp-ops: allow xp to restart xray";
+    let mut missing_rules: Vec<String> = Vec::new();
+    for svc in &services {
+        let rule = format!("permit nopass xp as root cmd /sbin/rc-service args {svc} restart");
+        if !existing.contains(&rule) {
+            missing_rules.push(rule);
+        }
+    }
+
+    if missing_rules.is_empty() {
         return Ok(());
     }
 
@@ -273,13 +300,31 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
     }
     out.push_str(marker);
     out.push('\n');
-    out.push_str(rule);
-    out.push('\n');
+    for rule in missing_rules {
+        out.push_str(&rule);
+        out.push('\n');
+    }
 
     write_string_if_changed(&p, &out)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&p, 0o600).ok();
     Ok(())
+}
+
+fn read_env_value(paths: &Paths, key: &str) -> Option<String> {
+    let raw = fs::read_to_string(paths.etc_xp_env()).ok()?;
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (k, v) = line.split_once('=')?;
+        if k.trim() != key {
+            continue;
+        }
+        return Some(v.trim().to_string());
+    }
+    None
 }
 
 fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
