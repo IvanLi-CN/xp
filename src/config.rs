@@ -2,6 +2,13 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XrayRestartMode {
+    None,
+    Systemd,
+    Openrc,
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "xp",
@@ -75,6 +82,54 @@ pub struct Config {
     pub xray_health_fails_before_down: u64,
 
     #[arg(
+        long = "xray-restart-mode",
+        global = true,
+        env = "XP_XRAY_RESTART_MODE",
+        value_name = "MODE",
+        default_value = "none",
+        value_enum
+    )]
+    pub xray_restart_mode: XrayRestartMode,
+
+    #[arg(
+        long = "xray-restart-cooldown-secs",
+        global = true,
+        env = "XP_XRAY_RESTART_COOLDOWN_SECS",
+        value_name = "SECS",
+        default_value_t = 30,
+        value_parser = clap::value_parser!(u64).range(1..=3600)
+    )]
+    pub xray_restart_cooldown_secs: u64,
+
+    #[arg(
+        long = "xray-restart-timeout-secs",
+        global = true,
+        env = "XP_XRAY_RESTART_TIMEOUT_SECS",
+        value_name = "SECS",
+        default_value_t = 5,
+        value_parser = clap::value_parser!(u64).range(1..=60)
+    )]
+    pub xray_restart_timeout_secs: u64,
+
+    #[arg(
+        long = "xray-systemd-unit",
+        global = true,
+        env = "XP_XRAY_SYSTEMD_UNIT",
+        value_name = "UNIT",
+        default_value = "xray.service"
+    )]
+    pub xray_systemd_unit: String,
+
+    #[arg(
+        long = "xray-openrc-service",
+        global = true,
+        env = "XP_XRAY_OPENRC_SERVICE",
+        value_name = "NAME",
+        default_value = "xray"
+    )]
+    pub xray_openrc_service: String,
+
+    #[arg(
         long,
         global = true,
         env = "XP_DATA_DIR",
@@ -142,6 +197,11 @@ mod tests {
         let cli = Cli::try_parse_from(["xp"]).unwrap();
         assert_eq!(cli.config.xray_health_interval_secs, 2);
         assert_eq!(cli.config.xray_health_fails_before_down, 3);
+        assert_eq!(cli.config.xray_restart_mode, XrayRestartMode::None);
+        assert_eq!(cli.config.xray_restart_cooldown_secs, 30);
+        assert_eq!(cli.config.xray_restart_timeout_secs, 5);
+        assert_eq!(cli.config.xray_systemd_unit, "xray.service");
+        assert_eq!(cli.config.xray_openrc_service, "xray");
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
     }
@@ -160,6 +220,22 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("--xray-health-fails-before-down"));
         assert!(msg.contains("1..=10"));
+    }
+
+    #[test]
+    fn rejects_invalid_xray_restart_cooldown_secs() {
+        let err = Cli::try_parse_from(["xp", "--xray-restart-cooldown-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--xray-restart-cooldown-secs"));
+        assert!(msg.contains("1..=3600"));
+    }
+
+    #[test]
+    fn rejects_invalid_xray_restart_timeout_secs() {
+        let err = Cli::try_parse_from(["xp", "--xray-restart-timeout-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--xray-restart-timeout-secs"));
+        assert!(msg.contains("1..=60"));
     }
 
     #[test]

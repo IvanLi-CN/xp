@@ -112,6 +112,7 @@
 - `xp` 启动时（确保 `xray` 重启后恢复运行态）
 - Raft 状态机应用新日志后（或按固定间隔）
 - `xray` 探活失败恢复后（down -> up 边沿触发一次 full reconcile，不依赖 30s 兜底周期）
+- （可选）`xray` 探活判定 down 后：`xp` 可通过 init system 请求重启 `xray`（不托管进程；由部署策略授权）
 
 步骤（本节点视角）：
 

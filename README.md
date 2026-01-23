@@ -114,6 +114,11 @@ VITE_BACKEND_PROXY=http://127.0.0.1:62416 bun run dev
 | `--xray-api-addr <ADDR>`            | `XP_XRAY_API_ADDR`            | `127.0.0.1:10085`         | Local `xray` gRPC API address                 |
 | `--xray-health-interval-secs <SECS>` | `XP_XRAY_HEALTH_INTERVAL_SECS` | `2`                      | Xray gRPC probe interval (`1..=30`)           |
 | `--xray-health-fails-before-down <N>` | `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` | `3`                 | Consecutive probe failures to mark down (`1..=10`) |
+| `--xray-restart-mode <MODE>`        | `XP_XRAY_RESTART_MODE`        | `none`                    | Restart strategy (`none|systemd|openrc`)      |
+| `--xray-restart-cooldown-secs <SECS>` | `XP_XRAY_RESTART_COOLDOWN_SECS` | `30`                   | Min seconds between restart requests          |
+| `--xray-restart-timeout-secs <SECS>` | `XP_XRAY_RESTART_TIMEOUT_SECS` | `5`                    | Restart command timeout                       |
+| `--xray-systemd-unit <UNIT>`        | `XP_XRAY_SYSTEMD_UNIT`        | `xray.service`            | systemd unit name                             |
+| `--xray-openrc-service <NAME>`      | `XP_XRAY_OPENRC_SERVICE`      | `xray`                    | OpenRC service name                           |
 | `--admin-token <TOKEN>`             | `XP_ADMIN_TOKEN`              | `""`                      | Admin bearer token                            |
 | `--node-name <NAME>`                | -                             | `node-1`                  | Node display name                             |
 | `--access-host <HOST>`              | -                             | `""`                      | Host used for subscription output             |
@@ -134,6 +139,7 @@ Example:
 	XP_XRAY_API_ADDR=127.0.0.1:10085 \
 	XP_XRAY_HEALTH_INTERVAL_SECS=2 \
 	XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3 \
+	XP_XRAY_RESTART_MODE=systemd \
 	xp
 ```
 

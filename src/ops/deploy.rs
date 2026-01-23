@@ -1352,6 +1352,11 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     let mut has_xray_addr = false;
     let mut has_xray_health_interval = false;
     let mut has_xray_health_fails_before_down = false;
+    let mut has_xray_restart_mode = false;
+    let mut has_xray_restart_cooldown = false;
+    let mut has_xray_restart_timeout = false;
+    let mut has_xray_systemd_unit = false;
+    let mut has_xray_openrc_service = false;
     if let Some(s) = existing {
         for line in s.lines() {
             if line.starts_with("XP_ADMIN_TOKEN=") {
@@ -1376,6 +1381,26 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
                 has_xray_health_fails_before_down = true;
                 continue;
             }
+            if line.starts_with("XP_XRAY_RESTART_MODE=") {
+                has_xray_restart_mode = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_RESTART_COOLDOWN_SECS=") {
+                has_xray_restart_cooldown = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_RESTART_TIMEOUT_SECS=") {
+                has_xray_restart_timeout = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_SYSTEMD_UNIT=") {
+                has_xray_systemd_unit = true;
+                continue;
+            }
+            if line.starts_with("XP_XRAY_OPENRC_SERVICE=") {
+                has_xray_openrc_service = true;
+                continue;
+            }
             retained.push(line.to_string());
         }
     }
@@ -1398,6 +1423,32 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     }
     if !has_xray_health_fails_before_down {
         lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
+    }
+    if !has_xray_restart_mode {
+        let default_mode = if is_test_root(paths.root()) {
+            "none"
+        } else {
+            let distro = detect_distro(paths).ok();
+            let init_system = distro.map(|d| detect_init_system(d, None));
+            match init_system {
+                Some(InitSystem::Systemd) => "systemd",
+                Some(InitSystem::OpenRc) => "openrc",
+                _ => "none",
+            }
+        };
+        lines.push(format!("XP_XRAY_RESTART_MODE={default_mode}"));
+    }
+    if !has_xray_restart_cooldown {
+        lines.push("XP_XRAY_RESTART_COOLDOWN_SECS=30".to_string());
+    }
+    if !has_xray_restart_timeout {
+        lines.push("XP_XRAY_RESTART_TIMEOUT_SECS=5".to_string());
+    }
+    if !has_xray_systemd_unit {
+        lines.push("XP_XRAY_SYSTEMD_UNIT=xray.service".to_string());
+    }
+    if !has_xray_openrc_service {
+        lines.push("XP_XRAY_OPENRC_SERVICE=xray".to_string());
     }
 
     let content = format!("{}\n", lines.join("\n"));

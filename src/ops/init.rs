@@ -3,6 +3,7 @@ use crate::ops::paths::Paths;
 use crate::ops::platform::{Distro, InitSystem, detect_distro, detect_init_system};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_string_if_changed};
 use serde_json::json;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -32,12 +33,14 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
     match init_system {
         InitSystem::Systemd => {
             write_systemd_units(&paths, &args, mode)?;
+            write_systemd_xray_restart_policy(&paths, mode)?;
             if args.enable_services {
                 enable_systemd_services(&paths, mode)?;
             }
         }
         InitSystem::OpenRc => {
             write_openrc_scripts(&paths, &args, mode)?;
+            write_openrc_xray_restart_policy(&paths, mode)?;
             if args.enable_services {
                 enable_openrc_services(mode)?;
             }
@@ -213,6 +216,72 @@ WantedBy=multi-user.target\n",
     )
 }
 
+fn write_systemd_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let p = paths.etc_polkit_xp_xray_restart_rule();
+    if mode == Mode::DryRun {
+        eprintln!("would write: {}", p.display());
+        return Ok(());
+    }
+
+    // Allow `xp` service user to restart `xray.service` without interactive auth.
+    // This does not grant broader systemd management rights.
+    let content = r#"// Managed by xp-ops (xp init)
+polkit.addRule(function(action, subject) {
+  if (action.id != "org.freedesktop.systemd1.manage-units") {
+    return null;
+  }
+  if (!subject || subject.user != "xp") {
+    return null;
+  }
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (!unit || !verb) {
+    return null;
+  }
+  if (unit == "xray.service" && verb == "restart") {
+    return polkit.Result.YES;
+  }
+  return null;
+});
+"#;
+
+    write_string_if_changed(&p, content)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&p, 0o644).ok();
+    Ok(())
+}
+
+fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let p = paths.etc_doas_conf();
+    if mode == Mode::DryRun {
+        eprintln!("would ensure: {}", p.display());
+        return Ok(());
+    }
+
+    // Keep existing doas.conf intact; append our minimal rule if missing.
+    let marker = "# Managed by xp-ops: allow xp to restart xray";
+    let rule = "permit nopass xp as root cmd /sbin/rc-service args xray restart";
+
+    let existing = fs::read_to_string(&p).unwrap_or_default();
+    if existing.contains(rule) {
+        return Ok(());
+    }
+
+    let mut out = existing;
+    if !out.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(marker);
+    out.push('\n');
+    out.push_str(rule);
+    out.push('\n');
+
+    write_string_if_changed(&p, &out)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&p, 0o600).ok();
+    Ok(())
+}
+
 fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
     if mode == Mode::DryRun {
         eprintln!("would run: systemctl daemon-reload");
@@ -263,7 +332,7 @@ fn openrc_xp_script() -> String {
 }
 
 fn openrc_xray_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\ncommand_background=\"yes\"\npidfile=\"/run/xray.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ncommand_background=\"yes\"\npidfile=\"/run/xray.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {

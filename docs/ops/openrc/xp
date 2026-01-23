@@ -7,6 +7,10 @@ command="/usr/local/bin/xp"
 command_args="run"
 command_user="xp:xp"
 
+# If you enable `XP_XRAY_RESTART_MODE=openrc`, `xp` may request `rc-service xray restart`
+# when it detects xray is down. This requires a minimal permission policy (doas/sudo) configured
+# by the operator or by `xp-ops`.
+
 depend() {
   need net
   # Suggested if xray is managed on the same host:

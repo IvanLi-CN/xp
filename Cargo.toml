@@ -24,7 +24,7 @@ serde_json = "1.0.145"
 serde_yaml = "0.9"
 sha2 = "0.10"
 futures-util = "0.3"
-tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 tonic = { version = "0.14", features = ["transport"] }
 tonic-prost = "0.14"

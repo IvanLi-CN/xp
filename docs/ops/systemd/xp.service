@@ -4,6 +4,10 @@ After=network.target
 # Suggested if you manage xray via systemd on the same host:
 # Wants=xray.service
 # After=xray.service
+#
+# If you enable `XP_XRAY_RESTART_MODE=systemd`, `xp` may request `systemctl restart xray.service`
+# when it detects xray is down. This requires a minimal system policy (polkit) that can be installed
+# by `xp-ops`.
 
 [Service]
 Type=simple

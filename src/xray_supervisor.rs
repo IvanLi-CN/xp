@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use tokio::{
@@ -8,7 +8,7 @@ use tokio::{
 use tracing::{debug, info, warn};
 
 use crate::{
-    config::Config,
+    config::{Config, XrayRestartMode},
     reconcile::ReconcileHandle,
     xray::proto::xray::app::stats::command::{
         GetStatsRequest, stats_service_client::StatsServiceClient,
@@ -40,6 +40,9 @@ pub struct XrayHealthSnapshot {
     pub down_since: Option<DateTime<Utc>>,
     pub consecutive_failures: u32,
     pub recoveries_observed: u64,
+    pub restart_attempts: u64,
+    pub last_restart_at: Option<DateTime<Utc>>,
+    pub last_restart_fail_at: Option<DateTime<Utc>>,
 }
 
 impl Default for XrayHealthSnapshot {
@@ -51,7 +54,53 @@ impl Default for XrayHealthSnapshot {
             down_since: None,
             consecutive_failures: 0,
             recoveries_observed: 0,
+            restart_attempts: 0,
+            last_restart_at: None,
+            last_restart_fail_at: None,
         }
+    }
+}
+
+pub type RestartFuture = Pin<Box<dyn Future<Output = Result<(), RestartError>> + Send>>;
+
+pub trait XrayRestarter: Send + Sync {
+    fn restart(&self) -> RestartFuture;
+    fn name(&self) -> &'static str;
+}
+
+#[derive(Debug, Clone)]
+struct SystemdRestarter {
+    unit: String,
+    timeout: Duration,
+}
+
+impl XrayRestarter for SystemdRestarter {
+    fn restart(&self) -> RestartFuture {
+        let unit = self.unit.clone();
+        let timeout = self.timeout;
+        Box::pin(async move { restart_systemd(&unit, timeout).await })
+    }
+
+    fn name(&self) -> &'static str {
+        "systemd"
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OpenrcRestarter {
+    service: String,
+    timeout: Duration,
+}
+
+impl XrayRestarter for OpenrcRestarter {
+    fn restart(&self) -> RestartFuture {
+        let service = self.service.clone();
+        let timeout = self.timeout;
+        Box::pin(async move { restart_openrc(&service, timeout).await })
+    }
+
+    fn name(&self) -> &'static str {
+        "openrc"
     }
 }
 
@@ -79,6 +128,7 @@ pub struct XraySupervisorOptions {
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
     pub down_log_throttle: Duration,
+    pub restart_cooldown: Duration,
 }
 
 impl XraySupervisorOptions {
@@ -89,6 +139,7 @@ impl XraySupervisorOptions {
             connect_timeout: Duration::from_millis(500),
             request_timeout: Duration::from_millis(500),
             down_log_throttle: Duration::from_secs(30),
+            restart_cooldown: Duration::from_secs(config.xray_restart_cooldown_secs),
         }
     }
 }
@@ -98,13 +149,28 @@ pub fn spawn_xray_supervisor(
     reconcile: ReconcileHandle,
 ) -> (XrayHealthHandle, tokio::task::JoinHandle<()>) {
     let opts = XraySupervisorOptions::from_config(&config);
-    spawn_xray_supervisor_with_options(config.xray_api_addr, opts, reconcile)
+    let restarter = restarter_from_config(&config);
+    spawn_xray_supervisor_with_options_and_restarter(
+        config.xray_api_addr,
+        opts,
+        reconcile,
+        restarter,
+    )
 }
 
 pub fn spawn_xray_supervisor_with_options(
     xray_api_addr: SocketAddr,
     opts: XraySupervisorOptions,
     reconcile: ReconcileHandle,
+) -> (XrayHealthHandle, tokio::task::JoinHandle<()>) {
+    spawn_xray_supervisor_with_options_and_restarter(xray_api_addr, opts, reconcile, None)
+}
+
+pub fn spawn_xray_supervisor_with_options_and_restarter(
+    xray_api_addr: SocketAddr,
+    opts: XraySupervisorOptions,
+    reconcile: ReconcileHandle,
+    restarter: Option<Arc<dyn XrayRestarter>>,
 ) -> (XrayHealthHandle, tokio::task::JoinHandle<()>) {
     let health = XrayHealthHandle::new_unknown();
     let health_clone = health.clone();
@@ -115,6 +181,7 @@ pub fn spawn_xray_supervisor_with_options(
 
         // Avoid log spam while Down by throttling periodic warnings.
         let mut last_down_warn_at: Option<Instant> = None;
+        let mut last_restart_attempt_at: Option<Instant> = None;
 
         loop {
             interval.tick().await;
@@ -123,90 +190,144 @@ pub fn spawn_xray_supervisor_with_options(
             let probe =
                 probe_xray_grpc(xray_api_addr, opts.connect_timeout, opts.request_timeout).await;
 
-            let mut snap = health_clone.inner.write().await;
-            let prev = snap.status;
+            let mut request_full = false;
+            let mut restart_due = false;
+            let mut restart_trigger = None::<&'static str>;
 
-            match probe {
-                Ok(()) => {
-                    snap.last_ok_at = Some(now);
-                    snap.consecutive_failures = 0;
+            {
+                let mut snap = health_clone.inner.write().await;
+                let prev = snap.status;
 
-                    if prev == XrayStatus::Down {
-                        snap.status = XrayStatus::Up;
-                        snap.down_since = None;
-                        snap.recoveries_observed = snap.recoveries_observed.saturating_add(1);
+                match probe {
+                    Ok(()) => {
+                        snap.last_ok_at = Some(now);
+                        snap.consecutive_failures = 0;
 
-                        info!(
-                            xray_status = snap.status.as_str(),
-                            recoveries_observed = snap.recoveries_observed,
-                            "xray recovered (down -> up); requesting full reconcile"
-                        );
-                        reconcile.request_full();
-                    } else if prev != XrayStatus::Up {
-                        snap.status = XrayStatus::Up;
-                        info!(xray_status = snap.status.as_str(), "xray became available");
-                    } else {
-                        debug!(xray_status = snap.status.as_str(), "xray probe ok");
+                        if prev == XrayStatus::Down {
+                            snap.status = XrayStatus::Up;
+                            snap.down_since = None;
+                            snap.recoveries_observed = snap.recoveries_observed.saturating_add(1);
+
+                            info!(
+                                xray_status = snap.status.as_str(),
+                                recoveries_observed = snap.recoveries_observed,
+                                "xray recovered (down -> up); requesting full reconcile"
+                            );
+                            request_full = true;
+                        } else if prev != XrayStatus::Up {
+                            snap.status = XrayStatus::Up;
+                            info!(xray_status = snap.status.as_str(), "xray became available");
+                        } else {
+                            debug!(xray_status = snap.status.as_str(), "xray probe ok");
+                        }
+
+                        last_down_warn_at = None;
                     }
+                    Err(err) => {
+                        snap.last_fail_at = Some(now);
+                        snap.consecutive_failures = snap.consecutive_failures.saturating_add(1);
 
-                    last_down_warn_at = None;
-                }
-                Err(err) => {
-                    snap.last_fail_at = Some(now);
-                    snap.consecutive_failures = snap.consecutive_failures.saturating_add(1);
+                        let should_mark_down = snap.consecutive_failures >= opts.fails_before_down
+                            && prev != XrayStatus::Down;
 
-                    let should_mark_down = snap.consecutive_failures >= opts.fails_before_down
-                        && prev != XrayStatus::Down;
-
-                    if should_mark_down {
-                        snap.status = XrayStatus::Down;
-                        snap.down_since = Some(now);
-                        warn!(
-                            xray_status = snap.status.as_str(),
-                            consecutive_failures = snap.consecutive_failures,
-                            error = %err,
-                            "xray marked down"
-                        );
-                        last_down_warn_at = Some(Instant::now());
-                        continue;
-                    }
-
-                    // Throttle warnings while in Down to avoid log spam.
-                    if snap.status == XrayStatus::Down {
-                        let now_i = Instant::now();
-                        let should_warn = last_down_warn_at
-                            .map(|t| now_i.duration_since(t) >= opts.down_log_throttle)
-                            .unwrap_or(true);
-                        if should_warn {
+                        if should_mark_down {
+                            snap.status = XrayStatus::Down;
+                            snap.down_since = Some(now);
                             warn!(
                                 xray_status = snap.status.as_str(),
                                 consecutive_failures = snap.consecutive_failures,
                                 error = %err,
-                                "xray still down"
+                                "xray marked down"
                             );
-                            last_down_warn_at = Some(now_i);
+                            last_down_warn_at = Some(Instant::now());
+                            restart_trigger = Some("status_transition");
+                        }
+
+                        // Throttle warnings while in Down to avoid log spam.
+                        if snap.status == XrayStatus::Down {
+                            let now_i = Instant::now();
+                            let should_warn = last_down_warn_at
+                                .map(|t| now_i.duration_since(t) >= opts.down_log_throttle)
+                                .unwrap_or(true);
+                            if should_warn {
+                                warn!(
+                                    xray_status = snap.status.as_str(),
+                                    consecutive_failures = snap.consecutive_failures,
+                                    error = %err,
+                                    "xray still down"
+                                );
+                                last_down_warn_at = Some(now_i);
+                            } else {
+                                debug!(
+                                    xray_status = snap.status.as_str(),
+                                    consecutive_failures = snap.consecutive_failures,
+                                    error = %err,
+                                    "xray probe failed (throttled)"
+                                );
+                            }
+                        } else if prev != XrayStatus::Unknown {
+                            // Unknown is expected during startup; don't warn until we were up at least once.
+                            debug!(
+                                xray_status = snap.status.as_str(),
+                                consecutive_failures = snap.consecutive_failures,
+                                error = %err,
+                                "xray probe failed"
+                            );
                         } else {
                             debug!(
                                 xray_status = snap.status.as_str(),
                                 consecutive_failures = snap.consecutive_failures,
                                 error = %err,
-                                "xray probe failed (throttled)"
+                                "xray probe failed (startup)"
                             );
                         }
-                    } else if prev != XrayStatus::Unknown {
-                        // Unknown is expected during startup; don't warn until we were up at least once.
-                        debug!(
-                            xray_status = snap.status.as_str(),
-                            consecutive_failures = snap.consecutive_failures,
-                            error = %err,
-                            "xray probe failed"
+                    }
+                }
+            }
+
+            if request_full {
+                reconcile.request_full();
+            }
+
+            if restarter.is_some() {
+                let now_i = Instant::now();
+                let can_restart = last_restart_attempt_at
+                    .map(|t| now_i.duration_since(t) >= opts.restart_cooldown)
+                    .unwrap_or(true);
+                if can_restart {
+                    let snap = health_clone.snapshot().await;
+                    if snap.status == XrayStatus::Down {
+                        restart_due = true;
+                        if restart_trigger.is_none() {
+                            restart_trigger = Some("still_down");
+                        }
+                        last_restart_attempt_at = Some(now_i);
+                    }
+                }
+            }
+
+            if restart_due && let Some(restarter) = restarter.as_ref() {
+                let attempt_at = Utc::now();
+                let result = restarter.restart().await;
+
+                let mut snap = health_clone.inner.write().await;
+                snap.restart_attempts = snap.restart_attempts.saturating_add(1);
+                snap.last_restart_at = Some(attempt_at);
+                match result {
+                    Ok(()) => {
+                        info!(
+                            restarter = restarter.name(),
+                            trigger = restart_trigger.unwrap_or("unknown"),
+                            "requested xray restart"
                         );
-                    } else {
-                        debug!(
-                            xray_status = snap.status.as_str(),
-                            consecutive_failures = snap.consecutive_failures,
+                    }
+                    Err(err) => {
+                        snap.last_restart_fail_at = Some(attempt_at);
+                        warn!(
+                            restarter = restarter.name(),
+                            trigger = restart_trigger.unwrap_or("unknown"),
                             error = %err,
-                            "xray probe failed (startup)"
+                            "failed to request xray restart"
                         );
                     }
                 }
@@ -215,6 +336,79 @@ pub fn spawn_xray_supervisor_with_options(
     });
 
     (health, task)
+}
+
+fn restarter_from_config(config: &Config) -> Option<Arc<dyn XrayRestarter>> {
+    let timeout = Duration::from_secs(config.xray_restart_timeout_secs);
+    match config.xray_restart_mode {
+        XrayRestartMode::None => None,
+        XrayRestartMode::Systemd => Some(Arc::new(SystemdRestarter {
+            unit: config.xray_systemd_unit.clone(),
+            timeout,
+        })),
+        XrayRestartMode::Openrc => Some(Arc::new(OpenrcRestarter {
+            service: config.xray_openrc_service.clone(),
+            timeout,
+        })),
+    }
+}
+
+async fn restart_systemd(unit: &str, timeout: Duration) -> Result<(), RestartError> {
+    let args = ["restart", unit];
+    run_command_with_timeout(
+        &["/usr/bin/systemctl", "/bin/systemctl", "systemctl"],
+        &args,
+        timeout,
+    )
+    .await
+    .map_err(|e| RestartError::Command {
+        program: "systemctl",
+        details: e,
+    })
+}
+
+async fn restart_openrc(service: &str, timeout: Duration) -> Result<(), RestartError> {
+    // Prefer doas on Alpine/OpenRC; fall back to sudo if doas is unavailable.
+    let args_doas = ["-n", "/sbin/rc-service", service, "restart"];
+    if let Ok(()) =
+        run_command_with_timeout(&["/usr/bin/doas", "/bin/doas", "doas"], &args_doas, timeout).await
+    {
+        return Ok(());
+    }
+    let args_sudo = ["-n", "/sbin/rc-service", service, "restart"];
+    run_command_with_timeout(&["/usr/bin/sudo", "/bin/sudo", "sudo"], &args_sudo, timeout)
+        .await
+        .map_err(|e| RestartError::Command {
+            program: "doas/sudo",
+            details: e,
+        })
+}
+
+async fn run_command_with_timeout(
+    programs: &[&str],
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(), String> {
+    for program in programs {
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(args);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let status = match tokio::time::timeout(timeout, cmd.status()).await {
+            Ok(Ok(status)) => status,
+            Ok(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Ok(Err(err)) => return Err(format!("spawn {program}: {err}")),
+            Err(_) => return Err(format!("timeout running {program}")),
+        };
+
+        if status.success() {
+            return Ok(());
+        }
+        return Err(format!("{program} exited with {status}"));
+    }
+    Err("no matching program found".to_string())
 }
 
 async fn probe_xray_grpc(
@@ -273,9 +467,29 @@ impl From<tonic::transport::Error> for ProbeError {
     }
 }
 
+#[derive(Debug)]
+pub enum RestartError {
+    Command {
+        program: &'static str,
+        details: String,
+    },
+}
+
+impl std::fmt::Display for RestartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Command { program, details } => write!(f, "{program}: {details}"),
+        }
+    }
+}
+
+impl std::error::Error for RestartError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use tokio::sync::{mpsc, oneshot};
 
@@ -309,6 +523,7 @@ mod tests {
             connect_timeout: Duration::from_millis(50),
             request_timeout: Duration::from_millis(50),
             down_log_throttle: Duration::from_secs(3600),
+            restart_cooldown: Duration::from_secs(3600),
         };
 
         let (health, task) = spawn_xray_supervisor_with_options(addr, opts, reconcile);
@@ -428,6 +643,72 @@ mod tests {
 
         let _ = shutdown_tx.send(());
         let _ = server_handle.await;
+
+        task.abort();
+    }
+
+    #[derive(Debug)]
+    struct RecordingRestarter {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl XrayRestarter for RecordingRestarter {
+        fn restart(&self) -> RestartFuture {
+            let calls = self.calls.clone();
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            })
+        }
+
+        fn name(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[tokio::test]
+    async fn restart_is_throttled_by_cooldown_while_down() {
+        let tmp_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tmp_listener.local_addr().unwrap();
+        drop(tmp_listener);
+
+        let (tx, _rx) = mpsc::unbounded_channel::<ReconcileRequest>();
+        let reconcile = ReconcileHandle::from_sender(tx);
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let restarter: Arc<dyn XrayRestarter> = Arc::new(RecordingRestarter {
+            calls: calls.clone(),
+        });
+
+        let opts = XraySupervisorOptions {
+            interval: Duration::from_millis(20),
+            fails_before_down: 1,
+            connect_timeout: Duration::from_millis(50),
+            request_timeout: Duration::from_millis(50),
+            down_log_throttle: Duration::from_secs(3600),
+            restart_cooldown: Duration::from_secs(3600),
+        };
+
+        let (_health, task) = spawn_xray_supervisor_with_options_and_restarter(
+            addr,
+            opts,
+            reconcile,
+            Some(restarter),
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if calls.load(Ordering::Relaxed) >= 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
 
         task.abort();
     }

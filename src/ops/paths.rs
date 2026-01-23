@@ -51,6 +51,18 @@ impl Paths {
         self.map_abs(Path::new("/etc/cloudflared/config.yml"))
     }
 
+    pub fn etc_polkit_rules_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/polkit-1/rules.d"))
+    }
+
+    pub fn etc_polkit_xp_xray_restart_rule(&self) -> PathBuf {
+        self.etc_polkit_rules_dir().join("90-xp-xray-restart.rules")
+    }
+
+    pub fn etc_doas_conf(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/doas.conf"))
+    }
+
     pub fn etc_xp_ops_cloudflare_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xp-ops/cloudflare_tunnel"))
     }
