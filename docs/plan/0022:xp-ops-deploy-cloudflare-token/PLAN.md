@@ -55,7 +55,7 @@
 ## 7) 验收标准（Acceptance Criteria）
 
 - Given 以 root 运行 `xp-ops deploy` 且启用 Cloudflare，
-  When 通过命令行参数传入 Cloudflare API token（见 `contracts/cli.md`），
+  When 通过命令行参数传入 Cloudflare API token（`--cloudflare-token` 或 `--cloudflare-token-stdin`；见 `contracts/cli.md`），
   Then preflight 不再出现 `cloudflare token error: token_missing`，并能派生/校验 `zone_name` 与 `hostname`（在参数足够时），最终不因 token 缺失而失败。
 
 - Given `--cloudflare-token` 或 `--cloudflare-token-stdin` 已提供，
