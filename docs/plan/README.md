@@ -75,4 +75,5 @@
 | 0019 | Subscription 预览格式（不折行 + 复制一致性）                | 已完成 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-23 | -                |
 | 0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 已完成 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |
 | 0021 | Xray 探活与恢复信号（Down/Up + health）                     | 已完成 | `0021:xray-supervision-auto-restart/PLAN.md`         | 2026-01-23 | -                |
-| 0022 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0022:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
+| 0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 待实现 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-23 | -                |
+| 0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |

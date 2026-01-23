@@ -1,4 +1,4 @@
-# Xray 故障自动重启（通过 init system 间接拉起）（#0022）
+# Xray 故障自动重启（通过 init system 间接拉起）（#0023）
 
 ## 状态
 

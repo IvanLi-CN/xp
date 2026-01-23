@@ -21,7 +21,7 @@
 ### Goals
 
 - 当 `xray` 退出或 gRPC 不可用时，`xp` 能快速检测并进入恢复流程。
-- `xray` 的重启由 init system 负责（systemd/OpenRC）；`xp` 不直接托管 `xray` 进程。（“由 `xp` 间接触发重启”的能力见 #0022）
+- `xray` 的重启由 init system 负责（systemd/OpenRC）；`xp` 不直接托管 `xray` 进程。（“由 `xp` 间接触发重启”的能力见 #0023）
 - 在 `xray` 恢复后，`xp` 必须立即触发一次 `reconcile.request_full()`，不依赖 30s 兜底周期。
 - 提供最小可观测性：
   - 结构化日志（状态切换、失败原因、恢复次数（down->up）、上次成功时间等）；
