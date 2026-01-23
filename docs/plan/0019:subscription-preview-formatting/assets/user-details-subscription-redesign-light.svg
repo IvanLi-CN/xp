@@ -8,6 +8,7 @@
       .t2 { font-size: 12px; fill: #64748b; }
       .t3 { font-size: 13px; fill: #0f172a; }
       .btn { font-size: 12px; font-weight: 750; fill: #0f172a; }
+      .iconBtn { font-size: 20px; font-weight: 900; fill: #0f172a; }
       .stroke { stroke: #e2e8f0; }
 
       .codeBg { fill: #0b1220; }
@@ -27,24 +28,22 @@
   <text x="176" y="162" class="sans t0">Subscription preview</text>
   <rect x="408" y="142" width="90" height="28" rx="10" fill="#e6fbff" class="stroke" stroke-width="1"/>
   <text x="453" y="156" class="sans pillText" text-anchor="middle" dominant-baseline="middle">clash</text>
-  <text x="516" y="162" class="mono t2">no wrap · scroll</text>
-
   <!-- Top actions -->
-  <rect x="928" y="138" width="120" height="34" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
-  <text x="988" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy URL</text>
-  <rect x="1056" y="138" width="140" height="34" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
-  <text x="1126" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy content</text>
-  <rect x="1204" y="138" width="72" height="34" rx="10" fill="#ffffff" class="stroke" stroke-width="1"/>
-  <text x="1240" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Close</text>
+  <rect x="952" y="138" width="120" height="34" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1012" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy URL</text>
+  <rect x="1080" y="138" width="140" height="34" rx="10" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1150" y="155" class="sans btn" text-anchor="middle" dominant-baseline="middle">Copy content</text>
+  <rect x="1232" y="133" width="44" height="44" rx="22" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <text x="1254" y="155" class="sans iconBtn" text-anchor="middle" dominant-baseline="middle">×</text>
 
   <!-- Search row -->
   <text x="176" y="208" class="sans t2" dominant-baseline="middle">Search</text>
-  <rect x="228" y="190" width="688" height="36" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
+  <rect x="228" y="190" width="788" height="36" rx="12" fill="#ffffff" class="stroke" stroke-width="1"/>
   <text x="244" y="208" class="mono t2" dominant-baseline="middle">e.g. public-key / short-id / servername</text>
-  <rect x="928" y="190" width="120" height="36" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1"/>
-  <text x="988" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find next</text>
-  <rect x="1056" y="190" width="120" height="36" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1"/>
-  <text x="1116" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find prev</text>
+  <rect x="1028" y="190" width="120" height="36" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1088" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find next</text>
+  <rect x="1156" y="190" width="120" height="36" rx="12" fill="#f1f5f9" class="stroke" stroke-width="1"/>
+  <text x="1216" y="208" class="sans btn" text-anchor="middle" dominant-baseline="middle">Find prev</text>
 
   <!-- Two columns -->
   <!-- Left: code viewer -->

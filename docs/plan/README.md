@@ -72,6 +72,6 @@
 | 0016 | Grant 新建页：接入点选择与创建交互优化                      | 已完成 | `0016:grant-new-access-selection/PLAN.md`            | 2026-01-19 | -                |
 | 0017 | Grant 模型：分组与配额周期归属                              | 已完成 | `0017:grant-grouping-and-cycle-ownership/PLAN.md`    | 2026-01-21 | -                |
 | 0018 | xp-ops：自我升级、xp 升级与 Release 自动发布                | 已完成 | `0018:xp-ops-upgrade-and-release-automation/PLAN.md` | 2026-01-20 | -                |
-| 0019 | Subscription 预览格式（不折行 + 复制一致性）                | 待实现 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-20 | -                |
+| 0019 | Subscription 预览格式（不折行 + 复制一致性）                | 已完成 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-23 | -                |
 | 0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 已完成 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |
 | 0021 | Xray 异常退出自动恢复（探活 + 自动重启）                    | 待实现 | `0021:xray-supervision-auto-restart/PLAN.md`         | 2026-01-21 | -                |

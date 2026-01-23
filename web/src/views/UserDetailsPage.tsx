@@ -25,6 +25,7 @@ import { CopyButton } from "../components/CopyButton";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
@@ -53,10 +54,12 @@ export function UserDetailsPage() {
 		prefs.density === "compact"
 			? "select select-bordered select-sm"
 			: "select select-bordered";
-	const textareaClass =
-		prefs.density === "compact"
-			? "textarea textarea-bordered textarea-sm h-40 font-mono text-xs"
-			: "textarea textarea-bordered h-40 font-mono text-xs";
+	const subscriptionSelectClass = [
+		selectClass,
+		"w-[180px] rounded-xl font-mono text-xs h-10 min-h-10",
+	]
+		.filter(Boolean)
+		.join(" ");
 
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
@@ -94,8 +97,10 @@ export function UserDetailsPage() {
 	const [isDeleting, setIsDeleting] = useState(false);
 
 	const [subFormat, setSubFormat] = useState<SubscriptionFormat>("raw");
+	const [subOpen, setSubOpen] = useState(false);
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
+	const [subError, setSubError] = useState<string | null>(null);
 
 	const user = userQuery.data;
 	useEffect(() => {
@@ -139,19 +144,27 @@ export function UserDetailsPage() {
 	const loadSubscriptionPreview = useCallback(async () => {
 		if (!subscriptionToken) return;
 		setSubLoading(true);
+		setSubError(null);
 		try {
 			const text = await fetchSubscription(subscriptionToken, subFormat);
 			setSubText(text);
 		} catch (err) {
-			setSubText(formatError(err));
+			setSubText("");
+			setSubError(formatError(err));
 		} finally {
 			setSubLoading(false);
 		}
 	}, [subFormat, subscriptionToken]);
-
-	useEffect(() => {
-		void loadSubscriptionPreview();
-	}, [loadSubscriptionPreview]);
+	const subscriptionUrl = useMemo(() => {
+		if (!subscriptionToken) return "";
+		const path = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+		if (typeof window === "undefined") {
+			return `${path}?format=${encodeURIComponent(subFormat)}`;
+		}
+		const url = new URL(path, window.location.origin);
+		url.searchParams.set("format", subFormat);
+		return url.toString();
+	}, [subFormat, subscriptionToken]);
 
 	if (adminToken.length === 0) {
 		return (
@@ -234,33 +247,7 @@ export function UserDetailsPage() {
 			/>
 
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
-				<div className="flex flex-wrap items-center justify-between gap-3">
-					<div className="space-y-1">
-						<div className="text-xs opacity-70">Subscription token</div>
-						<div className="flex items-center gap-2">
-							<span className="font-mono text-xs">
-								{user.subscription_token}
-							</span>
-							<CopyButton text={user.subscription_token} />
-						</div>
-					</div>
-					<div className="flex items-center gap-2">
-						<Button
-							variant="secondary"
-							onClick={() => setResetTokenOpen(true)}
-							disabled={isResettingToken}
-						>
-							Reset token
-						</Button>
-						<Button
-							variant="danger"
-							onClick={() => setDeleteOpen(true)}
-							disabled={isDeleting}
-						>
-							Delete user
-						</Button>
-					</div>
-				</div>
+				<h2 className="text-lg font-semibold">Profile</h2>
 
 				<div className="grid gap-4 md:grid-cols-2">
 					<label className="form-control">
@@ -358,8 +345,72 @@ export function UserDetailsPage() {
 							}
 						}}
 					>
-						Save
+						Save changes
 					</Button>
+				</div>
+			</div>
+
+			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+					<div className="space-y-1 min-w-0">
+						<h2 className="text-lg font-semibold">Subscription</h2>
+						<div className="text-xs opacity-70">Subscription token</div>
+						<div className="font-mono text-xs break-all">
+							{user.subscription_token}
+						</div>
+						<div className="text-xs opacity-70">No inline preview</div>
+						<div className="text-xs opacity-70">
+							Click Fetch to open the full preview modal (no wrap).
+						</div>
+					</div>
+
+					<div className="flex flex-col gap-2 md:items-end">
+						<div className="flex flex-wrap items-end gap-3 md:justify-end">
+							<div className="space-y-1">
+								<div className="text-xs opacity-70">Format</div>
+								<select
+									className={subscriptionSelectClass}
+									data-testid="subscription-format"
+									value={subFormat}
+									onChange={(e) =>
+										setSubFormat(e.target.value as SubscriptionFormat)
+									}
+								>
+									<option value="raw">raw</option>
+									<option value="clash">clash</option>
+								</select>
+							</div>
+
+							<CopyButton
+								text={subscriptionUrl}
+								label="Copy URL"
+								className="h-10 min-h-10 rounded-xl px-6"
+							/>
+
+							<Button
+								variant="primary"
+								data-testid="subscription-fetch"
+								className="h-10 min-h-10 rounded-xl px-6"
+								onClick={async () => {
+									setSubOpen(true);
+									await loadSubscriptionPreview();
+								}}
+								loading={subLoading}
+							>
+								Fetch
+							</Button>
+						</div>
+
+						<div className="flex justify-end">
+							<Button
+								variant="secondary"
+								onClick={() => setResetTokenOpen(true)}
+								disabled={isResettingToken}
+							>
+								Reset token
+							</Button>
+						</div>
+					</div>
 				</div>
 			</div>
 
@@ -406,36 +457,34 @@ export function UserDetailsPage() {
 				</div>
 			</div>
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
-				<div className="flex items-center justify-between gap-3">
-					<h2 className="text-lg font-semibold">Subscription preview</h2>
-					<div className="flex items-center gap-2">
-						<select
-							className={selectClass}
-							value={subFormat}
-							onChange={(e) =>
-								setSubFormat(e.target.value as SubscriptionFormat)
-							}
-						>
-							<option value="raw">raw</option>
-							<option value="clash">clash</option>
-						</select>
-						<Button
-							variant="secondary"
-							onClick={loadSubscriptionPreview}
-							loading={subLoading}
-						>
-							Reload
-						</Button>
+			<div className="rounded-box border border-base-200 bg-base-100 p-6">
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div className="space-y-1">
+						<h2 className="text-lg font-semibold text-error">Danger zone</h2>
+						<div className="text-sm opacity-70">
+							Deleting a user removes all associated grant memberships and
+							quotas.
+						</div>
 					</div>
+					<Button
+						variant="danger"
+						onClick={() => setDeleteOpen(true)}
+						disabled={isDeleting}
+					>
+						Delete user
+					</Button>
 				</div>
-				<textarea
-					className={textareaClass}
-					value={subText}
-					readOnly
-					placeholder="Subscription content…"
-				/>
 			</div>
+
+			<SubscriptionPreviewDialog
+				open={subOpen}
+				onClose={() => setSubOpen(false)}
+				subscriptionUrl={subscriptionUrl}
+				format={subFormat}
+				loading={subLoading}
+				content={subText}
+				error={subError}
+			/>
 
 			<ConfirmDialog
 				open={resetTokenOpen}

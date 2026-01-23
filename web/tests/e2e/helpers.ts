@@ -103,7 +103,8 @@ type MockApiOptions = {
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
 	healthStatus?: "ok" | "error";
-	subscriptionContent?: string;
+	subscriptionContentRaw?: string;
+	subscriptionContentClash?: string;
 };
 
 type MockState = {
@@ -115,7 +116,8 @@ type MockState = {
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
 	healthStatus: "ok" | "error";
-	subscriptionContent: string;
+	subscriptionContentRaw: string;
+	subscriptionContentClash: string;
 };
 
 const defaultNodes: AdminNode[] = [
@@ -191,6 +193,15 @@ const defaultAlerts: AlertsResponse = {
 	items: [],
 };
 
+const defaultSubscriptionClash = `proxies:
+  - name: demo
+    type: vless
+    servername: example.com
+    reality-opts:
+      public-key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      short-id: 0123456789abcdef
+`;
+
 function jsonResponse(route: Route, payload: unknown, status = 200): void {
 	void route.fulfill({
 		status,
@@ -261,8 +272,10 @@ export async function setupApiMocks(
 		clusterInfo: options.clusterInfo ?? { ...defaultClusterInfo },
 		alerts: options.alerts ?? { ...defaultAlerts },
 		healthStatus: options.healthStatus ?? "ok",
-		subscriptionContent:
-			options.subscriptionContent ?? "vless://example-host?encryption=none",
+		subscriptionContentRaw:
+			options.subscriptionContentRaw ?? "vless://example-host?encryption=none",
+		subscriptionContentClash:
+			options.subscriptionContentClash ?? defaultSubscriptionClash,
 	};
 
 	let userSeq = state.users.length + 1;
@@ -475,7 +488,12 @@ export async function setupApiMocks(
 		}
 
 		if (path.startsWith("/api/sub/") && method === "GET") {
-			textResponse(route, state.subscriptionContent);
+			const format = url.searchParams.get("format");
+			if (format === "clash") {
+				textResponse(route, state.subscriptionContentClash);
+				return;
+			}
+			textResponse(route, state.subscriptionContentRaw);
 			return;
 		}
 
@@ -496,8 +514,13 @@ export async function setAdminToken(
 
 export async function stubClipboard(page: Page): Promise<void> {
 	await page.addInitScript(() => {
+		// @ts-expect-error -- test-only helper
+		window.__xp_clipboard_last_write = "";
 		const clipboard = {
-			writeText: async (_text: string) => {},
+			writeText: async (text: string) => {
+				// @ts-expect-error -- test-only helper
+				window.__xp_clipboard_last_write = text;
+			},
 		};
 		Object.defineProperty(navigator, "clipboard", {
 			value: clipboard,
