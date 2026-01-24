@@ -57,6 +57,39 @@ fn init_writes_xray_config_under_test_root() {
     assert!(content.contains("\"inbounds\": []"));
 }
 
+#[test]
+#[cfg(unix)]
+fn preflight_fails_fast_when_fs_not_writable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Make the root `/etc` exist but read-only, so preflight fails before attempting writes.
+    let etc = root.join("etc");
+    fs::create_dir_all(&etc).unwrap();
+    fs::set_permissions(&etc, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.env("CLOUDFLARE_API_TOKEN", "tok");
+    cmd.args([
+        "--root",
+        &root.to_string_lossy(),
+        "cloudflare",
+        "token",
+        "set",
+        "--from-env",
+        "CLOUDFLARE_API_TOKEN",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .code(6)
+        .stderr(predicate::str::contains("preflight_failed"))
+        .stderr(predicate::str::contains("etc/xp-ops"))
+        .stderr(predicate::str::contains("Permission denied"));
+}
+
 #[tokio::test]
 async fn cloudflare_provision_uses_mock_api_and_writes_files() {
     use wiremock::matchers::{header, method, path, path_regex};
