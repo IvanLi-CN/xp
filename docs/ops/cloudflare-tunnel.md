@@ -26,6 +26,7 @@ Create a Cloudflare API token with:
 
 `xp-ops` reads the token from:
 
+- `--cloudflare-token <token>` / `--cloudflare-token-stdin` (for one-shot deploy; see below), or
 - `CLOUDFLARE_API_TOKEN` (recommended for CI / one-off runs), or
 - `/etc/xp-ops/cloudflare_tunnel/api_token`
 
@@ -59,6 +60,32 @@ sudo -E xp-ops deploy \
   --access-host node-1.example.net \
   --account-id <id> \
   --hostname node-1.example.com \
+  -y
+```
+
+- If you want to provide the Cloudflare token from the command line (not recommended, can leak via shell history / `ps`):
+
+```
+sudo xp-ops deploy \
+  --node-name node-1 \
+  --access-host node-1.example.net \
+  --cloudflare \
+  --account-id <id> \
+  --hostname node-1.example.com \
+  --cloudflare-token <token> \
+  -y
+```
+
+- To reduce leakage risk, prefer stdin:
+
+```
+printf "%s" "<token>" | sudo xp-ops deploy \
+  --node-name node-1 \
+  --access-host node-1.example.net \
+  --cloudflare \
+  --account-id <id> \
+  --hostname node-1.example.com \
+  --cloudflare-token-stdin \
   -y
 ```
 

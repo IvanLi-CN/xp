@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-23
-- Last: 2026-01-23
+- Last: 2026-01-24
 
 ## 1) 问题陈述
 
@@ -102,6 +102,6 @@
 ## 12) 参考（Repo reconnaissance）
 
 - CLI 入口与参数：`src/ops/cli.rs`（`DeployArgs`）
-- Deploy 预检与派生逻辑：`src/ops/deploy.rs`（`build_plan()`，当前从 `load_cloudflare_token_for_ops()` 读取 token）
-- token 加载逻辑：`src/ops/cloudflare.rs`（`load_cloudflare_token()` / `load_cloudflare_token_for_ops()`）
+- Deploy 预检与派生逻辑：`src/ops/deploy.rs`（`build_plan()`，当前使用 `load_cloudflare_token_for_deploy()` 解析 token + 来源）
+- token 加载逻辑：`src/ops/cloudflare.rs`（`load_cloudflare_token_for_deploy()`）
 - 现有运维文档：`docs/ops/cloudflare-tunnel.md`、`docs/ops/README.md`

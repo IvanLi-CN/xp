@@ -12,6 +12,25 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudflareTokenSource {
+    Flag,
+    Stdin,
+    Env,
+    File,
+}
+
+impl CloudflareTokenSource {
+    pub fn display(&self) -> &'static str {
+        match self {
+            CloudflareTokenSource::Flag => "flag",
+            CloudflareTokenSource::Stdin => "stdin",
+            CloudflareTokenSource::Env => "env",
+            CloudflareTokenSource::File => "file",
+        }
+    }
+}
+
 pub async fn cmd_cloudflare_token_set(
     paths: Paths,
     args: CloudflareTokenSetArgs,
@@ -49,6 +68,15 @@ pub async fn cmd_cloudflare_provision(
     paths: Paths,
     args: CloudflareProvisionArgs,
 ) -> Result<(), ExitError> {
+    let token = load_cloudflare_token(&paths).map_err(|e| ExitError::new(3, e))?;
+    cmd_cloudflare_provision_with_token(paths, args, token).await
+}
+
+pub async fn cmd_cloudflare_provision_with_token(
+    paths: Paths,
+    args: CloudflareProvisionArgs,
+    token: String,
+) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
     } else {
@@ -57,8 +85,6 @@ pub async fn cmd_cloudflare_provision(
 
     let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
     let init_system = detect_init_system(distro, None);
-
-    let token = load_cloudflare_token(&paths).map_err(|e| ExitError::new(3, e))?;
 
     ensure_cloudflared_present(&paths, distro, mode).await?;
     ensure_cloudflared_service(&paths, distro, init_system, mode)?;
@@ -212,6 +238,40 @@ fn load_cloudflare_token(paths: &Paths) -> Result<String, String> {
         return Err("token_missing".to_string());
     }
     Ok(v.trim().to_string())
+}
+
+pub fn load_cloudflare_token_for_deploy(
+    paths: &Paths,
+    token_from_flag: Option<&str>,
+    token_from_stdin: Option<&str>,
+) -> Result<(String, CloudflareTokenSource), ExitError> {
+    if let Some(v) = token_from_flag {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return Ok((trimmed.to_string(), CloudflareTokenSource::Flag));
+        }
+    }
+
+    if let Some(v) = token_from_stdin {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return Ok((trimmed.to_string(), CloudflareTokenSource::Stdin));
+        }
+    }
+
+    if let Ok(v) = std::env::var("CLOUDFLARE_API_TOKEN")
+        && !v.trim().is_empty()
+    {
+        return Ok((v, CloudflareTokenSource::Env));
+    }
+
+    let p = paths.etc_xp_ops_cloudflare_token();
+    let v = fs::read_to_string(&p).map_err(|_| ExitError::new(3, "token_missing"))?;
+    let trimmed = v.trim();
+    if trimmed.is_empty() {
+        return Err(ExitError::new(3, "token_missing"));
+    }
+    Ok((trimmed.to_string(), CloudflareTokenSource::File))
 }
 
 async fn ensure_cloudflared_present(
@@ -747,10 +807,6 @@ pub fn cloudflare_api_base() -> String {
         .unwrap_or_else(|_| "https://api.cloudflare.com".to_string())
 }
 
-pub fn load_cloudflare_token_for_ops(paths: &Paths) -> Result<String, ExitError> {
-    load_cloudflare_token(paths).map_err(|e| ExitError::new(3, e))
-}
-
 pub async fn fetch_zone_info(
     api_base: &str,
     token: &str,
@@ -805,4 +861,90 @@ pub async fn find_tunnel_by_name(
         .await
         .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
     Ok(tunnels.into_iter().find(|t| t.name == name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn load_cloudflare_token_for_deploy_flag_wins() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::write(paths.etc_xp_ops_cloudflare_token(), "filetok").unwrap();
+
+        let (token, src) = load_cloudflare_token_for_deploy(&paths, Some("flagtok"), None).unwrap();
+        assert_eq!(token, "flagtok");
+        assert_eq!(src, CloudflareTokenSource::Flag);
+
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+    }
+
+    #[test]
+    fn load_cloudflare_token_for_deploy_stdin_wins() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::write(paths.etc_xp_ops_cloudflare_token(), "filetok").unwrap();
+
+        let (token, src) =
+            load_cloudflare_token_for_deploy(&paths, None, Some(" stdintok \n")).unwrap();
+        assert_eq!(token, "stdintok");
+        assert_eq!(src, CloudflareTokenSource::Stdin);
+
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+    }
+
+    #[test]
+    fn load_cloudflare_token_for_deploy_env_wins_over_file() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::write(paths.etc_xp_ops_cloudflare_token(), "filetok").unwrap();
+
+        let (token, src) = load_cloudflare_token_for_deploy(&paths, None, None).unwrap();
+        assert_eq!(token, "envtok");
+        assert_eq!(src, CloudflareTokenSource::Env);
+
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+    }
+
+    #[test]
+    fn load_cloudflare_token_for_deploy_file_used_when_env_absent() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::write(paths.etc_xp_ops_cloudflare_token(), " filetok \n").unwrap();
+
+        let (token, src) = load_cloudflare_token_for_deploy(&paths, None, None).unwrap();
+        assert_eq!(token, "filetok");
+        assert_eq!(src, CloudflareTokenSource::File);
+    }
+
+    #[test]
+    fn load_cloudflare_token_for_deploy_missing_returns_token_missing() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        let err = load_cloudflare_token_for_deploy(&paths, None, None).unwrap_err();
+        assert_eq!(err.code, 3);
+        assert_eq!(err.message, "token_missing");
+    }
 }

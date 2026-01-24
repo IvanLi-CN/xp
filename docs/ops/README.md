@@ -16,6 +16,11 @@ If you want to reach `xp` from the public Internet without opening inbound ports
 
 - `docs/ops/cloudflare-tunnel.md`
 
+Notes:
+
+- `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
+- Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
+
 ## `xp-ops tui` (deploy wizard)
 
 `xp-ops tui` provides an interactive deploy wizard for `xp-ops deploy`.
