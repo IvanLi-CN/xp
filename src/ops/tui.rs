@@ -65,6 +65,9 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
         hostname: values.hostname,
         tunnel_name: None,
         origin_url: values.origin_url,
+        cloudflare_token: None,
+        cloudflare_token_stdin: false,
+        cloudflare_token_stdin_value: None,
         api_base_url: values.api_base_url,
         xray_version: values.xray_version,
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {

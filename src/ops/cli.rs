@@ -201,6 +201,15 @@ pub struct DeployArgs {
     #[arg(long, value_name = "URL")]
     pub origin_url: Option<String>,
 
+    #[arg(long, value_name = "TOKEN", conflicts_with = "cloudflare_token_stdin")]
+    pub cloudflare_token: Option<String>,
+
+    #[arg(long, conflicts_with = "cloudflare_token")]
+    pub cloudflare_token_stdin: bool,
+
+    #[arg(skip)]
+    pub cloudflare_token_stdin_value: Option<String>,
+
     #[arg(long, value_name = "ORIGIN")]
     pub api_base_url: Option<String>,
 

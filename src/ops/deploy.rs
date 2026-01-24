@@ -2,7 +2,7 @@ use crate::ops::cli::{
     DeployArgs, ExitError, InitArgs, InitSystemArg, InstallArgs, InstallOnly, XpBootstrapArgs,
     XpInstallArgs,
 };
-use crate::ops::cloudflare::{self, DnsRecordInfo, TunnelInfo, ZoneLookup};
+use crate::ops::cloudflare::{self, CloudflareTokenSource, DnsRecordInfo, TunnelInfo, ZoneLookup};
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
@@ -14,7 +14,7 @@ use dialoguer::Select;
 use nanoid::nanoid;
 use rand::RngCore;
 use std::fs;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -62,6 +62,7 @@ struct DeployPlan {
     xray_version: String,
     enable_services: bool,
     cloudflare_enabled: bool,
+    cloudflare_token_source: Option<CloudflareTokenSource>,
     cloudflare: Option<CloudflarePlan>,
     warnings: Vec<String>,
     errors: Vec<String>,
@@ -76,7 +77,19 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     let auto_yes = args.yes;
     let force_overwrite = args.overwrite_existing;
-    let interactive = !args.non_interactive && io::stdin().is_terminal();
+    let interactive =
+        !args.non_interactive && io::stdin().is_terminal() && !args.cloudflare_token_stdin;
+
+    if args.cloudflare_token_stdin {
+        let mut s = String::new();
+        io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| ExitError::new(2, format!("invalid_args: read stdin: {e}")))?;
+        let token = s.trim().to_string();
+        if !token.is_empty() {
+            args.cloudflare_token_stdin_value = Some(token);
+        }
+    }
 
     let mut plan = build_plan(&paths, &args).await?;
     let has_conflict = plan.cloudflare_enabled
@@ -135,23 +148,26 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
         if plan.cloudflare.as_ref().unwrap().tunnel_conflict.is_some() {
             if force_overwrite {
-                let (_new_args, new_plan) =
+                let (new_args, new_plan) =
                     force_overwrite_tunnel_conflict(&paths, args, plan, mode == Mode::DryRun)
                         .await?;
+                args = new_args;
                 plan = new_plan;
                 if !plan.errors.is_empty() {
                     return Err(ExitError::new(2, "preflight_failed: fix errors above"));
                 }
             } else if auto_yes {
-                let (_new_args, new_plan) =
+                let (new_args, new_plan) =
                     auto_resolve_tunnel_conflict(&paths, args, plan, mode == Mode::DryRun).await?;
+                args = new_args;
                 plan = new_plan;
                 if !plan.errors.is_empty() {
                     return Err(ExitError::new(2, "preflight_failed: fix errors above"));
                 }
             } else if interactive {
-                let (_new_args, new_plan) =
+                let (new_args, new_plan) =
                     resolve_tunnel_conflict(&paths, args, plan, mode == Mode::DryRun).await?;
+                args = new_args;
                 plan = new_plan;
                 if !plan.errors.is_empty() {
                     return Err(ExitError::new(2, "preflight_failed: fix errors above"));
@@ -255,7 +271,26 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     .await?;
 
     if let Some(cf) = plan.cloudflare.clone() {
-        cloudflare::cmd_cloudflare_provision(
+        let token = cloudflare::load_cloudflare_token_for_deploy(
+            &paths,
+            args.cloudflare_token.as_deref(),
+            args.cloudflare_token_stdin_value.as_deref(),
+        )
+        .map(|(t, _src)| t)
+        .map_err(|e| {
+            if e.message == "token_missing" {
+                ExitError::new(
+                    3,
+                    "cloudflare token missing: provide --cloudflare-token / --cloudflare-token-stdin, or set CLOUDFLARE_API_TOKEN, or write /etc/xp-ops/cloudflare_tunnel/api_token",
+                )
+            } else {
+                e
+            }
+        })?;
+
+        // Ensure deploy uses the exact token resolved for this run (incl. --cloudflare-token-stdin).
+        // `cmd_cloudflare_provision` remains the standalone CLI entry which reads from env/file.
+        cloudflare::cmd_cloudflare_provision_with_token(
             paths.clone(),
             crate::ops::cli::CloudflareProvisionArgs {
                 tunnel_name: Some(cf.tunnel_name),
@@ -269,6 +304,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 no_enable: !plan.enable_services,
                 dry_run: mode == Mode::DryRun,
             },
+            token,
         )
         .await?;
     }
@@ -339,6 +375,15 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         }
     }
 
+    if mode == Mode::Real
+        && plan.cloudflare_enabled
+        && plan.cloudflare_token_source == Some(CloudflareTokenSource::Flag)
+    {
+        eprintln!(
+            "security note: Cloudflare API token was provided via --cloudflare-token; this may leak via shell history or process list. Rotate/revoke it after this deploy."
+        );
+    }
+
     Ok(())
 }
 
@@ -370,6 +415,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
     let mut api_base_url_source = ValueSource::Provided;
     let mut cloudflare_plan = None;
+    let mut cloudflare_token_source: Option<CloudflareTokenSource> = None;
 
     let api_base_url = if cloudflare_enabled {
         let account_id = match args.account_id.clone() {
@@ -380,10 +426,24 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             }
         };
 
-        let token = match cloudflare::load_cloudflare_token_for_ops(paths) {
-            Ok(v) => Some(v),
+        let token = match cloudflare::load_cloudflare_token_for_deploy(
+            paths,
+            args.cloudflare_token.as_deref(),
+            args.cloudflare_token_stdin_value.as_deref(),
+        ) {
+            Ok((v, src)) => {
+                cloudflare_token_source = Some(src);
+                Some(v)
+            }
             Err(e) => {
-                errors.push(format!("cloudflare token error: {}", e.message));
+                if e.message == "token_missing" {
+                    errors.push(
+                        "cloudflare token missing: provide --cloudflare-token / --cloudflare-token-stdin, or set CLOUDFLARE_API_TOKEN, or write /etc/xp-ops/cloudflare_tunnel/api_token"
+                            .to_string(),
+                    );
+                } else {
+                    errors.push(format!("cloudflare token error: {}", e.message));
+                }
                 None
             }
         };
@@ -588,6 +648,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         xray_version: args.xray_version.clone(),
         enable_services: args.enable_services_toggle.enabled(),
         cloudflare_enabled,
+        cloudflare_token_source,
         cloudflare: cloudflare_plan,
         warnings,
         errors,
@@ -1134,6 +1195,13 @@ fn render_plan(plan: &DeployPlan) {
         }
         .to_string(),
     );
+    if plan.cloudflare_enabled {
+        let value = match plan.cloudflare_token_source {
+            Some(src) => format!("provided via {}", src.display()),
+            None => "absent".to_string(),
+        };
+        line("cloudflare_token", value);
+    }
 
     if let Some(cf) = plan.cloudflare.as_ref() {
         line("account_id", cf.account_id.clone());
@@ -1483,11 +1551,14 @@ fn generate_admin_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     fn read_env(paths: &Paths) -> String {
         fs::read_to_string(paths.etc_xp_env()).unwrap()
     }
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn ensure_xp_env_admin_token_keeps_xray_defaults_on_second_run() {
@@ -1540,6 +1611,60 @@ XP_XRAY_CUSTOM=keep-me\n",
         assert!(env.contains("XP_XRAY_SYSTEMD_UNIT=custom-xray.service"));
         assert!(env.contains("XP_XRAY_OPENRC_SERVICE=custom-xray"));
         assert!(env.contains("XP_XRAY_CUSTOM=keep-me"));
+    }
+
+    #[tokio::test]
+    async fn build_plan_cloudflare_token_missing_error_is_actionable() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        let xp_bin = tmp.path().join("xp");
+        fs::write(&xp_bin, b"dummy").unwrap();
+
+        let args = DeployArgs {
+            xp_bin: Some(xp_bin),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_toggle: crate::ops::cli::CloudflareToggle {
+                cloudflare: true,
+                no_cloudflare: false,
+            },
+            account_id: Some("acc".to_string()),
+            zone_id: Some("zone".to_string()),
+            hostname: Some("node-1.example.com".to_string()),
+            tunnel_name: None,
+            origin_url: None,
+            cloudflare_token: None,
+            cloudflare_token_stdin: false,
+            cloudflare_token_stdin_value: None,
+            api_base_url: None,
+            xray_version: "latest".to_string(),
+            enable_services_toggle: crate::ops::cli::EnableServicesToggle {
+                enable_services: false,
+                no_enable_services: true,
+            },
+            yes: false,
+            overwrite_existing: false,
+            non_interactive: true,
+            dry_run: true,
+        };
+
+        let plan = build_plan(&paths, &args).await.unwrap();
+        assert!(
+            plan.errors
+                .iter()
+                .any(|e| e.contains("--cloudflare-token") && e.contains("CLOUDFLARE_API_TOKEN")),
+            "expected actionable token missing error, got: {:?}",
+            plan.errors
+        );
+        assert!(
+            !plan.errors.iter().any(|e| e.contains("token_missing")),
+            "should not emit raw token_missing error string: {:?}",
+            plan.errors
+        );
     }
 }
 
