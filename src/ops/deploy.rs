@@ -77,18 +77,41 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     let auto_yes = args.yes;
     let force_overwrite = args.overwrite_existing;
-    let interactive =
-        !args.non_interactive && io::stdin().is_terminal() && !args.cloudflare_token_stdin;
+    let cloudflare_enabled = args.cloudflare_toggle.enabled();
+    let interactive = !args.non_interactive && io::stdin().is_terminal();
 
     if args.cloudflare_token_stdin {
+        if !cloudflare_enabled {
+            return Err(ExitError::new(
+                2,
+                "invalid_args: --cloudflare-token-stdin requires Cloudflare enabled (remove --no-cloudflare)",
+            ));
+        }
+        if io::stdin().is_terminal() {
+            return Err(ExitError::new(
+                2,
+                "invalid_args: --cloudflare-token-stdin requires piped stdin (e.g. printf \"%s\" <token> | ...)",
+            ));
+        }
         let mut s = String::new();
         io::stdin()
             .read_to_string(&mut s)
             .map_err(|e| ExitError::new(2, format!("invalid_args: read stdin: {e}")))?;
         let token = s.trim().to_string();
-        if !token.is_empty() {
-            args.cloudflare_token_stdin_value = Some(token);
+        if token.is_empty() {
+            return Err(ExitError::new(
+                3,
+                "cloudflare token missing: --cloudflare-token-stdin was set but stdin was empty (use --cloudflare-token / CLOUDFLARE_API_TOKEN / /etc/xp-ops/cloudflare_tunnel/api_token)",
+            ));
         }
+        args.cloudflare_token_stdin_value = Some(token);
+    }
+
+    if args.cloudflare_token.is_some() && !cloudflare_enabled {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --cloudflare-token requires Cloudflare enabled (remove --no-cloudflare)",
+        ));
     }
 
     let mut plan = build_plan(&paths, &args).await?;
@@ -1551,14 +1574,11 @@ fn generate_admin_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
 
     fn read_env(paths: &Paths) -> String {
         fs::read_to_string(paths.etc_xp_env()).unwrap()
     }
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn ensure_xp_env_admin_token_keeps_xray_defaults_on_second_run() {
@@ -1615,7 +1635,7 @@ XP_XRAY_CUSTOM=keep-me\n",
 
     #[tokio::test]
     async fn build_plan_cloudflare_token_missing_error_is_actionable() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
 
         let tmp = tempdir().unwrap();

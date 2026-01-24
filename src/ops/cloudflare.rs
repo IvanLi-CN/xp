@@ -866,14 +866,11 @@ pub async fn find_tunnel_by_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn load_cloudflare_token_for_deploy_flag_wins() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
 
         let tmp = tempdir().unwrap();
@@ -890,7 +887,7 @@ mod tests {
 
     #[test]
     fn load_cloudflare_token_for_deploy_stdin_wins() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
 
         let tmp = tempdir().unwrap();
@@ -908,7 +905,7 @@ mod tests {
 
     #[test]
     fn load_cloudflare_token_for_deploy_env_wins_over_file() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("CLOUDFLARE_API_TOKEN", "envtok") };
 
         let tmp = tempdir().unwrap();
@@ -925,7 +922,7 @@ mod tests {
 
     #[test]
     fn load_cloudflare_token_for_deploy_file_used_when_env_absent() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
 
         let tmp = tempdir().unwrap();
@@ -940,7 +937,7 @@ mod tests {
 
     #[test]
     fn load_cloudflare_token_for_deploy_missing_returns_token_missing() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
 
         let tmp = tempdir().unwrap();
