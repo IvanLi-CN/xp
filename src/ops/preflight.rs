@@ -48,7 +48,10 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             check_targets(
                 paths,
                 &[
-                    Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "xp binary location"),
+                    Target::dir(
+                        paths.map_abs(Path::new("/usr/local/bin")),
+                        "xp binary location",
+                    ),
                     Target::file(
                         paths.map_abs(Path::new("/usr/local/bin/xp")),
                         "verify xp installed",
@@ -135,8 +138,14 @@ fn preflight_install(paths: &Paths, args: &InstallArgs) -> Result<(), ExitError>
     check_targets(
         paths,
         &[
-            Target::dir(paths.map_abs(Path::new("/tmp/xp-ops")), "download workspace"),
-            Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "install location"),
+            Target::dir(
+                paths.map_abs(Path::new("/tmp/xp-ops")),
+                "download workspace",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "install location",
+            ),
         ],
     )
 }
@@ -148,10 +157,16 @@ fn preflight_self_upgrade(paths: &Paths, args: &SelfUpgradeArgs) -> Result<(), E
     check_targets(
         paths,
         &[
-            Target::dir(paths.map_abs(Path::new("/tmp/xp-ops")), "download workspace"),
+            Target::dir(
+                paths.map_abs(Path::new("/tmp/xp-ops")),
+                "download workspace",
+            ),
             // Self-upgrade replaces the current executable; we at least verify /usr/local/bin is writable
             // for common install locations (and to surface permission issues early).
-            Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "install location"),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "install location",
+            ),
         ],
     )
 }
@@ -163,8 +178,14 @@ fn preflight_xp_upgrade(paths: &Paths, args: &XpUpgradeArgs) -> Result<(), ExitE
     check_targets(
         paths,
         &[
-            Target::dir(paths.map_abs(Path::new("/tmp/xp-ops")), "download workspace"),
-            Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "xp install location"),
+            Target::dir(
+                paths.map_abs(Path::new("/tmp/xp-ops")),
+                "download workspace",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "xp install location",
+            ),
             Target::file(paths.usr_local_bin_xp(), "xp binary install"),
         ],
     )
@@ -177,7 +198,10 @@ fn preflight_xp_install(paths: &Paths, args: &XpInstallArgs) -> Result<(), ExitE
     check_targets(
         paths,
         &[
-            Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "xp install location"),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "xp install location",
+            ),
             Target::file(paths.usr_local_bin_xp(), "xp binary install"),
         ],
     )
@@ -225,14 +249,17 @@ fn preflight_deploy(paths: &Paths, args: &DeployArgs) -> Result<(), ExitError> {
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
 
     let mut targets = vec![
-        Target::dir(paths.map_abs(Path::new("/tmp/xp-ops")), "download workspace"),
-        Target::dir(paths.map_abs(Path::new("/usr/local/bin")), "install location"),
+        Target::dir(
+            paths.map_abs(Path::new("/tmp/xp-ops")),
+            "download workspace",
+        ),
+        Target::dir(
+            paths.map_abs(Path::new("/usr/local/bin")),
+            "install location",
+        ),
         Target::file(paths.usr_local_bin_xp(), "xp binary install"),
         Target::file(paths.usr_local_bin_xray(), "xray binary install"),
-        Target::dir(
-            paths.map_abs(Path::new("/var/lib/xp")),
-            "xp work directory",
-        ),
+        Target::dir(paths.map_abs(Path::new("/var/lib/xp")), "xp work directory"),
         Target::dir(
             paths.map_abs(Path::new("/var/lib/xp/data")),
             "xp data directory",
@@ -318,10 +345,7 @@ fn check_targets(paths: &Paths, targets: &[Target]) -> Result<(), ExitError> {
             TargetKind::File => check_writable_file(&t.path),
         };
         if let Err(e) = res {
-            return Err(ExitError::new(
-                6,
-                format_preflight_error(t, &e, paths),
-            ));
+            return Err(ExitError::new(6, format_preflight_error(t, &e, paths)));
         }
     }
 
@@ -331,7 +355,9 @@ fn check_targets(paths: &Paths, targets: &[Target]) -> Result<(), ExitError> {
 fn format_preflight_error(t: &Target, e: &io::Error, paths: &Paths) -> String {
     let hint = if !is_test_root(paths.root()) {
         match e.kind() {
-            io::ErrorKind::PermissionDenied => " (hint: run via sudo / ensure directory ownership & mode)",
+            io::ErrorKind::PermissionDenied => {
+                " (hint: run via sudo / ensure directory ownership & mode)"
+            }
             _ => "",
         }
     } else {
