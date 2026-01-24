@@ -379,10 +379,7 @@ fn format_preflight_error(t: &Target, e: &io::Error, paths: &Paths) -> String {
 
 fn check_writable_file(path: &Path) -> io::Result<()> {
     if path.exists() && path.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "path exists but is a directory",
-        ));
+        return Err(io::Error::other("path exists but is a directory"));
     }
 
     if let Some(parent) = path.parent() {
@@ -390,7 +387,7 @@ fn check_writable_file(path: &Path) -> io::Result<()> {
     }
 
     if path.exists() {
-        let _ = fs::OpenOptions::new().write(true).append(true).open(path)?;
+        let _ = fs::OpenOptions::new().append(true).open(path)?;
     }
     Ok(())
 }
@@ -402,10 +399,7 @@ fn check_writable_dir(path: &Path) -> io::Result<()> {
     let existing = find_existing_ancestor(path)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no existing ancestor"))?;
     if !existing.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "existing ancestor is not a directory",
-        ));
+        return Err(io::Error::other("existing ancestor is not a directory"));
     }
 
     // Best-effort: validate write+exec by creating a temp file and removing it.
@@ -447,10 +441,10 @@ fn check_no_non_dir_prefixes(path: &Path) -> io::Result<()> {
     for comp in path.components() {
         cur.push(comp);
         if cur.exists() && !cur.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("path component is not a directory: {}", cur.display()),
-            ));
+            return Err(io::Error::other(format!(
+                "path component is not a directory: {}",
+                cur.display()
+            )));
         }
     }
     Ok(())
