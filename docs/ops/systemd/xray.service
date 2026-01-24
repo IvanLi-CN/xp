@@ -11,6 +11,9 @@ User=xray
 Group=xray
 
 ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json
+
+# `xp` expects `xray` to be supervised by the init system and to recover on crashes/OOM.
+# Keep a non-zero `RestartSec` to avoid tight restart loops in crash-loop scenarios.
 Restart=on-failure
 RestartSec=2s
 
@@ -22,4 +25,3 @@ PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
-

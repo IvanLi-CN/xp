@@ -995,6 +995,13 @@ mod tests {
         let config = Config {
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             xray_api_addr,
+            xray_health_interval_secs: 2,
+            xray_health_fails_before_down: 3,
+            xray_restart_mode: crate::config::XrayRestartMode::None,
+            xray_restart_cooldown_secs: 30,
+            xray_restart_timeout_secs: 5,
+            xray_systemd_unit: "xray.service".to_string(),
+            xray_openrc_service: "xray".to_string(),
             data_dir: tmp_dir.to_path_buf(),
             admin_token: "testtoken".to_string(),
             node_name: "node-1".to_string(),

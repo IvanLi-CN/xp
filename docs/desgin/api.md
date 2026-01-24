@@ -35,7 +35,17 @@
 返回：
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "xray": {
+    "status": "unknown|up|down",
+    "last_ok_at": "RFC3339|null",
+    "last_fail_at": "RFC3339|null",
+    "down_since": "RFC3339|null",
+    "consecutive_failures": 0,
+    "recoveries_observed": 0
+  }
+}
 ```
 
 ## 2. 集群与节点

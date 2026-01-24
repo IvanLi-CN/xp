@@ -28,12 +28,20 @@ use crate::{
     },
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{JsonSnapshotStore, StoreInit},
+    xray_supervisor::XrayHealthHandle,
 };
 
 fn test_config(data_dir: PathBuf) -> Config {
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
+        xray_health_interval_secs: 2,
+        xray_health_fails_before_down: 3,
+        xray_restart_mode: crate::config::XrayRestartMode::None,
+        xray_restart_cooldown_secs: 30,
+        xray_restart_timeout_secs: 5,
+        xray_systemd_unit: "xray.service".to_string(),
+        xray_openrc_service: "xray".to_string(),
         data_dir,
         admin_token: "testtoken".to_string(),
         node_name: "node-1".to_string(),
@@ -75,11 +83,13 @@ fn app_with(
     let store = Arc::new(Mutex::new(store));
 
     let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
 
     let router = build_router(
         config,
         store.clone(),
         reconcile,
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -87,6 +97,30 @@ fn app_with(
         None,
     );
     (router, store)
+}
+
+#[tokio::test]
+async fn health_is_200_and_includes_xray_fields() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req("GET", "/api/health"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(res).await;
+    assert_eq!(body.get("status").and_then(|v| v.as_str()), Some("ok"));
+
+    let xray = body.get("xray").expect("missing xray field");
+    assert!(xray.get("status").is_some());
+    assert!(xray.get("last_ok_at").is_some());
+    assert!(xray.get("last_fail_at").is_some());
+    assert!(xray.get("down_since").is_some());
+    assert!(xray.get("consecutive_failures").is_some());
+    assert!(xray.get("recoveries_observed").is_some());
 }
 
 fn leader_raft(
@@ -524,10 +558,12 @@ async fn follower_admin_write_does_not_redirect() {
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(LocalRaft::new(store.clone(), rx));
 
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -1598,10 +1634,12 @@ async fn grant_usage_includes_warning_fields() {
             .unwrap();
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -1782,10 +1820,12 @@ async fn grant_usage_warns_on_quota_mismatch() {
             .unwrap();
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config,
         store.clone(),
         ReconcileHandle::noop(),
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2315,10 +2355,12 @@ async fn persistence_smoke_user_roundtrip_via_api() {
             .unwrap();
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config.clone(),
         store,
         crate::reconcile::ReconcileHandle::noop(),
+        xray_health,
         cluster.clone(),
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2352,10 +2394,12 @@ async fn persistence_smoke_user_roundtrip_via_api() {
             .unwrap();
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config,
         store,
         crate::reconcile::ReconcileHandle::noop(),
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

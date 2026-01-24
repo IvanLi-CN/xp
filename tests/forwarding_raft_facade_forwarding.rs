@@ -281,6 +281,13 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
     let config = Config {
         bind: admin_addr,
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
+        xray_health_interval_secs: 2,
+        xray_health_fails_before_down: 3,
+        xray_restart_mode: xp::config::XrayRestartMode::None,
+        xray_restart_cooldown_secs: 30,
+        xray_restart_timeout_secs: 5,
+        xray_systemd_unit: "xray.service".to_string(),
+        xray_openrc_service: "xray".to_string(),
         data_dir: leader_dir.clone(),
         admin_token: admin_token.clone(),
         node_name: cluster.node_name.clone(),
@@ -290,10 +297,12 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         quota_auto_unban: true,
     };
 
+    let xray_health = xp::xray_supervisor::XrayHealthHandle::new_unknown();
     let router = build_router(
         config,
         leader_store.clone(),
         ReconcileHandle::noop(),
+        xray_health,
         cluster,
         cluster_ca_pem.clone(),
         cluster_ca_key_pem.clone(),

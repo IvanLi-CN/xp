@@ -7,7 +7,11 @@ command="/usr/local/bin/xray"
 command_args="run -c /etc/xray/config.json"
 command_user="xray:xray"
 
+# Ensure automatic recovery on crashes without busy-looping.
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+
 depend() {
   need net
 }
-

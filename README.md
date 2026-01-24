@@ -107,17 +107,24 @@ VITE_BACKEND_PROXY=http://127.0.0.1:62416 bun run dev
 
 `xp` supports both CLI flags and environment variables (see `src/config.rs`). Common settings:
 
-| Setting                             | Env                           | Default                   | Description                                   |
-| ----------------------------------- | ----------------------------- | ------------------------- | --------------------------------------------- |
-| `--bind <ADDR>`                     | -                             | `127.0.0.1:62416`         | `xp` HTTP bind address                        |
-| `--data-dir <PATH>`                 | `XP_DATA_DIR`                 | `./data`                  | Data directory (identity, Raft, snapshots, …) |
-| `--xray-api-addr <ADDR>`            | `XP_XRAY_API_ADDR`            | `127.0.0.1:10085`         | Local `xray` gRPC API address                 |
-| `--admin-token <TOKEN>`             | `XP_ADMIN_TOKEN`              | `""`                      | Admin bearer token                            |
-| `--node-name <NAME>`                | -                             | `node-1`                  | Node display name                             |
-| `--access-host <HOST>`              | -                             | `""`                      | Host used for subscription output             |
-| `--api-base-url <ORIGIN>`           | -                             | `https://127.0.0.1:62416` | Public/reachable API origin for this node     |
-| `--quota-poll-interval-secs <SECS>` | `XP_QUOTA_POLL_INTERVAL_SECS` | `10`                      | Quota polling interval (`5..=30`)             |
-| `--quota-auto-unban <BOOL>`         | `XP_QUOTA_AUTO_UNBAN`         | `true`                    | Auto-unban on cycle rollover                  |
+| Setting                               | Env                                | Default                   | Description                                        |
+| ------------------------------------- | ---------------------------------- | ------------------------- | -------------------------------------------------- |
+| `--bind <ADDR>`                       | -                                  | `127.0.0.1:62416`         | `xp` HTTP bind address                             |
+| `--data-dir <PATH>`                   | `XP_DATA_DIR`                      | `./data`                  | Data directory (identity, Raft, snapshots, …)      |
+| `--xray-api-addr <ADDR>`              | `XP_XRAY_API_ADDR`                 | `127.0.0.1:10085`         | Local `xray` gRPC API address                      |
+| `--xray-health-interval-secs <SECS>`  | `XP_XRAY_HEALTH_INTERVAL_SECS`     | `2`                       | Xray gRPC probe interval (`1..=30`)                |
+| `--xray-health-fails-before-down <N>` | `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` | `3`                       | Consecutive probe failures to mark down (`1..=10`) |
+| `--xray-restart-mode <MODE>`          | `XP_XRAY_RESTART_MODE`             | `none`                    | Restart strategy (`none                            |
+| `--xray-restart-cooldown-secs <SECS>` | `XP_XRAY_RESTART_COOLDOWN_SECS`    | `30`                      | Min seconds between restart requests               |
+| `--xray-restart-timeout-secs <SECS>`  | `XP_XRAY_RESTART_TIMEOUT_SECS`     | `5`                       | Restart command timeout                            |
+| `--xray-systemd-unit <UNIT>`          | `XP_XRAY_SYSTEMD_UNIT`             | `xray.service`            | systemd unit name                                  |
+| `--xray-openrc-service <NAME>`        | `XP_XRAY_OPENRC_SERVICE`           | `xray`                    | OpenRC service name                                |
+| `--admin-token <TOKEN>`               | `XP_ADMIN_TOKEN`                   | `""`                      | Admin bearer token                                 |
+| `--node-name <NAME>`                  | -                                  | `node-1`                  | Node display name                                  |
+| `--access-host <HOST>`                | -                                  | `""`                      | Host used for subscription output                  |
+| `--api-base-url <ORIGIN>`             | -                                  | `https://127.0.0.1:62416` | Public/reachable API origin for this node          |
+| `--quota-poll-interval-secs <SECS>`   | `XP_QUOTA_POLL_INTERVAL_SECS`      | `10`                      | Quota polling interval (`5..=30`)                  |
+| `--quota-auto-unban <BOOL>`           | `XP_QUOTA_AUTO_UNBAN`              | `true`                    | Auto-unban on cycle rollover                       |
 
 Notes:
 
@@ -130,6 +137,9 @@ Example:
 XP_ADMIN_TOKEN="$(openssl rand -hex 32)" \
 XP_DATA_DIR=/var/lib/xp/data \
 XP_XRAY_API_ADDR=127.0.0.1:10085 \
+XP_XRAY_HEALTH_INTERVAL_SECS=2 \
+XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3 \
+XP_XRAY_RESTART_MODE=systemd \
 xp
 ```
 

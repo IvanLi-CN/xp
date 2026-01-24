@@ -213,6 +213,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         .await?;
     }
 
+    // Ensure /etc/xp/xp.env exists early so init-system policies written by `xp-ops init`
+    // can align with configured unit/service names.
+    ensure_xp_env_admin_token(&paths, mode)?;
+
     init::cmd_init(
         paths.clone(),
         InitArgs {
@@ -237,8 +241,6 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         )
         .await?;
     }
-
-    ensure_xp_env_admin_token(&paths, mode)?;
 
     xp::cmd_xp_bootstrap(
         paths.clone(),
@@ -1350,6 +1352,13 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     let mut admin_token: Option<String> = None;
     let mut has_data_dir = false;
     let mut has_xray_addr = false;
+    let mut has_xray_health_interval = false;
+    let mut has_xray_health_fails_before_down = false;
+    let mut has_xray_restart_mode = false;
+    let mut has_xray_restart_cooldown = false;
+    let mut has_xray_restart_timeout = false;
+    let mut has_xray_systemd_unit = false;
+    let mut has_xray_openrc_service = false;
     if let Some(s) = existing {
         for line in s.lines() {
             if line.starts_with("XP_ADMIN_TOKEN=") {
@@ -1360,10 +1369,47 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
             }
             if line.starts_with("XP_DATA_DIR=") {
                 has_data_dir = true;
+                retained.push(line.to_string());
                 continue;
             }
             if line.starts_with("XP_XRAY_API_ADDR=") {
                 has_xray_addr = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_HEALTH_INTERVAL_SECS=") {
+                has_xray_health_interval = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=") {
+                has_xray_health_fails_before_down = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_RESTART_MODE=") {
+                has_xray_restart_mode = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_RESTART_COOLDOWN_SECS=") {
+                has_xray_restart_cooldown = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_RESTART_TIMEOUT_SECS=") {
+                has_xray_restart_timeout = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_SYSTEMD_UNIT=") {
+                has_xray_systemd_unit = true;
+                retained.push(line.to_string());
+                continue;
+            }
+            if line.starts_with("XP_XRAY_OPENRC_SERVICE=") {
+                has_xray_openrc_service = true;
+                retained.push(line.to_string());
                 continue;
             }
             retained.push(line.to_string());
@@ -1383,6 +1429,38 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     if !has_xray_addr {
         lines.push("XP_XRAY_API_ADDR=127.0.0.1:10085".to_string());
     }
+    if !has_xray_health_interval {
+        lines.push("XP_XRAY_HEALTH_INTERVAL_SECS=2".to_string());
+    }
+    if !has_xray_health_fails_before_down {
+        lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
+    }
+    if !has_xray_restart_mode {
+        let default_mode = if is_test_root(paths.root()) {
+            "none"
+        } else {
+            let distro = detect_distro(paths).ok();
+            let init_system = distro.map(|d| detect_init_system(d, None));
+            match init_system {
+                Some(InitSystem::Systemd) => "systemd",
+                Some(InitSystem::OpenRc) => "openrc",
+                _ => "none",
+            }
+        };
+        lines.push(format!("XP_XRAY_RESTART_MODE={default_mode}"));
+    }
+    if !has_xray_restart_cooldown {
+        lines.push("XP_XRAY_RESTART_COOLDOWN_SECS=30".to_string());
+    }
+    if !has_xray_restart_timeout {
+        lines.push("XP_XRAY_RESTART_TIMEOUT_SECS=5".to_string());
+    }
+    if !has_xray_systemd_unit {
+        lines.push("XP_XRAY_SYSTEMD_UNIT=xray.service".to_string());
+    }
+    if !has_xray_openrc_service {
+        lines.push("XP_XRAY_OPENRC_SERVICE=xray".to_string());
+    }
 
     let content = format!("{}\n", lines.join("\n"));
     write_string_if_changed(&p, &content)
@@ -1400,6 +1478,69 @@ fn generate_admin_token() -> String {
     let mut buf = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut buf);
     hex::encode(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn read_env(paths: &Paths) -> String {
+        fs::read_to_string(paths.etc_xp_env()).unwrap()
+    }
+
+    #[test]
+    fn ensure_xp_env_admin_token_keeps_xray_defaults_on_second_run() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(paths.etc_xp_env(), "XP_ADMIN_TOKEN=testtoken\n").unwrap();
+
+        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
+        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
+
+        let env = read_env(&paths);
+        assert!(env.contains("XP_ADMIN_TOKEN=testtoken"));
+        assert!(env.contains("XP_DATA_DIR="));
+        assert!(env.contains("XP_XRAY_API_ADDR="));
+        assert!(env.contains("XP_XRAY_HEALTH_INTERVAL_SECS="));
+        assert!(env.contains("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN="));
+        assert!(env.contains("XP_XRAY_RESTART_MODE="));
+        assert!(env.contains("XP_XRAY_RESTART_COOLDOWN_SECS="));
+        assert!(env.contains("XP_XRAY_RESTART_TIMEOUT_SECS="));
+        assert!(env.contains("XP_XRAY_SYSTEMD_UNIT="));
+        assert!(env.contains("XP_XRAY_OPENRC_SERVICE="));
+    }
+
+    #[test]
+    fn ensure_xp_env_admin_token_preserves_user_xray_overrides() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            "XP_ADMIN_TOKEN=testtoken\n\
+XP_DATA_DIR=/custom/data\n\
+XP_XRAY_API_ADDR=127.0.0.1:12345\n\
+XP_XRAY_RESTART_MODE=systemd\n\
+XP_XRAY_SYSTEMD_UNIT=custom-xray.service\n\
+XP_XRAY_OPENRC_SERVICE=custom-xray\n\
+XP_XRAY_CUSTOM=keep-me\n",
+        )
+        .unwrap();
+
+        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
+
+        let env = read_env(&paths);
+        assert!(env.contains("XP_DATA_DIR=/custom/data"));
+        assert!(env.contains("XP_XRAY_API_ADDR=127.0.0.1:12345"));
+        assert!(env.contains("XP_XRAY_RESTART_MODE=systemd"));
+        assert!(env.contains("XP_XRAY_SYSTEMD_UNIT=custom-xray.service"));
+        assert!(env.contains("XP_XRAY_OPENRC_SERVICE=custom-xray"));
+        assert!(env.contains("XP_XRAY_CUSTOM=keep-me"));
+    }
 }
 
 fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {

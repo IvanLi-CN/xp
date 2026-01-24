@@ -16,6 +16,7 @@ use xp::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
     },
+    xray_supervisor::XrayHealthHandle,
 };
 use xp::{config::Config, http::build_router, reconcile::spawn_reconciler, state::StoreInit, xray};
 
@@ -37,6 +38,13 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr,
+        xray_health_interval_secs: 2,
+        xray_health_fails_before_down: 3,
+        xray_restart_mode: xp::config::XrayRestartMode::None,
+        xray_restart_cooldown_secs: 30,
+        xray_restart_timeout_secs: 5,
+        xray_systemd_unit: "xray.service".to_string(),
+        xray_openrc_service: "xray".to_string(),
         data_dir,
         admin_token: "testtoken".to_string(),
         node_name: "node-1".to_string(),
@@ -238,10 +246,12 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let raft: std::sync::Arc<dyn xp::raft::app::RaftFacade> =
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config,
         store.clone(),
         reconcile,
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -443,10 +453,12 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let raft: std::sync::Arc<dyn xp::raft::app::RaftFacade> =
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
+    let xray_health = XrayHealthHandle::new_unknown();
     let app = build_router(
         config.clone(),
         store.clone(),
         reconcile.clone(),
+        xray_health,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

@@ -33,6 +33,7 @@ use crate::{
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
     subscription,
+    xray_supervisor::XrayHealthHandle,
 };
 
 mod web_assets;
@@ -42,6 +43,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub reconcile: ReconcileHandle,
+    pub xray_health: XrayHealthHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
@@ -352,6 +354,7 @@ pub fn build_router(
     config: Config,
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
+    xray_health: XrayHealthHandle,
     cluster: ClusterMetadata,
     cluster_ca_pem: String,
     cluster_ca_key_pem: Option<String>,
@@ -362,6 +365,7 @@ pub fn build_router(
         config: Arc::new(config),
         store,
         reconcile,
+        xray_health,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
@@ -466,8 +470,19 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(raw.to_string())
 }
 
-async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
+async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {
+    let snap = state.xray_health.snapshot().await;
+    Json(json!({
+        "status": "ok",
+        "xray": {
+            "status": snap.status.as_str(),
+            "last_ok_at": snap.last_ok_at.map(|t| t.to_rfc3339()),
+            "last_fail_at": snap.last_fail_at.map(|t| t.to_rfc3339()),
+            "down_since": snap.down_since.map(|t| t.to_rfc3339()),
+            "consecutive_failures": snap.consecutive_failures,
+            "recoveries_observed": snap.recoveries_observed,
+        }
+    }))
 }
 
 fn raft_metrics(state: &AppState) -> openraft::RaftMetrics<RaftNodeId, RaftNodeMeta> {

@@ -1,10 +1,10 @@
-# Xray 异常退出自动恢复（探活 + 自动重启）（#0021）
+# Xray 探活与恢复信号（Down/Up + health + 触发 reconcile）（#0021）
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-21
-- Last: 2026-01-21
+- Last: 2026-01-23
 
 ## 背景 / 问题陈述
 
@@ -21,7 +21,7 @@
 ### Goals
 
 - 当 `xray` 退出或 gRPC 不可用时，`xp` 能快速检测并进入恢复流程。
-- `xray` 的重启由 init system 负责（systemd/OpenRC）；`xp` 不直接托管 `xray` 进程。
+- `xray` 的重启由 init system 负责（systemd/OpenRC）；`xp` 不直接托管 `xray` 进程。（“由 `xp` 间接触发重启”的能力见 #0023）
 - 在 `xray` 恢复后，`xp` 必须立即触发一次 `reconcile.request_full()`，不依赖 30s 兜底周期。
 - 提供最小可观测性：
   - 结构化日志（状态切换、失败原因、恢复次数（down->up）、上次成功时间等）；
@@ -127,9 +127,13 @@ None
 
 ## 里程碑（Milestones）
 
-- [ ] M1: `xray` 探活与状态机（Up/Down/Unknown）+ Up 边沿触发 reconcile
-- [ ] M2: 完善 ops 文档：systemd/OpenRC 的自动重启建议与边界条件
-- [ ] M3: 测试与文档补齐（单测/集测 + ops/workflows 文档更新）
+- [x] M1: `xray` 探活与状态机（Up/Down/Unknown）+ Up 边沿触发 reconcile
+- [x] M2: 完善 ops 文档：systemd/OpenRC 的自动重启建议与边界条件
+- [x] M3: 测试与文档补齐（单测/集测 + ops/workflows 文档更新）
+
+## Change log
+
+- 2026-01-23: 增加 `xray` 探活状态机与 `/api/health` 的 `xray.*` 字段；`down -> up` 触发 full reconcile；补齐 ops 与设计文档。
 
 ## 方案概述（Approach, high-level）
 
