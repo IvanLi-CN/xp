@@ -77,13 +77,9 @@ export function LoginPage() {
 								On the server, get it from{" "}
 								<span className="font-mono">
 									/etc/xp/xp.env (XP_ADMIN_TOKEN)
-								</span>
-								{" "}
+								</span>{" "}
 								or run{" "}
-								<span className="font-mono">
-									sudo xp-ops admin-token show
-								</span>
-								.
+								<span className="font-mono">sudo xp-ops admin-token show</span>.
 							</p>
 						</div>
 					) : (
