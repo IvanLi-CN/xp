@@ -7,6 +7,7 @@ mod init;
 mod install;
 mod paths;
 mod platform;
+mod preflight;
 mod status;
 mod tui;
 mod upgrade;

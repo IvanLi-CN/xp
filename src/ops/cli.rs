@@ -4,6 +4,7 @@ use crate::ops::deploy;
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
+use crate::ops::preflight;
 use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::upgrade;
@@ -356,7 +357,12 @@ impl ExitError {
 
 pub async fn run() -> i32 {
     let cli = Cli::parse();
-    let paths = Paths::new(cli.root);
+    let paths = Paths::new(cli.root.clone());
+
+    if let Err(e) = preflight::preflight(&paths, &cli.command) {
+        eprintln!("{}", e.message);
+        return e.code;
+    }
 
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
