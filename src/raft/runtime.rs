@@ -21,9 +21,29 @@ pub async fn start_raft(
     reconcile: ReconcileHandle,
     network: HttpNetworkFactory,
 ) -> anyhow::Result<RealRaft> {
-    let config = openraft::Config {
-        cluster_name,
-        ..Default::default()
+    let config = {
+        #[cfg(test)]
+        {
+            openraft::Config {
+                cluster_name,
+                ..Default::default()
+            }
+        }
+
+        #[cfg(not(test))]
+        {
+            // Production defaults: tuned for WAN-ish latencies (Cloudflare tunnels, etc.).
+            // OpenRaft uses `heartbeat_interval` as the hard TTL for replication RPCs, so 50ms
+            // is far too aggressive outside local networks.
+            openraft::Config {
+                cluster_name,
+                heartbeat_interval: 2_000,
+                election_timeout_min: 6_000,
+                election_timeout_max: 12_000,
+                install_snapshot_timeout: 30_000,
+                ..Default::default()
+            }
+        }
     }
     .validate()
     .map_err(|e| anyhow::anyhow!("raft config validate: {e}"))?;

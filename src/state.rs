@@ -775,6 +775,11 @@ impl DesiredStateCommand {
                 }
 
                 let mut grant = grant.clone();
+                if grant.group_name.is_empty() || validate_group_name(&grant.group_name).is_err() {
+                    // Backward-compat: older Raft logs allowed null/empty group_name.
+                    // Fold them into a deterministic legacy group derived from user_id.
+                    grant.group_name = make_legacy_group_name(&grant.user_id);
+                }
                 validate_group_name(&grant.group_name)?;
                 if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
                     && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
@@ -2291,6 +2296,51 @@ mod tests {
         .unwrap();
         assert_eq!(out, DesiredStateApplyResult::GrantDeleted { deleted: true });
         assert!(!state.grants.contains_key(&grant.grant_id));
+    }
+
+    #[test]
+    fn desired_state_apply_upsert_grant_fills_legacy_group_name_when_empty() {
+        let mut state = PersistedState::empty();
+        state.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        let grant = Grant {
+            grant_id: "grant_1".to_string(),
+            group_name: "".to_string(),
+            user_id: "user_1".to_string(),
+            endpoint_id: "endpoint_1".to_string(),
+            enabled: true,
+            quota_limit_bytes: 10,
+            note: None,
+            credentials: GrantCredentials {
+                vless: None,
+                ss2022: None,
+            },
+        };
+
+        DesiredStateCommand::UpsertGrant { grant }
+            .apply(&mut state)
+            .unwrap();
+        let inserted = state.grants.get("grant_1").unwrap();
+        assert_eq!(inserted.group_name, "legacy-user_1");
     }
 
     #[test]

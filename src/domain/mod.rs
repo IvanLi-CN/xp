@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.unwrap_or_default())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
     InvalidPort {
@@ -253,6 +261,7 @@ pub struct UserNodeQuota {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Grant {
     pub grant_id: String,
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub group_name: String,
     pub user_id: String,
     pub endpoint_id: String,
@@ -280,4 +289,31 @@ pub struct VlessCredentials {
 pub struct Ss2022Credentials {
     pub method: String,
     pub password: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grant_group_name_accepts_null() {
+        let raw = serde_json::json!({
+          "grant_id": "grant_1",
+          "group_name": null,
+          "user_id": "user_1",
+          "endpoint_id": "endpoint_1",
+          "enabled": true,
+          "quota_limit_bytes": 1,
+          "note": null,
+          "credentials": {
+            "vless": {
+              "uuid": "00000000-0000-0000-0000-000000000000",
+              "email": "grant:grant_1"
+            }
+          }
+        });
+
+        let grant: Grant = serde_json::from_value(raw).expect("deserialize grant");
+        assert_eq!(grant.group_name, "");
+    }
 }

@@ -124,9 +124,7 @@ impl ForwardingRaftFacade {
     ) -> anyhow::Result<Self> {
         let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
             .context("parse cluster_ca_pem")?;
-        let mut builder = reqwest::Client::builder()
-            .tls_built_in_root_certs(false)
-            .add_root_certificate(ca);
+        let mut builder = reqwest::Client::builder().add_root_certificate(ca);
         if let (Some(cert), Some(key)) = (node_cert_pem, node_key_pem) {
             let identity_pem = format!("{cert}\n{key}");
             let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())

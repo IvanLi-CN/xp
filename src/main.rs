@@ -62,7 +62,6 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     );
     let cluster_ca = reqwest::Certificate::from_pem(token.cluster_ca_pem.as_bytes())?;
     let client = reqwest::Client::builder()
-        .tls_built_in_root_certs(false)
         .add_root_certificate(cluster_ca)
         .build()?;
 
@@ -195,8 +194,29 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
     };
 
     if cluster.should_bootstrap_raft() {
+        let was_initialized = raft
+            .raft()
+            .is_initialized()
+            .await
+            .map_err(|e| anyhow::anyhow!("raft is_initialized: {e}"))?;
         raft.initialize_single_node_if_needed(raft_id, raft_node_meta)
             .await?;
+        if !was_initialized {
+            // Ensure the bootstrap node exists in the Raft state machine so future joiners can
+            // replicate the full node list. Without this, a joiner would only ever see itself
+            // unless the leader later emits an explicit UpsertNode for the bootstrap node.
+            let node = xp::domain::Node {
+                node_id: cluster.node_id.clone(),
+                node_name: cluster.node_name.clone(),
+                access_host: cluster.access_host.clone(),
+                api_base_url: cluster.api_base_url.clone(),
+                quota_reset: xp::domain::NodeQuotaReset::default(),
+            };
+            raft.raft()
+                .client_write(xp::state::DesiredStateCommand::UpsertNode { node })
+                .await
+                .map_err(|e| anyhow::anyhow!("bootstrap raft upsert_node: {e}"))?;
+        }
     }
 
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
