@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn cmd_install(paths: Paths, args: InstallArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
@@ -250,6 +251,41 @@ fn run_or_print(mode: Mode, program: &str, args: &[&str], hint: &str) -> Result<
     Ok(())
 }
 
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn backup_path(dest: &Path) -> std::path::PathBuf {
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let file = dest
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("file"))
+        .to_string_lossy();
+    parent.join(format!("{file}.bak.{}", now_unix_secs()))
+}
+
+fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
+    if !dest.exists() {
+        fs::rename(staged, dest)?;
+        return Ok(());
+    }
+
+    // On some filesystems (e.g. overlayfs), replacing an in-use executable directly can fail with
+    // ETXTBSY ("Text file busy"). Renaming the existing file out of the way first avoids that.
+    let backup = backup_path(dest);
+    fs::rename(dest, &backup)?;
+    match fs::rename(staged, dest) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::rename(&backup, dest);
+            Err(e.into())
+        }
+    }
+}
+
 async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("xp-ops")
@@ -267,7 +303,7 @@ async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
         file.write_all(&buf)?;
     }
     file.flush()?;
-    fs::rename(&tmp, dest)?;
+    replace_file_with_backup(dest, &tmp)?;
     Ok(())
 }
 
@@ -325,7 +361,7 @@ fn extract_xray_binary_from_zip_to_path(zip_path: &Path, dest: &Path) -> anyhow:
             let mut out = fs::File::create(&tmp)?;
             std::io::copy(&mut file, &mut out)?;
             out.flush()?;
-            fs::rename(&tmp, dest)?;
+            replace_file_with_backup(dest, &tmp)?;
             return Ok(());
         }
     }

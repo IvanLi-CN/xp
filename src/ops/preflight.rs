@@ -386,9 +386,6 @@ fn check_writable_file(path: &Path) -> io::Result<()> {
         check_writable_dir(parent)?;
     }
 
-    if path.exists() {
-        let _ = fs::OpenOptions::new().append(true).open(path)?;
-    }
     Ok(())
 }
 

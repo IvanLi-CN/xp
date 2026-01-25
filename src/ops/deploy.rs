@@ -254,8 +254,6 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     // Ensure /etc/xp/xp.env exists early so init-system policies written by `xp-ops init`
     // can align with configured unit/service names.
-    ensure_xp_env_admin_token(&paths, mode)?;
-
     init::cmd_init(
         paths.clone(),
         InitArgs {
@@ -268,6 +266,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         },
     )
     .await?;
+
+    // After `xp-ops init`, we know the `xp` group exists (so `chown root:xp` is reliable).
+    ensure_xp_env_admin_token(&paths, mode)?;
 
     if let Some(xp_bin) = plan.xp_install_from.clone() {
         xp::cmd_xp_install(
@@ -404,6 +405,12 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     {
         eprintln!(
             "security note: Cloudflare API token was provided via --cloudflare-token; this may leak via shell history or process list. Rotate/revoke it after this deploy."
+        );
+    }
+
+    if mode == Mode::Real && !is_test_root(paths.root()) {
+        eprintln!(
+            "admin note: XP admin token is stored in /etc/xp/xp.env (XP_ADMIN_TOKEN); show it with: sudo xp-ops admin-token show (or --redacted)."
         );
     }
 
