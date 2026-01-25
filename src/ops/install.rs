@@ -279,6 +279,14 @@ fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let dest_meta = fs::symlink_metadata(dest)?;
+    if dest_meta.is_dir() {
+        anyhow::bail!(
+            "refusing to replace directory path with binary: {}",
+            dest.display()
+        );
+    }
+
     // On some filesystems (e.g. overlayfs), replacing an in-use executable directly can fail with
     // ETXTBSY ("Text file busy"). Renaming the existing file out of the way first avoids that.
     let backup = {
@@ -385,4 +393,35 @@ fn extract_xray_binary_from_zip_to_path(zip_path: &Path, dest: &Path) -> anyhow:
     }
 
     anyhow::bail!("xray binary not found in zip")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn unique_tmp_dir(prefix: &str) -> std::path::PathBuf {
+        let id = format!("{}-{}-{}", prefix, now_unix_nanos(), std::process::id());
+        std::env::temp_dir().join(id)
+    }
+
+    #[test]
+    fn replace_file_with_backup_refuses_directories() {
+        let root = unique_tmp_dir("xp-ops-install-test");
+        fs::create_dir_all(&root).unwrap();
+
+        let dest = root.join("dest");
+        fs::create_dir_all(&dest).unwrap();
+
+        let staged = root.join("staged");
+        let mut f = fs::File::create(&staged).unwrap();
+        writeln!(f, "hello").unwrap();
+        f.flush().unwrap();
+
+        let err = replace_file_with_backup(&dest, &staged).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("refusing to replace directory path"));
+        assert!(dest.is_dir());
+        assert!(staged.exists());
+    }
 }
