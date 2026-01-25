@@ -252,8 +252,8 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         .await?;
     }
 
-    // Ensure /etc/xp/xp.env exists early so init-system policies written by `xp-ops init`
-    // can align with configured unit/service names.
+    // Run `xp-ops init` first so the `xp` group (and related init-system files) exist;
+    // then write /etc/xp/xp.env (XP_ADMIN_TOKEN) with correct ownership.
     init::cmd_init(
         paths.clone(),
         InitArgs {

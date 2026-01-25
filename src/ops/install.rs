@@ -251,20 +251,26 @@ fn run_or_print(mode: Mode, program: &str, args: &[&str], hint: &str) -> Result<
     Ok(())
 }
 
-fn now_unix_secs() -> u64 {
+fn now_unix_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_nanos()
 }
 
-fn backup_path(dest: &Path) -> std::path::PathBuf {
+fn backup_path(dest: &Path, attempt: u32) -> std::path::PathBuf {
     let parent = dest.parent().unwrap_or_else(|| Path::new("."));
     let file = dest
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("file"))
         .to_string_lossy();
-    parent.join(format!("{file}.bak.{}", now_unix_secs()))
+    let pid = std::process::id();
+    parent.join(format!(
+        "{file}.bak.{}.{}.{}",
+        now_unix_nanos(),
+        pid,
+        attempt
+    ))
 }
 
 fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
@@ -275,8 +281,20 @@ fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
 
     // On some filesystems (e.g. overlayfs), replacing an in-use executable directly can fail with
     // ETXTBSY ("Text file busy"). Renaming the existing file out of the way first avoids that.
-    let backup = backup_path(dest);
-    fs::rename(dest, &backup)?;
+    let backup = {
+        let mut attempt = 0u32;
+        loop {
+            let candidate = backup_path(dest, attempt);
+            match fs::rename(dest, &candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    };
     match fs::rename(staged, dest) {
         Ok(()) => Ok(()),
         Err(e) => {
