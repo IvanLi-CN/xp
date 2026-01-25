@@ -7,6 +7,7 @@ import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -173,7 +174,25 @@ export function NodesPage() {
 								</Link>
 							</td>
 							<td className="font-mono text-sm">{node.access_host || "-"}</td>
-							<td className="font-mono text-sm">{node.api_base_url || "-"}</td>
+							<td className="font-mono text-sm">
+								{node.api_base_url ? (
+									<a
+										href={node.api_base_url}
+										className="link link-primary inline-flex items-center gap-1"
+									>
+										<span aria-hidden="true">
+											<Icon
+												name="tabler:external-link"
+												size={16}
+												className="opacity-70"
+											/>
+										</span>
+										{node.api_base_url}
+									</a>
+								) : (
+									"-"
+								)}
+							</td>
 						</tr>
 					))}
 				</ResourceTable>
