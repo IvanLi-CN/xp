@@ -62,6 +62,8 @@ Required (or commonly set):
   - Path to the node data directory. See layout below.
 - `XP_ADMIN_TOKEN` (default: empty string)
   - Optional bearer token for admin endpoints. Leaving it empty effectively disables token checks.
+  - If you deployed via `xp-ops deploy`, the token is stored in `/etc/xp/xp.env` as `XP_ADMIN_TOKEN`.
+    - Show it on the server: `sudo xp-ops admin-token show` (or `--redacted`).
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)

@@ -69,9 +69,19 @@ export function LoginPage() {
 						/>
 					</label>
 					{token.length === 0 ? (
-						<p className="text-warning">
-							No token set. Please add a token to continue.
-						</p>
+						<div className="space-y-1">
+							<p className="text-warning">
+								No token set. Please add a token to continue.
+							</p>
+							<p className="text-xs opacity-70">
+								On the server, get it from{" "}
+								<span className="font-mono">
+									/etc/xp/xp.env (XP_ADMIN_TOKEN)
+								</span>{" "}
+								or run{" "}
+								<span className="font-mono">sudo xp-ops admin-token show</span>.
+							</p>
+						</div>
 					) : (
 						<p className="text-sm opacity-70">
 							Token stored (length {token.length}).

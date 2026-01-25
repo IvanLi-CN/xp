@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn cmd_install(paths: Paths, args: InstallArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
@@ -250,6 +251,67 @@ fn run_or_print(mode: Mode, program: &str, args: &[&str], hint: &str) -> Result<
     Ok(())
 }
 
+fn now_unix_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+fn backup_path(dest: &Path, attempt: u32) -> std::path::PathBuf {
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let file = dest
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("file"))
+        .to_string_lossy();
+    let pid = std::process::id();
+    parent.join(format!(
+        "{file}.bak.{}.{}.{}",
+        now_unix_nanos(),
+        pid,
+        attempt
+    ))
+}
+
+fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
+    if !dest.exists() {
+        fs::rename(staged, dest)?;
+        return Ok(());
+    }
+
+    let dest_meta = fs::symlink_metadata(dest)?;
+    if dest_meta.is_dir() {
+        anyhow::bail!(
+            "refusing to replace directory path with binary: {}",
+            dest.display()
+        );
+    }
+
+    // On some filesystems (e.g. overlayfs), replacing an in-use executable directly can fail with
+    // ETXTBSY ("Text file busy"). Renaming the existing file out of the way first avoids that.
+    let backup = {
+        let mut attempt = 0u32;
+        loop {
+            let candidate = backup_path(dest, attempt);
+            match fs::rename(dest, &candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    };
+    match fs::rename(staged, dest) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::rename(&backup, dest);
+            Err(e.into())
+        }
+    }
+}
+
 async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("xp-ops")
@@ -267,7 +329,7 @@ async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
         file.write_all(&buf)?;
     }
     file.flush()?;
-    fs::rename(&tmp, dest)?;
+    replace_file_with_backup(dest, &tmp)?;
     Ok(())
 }
 
@@ -325,10 +387,41 @@ fn extract_xray_binary_from_zip_to_path(zip_path: &Path, dest: &Path) -> anyhow:
             let mut out = fs::File::create(&tmp)?;
             std::io::copy(&mut file, &mut out)?;
             out.flush()?;
-            fs::rename(&tmp, dest)?;
+            replace_file_with_backup(dest, &tmp)?;
             return Ok(());
         }
     }
 
     anyhow::bail!("xray binary not found in zip")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn unique_tmp_dir(prefix: &str) -> std::path::PathBuf {
+        let id = format!("{}-{}-{}", prefix, now_unix_nanos(), std::process::id());
+        std::env::temp_dir().join(id)
+    }
+
+    #[test]
+    fn replace_file_with_backup_refuses_directories() {
+        let root = unique_tmp_dir("xp-ops-install-test");
+        fs::create_dir_all(&root).unwrap();
+
+        let dest = root.join("dest");
+        fs::create_dir_all(&dest).unwrap();
+
+        let staged = root.join("staged");
+        let mut f = fs::File::create(&staged).unwrap();
+        writeln!(f, "hello").unwrap();
+        f.flush().unwrap();
+
+        let err = replace_file_with_backup(&dest, &staged).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("refusing to replace directory path"));
+        assert!(dest.is_dir());
+        assert!(staged.exists());
+    }
 }

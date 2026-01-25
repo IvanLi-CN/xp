@@ -51,10 +51,12 @@ fn init_writes_xray_config_under_test_root() {
 
     let xray_cfg = tmp.path().join("etc/xray/config.json");
     let content = fs::read_to_string(xray_cfg).unwrap();
-    assert!(content.contains("\"listen\": \"127.0.0.1:10085\""));
     assert!(content.contains("\"HandlerService\""));
     assert!(content.contains("\"StatsService\""));
-    assert!(content.contains("\"inbounds\": []"));
+    assert!(content.contains("\"port\": 10085"));
+    assert!(content.contains("\"protocol\": \"dokodemo-door\""));
+    assert!(content.contains("\"tag\": \"api\""));
+    assert!(content.contains("\"routing\""));
 }
 
 #[test]
