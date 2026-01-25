@@ -6,7 +6,8 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
+use tokio::time::{Duration, Instant};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -212,10 +213,7 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
                 api_base_url: cluster.api_base_url.clone(),
                 quota_reset: xp::domain::NodeQuotaReset::default(),
             };
-            raft.raft()
-                .client_write(xp::state::DesiredStateCommand::UpsertNode { node })
-                .await
-                .map_err(|e| anyhow::anyhow!("bootstrap raft upsert_node: {e}"))?;
+            bootstrap_upsert_node(raft.raft(), node).await?;
         }
     }
 
@@ -267,6 +265,66 @@ fn init_tracing() {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+async fn wait_for_raft_leader(
+    mut metrics: watch::Receiver<
+        openraft::RaftMetrics<xp::raft::types::NodeId, xp::raft::types::NodeMeta>,
+    >,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let started_at = Instant::now();
+    loop {
+        let snapshot = metrics.borrow().clone();
+        if matches!(snapshot.state, openraft::ServerState::Leader) {
+            return Ok(());
+        }
+        let elapsed = Instant::now().duration_since(started_at);
+        if elapsed >= timeout {
+            anyhow::bail!(
+                "timeout waiting for raft leader: state={:?}",
+                snapshot.state
+            );
+        }
+        let remaining = timeout - elapsed;
+        tokio::time::timeout(remaining, metrics.changed())
+            .await
+            .map_err(|_| anyhow::anyhow!("timeout waiting for raft leader"))?
+            .map_err(|e| anyhow::anyhow!("raft metrics channel closed: {e}"))?;
+    }
+}
+
+async fn bootstrap_upsert_node(
+    raft: openraft::Raft<xp::raft::types::TypeConfig>,
+    node: xp::domain::Node,
+) -> anyhow::Result<()> {
+    wait_for_raft_leader(raft.metrics(), Duration::from_secs(30)).await?;
+
+    let mut backoff = Duration::from_millis(100);
+    for attempt in 0..5u8 {
+        match raft
+            .client_write(xp::state::DesiredStateCommand::UpsertNode { node: node.clone() })
+            .await
+        {
+            Ok(_resp) => return Ok(()),
+            Err(err) => {
+                if let Some(openraft::error::ClientWriteError::ForwardToLeader(_)) = err.api_error()
+                {
+                    tracing::warn!(
+                        attempt,
+                        backoff_ms = backoff.as_millis(),
+                        "bootstrap upsert_node forwarded; retrying"
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = std::cmp::min(backoff * 2, Duration::from_secs(2));
+                    continue;
+                }
+                return Err(anyhow::anyhow!("bootstrap raft upsert_node: {err}"));
+            }
+        }
+    }
+
+    anyhow::bail!("bootstrap raft upsert_node: leader not available after retries");
 }
 
 fn best_effort_chmod_0600(path: &std::path::Path) {
