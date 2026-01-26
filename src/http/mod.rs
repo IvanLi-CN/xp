@@ -663,6 +663,28 @@ async fn cluster_join(
         }
     }
 
+    // Ensure the current leader exists in the Raft state machine so joiners can replicate the
+    // full node list (including the bootstrap node).
+    let leader_node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&state.cluster.node_id)
+            .unwrap_or_else(|| Node {
+                node_id: state.cluster.node_id.clone(),
+                node_name: state.cluster.node_name.clone(),
+                access_host: state.cluster.access_host.clone(),
+                api_base_url: state.cluster.api_base_url.clone(),
+                quota_reset: NodeQuotaReset::default(),
+            })
+    };
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: leader_node.clone(),
+        },
+    )
+    .await?;
+
     let signed_cert_pem = crate::cluster_identity::sign_node_csr(
         &state.cluster.cluster_id,
         &ca_key_pem,
@@ -1544,7 +1566,6 @@ fn build_admin_http_client(cluster_ca_pem: &str) -> Result<reqwest::Client, ApiE
     let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
         .map_err(|e| ApiError::internal(e.to_string()))?;
     reqwest::Client::builder()
-        .tls_built_in_root_certs(false)
         .add_root_certificate(ca)
         .build()
         .map_err(|e| ApiError::internal(e.to_string()))
