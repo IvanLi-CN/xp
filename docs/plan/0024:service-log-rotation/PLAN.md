@@ -74,11 +74,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `xp-ops init`：启用日志轮换参数 | CLI | external | Modify | ./contracts/cli.md | xp-ops | operator / automation | 覆盖 Arch/Debian/Alpine |
-| logrotate 配置（仅本项目日志） | File format | external | New | ./contracts/file-formats.md | xp-ops | logrotate | 仅匹配本项目日志路径 |
-| 本项目专用 logrotate runner | File format | external | New | ./contracts/file-formats.md | xp-ops | systemd/OpenRC | 默认安装并启用；避免依赖系统全局调度 |
+| 接口（Name）                    | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers）   | 备注（Notes）                        |
+| ------------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | --------------------- | ------------------------------------ |
+| `xp-ops init`：启用日志轮换参数 | CLI          | external      | Modify         | ./contracts/cli.md          | xp-ops          | operator / automation | 覆盖 Arch/Debian/Alpine              |
+| logrotate 配置（仅本项目日志）  | File format  | external      | New            | ./contracts/file-formats.md | xp-ops          | logrotate             | 仅匹配本项目日志路径                 |
+| 本项目专用 logrotate runner     | File format  | external      | New            | ./contracts/file-formats.md | xp-ops          | systemd/OpenRC        | 默认安装并启用；避免依赖系统全局调度 |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -101,7 +101,7 @@
   - systemd：`xp-ops-logrotate.timer` 被 disable/stop，且相关 unit 文件被移除
   - Alpine：`/etc/periodic/<schedule>/xp-ops-logrotate` 不存在
   - `/var/lib/xp-ops/logrotate.status` 被移除（目录可保留）
-  且不得触发任何 logrotate 动作。
+    且不得触发任何 logrotate 动作。
 - Given 系统不存在 `logrotate`，
   When 运维人员运行 `xp-ops init`（默认启用），
   Then 命令失败且输出必须包含对应发行版的安装建议。
