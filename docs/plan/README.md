@@ -77,3 +77,4 @@
 | 0021 | Xray 探活与恢复信号（Down/Up + health）                     | 已完成 | `0021:xray-supervision-auto-restart/PLAN.md`         | 2026-01-23 | -                |
 | 0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 已完成 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-24 | -                |
 | 0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
+| 0024 | xp-ops：服务日志保留与轮换（防磁盘占满）                    | 待实现 | `0024:service-log-rotation/PLAN.md`                  | 2026-01-26 | -                |
