@@ -372,7 +372,10 @@ pub fn build_router(
         raft,
     };
 
-    let admin_token = app_state.config.admin_token.clone();
+    let admin_auth_state = AdminAuthState {
+        admin_token: app_state.config.admin_token.clone(),
+        cluster_id: app_state.cluster.cluster_id.clone(),
+    };
 
     let admin = Router::new()
         .route(
@@ -427,7 +430,7 @@ pub fn build_router(
                 .delete(admin_delete_grant_group),
         )
         .route("/alerts", get(admin_get_alerts))
-        .layer(middleware::from_fn_with_state(admin_token, admin_auth));
+        .layer(middleware::from_fn_with_state(admin_auth_state, admin_auth));
 
     let api = Router::new()
         .route("/health", get(health))
@@ -452,15 +455,35 @@ pub fn build_router(
         .layer(Extension(app_state))
 }
 
+#[derive(Clone)]
+struct AdminAuthState {
+    admin_token: String,
+    cluster_id: String,
+}
+
 async fn admin_auth(
-    State(expected_token): State<String>,
+    State(state): State<AdminAuthState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    match extract_bearer_token(req.headers()) {
-        Some(token) if token == expected_token => next.run(req).await,
-        _ => ApiError::unauthorized("missing or invalid authorization token").into_response(),
+    let Some(token) = extract_bearer_token(req.headers()) else {
+        return ApiError::unauthorized("missing or invalid authorization token").into_response();
+    };
+    if !state.admin_token.is_empty() && token == state.admin_token {
+        return next.run(req).await;
     }
+    if !state.admin_token.is_empty()
+        && crate::login_token::decode_and_validate_login_token_jwt(
+            &token,
+            Utc::now(),
+            &state.admin_token,
+            &state.cluster_id,
+        )
+        .is_ok()
+    {
+        return next.run(req).await;
+    }
+    ApiError::unauthorized("missing or invalid authorization token").into_response()
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {

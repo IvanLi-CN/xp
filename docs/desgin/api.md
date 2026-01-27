@@ -13,7 +13,9 @@
 
 ### 1.1 认证
 
-- 管理员 API（`/api/admin/*`）：`Authorization: Bearer <admin_token>`
+- 管理员 API（`/api/admin/*`）：`Authorization: Bearer <token>`
+  - `admin_token`：长效管理员 token（`XP_ADMIN_TOKEN`）
+  - `login_token`：短期登录 token（JWT HS256；TTL 1 小时；用于 “xp login-link” 登录链接）
 - 订阅 API（`/api/sub/*`）：基于 `subscription_token`（见 `subscription.md`）
 
 ### 1.2 错误格式

@@ -34,6 +34,9 @@ pub enum Command {
 
     /// Join an existing cluster using a join token.
     Join(JoinArgs),
+
+    /// Generate a one-time admin login link for the web UI.
+    LoginLink,
 }
 
 #[derive(Args, Debug, Clone)]
