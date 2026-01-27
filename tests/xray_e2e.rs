@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use axum::{body::Body, http::Request};
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -35,6 +36,7 @@ fn env_u16(key: &str) -> Result<u16, String> {
 }
 
 fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
+    let digest = Sha256::digest("testtoken".as_bytes());
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr,
@@ -46,7 +48,8 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir,
-        admin_token: "testtoken".to_string(),
+        admin_token_hash: format!("sha256:{}", hex::encode(digest)),
+        admin_token: String::new(),
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),

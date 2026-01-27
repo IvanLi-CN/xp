@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, path::Path, sync::Arc};
 
 use anyhow::Context as _;
+use sha2::{Digest, Sha256};
 use tokio::{
     net::TcpListener,
     sync::{Mutex, oneshot, watch},
@@ -278,6 +279,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         wait_for_leader_base_url(follower.metrics(), leader_id, Duration::from_secs(10)).await?;
     assert_eq!(leader_base_url, admin_base_url);
 
+    let admin_digest = Sha256::digest(admin_token.as_bytes());
     let config = Config {
         bind: admin_addr,
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
@@ -289,7 +291,8 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir: leader_dir.clone(),
-        admin_token: admin_token.clone(),
+        admin_token_hash: format!("sha256:{}", hex::encode(admin_digest)),
+        admin_token: String::new(),
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
@@ -316,7 +319,9 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
 
     let forwarding = ForwardingRaftFacade::try_new(
         follower.raft(),
-        admin_token.clone(),
+        cluster_ca_key_pem
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("missing cluster ca key"))?,
         &cluster_ca_pem,
         None,
         None,

@@ -13,6 +13,9 @@ export function parseAdminTokenInput(raw: string): AdminTokenParseResult {
 	if (/XP_ADMIN_TOKEN\s*=|^export\s+/i.test(trimmed)) {
 		return { error: "Paste the token only (not an env var line)." };
 	}
+	if (/XP_ADMIN_TOKEN_HASH\s*=/i.test(trimmed)) {
+		return { error: "Paste the token only (not a hash env var line)." };
+	}
 
 	if (/\s/.test(trimmed)) {
 		return { error: "Token must not contain whitespace." };

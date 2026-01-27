@@ -4,7 +4,7 @@
 
 ## 快速新增一个计划
 
-1. 分配一个新的四位编号 `ID`（查看下方 Index，取未使用的最小或递增编号）。
+1. 分配一个新的 `ID`（推荐 5 位 nanoId 风格：`[23456789abcdefghjkmnpqrstuvwxyz]{5}`；兼容四位数字 `0001`–`9999`）。
 2. 新建目录：`docs/plan/<id>:<title>/`（`<title>` 用简短 slug，建议 kebab-case）。
 3. 在该目录下创建 `PLAN.md`（模板见下方“PLAN.md 写法（简要）”）。
 4. 在下方 Index 表新增一行，并把 `Status` 设为 `待设计` 或 `待实现`（取决于是否已冻结验收标准），并填入 `Last`（通常为当天）。
@@ -12,7 +12,7 @@
 ## 目录与命名规则
 
 - 每个计划一个目录：`docs/plan/<id>:<title>/`
-- `<id>`：四位数字（`0001`–`9999`），一经分配不要变更。
+- `<id>`：推荐 5 位 nanoId 风格（`[23456789abcdefghjkmnpqrstuvwxyz]{5}`）；兼容四位数字（`0001`–`9999`）。一经分配不要变更。
 - `<title>`：短标题 slug（建议 kebab-case，避免空格与特殊字符）；目录名尽量稳定。
 - 人类可读标题写在 Index 的 `Title` 列；标题变更优先改 `Title`，不强制改目录名。
 
@@ -78,3 +78,4 @@
 | 0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 已完成 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-24 | -                |
 | 0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
 | 0024 | xp-ops：服务日志保留与轮换（防磁盘占满）                    | 待实现 | `0024:service-log-rotation/PLAN.md`                  | 2026-01-26 | -                |
+| 38wmj | 集群节点部署引导（Web 生成命令 + xp-ops deploy join）       | 待实现 | `38wmj:cluster-node-onboarding/PLAN.md`              | 2026-01-27 | -                |

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
@@ -32,6 +33,11 @@ export function NodesPage() {
 	const [joinTokenError, setJoinTokenError] = useState<string | null>(null);
 	const [isCreatingJoinToken, setIsCreatingJoinToken] = useState(false);
 
+	const clusterInfoQuery = useQuery({
+		queryKey: ["clusterInfo"],
+		queryFn: ({ signal }) => fetchClusterInfo(signal),
+	});
+
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
@@ -41,6 +47,42 @@ export function NodesPage() {
 	const joinCommand = useMemo(() => {
 		return joinToken ? `xp join --token ${joinToken}` : "";
 	}, [joinToken]);
+
+	const deployCommand = useMemo(() => {
+		if (!joinToken) return "";
+		const xpVersion = clusterInfoQuery.data?.xp_version;
+		if (!xpVersion) return "";
+
+		const tag = xpVersion.startsWith("v") ? xpVersion : `v${xpVersion}`;
+
+		return [
+			"set -euo pipefail",
+			`XP_VERSION='${xpVersion}'`,
+			'XP_REPO="${XP_REPO:-IvanLi-CN/xp}"',
+			"",
+			'arch="$(uname -m)"',
+			'case "$arch" in',
+			"  x86_64|amd64) platform=x86_64 ;;",
+			"  aarch64|arm64) platform=aarch64 ;;",
+			'  *) echo "unsupported arch: $arch" >&2; exit 2 ;;',
+			"esac",
+			"",
+			`tag='${tag}'`,
+			'tmp_dir="$(mktemp -d)"',
+			"trap 'rm -rf \"$tmp_dir\"' EXIT",
+			"",
+			'curl -fsSL "https://github.com/${XP_REPO}/releases/download/${tag}/xp-ops-linux-${platform}" -o "$tmp_dir/xp-ops"',
+			'curl -fsSL "https://github.com/${XP_REPO}/releases/download/${tag}/xp-linux-${platform}" -o "$tmp_dir/xp"',
+			'sudo install -m 0755 "$tmp_dir/xp-ops" /usr/local/bin/xp-ops',
+			'sudo install -m 0755 "$tmp_dir/xp" /usr/local/bin/xp',
+			"",
+			'NODE_NAME="${NODE_NAME:-$(hostname -s 2>/dev/null || hostname)}"',
+			'ACCESS_HOST="${ACCESS_HOST:-$(hostname -f 2>/dev/null || hostname)}"',
+			'API_BASE_URL="${API_BASE_URL:-https://${ACCESS_HOST}:62416}"',
+			"",
+			`sudo xp-ops deploy --no-cloudflare --api-base-url \"$API_BASE_URL\" --node-name \"$NODE_NAME\" --access-host \"$ACCESS_HOST\" --join-token '${joinToken}' --enable-services --non-interactive -y`,
+		].join("\n");
+	}, [joinToken, clusterInfoQuery.data?.xp_version]);
 
 	const handleCreateJoinToken = async () => {
 		setJoinTokenError(null);
@@ -264,11 +306,31 @@ export function NodesPage() {
 							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 								<div className="space-y-1">
 									<p className="text-xs uppercase tracking-wide opacity-60">
-										xp join command
+										xp join command (legacy)
 									</p>
 									<p className="font-mono text-sm break-all">{joinCommand}</p>
 								</div>
 								<CopyButton text={joinCommand} label="Copy command" />
+							</div>
+							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+								<div className="space-y-1 min-w-0">
+									<p className="text-xs uppercase tracking-wide opacity-60">
+										xp-ops deploy command (recommended)
+									</p>
+									{deployCommand ? (
+										<pre className="font-mono text-sm whitespace-pre-wrap break-words">
+											{deployCommand}
+										</pre>
+									) : (
+										<p className="text-sm opacity-70">
+											Loading cluster version...
+										</p>
+									)}
+								</div>
+								<CopyButton
+									text={deployCommand || ""}
+									label="Copy deploy command"
+								/>
 							</div>
 						</div>
 					) : null}
