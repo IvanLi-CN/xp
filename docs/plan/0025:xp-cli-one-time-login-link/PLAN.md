@@ -79,11 +79,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）                                | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers）                 | 备注（Notes） |
-| ------------------------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | ---------------------------------- | ------------ |
-| `xp login-link`                             | CLI          | external      | New            | ./contracts/cli.md          | xp              | operator / automation              | 生成 Admin UI 登录链接 |
-| Admin UI 入口：`GET /login`（含 query 参数） | HTTP API     | external      | Modify         | ./contracts/http-apis.md    | xp/web          | browser                            | 仅定义“参数与消费语义”；服务端仍返回 SPA |
-| 管理员鉴权：`Authorization` 规则（`/api/admin/*`） | HTTP API     | external      | Modify         | ./contracts/http-apis.md    | xp              | web admin UI / scripts / CLI client | `admin_token` + `login_token` 并存 |
+| 接口（Name）                                       | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）                 | 备注（Notes）                            |
+| -------------------------------------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ----------------------------------- | ---------------------------------------- |
+| `xp login-link`                                    | CLI          | external      | New            | ./contracts/cli.md       | xp              | operator / automation               | 生成 Admin UI 登录链接                   |
+| Admin UI 入口：`GET /login`（含 query 参数）       | HTTP API     | external      | Modify         | ./contracts/http-apis.md | xp/web          | browser                             | 仅定义“参数与消费语义”；服务端仍返回 SPA |
+| 管理员鉴权：`Authorization` 规则（`/api/admin/*`） | HTTP API     | external      | Modify         | ./contracts/http-apis.md | xp              | web admin UI / scripts / CLI client | `admin_token` + `login_token` 并存       |
 
 ### 契约文档（按 Kind 拆分）
 

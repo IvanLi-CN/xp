@@ -34,8 +34,8 @@
 
 其中 `<token>` 允许两种形态：
 
-1) `admin_token`（现有）：与配置的 `XP_ADMIN_TOKEN` 字符串完全匹配。
-2) `login_token`（新增）：短期有效、可验证的 JWT；用于“登录链接”。
+1. `admin_token`（现有）：与配置的 `XP_ADMIN_TOKEN` 字符串完全匹配。
+2. `login_token`（新增）：短期有效、可验证的 JWT；用于“登录链接”。
 
 ### `login_token` 形状（Schema）
 
