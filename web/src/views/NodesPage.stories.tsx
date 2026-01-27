@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, userEvent, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/NodesPage",
@@ -43,3 +44,18 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const WithJoinToken: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: /create token/i }),
+		);
+		await expect(
+			await canvas.findByText(/xp-ops deploy command/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/sudo xp-ops deploy/i),
+		).toBeInTheDocument();
+	},
+};
