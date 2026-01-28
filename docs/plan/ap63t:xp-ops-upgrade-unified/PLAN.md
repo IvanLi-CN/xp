@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-28
 - Last: 2026-01-28
 
@@ -111,9 +111,9 @@ None
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 增加 `xp-ops upgrade` CLI + preflight + 实现串联逻辑
-- [ ] M2: 隐藏旧命令并添加 deprecated 提示；更新文档指引
-- [ ] M3: 更新/新增测试覆盖 `xp-ops upgrade`
+- [x] M1: 增加 `xp-ops upgrade` CLI + preflight + 实现串联逻辑
+- [x] M2: 隐藏旧命令并添加 deprecated 提示；更新文档指引
+- [x] M3: 更新/新增测试覆盖 `xp-ops upgrade`
 
 ## 方案概述（Approach, high-level）
 
@@ -128,4 +128,3 @@ None
 ## 变更记录（Change log）
 
 - 2026-01-28: 创建计划
-
