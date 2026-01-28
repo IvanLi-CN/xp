@@ -40,6 +40,44 @@ fn cloudflare_provision_missing_token_exits_3() {
 }
 
 #[test]
+fn deploy_join_dry_run_succeeds_without_join_side_effects() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Satisfy `xp join` dry-run prerequisite: `/usr/local/bin/xp` exists.
+    let xp_bin = root.join("usr/local/bin/xp");
+    fs::create_dir_all(xp_bin.parent().unwrap()).unwrap();
+    fs::write(&xp_bin, b"#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut p = fs::metadata(&xp_bin).unwrap().permissions();
+        p.set_mode(0o755);
+        fs::set_permissions(&xp_bin, p).unwrap();
+    }
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.env("XP_OPS_DISTRO", "arch");
+    cmd.args([
+        "--root",
+        &root.to_string_lossy(),
+        "deploy",
+        "--node-name",
+        "node1",
+        "--access-host",
+        "node1.example.invalid",
+        "--join-token",
+        "join-token",
+        "--no-cloudflare",
+        "--api-base-url",
+        "https://api.example.invalid",
+        "--dry-run",
+    ]);
+
+    cmd.assert().success();
+}
+
+#[test]
 fn init_writes_xray_config_under_test_root() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();

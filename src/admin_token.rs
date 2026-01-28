@@ -4,6 +4,17 @@ use argon2::password_hash::{
 use argon2::{Algorithm, Argon2, Params, Version};
 use sha2::{Digest, Sha256};
 
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminTokenHash {
     /// Argon2id PHC string, e.g. `$argon2id$v=19$m=65536,t=3,p=1$...`
@@ -89,7 +100,14 @@ pub fn verify_admin_token(token_plaintext: &str, expected: &AdminTokenHash) -> b
                 return false;
             };
             let digest = Sha256::digest(token_plaintext.as_bytes());
-            hex::encode(digest) == hex.trim()
+            let expected = hex::decode(hex.trim()).ok();
+            let Some(expected) = expected else {
+                return false;
+            };
+            if expected.len() != digest.len() {
+                return false;
+            }
+            constant_time_eq(digest.as_slice(), &expected)
         }
     }
 }

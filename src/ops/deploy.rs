@@ -346,8 +346,13 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         )
         .await?;
 
-        let hash = read_cluster_admin_token_hash(&paths, Path::new("/var/lib/xp/data"))?;
-        ensure_xp_env_admin_token_hash_join(&paths, mode, &hash, force_overwrite)?;
+        if mode == Mode::DryRun {
+            // `xp join` dry-run does not materialize cluster metadata/hash files.
+            eprintln!("would write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH) from join result");
+        } else {
+            let hash = read_cluster_admin_token_hash(&paths, Path::new("/var/lib/xp/data"))?;
+            ensure_xp_env_admin_token_hash_join(&paths, mode, &hash, force_overwrite)?;
+        }
     } else {
         xp::cmd_xp_bootstrap(
             paths.clone(),
