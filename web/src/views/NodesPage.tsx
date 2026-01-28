@@ -294,8 +294,8 @@ export function NodesPage() {
 					) : null}
 					{joinToken ? (
 						<div className="space-y-4 rounded-box bg-base-200 p-4">
-							<div className="grid gap-3 lg:grid-cols-3">
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+							<div className="grid gap-4 lg:grid-cols-12">
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
 									<div className="space-y-1">
 										<p className="text-xs uppercase tracking-wide opacity-60">
 											Join token
@@ -307,7 +307,7 @@ export function NodesPage() {
 									</div>
 								</div>
 
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
 									<div className="space-y-1">
 										<p className="text-xs uppercase tracking-wide opacity-60">
 											xp join command (legacy)
@@ -319,15 +319,22 @@ export function NodesPage() {
 									</div>
 								</div>
 
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-12">
 									<div className="space-y-1 min-w-0">
 										<p className="text-xs uppercase tracking-wide opacity-60">
 											xp-ops deploy command (recommended)
 										</p>
 										{deployCommand ? (
-											<pre className="font-mono text-sm whitespace-pre-wrap break-words">
-												{deployCommand}
-											</pre>
+											<textarea
+												readOnly
+												rows={14}
+												className={
+													prefs.density === "compact"
+														? "textarea textarea-bordered textarea-sm font-mono text-sm leading-5 w-full"
+														: "textarea textarea-bordered font-mono text-sm leading-5 w-full"
+												}
+												value={deployCommand}
+											/>
 										) : (
 											<p className="text-sm opacity-70">
 												Loading cluster version...
@@ -341,6 +348,16 @@ export function NodesPage() {
 										/>
 									</div>
 								</div>
+							</div>
+							<div className="text-sm opacity-70">
+								<p>
+									Notes: you can override{" "}
+									<span className="font-mono">XP_REPO</span>,{" "}
+									<span className="font-mono">NODE_NAME</span>,{" "}
+									<span className="font-mono">ACCESS_HOST</span>, and{" "}
+									<span className="font-mono">API_BASE_URL</span> before running
+									the deploy command.
+								</p>
 							</div>
 						</div>
 					) : null}
