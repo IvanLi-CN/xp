@@ -1,6 +1,6 @@
 use crate::ops::cli::{
     AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, DeployArgs, ExitError,
-    InitArgs, InstallArgs, SelfUpgradeArgs, XpCommand, XpInstallArgs, XpUpgradeArgs,
+    InitArgs, InstallArgs, UpgradeArgs, XpCommand, XpInstallArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -35,10 +35,9 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
 
         Command::Install(args) => preflight_install(paths, args),
         Command::Init(args) => preflight_init(paths, args),
-        Command::SelfUpgrade(args) => preflight_self_upgrade(paths, args),
+        Command::Upgrade(args) => preflight_upgrade(paths, args),
 
         Command::Xp(XpCommand::Install(args)) => preflight_xp_install(paths, args),
-        Command::Xp(XpCommand::Upgrade(args)) => preflight_xp_upgrade(paths, args),
         Command::Xp(XpCommand::Bootstrap(args)) => {
             // `xp-ops xp bootstrap` runs `xp init` as user `xp`.
             // We only preflight the root-owned paths `xp-ops` itself needs.
@@ -109,6 +108,26 @@ fn preflight_tui(paths: &Paths) -> Result<(), ExitError> {
     )
 }
 
+fn preflight_upgrade(paths: &Paths, args: &UpgradeArgs) -> Result<(), ExitError> {
+    if args.dry_run {
+        return Ok(());
+    }
+    check_targets(
+        paths,
+        &[
+            Target::dir(
+                paths.map_abs(Path::new("/tmp/xp-ops")),
+                "download workspace",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "install location",
+            ),
+            Target::file(paths.usr_local_bin_xp(), "xp binary install"),
+        ],
+    )
+}
+
 fn preflight_cloudflare_token_set(
     paths: &Paths,
     args: &crate::ops::cli::CloudflareTokenSetArgs,
@@ -146,47 +165,6 @@ fn preflight_install(paths: &Paths, args: &InstallArgs) -> Result<(), ExitError>
                 paths.map_abs(Path::new("/usr/local/bin")),
                 "install location",
             ),
-        ],
-    )
-}
-
-fn preflight_self_upgrade(paths: &Paths, args: &SelfUpgradeArgs) -> Result<(), ExitError> {
-    if args.dry_run {
-        return Ok(());
-    }
-    check_targets(
-        paths,
-        &[
-            Target::dir(
-                paths.map_abs(Path::new("/tmp/xp-ops")),
-                "download workspace",
-            ),
-            // Self-upgrade replaces the current executable; we at least verify /usr/local/bin is writable
-            // for common install locations (and to surface permission issues early).
-            Target::dir(
-                paths.map_abs(Path::new("/usr/local/bin")),
-                "install location",
-            ),
-        ],
-    )
-}
-
-fn preflight_xp_upgrade(paths: &Paths, args: &XpUpgradeArgs) -> Result<(), ExitError> {
-    if args.dry_run {
-        return Ok(());
-    }
-    check_targets(
-        paths,
-        &[
-            Target::dir(
-                paths.map_abs(Path::new("/tmp/xp-ops")),
-                "download workspace",
-            ),
-            Target::dir(
-                paths.map_abs(Path::new("/usr/local/bin")),
-                "xp install location",
-            ),
-            Target::file(paths.usr_local_bin_xp(), "xp binary install"),
         ],
     )
 }

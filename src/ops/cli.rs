@@ -31,7 +31,8 @@ pub struct Cli {
 pub enum Command {
     Install(InstallArgs),
     Init(InitArgs),
-    SelfUpgrade(SelfUpgradeArgs),
+
+    Upgrade(UpgradeArgs),
 
     #[command(subcommand)]
     Xp(XpCommand),
@@ -98,7 +99,6 @@ pub enum InitSystemArg {
 #[derive(Subcommand, Debug)]
 pub enum XpCommand {
     Install(XpInstallArgs),
-    Upgrade(XpUpgradeArgs),
     Bootstrap(XpBootstrapArgs),
 }
 
@@ -138,16 +138,7 @@ pub struct UpgradeReleaseArgs {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct SelfUpgradeArgs {
-    #[command(flatten)]
-    pub release: UpgradeReleaseArgs,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct XpUpgradeArgs {
+pub struct UpgradeArgs {
     #[command(flatten)]
     pub release: UpgradeReleaseArgs,
 
@@ -376,10 +367,9 @@ pub async fn run() -> i32 {
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
-        Some(Command::SelfUpgrade(args)) => upgrade::cmd_self_upgrade(paths, args).await,
+        Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
-            XpCommand::Upgrade(args) => upgrade::cmd_xp_upgrade(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
