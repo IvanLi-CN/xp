@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
         xp::config::Command::Run => run_server(cli.config).await,
         xp::config::Command::Init => init_cluster(&cli.config),
         xp::config::Command::Join(args) => join_cluster(cli.config, args.token).await,
+        xp::config::Command::LoginLink => login_link(&cli.config),
     }
 }
 
@@ -45,6 +46,29 @@ fn init_cluster(config: &xp::config::Config) -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+fn login_link(config: &xp::config::Config) -> Result<()> {
+    if config.admin_token.is_empty() {
+        anyhow::bail!("admin token is not configured (XP_ADMIN_TOKEN is empty)");
+    }
+    if !config.api_base_url.starts_with("https://") {
+        anyhow::bail!("--api-base-url must start with https://");
+    }
+
+    let cluster = xp::cluster_metadata::ClusterMetadata::load(&config.data_dir)?;
+    let token_id = xp::id::new_ulid_string();
+    let now = chrono::Utc::now();
+    let jwt = xp::login_token::issue_login_token_jwt(
+        &cluster.cluster_id,
+        &token_id,
+        now,
+        &config.admin_token,
+    );
+
+    let base = config.api_base_url.trim_end_matches('/');
+    println!("{base}/login?login_token={jwt}");
     Ok(())
 }
 

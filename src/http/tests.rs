@@ -395,6 +395,62 @@ async fn unauthorized_admin_returns_401_with_error_shape() {
 }
 
 #[tokio::test]
+async fn login_token_jwt_can_access_admin_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+
+    let token_id = crate::id::new_ulid_string();
+    let now = chrono::Utc::now();
+    let jwt =
+        crate::login_token::issue_login_token_jwt(&meta.cluster_id, &token_id, now, "testtoken");
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/admin/alerts")
+                .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn expired_login_token_jwt_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+
+    let token_id = crate::id::new_ulid_string();
+    let now = chrono::Utc::now();
+    let issued_at =
+        now - chrono::Duration::seconds(crate::login_token::LOGIN_TOKEN_TTL_SECONDS + 1);
+    let jwt = crate::login_token::issue_login_token_jwt(
+        &meta.cluster_id,
+        &token_id,
+        issued_at,
+        "testtoken",
+    );
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/admin/alerts")
+                .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn internal_client_write_requires_admin_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
