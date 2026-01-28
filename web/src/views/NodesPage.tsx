@@ -24,6 +24,38 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+function highlightShell(text: string) {
+	const regex =
+		/(\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|'[^']*'|"[^"]*"|https?:\/\/[^\s"']+|--[a-z0-9-]+)/g;
+	const parts = text.split(regex);
+	let offset = 0;
+
+	return parts.map((part) => {
+		if (part.length === 0) return null;
+		const key = `o${offset}`;
+		offset += part.length;
+
+		let className: string | null = null;
+		if (part.startsWith("http://") || part.startsWith("https://")) {
+			className = "text-info";
+		} else if (part.startsWith("--")) {
+			className = "text-warning";
+		} else if (part.startsWith("$")) {
+			className = "text-accent";
+		} else if (part.startsWith("'") || part.startsWith('"')) {
+			className = "text-success";
+		}
+
+		return className ? (
+			<span key={key} className={className}>
+				{part}
+			</span>
+		) : (
+			<span key={key}>{part}</span>
+		);
+	});
+}
+
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
@@ -296,56 +328,66 @@ export function NodesPage() {
 						<div className="space-y-4 rounded-box bg-base-200 p-4">
 							<div className="grid gap-4 lg:grid-cols-12">
 								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
-									<div className="space-y-1">
+									<div className="flex items-center justify-between gap-2">
 										<p className="text-xs uppercase tracking-wide opacity-60">
 											Join token
 										</p>
-										<p className="font-mono text-sm break-all">{joinToken}</p>
+										<CopyButton
+											text={joinToken}
+											ariaLabel="Copy join token"
+											iconOnly
+											variant="ghost"
+											size="sm"
+										/>
 									</div>
-									<div className="flex justify-end">
-										<CopyButton text={joinToken} label="Copy token" />
-									</div>
+									<p className="font-mono text-sm break-all">{joinToken}</p>
 								</div>
 
 								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
-									<div className="space-y-1">
+									<div className="flex items-center justify-between gap-2">
 										<p className="text-xs uppercase tracking-wide opacity-60">
 											xp join command (legacy)
 										</p>
-										<p className="font-mono text-sm break-all">{joinCommand}</p>
+										<CopyButton
+											text={joinCommand}
+											ariaLabel="Copy join command"
+											iconOnly
+											variant="ghost"
+											size="sm"
+										/>
 									</div>
-									<div className="flex justify-end">
-										<CopyButton text={joinCommand} label="Copy command" />
-									</div>
+									<p className="font-mono text-sm break-all">{joinCommand}</p>
 								</div>
 
 								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-12">
 									<div className="space-y-1 min-w-0">
-										<p className="text-xs uppercase tracking-wide opacity-60">
-											xp-ops deploy command (recommended)
-										</p>
+										<div className="flex items-center justify-between gap-2">
+											<p className="text-xs uppercase tracking-wide opacity-60">
+												xp-ops deploy command (recommended)
+											</p>
+											<CopyButton
+												text={deployCommand || ""}
+												ariaLabel="Copy deploy command"
+												iconOnly
+												variant="ghost"
+												size="sm"
+											/>
+										</div>
 										{deployCommand ? (
-											<textarea
-												readOnly
-												rows={14}
+											<pre
 												className={
 													prefs.density === "compact"
-														? "textarea textarea-bordered textarea-sm font-mono text-sm leading-5 w-full"
-														: "textarea textarea-bordered font-mono text-sm leading-5 w-full"
+														? "rounded-box border border-base-content/20 bg-base-100/40 p-3 font-mono text-sm leading-5 max-h-72 overflow-auto"
+														: "rounded-box border border-base-content/20 bg-base-100/40 p-3 font-mono text-sm leading-5 max-h-72 overflow-auto"
 												}
-												value={deployCommand}
-											/>
+											>
+												{highlightShell(deployCommand)}
+											</pre>
 										) : (
 											<p className="text-sm opacity-70">
 												Loading cluster version...
 											</p>
 										)}
-									</div>
-									<div className="flex justify-end">
-										<CopyButton
-											text={deployCommand || ""}
-											label="Copy deploy command"
-										/>
 									</div>
 								</div>
 							</div>
