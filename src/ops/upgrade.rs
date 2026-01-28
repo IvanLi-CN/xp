@@ -1,4 +1,4 @@
-use crate::ops::cli::{ExitError, SelfUpgradeArgs, UpgradeArgs, UpgradeReleaseArgs, XpUpgradeArgs};
+use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
@@ -242,22 +242,6 @@ fn backup_path(dest: &Path) -> PathBuf {
 }
 
 pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitError> {
-    let xp_args = XpUpgradeArgs {
-        release: args.release.clone(),
-        dry_run: args.dry_run,
-    };
-    cmd_xp_upgrade(paths.clone(), xp_args).await?;
-
-    let self_args = SelfUpgradeArgs {
-        release: args.release,
-        dry_run: args.dry_run,
-    };
-    cmd_self_upgrade(paths, self_args).await?;
-
-    Ok(())
-}
-
-pub async fn cmd_self_upgrade(paths: Paths, args: SelfUpgradeArgs) -> Result<(), ExitError> {
     validate_release_args(&args.release)?;
     let mode = if args.dry_run {
         Mode::DryRun
@@ -272,193 +256,85 @@ pub async fn cmd_self_upgrade(paths: Paths, args: SelfUpgradeArgs) -> Result<(),
         .await
         .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
 
-    let current = crate::version::VERSION;
-    let tag = release.tag_name.as_str();
-    let target = tag.strip_prefix('v').unwrap_or(tag);
-    if current == target {
-        eprintln!("already up-to-date: v{current}");
-        return Ok(());
-    }
+    eprintln!(
+        "resolved release: {}/{} {}{}",
+        owner,
+        repo,
+        release.tag_name,
+        if release.prerelease {
+            " (prerelease)"
+        } else {
+            ""
+        }
+    );
 
-    let asset_name = platform.xp_ops_asset_name();
-    let Some(asset_url) = find_asset_url(&release, asset_name) else {
-        return Err(ExitError::new(
-            5,
-            format!("download_failed: missing asset {asset_name}"),
-        ));
-    };
-    let Some(checksums_url) = find_asset_url(&release, CHECKSUMS_ASSET_NAME) else {
-        return Err(ExitError::new(
-            5,
-            format!("download_failed: missing asset {CHECKSUMS_ASSET_NAME}"),
-        ));
-    };
-
-    let dest = std::env::current_exe()
+    let xp_dest = paths.usr_local_bin_xp();
+    let xp_backup = backup_path(&xp_dest);
+    let xp_asset_name = platform.xp_asset_name();
+    let xp_ops_dest = std::env::current_exe()
         .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
-    let backup = backup_path(&dest);
-
-    eprintln!(
-        "resolved release: {}/{} {}{}",
-        owner,
-        repo,
-        release.tag_name,
-        if release.prerelease {
-            " (prerelease)"
-        } else {
-            ""
-        }
-    );
+    let xp_ops_backup = backup_path(&xp_ops_dest);
+    let xp_ops_asset_name = platform.xp_ops_asset_name();
 
     if mode == Mode::DryRun {
         eprintln!("would download checksums: {CHECKSUMS_ASSET_NAME}");
-        eprintln!("would download asset: {asset_name}");
-        eprintln!("would install to: {}", dest.display());
-        eprintln!("would backup old binary to: {}", backup.display());
-        return Ok(());
-    }
-
-    let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
-    ensure_dir(&tmp_dir).map_err(|e| ExitError::new(7, format!("install_failed: {e}")))?;
-
-    let checksums_path = tmp_dir.join("checksums.txt");
-    download_to_path(checksums_url, &checksums_path)
-        .await
-        .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
-    let checksums = read_checksums(&checksums_path)?;
-
-    let Some(expected) = checksums.get(asset_name) else {
-        return Err(ExitError::new(
-            6,
-            format!("checksum_mismatch: missing {asset_name} in {CHECKSUMS_ASSET_NAME}"),
-        ));
-    };
-
-    let staged = tmp_path_next_to(&dest);
-    download_to_path(asset_url, &staged).await.map_err(|e| {
-        match e.downcast_ref::<std::io::Error>() {
-            Some(ioe) if ioe.kind() == std::io::ErrorKind::PermissionDenied => {
-                ExitError::new(4, format!("permission_denied: {ioe}"))
-            }
-            _ => ExitError::new(5, format!("download_failed: {e}")),
-        }
-    })?;
-
-    let actual = sha256_file(&staged)?;
-    if actual != *expected {
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(6, "checksum_mismatch"));
-    }
-    chmod(&staged, 0o755).ok();
-
-    let moved_old = fs::rename(&dest, &backup).map_err(|e| match e.kind() {
-        std::io::ErrorKind::PermissionDenied => {
-            ExitError::new(4, format!("permission_denied: {e}"))
-        }
-        _ => ExitError::new(7, format!("install_failed: {e}")),
-    });
-
-    if let Err(e) = moved_old {
-        let _ = fs::remove_file(&staged);
-        return Err(e);
-    }
-
-    if let Err(e) = fs::rename(&staged, &dest) {
-        let _ = fs::rename(&backup, &dest);
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(7, format!("install_failed: {e}")));
-    }
-
-    chmod(&dest, 0o755).ok();
-
-    if !is_test_root(paths.root()) {
-        let status = Command::new(&dest)
-            .args(["--version"])
-            .status()
-            .map_err(|e| ExitError::new(7, format!("install_failed: verify: {e}")))?;
-        if !status.success() {
-            let bad = dest.with_extension(format!("failed.{}", now_unix_secs()));
-            let _ = fs::rename(&dest, &bad);
-            let _ = fs::rename(&backup, &dest);
-            return Err(ExitError::new(7, "install_failed: verify failed"));
-        }
-    }
-
-    Ok(())
-}
-
-pub async fn cmd_xp_upgrade(paths: Paths, args: XpUpgradeArgs) -> Result<(), ExitError> {
-    validate_release_args(&args.release)?;
-    let mode = if args.dry_run {
-        Mode::DryRun
-    } else {
-        Mode::Real
-    };
-    let platform = detect_platform()?;
-
-    let (owner, repo) = resolve_repo(args.release.repo.as_deref())?;
-    let api_base = github_api_base();
-    let release = fetch_release(&api_base, &owner, &repo, &args.release)
-        .await
-        .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
-
-    let asset_name = platform.xp_asset_name();
-    let Some(asset_url) = find_asset_url(&release, asset_name) else {
-        return Err(ExitError::new(
-            5,
-            format!("download_failed: missing asset {asset_name}"),
-        ));
-    };
-    let Some(checksums_url) = find_asset_url(&release, CHECKSUMS_ASSET_NAME) else {
-        return Err(ExitError::new(
-            5,
-            format!("download_failed: missing asset {CHECKSUMS_ASSET_NAME}"),
-        ));
-    };
-
-    let dest = paths.usr_local_bin_xp();
-    let backup = backup_path(&dest);
-
-    eprintln!(
-        "resolved release: {}/{} {}{}",
-        owner,
-        repo,
-        release.tag_name,
-        if release.prerelease {
-            " (prerelease)"
-        } else {
-            ""
-        }
-    );
-
-    if mode == Mode::DryRun {
-        eprintln!("would download checksums: {CHECKSUMS_ASSET_NAME}");
-        eprintln!("would download asset: {asset_name}");
-        eprintln!("would install to: {}", dest.display());
-        eprintln!("would backup old binary to: {}", backup.display());
+        eprintln!("would download asset: {xp_asset_name}");
+        eprintln!("would install to: {}", xp_dest.display());
+        eprintln!("would backup old binary to: {}", xp_backup.display());
         eprintln!("would restart service: xp (systemd/OpenRC auto)");
+        eprintln!("would download asset: {xp_ops_asset_name}");
+        eprintln!("would install to: {}", xp_ops_dest.display());
+        eprintln!("would backup old binary to: {}", xp_ops_backup.display());
         return Ok(());
     }
 
-    if !dest.exists() {
+    if !xp_dest.exists() {
         return Err(ExitError::new(3, "invalid_args: xp is not installed"));
     }
 
     let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
     ensure_dir(&tmp_dir).map_err(|e| ExitError::new(7, format!("service_error: {e}")))?;
 
+    let Some(checksums_url) = find_asset_url(&release, CHECKSUMS_ASSET_NAME) else {
+        return Err(ExitError::new(
+            5,
+            format!("download_failed: missing asset {CHECKSUMS_ASSET_NAME}"),
+        ));
+    };
+
     let checksums_path = tmp_dir.join("checksums.txt");
     download_to_path(checksums_url, &checksums_path)
         .await
         .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
     let checksums = read_checksums(&checksums_path)?;
 
+    upgrade_xp(&paths, &release, &checksums, xp_asset_name).await?;
+    upgrade_xp_ops(&paths, &release, &checksums, xp_ops_asset_name).await?;
+
+    Ok(())
+}
+
+async fn upgrade_xp(
+    paths: &Paths,
+    release: &GitHubRelease,
+    checksums: &HashMap<String, [u8; 32]>,
+    asset_name: &str,
+) -> Result<(), ExitError> {
+    let Some(asset_url) = find_asset_url(release, asset_name) else {
+        return Err(ExitError::new(
+            5,
+            format!("download_failed: missing asset {asset_name}"),
+        ));
+    };
     let Some(expected) = checksums.get(asset_name) else {
         return Err(ExitError::new(
             6,
             format!("checksum_mismatch: missing {asset_name} in {CHECKSUMS_ASSET_NAME}"),
         ));
     };
+
+    let dest = paths.usr_local_bin_xp();
+    let backup = backup_path(&dest);
 
     let staged = tmp_path_next_to(&dest);
     download_to_path(asset_url, &staged).await.map_err(|e| {
@@ -522,6 +398,90 @@ pub async fn cmd_xp_upgrade(paths: Paths, args: XpUpgradeArgs) -> Result<(), Exi
                 ));
             }
             return Err(ExitError::new(8, "rollback_failed"));
+        }
+    }
+
+    Ok(())
+}
+
+async fn upgrade_xp_ops(
+    paths: &Paths,
+    release: &GitHubRelease,
+    checksums: &HashMap<String, [u8; 32]>,
+    asset_name: &str,
+) -> Result<(), ExitError> {
+    let current = crate::version::VERSION;
+    let tag = release.tag_name.as_str();
+    let target = tag.strip_prefix('v').unwrap_or(tag);
+    if current == target {
+        eprintln!("already up-to-date: v{current}");
+        return Ok(());
+    }
+
+    let Some(asset_url) = find_asset_url(release, asset_name) else {
+        return Err(ExitError::new(
+            5,
+            format!("download_failed: missing asset {asset_name}"),
+        ));
+    };
+    let Some(expected) = checksums.get(asset_name) else {
+        return Err(ExitError::new(
+            6,
+            format!("checksum_mismatch: missing {asset_name} in {CHECKSUMS_ASSET_NAME}"),
+        ));
+    };
+
+    let dest = std::env::current_exe()
+        .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
+    let backup = backup_path(&dest);
+
+    let staged = tmp_path_next_to(&dest);
+    download_to_path(asset_url, &staged).await.map_err(|e| {
+        match e.downcast_ref::<std::io::Error>() {
+            Some(ioe) if ioe.kind() == std::io::ErrorKind::PermissionDenied => {
+                ExitError::new(4, format!("permission_denied: {ioe}"))
+            }
+            _ => ExitError::new(5, format!("download_failed: {e}")),
+        }
+    })?;
+
+    let actual = sha256_file(&staged)?;
+    if actual != *expected {
+        let _ = fs::remove_file(&staged);
+        return Err(ExitError::new(6, "checksum_mismatch"));
+    }
+    chmod(&staged, 0o755).ok();
+
+    let moved_old = fs::rename(&dest, &backup).map_err(|e| match e.kind() {
+        std::io::ErrorKind::PermissionDenied => {
+            ExitError::new(4, format!("permission_denied: {e}"))
+        }
+        _ => ExitError::new(7, format!("install_failed: {e}")),
+    });
+
+    if let Err(e) = moved_old {
+        let _ = fs::remove_file(&staged);
+        return Err(e);
+    }
+
+    if let Err(e) = fs::rename(&staged, &dest) {
+        let _ = fs::rename(&backup, &dest);
+        let _ = fs::remove_file(&staged);
+        return Err(ExitError::new(7, format!("install_failed: {e}")));
+    }
+
+    chmod(&dest, 0o755).ok();
+
+    if !is_test_root(paths.root()) {
+        let status = Command::new(&dest)
+            .args(["--version"])
+            .status()
+            .map_err(|e| ExitError::new(7, format!("install_failed: verify: {e}")))?;
+        if !status.success() {
+            let bad = dest.with_extension(format!("failed.{}", now_unix_secs()));
+            let _ = fs::rename(&dest, &bad);
+            let _ = fs::rename(&backup, &dest);
+            return Err(ExitError::new(7, "install_failed: verify failed"));
         }
     }
 

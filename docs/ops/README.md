@@ -181,10 +181,6 @@ Rollback notes:
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
 - On upgrade failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
 
-Legacy commands:
-
-- `xp-ops self-upgrade` and `xp-ops xp upgrade` are kept for backward compatibility, but are hidden from `--help` output.
-
 ### Backup before upgrade
 
 Before upgrading the binary, stop the service and back up the entire `XP_DATA_DIR`. The most critical parts are:

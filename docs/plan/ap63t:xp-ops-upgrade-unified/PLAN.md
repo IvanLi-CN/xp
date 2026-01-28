@@ -17,7 +17,7 @@
 
 - 提供单一入口：实现 `xp-ops upgrade` 命令，一次同时升级 `xp` 与 `xp-ops` 到同一个 release（默认 latest stable）。
 - `xp` 本体 CLI 不出现“自更新/升级”相关命令。
-- 保持兼容性：既有 `xp-ops self-upgrade` 与 `xp-ops xp upgrade` 仍可运行，但从帮助输出中隐藏，并在执行时提示迁移到 `xp-ops upgrade`。
+- 移除旧入口：不再提供 `xp-ops self-upgrade` 与 `xp-ops xp upgrade` 命令。
 
 ### Non-goals
 
@@ -30,7 +30,6 @@
 ### In scope
 
 - `xp-ops upgrade`：封装并串联升级 `xp` 与 `xp-ops`（支持 `--version/--prerelease/--repo/--dry-run`）。
-- `xp-ops self-upgrade` 与 `xp-ops xp upgrade`：在 CLI 帮助中隐藏；执行时输出 deprecate 提示（stderr）。
 - 文档更新：统一推荐命令改为 `xp-ops upgrade`。
 - 测试：增加/更新单测覆盖新命令（以及旧命令的兼容提示如适用）。
 
@@ -53,7 +52,6 @@
 
 ### SHOULD
 
-- 旧命令在执行时提示：`deprecated: use xp-ops upgrade`，并给出等价命令示例。
 - 文档中不再推荐使用旧命令路径。
 
 ### COULD
@@ -64,11 +62,9 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `xp-ops upgrade` | CLI | internal | New | ./contracts/cli.md | ops | 管理员 / CI | 单一入口升级 `xp` + `xp-ops` |
-| `xp-ops self-upgrade` | CLI | internal | Modify | ./contracts/cli.md | ops | 管理员 / CI | 隐藏 + deprecated 提示 |
-| `xp-ops xp upgrade` | CLI | internal | Modify | ./contracts/cli.md | ops | 管理员 / CI | 隐藏 + deprecated 提示 |
+| 接口（Name）     | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                |
+| ---------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ---------------------------- |
+| `xp-ops upgrade` | CLI          | internal      | New            | ./contracts/cli.md       | ops             | 管理员 / CI         | 单一入口升级 `xp` + `xp-ops` |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -83,9 +79,6 @@
 - Given 任意环境，
   When 运行 `xp-ops upgrade --dry-run ...`，
   Then 只输出解析到的 release 与两段升级动作计划，不下载/不写入/不重启。
-- Given 旧脚本仍在使用 `xp-ops self-upgrade` 或 `xp-ops xp upgrade`，
-  When 执行旧命令，
-  Then 命令仍可工作，但 stderr 会提示迁移到 `xp-ops upgrade`，且 `--help` 不再展示旧命令。
 - Then `xp` CLI 中不存在升级/自更新命令。
 - Then 文档 `README.md` 与 `docs/ops/README.md` 的升级指引统一为 `xp-ops upgrade`。
 
@@ -112,19 +105,19 @@ None
 ## 实现里程碑（Milestones）
 
 - [x] M1: 增加 `xp-ops upgrade` CLI + preflight + 实现串联逻辑
-- [x] M2: 隐藏旧命令并添加 deprecated 提示；更新文档指引
+- [x] M2: 移除旧命令；更新文档指引
 - [x] M3: 更新/新增测试覆盖 `xp-ops upgrade`
 
 ## 方案概述（Approach, high-level）
 
 - 保留现有升级实现（下载、校验、原子替换、回滚、服务重启），新增一个顶层命令作为编排层。
-- 对旧命令保持兼容，但将其从帮助输出中隐藏，并在运行时提示迁移。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：旧命令从帮助中隐藏可能影响习惯用法；通过执行时提示与文档更新缓解。
+- 风险：旧命令移除会影响现有脚本；通过文档更新与明确迁移路径缓解。
 - 假设：`xp` 与 `xp-ops` 同一 release tag 下均存在对应平台资产与 `checksums.txt`。
 
 ## 变更记录（Change log）
 
 - 2026-01-28: 创建计划
+- 2026-01-28: 改为“移除旧命令”（不做兼容）
