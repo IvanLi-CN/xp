@@ -6,26 +6,26 @@ pub async fn cmd_admin_token_show(paths: Paths, args: AdminTokenShowArgs) -> Res
     let raw = std::fs::read_to_string(&path)
         .map_err(|_| ExitError::new(2, "token_missing: /etc/xp/xp.env not found"))?;
 
-    let token = parse_admin_token(&raw)
-        .ok_or_else(|| ExitError::new(2, "token_missing: XP_ADMIN_TOKEN not set"))?;
+    let token_hash = parse_admin_token_hash(&raw)
+        .ok_or_else(|| ExitError::new(2, "token_missing: XP_ADMIN_TOKEN_HASH not set"))?;
 
     let output = if args.redacted {
-        redact_token(&token)
+        redact_token(&token_hash)
     } else {
-        token
+        token_hash
     };
 
     println!("{output}");
     Ok(())
 }
 
-fn parse_admin_token(raw: &str) -> Option<String> {
+fn parse_admin_token_hash(raw: &str) -> Option<String> {
     for line in raw.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(value) = line.strip_prefix("XP_ADMIN_TOKEN=") {
+        if let Some(value) = line.strip_prefix("XP_ADMIN_TOKEN_HASH=") {
             let value = value.trim();
             if value.is_empty() {
                 return None;

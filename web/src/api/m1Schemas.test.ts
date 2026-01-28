@@ -39,6 +39,7 @@ describe("ClusterInfoResponseSchema", () => {
 				role: "leader",
 				leader_api_base_url: "https://127.0.0.1:62416",
 				term: 1,
+				xp_version: "0.0.0",
 			}),
 		).toEqual({
 			cluster_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
@@ -46,6 +47,7 @@ describe("ClusterInfoResponseSchema", () => {
 			role: "leader",
 			leader_api_base_url: "https://127.0.0.1:62416",
 			term: 1,
+			xp_version: "0.0.0",
 		});
 	});
 });

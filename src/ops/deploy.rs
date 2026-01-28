@@ -1,3 +1,4 @@
+use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash, verify_admin_token};
 use crate::ops::cli::{
     DeployArgs, ExitError, InitArgs, InitSystemArg, InstallArgs, InstallOnly, XpBootstrapArgs,
     XpInstallArgs,
@@ -59,6 +60,7 @@ struct DeployPlan {
     access_host: String,
     api_base_url: String,
     api_base_url_source: ValueSource,
+    join_token_present: bool,
     xray_version: String,
     enable_services: bool,
     cloudflare_enabled: bool,
@@ -79,6 +81,34 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     let force_overwrite = args.overwrite_existing;
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
     let interactive = !args.non_interactive && io::stdin().is_terminal();
+
+    if args.join_token_stdin && args.cloudflare_token_stdin {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --join-token-stdin conflicts with --cloudflare-token-stdin (stdin can only provide one secret)",
+        ));
+    }
+
+    if args.join_token_stdin {
+        if io::stdin().is_terminal() {
+            return Err(ExitError::new(
+                2,
+                "invalid_args: --join-token-stdin requires piped stdin (e.g. printf \"%s\" <token> | ...)",
+            ));
+        }
+        let mut s = String::new();
+        io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| ExitError::new(2, format!("invalid_args: read stdin: {e}")))?;
+        let token = s.trim().to_string();
+        if token.is_empty() {
+            return Err(ExitError::new(
+                2,
+                "invalid_args: --join-token-stdin was set but stdin was empty",
+            ));
+        }
+        args.join_token_stdin_value = Some(token);
+    }
 
     if args.cloudflare_token_stdin {
         if !cloudflare_enabled {
@@ -220,8 +250,13 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         }
         eprintln!("  - init directories and service files (no enable)");
         eprintln!("  - install xp binary");
-        eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN)");
-        eprintln!("  - xp bootstrap (xp init)");
+        if plan.join_token_present {
+            eprintln!("  - xp join (cluster join token)");
+            eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH)");
+        } else {
+            eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH; print token once)");
+            eprintln!("  - xp bootstrap (xp init)");
+        }
         if plan.cloudflare_enabled {
             eprintln!("  - cloudflare provision");
         }
@@ -253,7 +288,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     }
 
     // Run `xp-ops init` first so the `xp` group (and related init-system files) exist;
-    // then write /etc/xp/xp.env (XP_ADMIN_TOKEN) with correct ownership.
+    // then write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH) with correct ownership.
     init::cmd_init(
         paths.clone(),
         InitArgs {
@@ -268,7 +303,18 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     .await?;
 
     // After `xp-ops init`, we know the `xp` group exists (so `chown root:xp` is reliable).
-    ensure_xp_env_admin_token(&paths, mode)?;
+    let bootstrap_admin_token = if plan.join_token_present {
+        None
+    } else {
+        ensure_xp_env_admin_token_hash_bootstrap(&paths, mode)?
+    };
+    if mode == Mode::Real
+        && !is_test_root(paths.root())
+        && let Some(token) = bootstrap_admin_token.as_ref()
+    {
+        eprintln!("admin token (save it now; printed once; not stored on the server):");
+        println!("{token}");
+    }
 
     if let Some(xp_bin) = plan.xp_install_from.clone() {
         xp::cmd_xp_install(
@@ -282,17 +328,44 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         .await?;
     }
 
-    xp::cmd_xp_bootstrap(
-        paths.clone(),
-        XpBootstrapArgs {
-            node_name: plan.node_name.clone(),
-            access_host: plan.access_host.clone(),
-            api_base_url: plan.api_base_url.clone(),
-            xp_data_dir: Path::new("/var/lib/xp/data").to_path_buf(),
-            dry_run: mode == Mode::DryRun,
-        },
-    )
-    .await?;
+    if plan.join_token_present {
+        let join_token = args
+            .join_token
+            .clone()
+            .or(args.join_token_stdin_value.clone())
+            .ok_or_else(|| ExitError::new(2, "invalid_args: join token is missing"))?;
+
+        xp::cmd_xp_join(
+            paths.clone(),
+            "/var/lib/xp/data".into(),
+            plan.node_name.clone(),
+            plan.access_host.clone(),
+            plan.api_base_url.clone(),
+            join_token,
+            mode == Mode::DryRun,
+        )
+        .await?;
+
+        if mode == Mode::DryRun {
+            // `xp join` dry-run does not materialize cluster metadata/hash files.
+            eprintln!("would write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH) from join result");
+        } else {
+            let hash = read_cluster_admin_token_hash(&paths, Path::new("/var/lib/xp/data"))?;
+            ensure_xp_env_admin_token_hash_join(&paths, mode, &hash, force_overwrite)?;
+        }
+    } else {
+        xp::cmd_xp_bootstrap(
+            paths.clone(),
+            XpBootstrapArgs {
+                node_name: plan.node_name.clone(),
+                access_host: plan.access_host.clone(),
+                api_base_url: plan.api_base_url.clone(),
+                xp_data_dir: Path::new("/var/lib/xp/data").to_path_buf(),
+                dry_run: mode == Mode::DryRun,
+            },
+        )
+        .await?;
+    }
 
     if let Some(cf) = plan.cloudflare.clone() {
         let token = cloudflare::load_cloudflare_token_for_deploy(
@@ -410,7 +483,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     if mode == Mode::Real && !is_test_root(paths.root()) {
         eprintln!(
-            "admin note: XP admin token is stored in /etc/xp/xp.env (XP_ADMIN_TOKEN); show it with: sudo xp-ops admin-token show (or --redacted)."
+            "admin note: XP admin token is printed once during bootstrap deploy; the server only stores its hash in /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH)."
         );
     }
 
@@ -420,6 +493,8 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, ExitError> {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
+
+    let join_token_present = args.join_token.is_some() || args.join_token_stdin_value.is_some();
 
     let xp_path = paths.usr_local_bin_xp();
     match args.xp_bin.as_ref() {
@@ -675,6 +750,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         access_host: args.access_host.clone(),
         api_base_url,
         api_base_url_source,
+        join_token_present,
         xray_version: args.xray_version.clone(),
         enable_services: args.enable_services_toggle.enabled(),
         cloudflare_enabled,
@@ -1435,7 +1511,122 @@ fn confirm(message: &str) -> Result<bool, ExitError> {
     Ok(v == "y" || v == "yes")
 }
 
-fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+#[derive(Default)]
+struct XpEnvFlags {
+    has_data_dir: bool,
+    has_xray_addr: bool,
+    has_xray_health_interval: bool,
+    has_xray_health_fails_before_down: bool,
+    has_xray_restart_mode: bool,
+    has_xray_restart_cooldown: bool,
+    has_xray_restart_timeout: bool,
+    has_xray_systemd_unit: bool,
+    has_xray_openrc_service: bool,
+}
+
+fn parse_xp_env(raw: Option<String>) -> (Vec<String>, Option<String>, Option<String>, XpEnvFlags) {
+    let mut retained: Vec<String> = Vec::new();
+    let mut admin_token_plain: Option<String> = None;
+    let mut admin_token_hash: Option<String> = None;
+    let mut flags = XpEnvFlags::default();
+
+    let Some(s) = raw else {
+        return (retained, admin_token_plain, admin_token_hash, flags);
+    };
+
+    for line in s.lines() {
+        let line = line.trim();
+        if line.starts_with("XP_ADMIN_TOKEN_HASH=") {
+            if line.len() > "XP_ADMIN_TOKEN_HASH=".len() {
+                admin_token_hash = Some(
+                    line.trim_start_matches("XP_ADMIN_TOKEN_HASH=")
+                        .trim()
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_ADMIN_TOKEN=") {
+            if line.len() > "XP_ADMIN_TOKEN=".len() {
+                admin_token_plain = Some(
+                    line.trim_start_matches("XP_ADMIN_TOKEN=")
+                        .trim()
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_DATA_DIR=") {
+            flags.has_data_dir = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_API_ADDR=") {
+            flags.has_xray_addr = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_HEALTH_INTERVAL_SECS=") {
+            flags.has_xray_health_interval = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=") {
+            flags.has_xray_health_fails_before_down = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_RESTART_MODE=") {
+            flags.has_xray_restart_mode = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_RESTART_COOLDOWN_SECS=") {
+            flags.has_xray_restart_cooldown = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_RESTART_TIMEOUT_SECS=") {
+            flags.has_xray_restart_timeout = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_SYSTEMD_UNIT=") {
+            flags.has_xray_systemd_unit = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_XRAY_OPENRC_SERVICE=") {
+            flags.has_xray_openrc_service = true;
+            retained.push(line.to_string());
+            continue;
+        }
+        retained.push(line.to_string());
+    }
+
+    (retained, admin_token_plain, admin_token_hash, flags)
+}
+
+fn default_xray_restart_mode(paths: &Paths) -> &'static str {
+    if is_test_root(paths.root()) {
+        return "none";
+    }
+    let distro = detect_distro(paths).ok();
+    let init_system = distro.map(|d| detect_init_system(d, None));
+    match init_system {
+        Some(InitSystem::Systemd) => "systemd",
+        Some(InitSystem::OpenRc) => "openrc",
+        _ => "none",
+    }
+}
+
+fn write_xp_env(
+    paths: &Paths,
+    mode: Mode,
+    retained: Vec<String>,
+    flags: XpEnvFlags,
+    admin_token_hash: &str,
+) -> Result<(), ExitError> {
     let p = paths.etc_xp_env();
     if mode == Mode::DryRun {
         eprintln!("would ensure: {}", p.display());
@@ -1445,118 +1636,36 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
     ensure_dir(&paths.etc_xp_dir())
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
-    let existing = fs::read_to_string(&p).ok();
-    let mut retained: Vec<String> = Vec::new();
-    let mut admin_token: Option<String> = None;
-    let mut has_data_dir = false;
-    let mut has_xray_addr = false;
-    let mut has_xray_health_interval = false;
-    let mut has_xray_health_fails_before_down = false;
-    let mut has_xray_restart_mode = false;
-    let mut has_xray_restart_cooldown = false;
-    let mut has_xray_restart_timeout = false;
-    let mut has_xray_systemd_unit = false;
-    let mut has_xray_openrc_service = false;
-    if let Some(s) = existing {
-        for line in s.lines() {
-            if line.starts_with("XP_ADMIN_TOKEN=") {
-                if line.len() > "XP_ADMIN_TOKEN=".len() {
-                    admin_token = Some(line.trim().to_string());
-                }
-                continue;
-            }
-            if line.starts_with("XP_DATA_DIR=") {
-                has_data_dir = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_API_ADDR=") {
-                has_xray_addr = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_HEALTH_INTERVAL_SECS=") {
-                has_xray_health_interval = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=") {
-                has_xray_health_fails_before_down = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_RESTART_MODE=") {
-                has_xray_restart_mode = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_RESTART_COOLDOWN_SECS=") {
-                has_xray_restart_cooldown = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_RESTART_TIMEOUT_SECS=") {
-                has_xray_restart_timeout = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_SYSTEMD_UNIT=") {
-                has_xray_systemd_unit = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            if line.starts_with("XP_XRAY_OPENRC_SERVICE=") {
-                has_xray_openrc_service = true;
-                retained.push(line.to_string());
-                continue;
-            }
-            retained.push(line.to_string());
-        }
-    }
-
-    let token_line = admin_token.unwrap_or_else(|| {
-        let token = generate_admin_token();
-        format!("XP_ADMIN_TOKEN={token}")
-    });
-
     let mut lines = retained;
-    lines.push(token_line);
-    if !has_data_dir {
+    lines.push(format!("XP_ADMIN_TOKEN_HASH={admin_token_hash}"));
+    if !flags.has_data_dir {
         lines.push("XP_DATA_DIR=/var/lib/xp/data".to_string());
     }
-    if !has_xray_addr {
+    if !flags.has_xray_addr {
         lines.push("XP_XRAY_API_ADDR=127.0.0.1:10085".to_string());
     }
-    if !has_xray_health_interval {
+    if !flags.has_xray_health_interval {
         lines.push("XP_XRAY_HEALTH_INTERVAL_SECS=2".to_string());
     }
-    if !has_xray_health_fails_before_down {
+    if !flags.has_xray_health_fails_before_down {
         lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
     }
-    if !has_xray_restart_mode {
-        let default_mode = if is_test_root(paths.root()) {
-            "none"
-        } else {
-            let distro = detect_distro(paths).ok();
-            let init_system = distro.map(|d| detect_init_system(d, None));
-            match init_system {
-                Some(InitSystem::Systemd) => "systemd",
-                Some(InitSystem::OpenRc) => "openrc",
-                _ => "none",
-            }
-        };
-        lines.push(format!("XP_XRAY_RESTART_MODE={default_mode}"));
+    if !flags.has_xray_restart_mode {
+        lines.push(format!(
+            "XP_XRAY_RESTART_MODE={}",
+            default_xray_restart_mode(paths)
+        ));
     }
-    if !has_xray_restart_cooldown {
+    if !flags.has_xray_restart_cooldown {
         lines.push("XP_XRAY_RESTART_COOLDOWN_SECS=30".to_string());
     }
-    if !has_xray_restart_timeout {
+    if !flags.has_xray_restart_timeout {
         lines.push("XP_XRAY_RESTART_TIMEOUT_SECS=5".to_string());
     }
-    if !has_xray_systemd_unit {
+    if !flags.has_xray_systemd_unit {
         lines.push("XP_XRAY_SYSTEMD_UNIT=xray.service".to_string());
     }
-    if !has_xray_openrc_service {
+    if !flags.has_xray_openrc_service {
         lines.push("XP_XRAY_OPENRC_SERVICE=xray".to_string());
     }
 
@@ -1570,6 +1679,107 @@ fn ensure_xp_env_admin_token(paths: &Paths, mode: Mode) -> Result<(), ExitError>
             .status();
     }
     Ok(())
+}
+
+fn ensure_xp_env_admin_token_hash_bootstrap(
+    paths: &Paths,
+    mode: Mode,
+) -> Result<Option<String>, ExitError> {
+    let p = paths.etc_xp_env();
+    let existing = fs::read_to_string(&p).ok();
+    let (retained, admin_token_plain, admin_token_hash, flags) = parse_xp_env(existing);
+
+    if let Some(raw_hash) = admin_token_hash.as_deref() {
+        if parse_admin_token_hash(raw_hash).is_none() {
+            return Err(ExitError::new(
+                2,
+                "invalid_input: XP_ADMIN_TOKEN_HASH is present but invalid in /etc/xp/xp.env",
+            ));
+        }
+        write_xp_env(paths, mode, retained, flags, raw_hash)?;
+        return Ok(None);
+    }
+
+    if let Some(token) = admin_token_plain.as_deref() {
+        let hash = hash_admin_token_argon2id(token)
+            .map_err(|e| ExitError::new(2, format!("invalid_input: admin token hash: {e}")))?;
+        write_xp_env(paths, mode, retained, flags, hash.as_str())?;
+        return Ok(None);
+    }
+
+    let token = generate_admin_token();
+    let hash = hash_admin_token_argon2id(&token)
+        .map_err(|e| ExitError::new(2, format!("invalid_input: admin token hash: {e}")))?;
+    write_xp_env(paths, mode, retained, flags, hash.as_str())?;
+    Ok(Some(token))
+}
+
+fn ensure_xp_env_admin_token_hash_join(
+    paths: &Paths,
+    mode: Mode,
+    expected_hash: &str,
+    force_overwrite: bool,
+) -> Result<(), ExitError> {
+    if parse_admin_token_hash(expected_hash).is_none() {
+        return Err(ExitError::new(2, "invalid_args: expected hash is invalid"));
+    }
+
+    let p = paths.etc_xp_env();
+    let existing = fs::read_to_string(&p).ok();
+    let (retained, admin_token_plain, admin_token_hash, flags) = parse_xp_env(existing);
+
+    if let Some(raw_hash) = admin_token_hash.as_deref() {
+        if parse_admin_token_hash(raw_hash).is_none() {
+            return Err(ExitError::new(
+                2,
+                "invalid_input: XP_ADMIN_TOKEN_HASH is present but invalid in /etc/xp/xp.env",
+            ));
+        }
+        if raw_hash != expected_hash && !force_overwrite {
+            return Err(ExitError::new(
+                2,
+                "admin_token_mismatch: existing XP_ADMIN_TOKEN_HASH differs (use --overwrite-existing to replace)",
+            ));
+        }
+        write_xp_env(paths, mode, retained, flags, expected_hash)?;
+        return Ok(());
+    }
+
+    if let Some(token) = admin_token_plain.as_deref() {
+        let Some(expected) = parse_admin_token_hash(expected_hash) else {
+            return Err(ExitError::new(2, "invalid_args: expected hash is invalid"));
+        };
+        if !verify_admin_token(token, &expected) && !force_overwrite {
+            return Err(ExitError::new(
+                2,
+                "admin_token_mismatch: existing XP_ADMIN_TOKEN does not match cluster token (use --overwrite-existing to replace)",
+            ));
+        }
+        write_xp_env(paths, mode, retained, flags, expected_hash)?;
+        return Ok(());
+    }
+
+    write_xp_env(paths, mode, retained, flags, expected_hash)?;
+    Ok(())
+}
+
+fn read_cluster_admin_token_hash(paths: &Paths, data_dir: &Path) -> Result<String, ExitError> {
+    let abs_data_dir = paths.map_abs(data_dir);
+    let cluster_paths = crate::cluster_metadata::ClusterPaths::new(&abs_data_dir);
+    let raw = fs::read_to_string(&cluster_paths.admin_token_hash).map_err(|_| {
+        ExitError::new(
+            2,
+            "admin_token_missing: cluster admin token hash not found (did xp join succeed?)",
+        )
+    })?;
+    let hash = raw.trim();
+    if parse_admin_token_hash(hash).is_none() {
+        return Err(ExitError::new(
+            2,
+            "admin_token_invalid: cluster admin token hash is invalid",
+        ));
+    }
+    Ok(hash.to_string())
 }
 
 fn generate_admin_token() -> String {
@@ -1588,18 +1798,18 @@ mod tests {
     }
 
     #[test]
-    fn ensure_xp_env_admin_token_keeps_xray_defaults_on_second_run() {
+    fn ensure_xp_env_admin_token_hash_keeps_xray_defaults_on_second_run() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
 
         fs::create_dir_all(paths.etc_xp_dir()).unwrap();
-        fs::write(paths.etc_xp_env(), "XP_ADMIN_TOKEN=testtoken\n").unwrap();
+        fs::write(paths.etc_xp_env(), "XP_ADMIN_TOKEN_HASH=sha256:deadbeef\n").unwrap();
 
-        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
-        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
+        ensure_xp_env_admin_token_hash_bootstrap(&paths, Mode::Real).unwrap();
+        ensure_xp_env_admin_token_hash_bootstrap(&paths, Mode::Real).unwrap();
 
         let env = read_env(&paths);
-        assert!(env.contains("XP_ADMIN_TOKEN=testtoken"));
+        assert!(env.contains("XP_ADMIN_TOKEN_HASH=sha256:deadbeef"));
         assert!(env.contains("XP_DATA_DIR="));
         assert!(env.contains("XP_XRAY_API_ADDR="));
         assert!(env.contains("XP_XRAY_HEALTH_INTERVAL_SECS="));
@@ -1612,14 +1822,14 @@ mod tests {
     }
 
     #[test]
-    fn ensure_xp_env_admin_token_preserves_user_xray_overrides() {
+    fn ensure_xp_env_admin_token_hash_preserves_user_xray_overrides() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
 
         fs::create_dir_all(paths.etc_xp_dir()).unwrap();
         fs::write(
             paths.etc_xp_env(),
-            "XP_ADMIN_TOKEN=testtoken\n\
+            "XP_ADMIN_TOKEN_HASH=sha256:deadbeef\n\
 XP_DATA_DIR=/custom/data\n\
 XP_XRAY_API_ADDR=127.0.0.1:12345\n\
 XP_XRAY_RESTART_MODE=systemd\n\
@@ -1629,7 +1839,7 @@ XP_XRAY_CUSTOM=keep-me\n",
         )
         .unwrap();
 
-        ensure_xp_env_admin_token(&paths, Mode::Real).unwrap();
+        ensure_xp_env_admin_token_hash_bootstrap(&paths, Mode::Real).unwrap();
 
         let env = read_env(&paths);
         assert!(env.contains("XP_DATA_DIR=/custom/data"));
@@ -1664,6 +1874,9 @@ XP_XRAY_CUSTOM=keep-me\n",
             hostname: Some("node-1.example.com".to_string()),
             tunnel_name: None,
             origin_url: None,
+            join_token: None,
+            join_token_stdin: false,
+            join_token_stdin_value: None,
             cloudflare_token: None,
             cloudflare_token_stdin: false,
             cloudflare_token_stdin_value: None,
@@ -1702,12 +1915,6 @@ fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
         return Err(ExitError::new(
             2,
             "invalid_args: api-base-url must be https",
-        ));
-    }
-    if url.port().is_some() {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: api-base-url must not specify a custom port",
         ));
     }
     if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {

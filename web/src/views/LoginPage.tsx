@@ -74,12 +74,8 @@ export function LoginPage() {
 								No token set. Please add a token to continue.
 							</p>
 							<p className="text-xs opacity-70">
-								On the server, get it from{" "}
-								<span className="font-mono">
-									/etc/xp/xp.env (XP_ADMIN_TOKEN)
-								</span>{" "}
-								or run{" "}
-								<span className="font-mono">sudo xp-ops admin-token show</span>.
+								The admin token is printed once during the bootstrap deploy. It
+								is not stored on the server.
 							</p>
 						</div>
 					) : (

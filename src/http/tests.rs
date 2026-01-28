@@ -32,6 +32,8 @@ use crate::{
 };
 
 fn test_config(data_dir: PathBuf) -> Config {
+    let token = "testtoken";
+    let digest = Sha256::digest(token.as_bytes());
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
@@ -43,7 +45,8 @@ fn test_config(data_dir: PathBuf) -> Config {
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir,
-        admin_token: "testtoken".to_string(),
+        admin_token_hash: format!("sha256:{}", hex::encode(digest)),
+        admin_token: String::new(),
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
@@ -877,7 +880,7 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["quota_auto_unban"], true);
 
     assert_eq!(json["admin_token_present"], true);
-    assert_eq!(json["admin_token_masked"], "*********");
+    assert_eq!(json["admin_token_masked"], "********");
     assert_ne!(json["admin_token_masked"], "testtoken");
 }
 

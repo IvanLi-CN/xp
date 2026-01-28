@@ -8,6 +8,7 @@ export const ClusterInfoResponseSchema = z.object({
 	role: z.string(),
 	leader_api_base_url: z.string(),
 	term: z.number().int().nonnegative(),
+	xp_version: z.string(),
 });
 
 export type ClusterInfoResponse = z.infer<typeof ClusterInfoResponseSchema>;

@@ -140,6 +140,92 @@ pub async fn cmd_xp_bootstrap(paths: Paths, args: XpBootstrapArgs) -> Result<(),
     Ok(())
 }
 
+pub async fn cmd_xp_join(
+    paths: Paths,
+    xp_data_dir: std::path::PathBuf,
+    node_name: String,
+    access_host: String,
+    api_base_url: String,
+    join_token: String,
+    dry_run: bool,
+) -> Result<(), ExitError> {
+    let mode = if dry_run { Mode::DryRun } else { Mode::Real };
+
+    if join_token.trim().is_empty() {
+        return Err(ExitError::new(2, "invalid_args: join token is empty"));
+    }
+    validate_https_origin(&api_base_url)?;
+
+    let xp_bin = paths.map_abs(Path::new("/usr/local/bin/xp"));
+    if !xp_bin.exists() {
+        return Err(ExitError::new(3, "xp_not_installed"));
+    }
+
+    let metadata_path = paths
+        .map_abs(&xp_data_dir)
+        .join("cluster")
+        .join("metadata.json");
+    if metadata_path.exists() {
+        return Ok(());
+    }
+
+    if mode == Mode::DryRun {
+        eprintln!("would run as user xp: /usr/local/bin/xp join ...");
+        return Ok(());
+    }
+
+    if is_test_root(paths.root()) {
+        return Err(ExitError::new(
+            5,
+            "xp_join_failed: xp join requires real system environment (use --dry-run for tests)",
+        ));
+    }
+
+    // Prefer runuser if present; fallback to su.
+    let has_runuser = Command::new("runuser")
+        .arg("--help")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    let status = if has_runuser {
+        let mut c = Command::new("runuser");
+        c.args(["-u", "xp", "--", "/usr/local/bin/xp", "join"]);
+        c.args([
+            "--data-dir",
+            xp_data_dir.to_string_lossy().as_ref(),
+            "--node-name",
+            &node_name,
+            "--access-host",
+            &access_host,
+            "--api-base-url",
+            &api_base_url,
+            "--token",
+            &join_token,
+        ]);
+        c.status()
+    } else {
+        let cmdline = format!(
+            "/usr/local/bin/xp join --data-dir {} --node-name {} --access-host {} --api-base-url {} --token {}",
+            sh_quote(&xp_data_dir.to_string_lossy()),
+            sh_quote(&node_name),
+            sh_quote(&access_host),
+            sh_quote(&api_base_url),
+            sh_quote(&join_token),
+        );
+        Command::new("su")
+            .args(["-s", "/bin/sh", "xp", "-c", &cmdline])
+            .status()
+    };
+    let status = status.map_err(|e| ExitError::new(5, format!("xp_join_failed: {e}")))?;
+    if !status.success() {
+        return Err(ExitError::new(5, "xp_join_failed"));
+    }
+    Ok(())
+}
+
 fn sh_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
