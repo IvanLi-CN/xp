@@ -42,7 +42,7 @@ xp-ops deploy \
   3. 安装 `xp`（来源/策略沿用现有）
   4. 执行 join（不得执行 `xp init`）并获取集群 `XP_ADMIN_TOKEN_HASH`（见 `contracts/http-apis.md`）
   5. 写入 `/etc/xp/xp.env`（必须包含从 leader 同步到的 `XP_ADMIN_TOKEN_HASH`；不得写入明文 token）
-  6.（可选）启用并启动服务（同 `--enable-services`）
+     6.（可选）启用并启动服务（同 `--enable-services`）
 - join 模式不得要求用户额外输入 admin token；token 获取必须在“只提供 join token”的条件下完成。
 - 当 `/etc/xp/xp.env` 已存在且 `XP_ADMIN_TOKEN_HASH` 与 leader 下发值不一致：
   - 默认 MUST 失败

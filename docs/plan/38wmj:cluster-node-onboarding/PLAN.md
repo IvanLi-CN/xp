@@ -65,20 +65,20 @@
   - join 模式下不得要求用户手工输入/粘贴 admin token；必须由程序自动、安全地获取并写入（见接口契约）。
   - 当目标机已有 `/etc/xp/xp.env` 且 `XP_ADMIN_TOKEN` 与输入不一致时，默认必须失败并提示 `--overwrite-existing`（避免静默形成不一致）。
 - 所有实现不得把 token 写入普通日志；错误信息需可操作（指出缺失项与建议命令行参数）。
- - bootstrap 节点首次部署时，`xp-ops deploy` 必须自动生成一个随机 admin token，并且：
-   - 只在终端 **打印一次** 明文 token（用于管理员保存与登录 Web）
-   - 仅将其 hash 落盘（`/etc/xp/xp.env`），服务端不得保存明文
+- bootstrap 节点首次部署时，`xp-ops deploy` 必须自动生成一个随机 admin token，并且：
+  - 只在终端 **打印一次** 明文 token（用于管理员保存与登录 Web）
+  - 仅将其 hash 落盘（`/etc/xp/xp.env`），服务端不得保存明文
 
 ## 接口契约（Interfaces & Contracts）
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `xp-ops deploy` join mode (auto admin token sync) | CLI | internal | Modify | ./contracts/cli.md | ops | 管理员、Web 指引 | join 流程与 token 同步 |
-| `POST /api/cluster/join` response schema | HTTP API | internal | Modify | ./contracts/http-apis.md | server | xp / xp-ops | join 过程下发集群 admin token |
-| `/etc/xp/xp.env` (`XP_ADMIN_TOKEN_HASH`) | File format | internal | Modify | ./contracts/file-formats.md | ops/server | xp / xp-ops | 服务端不落原文，仅存 hash |
-| `GET /api/cluster/info` response schema | HTTP API | internal | Modify | ./contracts/http-apis.md | server | Web UI | 增加 `xp_version` 供 Web 生成下载命令 |
+| 接口（Name）                                      | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                         |
+| ------------------------------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | ------------------- | ------------------------------------- |
+| `xp-ops deploy` join mode (auto admin token sync) | CLI          | internal      | Modify         | ./contracts/cli.md          | ops             | 管理员、Web 指引    | join 流程与 token 同步                |
+| `POST /api/cluster/join` response schema          | HTTP API     | internal      | Modify         | ./contracts/http-apis.md    | server          | xp / xp-ops         | join 过程下发集群 admin token         |
+| `/etc/xp/xp.env` (`XP_ADMIN_TOKEN_HASH`)          | File format  | internal      | Modify         | ./contracts/file-formats.md | ops/server      | xp / xp-ops         | 服务端不落原文，仅存 hash             |
+| `GET /api/cluster/info` response schema           | HTTP API     | internal      | Modify         | ./contracts/http-apis.md    | server          | Web UI              | 增加 `xp_version` 供 Web 生成下载命令 |
 
 ### 契约文档（按 Kind 拆分）
 

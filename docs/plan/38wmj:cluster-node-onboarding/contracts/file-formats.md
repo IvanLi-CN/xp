@@ -2,7 +2,7 @@
 
 ## `/etc/xp/xp.env`
 
-Scope: internal  
+Scope: internal\
 Change: Modify
 
 ### Purpose
