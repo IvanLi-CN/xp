@@ -294,43 +294,53 @@ export function NodesPage() {
 					) : null}
 					{joinToken ? (
 						<div className="space-y-4 rounded-box bg-base-200 p-4">
-							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-								<div className="space-y-1">
-									<p className="text-xs uppercase tracking-wide opacity-60">
-										Join token
-									</p>
-									<p className="font-mono text-sm break-all">{joinToken}</p>
-								</div>
-								<CopyButton text={joinToken} label="Copy token" />
-							</div>
-							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-								<div className="space-y-1">
-									<p className="text-xs uppercase tracking-wide opacity-60">
-										xp join command (legacy)
-									</p>
-									<p className="font-mono text-sm break-all">{joinCommand}</p>
-								</div>
-								<CopyButton text={joinCommand} label="Copy command" />
-							</div>
-							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-								<div className="space-y-1 min-w-0">
-									<p className="text-xs uppercase tracking-wide opacity-60">
-										xp-ops deploy command (recommended)
-									</p>
-									{deployCommand ? (
-										<pre className="font-mono text-sm whitespace-pre-wrap break-words">
-											{deployCommand}
-										</pre>
-									) : (
-										<p className="text-sm opacity-70">
-											Loading cluster version...
+							<div className="grid gap-3 lg:grid-cols-3">
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+									<div className="space-y-1">
+										<p className="text-xs uppercase tracking-wide opacity-60">
+											Join token
 										</p>
-									)}
+										<p className="font-mono text-sm break-all">{joinToken}</p>
+									</div>
+									<div className="flex justify-end">
+										<CopyButton text={joinToken} label="Copy token" />
+									</div>
 								</div>
-								<CopyButton
-									text={deployCommand || ""}
-									label="Copy deploy command"
-								/>
+
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+									<div className="space-y-1">
+										<p className="text-xs uppercase tracking-wide opacity-60">
+											xp join command (legacy)
+										</p>
+										<p className="font-mono text-sm break-all">{joinCommand}</p>
+									</div>
+									<div className="flex justify-end">
+										<CopyButton text={joinCommand} label="Copy command" />
+									</div>
+								</div>
+
+								<div className="space-y-3 rounded-box bg-base-100/60 p-4">
+									<div className="space-y-1 min-w-0">
+										<p className="text-xs uppercase tracking-wide opacity-60">
+											xp-ops deploy command (recommended)
+										</p>
+										{deployCommand ? (
+											<pre className="font-mono text-sm whitespace-pre-wrap break-words">
+												{deployCommand}
+											</pre>
+										) : (
+											<p className="text-sm opacity-70">
+												Loading cluster version...
+											</p>
+										)}
+									</div>
+									<div className="flex justify-end">
+										<CopyButton
+											text={deployCommand || ""}
+											label="Copy deploy command"
+										/>
+									</div>
+								</div>
 							</div>
 						</div>
 					) : null}
