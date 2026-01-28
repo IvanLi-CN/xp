@@ -162,18 +162,12 @@ sudo rc-service xp start
 
 ### Recommended: upgrade via `xp-ops` (GitHub Releases)
 
-`xp-ops` can upgrade itself and `xp` from GitHub Releases (Linux musl assets).
+`xp-ops` can upgrade both `xp` and `xp-ops` from GitHub Releases (Linux musl assets).
 
-Self-upgrade `xp-ops`:
-
-```
-sudo xp-ops self-upgrade --version latest
-```
-
-Upgrade `xp` (installs to `/usr/local/bin/xp` and restarts the service):
+Upgrade both `xp` (installs to `/usr/local/bin/xp` and restarts the service) and `xp-ops`:
 
 ```
-sudo xp-ops xp upgrade --version latest
+sudo xp-ops upgrade --version latest
 ```
 
 Useful flags:
@@ -184,8 +178,12 @@ Useful flags:
 
 Rollback notes:
 
-- Both upgrade commands keep a backup next to the install path as `<path>.bak.<unix-ts>`.
-- On upgrade failures, `xp-ops xp upgrade` automatically rolls back to the previous `xp` binary.
+- The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
+- On upgrade failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
+
+Legacy commands:
+
+- `xp-ops self-upgrade` and `xp-ops xp upgrade` are kept for backward compatibility, but are hidden from `--help` output.
 
 ### Backup before upgrade
 
