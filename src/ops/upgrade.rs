@@ -1,4 +1,4 @@
-use crate::ops::cli::{ExitError, SelfUpgradeArgs, UpgradeReleaseArgs, XpUpgradeArgs};
+use crate::ops::cli::{ExitError, SelfUpgradeArgs, UpgradeArgs, UpgradeReleaseArgs, XpUpgradeArgs};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
@@ -239,6 +239,22 @@ fn backup_path(dest: &Path) -> PathBuf {
         .unwrap_or_else(|| OsStr::new("bin"))
         .to_string_lossy();
     parent.join(format!("{name}.bak.{}", now_unix_secs()))
+}
+
+pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitError> {
+    let xp_args = XpUpgradeArgs {
+        release: args.release.clone(),
+        dry_run: args.dry_run,
+    };
+    cmd_xp_upgrade(paths.clone(), xp_args).await?;
+
+    let self_args = SelfUpgradeArgs {
+        release: args.release,
+        dry_run: args.dry_run,
+    };
+    cmd_self_upgrade(paths, self_args).await?;
+
+    Ok(())
 }
 
 pub async fn cmd_self_upgrade(paths: Paths, args: SelfUpgradeArgs) -> Result<(), ExitError> {

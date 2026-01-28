@@ -1,6 +1,6 @@
 use crate::ops::cli::{
     AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, DeployArgs, ExitError,
-    InitArgs, InstallArgs, SelfUpgradeArgs, XpCommand, XpInstallArgs, XpUpgradeArgs,
+    InitArgs, InstallArgs, SelfUpgradeArgs, UpgradeArgs, XpCommand, XpInstallArgs, XpUpgradeArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -35,6 +35,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
 
         Command::Install(args) => preflight_install(paths, args),
         Command::Init(args) => preflight_init(paths, args),
+        Command::Upgrade(args) => preflight_upgrade(paths, args),
         Command::SelfUpgrade(args) => preflight_self_upgrade(paths, args),
 
         Command::Xp(XpCommand::Install(args)) => preflight_xp_install(paths, args),
@@ -105,6 +106,26 @@ fn preflight_tui(paths: &Paths) -> Result<(), ExitError> {
                 paths.etc_xp_ops_cloudflare_token(),
                 "TUI saved Cloudflare API token",
             ),
+        ],
+    )
+}
+
+fn preflight_upgrade(paths: &Paths, args: &UpgradeArgs) -> Result<(), ExitError> {
+    if args.dry_run {
+        return Ok(());
+    }
+    check_targets(
+        paths,
+        &[
+            Target::dir(
+                paths.map_abs(Path::new("/tmp/xp-ops")),
+                "download workspace",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/usr/local/bin")),
+                "install location",
+            ),
+            Target::file(paths.usr_local_bin_xp(), "xp binary install"),
         ],
     )
 }

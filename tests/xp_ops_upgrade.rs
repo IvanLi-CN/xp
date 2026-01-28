@@ -280,6 +280,103 @@ mod linux {
     }
 
     #[tokio::test]
+    async fn upgrade_downloads_verifies_and_replaces_xp_and_xp_ops_binaries() {
+        let server = MockServer::start().await;
+
+        let xp_asset = xp_asset_name();
+        let xp_ops_asset = xp_ops_asset_name();
+
+        let new_xp = b"xp-new-binary";
+        let new_xp_ops = b"#!/bin/sh\nexit 0\n";
+
+        let xp_checksum = sha256_hex(new_xp);
+        let xp_ops_checksum = sha256_hex(new_xp_ops);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/o/r/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "tag_name": "v0.1.999",
+              "prerelease": false,
+              "published_at": "2026-01-20T00:00:00Z",
+              "assets": [
+                { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
+                { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },
+                { "name": "checksums.txt", "browser_download_url": format!("{}/download/checksums.txt", server.uri()) }
+              ]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_ops_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/download/checksums.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "{xp_checksum}  {xp_asset}\n{xp_ops_checksum}  {xp_ops_asset}\n"
+            )))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let xp_path = tmp.path().join("usr/local/bin/xp");
+        fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
+        fs::write(&xp_path, b"xp-old-binary").unwrap();
+
+        let src = assert_cmd::cargo::cargo_bin("xp-ops");
+        let dest = tmp.path().join("xp-ops-copy");
+        fs::copy(src, &dest).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut p = fs::metadata(&dest).unwrap().permissions();
+            p.set_mode(0o755);
+            fs::set_permissions(&dest, p).unwrap();
+        }
+
+        let original_xp_ops = fs::read(&dest).unwrap();
+
+        let mut cmd = assert_cmd::Command::new(&dest);
+        cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        cmd.args([
+            "--root",
+            &root,
+            "upgrade",
+            "--version",
+            "latest",
+            "--repo",
+            "o/r",
+        ]);
+
+        cmd.assert().success();
+
+        let new_xp_bytes = fs::read(&xp_path).unwrap();
+        assert_eq!(new_xp_bytes, new_xp);
+        let xp_backup = find_backup(xp_path.parent().unwrap(), "xp.bak.").unwrap();
+        let xp_backup_bytes = fs::read(xp_backup).unwrap();
+        assert_eq!(xp_backup_bytes, b"xp-old-binary");
+
+        let new_xp_ops_bytes = fs::read(&dest).unwrap();
+        assert_eq!(new_xp_ops_bytes, new_xp_ops);
+
+        let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
+        let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();
+        let xp_ops_backup_bytes = fs::read(xp_ops_backup).unwrap();
+        assert_eq!(xp_ops_backup_bytes, original_xp_ops);
+    }
+
+    #[tokio::test]
     async fn self_upgrade_latest_prerelease_is_selected_by_published_at() {
         let server = MockServer::start().await;
 

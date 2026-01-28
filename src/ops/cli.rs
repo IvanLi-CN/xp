@@ -31,6 +31,10 @@ pub struct Cli {
 pub enum Command {
     Install(InstallArgs),
     Init(InitArgs),
+
+    Upgrade(UpgradeArgs),
+
+    #[command(hide = true)]
     SelfUpgrade(SelfUpgradeArgs),
 
     #[command(subcommand)]
@@ -98,6 +102,7 @@ pub enum InitSystemArg {
 #[derive(Subcommand, Debug)]
 pub enum XpCommand {
     Install(XpInstallArgs),
+    #[command(hide = true)]
     Upgrade(XpUpgradeArgs),
     Bootstrap(XpBootstrapArgs),
 }
@@ -135,6 +140,15 @@ pub struct UpgradeReleaseArgs {
 
     #[arg(long, value_name = "OWNER/REPO")]
     pub repo: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct UpgradeArgs {
+    #[command(flatten)]
+    pub release: UpgradeReleaseArgs,
+
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -376,10 +390,17 @@ pub async fn run() -> i32 {
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
-        Some(Command::SelfUpgrade(args)) => upgrade::cmd_self_upgrade(paths, args).await,
+        Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
+        Some(Command::SelfUpgrade(args)) => {
+            eprintln!("deprecated: use `xp-ops upgrade`");
+            upgrade::cmd_self_upgrade(paths, args).await
+        }
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
-            XpCommand::Upgrade(args) => upgrade::cmd_xp_upgrade(paths, args).await,
+            XpCommand::Upgrade(args) => {
+                eprintln!("deprecated: use `xp-ops upgrade`");
+                upgrade::cmd_xp_upgrade(paths, args).await
+            }
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
