@@ -1,7 +1,10 @@
 use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash as parse_hash_value};
 use crate::ops::cli::{AdminTokenSetArgs, AdminTokenShowArgs, ExitError};
 use crate::ops::paths::Paths;
-use crate::ops::util::{chmod, ensure_dir, is_test_root, write_string_if_changed};
+use crate::ops::util::{
+    chmod, ensure_dir, is_test_root, shell_quote_single, shell_unquote_wrapping_quotes,
+    write_string_if_changed,
+};
 use std::io::Read;
 
 pub async fn cmd_admin_token_show(paths: Paths, args: AdminTokenShowArgs) -> Result<(), ExitError> {
@@ -72,7 +75,13 @@ pub async fn cmd_admin_token_set(paths: Paths, args: AdminTokenSetArgs) -> Resul
         }
         retained.push(line.to_string());
     }
-    retained.push(format!("XP_ADMIN_TOKEN_HASH={hash_to_write}"));
+    let hash_to_write_quoted = shell_quote_single(&hash_to_write).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: XP_ADMIN_TOKEN_HASH cannot be written safely: {e}"),
+        )
+    })?;
+    retained.push(format!("XP_ADMIN_TOKEN_HASH={hash_to_write_quoted}"));
     let content = format!("{}\n", retained.join("\n"));
 
     if args.dry_run {
@@ -128,7 +137,7 @@ fn parse_admin_token_hash(raw: &str) -> Option<String> {
             continue;
         }
         if let Some(value) = line.strip_prefix("XP_ADMIN_TOKEN_HASH=") {
-            let value = value.trim();
+            let value = shell_unquote_wrapping_quotes(value);
             if value.is_empty() {
                 return None;
             }

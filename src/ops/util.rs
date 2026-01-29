@@ -78,3 +78,26 @@ pub fn tmp_path_next_to(path: &Path) -> PathBuf {
         std::process::id()
     ))
 }
+
+pub fn shell_unquote_wrapping_quotes(value: &str) -> &str {
+    let v = value.trim();
+    if v.len() >= 2 {
+        let bytes = v.as_bytes();
+        if (bytes[0] == b'\'' && bytes[v.len() - 1] == b'\'')
+            || (bytes[0] == b'"' && bytes[v.len() - 1] == b'"')
+        {
+            return &v[1..v.len() - 1];
+        }
+    }
+    v
+}
+
+pub fn shell_quote_single(value: &str) -> Result<String, &'static str> {
+    if value.contains('\'') {
+        return Err("contains_single_quote");
+    }
+    if value.contains('\n') || value.contains('\r') {
+        return Err("contains_newline");
+    }
+    Ok(format!("'{value}'"))
+}

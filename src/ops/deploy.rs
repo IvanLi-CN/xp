@@ -8,7 +8,10 @@ use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
 use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
-use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_string_if_changed};
+use crate::ops::util::{
+    Mode, chmod, ensure_dir, is_test_root, shell_quote_single, shell_unquote_wrapping_quotes,
+    write_string_if_changed,
+};
 use crate::ops::xp;
 use dialoguer::Confirm;
 use dialoguer::Select;
@@ -1539,9 +1542,10 @@ fn parse_xp_env(raw: Option<String>) -> (Vec<String>, Option<String>, Option<Str
         if line.starts_with("XP_ADMIN_TOKEN_HASH=") {
             if line.len() > "XP_ADMIN_TOKEN_HASH=".len() {
                 admin_token_hash = Some(
-                    line.trim_start_matches("XP_ADMIN_TOKEN_HASH=")
-                        .trim()
-                        .to_string(),
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_ADMIN_TOKEN_HASH=").trim(),
+                    )
+                    .to_string(),
                 );
             }
             continue;
@@ -1549,9 +1553,10 @@ fn parse_xp_env(raw: Option<String>) -> (Vec<String>, Option<String>, Option<Str
         if line.starts_with("XP_ADMIN_TOKEN=") {
             if line.len() > "XP_ADMIN_TOKEN=".len() {
                 admin_token_plain = Some(
-                    line.trim_start_matches("XP_ADMIN_TOKEN=")
-                        .trim()
-                        .to_string(),
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_ADMIN_TOKEN=").trim(),
+                    )
+                    .to_string(),
                 );
             }
             continue;
@@ -1637,7 +1642,13 @@ fn write_xp_env(
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let mut lines = retained;
-    lines.push(format!("XP_ADMIN_TOKEN_HASH={admin_token_hash}"));
+    let quoted = shell_quote_single(admin_token_hash).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: XP_ADMIN_TOKEN_HASH cannot be written safely: {e}"),
+        )
+    })?;
+    lines.push(format!("XP_ADMIN_TOKEN_HASH={quoted}"));
     if !flags.has_data_dir {
         lines.push("XP_DATA_DIR=/var/lib/xp/data".to_string());
     }
