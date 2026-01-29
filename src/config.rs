@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::admin_token::{AdminTokenHash, hash_admin_token_sha256_legacy, parse_admin_token_hash};
+use crate::admin_token::{AdminTokenHash, parse_admin_token_hash};
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XrayRestartMode {
@@ -149,15 +149,6 @@ pub struct Config {
     )]
     pub admin_token_hash: String,
 
-    #[arg(
-        long,
-        global = true,
-        env = "XP_ADMIN_TOKEN",
-        value_name = "TOKEN",
-        default_value = ""
-    )]
-    pub admin_token: String,
-
     #[arg(long, global = true, value_name = "NAME", default_value = "node-1")]
     pub node_name: String,
 
@@ -200,27 +191,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// Normalize admin token configuration:
-    /// - Prefer `XP_ADMIN_TOKEN_HASH` when present.
-    /// - If only `XP_ADMIN_TOKEN` is present, derive legacy `sha256:<hex>` hash.
-    /// - Always clear `admin_token` plaintext after normalization.
-    pub fn normalize_admin_token(&mut self) {
-        let hash = parse_admin_token_hash(&self.admin_token_hash);
-        if let Some(hash) = hash {
-            self.admin_token_hash = hash.as_str().to_string();
-            self.admin_token.clear();
-            return;
-        }
-
-        if !self.admin_token.trim().is_empty() {
-            // Backward-compat: accept plaintext token but only keep its hash in memory.
-            if let Ok(hash) = hash_admin_token_sha256_legacy(self.admin_token.trim()) {
-                self.admin_token_hash = hash.as_str().to_string();
-            }
-        }
-        self.admin_token.clear();
-    }
-
     pub fn admin_token_hash(&self) -> Option<AdminTokenHash> {
         parse_admin_token_hash(&self.admin_token_hash)
     }

@@ -55,7 +55,7 @@ Body (JSON):
 Notes:
 
 - `xp_admin_token_hash` MUST be the leader node's configured hash (the cluster source of truth) so joiners can align without operator input.
-- `xp_admin_token_hash` format (v1): Argon2id PHC string (see `contracts/file-formats.md`); legacy `sha256:<hex>` MAY be supported during migration.
+- `xp_admin_token_hash` format (v1): Argon2id PHC string (see `contracts/file-formats.md`).
 - The server MUST NOT log `xp_admin_token_hash` (nor `cluster_ca_key_pem`) in plaintext.
 - Security model note: confidentiality relies on TLS pinned by `cluster_ca_pem` carried in the join token; leaking a join token implies the attacker can join and receive the response secrets.
 

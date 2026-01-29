@@ -26,13 +26,13 @@ Change: Modify
   - Token plaintext is expected to be high-entropy (bootstrap: randomly generated), so the hash is primarily to avoid persisting plaintext.
   - Verification: server MUST verify using Argon2id against the stored PHC string (salt and params are encoded in the PHC string).
 - `XP_ADMIN_TOKEN` (deprecated): MUST NOT be required after this plan ships.
-  - Migration behavior to be defined in implementation: if present, server MAY compute `XP_ADMIN_TOKEN_HASH` and ignore plaintext for verification; plaintext should not be persisted back.
+  - Migration behavior: tooling MAY read it for one-time migration to `XP_ADMIN_TOKEN_HASH`; the server MUST NOT rely on plaintext and MUST NOT persist plaintext back.
 
 ### Compatibility rules
 
 - New builds MUST accept `XP_ADMIN_TOKEN_HASH` in PHC Argon2id form.
-- During migration window, builds MAY also accept legacy `XP_ADMIN_TOKEN_HASH` in `sha256:<hex>` form (if encountered in existing installs).
-- During migration window, builds MAY accept `XP_ADMIN_TOKEN` but MUST treat it as deprecated and MUST NOT rely on it for join-time distribution.
+- New builds MUST NOT accept legacy `XP_ADMIN_TOKEN_HASH` in `sha256:<hex>` form.
+- Tooling MAY accept `XP_ADMIN_TOKEN` only as an input to derive/write `XP_ADMIN_TOKEN_HASH` (migration), but MUST NOT rely on it for join-time distribution.
 
 ### Security
 

@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, path::Path, sync::Arc};
 
 use anyhow::Context as _;
-use sha2::{Digest, Sha256};
 use tokio::{
     net::TcpListener,
     sync::{Mutex, oneshot, watch},
@@ -9,6 +8,8 @@ use tokio::{
     time::{Duration, Instant},
 };
 
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::{Algorithm, Argon2, Params, Version};
 use xp::{
     cluster_metadata::ClusterMetadata,
     config::Config,
@@ -44,6 +45,17 @@ impl ServerHandle {
             .context("server exited with error")?;
         Ok(())
     }
+}
+
+fn test_admin_token_hash(token: &str) -> String {
+    // Fast + deterministic: keep integration tests snappy.
+    let params = Params::new(32, 1, 1, None).expect("argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let salt = SaltString::encode_b64(b"xp-test-salt").expect("salt");
+    argon2
+        .hash_password(token.as_bytes(), &salt)
+        .expect("hash_password")
+        .to_string()
 }
 
 async fn spawn_server(listener: TcpListener, router: axum::Router) -> anyhow::Result<ServerHandle> {
@@ -279,7 +291,6 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         wait_for_leader_base_url(follower.metrics(), leader_id, Duration::from_secs(10)).await?;
     assert_eq!(leader_base_url, admin_base_url);
 
-    let admin_digest = Sha256::digest(admin_token.as_bytes());
     let config = Config {
         bind: admin_addr,
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
@@ -291,8 +302,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir: leader_dir.clone(),
-        admin_token_hash: format!("sha256:{}", hex::encode(admin_digest)),
-        admin_token: String::new(),
+        admin_token_hash: test_admin_token_hash(&admin_token),
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),

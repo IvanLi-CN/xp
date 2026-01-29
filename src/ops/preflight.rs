@@ -30,6 +30,18 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
     match cmd {
         Command::Status(_) => Ok(()),
         Command::AdminToken(AdminTokenCommand::Show(_)) => Ok(()),
+        Command::AdminToken(AdminTokenCommand::Set(args)) => {
+            if args.dry_run {
+                return Ok(());
+            }
+            check_targets(
+                paths,
+                &[
+                    Target::dir(paths.etc_xp_dir(), "xp env dir"),
+                    Target::file(paths.etc_xp_env(), "xp env file"),
+                ],
+            )
+        }
 
         Command::Tui(_) => preflight_tui(paths),
 
