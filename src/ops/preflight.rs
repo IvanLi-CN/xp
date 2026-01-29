@@ -70,6 +70,13 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
                 ],
             )
         }
+        Command::Xp(XpCommand::Restart(args)) => {
+            if args.dry_run {
+                return Ok(());
+            }
+            // Runtime command only: no filesystem preflight needed.
+            Ok(())
+        }
 
         Command::Deploy(args) => preflight_deploy(paths, args),
 
