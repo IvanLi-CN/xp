@@ -1793,6 +1793,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    const VALID_ADMIN_TOKEN_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
+
     fn read_env(paths: &Paths) -> String {
         fs::read_to_string(paths.etc_xp_env()).unwrap()
     }
@@ -1803,13 +1805,17 @@ mod tests {
         let paths = Paths::new(tmp.path().to_path_buf());
 
         fs::create_dir_all(paths.etc_xp_dir()).unwrap();
-        fs::write(paths.etc_xp_env(), "XP_ADMIN_TOKEN_HASH=sha256:deadbeef\n").unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            format!("XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n"),
+        )
+        .unwrap();
 
         ensure_xp_env_admin_token_hash_bootstrap(&paths, Mode::Real).unwrap();
         ensure_xp_env_admin_token_hash_bootstrap(&paths, Mode::Real).unwrap();
 
         let env = read_env(&paths);
-        assert!(env.contains("XP_ADMIN_TOKEN_HASH=sha256:deadbeef"));
+        assert!(env.contains(VALID_ADMIN_TOKEN_HASH));
         assert!(env.contains("XP_DATA_DIR="));
         assert!(env.contains("XP_XRAY_API_ADDR="));
         assert!(env.contains("XP_XRAY_HEALTH_INTERVAL_SECS="));
@@ -1829,13 +1835,15 @@ mod tests {
         fs::create_dir_all(paths.etc_xp_dir()).unwrap();
         fs::write(
             paths.etc_xp_env(),
-            "XP_ADMIN_TOKEN_HASH=sha256:deadbeef\n\
+            format!(
+                "XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n\
 XP_DATA_DIR=/custom/data\n\
 XP_XRAY_API_ADDR=127.0.0.1:12345\n\
 XP_XRAY_RESTART_MODE=systemd\n\
 XP_XRAY_SYSTEMD_UNIT=custom-xray.service\n\
 XP_XRAY_OPENRC_SERVICE=custom-xray\n\
 XP_XRAY_CUSTOM=keep-me\n",
+            ),
         )
         .unwrap();
 

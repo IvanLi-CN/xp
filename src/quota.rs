@@ -692,7 +692,6 @@ mod tests {
     use std::{collections::BTreeMap, net::SocketAddr};
 
     use pretty_assertions::assert_eq;
-    use sha2::{Digest, Sha256};
     use tokio::sync::{Mutex, oneshot, watch};
 
     use crate::{
@@ -993,7 +992,6 @@ mod tests {
         xray_api_addr: SocketAddr,
         quota_auto_unban: bool,
     ) -> (Config, Arc<Mutex<JsonSnapshotStore>>) {
-        let digest = Sha256::digest("testtoken".as_bytes());
         let config = Config {
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             xray_api_addr,
@@ -1005,8 +1003,7 @@ mod tests {
             xray_systemd_unit: "xray.service".to_string(),
             xray_openrc_service: "xray".to_string(),
             data_dir: tmp_dir.to_path_buf(),
-            admin_token_hash: format!("sha256:{}", hex::encode(digest)),
-            admin_token: String::new(),
+            admin_token_hash: String::new(),
             node_name: "node-1".to_string(),
             access_host: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),

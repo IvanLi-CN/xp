@@ -105,12 +105,37 @@ pub enum XpCommand {
 #[derive(Subcommand, Debug)]
 pub enum AdminTokenCommand {
     Show(AdminTokenShowArgs),
+    Set(AdminTokenSetArgs),
 }
 
 #[derive(Args, Debug, Clone)]
 pub struct AdminTokenShowArgs {
     #[arg(long)]
     pub redacted: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AdminTokenSetArgs {
+    /// Admin token hash (argon2id PHC string, e.g. `$argon2id$v=19$...`).
+    #[arg(long, value_name = "HASH", conflicts_with_all = ["token", "token_stdin"])]
+    pub hash: Option<String>,
+
+    /// Admin token plaintext (will be converted to argon2id hash).
+    ///
+    /// Prefer `--token-stdin` to avoid leaking it via shell history.
+    #[arg(long, value_name = "TOKEN", conflicts_with = "token_stdin")]
+    pub token: Option<String>,
+
+    /// Read admin token plaintext from stdin (recommended).
+    #[arg(long)]
+    pub token_stdin: bool,
+
+    /// Keep any existing `XP_ADMIN_TOKEN=...` line in `/etc/xp/xp.env` (not recommended).
+    #[arg(long)]
+    pub keep_plaintext: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -375,6 +400,7 @@ pub async fn run() -> i32 {
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {
             AdminTokenCommand::Show(args) => admin_token::cmd_admin_token_show(paths, args).await,
+            AdminTokenCommand::Set(args) => admin_token::cmd_admin_token_set(paths, args).await,
         },
         Some(Command::Cloudflare(cmd)) => match cmd {
             CloudflareCommand::Token(token) => match token.command {

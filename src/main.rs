@@ -15,8 +15,7 @@ async fn main() -> Result<()> {
 
     let cli = xp::config::Cli::parse();
     let cmd = cli.command.clone().unwrap_or(xp::config::Command::Run);
-    let mut config = cli.config.clone();
-    config.normalize_admin_token();
+    let config = cli.config.clone();
 
     match cmd {
         xp::config::Command::Run => run_server(config).await,
