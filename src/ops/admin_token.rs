@@ -1,7 +1,7 @@
 use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash as parse_hash_value};
 use crate::ops::cli::{AdminTokenSetArgs, AdminTokenShowArgs, ExitError};
 use crate::ops::paths::Paths;
-use crate::ops::util::{chmod, is_test_root, write_string_if_changed};
+use crate::ops::util::{chmod, ensure_dir, is_test_root, write_string_if_changed};
 use std::io::Read;
 
 pub async fn cmd_admin_token_show(paths: Paths, args: AdminTokenShowArgs) -> Result<(), ExitError> {
@@ -30,8 +30,7 @@ pub async fn cmd_admin_token_show(paths: Paths, args: AdminTokenShowArgs) -> Res
 
 pub async fn cmd_admin_token_set(paths: Paths, args: AdminTokenSetArgs) -> Result<(), ExitError> {
     let env_path = paths.etc_xp_env();
-    let raw = std::fs::read_to_string(&env_path)
-        .map_err(|_| ExitError::new(2, "token_missing: /etc/xp/xp.env not found"))?;
+    let raw = std::fs::read_to_string(&env_path).unwrap_or_default();
 
     let hash_to_write = if let Some(hash) = args.hash.as_deref() {
         let Some(hash) = parse_hash_value(hash) else {
@@ -79,9 +78,24 @@ pub async fn cmd_admin_token_set(paths: Paths, args: AdminTokenSetArgs) -> Resul
     if args.dry_run {
         // Keep output stable for scripting; only indicate success.
         println!("ok");
+        if !args.quiet {
+            eprintln!();
+            eprintln!("Next steps:");
+            eprintln!("- Restart local service: sudo xp-ops xp restart");
+            eprintln!(
+                "- Sync other instances (copy hash): sudo xp-ops admin-token set --hash '{}' && sudo xp-ops xp restart",
+                hash_to_write
+            );
+            eprintln!("- Verify (use your plaintext token, not the hash):");
+            eprintln!(
+                "  curl -fsS -H \"Authorization: Bearer <token>\" http://127.0.0.1:62416/api/admin/config && echo OK"
+            );
+        }
         return Ok(());
     }
 
+    ensure_dir(&paths.etc_xp_dir())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&env_path, &content)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&env_path, 0o640).ok();
@@ -91,6 +105,19 @@ pub async fn cmd_admin_token_set(paths: Paths, args: AdminTokenSetArgs) -> Resul
             .status();
     }
     println!("ok");
+    if !args.quiet {
+        eprintln!();
+        eprintln!("Next steps:");
+        eprintln!("- Restart local service: sudo xp-ops xp restart");
+        eprintln!(
+            "- Sync other instances (copy hash): sudo xp-ops admin-token set --hash '{}' && sudo xp-ops xp restart",
+            hash_to_write
+        );
+        eprintln!("- Verify (use your plaintext token, not the hash):");
+        eprintln!(
+            "  curl -fsS -H \"Authorization: Bearer <token>\" http://127.0.0.1:62416/api/admin/config && echo OK"
+        );
+    }
     Ok(())
 }
 

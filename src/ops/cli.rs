@@ -100,6 +100,7 @@ pub enum InitSystemArg {
 pub enum XpCommand {
     Install(XpInstallArgs),
     Bootstrap(XpBootstrapArgs),
+    Restart(XpRestartArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -133,6 +134,10 @@ pub struct AdminTokenSetArgs {
     /// Keep any existing `XP_ADMIN_TOKEN=...` line in `/etc/xp/xp.env` (not recommended).
     #[arg(long)]
     pub keep_plaintext: bool,
+
+    /// Only print `ok` on stdout (suppress guidance output).
+    #[arg(long)]
+    pub quiet: bool,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -184,6 +189,16 @@ pub struct XpBootstrapArgs {
 
     #[arg(long, value_name = "PATH", default_value = "/var/lib/xp/data")]
     pub xp_data_dir: PathBuf,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpRestartArgs {
+    /// Service name to restart (OpenRC: `rc-service <name> restart`, systemd: `<name>.service`).
+    #[arg(long, value_name = "NAME", default_value = "xp")]
+    pub service_name: String,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -396,6 +411,7 @@ pub async fn run() -> i32 {
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
+            XpCommand::Restart(args) => xp::cmd_xp_restart(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {

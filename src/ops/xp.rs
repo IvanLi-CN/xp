@@ -1,4 +1,4 @@
-use crate::ops::cli::{ExitError, XpBootstrapArgs, XpInstallArgs};
+use crate::ops::cli::{ExitError, XpBootstrapArgs, XpInstallArgs, XpRestartArgs};
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
 use std::fs;
@@ -138,6 +138,49 @@ pub async fn cmd_xp_bootstrap(paths: Paths, args: XpBootstrapArgs) -> Result<(),
         return Err(ExitError::new(5, "xp_init_failed"));
     }
     Ok(())
+}
+
+pub async fn cmd_xp_restart(paths: Paths, args: XpRestartArgs) -> Result<(), ExitError> {
+    if args.dry_run {
+        eprintln!(
+            "would restart xp service (init-system auto): {}",
+            args.service_name
+        );
+        return Ok(());
+    }
+
+    if is_test_root(paths.root()) {
+        return Err(ExitError::new(
+            5,
+            "xp_restart_failed: xp restart requires real system environment (use --dry-run for tests)",
+        ));
+    }
+
+    let service = args.service_name.as_str();
+
+    // Prefer init-system auto behavior: try systemd first, then OpenRC.
+    let systemd_ok = Command::new("systemctl")
+        .args(["restart", format!("{service}.service").as_str()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if systemd_ok {
+        return Ok(());
+    }
+
+    let openrc_ok = Command::new("rc-service")
+        .args([service, "restart"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if openrc_ok {
+        return Ok(());
+    }
+
+    Err(ExitError::new(
+        6,
+        "xp_restart_failed: failed to restart service (hint: run via sudo; ensure systemctl/rc-service exists)",
+    ))
 }
 
 pub async fn cmd_xp_join(
