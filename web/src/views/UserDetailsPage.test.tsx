@@ -16,7 +16,10 @@ import {
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
-import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
+import {
+	fetchAdminUserNodeQuotas,
+	putAdminUserNodeQuota,
+} from "../api/adminUserNodeQuotas";
 import { fetchAdminUser } from "../api/adminUsers";
 import { BackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
@@ -366,5 +369,110 @@ describe("<UserDetailsPage />", () => {
 			expect(replaceAdminGrantGroup).toHaveBeenCalled();
 		});
 		expect(createAdminGrantGroup).not.toHaveBeenCalled();
+	});
+
+	it("updates node quota and syncs managed group members", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [{ node_id: "n-tokyo", quota_limit_bytes: 0 }],
+		});
+
+		vi.mocked(fetchAdminGrantGroup).mockResolvedValue({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			members: [
+				{
+					user_id: "u_01HUSERAAAAAA",
+					endpoint_id: "ep-a",
+					enabled: true,
+					quota_limit_bytes: 0,
+					note: null,
+					credentials: {
+						vless: { uuid: "00000000-0000-0000-0000-000000000000", email: "" },
+					},
+				},
+			],
+		});
+		vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
+			user_id: "u_01HUSERAAAAAA",
+			node_id: "n-tokyo",
+			quota_limit_bytes: 1024 * 1024 * 1024,
+			quota_reset_source: "user",
+		});
+		vi.mocked(replaceAdminGrantGroup).mockResolvedValue({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			created: 0,
+			updated: 1,
+			deleted: 0,
+		});
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		await within(view.container).findByText("Matrix");
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: /Quota:/ }),
+		);
+
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: "Edit node quota",
+		});
+		fireEvent.change(within(dialog).getByRole("textbox"), {
+			target: { value: "1GiB" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+
+		await waitFor(() => {
+			expect(putAdminUserNodeQuota).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				"n-tokyo",
+				1024 * 1024 * 1024,
+				"user",
+			);
+		});
+		await waitFor(() => {
+			expect(replaceAdminGrantGroup).toHaveBeenCalledWith(
+				"admintoken",
+				"managed-u_01huseraaaaaa",
+				expect.objectContaining({
+					members: [
+						expect.objectContaining({
+							user_id: "u_01HUSERAAAAAA",
+							endpoint_id: "ep-a",
+							enabled: true,
+							quota_limit_bytes: 1024 * 1024 * 1024,
+						}),
+					],
+				}),
+			);
+		});
 	});
 });

@@ -11,7 +11,10 @@ import {
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
-import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
+import {
+	fetchAdminUserNodeQuotas,
+	putAdminUserNodeQuota,
+} from "../api/adminUserNodeQuotas";
 import {
 	deleteAdminUser,
 	fetchAdminUser,
@@ -31,6 +34,7 @@ import {
 	GrantAccessMatrix,
 	type GrantAccessMatrixCellState,
 } from "../components/GrantAccessMatrix";
+import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
@@ -464,6 +468,33 @@ export function UserDetailsPage() {
 			PROTOCOLS.some((p) => p.protocolId === ep.kind),
 		).length;
 
+		const quotaForNode = (nodeId: string): number => {
+			return quotaByNodeId.get(nodeId)?.quota_limit_bytes ?? 0;
+		};
+
+		const buildMembers = (args: {
+			selectedEndpointIds: string[];
+			quotaOverride?: { nodeId: string; quotaLimitBytes: number };
+		}) => {
+			return args.selectedEndpointIds.map((endpointId) => {
+				const endpoint = endpoints.find((ep) => ep.endpoint_id === endpointId);
+				if (!endpoint) {
+					throw new Error(`endpoint not found: ${endpointId}`);
+				}
+				const quotaLimitBytes =
+					args.quotaOverride && args.quotaOverride.nodeId === endpoint.node_id
+						? args.quotaOverride.quotaLimitBytes
+						: quotaForNode(endpoint.node_id);
+				return {
+					user_id: user.user_id,
+					endpoint_id: endpointId,
+					enabled: true,
+					quota_limit_bytes: quotaLimitBytes,
+					note: null,
+				};
+			});
+		};
+
 		const cells: Record<
 			string,
 			Record<string, GrantAccessMatrixCellState>
@@ -602,23 +633,7 @@ export function UserDetailsPage() {
 					return;
 				}
 
-				const members = selectedEndpointIds.map((endpointId) => {
-					const endpoint = endpoints.find(
-						(ep) => ep.endpoint_id === endpointId,
-					);
-					if (!endpoint) {
-						throw new Error(`endpoint not found: ${endpointId}`);
-					}
-					const quotaLimitBytes =
-						quotaByNodeId.get(endpoint.node_id)?.quota_limit_bytes ?? 0;
-					return {
-						user_id: user.user_id,
-						endpoint_id: endpointId,
-						enabled: true,
-						quota_limit_bytes: quotaLimitBytes,
-						note: null,
-					};
-				});
+				const members = buildMembers({ selectedEndpointIds });
 
 				if (grantGroupQuery.data) {
 					await replaceAdminGrantGroup(adminToken, managedGroupName, {
@@ -702,6 +717,63 @@ export function UserDetailsPage() {
 						nodes={visibleNodes.map((n) => ({
 							nodeId: n.node_id,
 							label: n.node_name,
+							details: (
+								<NodeQuotaEditor
+									value={quotaForNode(n.node_id)}
+									disabled={isApplyingAccess}
+									onApply={async (nextBytes) => {
+										try {
+											await putAdminUserNodeQuota(
+												adminToken,
+												user.user_id,
+												n.node_id,
+												nextBytes,
+												"user",
+											);
+											await nodeQuotasQuery.refetch();
+
+											if (!grantGroupQuery.data) return;
+
+											const affectedSelected = Object.values(
+												selectedByCell,
+											).some((endpointId) => {
+												const ep = endpoints.find(
+													(e) => e.endpoint_id === endpointId,
+												);
+												return ep?.node_id === n.node_id;
+											});
+											if (!affectedSelected) return;
+
+											const members = buildMembers({
+												selectedEndpointIds: Object.values(selectedByCell),
+												quotaOverride: {
+													nodeId: n.node_id,
+													quotaLimitBytes: nextBytes,
+												},
+											});
+
+											await replaceAdminGrantGroup(
+												adminToken,
+												managedGroupName,
+												{ members },
+											);
+											await grantGroupQuery.refetch();
+
+											pushToast({
+												variant: "success",
+												message: "Node quota updated.",
+											});
+										} catch (err) {
+											const message = formatError(err);
+											pushToast({
+												variant: "error",
+												message: `Failed to update node quota: ${message}`,
+											});
+											throw new Error(message);
+										}
+									}}
+								/>
+							),
 						}))}
 						protocols={PROTOCOLS.map((p) => ({
 							protocolId: p.protocolId,

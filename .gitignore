@@ -1,6 +1,7 @@
 /target
 /logs
 /data
+/data-dev-62418
 *.log
 .env
 .env.local
