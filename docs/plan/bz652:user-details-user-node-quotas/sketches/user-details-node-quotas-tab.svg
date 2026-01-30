@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <defs>
+    <filter id="shadow-sm" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#111827" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      .bg { fill: #eef2f7; }
+      .card { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; filter: url(#shadow-sm); }
+      .card-flat { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; }
+      .muted { fill: rgba(17, 24, 39, 0.55); font: 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .text { fill: rgba(17, 24, 39, 0.88); font: 14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .title { fill: rgba(17, 24, 39, 0.92); font: 700 24px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .h2 { fill: rgba(17, 24, 39, 0.92); font: 700 18px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .mono { fill: rgba(17, 24, 39, 0.78); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .monoStrong { fill: rgba(17, 24, 39, 0.88); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+      .btnGhost { fill: rgba(255, 255, 255, 0); stroke: rgba(17, 24, 39, 0.12); stroke-width: 1.25; }
+      .btnPrimary { fill: rgba(14, 165, 233, 0.10); stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+      .btnText { fill: rgba(17, 24, 39, 0.86); font: 600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .btnTextPrimary { fill: rgba(3, 105, 161, 0.95); font: 700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+
+      .input { fill: rgba(243, 244, 246, 0.75); stroke: #e5e7eb; stroke-width: 1.25; }
+      .tabActive { fill: #ffffff; stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+      .tabIdle { fill: rgba(243, 244, 246, 0.75); stroke: rgba(17, 24, 39, 0.12); stroke-width: 1.25; }
+
+      .navItem { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; }
+      .navItemActive { fill: rgba(14, 165, 233, 0.10); stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+	      .navText { fill: rgba(17, 24, 39, 0.88); font: 600 13px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .badge { fill: rgba(17, 24, 39, 0.04); stroke: rgba(17, 24, 39, 0.10); stroke-width: 1.25; }
+	      .badgeOk { fill: rgba(14, 165, 233, 0.10); stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+	      .badgeText { fill: rgba(17, 24, 39, 0.78); font: 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .badgeTextStrong { fill: rgba(17, 24, 39, 0.88); font: 700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+
+      .tableBorder { stroke: #e5e7eb; stroke-width: 1.25; fill: #ffffff; }
+      .tableHead { fill: rgba(243, 244, 246, 0.85); stroke: #e5e7eb; stroke-width: 1.25; }
+      .zebra { fill: rgba(243, 244, 246, 0.45); }
+      .cell { fill: rgba(255, 255, 255, 1); }
+      .cellDisabled { fill: rgba(243, 244, 246, 0.65); }
+      .checkBox { fill: rgba(255,255,255,1); stroke: rgba(14, 165, 233, 0.55); stroke-width: 1.25; }
+      .checkOn { fill: rgba(14, 165, 233, 0.55); stroke: rgba(14, 165, 233, 0.55); stroke-width: 1.25; }
+      .pill { fill: rgba(17, 24, 39, 0.04); stroke: rgba(17, 24, 39, 0.10); stroke-width: 1.25; }
+    </style>
+
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1400" height="900"/>
+
+  <!-- App header (AppShell) -->
+  <rect class="card" x="24" y="20" width="1352" height="64" rx="16"/>
+  <text class="btnText" x="52" y="52" style="font-size:16px; font-weight:700;">xp</text>
+  <text class="muted" x="78" y="54" style="font-size:12px;">cluster manager</text>
+
+	  <rect class="input" x="420" y="34" width="400" height="36" rx="12"/>
+	  <text class="muted" x="438" y="56">Search / command palette</text>
+	  <!-- Ctrl/K hints are inside the search input -->
+	  <rect class="badge" x="732" y="42" width="44" height="20" rx="8"/>
+	  <text class="mono" x="744" y="56">Ctrl</text>
+	  <rect class="badge" x="780" y="42" width="24" height="20" rx="8"/>
+	  <text class="mono" x="787" y="56">K</text>
+
+  <!-- Status badges (AppShell) -->
+  <!-- Right padding: keep a safe inset from rounded corner -->
+	  <rect class="badgeOk" x="852" y="40" width="88" height="24" rx="12"/>
+	  <text class="badgeTextStrong" x="866" y="56">Health OK</text>
+
+	  <rect class="badge" x="948" y="40" width="104" height="24" rx="12"/>
+	  <text class="badgeText" x="962" y="56">leader: &lt;id&gt;</text>
+
+	  <rect class="badge" x="1060" y="40" width="70" height="24" rx="12"/>
+	  <text class="badgeText" x="1074" y="56">term: 1</text>
+
+	  <rect class="badge" x="1138" y="40" width="82" height="24" rx="12"/>
+	  <text class="badgeText" x="1152" y="56">alerts: 0</text>
+
+  <!-- Actions -->
+  <rect class="btnGhost" x="1230" y="38" width="60" height="28" rx="10"/>
+  <text class="btnText" x="1246" y="56">Theme</text>
+  <rect class="btnGhost" x="1296" y="38" width="64" height="28" rx="10"/>
+  <text class="btnText" x="1312" y="56">Logout</text>
+
+  <!-- Layout: sidebar + main -->
+  <rect class="card" x="24" y="104" width="260" height="772" rx="16"/>
+  <rect class="card" x="304" y="104" width="1072" height="772" rx="16"/>
+
+  <!-- Sidebar content -->
+  <text class="muted" x="52" y="140" style="letter-spacing:0.08em; font-size:11px;">NAV</text>
+  <rect class="navItem" x="44" y="156" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="180">Dashboard</text>
+  <rect class="navItem" x="44" y="202" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="226">Nodes</text>
+  <rect class="navItem" x="44" y="248" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="272">Endpoints</text>
+  <rect class="navItemActive" x="44" y="294" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="318">Users</text>
+  <rect class="navItem" x="44" y="340" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="364">Grant groups</text>
+
+  <text class="muted" x="52" y="414" style="letter-spacing:0.08em; font-size:11px;">SETTINGS</text>
+  <rect class="navItem" x="44" y="430" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="454">Service config</text>
+
+	  <!-- Main content (Node quotas tab) -->
+	  <text class="title" x="336" y="156">User</text>
+	  <text class="monoStrong" x="336" y="178">&lt;user_id&gt; — &lt;display_name&gt;</text>
+	  <rect class="btnGhost" x="1258" y="132" width="96" height="30" rx="10"/>
+	  <text class="btnText" x="1290" y="151">Back</text>
+
+	  <!-- Tabs -->
+	  <rect class="tabIdle" x="336" y="198" width="84" height="30" rx="12"/>
+	  <text class="btnText" x="378" y="217" text-anchor="middle">User</text>
+	  <rect class="tabActive" x="428" y="198" width="128" height="30" rx="12"/>
+	  <text class="btnTextPrimary" x="492" y="217" text-anchor="middle">Node quotas</text>
+
+	  <!-- Card -->
+	  <rect class="card-flat" x="336" y="244" width="1018" height="616" rx="16"/>
+	  <text class="h2" x="360" y="276">Node quotas</text>
+
+  <!-- Toolbar (GrantNewPage-like) -->
+  <rect class="card-flat" x="360" y="318" width="970" height="84" rx="14"/>
+  <rect class="input" x="384" y="344" width="360" height="34" rx="12"/>
+  <text class="muted" x="398" y="365">Filter nodes...</text>
+
+  <rect class="pill" x="756" y="344" width="220" height="34" rx="16"/>
+  <text class="mono" x="772" y="365">Selected 5 / 12</text>
+
+	  <rect class="btnGhost" x="986" y="344" width="92" height="34" rx="12"/>
+	  <text class="btnText" x="1032" y="365" text-anchor="middle">Reset</text>
+	  <rect class="btnPrimary" x="1086" y="344" width="118" height="34" rx="12"/>
+	  <text class="btnTextPrimary" x="1145" y="365" text-anchor="middle">Apply changes</text>
+
+  <!-- Matrix heading -->
+  <text class="text" x="384" y="410" style="font-weight:700; font-size:13px;">Matrix</text>
+  <text class="muted" x="450" y="410">Batch rule: if any selected, clear; else select all</text>
+
+  <!-- Matrix wrapper -->
+  <rect class="tableBorder" x="360" y="424" width="970" height="410" rx="14"/>
+
+  <!-- Table header -->
+  <rect class="tableHead" x="360" y="424" width="970" height="58" rx="14"/>
+  <rect class="checkBox" x="382" y="444" width="14" height="14" rx="3"/>
+  <text class="text" x="408" y="456" style="font-weight:700; font-size:13px;">All nodes</text>
+
+  <rect class="checkBox" x="640" y="444" width="14" height="14" rx="3"/>
+  <text class="text" x="664" y="456" style="font-weight:700; font-size:13px;">VLESS</text>
+  <text class="mono" x="708" y="456">vless_reality_vision...</text>
+
+  <rect class="checkBox" x="980" y="444" width="14" height="14" rx="3"/>
+  <text class="text" x="1004" y="456" style="font-weight:700; font-size:13px;">SS2022</text>
+  <text class="mono" x="1056" y="456">ss2022_2022_blake3_...</text>
+
+  <!-- Row 1 (zebra) -->
+  <rect class="zebra" x="360" y="482" width="970" height="92"/>
+  <rect class="checkBox" x="382" y="518" width="14" height="14" rx="3"/>
+  <text class="text" x="408" y="516" style="font-weight:700;">node-a</text>
+  <text class="mono" x="408" y="538">node_123</text>
+
+  <!-- Cell: node-a × VLESS (on) -->
+  <rect class="cell" x="622" y="504" width="324" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkOn" x="640" y="522" width="14" height="14" rx="3"/>
+  <text class="monoStrong" x="664" y="534">port 443 - node-a-443</text>
+
+  <!-- Cell: node-a × SS2022 (off) -->
+  <rect class="cell" x="962" y="504" width="346" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkBox" x="980" y="522" width="14" height="14" rx="3"/>
+  <text class="mono" x="1004" y="534">port 8388 - node-a-8388</text>
+
+  <!-- Row 2 -->
+  <rect class="cell" x="360" y="574" width="970" height="92"/>
+  <rect class="checkBox" x="382" y="610" width="14" height="14" rx="3"/>
+  <text class="text" x="408" y="608" style="font-weight:700;">node-b</text>
+  <text class="mono" x="408" y="630">node_456</text>
+
+  <!-- Cell: node-b × VLESS (multiple endpoints, on) -->
+  <rect class="cell" x="622" y="596" width="324" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkOn" x="640" y="614" width="14" height="14" rx="3"/>
+  <text class="mono" x="664" y="626">multiple endpoints</text>
+  <rect class="btnGhost" x="840" y="606" width="98" height="28" rx="10"/>
+  <text class="btnText" x="858" y="624">Choose (2)</text>
+
+  <!-- Cell: node-b × SS2022 (disabled) -->
+  <rect class="cellDisabled" x="962" y="596" width="346" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkBox" x="980" y="614" width="14" height="14" rx="3" style="stroke:rgba(17,24,39,0.15);"/>
+  <text class="mono" x="1004" y="626">No endpoint</text>
+  <text class="mono" x="1286" y="626" text-anchor="end">(disabled)</text>
+
+  <!-- Row 3 (zebra) -->
+  <rect class="zebra" x="360" y="666" width="970" height="92"/>
+  <rect class="checkBox" x="382" y="702" width="14" height="14" rx="3"/>
+  <text class="text" x="408" y="700" style="font-weight:700;">node-c</text>
+  <text class="mono" x="408" y="722">node_789</text>
+
+  <rect class="cell" x="622" y="688" width="324" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkBox" x="640" y="706" width="14" height="14" rx="3"/>
+  <text class="mono" x="664" y="718">port 443 - node-c-443</text>
+
+  <rect class="cell" x="962" y="688" width="346" height="48" rx="12" style="stroke:#e5e7eb; stroke-width:1.25;"/>
+  <rect class="checkOn" x="980" y="706" width="14" height="14" rx="3"/>
+  <text class="monoStrong" x="1004" y="718">port 8388 - node-c-8388</text>
+
+  <text class="muted" x="384" y="848">Tip: header checkboxes may be indeterminate; clicking never inverts.</text>
+</svg>
