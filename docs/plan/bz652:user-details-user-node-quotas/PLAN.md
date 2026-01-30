@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 待实现
 - Created: 2026-01-30
 - Last: 2026-01-30
 
@@ -33,6 +33,7 @@
 - Web Admin UI：替换 `web/src/views/UserDetailsPage.tsx` 的主内容结构，改为 tabs：`User` / `Node quotas`（见 UI 草图）。
 - `Node quotas` tab：
   - 矩阵（nodes × protocols）展示可用接入点；单元格可 on/off；若同一 node+protocol 有多个 endpoint，支持在 cell 内选择具体 endpoint（与 `GrantAccessMatrix` 一致）。
+  - 在矩阵行（node）处编辑该用户在该节点的流量配额（`quota_limit_bytes`），使用 `MiB/GiB` 的用户友好输入形状（复用既有 `NodeQuotaEditor` 口径）。
   - 保存口径为“硬切”：以当前选择覆盖“本用户 managed group”的 members。
   - 允许“全关闭”：当选择为空时，删除本用户 managed group（等价于该用户无接入点）。
 
@@ -51,6 +52,7 @@
 - `Node quotas` tab：
   - UI 不出现 group/Grant 表字段（例如 `grant_id`、cycle 字段）。
   - 矩阵型接入点配置（节点 × 协议），不允许出现“列表式的接入点配置”替代矩阵。
+  - 必须支持修改该用户在每个节点的流量配额（`quota_limit_bytes`），并保持最终生效配额与 UI 回显一致。
   - 保存口径为“硬切”：
     - 保存后刷新回显与矩阵选择一致；
     - 允许空选择（删除 managed group）。
@@ -74,6 +76,9 @@
 - Given 我进入 `Node quotas` tab，
   When 页面加载完成，
   Then 我能看到“节点 × 协议”的接入点矩阵，且页面不展示任何 Grant 表字段与 group 字段。
+- Given 我在 `Node quotas` tab 修改某个节点的 Quota 并确认保存，
+  When 操作成功并刷新回显，
+  Then 该节点行显示新的 quota 值，且该用户在该节点上已选 endpoint 的实际生效 `quota_limit_bytes` 与该值一致。
 - Given 我在 `Node quotas` tab 勾选/取消若干 cell 并点击 `Apply changes`，
   When 操作成功并刷新，
   Then 矩阵回显与我刚刚的选择一致。
@@ -120,6 +125,8 @@ TBD（在 UI 草图确认并满足 `Ready-to-implement: yes` 后再拆分；避�
 - `User` tab 保留现有用户编辑/订阅/危险操作逻辑（仅移动位置/结构，不改语义）。
 - `Node quotas` tab：
   - 复用 `GrantAccessMatrix` 的交互口径（节点 × 协议）。
+  - 在 node 行内复用 `NodeQuotaEditor` 的交互与解析口径（MiB/GiB），并通过 `PUT /api/admin/users/:user_id/node-quotas/:node_id` 写入用户级配额。
+  - 若 managed group 已存在且该节点有已选 endpoint，则同步用 `PUT /api/admin/grant-groups/:group_name` 硬切更新对应 members 的 `quota_limit_bytes`，确保“实际生效配额”与 UI 一致。
   - 以“本用户 managed group”作为落库与回显来源：
     - 加载：`GET /api/admin/grant-groups/:group_name`（404 视为空）。
     - 保存：
@@ -135,6 +142,7 @@ TBD（在 UI 草图确认并满足 `Ready-to-implement: yes` 后再拆分；避�
 
 - 2026-01-30: pivot to matrix-based access configuration per user (replace list UI)
 - 2026-01-30: align sketches to current UI (GrantNewPage)
+- 2026-01-30: add per-node quota editing in Node quotas tab (sync to managed group)
 
 ## 参考（References）
 

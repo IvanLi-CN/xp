@@ -42,6 +42,8 @@
   - Selected `x / y` 计数（与 `GrantNewPage` 一致）
   - `Reset`（清空过滤条件）
 - 主操作按钮：`Apply changes`
+- 节点配额编辑（Quota）：
+  - 在矩阵行（node）标题区域提供 `Quota: <value> (edit)` 的入口（复用既有 `NodeQuotaEditor` 的交互与解析口径，支持 `MiB/GiB` 输入）。
 - 矩阵（复用 `GrantAccessMatrix` 交互口径）：
   - 列：protocols（VLESS / SS2022）
   - 行：nodes（node_name + node_id）
@@ -51,3 +53,6 @@
 
 - “硬切（hard cut）”：`Apply changes` 会把本用户接入点集合覆盖为当前矩阵选择。
 - 若当前选择为空：删除本用户的 managed group（等价于本用户无接入点）。
+- 节点配额编辑是“即时保存”：
+  - 修改 node quota 后立即调用后端写入接口；
+  - 若 managed group 已存在且该节点有已选 endpoint，则同步更新对应 members 的 `quota_limit_bytes`，保持实际生效口径一致（不要求用户额外再点一次 `Apply changes`）。

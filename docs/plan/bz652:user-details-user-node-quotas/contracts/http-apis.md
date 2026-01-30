@@ -72,7 +72,7 @@
 
 ## GET `/api/admin/users/:user_id/node-quotas`
 
-用于构建/回填 grant group members 的 `quota_limit_bytes`（与 `GrantNewPage` 一致：按 endpoint 的 `node_id` 取该用户对应 node quota；若不存在则默认为 `0`）。
+用于构建/回填每个节点的流量配额（`quota_limit_bytes`），并为 `grant group members` 的 `quota_limit_bytes` 提供默认值（与 `GrantNewPage` 一致：按 endpoint 的 `node_id` 取该用户对应 node quota；若不存在则默认为 `0`）。
 
 ### Response `200`
 
@@ -89,7 +89,33 @@
 }
 ```
 
-备注：`quota_reset_source` 的取值由后端决定；UI 仅透传（若后续需要编辑 node quota 再在本契约中补充 PUT 口径）。
+备注：`quota_reset_source` 的取值由后端决定；UI 在本计划内会通过 `PUT` 口径将其设置为 `user`（明确表示本用户的覆盖配置）。
+
+---
+
+## PUT `/api/admin/users/:user_id/node-quotas/:node_id`
+
+用于在 User details → `Node quotas` tab 内修改“该用户在该节点的流量配额（quota_limit_bytes）”。
+
+### Request body
+
+```json
+{
+  "quota_limit_bytes": 1073741824,
+  "quota_reset_source": "user"
+}
+```
+
+### Response `200`
+
+```json
+{
+  "user_id": "usr_xxx",
+  "node_id": "node_xxx",
+  "quota_limit_bytes": 1073741824,
+  "quota_reset_source": "user"
+}
+```
 
 ---
 
