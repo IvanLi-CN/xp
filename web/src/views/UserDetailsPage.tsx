@@ -469,9 +469,17 @@ export function UserDetailsPage() {
 		});
 
 		const selectedEndpointIds = Object.values(selectedByCell);
-		const totalEndpointOptions = endpoints.filter((ep) =>
-			PROTOCOLS.some((p) => p.protocolId === ep.kind),
-		).length;
+		const totalSelectableCells = (() => {
+			let count = 0;
+			for (const n of visibleNodes) {
+				for (const p of PROTOCOLS) {
+					const options =
+						endpointsByNodeProtocol.get(n.node_id)?.get(p.protocolId) ?? [];
+					if (options.length > 0) count += 1;
+				}
+			}
+			return count;
+		})();
 
 		const quotaForNode = (nodeId: string): number => {
 			return quotaByNodeId.get(nodeId)?.quota_limit_bytes ?? 0;
@@ -500,8 +508,43 @@ export function UserDetailsPage() {
 			});
 		};
 
-		const purgeUserFromOtherGrantGroups = async () => {
+		type GrantGroupMemberPayload = {
+			user_id: string;
+			endpoint_id: string;
+			enabled: boolean;
+			quota_limit_bytes: number;
+			note: string | null;
+		};
+
+		type GrantGroupPurgePlanItem = {
+			groupName: string;
+			originalMembers: GrantGroupMemberPayload[];
+			remainingMembers: GrantGroupMemberPayload[];
+			action: "delete" | "replace";
+		};
+
+		const toMemberPayload = (m: {
+			user_id: string;
+			endpoint_id: string;
+			enabled: boolean;
+			quota_limit_bytes: number;
+			note: string | null;
+		}): GrantGroupMemberPayload => {
+			return {
+				user_id: m.user_id,
+				endpoint_id: m.endpoint_id,
+				enabled: m.enabled,
+				quota_limit_bytes: m.quota_limit_bytes,
+				note: m.note ?? null,
+			};
+		};
+
+		const buildPurgePlanForUserInOtherGrantGroups = async (): Promise<
+			GrantGroupPurgePlanItem[]
+		> => {
 			const list = await fetchAdminGrantGroups(adminToken);
+			const plan: GrantGroupPurgePlanItem[] = [];
+
 			for (const g of list.items) {
 				const groupName = g.group_name;
 				if (groupName === managedGroupName) continue;
@@ -516,32 +559,46 @@ export function UserDetailsPage() {
 				}
 				if (!detail) continue;
 
-				const remaining = detail.members.filter(
-					(m) => m.user_id !== user.user_id,
-				);
-				if (remaining.length === detail.members.length) continue;
+				const hasUser = detail.members.some((m) => m.user_id === user.user_id);
+				if (!hasUser) continue;
 
-				if (remaining.length === 0) {
-					try {
-						await deleteAdminGrantGroup(adminToken, groupName);
-					} catch (err) {
-						if (!(isBackendApiError(err) && err.status === 404)) {
-							throw err;
-						}
-					}
-					continue;
-				}
+				const originalMembers = detail.members.map(toMemberPayload);
+				const remainingMembers = detail.members
+					.filter((m) => m.user_id !== user.user_id)
+					.map(toMemberPayload);
 
-				await replaceAdminGrantGroup(adminToken, groupName, {
-					members: remaining.map((m) => ({
-						user_id: m.user_id,
-						endpoint_id: m.endpoint_id,
-						enabled: m.enabled,
-						quota_limit_bytes: m.quota_limit_bytes,
-						note: m.note ?? null,
-					})),
+				plan.push({
+					groupName,
+					originalMembers,
+					remainingMembers,
+					action: remainingMembers.length === 0 ? "delete" : "replace",
 				});
 			}
+
+			return plan;
+		};
+
+		const rollbackPurgePlan = async (plan: GrantGroupPurgePlanItem[]) => {
+			const errors: string[] = [];
+
+			for (const item of [...plan].reverse()) {
+				try {
+					if (item.action === "delete") {
+						await createAdminGrantGroup(adminToken, {
+							group_name: item.groupName,
+							members: item.originalMembers,
+						});
+					} else {
+						await replaceAdminGrantGroup(adminToken, item.groupName, {
+							members: item.originalMembers,
+						});
+					}
+				} catch (err) {
+					errors.push(formatError(err));
+				}
+			}
+
+			return errors;
 		};
 
 		const cells: Record<
@@ -673,41 +730,75 @@ export function UserDetailsPage() {
 		const applyChanges = async () => {
 			setAccessError(null);
 			setIsApplyingAccess(true);
+			let appliedPurgePlan: GrantGroupPurgePlanItem[] = [];
 			try {
+				const purgePlan = await buildPurgePlanForUserInOtherGrantGroups();
+
 				// Hard cut: this UI is authoritative. Remove this user from any existing
 				// grant-groups so we can safely move everything into the per-user managed
 				// group (backend enforces uniqueness of (user_id, endpoint_id) globally).
-				await purgeUserFromOtherGrantGroups();
-
-				if (selectedEndpointIds.length === 0) {
-					try {
-						await deleteAdminGrantGroup(adminToken, managedGroupName);
-					} catch (err) {
-						if (!(isBackendApiError(err) && err.status === 404)) {
-							throw err;
+				appliedPurgePlan = [];
+				for (const item of purgePlan) {
+					if (item.action === "delete") {
+						try {
+							await deleteAdminGrantGroup(adminToken, item.groupName);
+						} catch (err) {
+							if (!(isBackendApiError(err) && err.status === 404)) {
+								throw err;
+							}
 						}
+					} else {
+						await replaceAdminGrantGroup(adminToken, item.groupName, {
+							members: item.remainingMembers,
+						});
 					}
-					await grantGroupQuery.refetch();
-					pushToast({ variant: "success", message: "Node quotas updated." });
-					return;
+					appliedPurgePlan.push(item);
 				}
 
-				const members = buildMembers({ selectedEndpointIds });
+				try {
+					if (selectedEndpointIds.length === 0) {
+						try {
+							await deleteAdminGrantGroup(adminToken, managedGroupName);
+						} catch (err) {
+							if (!(isBackendApiError(err) && err.status === 404)) {
+								throw err;
+							}
+						}
+					} else {
+						const members = buildMembers({ selectedEndpointIds });
 
-				if (grantGroupQuery.data) {
-					await replaceAdminGrantGroup(adminToken, managedGroupName, {
-						members,
-					});
-				} else {
-					await createAdminGrantGroup(adminToken, {
-						group_name: managedGroupName,
-						members,
-					});
+						if (grantGroupQuery.data) {
+							await replaceAdminGrantGroup(adminToken, managedGroupName, {
+								members,
+							});
+						} else {
+							await createAdminGrantGroup(adminToken, {
+								group_name: managedGroupName,
+								members,
+							});
+						}
+					}
+				} catch (err) {
+					// Best-effort rollback: avoid dropping user access if managed group
+					// operation fails after we already removed membership from other groups.
+					const rollbackErrors = await rollbackPurgePlan(appliedPurgePlan);
+					appliedPurgePlan = [];
+					const message = formatError(err);
+					const rollbackSuffix =
+						rollbackErrors.length > 0
+							? ` (rollback errors: ${rollbackErrors.join("; ")})`
+							: " (rolled back)";
+					throw new Error(`${message}${rollbackSuffix}`);
 				}
 
 				await grantGroupQuery.refetch();
 				pushToast({ variant: "success", message: "Node quotas updated." });
 			} catch (err) {
+				// If purge partially succeeded but we failed before applying the managed
+				// group update, restore whatever we already changed.
+				if (appliedPurgePlan.length > 0) {
+					await rollbackPurgePlan(appliedPurgePlan);
+				}
 				const message = formatError(err);
 				setAccessError(message);
 				pushToast({
@@ -737,7 +828,7 @@ export function UserDetailsPage() {
 
 						<div className="flex items-center gap-2">
 							<span className="rounded-full border border-base-200 bg-base-200/40 px-4 py-2 font-mono text-xs">
-								Selected {selectedEndpointIds.length} / {totalEndpointOptions}
+								Selected {selectedEndpointIds.length} / {totalSelectableCells}
 							</span>
 						</div>
 
@@ -791,6 +882,10 @@ export function UserDetailsPage() {
 												quotaByNodeId.get(n.node_id)?.quota_reset_source,
 											);
 											await nodeQuotasQuery.refetch();
+											pushToast({
+												variant: "success",
+												message: "Node quota updated.",
+											});
 
 											if (!grantGroupQuery.data) return;
 
@@ -824,19 +919,22 @@ export function UserDetailsPage() {
 												};
 											});
 
-											await replaceAdminGrantGroup(
-												adminToken,
-												managedGroupName,
-												{
-													members,
-												},
-											);
-											await grantGroupQuery.refetch();
-
-											pushToast({
-												variant: "success",
-												message: "Node quota updated.",
-											});
+											try {
+												await replaceAdminGrantGroup(
+													adminToken,
+													managedGroupName,
+													{
+														members,
+													},
+												);
+												await grantGroupQuery.refetch();
+											} catch (err) {
+												const message = formatError(err);
+												pushToast({
+													variant: "error",
+													message: `Quota updated, but failed to sync access quotas: ${message}`,
+												});
+											}
 										} catch (err) {
 											const message = formatError(err);
 											pushToast({

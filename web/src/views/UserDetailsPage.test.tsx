@@ -543,6 +543,112 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("rolls back purge if managed group create fails", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [{ node_id: "n-tokyo", quota_limit_bytes: 123 }],
+		});
+
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({
+			items: [{ group_name: "legacy-group", member_count: 1 }],
+		});
+		vi.mocked(fetchAdminGrantGroup).mockImplementation(
+			async (_token, groupName) => {
+				if (groupName === "managed-u_01huseraaaaaa") {
+					throw new BackendApiError({ status: 404, message: "not found" });
+				}
+				if (groupName === "legacy-group") {
+					return {
+						group: { group_name: "legacy-group" },
+						members: [
+							{
+								user_id: "u_01HUSERAAAAAA",
+								endpoint_id: "ep-a",
+								enabled: true,
+								quota_limit_bytes: 0,
+								note: null,
+								credentials: {
+									vless: {
+										uuid: "00000000-0000-0000-0000-000000000000",
+										email: "",
+									},
+								},
+							},
+						],
+					};
+				}
+				throw new BackendApiError({ status: 404, message: "not found" });
+			},
+		);
+		vi.mocked(deleteAdminGrantGroup).mockResolvedValue({ deleted: 1 });
+		vi.mocked(createAdminGrantGroup).mockImplementation(
+			async (_token, payload) => {
+				if (payload.group_name === "managed-u_01huseraaaaaa") {
+					throw new BackendApiError({ status: 500, message: "boom" });
+				}
+				return {
+					group: { group_name: payload.group_name },
+					members: [],
+				};
+			},
+		);
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		const cellToggle = await within(view.container).findByLabelText(
+			"Toggle Tokyo VLESS",
+		);
+		fireEvent.click(cellToggle);
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Apply changes" }),
+		);
+
+		await waitFor(() => {
+			expect(deleteAdminGrantGroup).toHaveBeenCalledWith(
+				"admintoken",
+				"legacy-group",
+			);
+		});
+		await waitFor(() => {
+			expect(
+				vi
+					.mocked(createAdminGrantGroup)
+					.mock.calls.some(
+						([, payload]) => payload.group_name === "legacy-group",
+					),
+			).toBe(true);
+		});
+	});
+
 	it("replaces per-user managed group when it already exists", async () => {
 		setupHappyPathMocks({
 			userId: "u_01HUSERAAAAAA",
