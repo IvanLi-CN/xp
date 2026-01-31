@@ -196,8 +196,10 @@ export function UserDetailsPage() {
 		if (!userId) return;
 		if (accessInitForUserId === userId) return;
 		if (endpointsQuery.isLoading || grantGroupQuery.isLoading) return;
+		if (endpointsQuery.isError || grantGroupQuery.isError) return;
+		if (!endpointsQuery.data) return;
 
-		const endpoints = endpointsQuery.data?.items ?? [];
+		const endpoints = endpointsQuery.data.items ?? [];
 		const group = grantGroupQuery.data;
 		const supported = new Set(PROTOCOLS.map((p) => p.protocolId));
 		const next: Record<string, string> = {};
@@ -219,8 +221,10 @@ export function UserDetailsPage() {
 	}, [
 		accessInitForUserId,
 		endpointsQuery.data,
+		endpointsQuery.isError,
 		endpointsQuery.isLoading,
 		grantGroupQuery.data,
+		grantGroupQuery.isError,
 		grantGroupQuery.isLoading,
 		userId,
 	]);

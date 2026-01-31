@@ -189,6 +189,73 @@ describe("<UserDetailsPage />", () => {
 		).toBeInTheDocument();
 	});
 
+	it("re-initializes selection after transient endpoints load error", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+		});
+
+		vi.mocked(fetchAdminEndpoints).mockRejectedValueOnce(
+			new BackendApiError({ status: 500, message: "boom" }),
+		);
+		vi.mocked(fetchAdminGrantGroup).mockResolvedValue({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			members: [
+				{
+					user_id: "u_01HUSERAAAAAA",
+					endpoint_id: "ep-a",
+					enabled: true,
+					quota_limit_bytes: 0,
+					note: null,
+					credentials: {
+						vless: { uuid: "00000000-0000-0000-0000-000000000000", email: "" },
+					},
+				},
+			],
+		});
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		expect(
+			await within(view.container).findByText("Failed to load node quotas"),
+		).toBeInTheDocument();
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Retry" }),
+		);
+
+		await within(view.container).findByText("Matrix");
+		await within(view.container).findByText(/Selected 1 \/ 1/);
+	});
+
 	it("deletes per-user managed group on empty selection (hard cut)", async () => {
 		setupHappyPathMocks({
 			userId: "u_01HUSERAAAAAA",
