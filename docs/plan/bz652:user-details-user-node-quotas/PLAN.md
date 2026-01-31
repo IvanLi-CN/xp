@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-01-30
-- Last: 2026-01-30
+- Last: 2026-01-31
 
 ## 背景 / 问题陈述
 
@@ -143,6 +143,7 @@ TBD（在 UI 草图确认并满足 `Ready-to-implement: yes` 后再拆分；避�
 - 2026-01-30: pivot to matrix-based access configuration per user (replace list UI)
 - 2026-01-30: align sketches to current UI (GrantNewPage)
 - 2026-01-30: add per-node quota editing in Node quotas tab (sync to managed group)
+- 2026-01-31: shipped via PR #54
 
 ## 参考（References）
 
