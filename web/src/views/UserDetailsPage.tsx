@@ -782,7 +782,7 @@ export function UserDetailsPage() {
 												user.user_id,
 												n.node_id,
 												nextBytes,
-												"user",
+												quotaByNodeId.get(n.node_id)?.quota_reset_source,
 											);
 											await nodeQuotasQuery.refetch();
 

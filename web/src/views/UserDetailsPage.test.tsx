@@ -95,7 +95,11 @@ function setupHappyPathMocks(args: {
 		port: number;
 		meta: Record<string, unknown>;
 	}>;
-	nodeQuotas?: Array<{ node_id: string; quota_limit_bytes: number }>;
+	nodeQuotas?: Array<{
+		node_id: string;
+		quota_limit_bytes: number;
+		quota_reset_source?: "node" | "user";
+	}>;
 }) {
 	const { userId } = args;
 	vi.mocked(fetchAdminUser).mockResolvedValue({
@@ -133,14 +137,14 @@ function setupHappyPathMocks(args: {
 	});
 
 	const nodeQuotas = args.nodeQuotas ?? [
-		{ node_id: "n-tokyo", quota_limit_bytes: 0 },
+		{ node_id: "n-tokyo", quota_limit_bytes: 0, quota_reset_source: "user" },
 	];
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
 		items: nodeQuotas.map((q) => ({
 			user_id: userId,
 			node_id: q.node_id,
 			quota_limit_bytes: q.quota_limit_bytes,
-			quota_reset_source: "user",
+			quota_reset_source: q.quota_reset_source ?? "user",
 		})),
 	});
 }
@@ -637,6 +641,84 @@ describe("<UserDetailsPage />", () => {
 						}),
 					],
 				}),
+			);
+		});
+	});
+
+	it("preserves quota_reset_source when updating quota", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [
+				{
+					node_id: "n-tokyo",
+					quota_limit_bytes: 0,
+					quota_reset_source: "node",
+				},
+			],
+		});
+
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
+		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
+			new BackendApiError({ status: 404, message: "not found" }),
+		);
+		vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
+			user_id: "u_01HUSERAAAAAA",
+			node_id: "n-tokyo",
+			quota_limit_bytes: 1024 * 1024 * 1024,
+			quota_reset_source: "node",
+		});
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		await within(view.container).findByText("Matrix");
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: /Quota:/ }),
+		);
+
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: "Edit node quota",
+		});
+		fireEvent.change(within(dialog).getByRole("textbox"), {
+			target: { value: "1GiB" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+
+		await waitFor(() => {
+			expect(putAdminUserNodeQuota).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				"n-tokyo",
+				1024 * 1024 * 1024,
+				"node",
 			);
 		});
 	});
