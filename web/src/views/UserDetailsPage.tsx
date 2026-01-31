@@ -587,6 +587,7 @@ export function UserDetailsPage() {
 		}
 
 		const onToggleCell = (nodeId: string, protocolId: string) => {
+			if (isApplyingAccess) return;
 			const options =
 				endpointsByNodeProtocol.get(nodeId)?.get(protocolId) ?? [];
 			if (options.length === 0) return;
@@ -604,6 +605,7 @@ export function UserDetailsPage() {
 			protocolId: string,
 			endpointId: string,
 		) => {
+			if (isApplyingAccess) return;
 			const options =
 				endpointsByNodeProtocol.get(nodeId)?.get(protocolId) ?? [];
 			if (!options.some((ep) => ep.endpoint_id === endpointId)) return;
@@ -612,6 +614,7 @@ export function UserDetailsPage() {
 		};
 
 		const onToggleRow = (nodeId: string) => {
+			if (isApplyingAccess) return;
 			const protocolIds = PROTOCOLS.map((p) => p.protocolId);
 			setSelectedByCell((prev) => {
 				const hasAny = protocolIds.some((pid) =>
@@ -630,6 +633,7 @@ export function UserDetailsPage() {
 		};
 
 		const onToggleColumn = (protocolId: string) => {
+			if (isApplyingAccess) return;
 			setSelectedByCell((prev) => {
 				const hasAny = visibleNodes.some((n) =>
 					Boolean(prev[cellKey(n.node_id, protocolId)]),
@@ -648,6 +652,7 @@ export function UserDetailsPage() {
 		};
 
 		const onToggleAll = () => {
+			if (isApplyingAccess) return;
 			setSelectedByCell((prev) => {
 				const hasAny = Object.keys(prev).length > 0;
 				if (hasAny) return {};
@@ -768,6 +773,7 @@ export function UserDetailsPage() {
 					</div>
 
 					<GrantAccessMatrix
+						disabled={isApplyingAccess}
 						nodes={visibleNodes.map((n) => ({
 							nodeId: n.node_id,
 							label: n.node_name,

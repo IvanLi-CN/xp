@@ -376,6 +376,80 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("disables matrix edits while Apply changes is in-flight", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [{ node_id: "n-tokyo", quota_limit_bytes: 123 }],
+		});
+
+		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
+			new BackendApiError({ status: 404, message: "not found" }),
+		);
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
+
+		let resolveCreate: ((value: unknown) => void) | undefined;
+		const pending = new Promise((resolve) => {
+			resolveCreate = resolve;
+		});
+		vi.mocked(createAdminGrantGroup).mockReturnValue(
+			pending as unknown as ReturnType<typeof createAdminGrantGroup>,
+		);
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		const cellToggle = await within(view.container).findByLabelText(
+			"Toggle Tokyo VLESS",
+		);
+		fireEvent.click(cellToggle);
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Apply changes" }),
+		);
+
+		expect(
+			within(view.container).getByLabelText("Toggle Tokyo VLESS"),
+		).toBeDisabled();
+
+		resolveCreate?.({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			members: [],
+		});
+
+		await waitFor(() => {
+			expect(
+				within(view.container).getByLabelText("Toggle Tokyo VLESS"),
+			).not.toBeDisabled();
+		});
+	});
+
 	it("purges user grants from other groups before creating managed group", async () => {
 		setupHappyPathMocks({
 			userId: "u_01HUSERAAAAAA",
