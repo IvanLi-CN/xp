@@ -8,6 +8,7 @@ import {
 	createAdminGrantGroup,
 	deleteAdminGrantGroup,
 	fetchAdminGrantGroup,
+	fetchAdminGrantGroups,
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -495,6 +496,50 @@ export function UserDetailsPage() {
 			});
 		};
 
+		const purgeUserFromOtherGrantGroups = async () => {
+			const list = await fetchAdminGrantGroups(adminToken);
+			for (const g of list.items) {
+				const groupName = g.group_name;
+				if (groupName === managedGroupName) continue;
+
+				let detail: Awaited<ReturnType<typeof fetchAdminGrantGroup>> | null =
+					null;
+				try {
+					detail = await fetchAdminGrantGroup(adminToken, groupName);
+				} catch (err) {
+					if (isBackendApiError(err) && err.status === 404) continue;
+					throw err;
+				}
+				if (!detail) continue;
+
+				const remaining = detail.members.filter(
+					(m) => m.user_id !== user.user_id,
+				);
+				if (remaining.length === detail.members.length) continue;
+
+				if (remaining.length === 0) {
+					try {
+						await deleteAdminGrantGroup(adminToken, groupName);
+					} catch (err) {
+						if (!(isBackendApiError(err) && err.status === 404)) {
+							throw err;
+						}
+					}
+					continue;
+				}
+
+				await replaceAdminGrantGroup(adminToken, groupName, {
+					members: remaining.map((m) => ({
+						user_id: m.user_id,
+						endpoint_id: m.endpoint_id,
+						enabled: m.enabled,
+						quota_limit_bytes: m.quota_limit_bytes,
+						note: m.note ?? null,
+					})),
+				});
+			}
+		};
+
 		const cells: Record<
 			string,
 			Record<string, GrantAccessMatrixCellState>
@@ -620,6 +665,11 @@ export function UserDetailsPage() {
 			setAccessError(null);
 			setIsApplyingAccess(true);
 			try {
+				// Hard cut: this UI is authoritative. Remove this user from any existing
+				// grant-groups so we can safely move everything into the per-user managed
+				// group (backend enforces uniqueness of (user_id, endpoint_id) globally).
+				await purgeUserFromOtherGrantGroups();
+
 				if (selectedEndpointIds.length === 0) {
 					try {
 						await deleteAdminGrantGroup(adminToken, managedGroupName);
@@ -734,28 +784,42 @@ export function UserDetailsPage() {
 
 											if (!grantGroupQuery.data) return;
 
-											const affectedSelected = Object.values(
-												selectedByCell,
-											).some((endpointId) => {
-												const ep = endpoints.find(
-													(e) => e.endpoint_id === endpointId,
-												);
-												return ep?.node_id === n.node_id;
-											});
-											if (!affectedSelected) return;
+											// Do not implicitly apply selection changes from the matrix:
+											// only update quotas for endpoints already in the managed group.
+											const endpointsInGroupForNode =
+												grantGroupQuery.data.members
+													.map((m) => {
+														const ep = endpoints.find(
+															(e) => e.endpoint_id === m.endpoint_id,
+														);
+														return ep?.node_id ?? null;
+													})
+													.some((nodeId) => nodeId === n.node_id);
+											if (!endpointsInGroupForNode) return;
 
-											const members = buildMembers({
-												selectedEndpointIds: Object.values(selectedByCell),
-												quotaOverride: {
-													nodeId: n.node_id,
-													quotaLimitBytes: nextBytes,
-												},
+											const members = grantGroupQuery.data.members.map((m) => {
+												const ep = endpoints.find(
+													(e) => e.endpoint_id === m.endpoint_id,
+												);
+												const quotaLimitBytes =
+													ep?.node_id === n.node_id
+														? nextBytes
+														: m.quota_limit_bytes;
+												return {
+													user_id: m.user_id,
+													endpoint_id: m.endpoint_id,
+													enabled: m.enabled,
+													quota_limit_bytes: quotaLimitBytes,
+													note: m.note ?? null,
+												};
 											});
 
 											await replaceAdminGrantGroup(
 												adminToken,
 												managedGroupName,
-												{ members },
+												{
+													members,
+												},
 											);
 											await grantGroupQuery.refetch();
 

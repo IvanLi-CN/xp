@@ -13,6 +13,7 @@ import {
 	createAdminGrantGroup,
 	deleteAdminGrantGroup,
 	fetchAdminGrantGroup,
+	fetchAdminGrantGroups,
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -205,6 +206,7 @@ describe("<UserDetailsPage />", () => {
 		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
 			new BackendApiError({ status: 404, message: "not found" }),
 		);
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
 		vi.mocked(deleteAdminGrantGroup).mockResolvedValue({ deleted: 0 });
 
 		const view = renderPage();
@@ -261,6 +263,7 @@ describe("<UserDetailsPage />", () => {
 		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
 			new BackendApiError({ status: 404, message: "not found" }),
 		);
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
 		vi.mocked(createAdminGrantGroup).mockResolvedValue({
 			group: { group_name: "managed-u_01huseraaaaaa" },
 			members: [],
@@ -299,6 +302,99 @@ describe("<UserDetailsPage />", () => {
 					note: null,
 				},
 			],
+		});
+	});
+
+	it("purges user grants from other groups before creating managed group", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-a",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [{ node_id: "n-tokyo", quota_limit_bytes: 123 }],
+		});
+
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({
+			items: [{ group_name: "legacy-group", member_count: 1 }],
+		});
+		vi.mocked(fetchAdminGrantGroup).mockImplementation(
+			async (_token, groupName) => {
+				if (groupName === "managed-u_01huseraaaaaa") {
+					throw new BackendApiError({ status: 404, message: "not found" });
+				}
+				if (groupName === "legacy-group") {
+					return {
+						group: { group_name: "legacy-group" },
+						members: [
+							{
+								user_id: "u_01HUSERAAAAAA",
+								endpoint_id: "ep-a",
+								enabled: true,
+								quota_limit_bytes: 0,
+								note: null,
+								credentials: {
+									vless: {
+										uuid: "00000000-0000-0000-0000-000000000000",
+										email: "",
+									},
+								},
+							},
+						],
+					};
+				}
+				throw new BackendApiError({ status: 404, message: "not found" });
+			},
+		);
+		vi.mocked(deleteAdminGrantGroup).mockResolvedValue({ deleted: 1 });
+		vi.mocked(createAdminGrantGroup).mockResolvedValue({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			members: [],
+		});
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		const cellToggle = await within(view.container).findByLabelText(
+			"Toggle Tokyo VLESS",
+		);
+		fireEvent.click(cellToggle);
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Apply changes" }),
+		);
+
+		await waitFor(() => {
+			expect(deleteAdminGrantGroup).toHaveBeenCalledWith(
+				"admintoken",
+				"legacy-group",
+			);
+		});
+		await waitFor(() => {
+			expect(createAdminGrantGroup).toHaveBeenCalled();
 		});
 	});
 
@@ -345,6 +441,7 @@ describe("<UserDetailsPage />", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
 		vi.mocked(replaceAdminGrantGroup).mockResolvedValue({
 			group: { group_name: "managed-u_01huseraaaaaa" },
 			created: 0,
@@ -415,6 +512,7 @@ describe("<UserDetailsPage />", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
 		vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 			user_id: "u_01HUSERAAAAAA",
 			node_id: "n-tokyo",
