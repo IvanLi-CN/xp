@@ -418,8 +418,8 @@ async fn login_token_jwt_can_access_admin_endpoints() {
 
     let token_id = crate::id::new_ulid_string();
     let now = chrono::Utc::now();
-    let jwt =
-        crate::login_token::issue_login_token_jwt(&meta.cluster_id, &token_id, now, "testtoken");
+    let secret = test_admin_token_hash();
+    let jwt = crate::login_token::issue_login_token_jwt(&meta.cluster_id, &token_id, now, &secret);
 
     let res = app
         .oneshot(
@@ -445,11 +445,12 @@ async fn expired_login_token_jwt_is_rejected() {
     let now = chrono::Utc::now();
     let issued_at =
         now - chrono::Duration::seconds(crate::login_token::LOGIN_TOKEN_TTL_SECONDS + 1);
+    let secret = test_admin_token_hash();
     let jwt = crate::login_token::issue_login_token_jwt(
         &meta.cluster_id,
         &token_id,
         issued_at,
-        "testtoken",
+        &secret,
     );
 
     let res = app

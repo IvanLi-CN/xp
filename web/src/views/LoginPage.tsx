@@ -104,11 +104,11 @@ export function LoginPage() {
 							<p className="text-warning">
 								No token set. Please add a token to continue.
 							</p>
-								<p className="text-xs opacity-70">
-									Ask an administrator for a token or a temporary login link.
-								</p>
-							</div>
-						) : (
+							<p className="text-xs opacity-70">
+								Ask an administrator for a token or a temporary login link.
+							</p>
+						</div>
+					) : (
 						<p className="text-sm opacity-70">
 							Token stored (length {token.length}).
 						</p>
