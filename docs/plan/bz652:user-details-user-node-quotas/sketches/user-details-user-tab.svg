@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <defs>
+    <filter id="shadow-sm" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#111827" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      .bg { fill: #eef2f7; }
+      .card { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; filter: url(#shadow-sm); }
+      .card-flat { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; }
+      .muted { fill: rgba(17, 24, 39, 0.55); font: 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .text { fill: rgba(17, 24, 39, 0.88); font: 14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .title { fill: rgba(17, 24, 39, 0.92); font: 700 24px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .h2 { fill: rgba(17, 24, 39, 0.92); font: 700 18px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .mono { fill: rgba(17, 24, 39, 0.78); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .monoStrong { fill: rgba(17, 24, 39, 0.88); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+      .btn { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; }
+      .btnGhost { fill: rgba(255, 255, 255, 0); stroke: rgba(17, 24, 39, 0.12); stroke-width: 1.25; }
+      .btnPrimary { fill: rgba(14, 165, 233, 0.10); stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+      .btnText { fill: rgba(17, 24, 39, 0.86); font: 600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .btnTextPrimary { fill: rgba(3, 105, 161, 0.95); font: 700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+
+      .input { fill: rgba(243, 244, 246, 0.75); stroke: #e5e7eb; stroke-width: 1.25; }
+      .tabActive { fill: #ffffff; stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+      .tabIdle { fill: rgba(243, 244, 246, 0.75); stroke: rgba(17, 24, 39, 0.12); stroke-width: 1.25; }
+
+      .navItem { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1.25; }
+      .navItemActive { fill: rgba(14, 165, 233, 0.10); stroke: rgba(14, 165, 233, 0.35); stroke-width: 1.25; }
+	      .navText { fill: rgba(17, 24, 39, 0.88); font: 600 13px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .badge { fill: rgba(17, 24, 39, 0.04); stroke: rgba(17, 24, 39, 0.10); stroke-width: 1.25; }
+	      .badgeText { fill: rgba(17, 24, 39, 0.78); font: 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .badgeTextStrong { fill: rgba(17, 24, 39, 0.88); font: 700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .dangerTitle { fill: rgba(220, 38, 38, 0.92); font: 700 18px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	      .dangerBtn { fill: rgba(220, 38, 38, 0.08); stroke: rgba(220, 38, 38, 0.30); stroke-width: 1.25; }
+	      .dangerBtnText { fill: rgba(185, 28, 28, 0.95); font: 700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+	    </style>
+
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1400" height="900"/>
+
+  <!-- App header (AppShell) -->
+  <rect class="card" x="24" y="20" width="1352" height="64" rx="16"/>
+  <text class="btnText" x="52" y="52" style="font-size:16px; font-weight:700;">xp</text>
+  <text class="muted" x="78" y="54" style="font-size:12px;">cluster manager</text>
+
+	  <rect class="input" x="420" y="34" width="400" height="36" rx="12"/>
+	  <text class="muted" x="438" y="56">Search / command palette</text>
+	  <!-- Ctrl/K hints are inside the search input -->
+	  <rect class="badge" x="732" y="42" width="44" height="20" rx="8"/>
+	  <text class="mono" x="744" y="56">Ctrl</text>
+	  <rect class="badge" x="780" y="42" width="24" height="20" rx="8"/>
+	  <text class="mono" x="787" y="56">K</text>
+
+	  <!-- Status badges (AppShell) -->
+	  <rect class="btnPrimary" x="852" y="40" width="88" height="24" rx="12"/>
+	  <text class="badgeTextStrong" x="866" y="56">Health OK</text>
+
+	  <rect class="badge" x="948" y="40" width="104" height="24" rx="12"/>
+	  <text class="badgeText" x="962" y="56">leader: &lt;id&gt;</text>
+
+	  <rect class="badge" x="1060" y="40" width="70" height="24" rx="12"/>
+	  <text class="badgeText" x="1074" y="56">term: 1</text>
+
+	  <rect class="badge" x="1138" y="40" width="82" height="24" rx="12"/>
+	  <text class="badgeText" x="1152" y="56">alerts: 0</text>
+
+  <!-- Actions -->
+  <rect class="btnGhost" x="1230" y="38" width="60" height="28" rx="10"/>
+  <text class="btnText" x="1246" y="56">Theme</text>
+  <rect class="btnGhost" x="1296" y="38" width="64" height="28" rx="10"/>
+  <text class="btnText" x="1312" y="56">Logout</text>
+
+  <!-- Layout: sidebar + main -->
+  <rect class="card" x="24" y="104" width="260" height="772" rx="16"/>
+  <rect class="card" x="304" y="104" width="1072" height="772" rx="16"/>
+
+  <!-- Sidebar content -->
+  <text class="muted" x="52" y="140" style="letter-spacing:0.08em; font-size:11px;">NAV</text>
+  <rect class="navItem" x="44" y="156" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="180">Dashboard</text>
+  <rect class="navItem" x="44" y="202" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="226">Nodes</text>
+  <rect class="navItem" x="44" y="248" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="272">Endpoints</text>
+  <rect class="navItemActive" x="44" y="294" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="318">Users</text>
+  <rect class="navItem" x="44" y="340" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="364">Grant groups</text>
+
+  <text class="muted" x="52" y="414" style="letter-spacing:0.08em; font-size:11px;">SETTINGS</text>
+  <rect class="navItem" x="44" y="430" width="220" height="38" rx="12"/>
+  <text class="navText" x="76" y="454">Service config</text>
+
+  <!-- Main content (User tab) -->
+  <text class="title" x="336" y="156">User</text>
+  <text class="monoStrong" x="336" y="178">&lt;user_id&gt; — &lt;display_name&gt;</text>
+  <rect class="btnGhost" x="1258" y="132" width="96" height="30" rx="10"/>
+  <text class="btnText" x="1290" y="151">Back</text>
+
+	  <!-- Tabs -->
+	  <rect class="tabActive" x="336" y="198" width="84" height="30" rx="12"/>
+	  <text class="btnTextPrimary" x="378" y="217" text-anchor="middle">User</text>
+	  <rect class="tabIdle" x="428" y="198" width="128" height="30" rx="12"/>
+	  <text class="btnText" x="492" y="217" text-anchor="middle">Node quotas</text>
+
+  <!-- Profile card -->
+  <rect class="card-flat" x="336" y="244" width="1018" height="250" rx="16"/>
+  <text class="h2" x="360" y="276">Profile</text>
+
+  <!-- Grid inputs -->
+  <text class="muted" x="360" y="306">Display name</text>
+  <rect class="input" x="360" y="316" width="480" height="36" rx="12"/>
+  <text class="text" x="374" y="339">&lt;display_name&gt;</text>
+
+	  <text class="muted" x="872" y="306">Quota reset policy</text>
+	  <!-- Keep right column inset from card border (inner padding 24px) -->
+	  <rect class="input" x="872" y="316" width="458" height="36" rx="12"/>
+	  <text class="text" x="886" y="339">monthly</text>
+
+  <text class="muted" x="360" y="376">Reset day of month</text>
+  <rect class="input" x="360" y="386" width="480" height="36" rx="12"/>
+  <text class="text" x="374" y="409">1</text>
+
+	  <text class="muted" x="872" y="376">tz_offset_minutes</text>
+	  <rect class="input" x="872" y="386" width="458" height="36" rx="12"/>
+	  <text class="text" x="886" y="409">480</text>
+
+	  <!-- Card inner padding: keep actions inset from the card border -->
+	  <rect class="btnPrimary" x="1222" y="436" width="108" height="34" rx="12"/>
+	  <text class="btnTextPrimary" x="1276" y="457" text-anchor="middle">Save changes</text>
+
+  <!-- Subscription card -->
+  <rect class="card-flat" x="336" y="514" width="1018" height="220" rx="16"/>
+  <text class="h2" x="360" y="546">Subscription</text>
+  <text class="muted" x="360" y="570">Subscription token</text>
+  <text class="monoStrong" x="360" y="592">sub_xxxxxxxxxxxxxxxxxxxxxxxxx</text>
+
+  <text class="muted" x="872" y="570">Format</text>
+  <rect class="input" x="872" y="580" width="182" height="32" rx="12"/>
+  <text class="mono" x="886" y="601">raw</text>
+
+	  <rect class="btnGhost" x="1062" y="580" width="98" height="32" rx="12"/>
+	  <text class="btnText" x="1111" y="600" text-anchor="middle">Copy URL</text>
+	  <rect class="btnPrimary" x="1166" y="580" width="74" height="32" rx="12"/>
+	  <text class="btnTextPrimary" x="1203" y="600" text-anchor="middle">Fetch</text>
+
+	  <!-- Reset token is a separate right-aligned action row -->
+	  <rect class="btnGhost" x="1222" y="624" width="108" height="32" rx="12"/>
+	  <text class="btnText" x="1276" y="644" text-anchor="middle">Reset token</text>
+
+	  <text class="muted" x="360" y="688">No inline preview · use Fetch to open modal</text>
+
+  <!-- Danger zone card -->
+  <rect class="card-flat" x="336" y="754" width="1018" height="106" rx="16"/>
+  <text class="dangerTitle" x="360" y="790">Danger zone</text>
+  <text class="muted" x="360" y="812">Deleting a user removes all associated memberships and quotas.</text>
+	  <rect class="dangerBtn" x="1228" y="782" width="102" height="34" rx="12"/>
+	  <text class="dangerBtnText" x="1279" y="803" text-anchor="middle">Delete user</text>
+</svg>

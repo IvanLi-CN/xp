@@ -81,3 +81,4 @@
 | 38wmj | 集群节点部署引导（Web 生成命令 + xp-ops deploy join）       | 待实现 | `38wmj:cluster-node-onboarding/PLAN.md`              | 2026-01-27 | -                |
 | ap63t | xp-ops：统一升级命令 upgrade（同时升级 xp + xp-ops）        | 已完成 | `ap63t:xp-ops-upgrade-unified/PLAN.md`               | 2026-01-28 | PR #50           |
 | k9n2r | xp-ops：admin token 设置后操作指引                          | 已完成 | `k9n2r:xp-ops-admin-token-ops/PLAN.md`               | 2026-01-29 | PR #52, PR #53   |
+| bz652 | User 详情：用户信息 / 接入点配置（矩阵）                    | 待实现 | `bz652:user-details-user-node-quotas/PLAN.md`        | 2026-01-30 | impl branch      |
