@@ -15,12 +15,13 @@ async fn main() -> Result<()> {
 
     let cli = xp::config::Cli::parse();
     let cmd = cli.command.clone().unwrap_or(xp::config::Command::Run);
+    let config = cli.config.clone();
 
     match cmd {
-        xp::config::Command::Run => run_server(cli.config).await,
-        xp::config::Command::Init => init_cluster(&cli.config),
-        xp::config::Command::Join(args) => join_cluster(cli.config, args.token).await,
-        xp::config::Command::LoginLink => login_link(&cli.config),
+        xp::config::Command::Run => run_server(config).await,
+        xp::config::Command::Init => init_cluster(&config),
+        xp::config::Command::Join(args) => join_cluster(config, args.token).await,
+        xp::config::Command::LoginLink => login_link(&config),
     }
 }
 
@@ -50,8 +51,8 @@ fn init_cluster(config: &xp::config::Config) -> Result<()> {
 }
 
 fn login_link(config: &xp::config::Config) -> Result<()> {
-    if config.admin_token.is_empty() {
-        anyhow::bail!("admin token is not configured (XP_ADMIN_TOKEN is empty)");
+    if config.admin_token_hash().is_none() {
+        anyhow::bail!("admin token hash is not configured (XP_ADMIN_TOKEN_HASH is empty/invalid)");
     }
     if !config.api_base_url.starts_with("https://") {
         anyhow::bail!("--api-base-url must start with https://");
@@ -64,7 +65,7 @@ fn login_link(config: &xp::config::Config) -> Result<()> {
         &cluster.cluster_id,
         &token_id,
         now,
-        &config.admin_token,
+        &config.admin_token_hash,
     );
 
     let base = config.api_base_url.trim_end_matches('/');
@@ -131,6 +132,11 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing cluster_ca_key_pem in join response"))?
         .to_string();
+    let xp_admin_token_hash = resp
+        .get("xp_admin_token_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing xp_admin_token_hash in join response"))?
+        .to_string();
 
     if node_id != expected_node_id {
         anyhow::bail!(
@@ -143,6 +149,8 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     std::fs::write(&paths.cluster_ca_pem, cluster_ca_pem.as_bytes())?;
     std::fs::write(&paths.cluster_ca_key_pem, cluster_ca_key_pem.as_bytes())?;
     best_effort_chmod_0600(&paths.cluster_ca_key_pem);
+    std::fs::write(&paths.admin_token_hash, xp_admin_token_hash.as_bytes())?;
+    best_effort_chmod_0600(&paths.admin_token_hash);
     std::fs::write(&paths.node_key_pem, csr.key_pem.as_bytes())?;
     std::fs::write(&paths.node_csr_pem, csr.csr_pem.as_bytes())?;
     std::fs::write(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
@@ -244,7 +252,9 @@ async fn run_server(mut config: xp::config::Config) -> Result<()> {
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
-            config.admin_token.clone(),
+            cluster_ca_key_pem
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("cluster ca key is not available on this node"))?,
             &cluster_ca_pem,
             Some(&node_cert_pem),
             Some(&node_key_pem),

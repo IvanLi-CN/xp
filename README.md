@@ -17,7 +17,7 @@ into the `xp` binary at build time and served as a SPA by default.
 - Quotas: cycle windows, bidirectional traffic, auto-ban, optional auto-unban (see `docs/desgin/quota.md` and `XP_QUOTA_*`)
 - Cluster consistency: 1–20 nodes Raft (OpenRaft); write requests are serialized by the leader
 - Embedded admin UI: served by `xp` (default: `http://127.0.0.1:62416/`)
-- Ops tool: `xp-ops` (install/init services, self-upgrade, `xp` upgrade, optional Cloudflare Tunnel)
+- Ops tool: `xp-ops` (install/init services, unified `upgrade`, optional Cloudflare Tunnel)
 
 ## Docs
 

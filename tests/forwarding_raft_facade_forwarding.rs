@@ -8,6 +8,8 @@ use tokio::{
     time::{Duration, Instant},
 };
 
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::{Algorithm, Argon2, Params, Version};
 use xp::{
     cluster_metadata::ClusterMetadata,
     config::Config,
@@ -43,6 +45,17 @@ impl ServerHandle {
             .context("server exited with error")?;
         Ok(())
     }
+}
+
+fn test_admin_token_hash(token: &str) -> String {
+    // Fast + deterministic: keep integration tests snappy.
+    let params = Params::new(32, 1, 1, None).expect("argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let salt = SaltString::encode_b64(b"xp-test-salt").expect("salt");
+    argon2
+        .hash_password(token.as_bytes(), &salt)
+        .expect("hash_password")
+        .to_string()
 }
 
 async fn spawn_server(listener: TcpListener, router: axum::Router) -> anyhow::Result<ServerHandle> {
@@ -289,7 +302,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir: leader_dir.clone(),
-        admin_token: admin_token.clone(),
+        admin_token_hash: test_admin_token_hash(&admin_token),
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
@@ -316,7 +329,9 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
 
     let forwarding = ForwardingRaftFacade::try_new(
         follower.raft(),
-        admin_token.clone(),
+        cluster_ca_key_pem
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("missing cluster ca key"))?,
         &cluster_ca_pem,
         None,
         None,

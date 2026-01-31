@@ -31,7 +31,8 @@ pub struct Cli {
 pub enum Command {
     Install(InstallArgs),
     Init(InitArgs),
-    SelfUpgrade(SelfUpgradeArgs),
+
+    Upgrade(UpgradeArgs),
 
     #[command(subcommand)]
     Xp(XpCommand),
@@ -98,19 +99,48 @@ pub enum InitSystemArg {
 #[derive(Subcommand, Debug)]
 pub enum XpCommand {
     Install(XpInstallArgs),
-    Upgrade(XpUpgradeArgs),
     Bootstrap(XpBootstrapArgs),
+    Restart(XpRestartArgs),
 }
 
 #[derive(Subcommand, Debug)]
 pub enum AdminTokenCommand {
     Show(AdminTokenShowArgs),
+    Set(AdminTokenSetArgs),
 }
 
 #[derive(Args, Debug, Clone)]
 pub struct AdminTokenShowArgs {
     #[arg(long)]
     pub redacted: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AdminTokenSetArgs {
+    /// Admin token hash (argon2id PHC string, e.g. `$argon2id$v=19$...`).
+    #[arg(long, value_name = "HASH", conflicts_with_all = ["token", "token_stdin"])]
+    pub hash: Option<String>,
+
+    /// Admin token plaintext (will be converted to argon2id hash).
+    ///
+    /// Prefer `--token-stdin` to avoid leaking it via shell history.
+    #[arg(long, value_name = "TOKEN", conflicts_with = "token_stdin")]
+    pub token: Option<String>,
+
+    /// Read admin token plaintext from stdin (recommended).
+    #[arg(long)]
+    pub token_stdin: bool,
+
+    /// Keep any existing `XP_ADMIN_TOKEN=...` line in `/etc/xp/xp.env` (not recommended).
+    #[arg(long)]
+    pub keep_plaintext: bool,
+
+    /// Only print `ok` on stdout (suppress guidance output).
+    #[arg(long)]
+    pub quiet: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -138,16 +168,7 @@ pub struct UpgradeReleaseArgs {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct SelfUpgradeArgs {
-    #[command(flatten)]
-    pub release: UpgradeReleaseArgs,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct XpUpgradeArgs {
+pub struct UpgradeArgs {
     #[command(flatten)]
     pub release: UpgradeReleaseArgs,
 
@@ -168,6 +189,16 @@ pub struct XpBootstrapArgs {
 
     #[arg(long, value_name = "PATH", default_value = "/var/lib/xp/data")]
     pub xp_data_dir: PathBuf,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpRestartArgs {
+    /// Service name to restart (OpenRC: `rc-service <name> restart`, systemd: `<name>.service`).
+    #[arg(long, value_name = "NAME", default_value = "xp")]
+    pub service_name: String,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -201,6 +232,15 @@ pub struct DeployArgs {
 
     #[arg(long, value_name = "URL")]
     pub origin_url: Option<String>,
+
+    #[arg(long, value_name = "TOKEN", conflicts_with = "join_token_stdin")]
+    pub join_token: Option<String>,
+
+    #[arg(long, conflicts_with = "join_token")]
+    pub join_token_stdin: bool,
+
+    #[arg(skip)]
+    pub join_token_stdin_value: Option<String>,
 
     #[arg(long, value_name = "TOKEN", conflicts_with = "cloudflare_token_stdin")]
     pub cloudflare_token: Option<String>,
@@ -367,15 +407,16 @@ pub async fn run() -> i32 {
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
-        Some(Command::SelfUpgrade(args)) => upgrade::cmd_self_upgrade(paths, args).await,
+        Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
-            XpCommand::Upgrade(args) => upgrade::cmd_xp_upgrade(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
+            XpCommand::Restart(args) => xp::cmd_xp_restart(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {
             AdminTokenCommand::Show(args) => admin_token::cmd_admin_token_show(paths, args).await,
+            AdminTokenCommand::Set(args) => admin_token::cmd_admin_token_set(paths, args).await,
         },
         Some(Command::Cloudflare(cmd)) => match cmd {
             CloudflareCommand::Token(token) => match token.command {

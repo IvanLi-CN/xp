@@ -1,5 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::{Algorithm, Argon2, Params, Version};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
@@ -32,6 +34,7 @@ use crate::{
 };
 
 fn test_config(data_dir: PathBuf) -> Config {
+    let hash = test_admin_token_hash();
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
@@ -43,13 +46,26 @@ fn test_config(data_dir: PathBuf) -> Config {
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir,
-        admin_token: "testtoken".to_string(),
+        admin_token_hash: hash,
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
     }
+}
+
+const TEST_ADMIN_TOKEN: &str = "testtoken";
+
+fn test_admin_token_hash() -> String {
+    // Keep tests fast: use a deterministic, low-cost argon2id hash.
+    let params = Params::new(32, 1, 1, None).expect("argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let salt = SaltString::encode_b64(b"xp-test-salt").expect("salt");
+    argon2
+        .hash_password(TEST_ADMIN_TOKEN.as_bytes(), &salt)
+        .expect("hash_password")
+        .to_string()
 }
 
 fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
@@ -933,7 +949,7 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["quota_auto_unban"], true);
 
     assert_eq!(json["admin_token_present"], true);
-    assert_eq!(json["admin_token_masked"], "*********");
+    assert_eq!(json["admin_token_masked"], "********");
     assert_ne!(json["admin_token_masked"], "testtoken");
 }
 

@@ -1,5 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::{Algorithm, Argon2, Params, Version};
 use axum::{body::Body, http::Request};
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -19,6 +21,17 @@ use xp::{
     xray_supervisor::XrayHealthHandle,
 };
 use xp::{config::Config, http::build_router, reconcile::spawn_reconciler, state::StoreInit, xray};
+
+fn test_admin_token_hash(token: &str) -> String {
+    // Fast + deterministic: keep integration tests snappy.
+    let params = Params::new(32, 1, 1, None).expect("argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let salt = SaltString::encode_b64(b"xp-test-salt").expect("salt");
+    argon2
+        .hash_password(token.as_bytes(), &salt)
+        .expect("hash_password")
+        .to_string()
+}
 
 fn env_socket_addr(key: &str) -> Result<SocketAddr, String> {
     let raw = std::env::var(key)
@@ -46,7 +59,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         data_dir,
-        admin_token: "testtoken".to_string(),
+        admin_token_hash: test_admin_token_hash("testtoken"),
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),

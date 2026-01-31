@@ -4,7 +4,7 @@
 
 ## 快速新增一个计划
 
-1. 分配一个新的四位编号 `ID`（查看下方 Index，取未使用的最小或递增编号）。
+1. 分配一个新的 `ID`（推荐 5 位 nanoId 风格：`[23456789abcdefghjkmnpqrstuvwxyz]{5}`；兼容四位数字 `0001`–`9999`）。
 2. 新建目录：`docs/plan/<id>:<title>/`（`<title>` 用简短 slug，建议 kebab-case）。
 3. 在该目录下创建 `PLAN.md`（模板见下方“PLAN.md 写法（简要）”）。
 4. 在下方 Index 表新增一行，并把 `Status` 设为 `待设计` 或 `待实现`（取决于是否已冻结验收标准），并填入 `Last`（通常为当天）。
@@ -12,7 +12,7 @@
 ## 目录与命名规则
 
 - 每个计划一个目录：`docs/plan/<id>:<title>/`
-- `<id>`：四位数字（`0001`–`9999`），一经分配不要变更。
+- `<id>`：推荐 5 位 nanoId 风格（`[23456789abcdefghjkmnpqrstuvwxyz]{5}`）；兼容四位数字（`0001`–`9999`）。一经分配不要变更。
 - `<title>`：短标题 slug（建议 kebab-case，避免空格与特殊字符）；目录名尽量稳定。
 - 人类可读标题写在 Index 的 `Title` 列；标题变更优先改 `Title`，不强制改目录名。
 
@@ -52,30 +52,34 @@
 
 ## Index（固定表格）
 
-|   ID | Title                                                       | Status | Plan                                                 | Last       | Notes            |
-| ---: | ----------------------------------------------------------- | ------ | ---------------------------------------------------- | ---------- | ---------------- |
-| 0001 | MVP 大纲（目标与里程碑）                                    | 已完成 | `0001:mvp-outline/PLAN.md`                           | 2025-12-23 | -                |
-| 0002 | Milestone 1 · 控制面基础（单机可用）                        | 已完成 | `0002:m1-management-foundation/PLAN.md`              | 2025-12-17 | -                |
-| 0003 | Milestone 2 · Xray Controller + Reconcile（单机闭环）       | 已完成 | `0003:m2-xray-controller-reconcile/PLAN.md`          | 2025-12-18 | -                |
-| 0004 | Milestone 3 · 订阅输出（对用户可交付）                      | 已完成 | `0004:m3-subscription-output/PLAN.md`                | 2025-12-18 | -                |
-| 0005 | Milestone 4 · 配额系统（单机强约束）                        | 已完成 | `0005:m4-quota-system/PLAN.md`                       | 2025-12-19 | -                |
-| 0006 | Milestone 5 · Raft 集群（强一致 + HTTPS-only）              | 已完成 | `0006:m5-raft-cluster/PLAN.md`                       | 2025-12-23 | -                |
-| 0007 | Milestone 5 收尾 · Quota 强约束与 Raft 一致性               | 已完成 | `0007:m5-quota-raft-consistency/PLAN.md`             | 2025-12-21 | -                |
-| 0008 | Milestone 6 · Web 面板（基础功能完整：CRUD）                | 已完成 | `0008:m6-web-panel/PLAN.md`                          | 2025-12-22 | -                |
-| 0009 | Milestone 7 · 质量门禁与交付                                | 已完成 | `0009:m7-quality-gates-delivery/PLAN.md`             | 2025-12-23 | -                |
-| 0010 | 控制面 Web UI 重设计（Geek 风格 + Light/Dark）              | 已完成 | `0010:admin-ui-geek-redesign/PLAN.md`                | 2026-01-14 | PR #15           |
-| 0011 | Storybook 启动不自动打开浏览器                              | 已完成 | `0011:storybook-no-auto-open/PLAN.md`                | 2026-01-14 | 默认 `--no-open` |
-| 0012 | Grant 接入点配置：协议 × 节点二维表格                       | 已完成 | `0012:grant-access-matrix/PLAN.md`                   | 2026-01-16 | PR #18           |
-| 0013 | Cloudflare Tunnel 公网访问与互联（API 自动创建 + 应用路由） | 已完成 | `0013:cloudflare-tunnel-remote-access/PLAN.md`       | 2026-01-16 | -                |
-| 0014 | Grant 按节点配额编辑（GiB/MiB 智能解析）                    | 已完成 | `0014:grant-node-quota-editor/PLAN.md`               | 2026-01-19 | -                |
-| 0015 | 服务配置只读展示页                                          | 已完成 | `0015:service-config-readonly-page/PLAN.md`          | 2026-01-19 | -                |
-| 0016 | Grant 新建页：接入点选择与创建交互优化                      | 已完成 | `0016:grant-new-access-selection/PLAN.md`            | 2026-01-19 | -                |
-| 0017 | Grant 模型：分组与配额周期归属                              | 已完成 | `0017:grant-grouping-and-cycle-ownership/PLAN.md`    | 2026-01-21 | -                |
-| 0018 | xp-ops：自我升级、xp 升级与 Release 自动发布                | 已完成 | `0018:xp-ops-upgrade-and-release-automation/PLAN.md` | 2026-01-20 | -                |
-| 0019 | Subscription 预览格式（不折行 + 复制一致性）                | 已完成 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-23 | -                |
-| 0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 已完成 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |
-| 0021 | Xray 探活与恢复信号（Down/Up + health）                     | 已完成 | `0021:xray-supervision-auto-restart/PLAN.md`         | 2026-01-23 | -                |
-| 0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 已完成 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-24 | -                |
-| 0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
-| 0024 | xp-ops：服务日志保留与轮换（防磁盘占满）                    | 待实现 | `0024:service-log-rotation/PLAN.md`                  | 2026-01-26 | -                |
-| 0025 | xp：CLI 一次性登录链接（Admin UI）                          | 已完成 | `0025:xp-cli-one-time-login-link/PLAN.md`            | 2026-01-27 | -                |
+|    ID | Title                                                       | Status | Plan                                                 | Last       | Notes            |
+| ----: | ----------------------------------------------------------- | ------ | ---------------------------------------------------- | ---------- | ---------------- |
+|  0001 | MVP 大纲（目标与里程碑）                                    | 已完成 | `0001:mvp-outline/PLAN.md`                           | 2025-12-23 | -                |
+|  0002 | Milestone 1 · 控制面基础（单机可用）                        | 已完成 | `0002:m1-management-foundation/PLAN.md`              | 2025-12-17 | -                |
+|  0003 | Milestone 2 · Xray Controller + Reconcile（单机闭环）       | 已完成 | `0003:m2-xray-controller-reconcile/PLAN.md`          | 2025-12-18 | -                |
+|  0004 | Milestone 3 · 订阅输出（对用户可交付）                      | 已完成 | `0004:m3-subscription-output/PLAN.md`                | 2025-12-18 | -                |
+|  0005 | Milestone 4 · 配额系统（单机强约束）                        | 已完成 | `0005:m4-quota-system/PLAN.md`                       | 2025-12-19 | -                |
+|  0006 | Milestone 5 · Raft 集群（强一致 + HTTPS-only）              | 已完成 | `0006:m5-raft-cluster/PLAN.md`                       | 2025-12-23 | -                |
+|  0007 | Milestone 5 收尾 · Quota 强约束与 Raft 一致性               | 已完成 | `0007:m5-quota-raft-consistency/PLAN.md`             | 2025-12-21 | -                |
+|  0008 | Milestone 6 · Web 面板（基础功能完整：CRUD）                | 已完成 | `0008:m6-web-panel/PLAN.md`                          | 2025-12-22 | -                |
+|  0009 | Milestone 7 · 质量门禁与交付                                | 已完成 | `0009:m7-quality-gates-delivery/PLAN.md`             | 2025-12-23 | -                |
+|  0010 | 控制面 Web UI 重设计（Geek 风格 + Light/Dark）              | 已完成 | `0010:admin-ui-geek-redesign/PLAN.md`                | 2026-01-14 | PR #15           |
+|  0011 | Storybook 启动不自动打开浏览器                              | 已完成 | `0011:storybook-no-auto-open/PLAN.md`                | 2026-01-14 | 默认 `--no-open` |
+|  0012 | Grant 接入点配置：协议 × 节点二维表格                       | 已完成 | `0012:grant-access-matrix/PLAN.md`                   | 2026-01-16 | PR #18           |
+|  0013 | Cloudflare Tunnel 公网访问与互联（API 自动创建 + 应用路由） | 已完成 | `0013:cloudflare-tunnel-remote-access/PLAN.md`       | 2026-01-16 | -                |
+|  0014 | Grant 按节点配额编辑（GiB/MiB 智能解析）                    | 已完成 | `0014:grant-node-quota-editor/PLAN.md`               | 2026-01-19 | -                |
+|  0015 | 服务配置只读展示页                                          | 已完成 | `0015:service-config-readonly-page/PLAN.md`          | 2026-01-19 | -                |
+|  0016 | Grant 新建页：接入点选择与创建交互优化                      | 已完成 | `0016:grant-new-access-selection/PLAN.md`            | 2026-01-19 | -                |
+|  0017 | Grant 模型：分组与配额周期归属                              | 已完成 | `0017:grant-grouping-and-cycle-ownership/PLAN.md`    | 2026-01-21 | -                |
+|  0018 | xp-ops：自我升级、xp 升级与 Release 自动发布                | 已完成 | `0018:xp-ops-upgrade-and-release-automation/PLAN.md` | 2026-01-20 | -                |
+|  0019 | Subscription 预览格式（不折行 + 复制一致性）                | 已完成 | `0019:subscription-preview-formatting/PLAN.md`       | 2026-01-23 | -                |
+|  0020 | xp-ops TUI：部署前自动保存配置 + 退出保存确认               | 已完成 | `0020:xp-ops-tui-config-autosave/PLAN.md`            | 2026-01-21 | -                |
+|  0021 | Xray 探活与恢复信号（Down/Up + health）                     | 已完成 | `0021:xray-supervision-auto-restart/PLAN.md`         | 2026-01-23 | -                |
+|  0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 已完成 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-24 | -                |
+|  0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
+|  0024 | xp-ops：服务日志保留与轮换（防磁盘占满）                    | 待实现 | `0024:service-log-rotation/PLAN.md`                  | 2026-01-26 | -                |
+|  0025 | xp：CLI 一次性登录链接（Admin UI）                          | 已完成 | `0025:xp-cli-one-time-login-link/PLAN.md`            | 2026-01-27 | -                |
+| 38wmj | 集群节点部署引导（Web 生成命令 + xp-ops deploy join）       | 待实现 | `38wmj:cluster-node-onboarding/PLAN.md`              | 2026-01-27 | -                |
+| ap63t | xp-ops：统一升级命令 upgrade（同时升级 xp + xp-ops）        | 已完成 | `ap63t:xp-ops-upgrade-unified/PLAN.md`               | 2026-01-28 | PR #50           |
+| k9n2r | xp-ops：admin token 设置后操作指引                          | 已完成 | `k9n2r:xp-ops-admin-token-ops/PLAN.md`               | 2026-01-29 | PR #52, PR #53   |
+| bz652 | User 详情：用户信息 / 接入点配置（矩阵）                    | 已完成 | `bz652:user-details-user-node-quotas/PLAN.md`        | 2026-01-31 | PR #54           |

@@ -1,3 +1,4 @@
+pub mod admin_token;
 pub mod cluster_identity;
 pub mod cluster_metadata;
 pub mod config;
@@ -6,6 +7,7 @@ pub mod domain;
 pub mod http;
 pub mod id;
 pub mod login_token;
+pub mod internal_auth;
 pub mod ops;
 pub mod protocol;
 pub mod quota;

@@ -79,6 +79,7 @@ function IndeterminateCheckbox(props: {
 export type GrantAccessMatrixProps = {
 	nodes: GrantAccessMatrixNode[];
 	protocols: GrantAccessMatrixProtocol[];
+	disabled?: boolean;
 	// nodeId -> protocolId -> state
 	cells: Record<string, Record<string, GrantAccessMatrixCellState>>;
 	onToggleCell?: (nodeId: string, protocolId: string) => void;
@@ -96,6 +97,7 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 	const {
 		nodes,
 		protocols,
+		disabled,
 		cells,
 		onToggleAll,
 		onToggleCell,
@@ -149,9 +151,12 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 								<IndeterminateCheckbox
 									checked={allState.checked}
 									indeterminate={allState.indeterminate}
-									disabled={allState.disabled}
+									disabled={Boolean(disabled) || allState.disabled}
 									ariaLabel="Toggle all nodes and protocols"
-									onChange={() => onToggleAll?.()}
+									onChange={() => {
+										if (disabled) return;
+										onToggleAll?.();
+									}}
 								/>
 								<span className="font-medium">All nodes</span>
 							</div>
@@ -171,9 +176,12 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 										<IndeterminateCheckbox
 											checked={state.checked}
 											indeterminate={state.indeterminate}
-											disabled={state.disabled}
+											disabled={Boolean(disabled) || state.disabled}
 											ariaLabel={`Toggle protocol ${protocol.label}`}
-											onChange={() => onToggleColumn?.(protocol.protocolId)}
+											onChange={() => {
+												if (disabled) return;
+												onToggleColumn?.(protocol.protocolId);
+											}}
 										/>
 										<div className="min-w-0">
 											<div className="flex items-baseline gap-2 min-w-0">
@@ -204,9 +212,12 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 										<IndeterminateCheckbox
 											checked={rowState.checked}
 											indeterminate={rowState.indeterminate}
-											disabled={rowState.disabled}
+											disabled={Boolean(disabled) || rowState.disabled}
 											ariaLabel={`Toggle node ${node.label}`}
-											onChange={() => onToggleRow?.(node.nodeId)}
+											onChange={() => {
+												if (disabled) return;
+												onToggleRow?.(node.nodeId);
+											}}
 										/>
 										<div className="min-w-0">
 											<div className="font-medium">{node.label}</div>
@@ -238,17 +249,21 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 													type="checkbox"
 													className="checkbox checkbox-xs checkbox-primary rounded"
 													checked={cell.value === "on"}
-													disabled={cell.value === "disabled"}
-													aria-label={ariaLabel}
-													onChange={() =>
-														onToggleCell?.(node.nodeId, protocol.protocolId)
+													disabled={
+														Boolean(disabled) || cell.value === "disabled"
 													}
+													aria-label={ariaLabel}
+													onChange={() => {
+														if (disabled) return;
+														onToggleCell?.(node.nodeId, protocol.protocolId);
+													}}
 												/>
 												<div className="min-w-0 flex-1">
 													<CellContent
 														cell={cell}
 														nodeId={node.nodeId}
 														protocolId={protocol.protocolId}
+														disabled={disabled}
 														onSelectCellEndpoint={onSelectCellEndpoint}
 													/>
 												</div>
@@ -274,13 +289,14 @@ function CellContent(props: {
 	cell: GrantAccessMatrixCellState;
 	nodeId: string;
 	protocolId: string;
+	disabled?: boolean;
 	onSelectCellEndpoint?: (
 		nodeId: string,
 		protocolId: string,
 		endpointId: string,
 	) => void;
 }) {
-	const { cell, nodeId, protocolId, onSelectCellEndpoint } = props;
+	const { cell, nodeId, protocolId, disabled, onSelectCellEndpoint } = props;
 
 	if (cell.value === "disabled") {
 		return (
@@ -313,7 +329,11 @@ function CellContent(props: {
 					)}
 				</div>
 				<div className="dropdown dropdown-end">
-					<button type="button" className="btn btn-ghost btn-xs">
+					<button
+						type="button"
+						className="btn btn-ghost btn-xs"
+						disabled={disabled}
+					>
 						Choose ({options.length})
 					</button>
 					<ul className="dropdown-content menu z-[1] w-64 rounded-box border border-base-200 bg-base-100 shadow">
@@ -322,9 +342,11 @@ function CellContent(props: {
 								<button
 									type="button"
 									className="justify-between"
-									onClick={() =>
-										onSelectCellEndpoint?.(nodeId, protocolId, opt.endpointId)
-									}
+									disabled={disabled}
+									onClick={() => {
+										if (disabled) return;
+										onSelectCellEndpoint?.(nodeId, protocolId, opt.endpointId);
+									}}
 								>
 									<span className="font-mono text-xs">
 										port {opt.port} - {opt.tag}

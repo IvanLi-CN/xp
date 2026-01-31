@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::Context;
-use reqwest::header::AUTHORIZATION;
+use axum::http::{Method, Uri, header::HeaderName};
 use tokio::sync::watch;
 
 use crate::{
@@ -111,13 +111,13 @@ pub struct ForwardingRaftFacade {
     raft: openraft::Raft<TypeConfig>,
     metrics: watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>,
     client: reqwest::Client,
-    admin_token: String,
+    cluster_ca_key_pem: String,
 }
 
 impl ForwardingRaftFacade {
     pub fn try_new(
         raft: openraft::Raft<TypeConfig>,
-        admin_token: String,
+        cluster_ca_key_pem: String,
         cluster_ca_pem: &str,
         node_cert_pem: Option<&str>,
         node_key_pem: Option<&str>,
@@ -137,7 +137,7 @@ impl ForwardingRaftFacade {
             raft,
             metrics,
             client,
-            admin_token,
+            cluster_ca_key_pem,
         })
     }
 }
@@ -154,7 +154,7 @@ impl RaftFacade for ForwardingRaftFacade {
         let raft = self.raft.clone();
         let metrics = self.metrics.clone();
         let client = self.client.clone();
-        let admin_token = self.admin_token.clone();
+        let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
         Box::pin(async move {
             let cmd_clone = cmd.clone();
             match raft.client_write(cmd).await {
@@ -170,7 +170,8 @@ impl RaftFacade for ForwardingRaftFacade {
                         leader_api_base_url_from_forward(forward, &metrics_snapshot).ok_or_else(
                             || anyhow::anyhow!("raft client_write forward: leader not available"),
                         )?;
-                    forward_client_write(&client, &admin_token, &leader_base_url, &cmd_clone).await
+                    forward_client_write(&client, &cluster_ca_key_pem, &leader_base_url, &cmd_clone)
+                        .await
                 }
             }
         })
@@ -222,7 +223,7 @@ fn leader_api_base_url_from_forward(
 
 async fn forward_client_write(
     client: &reqwest::Client,
-    admin_token: &str,
+    cluster_ca_key_pem: &str,
     leader_base_url: &str,
     cmd: &DesiredStateCommand,
 ) -> anyhow::Result<ClientResponse> {
@@ -230,9 +231,17 @@ async fn forward_client_write(
         "{}/api/admin/_internal/raft/client-write",
         leader_base_url.trim_end_matches('/')
     );
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/_internal/...` (not `/api/admin/...`).
+    let uri: Uri = "/_internal/raft/client-write".parse().expect("valid uri");
+    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
+        .map_err(|e| anyhow::anyhow!("sign internal request: {e}"))?;
     let resp = client
         .post(url)
-        .header(AUTHORIZATION, format!("Bearer {admin_token}"))
+        .header(
+            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
         .json(cmd)
         .send()
         .await

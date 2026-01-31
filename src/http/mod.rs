@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 use tokio::{sync::Mutex, time::Duration};
 
 use crate::{
+    admin_token::{AdminTokenHash, verify_admin_token},
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
     config::Config,
@@ -22,6 +23,7 @@ use crate::{
         Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, User, UserNodeQuota,
         UserQuotaReset, validate_group_name,
     },
+    internal_auth,
     protocol::VlessRealityVisionTcpEndpointMeta,
     raft::{
         app::RaftFacade,
@@ -172,6 +174,7 @@ struct ClusterInfoResponse {
     role: &'static str,
     leader_api_base_url: String,
     term: u64,
+    xp_version: String,
 }
 
 #[derive(Deserialize)]
@@ -200,6 +203,7 @@ struct ClusterJoinResponse {
     signed_cert_pem: String,
     cluster_ca_pem: String,
     cluster_ca_key_pem: String,
+    xp_admin_token_hash: String,
 }
 
 #[derive(Deserialize)]
@@ -361,6 +365,13 @@ pub fn build_router(
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
 ) -> Router {
+    let cluster_id = cluster.cluster_id.clone();
+    let auth_state = AdminAuthState {
+        admin_token_hash: config.admin_token_hash(),
+        cluster_id,
+        cluster_ca_key_pem: cluster_ca_key_pem.clone(),
+    };
+
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -370,11 +381,6 @@ pub fn build_router(
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
         raft,
-    };
-
-    let admin_auth_state = AdminAuthState {
-        admin_token: app_state.config.admin_token.clone(),
-        cluster_id: app_state.cluster.cluster_id.clone(),
     };
 
     let admin = Router::new()
@@ -430,7 +436,7 @@ pub fn build_router(
                 .delete(admin_delete_grant_group),
         )
         .route("/alerts", get(admin_get_alerts))
-        .layer(middleware::from_fn_with_state(admin_auth_state, admin_auth));
+        .layer(middleware::from_fn_with_state(auth_state, admin_auth));
 
     let api = Router::new()
         .route("/health", get(health))
@@ -455,34 +461,40 @@ pub fn build_router(
         .layer(Extension(app_state))
 }
 
-#[derive(Clone)]
-struct AdminAuthState {
-    admin_token: String,
-    cluster_id: String,
-}
-
 async fn admin_auth(
-    State(state): State<AdminAuthState>,
+    State(auth): State<AdminAuthState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    let Some(token) = extract_bearer_token(req.headers()) else {
-        return ApiError::unauthorized("missing or invalid authorization token").into_response();
-    };
-    if !state.admin_token.is_empty() && token == state.admin_token {
-        return next.run(req).await;
-    }
-    if !state.admin_token.is_empty()
-        && crate::login_token::decode_and_validate_login_token_jwt(
-            &token,
-            Utc::now(),
-            &state.admin_token,
-            &state.cluster_id,
-        )
-        .is_ok()
+    if let (Some(sig), Some(ca_key_pem)) = (
+        extract_internal_signature(req.headers()),
+        auth.cluster_ca_key_pem.as_deref(),
+    ) && internal_auth::verify_request(ca_key_pem, req.method(), req.uri(), &sig)
     {
         return next.run(req).await;
     }
+
+    let Some(token) = extract_bearer_token(req.headers()) else {
+        return ApiError::unauthorized("missing or invalid authorization token").into_response();
+    };
+    let Some(expected) = auth.admin_token_hash.as_ref() else {
+        return ApiError::unauthorized("missing or invalid authorization token").into_response();
+    };
+
+    if verify_admin_token(&token, expected) {
+        return next.run(req).await;
+    }
+    if crate::login_token::decode_and_validate_login_token_jwt(
+        &token,
+        Utc::now(),
+        expected.as_str(),
+        &auth.cluster_id,
+    )
+    .is_ok()
+    {
+        return next.run(req).await;
+    }
+
     ApiError::unauthorized("missing or invalid authorization token").into_response()
 }
 
@@ -491,6 +503,20 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let raw = raw.to_str().ok()?;
     let raw = raw.strip_prefix("Bearer ")?;
     Some(raw.to_string())
+}
+
+fn extract_internal_signature(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::HeaderName::from_static(
+        internal_auth::INTERNAL_SIGNATURE_HEADER,
+    ))?;
+    raw.to_str().ok().map(|s| s.to_string())
+}
+
+#[derive(Clone)]
+struct AdminAuthState {
+    admin_token_hash: Option<AdminTokenHash>,
+    cluster_id: String,
+    cluster_ca_key_pem: Option<String>,
 }
 
 async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {
@@ -610,6 +636,7 @@ async fn cluster_info(
         role,
         leader_api_base_url,
         term: metrics.current_term,
+        xp_version: crate::version::VERSION.to_string(),
     }))
 }
 
@@ -773,6 +800,7 @@ async fn cluster_join(
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
         cluster_ca_key_pem: ca_key_pem,
+        xp_admin_token_hash: state.config.admin_token_hash.clone(),
     }))
 }
 
@@ -909,10 +937,9 @@ async fn admin_patch_node(
 async fn admin_get_config(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
-    let admin_token = state.config.admin_token.as_str();
-    let admin_token_present = !admin_token.is_empty();
+    let admin_token_present = state.config.admin_token_hash().is_some();
     let admin_token_masked = if admin_token_present {
-        "*".repeat(admin_token.chars().count())
+        "********".to_string()
     } else {
         String::new()
     };
@@ -1625,10 +1652,20 @@ async fn admin_get_alerts(
         store.list_nodes()
     };
     let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
-    let admin_token = state.config.admin_token.clone();
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
 
     let mut items = local_items;
     let mut unreachable_nodes = Vec::new();
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/alerts?...` (not `/api/admin/...`).
+    let local_alerts_uri: axum::http::Uri = "/alerts?scope=local".parse().expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_alerts_uri)
+        .map_err(ApiError::internal)?;
 
     for node in nodes {
         if node.node_id == local_node_id {
@@ -1642,7 +1679,10 @@ async fn admin_get_alerts(
         let url = format!("{base}/api/admin/alerts?scope=local");
         let request = client
             .get(url)
-            .header(header::AUTHORIZATION, format!("Bearer {admin_token}"))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
             .send();
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {

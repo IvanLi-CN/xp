@@ -1003,7 +1003,7 @@ mod tests {
             xray_systemd_unit: "xray.service".to_string(),
             xray_openrc_service: "xray".to_string(),
             data_dir: tmp_dir.to_path_buf(),
-            admin_token: "testtoken".to_string(),
+            admin_token_hash: String::new(),
             node_name: "node-1".to_string(),
             access_host: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),

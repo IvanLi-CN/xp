@@ -278,6 +278,7 @@ function createDefaultSeed(): MockStateSeed {
 			role: "leader",
 			leader_api_base_url: "https://tokyo-1.example.com",
 			term: 12,
+			xp_version: "0.0.0",
 		},
 		nodes,
 		endpoints,
