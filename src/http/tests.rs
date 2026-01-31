@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -17,6 +17,8 @@ use tempfile::TempDir;
 use tokio::sync::{Mutex, mpsc, watch};
 use tower::util::ServiceExt;
 use uuid::Uuid;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::{
     cluster_metadata::ClusterMetadata,
@@ -137,6 +139,167 @@ async fn health_is_200_and_includes_xray_fields() {
     assert!(xray.get("down_since").is_some());
     assert!(xray.get("consecutive_failures").is_some());
     assert!(xray.get("recoveries_observed").is_some());
+}
+
+#[tokio::test]
+async fn version_check_uses_github_and_caches_and_compares() {
+    struct EnvGuard {
+        repo: Option<OsString>,
+        api_base: Option<OsString>,
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.repo.take() {
+                    Some(v) => std::env::set_var("XP_OPS_GITHUB_REPO", v),
+                    None => std::env::remove_var("XP_OPS_GITHUB_REPO"),
+                }
+                match self.api_base.take() {
+                    Some(v) => std::env::set_var("XP_OPS_GITHUB_API_BASE_URL", v),
+                    None => std::env::remove_var("XP_OPS_GITHUB_API_BASE_URL"),
+                }
+            }
+        }
+    }
+
+    let _guard = EnvGuard {
+        repo: std::env::var_os("XP_OPS_GITHUB_REPO"),
+        api_base: std::env::var_os("XP_OPS_GITHUB_API_BASE_URL"),
+    };
+
+    // semver compare + caching (second call must not hit upstream)
+    {
+        let github = MockServer::start().await;
+        unsafe {
+            std::env::set_var("XP_OPS_GITHUB_API_BASE_URL", github.uri());
+            std::env::set_var("XP_OPS_GITHUB_REPO", "acme/xp");
+        }
+
+        Mock::given(method("GET"))
+            .and(path("/repos/acme/xp/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "tag_name": "v0.2.0",
+                "published_at": "2026-01-31T00:00:00Z"
+            })))
+            .mount(&github)
+            .await;
+
+        let tmp = TempDir::new().unwrap();
+        let app = app(&tmp);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/version/check")
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = body_json(res).await;
+        assert_eq!(
+            body.pointer("/current/package").and_then(|v| v.as_str()),
+            Some(crate::version::VERSION)
+        );
+        assert_eq!(
+            body.pointer("/latest/release_tag").and_then(|v| v.as_str()),
+            Some("v0.2.0")
+        );
+        assert_eq!(body.get("has_update").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            body.get("compare_reason").and_then(|v| v.as_str()),
+            Some("semver")
+        );
+        assert_eq!(
+            body.pointer("/source/repo").and_then(|v| v.as_str()),
+            Some("acme/xp")
+        );
+        assert_eq!(
+            body.pointer("/source/api_base").and_then(|v| v.as_str()),
+            Some(github.uri().as_str())
+        );
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/version/check")
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let requests = github.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.path(), "/repos/acme/xp/releases/latest");
+    }
+
+    // uncomparable compare semantics
+    {
+        let github = MockServer::start().await;
+        unsafe {
+            std::env::set_var("XP_OPS_GITHUB_API_BASE_URL", github.uri());
+            std::env::set_var("XP_OPS_GITHUB_REPO", "acme/xp2");
+        }
+
+        Mock::given(method("GET"))
+            .and(path("/repos/acme/xp2/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "tag_name": "main",
+                "published_at": "2026-01-31T00:00:00Z"
+            })))
+            .mount(&github)
+            .await;
+
+        let tmp = TempDir::new().unwrap();
+        let app = app(&tmp);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/version/check")
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = body_json(res).await;
+        assert!(body.get("has_update").is_some());
+        assert!(body.get("has_update").unwrap().is_null());
+        assert_eq!(
+            body.get("compare_reason").and_then(|v| v.as_str()),
+            Some("uncomparable")
+        );
+    }
+
+    // upstream parse failure => 502
+    {
+        let github = MockServer::start().await;
+        unsafe {
+            std::env::set_var("XP_OPS_GITHUB_API_BASE_URL", github.uri());
+            std::env::set_var("XP_OPS_GITHUB_REPO", "acme/xp3");
+        }
+
+        Mock::given(method("GET"))
+            .and(path("/repos/acme/xp3/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "published_at": "2026-01-31T00:00:00Z"
+            })))
+            .mount(&github)
+            .await;
+
+        let tmp = TempDir::new().unwrap();
+        let app = app(&tmp);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/version/check")
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    }
 }
 
 fn leader_raft(
@@ -446,12 +609,8 @@ async fn expired_login_token_jwt_is_rejected() {
     let issued_at =
         now - chrono::Duration::seconds(crate::login_token::LOGIN_TOKEN_TTL_SECONDS + 1);
     let secret = test_admin_token_hash();
-    let jwt = crate::login_token::issue_login_token_jwt(
-        &meta.cluster_id,
-        &token_id,
-        issued_at,
-        &secret,
-    );
+    let jwt =
+        crate::login_token::issue_login_token_jwt(&meta.cluster_id, &token_id, issued_at, &secret);
 
     let res = app
         .oneshot(
