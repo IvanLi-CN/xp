@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 待实现
 - Created: 2026-01-31
 - Last: 2026-01-31
 
@@ -160,15 +160,18 @@
   - GitHub API rate limit / 网络不可达导致频繁失败：需要缓存/节流与良好的失败 UI。
   - 版本字符串非严格 semver（例如带 git hash / build metadata）导致比较歧义：需要明确比较规则与降级策略。
 - 开放问题（需要决策的问题）：
-  - 更新检查是否只检查 stable（`releases/latest`）？是否允许包含 prerelease（如果允许，UI 是否需要显式开关）？
-  - 更新来源配置是否复用 `xp-ops` 的 repo/api_base 默认与 env override（`XP_OPS_GITHUB_REPO` / `XP_OPS_GITHUB_API_BASE_URL`），还是为 `xp` 服务引入独立配置键？
-  - `GET /api/version/check` 的错误语义采用 5xx（对齐 `pod-upgrade-trigger`）还是 200 + `error` 字段？
+  - None
 - 假设（需主人确认）：
-  - 默认使用 stable release（`releases/latest`）作为“新版本”的判定基础。
+  - 仅检查 stable（GitHub `releases/latest`），不包含 prerelease。
+  - `GET /api/version/check` 在上游错误时返回 5xx（对齐 `pod-upgrade-trigger`），前端展示 `check_failed` 并提供重试。
+  - 更新来源配置复用 `xp-ops` 的 env override：`XP_OPS_GITHUB_REPO` / `XP_OPS_GITHUB_API_BASE_URL`（默认 `IvanLi-CN/xp` / `https://api.github.com`）。
+  - 前端聚焦触发冷却时间默认 1 小时。
+  - 当前版本点击跳转：当 `xp_version` 无法映射为 semver tag 时，降级跳转到仓库 Releases 列表页。
 
 ## 变更记录（Change log）
 
 - 2026-01-31: 对齐过往项目经验（`pod-upgrade-trigger`）：将版本检查接口与 UX 调整为 `GET /api/version/check` + 聚焦节流
+- 2026-01-31: 进入实现阶段：冻结默认行为（stable-only、5xx 错误语义、1h 冷却时间、复用 `xp-ops` env）
 
 ## 参考（References）
 
