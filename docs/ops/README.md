@@ -176,6 +176,12 @@ Useful flags:
 - `--prerelease` (only with `--version latest`) selects the newest prerelease instead of stable.
 - `--repo <owner/repo>` (or `XP_OPS_GITHUB_REPO=<owner/repo>`) overrides the default source repo.
 
+UI notes:
+
+- The Web UI header shows the current `xp` version (clickable) and can check whether a newer stable GitHub Release exists.
+- The UI does not perform upgrades; upgrades are still expected to be done via `xp-ops upgrade`.
+- If you override the upgrade source repo via `XP_OPS_GITHUB_REPO`, the version check uses the same repo.
+
 Rollback notes:
 
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
