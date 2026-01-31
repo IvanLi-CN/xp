@@ -1,14 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
+import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { fetchVersionCheck } from "../api/versionCheck";
 import { Icon } from "./Icon";
 import { useUiPrefs } from "./UiPrefs";
 import { clearAdminToken, readAdminToken } from "./auth";
+import {
+	githubReleaseTagUrl,
+	readVersionCheckLastAtMs,
+	reduceVersionCheckUiState,
+	shouldAutoCheckVersion,
+	writeVersionCheckLastAtMs,
+	xpVersionLinkHref,
+} from "./versionCheckUi";
 
 type AppShellProps = {
 	brand: { name: string; subtitle?: string };
@@ -22,6 +32,7 @@ type AppShellProps = {
 };
 
 type CommandPaletteState = { open: boolean };
+type VersionCheckUiState = Parameters<typeof reduceVersionCheckUiState>[0];
 
 function safeHostFromUrl(value: string): string | null {
 	try {
@@ -46,6 +57,13 @@ export function AppShell({
 		open: false,
 	});
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
+	const [versionCheck, dispatchVersionCheck] = useReducer(
+		reduceVersionCheckUiState,
+		{ kind: "idle" } satisfies VersionCheckUiState,
+	);
+	const [versionCheckLastAtMs, setVersionCheckLastAtMs] = useState<
+		number | null
+	>(() => readVersionCheckLastAtMs());
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -73,6 +91,47 @@ export function AppShell({
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
+
+	const runVersionCheck = useCallback(
+		async (options?: { force?: boolean }) => {
+			const force = options?.force ?? false;
+			const nowMs = Date.now();
+			const canRun =
+				force ||
+				shouldAutoCheckVersion({ nowMs, lastAtMs: versionCheckLastAtMs });
+			if (!canRun) return;
+
+			writeVersionCheckLastAtMs(nowMs);
+			setVersionCheckLastAtMs(nowMs);
+			dispatchVersionCheck({ type: "start" });
+
+			try {
+				const data = await fetchVersionCheck();
+				dispatchVersionCheck({ type: "success", data });
+			} catch (err) {
+				const message = isBackendApiError(err)
+					? `request failed: ${err.status}`
+					: err instanceof Error
+						? err.message
+						: "request failed";
+				dispatchVersionCheck({ type: "fail", message });
+			}
+		},
+		[versionCheckLastAtMs],
+	);
+
+	useEffect(() => {
+		const onFocus = () => {
+			void runVersionCheck();
+		};
+
+		window.addEventListener("focus", onFocus);
+		if (typeof document.hasFocus === "function" && document.hasFocus()) {
+			onFocus();
+		}
+
+		return () => window.removeEventListener("focus", onFocus);
+	}, [runVersionCheck]);
 
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
@@ -154,6 +213,120 @@ export function AppShell({
 		health.data,
 		health.isSuccess,
 	]);
+
+	const versionBadges = useMemo(() => {
+		const xpVersion =
+			clusterInfo.isSuccess && clusterInfo.data?.xp_version
+				? clusterInfo.data.xp_version
+				: null;
+		const repo =
+			versionCheck.kind === "update_available" ||
+			versionCheck.kind === "up_to_date"
+				? versionCheck.repo
+				: null;
+		const xpHref = xpVersionLinkHref(xpVersion, repo);
+
+		const items: ReactNode[] = [];
+
+		items.push(
+			<a
+				key="xp-version"
+				href={xpHref}
+				target="_blank"
+				rel="noreferrer"
+				className="badge badge-sm gap-2 font-mono badge-ghost hover:bg-base-200 transition-colors"
+				title={
+					xpVersion
+						? `xp version (from /api/cluster/info): ${xpVersion}`
+						: "xp version (from /api/cluster/info)"
+				}
+			>
+				<span>xp</span>
+				<span className="opacity-80">{xpVersion ?? "…"}</span>
+				<Icon name="tabler:external-link" size={14} className="opacity-60" />
+			</a>,
+		);
+
+		if (versionCheck.kind === "checking") {
+			items.push(
+				<span
+					key="version-check"
+					className="badge badge-sm gap-2 font-mono badge-ghost"
+					title="Checking latest version…"
+				>
+					<Icon
+						name="tabler:loader-2"
+						size={14}
+						className="animate-spin opacity-70"
+					/>
+					<span>checking</span>
+				</span>,
+			);
+		} else if (versionCheck.kind === "update_available") {
+			const href = githubReleaseTagUrl(
+				versionCheck.latest_tag,
+				versionCheck.repo,
+			);
+			items.push(
+				<a
+					key="version-check"
+					href={href}
+					target="_blank"
+					rel="noreferrer"
+					className="badge badge-sm gap-2 font-mono badge-warning hover:brightness-95 transition"
+					title="Update available"
+				>
+					<Icon name="tabler:download" size={14} className="opacity-80" />
+					<span>update:</span>
+					<span className="opacity-80">{versionCheck.latest_tag}</span>
+					<Icon name="tabler:external-link" size={14} className="opacity-70" />
+				</a>,
+			);
+		} else if (versionCheck.kind === "up_to_date") {
+			items.push(
+				<span
+					key="version-check"
+					className="badge badge-sm gap-2 font-mono badge-ghost"
+					title={
+						versionCheck.comparable
+							? `Up to date (checked at ${versionCheck.checked_at})`
+							: `Latest is ${versionCheck.latest_tag}, but current version is not comparable`
+					}
+				>
+					<Icon name="tabler:circle-check" size={14} className="opacity-70" />
+					<span>{versionCheck.comparable ? "up-to-date" : "unknown"}</span>
+				</span>,
+			);
+		} else if (versionCheck.kind === "check_failed") {
+			items.push(
+				<button
+					key="version-check"
+					type="button"
+					className="badge badge-sm gap-2 font-mono badge-error hover:brightness-95 transition"
+					title={versionCheck.message}
+					onClick={() => {
+						void runVersionCheck({ force: true });
+					}}
+				>
+					<Icon name="tabler:refresh" size={14} className="opacity-80" />
+					<span>retry</span>
+				</button>,
+			);
+		} else {
+			items.push(
+				<span
+					key="version-check"
+					className="badge badge-sm gap-2 font-mono badge-ghost"
+					title="Focus the page to check updates (1h cooldown)"
+				>
+					<Icon name="tabler:refresh" size={14} className="opacity-70" />
+					<span>update</span>
+				</span>,
+			);
+		}
+
+		return items;
+	}, [clusterInfo.data, clusterInfo.isSuccess, runVersionCheck, versionCheck]);
 
 	const effectiveNavGroups =
 		navGroups ??
@@ -250,6 +423,8 @@ export function AppShell({
 							</div>
 
 							<div className="flex items-center justify-end gap-2">
+								<div className="flex items-center gap-2">{versionBadges}</div>
+
 								<div className="dropdown dropdown-end">
 									<button
 										type="button"
