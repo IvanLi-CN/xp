@@ -468,18 +468,28 @@ export function UserDetailsPage() {
 			);
 		});
 
-		const selectedEndpointIds = Object.values(selectedByCell);
-		const totalSelectableCells = (() => {
-			let count = 0;
+		const visibleSelectableCellKeys = (() => {
+			const keys: string[] = [];
 			for (const n of visibleNodes) {
 				for (const p of PROTOCOLS) {
 					const options =
 						endpointsByNodeProtocol.get(n.node_id)?.get(p.protocolId) ?? [];
-					if (options.length > 0) count += 1;
+					if (options.length === 0) continue;
+					keys.push(cellKey(n.node_id, p.protocolId));
 				}
 			}
-			return count;
+			return keys;
 		})();
+
+		const selectedEndpointIds = Object.values(selectedByCell);
+		const totalSelectableCells = visibleSelectableCellKeys.length;
+		const visibleSelectedCount = visibleSelectableCellKeys.filter(
+			(key) => selectedByCell[key],
+		).length;
+		const hiddenSelectedCount = Math.max(
+			0,
+			selectedEndpointIds.length - visibleSelectedCount,
+		);
 
 		const quotaForNode = (nodeId: string): number => {
 			return quotaByNodeId.get(nodeId)?.quota_limit_bytes ?? 0;
@@ -711,9 +721,18 @@ export function UserDetailsPage() {
 		const onToggleAll = () => {
 			if (isApplyingAccess) return;
 			setSelectedByCell((prev) => {
-				const hasAny = Object.keys(prev).length > 0;
-				if (hasAny) return {};
-				const next: Record<string, string> = {};
+				const hasAnyVisible = visibleSelectableCellKeys.some((key) =>
+					Boolean(prev[key]),
+				);
+
+				const next: Record<string, string> = { ...prev };
+				if (hasAnyVisible) {
+					for (const key of visibleSelectableCellKeys) {
+						delete next[key];
+					}
+					return next;
+				}
+
 				for (const n of visibleNodes) {
 					for (const p of PROTOCOLS) {
 						const key = cellKey(n.node_id, p.protocolId);
@@ -828,7 +847,10 @@ export function UserDetailsPage() {
 
 						<div className="flex items-center gap-2">
 							<span className="rounded-full border border-base-200 bg-base-200/40 px-4 py-2 font-mono text-xs">
-								Selected {selectedEndpointIds.length} / {totalSelectableCells}
+								Selected {visibleSelectedCount} / {totalSelectableCells}
+								{hiddenSelectedCount > 0
+									? ` (+${hiddenSelectedCount} hidden)`
+									: ""}
 							</span>
 						</div>
 

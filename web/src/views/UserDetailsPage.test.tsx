@@ -450,6 +450,110 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("toggle all only affects visible nodes when filtered", async () => {
+		setupHappyPathMocks({
+			userId: "u_01HUSERAAAAAA",
+			nodes: [
+				{
+					node_id: "n-tokyo",
+					node_name: "Tokyo",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+				{
+					node_id: "n-osaka",
+					node_name: "Osaka",
+					api_base_url: "http://localhost",
+					access_host: "localhost",
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: 0,
+					},
+				},
+			],
+			endpoints: [
+				{
+					endpoint_id: "ep-tokyo",
+					node_id: "n-tokyo",
+					tag: "tokyo-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+				{
+					endpoint_id: "ep-osaka",
+					node_id: "n-osaka",
+					tag: "osaka-vless",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+			],
+			nodeQuotas: [
+				{ node_id: "n-tokyo", quota_limit_bytes: 0 },
+				{ node_id: "n-osaka", quota_limit_bytes: 0 },
+			],
+		});
+
+		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
+		vi.mocked(fetchAdminGrantGroup).mockResolvedValue({
+			group: { group_name: "managed-u_01huseraaaaaa" },
+			members: [
+				{
+					user_id: "u_01HUSERAAAAAA",
+					endpoint_id: "ep-osaka",
+					enabled: true,
+					quota_limit_bytes: 0,
+					note: null,
+					credentials: {
+						vless: { uuid: "00000000-0000-0000-0000-000000000000", email: "" },
+					},
+				},
+			],
+		});
+
+		const view = renderPage();
+
+		fireEvent.click(
+			await within(view.container).findByRole("button", {
+				name: "Node quotas",
+			}),
+		);
+		await within(view.container).findByText("Matrix");
+		await within(view.container).findByText(/Selected 1 \/ 2/);
+
+		fireEvent.change(
+			within(view.container).getByPlaceholderText("Filter nodes..."),
+			{
+				target: { value: "Tokyo" },
+			},
+		);
+		await within(view.container).findByText(
+			/Selected\s+0\s*\/\s*1\s*\(\+1 hidden\)/,
+		);
+
+		fireEvent.click(
+			within(view.container).getByLabelText("Toggle all nodes and protocols"),
+		);
+		await within(view.container).findByText(
+			/Selected\s+1\s*\/\s*1\s*\(\+1 hidden\)/,
+		);
+
+		fireEvent.change(
+			within(view.container).getByPlaceholderText("Filter nodes..."),
+			{
+				target: { value: "" },
+			},
+		);
+		await within(view.container).findByText(/Selected 2 \/ 2/);
+	});
+
 	it("purges user grants from other groups before creating managed group", async () => {
 		setupHappyPathMocks({
 			userId: "u_01HUSERAAAAAA",
