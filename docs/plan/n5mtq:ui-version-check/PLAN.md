@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 部分完成（4/4）
 - Created: 2026-01-31
 - Last: 2026-01-31
 
@@ -143,10 +143,10 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: Backend：新增 `GET /api/version/check`（对齐 `pod-upgrade-trigger` 形状；含 GitHub releases/latest 查询 + 缓存/节流 + 测试）
-- [ ] M2: Web：顶栏“当前版本可点击（release link）”+ 聚焦触发/冷却时间节流的更新提示 + 失败重试（含测试）
-- [ ] M3: 质量门槛补齐：Storybook 场景覆盖（up-to-date / update-available / failed）+ Vitest 覆盖核心状态机
-- [ ] M4: 文档：补齐 `docs/ops/README.md` 的版本/更新说明（明确升级仍通过 `xp-ops upgrade`）
+- [x] M1: Backend：新增 `GET /api/version/check`（对齐 `pod-upgrade-trigger` 形状；含 GitHub releases/latest 查询 + 缓存/节流 + 测试）
+- [x] M2: Web：顶栏“当前版本可点击（release link）”+ 聚焦触发/冷却时间节流的更新提示 + 失败重试（含测试）
+- [x] M3: 质量门槛补齐：Storybook 场景覆盖（up-to-date / update-available / failed）+ Vitest 覆盖核心状态机
+- [x] M4: 文档：补齐 `docs/ops/README.md` 的版本/更新说明（明确升级仍通过 `xp-ops upgrade`）
 
 ## 方案概述（Approach, high-level）
 
@@ -172,6 +172,7 @@
 
 - 2026-01-31: 对齐过往项目经验（`pod-upgrade-trigger`）：将版本检查接口与 UX 调整为 `GET /api/version/check` + 聚焦节流
 - 2026-01-31: 进入实现阶段：冻结默认行为（stable-only、5xx 错误语义、1h 冷却时间、复用 `xp-ops` env）
+- 2026-01-31: 完成实现与验证：M1–M4（backend+web+tests+docs）
 
 ## 参考（References）
 
