@@ -365,8 +365,10 @@ pub fn build_router(
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
 ) -> Router {
+    let cluster_id = cluster.cluster_id.clone();
     let auth_state = AdminAuthState {
         admin_token_hash: config.admin_token_hash(),
+        cluster_id,
         cluster_ca_key_pem: cluster_ca_key_pem.clone(),
     };
 
@@ -472,13 +474,27 @@ async fn admin_auth(
         return next.run(req).await;
     }
 
-    if let (Some(expected), Some(token)) = (
-        auth.admin_token_hash.as_ref(),
-        extract_bearer_token(req.headers()),
-    ) && verify_admin_token(&token, expected)
+    let Some(token) = extract_bearer_token(req.headers()) else {
+        return ApiError::unauthorized("missing or invalid authorization token").into_response();
+    };
+    let Some(expected) = auth.admin_token_hash.as_ref() else {
+        return ApiError::unauthorized("missing or invalid authorization token").into_response();
+    };
+
+    if verify_admin_token(&token, expected) {
+        return next.run(req).await;
+    }
+    if crate::login_token::decode_and_validate_login_token_jwt(
+        &token,
+        Utc::now(),
+        expected.as_str(),
+        &auth.cluster_id,
+    )
+    .is_ok()
     {
         return next.run(req).await;
     }
+
     ApiError::unauthorized("missing or invalid authorization token").into_response()
 }
 
@@ -499,6 +515,7 @@ fn extract_internal_signature(headers: &HeaderMap) -> Option<String> {
 #[derive(Clone)]
 struct AdminAuthState {
     admin_token_hash: Option<AdminTokenHash>,
+    cluster_id: String,
     cluster_ca_key_pem: Option<String>,
 }
 

@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
@@ -29,6 +29,37 @@ export function LoginPage() {
 	const [draft, setDraft] = useState(() => readAdminToken());
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const loginToken = params.get("login_token");
+		if (!loginToken) return;
+
+		params.delete("login_token");
+		const nextQuery = params.toString();
+		const nextUrl = `${window.location.pathname}${
+			nextQuery.length ? `?${nextQuery}` : ""
+		}${window.location.hash ?? ""}`;
+		window.history.replaceState(null, "", nextUrl);
+
+		setDraft(loginToken);
+		setIsVerifying(true);
+		setError(null);
+
+		verifyAdminToken(loginToken)
+			.then(() => {
+				writeAdminToken(loginToken);
+				setToken(loginToken);
+				setDraft(loginToken);
+				navigate({ to: "/" });
+			})
+			.catch((err) => {
+				setError(formatError(err));
+			})
+			.finally(() => {
+				setIsVerifying(false);
+			});
+	}, [navigate]);
 
 	const inputClass =
 		prefs.density === "compact"
@@ -74,8 +105,7 @@ export function LoginPage() {
 								No token set. Please add a token to continue.
 							</p>
 							<p className="text-xs opacity-70">
-								The admin token is printed once during the bootstrap deploy. It
-								is not stored on the server.
+								Ask an administrator for a token or a temporary login link.
 							</p>
 						</div>
 					) : (

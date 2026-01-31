@@ -78,6 +78,7 @@
 |  0022 | xp-ops deploy：命令行传递 Cloudflare API token              | 已完成 | `0022:xp-ops-deploy-cloudflare-token/PLAN.md`        | 2026-01-24 | -                |
 |  0023 | Xray 故障自动重启（通过 init system 间接拉起）              | 已完成 | `0023:xray-restart-via-init-system/PLAN.md`          | 2026-01-23 | -                |
 |  0024 | xp-ops：服务日志保留与轮换（防磁盘占满）                    | 待实现 | `0024:service-log-rotation/PLAN.md`                  | 2026-01-26 | -                |
+|  0025 | xp：CLI 一次性登录链接（Admin UI）                          | 已完成 | `0025:xp-cli-one-time-login-link/PLAN.md`            | 2026-01-27 | -                |
 | 38wmj | 集群节点部署引导（Web 生成命令 + xp-ops deploy join）       | 待实现 | `38wmj:cluster-node-onboarding/PLAN.md`              | 2026-01-27 | -                |
 | ap63t | xp-ops：统一升级命令 upgrade（同时升级 xp + xp-ops）        | 已完成 | `ap63t:xp-ops-upgrade-unified/PLAN.md`               | 2026-01-28 | PR #50           |
 | k9n2r | xp-ops：admin token 设置后操作指引                          | 已完成 | `k9n2r:xp-ops-admin-token-ops/PLAN.md`               | 2026-01-29 | PR #52, PR #53   |

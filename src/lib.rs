@@ -6,6 +6,7 @@ pub mod cycle;
 pub mod domain;
 pub mod http;
 pub mod id;
+pub mod login_token;
 pub mod internal_auth;
 pub mod ops;
 pub mod protocol;
