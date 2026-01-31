@@ -60,10 +60,10 @@
 
 ## 接口清单与契约（Interfaces & Contracts）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| UserDetails tabs (`User` / `Node quotas`) | UI Component | internal | Modify | `./contracts/ui.md` | web | admin | 仅重组布局与信息架构 |
-| User access matrix APIs | HTTP API | internal | Modify | `./contracts/http-apis.md` | backend | web/admin | 复用既有 endpoints / grant-groups；本计划新增“明确的使用契约” |
+| 接口（Name）                              | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）   | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                                                 |
+| ----------------------------------------- | ------------ | ------------- | -------------- | -------------------------- | --------------- | ------------------- | ------------------------------------------------------------- |
+| UserDetails tabs (`User` / `Node quotas`) | UI Component | internal      | Modify         | `./contracts/ui.md`        | web             | admin               | 仅重组布局与信息架构                                          |
+| User access matrix APIs                   | HTTP API     | internal      | Modify         | `./contracts/http-apis.md` | backend         | web/admin           | 复用既有 endpoints / grant-groups；本计划新增“明确的使用契约” |
 
 ## 验收标准（Acceptance Criteria）
 

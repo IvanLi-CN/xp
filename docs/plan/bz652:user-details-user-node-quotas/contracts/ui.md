@@ -14,8 +14,8 @@
 
 仅两个标签页：
 
-1) `User`
-2) `Node quotas`（矩阵型接入点配置）
+1. `User`
+2. `Node quotas`（矩阵型接入点配置）
 
 默认打开 `User`。
 
