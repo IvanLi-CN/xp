@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 部分完成（4/4）
+- Status: 已完成
 - Created: 2026-01-31
-- Last: 2026-01-31
+- Last: 2026-02-01
 
 ## 背景 / 问题陈述
 
@@ -135,7 +135,10 @@
 
 ## 计划资产（Plan assets）
 
-- None
+- 顶栏低密度布局（Storybook）
+  - ![Header redesign - update available](./assets/header-redesign-update-available.png)
+  - ![Header redesign - status menu](./assets/header-redesign-status-open.png)
+  - ![Header redesign - update failed](./assets/header-redesign-update-failed.png)
 
 ## 资产晋升（Asset promotion）
 
@@ -173,6 +176,8 @@
 - 2026-01-31: 对齐过往项目经验（`pod-upgrade-trigger`）：将版本检查接口与 UX 调整为 `GET /api/version/check` + 聚焦节流
 - 2026-01-31: 进入实现阶段：冻结默认行为（stable-only、5xx 错误语义、1h 冷却时间、复用 `xp-ops` env）
 - 2026-01-31: 完成实现与验证：M1–M4（backend+web+tests+docs）
+- 2026-01-31: UX 微调：将顶栏的 Theme/Logout 收拢到 Settings 下拉菜单，缓解页头拥挤
+- 2026-02-01: UX 微调：顶栏状态信息（Health/leader/term/alerts）改为 Status 下拉菜单，减少页头拥挤
 
 ## 参考（References）
 
