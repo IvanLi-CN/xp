@@ -25,11 +25,13 @@ import type {
 	QuotaResetSource,
 	UserQuotaReset,
 } from "../../src/api/quotaReset";
+import type { VersionCheckResponse } from "../../src/api/versionCheck";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
+	failVersionCheck?: boolean;
 	failGrantGroupCreate?: boolean;
 	delayGrantGroupCreateMs?: number;
 };
@@ -47,6 +49,7 @@ type MockEndpointRecord = AdminEndpoint & {
 type MockStateSeed = {
 	health: HealthResponse;
 	clusterInfo: ClusterInfoResponse;
+	versionCheck: VersionCheckResponse;
 	nodes: AdminNode[];
 	endpoints: MockEndpointSeed[];
 	users: AdminUser[];
@@ -59,6 +62,7 @@ type MockStateSeed = {
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
 	failAdminConfig: boolean;
+	failVersionCheck: boolean;
 	failGrantGroupCreate: boolean;
 	delayGrantGroupCreateMs: number;
 	grantGroupsByName: Record<string, AdminGrantGroupDetail>;
@@ -280,6 +284,19 @@ function createDefaultSeed(): MockStateSeed {
 			term: 12,
 			xp_version: "0.0.0",
 		},
+		versionCheck: {
+			current: { package: "0.0.0", release_tag: "v0.0.0" },
+			latest: { release_tag: "v0.0.0", published_at: "2026-01-31T00:00:00Z" },
+			has_update: false,
+			checked_at: "2026-01-31T00:00:00Z",
+			compare_reason: "semver",
+			source: {
+				kind: "github-releases",
+				repo: "IvanLi-CN/xp",
+				api_base: "https://api.github.com",
+				channel: "stable",
+			},
+		},
 		nodes,
 		endpoints,
 		users,
@@ -297,6 +314,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	const merged: MockStateSeed = {
 		health: overrides?.health ?? base.health,
 		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
+		versionCheck: overrides?.versionCheck ?? base.versionCheck,
 		nodes: overrides?.nodes ?? base.nodes,
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		users: overrides?.users ?? base.users,
@@ -331,6 +349,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		...clone(merged),
 		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
+		failVersionCheck: config?.failVersionCheck ?? false,
 		failGrantGroupCreate: config?.failGrantGroupCreate ?? false,
 		delayGrantGroupCreateMs: config?.delayGrantGroupCreateMs ?? 0,
 		grantGroupsByName,
@@ -394,6 +413,13 @@ async function handleRequest(
 
 	if (path === "/api/cluster/info" && method === "GET") {
 		return jsonResponse(state.clusterInfo);
+	}
+
+	if (path === "/api/version/check" && method === "GET") {
+		if (state.failVersionCheck) {
+			return errorResponse(502, "upstream_error", "mock version check failure");
+		}
+		return jsonResponse(clone(state.versionCheck));
 	}
 
 	if (path === "/api/admin/config" && method === "GET") {

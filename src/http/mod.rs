@@ -9,10 +9,13 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     routing::{get, post, put},
 };
-use chrono::Utc;
+use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tokio::{sync::Mutex, time::Duration};
+use tokio::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use crate::{
     admin_token::{AdminTokenHash, verify_admin_token},
@@ -50,6 +53,10 @@ pub struct AppState {
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
     pub raft: Arc<dyn RaftFacade>,
+    pub version_check_cache: Arc<Mutex<VersionCheckCache>>,
+    pub ops_github_repo: Arc<String>,
+    pub ops_github_api_base_url: Arc<String>,
+    pub ops_github_client: reqwest::Client,
 }
 
 #[derive(Debug)]
@@ -372,6 +379,15 @@ pub fn build_router(
         cluster_ca_key_pem: cluster_ca_key_pem.clone(),
     };
 
+    let ops_github_repo =
+        std::env::var("XP_OPS_GITHUB_REPO").unwrap_or_else(|_| "IvanLi-CN/xp".to_string());
+    let ops_github_api_base_url = std::env::var("XP_OPS_GITHUB_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.github.com".to_string());
+    let ops_github_client = reqwest::Client::builder()
+        .user_agent(format!("xp/{}", crate::version::VERSION))
+        .build()
+        .expect("build reqwest client");
+
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -381,6 +397,10 @@ pub fn build_router(
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
         raft,
+        version_check_cache: Arc::new(Mutex::new(VersionCheckCache { entry: None })),
+        ops_github_repo: Arc::new(ops_github_repo),
+        ops_github_api_base_url: Arc::new(ops_github_api_base_url),
+        ops_github_client,
     };
 
     let admin = Router::new()
@@ -441,6 +461,7 @@ pub fn build_router(
     let api = Router::new()
         .route("/health", get(health))
         .route("/cluster/info", get(cluster_info))
+        .route("/version/check", get(api_version_check))
         .route("/cluster/join", post(cluster_join))
         .route("/sub/:subscription_token", get(get_subscription))
         .nest("/admin", admin)
@@ -638,6 +659,189 @@ async fn cluster_info(
         term: metrics.current_term,
         xp_version: crate::version::VERSION.to_string(),
     }))
+}
+
+#[derive(Clone)]
+pub struct VersionCheckCache {
+    entry: Option<VersionCheckCacheEntry>,
+}
+
+#[derive(Clone)]
+struct VersionCheckCacheEntry {
+    fetched_at: Instant,
+    checked_at: String,
+    latest_release_tag: String,
+    latest_published_at: Option<String>,
+}
+
+const VERSION_CHECK_TTL: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Serialize)]
+struct VersionCheckResponse {
+    current: VersionCheckCurrent,
+    latest: VersionCheckLatest,
+    has_update: Option<bool>,
+    checked_at: String,
+    compare_reason: VersionCheckCompareReason,
+    source: VersionCheckSource,
+}
+
+#[derive(Serialize)]
+struct VersionCheckCurrent {
+    package: String,
+    release_tag: String,
+}
+
+#[derive(Serialize)]
+struct VersionCheckLatest {
+    release_tag: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum VersionCheckCompareReason {
+    Semver,
+    Uncomparable,
+}
+
+#[derive(Serialize)]
+struct VersionCheckSource {
+    kind: &'static str,
+    repo: String,
+    api_base: String,
+    channel: &'static str,
+}
+
+#[derive(Deserialize)]
+struct GithubLatestReleaseResponse {
+    tag_name: String,
+    published_at: Option<String>,
+}
+
+async fn api_version_check(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<VersionCheckResponse>, ApiError> {
+    let current_package = crate::version::VERSION.to_string();
+    let current_release_tag = format!("v{current_package}");
+
+    let cached = { state.version_check_cache.lock().await.entry.clone() };
+    let (latest_release_tag, latest_published_at, checked_at) = if let Some(entry) = cached
+        && entry.fetched_at.elapsed() < VERSION_CHECK_TTL
+    {
+        (
+            entry.latest_release_tag,
+            entry.latest_published_at,
+            entry.checked_at,
+        )
+    } else {
+        let (tag, published_at) = fetch_github_latest_release(&state).await?;
+        let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+        let mut cache = state.version_check_cache.lock().await;
+        cache.entry = Some(VersionCheckCacheEntry {
+            fetched_at: Instant::now(),
+            checked_at: checked_at.clone(),
+            latest_release_tag: tag.clone(),
+            latest_published_at: published_at.clone(),
+        });
+        (tag, published_at, checked_at)
+    };
+
+    let (has_update, compare_reason) =
+        compare_simple_semver(&current_release_tag, &latest_release_tag);
+
+    Ok(Json(VersionCheckResponse {
+        current: VersionCheckCurrent {
+            package: current_package,
+            release_tag: current_release_tag,
+        },
+        latest: VersionCheckLatest {
+            release_tag: latest_release_tag,
+            published_at: latest_published_at,
+        },
+        has_update,
+        checked_at,
+        compare_reason,
+        source: VersionCheckSource {
+            kind: "github-releases",
+            repo: state.ops_github_repo.as_str().to_string(),
+            api_base: state.ops_github_api_base_url.as_str().to_string(),
+            channel: "stable",
+        },
+    }))
+}
+
+async fn fetch_github_latest_release(
+    state: &AppState,
+) -> Result<(String, Option<String>), ApiError> {
+    let api_base = state.ops_github_api_base_url.trim_end_matches('/');
+    let repo = state.ops_github_repo.trim().trim_matches('/');
+    let url = format!("{api_base}/repos/{repo}/releases/latest");
+
+    let resp = state
+        .ops_github_client
+        .get(url)
+        .header(header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err(ApiError::new(
+            "upstream_error",
+            StatusCode::BAD_GATEWAY,
+            format!("github returned status: {}", resp.status()),
+        ));
+    }
+
+    let body: GithubLatestReleaseResponse = resp
+        .json()
+        .await
+        .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    let published_at = match body.published_at {
+        Some(raw) => {
+            let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
+                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
+            })?;
+            Some(
+                dt.with_timezone(&Utc)
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+            )
+        }
+        None => None,
+    };
+
+    Ok((body.tag_name, published_at))
+}
+
+fn compare_simple_semver(current: &str, latest: &str) -> (Option<bool>, VersionCheckCompareReason) {
+    let Some(current) = parse_simple_semver(current) else {
+        return (None, VersionCheckCompareReason::Uncomparable);
+    };
+    let Some(latest) = parse_simple_semver(latest) else {
+        return (None, VersionCheckCompareReason::Uncomparable);
+    };
+
+    (Some(latest > current), VersionCheckCompareReason::Semver)
+}
+
+fn parse_simple_semver(raw: &str) -> Option<(u64, u64, u64)> {
+    let raw = raw.trim();
+    let raw = raw
+        .strip_prefix('v')
+        .or_else(|| raw.strip_prefix('V'))
+        .unwrap_or(raw);
+    let core = raw.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next()?.parse().ok()?;
+    let patch: u64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
 }
 
 async fn admin_internal_raft_client_write(

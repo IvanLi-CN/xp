@@ -205,6 +205,7 @@ const DESIGN_MOCK_API = {
 			role: "leader" as const,
 			leader_api_base_url: "https://n1:62416",
 			term: 42,
+			xp_version: "0.0.0",
 		},
 		nodes: DESIGN_NODES,
 		endpoints: DESIGN_ENDPOINTS,
@@ -237,6 +238,45 @@ function pageStory(options: {
 
 export const Login: Story = pageStory({ path: "/login", adminToken: null });
 export const Dashboard: Story = pageStory({ path: "/" });
+const DASHBOARD_BASE = pageStory({ path: "/" });
+export const DashboardUpdateAvailable: Story = {
+	...DASHBOARD_BASE,
+	parameters: {
+		...DASHBOARD_BASE.parameters,
+		mockApi: {
+			...(DASHBOARD_BASE.parameters?.mockApi ?? DESIGN_MOCK_API),
+			data: {
+				...DESIGN_MOCK_API.data,
+				versionCheck: {
+					current: { package: "0.1.0", release_tag: "v0.1.0" },
+					latest: {
+						release_tag: "v0.2.0",
+						published_at: "2026-01-31T00:00:00Z",
+					},
+					has_update: true,
+					checked_at: "2026-01-31T00:00:00Z",
+					compare_reason: "semver",
+					source: {
+						kind: "github-releases",
+						repo: "IvanLi-CN/xp",
+						api_base: "https://api.github.com",
+						channel: "stable",
+					},
+				},
+			},
+		},
+	},
+} satisfies Story;
+export const DashboardUpdateFailed: Story = {
+	...DASHBOARD_BASE,
+	parameters: {
+		...DASHBOARD_BASE.parameters,
+		mockApi: {
+			...(DASHBOARD_BASE.parameters?.mockApi ?? DESIGN_MOCK_API),
+			failVersionCheck: true,
+		},
+	},
+} satisfies Story;
 export const Nodes: Story = pageStory({ path: "/nodes" });
 export const NodeDetails: Story = pageStory({ path: "/nodes/n2" });
 export const Endpoints: Story = pageStory({ path: "/endpoints" });

@@ -1,14 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
+import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { fetchVersionCheck } from "../api/versionCheck";
 import { Icon } from "./Icon";
 import { useUiPrefs } from "./UiPrefs";
+import { VersionBadges } from "./VersionBadges";
 import { clearAdminToken, readAdminToken } from "./auth";
+import {
+	type VersionCheckUiState,
+	readVersionCheckLastAtMs,
+	reduceVersionCheckUiState,
+	shouldAutoCheckVersion,
+	writeVersionCheckLastAtMs,
+} from "./versionCheckUi";
 
 type AppShellProps = {
 	brand: { name: string; subtitle?: string };
@@ -46,6 +56,13 @@ export function AppShell({
 		open: false,
 	});
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
+	const [versionCheck, dispatchVersionCheck] = useReducer(
+		reduceVersionCheckUiState,
+		{ kind: "idle" } satisfies VersionCheckUiState,
+	);
+	const [versionCheckLastAtMs, setVersionCheckLastAtMs] = useState<
+		number | null
+	>(() => readVersionCheckLastAtMs());
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -73,6 +90,47 @@ export function AppShell({
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
+
+	const runVersionCheck = useCallback(
+		async (options?: { force?: boolean }) => {
+			const force = options?.force ?? false;
+			const nowMs = Date.now();
+			const canRun =
+				force ||
+				shouldAutoCheckVersion({ nowMs, lastAtMs: versionCheckLastAtMs });
+			if (!canRun) return;
+
+			writeVersionCheckLastAtMs(nowMs);
+			setVersionCheckLastAtMs(nowMs);
+			dispatchVersionCheck({ type: "start" });
+
+			try {
+				const data = await fetchVersionCheck();
+				dispatchVersionCheck({ type: "success", data });
+			} catch (err) {
+				const message = isBackendApiError(err)
+					? `request failed: ${err.status}`
+					: err instanceof Error
+						? err.message
+						: "request failed";
+				dispatchVersionCheck({ type: "fail", message });
+			}
+		},
+		[versionCheckLastAtMs],
+	);
+
+	useEffect(() => {
+		const onFocus = () => {
+			void runVersionCheck();
+		};
+
+		window.addEventListener("focus", onFocus);
+		if (typeof document.hasFocus === "function" && document.hasFocus()) {
+			onFocus();
+		}
+
+		return () => window.removeEventListener("focus", onFocus);
+	}, [runVersionCheck]);
 
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
@@ -154,6 +212,24 @@ export function AppShell({
 		health.data,
 		health.isSuccess,
 	]);
+
+	const statusMenuBadges = headerStatus ?? statusBadges;
+
+	const versionBadges = useMemo(() => {
+		const xpVersion =
+			clusterInfo.isSuccess && clusterInfo.data?.xp_version
+				? clusterInfo.data.xp_version
+				: null;
+		return (
+			<VersionBadges
+				xpVersion={xpVersion}
+				versionCheck={versionCheck}
+				onRetry={() => {
+					void runVersionCheck({ force: true });
+				}}
+			/>
+		);
+	}, [clusterInfo.data, clusterInfo.isSuccess, runVersionCheck, versionCheck]);
 
 	const effectiveNavGroups =
 		navGroups ??
@@ -243,19 +319,40 @@ export function AppShell({
 										<kbd className="kbd kbd-sm">K</kbd>
 									</div>
 								</div>
-
-								<div className="flex items-center gap-2">
-									{headerStatus ?? statusBadges}
-								</div>
 							</div>
 
 							<div className="flex items-center justify-end gap-2">
+								<div className="flex items-center gap-2">{versionBadges}</div>
+
 								<div className="dropdown dropdown-end">
 									<button
 										type="button"
 										className="btn btn-outline btn-sm xp-btn-outline"
+										aria-label="Open status"
 									>
-										Theme
+										<Icon name="tabler:activity-heartbeat" ariaLabel="Status" />
+										<span className="hidden sm:inline">Status</span>
+									</button>
+									<div className="dropdown-content z-[1] w-80 rounded-box border border-base-200 bg-base-100 shadow">
+										<div className="p-3 space-y-3">
+											<p className="text-xs uppercase tracking-wide opacity-60">
+												Status
+											</p>
+											<div className="flex flex-wrap gap-2">
+												{statusMenuBadges}
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<div className="dropdown dropdown-end">
+									<button
+										type="button"
+										className="btn btn-outline btn-sm xp-btn-outline"
+										aria-label="Open settings"
+									>
+										<Icon name="tabler:settings" ariaLabel="Settings" />
+										<span className="hidden sm:inline">Settings</span>
 									</button>
 									<div className="dropdown-content z-[1] w-72 rounded-box border border-base-200 bg-base-100 shadow">
 										<div className="p-3 space-y-3">
@@ -313,21 +410,21 @@ export function AppShell({
 														Ctrl/⌘K
 													</span>
 												</button>
+												<button
+													type="button"
+													className="btn btn-ghost btn-sm w-full justify-start text-error"
+													onClick={() => {
+														clearAdminToken();
+														navigate({ to: "/login" });
+													}}
+												>
+													<Icon name="tabler:logout" ariaLabel="Logout" />
+													Logout
+												</button>
 											</div>
 										</div>
 									</div>
 								</div>
-
-								<button
-									type="button"
-									className="btn btn-outline btn-sm xp-btn-outline"
-									onClick={() => {
-										clearAdminToken();
-										navigate({ to: "/login" });
-									}}
-								>
-									Logout
-								</button>
 							</div>
 						</div>
 					</header>
