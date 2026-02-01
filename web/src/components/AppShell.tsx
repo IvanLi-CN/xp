@@ -10,14 +10,14 @@ import { fetchHealth } from "../api/health";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { Icon } from "./Icon";
 import { useUiPrefs } from "./UiPrefs";
+import { VersionBadges } from "./VersionBadges";
 import { clearAdminToken, readAdminToken } from "./auth";
 import {
-	githubReleaseTagUrl,
+	type VersionCheckUiState,
 	readVersionCheckLastAtMs,
 	reduceVersionCheckUiState,
 	shouldAutoCheckVersion,
 	writeVersionCheckLastAtMs,
-	xpVersionLinkHref,
 } from "./versionCheckUi";
 
 type AppShellProps = {
@@ -32,7 +32,6 @@ type AppShellProps = {
 };
 
 type CommandPaletteState = { open: boolean };
-type VersionCheckUiState = Parameters<typeof reduceVersionCheckUiState>[0];
 
 function safeHostFromUrl(value: string): string | null {
 	try {
@@ -221,114 +220,15 @@ export function AppShell({
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
 				? clusterInfo.data.xp_version
 				: null;
-		const repo =
-			versionCheck.kind === "update_available" ||
-			versionCheck.kind === "up_to_date"
-				? versionCheck.repo
-				: null;
-		const xpHref = xpVersionLinkHref(xpVersion, repo);
-
-		const items: ReactNode[] = [];
-
-		items.push(
-			<a
-				key="xp-version"
-				href={xpHref}
-				target="_blank"
-				rel="noreferrer"
-				className="badge badge-sm gap-2 font-mono badge-ghost hover:bg-base-200 transition-colors"
-				title={
-					xpVersion
-						? `xp version (from /api/cluster/info): ${xpVersion}`
-						: "xp version (from /api/cluster/info)"
-				}
-			>
-				<span>xp</span>
-				<span className="opacity-80">{xpVersion ?? "…"}</span>
-				<Icon name="tabler:external-link" size={14} className="opacity-60" />
-			</a>,
+		return (
+			<VersionBadges
+				xpVersion={xpVersion}
+				versionCheck={versionCheck}
+				onRetry={() => {
+					void runVersionCheck({ force: true });
+				}}
+			/>
 		);
-
-		if (versionCheck.kind === "checking") {
-			items.push(
-				<span
-					key="version-check"
-					className="badge badge-sm gap-2 font-mono badge-ghost"
-					title="Checking latest version…"
-				>
-					<Icon
-						name="tabler:loader-2"
-						size={14}
-						className="animate-spin opacity-70"
-					/>
-					<span className="sr-only">checking</span>
-				</span>,
-			);
-		} else if (versionCheck.kind === "update_available") {
-			const href = githubReleaseTagUrl(
-				versionCheck.latest_tag,
-				versionCheck.repo,
-			);
-			items.push(
-				<a
-					key="version-check"
-					href={href}
-					target="_blank"
-					rel="noreferrer"
-					className="badge badge-sm gap-2 font-mono badge-warning hover:brightness-95 transition"
-					title="Update available"
-				>
-					<Icon name="tabler:download" size={14} className="opacity-80" />
-					<span className="opacity-90">{versionCheck.latest_tag}</span>
-					<Icon name="tabler:external-link" size={14} className="opacity-70" />
-				</a>,
-			);
-		} else if (versionCheck.kind === "up_to_date") {
-			items.push(
-				<span
-					key="version-check"
-					className="badge badge-sm gap-2 font-mono badge-ghost"
-					title={
-						versionCheck.comparable
-							? `Up to date (checked at ${versionCheck.checked_at})`
-							: `Latest is ${versionCheck.latest_tag}, but current version is not comparable`
-					}
-				>
-					<Icon name="tabler:circle-check" size={14} className="opacity-70" />
-					<span className="sr-only">
-						{versionCheck.comparable ? "up-to-date" : "unknown"}
-					</span>
-				</span>,
-			);
-		} else if (versionCheck.kind === "check_failed") {
-			items.push(
-				<button
-					key="version-check"
-					type="button"
-					className="badge badge-sm gap-2 font-mono badge-error hover:brightness-95 transition"
-					title={versionCheck.message}
-					onClick={() => {
-						void runVersionCheck({ force: true });
-					}}
-				>
-					<Icon name="tabler:refresh" size={14} className="opacity-80" />
-					<span className="sr-only">retry</span>
-				</button>,
-			);
-		} else {
-			items.push(
-				<span
-					key="version-check"
-					className="badge badge-sm gap-2 font-mono badge-ghost"
-					title="Focus the page to check updates (1h cooldown)"
-				>
-					<Icon name="tabler:refresh" size={14} className="opacity-70" />
-					<span className="sr-only">update</span>
-				</span>,
-			);
-		}
-
-		return items;
 	}, [clusterInfo.data, clusterInfo.isSuccess, runVersionCheck, versionCheck]);
 
 	const effectiveNavGroups =
