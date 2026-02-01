@@ -178,6 +178,7 @@
 - 2026-01-31: 完成实现与验证：M1–M4（backend+web+tests+docs）
 - 2026-01-31: UX 微调：将顶栏的 Theme/Logout 收拢到 Settings 下拉菜单，缓解页头拥挤
 - 2026-02-01: UX 微调：顶栏状态信息（Health/leader/term/alerts）改为 Status 下拉菜单，减少页头拥挤
+- 2026-02-01: Storybook：新增 `Components/VersionBadges`，便于单独预览顶栏版本展示组件
 
 ## 参考（References）
 
