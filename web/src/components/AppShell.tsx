@@ -214,6 +214,8 @@ export function AppShell({
 		health.isSuccess,
 	]);
 
+	const statusMenuBadges = headerStatus ?? statusBadges;
+
 	const versionBadges = useMemo(() => {
 		const xpVersion =
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
@@ -259,7 +261,7 @@ export function AppShell({
 						size={14}
 						className="animate-spin opacity-70"
 					/>
-					<span>checking</span>
+					<span className="sr-only">checking</span>
 				</span>,
 			);
 		} else if (versionCheck.kind === "update_available") {
@@ -277,8 +279,7 @@ export function AppShell({
 					title="Update available"
 				>
 					<Icon name="tabler:download" size={14} className="opacity-80" />
-					<span>update:</span>
-					<span className="opacity-80">{versionCheck.latest_tag}</span>
+					<span className="opacity-90">{versionCheck.latest_tag}</span>
 					<Icon name="tabler:external-link" size={14} className="opacity-70" />
 				</a>,
 			);
@@ -294,7 +295,9 @@ export function AppShell({
 					}
 				>
 					<Icon name="tabler:circle-check" size={14} className="opacity-70" />
-					<span>{versionCheck.comparable ? "up-to-date" : "unknown"}</span>
+					<span className="sr-only">
+						{versionCheck.comparable ? "up-to-date" : "unknown"}
+					</span>
 				</span>,
 			);
 		} else if (versionCheck.kind === "check_failed") {
@@ -309,7 +312,7 @@ export function AppShell({
 					}}
 				>
 					<Icon name="tabler:refresh" size={14} className="opacity-80" />
-					<span>retry</span>
+					<span className="sr-only">retry</span>
 				</button>,
 			);
 		} else {
@@ -320,7 +323,7 @@ export function AppShell({
 					title="Focus the page to check updates (1h cooldown)"
 				>
 					<Icon name="tabler:refresh" size={14} className="opacity-70" />
-					<span>update</span>
+					<span className="sr-only">update</span>
 				</span>,
 			);
 		}
@@ -416,10 +419,6 @@ export function AppShell({
 										<kbd className="kbd kbd-sm">K</kbd>
 									</div>
 								</div>
-
-								<div className="flex items-center gap-2">
-									{headerStatus ?? statusBadges}
-								</div>
 							</div>
 
 							<div className="flex items-center justify-end gap-2">
@@ -429,8 +428,31 @@ export function AppShell({
 									<button
 										type="button"
 										className="btn btn-outline btn-sm xp-btn-outline"
+										aria-label="Open status"
 									>
-										Theme
+										<Icon name="tabler:activity-heartbeat" ariaLabel="Status" />
+										<span className="hidden sm:inline">Status</span>
+									</button>
+									<div className="dropdown-content z-[1] w-80 rounded-box border border-base-200 bg-base-100 shadow">
+										<div className="p-3 space-y-3">
+											<p className="text-xs uppercase tracking-wide opacity-60">
+												Status
+											</p>
+											<div className="flex flex-wrap gap-2">
+												{statusMenuBadges}
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<div className="dropdown dropdown-end">
+									<button
+										type="button"
+										className="btn btn-outline btn-sm xp-btn-outline"
+										aria-label="Open settings"
+									>
+										<Icon name="tabler:settings" ariaLabel="Settings" />
+										<span className="hidden sm:inline">Settings</span>
 									</button>
 									<div className="dropdown-content z-[1] w-72 rounded-box border border-base-200 bg-base-100 shadow">
 										<div className="p-3 space-y-3">
@@ -488,21 +510,21 @@ export function AppShell({
 														Ctrl/⌘K
 													</span>
 												</button>
+												<button
+													type="button"
+													className="btn btn-ghost btn-sm w-full justify-start text-error"
+													onClick={() => {
+														clearAdminToken();
+														navigate({ to: "/login" });
+													}}
+												>
+													<Icon name="tabler:logout" ariaLabel="Logout" />
+													Logout
+												</button>
 											</div>
 										</div>
 									</div>
 								</div>
-
-								<button
-									type="button"
-									className="btn btn-outline btn-sm xp-btn-outline"
-									onClick={() => {
-										clearAdminToken();
-										navigate({ to: "/login" });
-									}}
-								>
-									Logout
-								</button>
 							</div>
 						</div>
 					</header>
