@@ -23,7 +23,7 @@ test("theme preference persists after reload", async ({ page }) => {
 		page.getByRole("heading", { name: "User", exact: true }),
 	).toBeVisible();
 
-	await page.getByRole("button", { name: "Theme" }).click();
+	await page.getByRole("button", { name: "Open settings" }).click();
 	await page.getByLabel("Theme").selectOption("dark");
 	await expect(page.locator("html")).toHaveAttribute("data-theme", "xp-dark");
 
