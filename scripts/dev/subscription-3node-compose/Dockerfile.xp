@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+FROM debian:bookworm-slim AS builder
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH=/root/.cargo/bin:$PATH
+
+WORKDIR /app
+COPY . .
+
+# build.rs requires web/dist/index.html to embed admin UI assets.
+# For this local regression environment we don't need the real UI, so generate a minimal placeholder.
+RUN mkdir -p web/dist/assets \
+  && if [ ! -f web/dist/index.html ]; then \
+    printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>xp</title></head><body>xp</body></html>' > web/dist/index.html; \
+  fi
+
+RUN --mount=type=cache,target=/root/.cargo/registry \
+  --mount=type=cache,target=/root/.cargo/git \
+  --mount=type=cache,target=/root/.rustup \
+  --mount=type=cache,target=/app/target \
+  mkdir -p /out \
+  && cargo build --release --bin xp --bin xp-ops \
+  && cp /app/target/release/xp /out/xp \
+  && cp /app/target/release/xp-ops /out/xp-ops
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl openssl socat \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out/xp /usr/local/bin/xp
+COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
+
+ENTRYPOINT ["xp"]
