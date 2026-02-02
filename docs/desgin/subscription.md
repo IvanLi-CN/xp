@@ -16,8 +16,12 @@
 ### 2.2 命名（显示名）
 
 - URI 的 `#name` 与 Clash 的 `name`：
-  - 默认：`{user.display_name}-{node.name}-{endpoint.tag}`
-  - 可被 Grant.note 覆盖（更友好）
+  - 默认：`{user.display_name}-{node.node_name}-{endpoint.tag}`
+  - `Grant.note` 可覆盖默认命名（更友好）
+  - **同一订阅内要求 name 唯一**（避免 Clash/Mihomo 等客户端按 `name` 去重/覆盖导致“看起来缺了节点/端点”）：
+    - `Grant.note` 为空/空白：使用默认命名（天然唯一：包含 `endpoint.tag`）
+    - `Grant.note` 非空且在本订阅中唯一：使用 `Grant.note`（保持用户可读）
+    - `Grant.note` 非空且在本订阅中出现多次：对这些冲突项使用 `{note}-{node.node_name}-{endpoint.tag}` 进行区分
 - URI 的 `#name` 建议进行 URL encode（至少对空格等非法字符做转义），避免生成非法 URI（参见 SIP002 的说明）。
 
 ## 3. Raw URI（逐行）
