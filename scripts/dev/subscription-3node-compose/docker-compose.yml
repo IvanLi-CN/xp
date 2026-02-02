@@ -1,0 +1,149 @@
+name: xp-apxdg
+
+services:
+  xp1-app:
+    build:
+      context: ../../..
+      dockerfile: scripts/dev/subscription-3node-compose/Dockerfile.xp
+    image: xp-local:apxdg
+    command:
+      [
+        "run",
+        "--bind",
+        "0.0.0.0:62416",
+        "--data-dir",
+        "/data",
+        "--node-name",
+        "node-1",
+        "--access-host",
+        "xp1",
+        "--api-base-url",
+        "https://xp1:6443",
+        "--xray-restart-mode",
+        "none",
+      ]
+    environment:
+      XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
+    volumes:
+      - xp1_data:/data
+    networks:
+      - xpnet
+
+  xp1:
+    image: xp-local:apxdg
+    entrypoint: ["socat"]
+    command:
+      [
+        "-ly",
+        "OPENSSL-LISTEN:6443,reuseaddr,fork,verify=0,cert=/data/cluster/https_cert.pem,key=/data/cluster/https_key.pem",
+        "TCP:xp1-app:62416",
+      ]
+    ports:
+      - "127.0.0.1:${XP_APXDG_XP1_HTTPS_PORT:-0}:6443"
+    volumes:
+      - xp1_data:/data:ro
+    networks:
+      - xpnet
+
+  xp2-app:
+    image: xp-local:apxdg
+    command:
+      [
+        "run",
+        "--bind",
+        "0.0.0.0:62416",
+        "--data-dir",
+        "/data",
+        "--node-name",
+        "node-2",
+        "--access-host",
+        "xp2",
+        "--api-base-url",
+        "https://xp2:6443",
+        "--xray-restart-mode",
+        "none",
+      ]
+    environment:
+      XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
+    volumes:
+      - xp2_data:/data
+    networks:
+      - xpnet
+
+  xp2:
+    image: xp-local:apxdg
+    entrypoint: ["socat"]
+    command:
+      [
+        "-ly",
+        "OPENSSL-LISTEN:6443,reuseaddr,fork,verify=0,cert=/data/cluster/https_cert.pem,key=/data/cluster/https_key.pem",
+        "TCP:xp2-app:62416",
+      ]
+    ports:
+      - "127.0.0.1:${XP_APXDG_XP2_HTTPS_PORT:-0}:6443"
+    volumes:
+      - xp2_data:/data:ro
+    networks:
+      - xpnet
+
+  xp3-app:
+    image: xp-local:apxdg
+    command:
+      [
+        "run",
+        "--bind",
+        "0.0.0.0:62416",
+        "--data-dir",
+        "/data",
+        "--node-name",
+        "node-3",
+        "--access-host",
+        "xp3",
+        "--api-base-url",
+        "https://xp3:6443",
+        "--xray-restart-mode",
+        "none",
+      ]
+    environment:
+      XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
+    volumes:
+      - xp3_data:/data
+    networks:
+      - xpnet
+
+  xp3:
+    image: xp-local:apxdg
+    entrypoint: ["socat"]
+    command:
+      [
+        "-ly",
+        "OPENSSL-LISTEN:6443,reuseaddr,fork,verify=0,cert=/data/cluster/https_cert.pem,key=/data/cluster/https_key.pem",
+        "TCP:xp3-app:62416",
+      ]
+    ports:
+      - "127.0.0.1:${XP_APXDG_XP3_HTTPS_PORT:-0}:6443"
+    volumes:
+      - xp3_data:/data:ro
+    networks:
+      - xpnet
+
+  tool:
+    image: xp-local:apxdg
+    entrypoint: ["tail", "-f", "/dev/null"]
+    environment:
+      XP_APXDG_ADMIN_TOKEN: ${XP_APXDG_ADMIN_TOKEN:-devtoken}
+    volumes:
+      - xp1_data:/vol/xp1
+      - xp2_data:/vol/xp2
+      - xp3_data:/vol/xp3
+    networks:
+      - xpnet
+
+volumes:
+  xp1_data:
+  xp2_data:
+  xp3_data:
+
+networks:
+  xpnet:
+    driver: bridge
