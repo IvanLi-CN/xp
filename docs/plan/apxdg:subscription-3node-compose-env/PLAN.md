@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 已完成
 - Created: 2026-02-01
-- Last: 2026-02-01
+- Last: 2026-02-02
 
 ## 背景 / 问题陈述
 
@@ -120,10 +120,10 @@ None
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 新增 `scripts/dev/subscription-3node-compose/` 骨架与 README
-- [ ] M2: 提供 `xp` 可用的 Docker 构建（包含 embedded `web/dist`）
-- [ ] M3: 实现集群 init/join 自动化 + HTTPS 入口（单机 3 节点）
-- [ ] M4: 实现 `seed` + `verify`，并让 `reset-and-verify` 幂等稳定
+- [x] M1: 新增 `scripts/dev/subscription-3node-compose/` 骨架与 README
+- [x] M2: 提供 `xp` 可用的 Docker 构建（包含 embedded `web/dist`）
+- [x] M3: 实现集群 init/join 自动化 + HTTPS 入口（单机 3 节点）
+- [x] M4: 实现 `seed` + `verify`，并让 `reset-and-verify` 幂等稳定
 
 ## 方案概述（Approach, high-level）
 
@@ -147,6 +147,7 @@ None
 ## 变更记录（Change log）
 
 - 2026-02-01: create plan
+- 2026-02-02: implement env + verify via `run.sh reset-and-verify`
 
 ## 参考（References）
 
