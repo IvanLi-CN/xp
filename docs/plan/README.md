@@ -84,5 +84,5 @@
 | k9n2r | xp-ops：admin token 设置后操作指引                          | 已完成 | `k9n2r:xp-ops-admin-token-ops/PLAN.md`               | 2026-01-29 | PR #52, PR #53   |
 | bz652 | User 详情：用户信息 / 接入点配置（矩阵）                    | 已完成 | `bz652:user-details-user-node-quotas/PLAN.md`        | 2026-01-31 | PR #54           |
 | n5mtq | Web UI：版本显示与更新检查                                  | 已完成 | `n5mtq:ui-version-check/PLAN.md`                     | 2026-02-01 | -                |
-| apxdg | 本地 docker compose：3 节点订阅回归测试环境                 | 已完成 | `apxdg:subscription-3node-compose-env/PLAN.md`       | 2026-02-02 | -                |
+| apxdg | 本地 docker compose：3 节点订阅回归测试环境                 | 已完成 | `apxdg:subscription-3node-compose-env/PLAN.md`       | 2026-02-02 | PR #57           |
 | m6mer | 订阅输出：name 全局唯一，避免客户端覆盖                     | 待设计 | `m6mer:subscription-name-uniqueness/PLAN.md`         | 2026-02-01 | Depends apxdg    |
