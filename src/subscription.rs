@@ -270,10 +270,10 @@ fn build_items(
         }
 
         let mut name = build_name(user, grant, node, endpoint);
-        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty()) {
-            if note_counts.get(note).copied().unwrap_or(0) > 1 {
-                name = format!("{note}-{}-{}", node.node_name, endpoint.tag);
-            }
+        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty())
+            && note_counts.get(note).copied().unwrap_or(0) > 1
+        {
+            name = format!("{note}-{}-{}", node.node_name, endpoint.tag);
         }
         let name_encoded = percent_encode_rfc3986(&name);
 
