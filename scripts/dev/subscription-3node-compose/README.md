@@ -20,6 +20,8 @@ This directory provides a docker-compose based 3-node `xp` cluster on a single d
 ./scripts/dev/subscription-3node-compose/run.sh reset-and-verify
 ```
 
+> WARNING: `reset` / `reset-and-verify` will wipe docker volumes for the `xp-apxdg` compose project (data loss).
+
 ## Useful commands
 
 ```sh
@@ -35,6 +37,7 @@ This directory provides a docker-compose based 3-node `xp` cluster on a single d
 
 - The cluster runs `xp` HTTP internally and uses `socat` for HTTPS termination (`https://xp{1,2,3}:6443` inside the compose network).
 - Certificates are generated from the cluster CA produced by `xp init` and stored under each node volume.
+- `seed` is idempotent: it reuses `alice` and endpoints (by port) and replaces the `apxdg` grant group if it already exists.
 - Seed data creates:
   - 1 user (`alice`)
   - 4 endpoints across 2 nodes

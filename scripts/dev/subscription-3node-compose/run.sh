@@ -85,6 +85,7 @@ print(obj[key])
 reset() {
   ensure_ports
   ensure_admin_token
+  echo "WARNING: reset will wipe docker volumes for compose project \"xp-apxdg\" (data loss)" >&2
   compose down -v --remove-orphans
 }
 
@@ -242,17 +243,41 @@ up() {
 
 seed() {
   ensure_admin_token
+  need_python3
 
-  users_json="$(
+  users_list="$(
     compose exec -T xp1-app curl -fsS \
       --cacert /data/cluster/cluster_ca.pem \
       -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -d '{"display_name":"alice"}' \
       https://xp1:6443/api/admin/users
   )"
 
-  user_id="$(echo "$users_json" | json_get user_id)"
+  user_id="$(
+    printf '%s' "$users_list" | python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+for u in obj.get("items", []):
+    if u.get("display_name") == "alice":
+        print(u["user_id"])
+        raise SystemExit(0)
+print("")
+'
+  )"
+
+  if [ -z "$user_id" ]; then
+    users_json="$(
+      compose exec -T xp1-app curl -fsS \
+        --cacert /data/cluster/cluster_ca.pem \
+        -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d '{"display_name":"alice"}' \
+        https://xp1:6443/api/admin/users
+    )"
+
+    user_id="$(echo "$users_json" | json_get user_id)"
+  fi
 
   nodes_json="$(
     compose exec -T xp1-app curl -fsS \
@@ -295,7 +320,35 @@ def pick(prefix: str) -> str:
 
 print(pick("https://xp2:"))
 '
+	  )"
+
+  endpoints_list="$(
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      https://xp1:6443/api/admin/endpoints
   )"
+
+  find_endpoint_id() {
+    node_id="$1"
+    port="$2"
+    kind="$3"
+    printf '%s' "$endpoints_list" | python3 -c '
+import json
+import sys
+
+node_id = sys.argv[1]
+port = int(sys.argv[2])
+kind = sys.argv[3]
+
+obj = json.load(sys.stdin)
+for e in obj.get("items", []):
+    if e.get("node_id") == node_id and e.get("kind") == kind and e.get("port") == port:
+        print(e["endpoint_id"])
+        raise SystemExit(0)
+print("")
+' "$node_id" "$port" "$kind"
+  }
 
   create_endpoint() {
     node_id="$1"
@@ -308,27 +361,53 @@ print(pick("https://xp2:"))
       https://xp1:6443/api/admin/endpoints
   }
 
-  e1="$(create_endpoint "$node1_id" 31081 | json_get endpoint_id)"
-  e2="$(create_endpoint "$node1_id" 31082 | json_get endpoint_id)"
-  e3="$(create_endpoint "$node2_id" 31083 | json_get endpoint_id)"
-  e4="$(create_endpoint "$node2_id" 31084 | json_get endpoint_id)"
+  kind="ss2022_2022_blake3_aes_128_gcm"
+  e1="$(find_endpoint_id "$node1_id" 31081 "$kind")"
+  if [ -z "$e1" ]; then e1="$(create_endpoint "$node1_id" 31081 | json_get endpoint_id)"; fi
+  e2="$(find_endpoint_id "$node1_id" 31082 "$kind")"
+  if [ -z "$e2" ]; then e2="$(create_endpoint "$node1_id" 31082 | json_get endpoint_id)"; fi
+  e3="$(find_endpoint_id "$node2_id" 31083 "$kind")"
+  if [ -z "$e3" ]; then e3="$(create_endpoint "$node2_id" 31083 | json_get endpoint_id)"; fi
+  e4="$(find_endpoint_id "$node2_id" 31084 "$kind")"
+  if [ -z "$e4" ]; then e4="$(create_endpoint "$node2_id" 31084 | json_get endpoint_id)"; fi
 
-  compose exec -T xp1-app curl -fsS \
+  group_name="apxdg"
+  if compose exec -T xp1-app curl -fsS \
     --cacert /data/cluster/cluster_ca.pem \
     -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"group_name\":\"apxdg\",
-      \"members\":[
-        {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e1}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-        {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e2}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-        {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e3}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-        {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e4}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"}
-      ]
-    }" \
-    https://xp1:6443/api/admin/grant-groups >/dev/null
+    "https://xp1:6443/api/admin/grant-groups/${group_name}" >/dev/null 2>&1; then
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -X PUT \
+      -d "{
+        \"members\":[
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e1}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e2}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e3}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e4}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"}
+        ]
+      }" \
+      "https://xp1:6443/api/admin/grant-groups/${group_name}" >/dev/null
+  else
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"group_name\":\"${group_name}\",
+        \"members\":[
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e1}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e2}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e3}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
+          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e4}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"}
+        ]
+      }" \
+      https://xp1:6443/api/admin/grant-groups >/dev/null
+  fi
 
-  echo "seed ok (user=alice, 4 endpoints, 4 grants with note=\"same\")"
+  echo "seed ok (user=alice, 4 endpoints, 4 grants in group=\"${group_name}\" with note=\"same\")"
 }
 
 verify_one_raw() {
