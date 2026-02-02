@@ -899,7 +899,8 @@ mod tests {
             grant_ss("u1", "g4", "e4", true, Some("same"), "g:h"),
         ];
 
-        let raw_lines = build_raw_lines(&u, &grants, &endpoints, &[n1.clone(), n2.clone()]).unwrap();
+        let raw_lines =
+            build_raw_lines(&u, &grants, &endpoints, &[n1.clone(), n2.clone()]).unwrap();
         assert_eq!(raw_lines.len(), 4);
         let raw_names: Vec<String> = raw_lines
             .iter()
@@ -919,7 +920,11 @@ mod tests {
             .expect("proxies must be a list");
         let clash_names: Vec<String> = proxies
             .iter()
-            .filter_map(|p| p.get("name").and_then(|x| x.as_str()).map(|s| s.to_string()))
+            .filter_map(|p| {
+                p.get("name")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect();
         assert_eq!(clash_names.len(), 4);
         assert_eq!(
