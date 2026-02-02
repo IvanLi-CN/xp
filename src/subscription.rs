@@ -212,6 +212,24 @@ fn build_items(
     let nodes_by_id: std::collections::HashMap<&str, &Node> =
         nodes.iter().map(|n| (n.node_id.as_str(), n)).collect();
 
+    let mut note_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for grant in grants {
+        if grant.user_id != user.user_id {
+            return Err(SubscriptionError::GrantUserMismatch {
+                grant_id: grant.grant_id.clone(),
+                expected_user_id: user.user_id.clone(),
+                got_user_id: grant.user_id.clone(),
+            });
+        }
+        if !grant.enabled {
+            continue;
+        }
+        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty()) {
+            *note_counts.entry(note.to_string()).or_insert(0) += 1;
+        }
+    }
+
     let mut items = Vec::new();
 
     for grant in grants {
@@ -251,7 +269,12 @@ fn build_items(
             });
         }
 
-        let name = build_name(user, grant, node, endpoint);
+        let mut name = build_name(user, grant, node, endpoint);
+        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty())
+            && note_counts.get(note).copied().unwrap_or(0) > 1
+        {
+            name = format!("{note}-{}-{}", node.node_name, endpoint.tag);
+        }
         let name_encoded = percent_encode_rfc3986(&name);
 
         let host = node.access_host.as_str();
@@ -853,5 +876,65 @@ mod tests {
         assert_eq!(out1.len(), 1);
         assert!(out1[0].contains("ss://"));
         assert!(!out1[0].contains("c%3Ad"));
+    }
+
+    #[test]
+    fn duplicated_note_is_disambiguated_to_keep_names_unique() {
+        use std::collections::HashSet;
+
+        let u = user("u1", "alice");
+        let n1 = node("n1", "node-1", "example.com");
+        let n2 = node("n2", "node-2", "example.com");
+
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "tag-1", 443),
+            endpoint_ss("e2", "n1", "tag-2", 443),
+            endpoint_ss("e3", "n2", "tag-3", 443),
+            endpoint_ss("e4", "n2", "tag-4", 443),
+        ];
+        let grants = vec![
+            grant_ss("u1", "g1", "e1", true, Some("same"), "a:b"),
+            grant_ss("u1", "g2", "e2", true, Some("same"), "c:d"),
+            grant_ss("u1", "g3", "e3", true, Some("same"), "e:f"),
+            grant_ss("u1", "g4", "e4", true, Some("same"), "g:h"),
+        ];
+
+        let raw_lines =
+            build_raw_lines(&u, &grants, &endpoints, &[n1.clone(), n2.clone()]).unwrap();
+        assert_eq!(raw_lines.len(), 4);
+        let raw_names: Vec<String> = raw_lines
+            .iter()
+            .map(|l| l.rsplit('#').next().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(
+            HashSet::<&String>::from_iter(raw_names.iter()).len(),
+            4,
+            "raw names must be unique, got: {raw_names:?}"
+        );
+
+        let yaml = build_clash_yaml(&u, &grants, &endpoints, &[n1, n2]).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let proxies = v
+            .get("proxies")
+            .and_then(|x| x.as_sequence())
+            .expect("proxies must be a list");
+        let clash_names: Vec<String> = proxies
+            .iter()
+            .filter_map(|p| {
+                p.get("name")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        assert_eq!(clash_names.len(), 4);
+        assert_eq!(
+            HashSet::<&String>::from_iter(clash_names.iter()).len(),
+            4,
+            "clash proxy names must be unique, got: {clash_names:?}"
+        );
+        assert!(
+            clash_names.iter().all(|n| n != "same"),
+            "duplicated note should be disambiguated in clash names, got: {clash_names:?}"
+        );
     }
 }

@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待设计
+- Status: 已完成
 - Created: 2026-02-01
-- Last: 2026-02-01
+- Last: 2026-02-02
 
 ## 背景 / 问题陈述
 
@@ -113,9 +113,9 @@ None
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 补充回归测试用例（unit + http）
-- [ ] M2: 在订阅生成逻辑中实现 name 唯一策略
-- [ ] M3: 在 `apxdg` 环境中验证（3 节点一致 + raw/clash 断言）
+- [x] M1: 补充回归测试用例（unit + http）
+- [x] M2: 在订阅生成逻辑中实现 name 唯一策略
+- [x] M3: 在 `apxdg` 环境中验证（3 节点一致 + raw/clash 断言）
 
 ## 方案概述（Approach, high-level）
 
@@ -134,6 +134,7 @@ None
 ## 变更记录（Change log）
 
 - 2026-02-01: create plan
+- 2026-02-02: implement name disambiguation + add unit test
 
 ## 参考（References）
 
