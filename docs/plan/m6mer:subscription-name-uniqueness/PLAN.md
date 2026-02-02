@@ -72,7 +72,7 @@ None（对外 API 路径与 schema 不变；仅输出内容的 `name` 策略明�
   When 分别从 3 个节点拉取：
   - `GET /api/sub/<token>?format=raw`
   - `GET /api/sub/<token>?format=clash`
-  Then
+    Then
   - raw 行数=4，且 `#name` 集合大小=4
   - clash `proxies` 数=4，且 `name` 集合大小=4
   - 三个节点返回逻辑一致（至少满足 `verify` 脚本断言一致）
