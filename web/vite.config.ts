@@ -12,8 +12,8 @@ export default defineConfig(({ mode }) => {
 			port: 60080,
 			strictPort: true,
 			proxy: {
-				"/api": { target: backend, changeOrigin: true },
-				"/events": { target: backend, changeOrigin: true },
+				"/api": { target: backend, changeOrigin: true, secure: false },
+				"/events": { target: backend, changeOrigin: true, secure: false },
 			},
 		},
 	};
