@@ -1753,12 +1753,20 @@ async fn admin_list_user_quota_summaries(
                     totals
                         .entry(item.user_id.clone())
                         .and_modify(|entry| {
-                            entry.quota_limit_bytes = entry
-                                .quota_limit_bytes
-                                .saturating_add(item.quota_limit_bytes);
+                            // Keep semantics consistent with enforcement:
+                            // `quota_limit_bytes == 0` means "unlimited", so any unlimited node
+                            // must keep the aggregated limit as unlimited.
                             entry.used_bytes = entry.used_bytes.saturating_add(item.used_bytes);
-                            entry.remaining_bytes =
-                                entry.remaining_bytes.saturating_add(item.remaining_bytes);
+                            if entry.quota_limit_bytes == 0 || item.quota_limit_bytes == 0 {
+                                entry.quota_limit_bytes = 0;
+                                entry.remaining_bytes = 0;
+                            } else {
+                                entry.quota_limit_bytes = entry
+                                    .quota_limit_bytes
+                                    .saturating_add(item.quota_limit_bytes);
+                                entry.remaining_bytes =
+                                    entry.remaining_bytes.saturating_add(item.remaining_bytes);
+                            }
                         })
                         .or_insert(item);
                 }
@@ -1886,6 +1894,9 @@ async fn admin_get_user_node_quota_status(
     let local_node_id = state.cluster.node_id.clone();
     let local_items = {
         let store = state.store.lock().await;
+        if store.get_user(&user_id).is_none() {
+            return Err(ApiError::not_found(format!("user not found: {user_id}")));
+        }
         build_local_user_node_quota_status(&store, &local_node_id, &user_id)?
     };
 

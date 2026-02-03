@@ -3135,3 +3135,20 @@ async fn user_quota_summaries_ignore_grants_for_missing_users() {
     };
     assert!(items.iter().all(|i| i.user_id != "missing-user"));
 }
+
+#[tokio::test]
+async fn user_node_quota_status_returns_404_for_missing_user() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/users/missing-user/node-quotas/status?scope=local",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+}
