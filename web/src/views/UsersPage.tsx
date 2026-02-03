@@ -269,15 +269,15 @@ export function UsersPage() {
 
 											return (
 												<div
-													className="h-2.5 rounded bg-base-300 relative overflow-hidden"
+													className="h-2.5 rounded bg-base-200 relative overflow-hidden"
 													title={`Used: ${used} · Remaining: ${remaining}`}
 												>
 													<div
-														className="absolute inset-y-0 left-0 bg-primary/70"
+														className="absolute inset-y-0 left-0 bg-warning/80"
 														style={{ width: `${usedPct}%` }}
 													/>
 													<div
-														className="absolute inset-y-0 right-0 bg-success/40"
+														className="absolute inset-y-0 right-0 bg-success/70"
 														style={{ width: `${remainingPct}%` }}
 													/>
 												</div>
