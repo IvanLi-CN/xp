@@ -1603,10 +1603,11 @@ fn build_local_user_quota_summaries(
     let mut grants_by_user: std::collections::BTreeMap<String, Vec<Grant>> =
         std::collections::BTreeMap::new();
     for grant in store.list_grants() {
-        let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id) else {
-            continue;
-        };
-        if endpoint.node_id != local_node_id {
+        // Keep behavior consistent with quota enforcement: if an endpoint is missing (e.g. deleted
+        // while grants still exist), treat the grant as belonging to the local node.
+        if let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id)
+            && endpoint.node_id != local_node_id
+        {
             continue;
         }
         grants_by_user
@@ -1821,10 +1822,11 @@ fn build_local_user_node_quota_status(
         if grant.user_id != user_id {
             continue;
         }
-        let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id) else {
-            continue;
-        };
-        if endpoint.node_id != local_node_id {
+        // Keep behavior consistent with quota enforcement: if an endpoint is missing (e.g. deleted
+        // while grants still exist), treat the grant as belonging to the local node.
+        if let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id)
+            && endpoint.node_id != local_node_id
+        {
             continue;
         }
         grants.push(grant);

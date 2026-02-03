@@ -134,7 +134,8 @@ export function UserDetailsPage() {
 
 	const nodeQuotaStatusQuery = useQuery({
 		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
-		enabled: adminToken.length > 0 && userId.length > 0,
+		enabled:
+			adminToken.length > 0 && userId.length > 0 && tab === "quotaStatus",
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
