@@ -22,6 +22,7 @@ use crate::{
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
     config::Config,
+    cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
         Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, User, UserNodeQuota,
         UserQuotaReset, validate_group_name,
@@ -431,12 +432,20 @@ pub fn build_router(
         )
         .route("/users", post(admin_create_user).get(admin_list_users))
         .route(
+            "/users/quota-summaries",
+            get(admin_list_user_quota_summaries),
+        )
+        .route(
             "/users/:user_id",
             get(admin_get_user)
                 .delete(admin_delete_user)
                 .patch(admin_patch_user),
         )
         .route("/users/:user_id/reset-token", post(admin_reset_user_token))
+        .route(
+            "/users/:user_id/node-quotas/status",
+            get(admin_get_user_node_quota_status),
+        )
         .route(
             "/users/:user_id/node-quotas",
             get(admin_list_user_node_quotas),
@@ -1470,6 +1479,499 @@ async fn admin_list_user_node_quotas(
     let store = state.store.lock().await;
     let items = store.list_user_node_quotas(&user_id)?;
     Ok(Json(Items { items }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ScopeQuery {
+    scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuotaResetPolicy {
+    Monthly,
+    Unlimited,
+}
+
+fn resolve_user_node_quota_reset_for_status(
+    store: &JsonSnapshotStore,
+    user_id: &str,
+    node_id: &str,
+) -> Result<(QuotaResetSource, QuotaResetPolicy, CycleTimeZone, u8), ApiError> {
+    let source = store
+        .get_user_node_quota_reset_source(user_id, node_id)
+        .unwrap_or_default();
+
+    let (policy, day_of_month, tz) = match source {
+        QuotaResetSource::User => {
+            let user = store
+                .get_user(user_id)
+                .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
+            match user.quota_reset {
+                UserQuotaReset::Unlimited { tz_offset_minutes } => (
+                    QuotaResetPolicy::Unlimited,
+                    1,
+                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                ),
+                UserQuotaReset::Monthly {
+                    day_of_month,
+                    tz_offset_minutes,
+                } => (
+                    QuotaResetPolicy::Monthly,
+                    day_of_month,
+                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                ),
+            }
+        }
+        QuotaResetSource::Node => {
+            let node = store
+                .get_node(node_id)
+                .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
+            match node.quota_reset {
+                NodeQuotaReset::Unlimited { tz_offset_minutes } => (
+                    QuotaResetPolicy::Unlimited,
+                    1,
+                    match tz_offset_minutes {
+                        Some(tz_offset_minutes) => {
+                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
+                        }
+                        None => CycleTimeZone::Local,
+                    },
+                ),
+                NodeQuotaReset::Monthly {
+                    day_of_month,
+                    tz_offset_minutes,
+                } => (
+                    QuotaResetPolicy::Monthly,
+                    day_of_month,
+                    match tz_offset_minutes {
+                        Some(tz_offset_minutes) => {
+                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
+                        }
+                        None => CycleTimeZone::Local,
+                    },
+                ),
+            }
+        }
+    };
+
+    if !(1..=31).contains(&day_of_month) {
+        return Err(ApiError::internal(format!(
+            "invalid day_of_month: {day_of_month}"
+        )));
+    }
+
+    Ok((source, policy, tz, day_of_month))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminUserQuotaSummaryItem {
+    user_id: String,
+    quota_limit_bytes: u64,
+    used_bytes: u64,
+    remaining_bytes: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminUserQuotaSummariesResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    items: Vec<AdminUserQuotaSummaryItem>,
+}
+
+fn build_local_user_quota_summaries(
+    store: &JsonSnapshotStore,
+    local_node_id: &str,
+) -> Result<Vec<AdminUserQuotaSummaryItem>, ApiError> {
+    let now = Utc::now();
+
+    let endpoints_by_id = store
+        .list_endpoints()
+        .into_iter()
+        .map(|e| (e.endpoint_id.clone(), e))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    // Collect explicit per-user quota limits for the local node (even if there are no grants yet).
+    let mut explicit_limit_by_user_id: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+    for user in store.list_users() {
+        if let Some(limit) = store.get_user_node_quota_limit_bytes(&user.user_id, local_node_id) {
+            explicit_limit_by_user_id.insert(user.user_id, limit);
+        }
+    }
+
+    // Group grants by (user_id, node_id=local) to match quota enforcement behavior.
+    let mut grants_by_user: std::collections::BTreeMap<String, Vec<Grant>> =
+        std::collections::BTreeMap::new();
+    for grant in store.list_grants() {
+        let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id) else {
+            continue;
+        };
+        if endpoint.node_id != local_node_id {
+            continue;
+        }
+        grants_by_user
+            .entry(grant.user_id.clone())
+            .or_default()
+            .push(grant);
+    }
+
+    let mut items = Vec::new();
+    let mut all_user_ids: std::collections::BTreeSet<String> =
+        explicit_limit_by_user_id.keys().cloned().collect();
+    all_user_ids.extend(grants_by_user.keys().cloned());
+
+    for user_id in all_user_ids {
+        let grants = grants_by_user.remove(&user_id).unwrap_or_default();
+        let explicit = explicit_limit_by_user_id.get(&user_id).copied();
+        let uniform_grant_quota = {
+            let first = grants.first().map(|g| g.quota_limit_bytes);
+            if let Some(first) = first
+                && grants.iter().all(|g| g.quota_limit_bytes == first)
+            {
+                Some(first)
+            } else {
+                None
+            }
+        };
+        let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+            continue;
+        };
+
+        let (_source, policy, tz, day_of_month) =
+            resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+
+        let (cycle_start_at, cycle_end_at) = if policy == QuotaResetPolicy::Monthly {
+            let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            (Some(cycle_start.to_rfc3339()), Some(cycle_end.to_rfc3339()))
+        } else {
+            (None, None)
+        };
+
+        let used_bytes = grants.iter().fold(0u64, |acc, g| {
+            let usage = store.get_grant_usage(&g.grant_id);
+            let Some(usage) = usage else {
+                return acc;
+            };
+            if let (Some(expected_start), Some(expected_end)) = (&cycle_start_at, &cycle_end_at) {
+                if usage.cycle_start_at != *expected_start || usage.cycle_end_at != *expected_end {
+                    return acc;
+                }
+            }
+            acc.saturating_add(usage.used_bytes)
+        });
+
+        let remaining_bytes = quota_limit_bytes.saturating_sub(used_bytes);
+        items.push(AdminUserQuotaSummaryItem {
+            user_id,
+            quota_limit_bytes,
+            used_bytes,
+            remaining_bytes,
+        });
+    }
+
+    Ok(items)
+}
+
+async fn admin_list_user_quota_summaries(
+    Extension(state): Extension<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<AdminUserQuotaSummariesResponse>, ApiError> {
+    if let Some(scope) = query.scope.as_deref()
+        && scope != "local"
+    {
+        return Err(ApiError::invalid_request(
+            "invalid scope, expected local or omit",
+        ));
+    }
+
+    let local_node_id = state.cluster.node_id.clone();
+    let local_items = {
+        let store = state.store.lock().await;
+        build_local_user_quota_summaries(&store, &local_node_id)?
+    };
+
+    if query.scope.as_deref() == Some("local") {
+        return Ok(Json(AdminUserQuotaSummariesResponse {
+            partial: false,
+            unreachable_nodes: Vec::new(),
+            items: local_items,
+        }));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/users/quota-summaries?...` (not `/api/admin/...`).
+    let local_uri: axum::http::Uri = "/users/quota-summaries?scope=local"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
+        .map_err(ApiError::internal)?;
+
+    let mut unreachable_nodes = Vec::new();
+
+    let mut totals: std::collections::BTreeMap<String, AdminUserQuotaSummaryItem> =
+        std::collections::BTreeMap::new();
+
+    for item in local_items {
+        totals.insert(item.user_id.clone(), item);
+    }
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+        let url = format!("{base}/api/admin/users/quota-summaries?scope=local");
+        let request = client
+            .get(url)
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id);
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+
+        match response.json::<AdminUserQuotaSummariesResponse>().await {
+            Ok(remote) => {
+                for item in remote.items {
+                    totals
+                        .entry(item.user_id.clone())
+                        .and_modify(|entry| {
+                            entry.quota_limit_bytes = entry
+                                .quota_limit_bytes
+                                .saturating_add(item.quota_limit_bytes);
+                            entry.used_bytes = entry.used_bytes.saturating_add(item.used_bytes);
+                            entry.remaining_bytes =
+                                entry.remaining_bytes.saturating_add(item.remaining_bytes);
+                        })
+                        .or_insert(item);
+                }
+            }
+            Err(_) => unreachable_nodes.push(node.node_id),
+        }
+    }
+
+    let partial = !unreachable_nodes.is_empty();
+    Ok(Json(AdminUserQuotaSummariesResponse {
+        partial,
+        unreachable_nodes,
+        items: totals.into_values().collect(),
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminUserNodeQuotaStatusItem {
+    user_id: String,
+    node_id: String,
+    quota_limit_bytes: u64,
+    used_bytes: u64,
+    remaining_bytes: u64,
+    cycle_end_at: Option<String>,
+    quota_reset_source: QuotaResetSource,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminUserNodeQuotaStatusResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    items: Vec<AdminUserNodeQuotaStatusItem>,
+}
+
+fn build_local_user_node_quota_status(
+    store: &JsonSnapshotStore,
+    local_node_id: &str,
+    user_id: &str,
+) -> Result<Vec<AdminUserNodeQuotaStatusItem>, ApiError> {
+    let now = Utc::now();
+    let endpoints_by_id = store
+        .list_endpoints()
+        .into_iter()
+        .map(|e| (e.endpoint_id.clone(), e))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut grants = Vec::new();
+    for grant in store.list_grants() {
+        if grant.user_id != user_id {
+            continue;
+        }
+        let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id) else {
+            continue;
+        };
+        if endpoint.node_id != local_node_id {
+            continue;
+        }
+        grants.push(grant);
+    }
+
+    let explicit = store.get_user_node_quota_limit_bytes(user_id, local_node_id);
+    let uniform_grant_quota = {
+        let first = grants.first().map(|g| g.quota_limit_bytes);
+        if let Some(first) = first
+            && grants.iter().all(|g| g.quota_limit_bytes == first)
+        {
+            Some(first)
+        } else {
+            None
+        }
+    };
+    let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+        return Ok(Vec::new());
+    };
+
+    let (quota_reset_source, policy, tz, day_of_month) =
+        resolve_user_node_quota_reset_for_status(store, user_id, local_node_id)?;
+    let cycle_end_at = if policy == QuotaResetPolicy::Monthly {
+        let (_cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        Some(cycle_end.to_rfc3339())
+    } else {
+        None
+    };
+
+    let used_bytes = grants.iter().fold(0u64, |acc, g| {
+        let usage = store.get_grant_usage(&g.grant_id);
+        let Some(usage) = usage else {
+            return acc;
+        };
+        if let Some(expected_end) = &cycle_end_at {
+            if usage.cycle_end_at != *expected_end {
+                return acc;
+            }
+        }
+        acc.saturating_add(usage.used_bytes)
+    });
+
+    let remaining_bytes = quota_limit_bytes.saturating_sub(used_bytes);
+    Ok(vec![AdminUserNodeQuotaStatusItem {
+        user_id: user_id.to_string(),
+        node_id: local_node_id.to_string(),
+        quota_limit_bytes,
+        used_bytes,
+        remaining_bytes,
+        cycle_end_at,
+        quota_reset_source,
+    }])
+}
+
+async fn admin_get_user_node_quota_status(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<AdminUserNodeQuotaStatusResponse>, ApiError> {
+    if let Some(scope) = query.scope.as_deref()
+        && scope != "local"
+    {
+        return Err(ApiError::invalid_request(
+            "invalid scope, expected local or omit",
+        ));
+    }
+
+    let local_node_id = state.cluster.node_id.clone();
+    let local_items = {
+        let store = state.store.lock().await;
+        build_local_user_node_quota_status(&store, &local_node_id, &user_id)?
+    };
+
+    if query.scope.as_deref() == Some("local") {
+        return Ok(Json(AdminUserNodeQuotaStatusResponse {
+            partial: false,
+            unreachable_nodes: Vec::new(),
+            items: local_items,
+        }));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/users/:user_id/node-quotas/status?...`.
+    let local_uri: axum::http::Uri = format!("/users/{user_id}/node-quotas/status?scope=local")
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
+        .map_err(ApiError::internal)?;
+
+    let mut items = local_items;
+    let mut unreachable_nodes = Vec::new();
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+        let url = format!("{base}/api/admin/users/{user_id}/node-quotas/status?scope=local");
+        let request = client
+            .get(url)
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id);
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+
+        match response.json::<AdminUserNodeQuotaStatusResponse>().await {
+            Ok(remote) => items.extend(remote.items),
+            Err(_) => unreachable_nodes.push(node.node_id),
+        }
+    }
+
+    let partial = !unreachable_nodes.is_empty();
+    Ok(Json(AdminUserNodeQuotaStatusResponse {
+        partial,
+        unreachable_nodes,
+        items,
+    }))
 }
 
 async fn admin_put_user_node_quota(

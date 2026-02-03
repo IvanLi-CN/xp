@@ -10,7 +10,9 @@ import type {
 	AdminGrantGroupReplaceRequest,
 } from "../../src/api/adminGrantGroups";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
+import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
 	AdminUser,
 	AdminUserCreateRequest,
@@ -668,6 +670,46 @@ async function handleRequest(
 		return jsonResponse({ items: clone(state.users) });
 	}
 
+	if (path === "/api/admin/users/quota-summaries" && method === "GET") {
+		const totals = new Map<
+			string,
+			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }
+		>();
+		for (const q of state.nodeQuotas) {
+			const prev = totals.get(q.user_id) ?? {
+				quota_limit_bytes: 0,
+				used_bytes: 0,
+				remaining_bytes: 0,
+			};
+			const nextLimit = prev.quota_limit_bytes + q.quota_limit_bytes;
+			totals.set(q.user_id, {
+				quota_limit_bytes: nextLimit,
+				used_bytes: 0,
+				remaining_bytes: nextLimit,
+			});
+		}
+		const items = state.users.map((u) => {
+			const t = totals.get(u.user_id) ?? {
+				quota_limit_bytes: 0,
+				used_bytes: 0,
+				remaining_bytes: 0,
+			};
+			return {
+				user_id: u.user_id,
+				quota_limit_bytes: t.quota_limit_bytes,
+				used_bytes: t.used_bytes,
+				remaining_bytes: t.remaining_bytes,
+			};
+		});
+
+		const response: AdminUserQuotaSummariesResponse = {
+			partial: false,
+			unreachable_nodes: [],
+			items,
+		};
+		return jsonResponse(response);
+	}
+
 	if (path === "/api/admin/users" && method === "POST") {
 		const payload = await readJson<AdminUserCreateRequest>(req);
 		if (!payload) {
@@ -742,6 +784,38 @@ async function handleRequest(
 		);
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		const response: AdminUserTokenResponse = { subscription_token: token };
+		return jsonResponse(response);
+	}
+
+	const userNodeQuotaStatusMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-quotas\/status$/,
+	);
+	if (userNodeQuotaStatusMatch && method === "GET") {
+		const userId = decodeURIComponent(userNodeQuotaStatusMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const cycleEnd = new Date(
+			Date.now() + 10 * 24 * 60 * 60 * 1000,
+		).toISOString();
+		const items = state.nodeQuotas
+			.filter((q) => q.user_id === userId)
+			.map((q) => ({
+				user_id: q.user_id,
+				node_id: q.node_id,
+				quota_limit_bytes: q.quota_limit_bytes,
+				used_bytes: 0,
+				remaining_bytes: q.quota_limit_bytes,
+				cycle_end_at: cycleEnd,
+				quota_reset_source: q.quota_reset_source,
+			}));
+
+		const response: AdminUserNodeQuotaStatusResponse = {
+			partial: false,
+			unreachable_nodes: [],
+			items,
+		};
 		return jsonResponse(response);
 	}
 

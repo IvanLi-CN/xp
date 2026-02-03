@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 
+import { fetchAdminUserQuotaSummaries } from "../api/adminUserQuotaSummaries";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
@@ -8,6 +10,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
+import { formatQuotaBytesHuman } from "../utils/quota";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -25,6 +28,15 @@ export function UsersPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
+	const quotaSummariesQuery = useQuery({
+		queryKey: ["adminUserQuotaSummaries", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminUserQuotaSummaries(adminToken, signal),
+	});
+	const quotaSummaryByUserId = useMemo(() => {
+		const items = quotaSummariesQuery.data?.items ?? [];
+		return new Map(items.map((s) => [s.user_id, s]));
+	}, [quotaSummariesQuery.data]);
 
 	const actions =
 		adminToken.length === 0 ? (
@@ -90,6 +102,25 @@ export function UsersPage() {
 				headers={[
 					{ key: "user_id", label: "User ID" },
 					{ key: "display_name", label: "Display name" },
+					{
+						key: "quota_summary",
+						label: (
+							<span
+								className={
+									quotaSummariesQuery.data?.partial ? "text-warning" : undefined
+								}
+								title={
+									quotaSummariesQuery.isError
+										? `Failed to load quota summaries: ${formatError(quotaSummariesQuery.error)}`
+										: quotaSummariesQuery.data?.partial
+											? `Partial data (unreachable nodes): ${quotaSummariesQuery.data.unreachable_nodes.join(", ")}`
+											: undefined
+								}
+							>
+								Quota (remaining/limit)
+							</span>
+						),
+					},
 					{ key: "quota_reset", label: "Quota reset" },
 					{ key: "subscription_token", label: "Subscription token" },
 					{ key: "actions", label: "" },
@@ -107,6 +138,30 @@ export function UsersPage() {
 							</Link>
 						</td>
 						<td>{user.display_name}</td>
+						<td className="font-mono text-xs">
+							{quotaSummariesQuery.isLoading ? (
+								<span className="opacity-60">...</span>
+							) : quotaSummariesQuery.isError ? (
+								<span className="opacity-60">-</span>
+							) : (
+								(() => {
+									const summary = quotaSummaryByUserId.get(user.user_id);
+									if (!summary) return <span className="opacity-60">-</span>;
+									const used = formatQuotaBytesHuman(summary.used_bytes);
+									const remaining = formatQuotaBytesHuman(
+										summary.remaining_bytes,
+									);
+									const limit = formatQuotaBytesHuman(
+										summary.quota_limit_bytes,
+									);
+									return (
+										<span title={`Used: ${used}`}>
+											{remaining}/{limit}
+										</span>
+									);
+								})()
+							)}
+						</td>
 						<td className="font-mono text-xs">
 							{user.quota_reset.policy === "monthly"
 								? `monthly@${user.quota_reset.day_of_month} tz=${user.quota_reset.tz_offset_minutes}`
