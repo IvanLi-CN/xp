@@ -213,17 +213,23 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	];
 
+	// Keep IDs close to prod behavior: user_id is a ULID, token is `sub_<ulid>`.
+	const userId1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
+	const userId2 = "01HF7YAT01YVKWQ847J5T9EY84";
+	const subToken1 = `sub_${userId1}`;
+	const subToken2 = `sub_${userId2}`;
+
 	const users: AdminUser[] = [
 		{
-			user_id: "user-1",
+			user_id: userId1,
 			display_name: "Alice",
-			subscription_token: "sub-user-1",
+			subscription_token: subToken1,
 			quota_reset: defaultUserQuotaReset(1),
 		},
 		{
-			user_id: "user-2",
+			user_id: userId2,
 			display_name: "Bob",
-			subscription_token: "sub-user-2",
+			subscription_token: subToken2,
 			quota_reset: defaultUserQuotaReset(15),
 		},
 	];
@@ -233,7 +239,7 @@ function createDefaultSeed(): MockStateSeed {
 			group: { group_name: "group-demo" },
 			members: [
 				{
-					user_id: "user-1",
+					user_id: userId1,
 					endpoint_id: "endpoint-1",
 					enabled: true,
 					quota_limit_bytes: 10_000_000,
@@ -241,7 +247,7 @@ function createDefaultSeed(): MockStateSeed {
 					credentials: createGrantCredentials(endpoints[0], 1),
 				},
 				{
-					user_id: "user-2",
+					user_id: userId2,
 					endpoint_id: "endpoint-2",
 					enabled: true,
 					quota_limit_bytes: 5_000_000,
@@ -272,8 +278,8 @@ function createDefaultSeed(): MockStateSeed {
 	};
 
 	const subscriptions: Record<string, string> = {
-		"sub-user-1": "# raw subscription for sub-user-1\nnode-1",
-		"sub-user-2": "# raw subscription for sub-user-2\nnode-2",
+		[subToken1]: `# raw subscription for ${subToken1}\nnode-1`,
+		[subToken2]: `# raw subscription for ${subToken2}\nnode-2`,
 	};
 
 	return {

@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 
+const USER_ID_1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
+const USER_ID_2 = "01HF7YAT01YVKWQ847J5T9EY84";
+
 const meta = {
 	title: "Pages/UsersPage",
 	render: () => <div />,
@@ -12,19 +15,19 @@ const meta = {
 			data: {
 				nodeQuotas: [
 					{
-						user_id: "user-1",
+						user_id: USER_ID_1,
 						node_id: "node-1",
 						quota_limit_bytes: 10 * 2 ** 30,
 						quota_reset_source: "user",
 					},
 					{
-						user_id: "user-1",
+						user_id: USER_ID_1,
 						node_id: "node-2",
 						quota_limit_bytes: 5 * 2 ** 30,
 						quota_reset_source: "user",
 					},
 					{
-						user_id: "user-2",
+						user_id: USER_ID_2,
 						node_id: "node-2",
 						quota_limit_bytes: 5 * 2 ** 30,
 						quota_reset_source: "user",
@@ -50,7 +53,7 @@ export const Default: Story = {
 			await canvas.findByText("Quota usage (remaining/limit)"),
 		).toBeInTheDocument();
 
-		// Aggregated quota for user-1: 10 GiB + 5 GiB.
+		// Aggregated quota for the first user: 10 GiB + 5 GiB.
 		await expect(await canvas.findByText("15 GiB/15 GiB")).toBeInTheDocument();
 	},
 };
