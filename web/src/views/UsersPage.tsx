@@ -108,6 +108,7 @@ export function UsersPage() {
 
 		return (
 			<ResourceTable
+				tableClassName="table-fixed w-full"
 				headers={[
 					{ key: "user", label: "User" },
 					{
@@ -155,7 +156,7 @@ export function UsersPage() {
 								<Link
 									to="/users/$userId"
 									params={{ userId: user.user_id }}
-									className="link link-hover font-semibold truncate max-w-[32ch]"
+									className="link link-hover font-semibold block truncate"
 									title="Open user details"
 								>
 									{user.display_name}
@@ -164,7 +165,7 @@ export function UsersPage() {
 									<Link
 										to="/users/$userId"
 										params={{ userId: user.user_id }}
-										className="link link-primary font-mono text-xs truncate max-w-[32ch]"
+										className="link link-primary font-mono text-xs block truncate min-w-0"
 										title={user.user_id}
 									>
 										{user.user_id}
@@ -184,7 +185,7 @@ export function UsersPage() {
 							<div className="flex flex-col gap-1 min-w-0">
 								<div className="flex items-center gap-2 min-w-0">
 									<span
-										className="font-mono text-xs truncate max-w-[34ch]"
+										className="font-mono text-xs block truncate min-w-0"
 										title={user.subscription_token}
 									>
 										{user.subscription_token}
@@ -199,7 +200,7 @@ export function UsersPage() {
 									/>
 								</div>
 								<div
-									className="text-xs opacity-60 whitespace-nowrap"
+									className="text-xs opacity-60 whitespace-nowrap truncate"
 									title="Quota reset policy (user default)"
 								>
 									{user.quota_reset.policy === "monthly"
@@ -234,7 +235,7 @@ export function UsersPage() {
 										})()
 									)}
 								</div>
-								<div className="text-xs opacity-60 whitespace-nowrap">
+								<div className="text-xs opacity-60 whitespace-nowrap truncate">
 									{quotaSummariesQuery.isLoading || quotaSummariesQuery.isError
 										? null
 										: (() => {

@@ -13,6 +13,7 @@ type DataTableProps = {
 	children: ReactNode;
 	density?: "comfortable" | "compact";
 	caption?: ReactNode;
+	tableClassName?: string;
 };
 
 export function DataTable({
@@ -20,6 +21,7 @@ export function DataTable({
 	children,
 	density,
 	caption,
+	tableClassName,
 }: DataTableProps) {
 	const prefs = useUiPrefs();
 	const effectiveDensity = density ?? prefs.density;
@@ -35,7 +37,7 @@ export function DataTable({
 			) : null}
 			<div className="overflow-x-auto">
 				<table
-					className={["table table-zebra", tableSizeClass]
+					className={["table table-zebra", tableSizeClass, tableClassName]
 						.filter(Boolean)
 						.join(" ")}
 				>
