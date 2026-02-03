@@ -57,6 +57,7 @@ type MockStateSeed = {
 	users: AdminUser[];
 	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
+	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
 };
@@ -328,6 +329,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		users: overrides?.users ?? base.users,
 		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
 			...base.subscriptions,
@@ -677,6 +679,10 @@ async function handleRequest(
 	}
 
 	if (path === "/api/admin/users/quota-summaries" && method === "GET") {
+		if (state.quotaSummaries) {
+			return jsonResponse(clone(state.quotaSummaries));
+		}
+
 		const totals = new Map<
 			string,
 			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }

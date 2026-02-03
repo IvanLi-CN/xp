@@ -117,3 +117,36 @@ export const LongValues: Story = {
 		).toBeInTheDocument();
 	},
 };
+
+export const WithUsage: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				// Override the quota summary response so we can demo the dual-direction bar.
+				quotaSummaries: {
+					partial: false,
+					unreachable_nodes: [],
+					items: [
+						{
+							user_id: USER_ID_1,
+							quota_limit_bytes: 15 * 2 ** 30,
+							used_bytes: 4 * 2 ** 30,
+							remaining_bytes: 11 * 2 ** 30,
+						},
+						{
+							user_id: USER_ID_2,
+							quota_limit_bytes: 5 * 2 ** 30,
+							used_bytes: 1 * 2 ** 30,
+							remaining_bytes: 4 * 2 ** 30,
+						},
+					],
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText("4 GiB/15 GiB")).toBeInTheDocument();
+		await expect(await canvas.findByText("1 GiB/5 GiB")).toBeInTheDocument();
+	},
+};
