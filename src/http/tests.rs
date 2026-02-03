@@ -3078,3 +3078,60 @@ async fn user_node_quota_status_include_grants_with_missing_endpoints_as_local()
     assert_eq!(item.quota_reset_source, QuotaResetSource::User);
     assert_eq!(item.cycle_end_at, None);
 }
+
+#[tokio::test]
+async fn user_quota_summaries_ignore_grants_for_missing_users() {
+    let tmp = TempDir::new().unwrap();
+    let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let local_node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node_id")
+    };
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().grants.insert(
+            "grant-1".to_string(),
+            Grant {
+                grant_id: "grant-1".to_string(),
+                group_name: "group-1".to_string(),
+                user_id: "missing-user".to_string(),
+                endpoint_id: "missing-endpoint".to_string(),
+                enabled: true,
+                quota_limit_bytes: 1000,
+                note: None,
+                credentials: GrantCredentials {
+                    vless: Some(VlessCredentials {
+                        uuid: "00000000-0000-0000-0000-000000000001".to_string(),
+                        email: "grant:grant-1".to_string(),
+                    }),
+                    ss2022: None,
+                },
+            },
+        );
+        store
+            .apply_grant_usage_sample(
+                "grant-1",
+                "cycle-start".to_string(),
+                "cycle-end".to_string(),
+                600,
+                100,
+                "seen".to_string(),
+            )
+            .unwrap();
+        store.save().unwrap();
+    }
+
+    let items = {
+        let store = store.lock().await;
+        super::build_local_user_quota_summaries(&store, &local_node_id).unwrap()
+    };
+    assert!(items.iter().all(|i| i.user_id != "missing-user"));
+}

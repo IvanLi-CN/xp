@@ -1590,15 +1590,6 @@ fn build_local_user_quota_summaries(
         .map(|e| (e.endpoint_id.clone(), e))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    // Collect explicit per-user quota limits for the local node (even if there are no grants yet).
-    let mut explicit_limit_by_user_id: std::collections::BTreeMap<String, u64> =
-        std::collections::BTreeMap::new();
-    for user in store.list_users() {
-        if let Some(limit) = store.get_user_node_quota_limit_bytes(&user.user_id, local_node_id) {
-            explicit_limit_by_user_id.insert(user.user_id, limit);
-        }
-    }
-
     // Group grants by (user_id, node_id=local) to match quota enforcement behavior.
     let mut grants_by_user: std::collections::BTreeMap<String, Vec<Grant>> =
         std::collections::BTreeMap::new();
@@ -1617,13 +1608,10 @@ fn build_local_user_quota_summaries(
     }
 
     let mut items = Vec::new();
-    let mut all_user_ids: std::collections::BTreeSet<String> =
-        explicit_limit_by_user_id.keys().cloned().collect();
-    all_user_ids.extend(grants_by_user.keys().cloned());
-
-    for user_id in all_user_ids {
+    for user in store.list_users() {
+        let user_id = user.user_id;
         let grants = grants_by_user.remove(&user_id).unwrap_or_default();
-        let explicit = explicit_limit_by_user_id.get(&user_id).copied();
+        let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
         let uniform_grant_quota = {
             let first = grants.first().map(|g| g.quota_limit_bytes);
             if let Some(first) = first

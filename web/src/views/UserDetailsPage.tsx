@@ -1083,6 +1083,28 @@ export function UserDetailsPage() {
 		const items = data?.items ?? [];
 
 		if (items.length === 0) {
+			if (data?.partial) {
+				return (
+					<PageState
+						variant="empty"
+						title="Quota usage data unavailable"
+						description={`Partial data: unreachable nodes: ${data.unreachable_nodes.join(
+							", ",
+						)}`}
+						action={
+							<Button
+								variant="secondary"
+								onClick={() => {
+									nodesQuery.refetch();
+									nodeQuotaStatusQuery.refetch();
+								}}
+							>
+								Retry
+							</Button>
+						}
+					/>
+				);
+			}
 			return (
 				<PageState
 					variant="empty"
