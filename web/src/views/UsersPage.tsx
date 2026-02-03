@@ -22,6 +22,14 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
+function formatUtcOffset(minutes: number): string {
+	const sign = minutes >= 0 ? "+" : "-";
+	const abs = Math.abs(minutes);
+	const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+	const mm = String(abs % 60).padStart(2, "0");
+	return `UTC${sign}${hh}:${mm}`;
+}
+
 export function UsersPage() {
 	const adminToken = readAdminToken();
 	const usersQuery = useQuery({
@@ -103,6 +111,17 @@ export function UsersPage() {
 				headers={[
 					{ key: "user", label: "User" },
 					{
+						key: "access",
+						label: (
+							<div className="flex flex-col leading-tight">
+								<span>Access</span>
+								<span className="text-xs opacity-60 font-normal">
+									token/reset
+								</span>
+							</div>
+						),
+					},
+					{
 						key: "quota_summary",
 						label: (
 							<div
@@ -127,24 +146,25 @@ export function UsersPage() {
 							</div>
 						),
 					},
-					{ key: "quota_reset", label: "Reset" },
-					{
-						key: "subscription_token",
-						label: <span title="Subscription token">Token</span>,
-					},
-					{ key: "actions", label: "" },
 				]}
 			>
 				{users.map((user) => (
 					<tr key={user.user_id}>
-						<td>
-							<div className="flex flex-col gap-1">
-								<div className="font-semibold">{user.display_name}</div>
-								<div className="flex items-center gap-2">
+						<td className="align-top">
+							<div className="flex flex-col gap-1 min-w-0">
+								<Link
+									to="/users/$userId"
+									params={{ userId: user.user_id }}
+									className="link link-hover font-semibold truncate max-w-[32ch]"
+									title="Open user details"
+								>
+									{user.display_name}
+								</Link>
+								<div className="flex items-center gap-2 min-w-0">
 									<Link
 										to="/users/$userId"
 										params={{ userId: user.user_id }}
-										className="link link-primary font-mono text-xs max-w-[22ch] truncate"
+										className="link link-primary font-mono text-xs truncate max-w-[32ch]"
 										title={user.user_id}
 									>
 										{user.user_id}
@@ -155,66 +175,78 @@ export function UsersPage() {
 										variant="ghost"
 										size="sm"
 										ariaLabel="Copy user ID"
-										className="px-2"
+										className="px-2 shrink-0"
 									/>
 								</div>
 							</div>
 						</td>
-						<td className="font-mono text-xs">
-							{quotaSummariesQuery.isLoading ? (
-								<span className="opacity-60">...</span>
-							) : quotaSummariesQuery.isError ? (
-								<span className="opacity-60">-</span>
-							) : (
-								(() => {
-									const summary = quotaSummaryByUserId.get(user.user_id);
-									if (!summary) return <span className="opacity-60">-</span>;
-									const used = formatQuotaBytesHuman(summary.used_bytes);
-									const remaining = formatQuotaBytesHuman(
-										summary.remaining_bytes,
-									);
-									const limit = formatQuotaBytesHuman(
-										summary.quota_limit_bytes,
-									);
-									return (
-										<span title={`Used: ${used}`}>
-											{remaining}/{limit}
-										</span>
-									);
-								})()
-							)}
-						</td>
-						<td className="font-mono text-xs">
-							{user.quota_reset.policy === "monthly"
-								? `monthly@${user.quota_reset.day_of_month} tz=${user.quota_reset.tz_offset_minutes}`
-								: `unlimited tz=${user.quota_reset.tz_offset_minutes}`}
-						</td>
-						<td className="font-mono text-xs">
-							<div className="flex items-center gap-2">
-								<span
-									className="max-w-[26ch] truncate"
-									title={user.subscription_token}
+						<td className="align-top">
+							<div className="flex flex-col gap-1 min-w-0">
+								<div className="flex items-center gap-2 min-w-0">
+									<span
+										className="font-mono text-xs truncate max-w-[34ch]"
+										title={user.subscription_token}
+									>
+										{user.subscription_token}
+									</span>
+									<CopyButton
+										text={user.subscription_token}
+										iconOnly
+										variant="ghost"
+										size="sm"
+										ariaLabel="Copy subscription token"
+										className="px-2 shrink-0"
+									/>
+								</div>
+								<div
+									className="text-xs opacity-60 whitespace-nowrap"
+									title="Quota reset policy (user default)"
 								>
-									{user.subscription_token}
-								</span>
-								<CopyButton
-									text={user.subscription_token}
-									iconOnly
-									variant="ghost"
-									size="sm"
-									ariaLabel="Copy subscription token"
-									className="px-2"
-								/>
+									{user.quota_reset.policy === "monthly"
+										? `Reset: monthly@${user.quota_reset.day_of_month} ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`
+										: `Reset: unlimited ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`}
+								</div>
 							</div>
 						</td>
-						<td>
-							<Link
-								to="/users/$userId"
-								params={{ userId: user.user_id }}
-								className="link"
-							>
-								Details
-							</Link>
+						<td className="align-top">
+							<div className="flex flex-col gap-1 min-w-0">
+								<div className="font-mono text-xs whitespace-nowrap">
+									{quotaSummariesQuery.isLoading ? (
+										<span className="opacity-60">...</span>
+									) : quotaSummariesQuery.isError ? (
+										<span className="opacity-60">-</span>
+									) : (
+										(() => {
+											const summary = quotaSummaryByUserId.get(user.user_id);
+											if (!summary)
+												return <span className="opacity-60">-</span>;
+											const remaining = formatQuotaBytesHuman(
+												summary.remaining_bytes,
+											);
+											const limit = formatQuotaBytesHuman(
+												summary.quota_limit_bytes,
+											);
+											return (
+												<span title="Remaining / limit">
+													{remaining}/{limit}
+												</span>
+											);
+										})()
+									)}
+								</div>
+								<div className="text-xs opacity-60 whitespace-nowrap">
+									{quotaSummariesQuery.isLoading || quotaSummariesQuery.isError
+										? null
+										: (() => {
+												const summary = quotaSummaryByUserId.get(user.user_id);
+												if (!summary) return null;
+												const used = formatQuotaBytesHuman(summary.used_bytes);
+												return quotaSummariesQuery.data?.partial
+													? `Used: ${used} · partial`
+													: `Used: ${used}`;
+											})()}
+								</div>
+							</div>
 						</td>
 					</tr>
 				))}
