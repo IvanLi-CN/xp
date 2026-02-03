@@ -6,6 +6,7 @@ import { fetchAdminUserQuotaSummaries } from "../api/adminUserQuotaSummaries";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -100,44 +101,65 @@ export function UsersPage() {
 		return (
 			<ResourceTable
 				headers={[
-					{ key: "user_id", label: "User ID" },
-					{ key: "display_name", label: "Display name" },
+					{ key: "user", label: "User" },
 					{
 						key: "quota_summary",
 						label: (
-							<span
-								className={
-									quotaSummariesQuery.data?.partial ? "text-warning" : undefined
-								}
+							<div
+								className={[
+									"flex flex-col leading-tight",
+									quotaSummariesQuery.data?.partial ? "text-warning" : "",
+								]
+									.filter(Boolean)
+									.join(" ")}
 								title={
 									quotaSummariesQuery.isError
 										? `Failed to load quota summaries: ${formatError(quotaSummariesQuery.error)}`
 										: quotaSummariesQuery.data?.partial
 											? `Partial data (unreachable nodes): ${quotaSummariesQuery.data.unreachable_nodes.join(", ")}`
-											: undefined
+											: "Remaining / limit (aggregated across nodes)"
 								}
 							>
-								Quota usage (remaining/limit)
-							</span>
+								<span>Quota usage</span>
+								<span className="text-xs opacity-60 font-normal">
+									remaining/limit
+								</span>
+							</div>
 						),
 					},
-					{ key: "quota_reset", label: "Quota reset" },
-					{ key: "subscription_token", label: "Subscription token" },
+					{ key: "quota_reset", label: "Reset" },
+					{
+						key: "subscription_token",
+						label: <span title="Subscription token">Token</span>,
+					},
 					{ key: "actions", label: "" },
 				]}
 			>
 				{users.map((user) => (
 					<tr key={user.user_id}>
-						<td className="font-mono text-xs">
-							<Link
-								to="/users/$userId"
-								params={{ userId: user.user_id }}
-								className="link link-primary"
-							>
-								{user.user_id}
-							</Link>
+						<td>
+							<div className="flex flex-col gap-1">
+								<div className="font-semibold">{user.display_name}</div>
+								<div className="flex items-center gap-2">
+									<Link
+										to="/users/$userId"
+										params={{ userId: user.user_id }}
+										className="link link-primary font-mono text-xs max-w-[22ch] truncate"
+										title={user.user_id}
+									>
+										{user.user_id}
+									</Link>
+									<CopyButton
+										text={user.user_id}
+										iconOnly
+										variant="ghost"
+										size="sm"
+										ariaLabel="Copy user ID"
+										className="px-2"
+									/>
+								</div>
+							</div>
 						</td>
-						<td>{user.display_name}</td>
 						<td className="font-mono text-xs">
 							{quotaSummariesQuery.isLoading ? (
 								<span className="opacity-60">...</span>
@@ -167,7 +189,24 @@ export function UsersPage() {
 								? `monthly@${user.quota_reset.day_of_month} tz=${user.quota_reset.tz_offset_minutes}`
 								: `unlimited tz=${user.quota_reset.tz_offset_minutes}`}
 						</td>
-						<td className="font-mono text-xs">{user.subscription_token}</td>
+						<td className="font-mono text-xs">
+							<div className="flex items-center gap-2">
+								<span
+									className="max-w-[26ch] truncate"
+									title={user.subscription_token}
+								>
+									{user.subscription_token}
+								</span>
+								<CopyButton
+									text={user.subscription_token}
+									iconOnly
+									variant="ghost"
+									size="sm"
+									ariaLabel="Copy subscription token"
+									className="px-2"
+								/>
+							</div>
+						</td>
 						<td>
 							<Link
 								to="/users/$userId"
