@@ -468,7 +468,7 @@ WantedBy=multi-user.target\n"
 }
 
 fn openrc_cloudflared_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\ncommand_background=\"yes\"\npidfile=\"/run/cloudflared.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -867,6 +867,18 @@ pub async fn find_tunnel_by_name(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn openrc_cloudflared_script_is_supervised() {
+        let script = openrc_cloudflared_script();
+        assert!(script.contains("supervisor=supervise-daemon"));
+        assert!(script.contains("respawn_delay=2"));
+        assert!(script.contains("respawn_max=0"));
+
+        // When supervised by OpenRC, the service should not be backgrounded by the script itself.
+        assert!(!script.contains("command_background"));
+        assert!(!script.contains("pidfile="));
+    }
 
     #[test]
     fn load_cloudflare_token_for_deploy_flag_wins() {

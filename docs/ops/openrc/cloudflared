@@ -7,7 +7,11 @@ command="/usr/local/bin/cloudflared"
 command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
 
+# Ensure automatic recovery on crashes without busy-looping.
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+
 depend() {
   need net
 }
-
