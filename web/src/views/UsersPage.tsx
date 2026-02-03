@@ -137,12 +137,12 @@ export function UsersPage() {
 										? `Failed to load quota summaries: ${formatError(quotaSummariesQuery.error)}`
 										: quotaSummariesQuery.data?.partial
 											? `Partial data (unreachable nodes): ${quotaSummariesQuery.data.unreachable_nodes.join(", ")}`
-											: "Remaining / limit (aggregated across nodes)"
+											: "Used / limit (aggregated across nodes)"
 								}
 							>
 								<span>Quota usage</span>
 								<span className="text-xs opacity-60 font-normal">
-									remaining/limit
+									used/limit
 								</span>
 							</div>
 						),
@@ -221,32 +221,68 @@ export function UsersPage() {
 											const summary = quotaSummaryByUserId.get(user.user_id);
 											if (!summary)
 												return <span className="opacity-60">-</span>;
-											const remaining = formatQuotaBytesHuman(
-												summary.remaining_bytes,
-											);
-											const limit = formatQuotaBytesHuman(
-												summary.quota_limit_bytes,
-											);
+											const used = formatQuotaBytesHuman(summary.used_bytes);
+											const limit =
+												summary.quota_limit_bytes === 0
+													? "unlimited"
+													: formatQuotaBytesHuman(summary.quota_limit_bytes);
 											return (
-												<span title="Remaining / limit">
-													{remaining}/{limit}
+												<span title="Used / limit">
+													{used}/{limit}
 												</span>
 											);
 										})()
 									)}
 								</div>
-								<div className="text-xs opacity-60 whitespace-nowrap truncate">
-									{quotaSummariesQuery.isLoading || quotaSummariesQuery.isError
-										? null
-										: (() => {
-												const summary = quotaSummaryByUserId.get(user.user_id);
-												if (!summary) return null;
-												const used = formatQuotaBytesHuman(summary.used_bytes);
-												return quotaSummariesQuery.data?.partial
-													? `Used: ${used} · partial`
-													: `Used: ${used}`;
-											})()}
-								</div>
+								{quotaSummariesQuery.isLoading || quotaSummariesQuery.isError
+									? null
+									: (() => {
+											const summary = quotaSummaryByUserId.get(user.user_id);
+											if (!summary) return null;
+
+											// If the user has no quota cap, don't render a misleading bar.
+											if (summary.quota_limit_bytes === 0) {
+												return (
+													<div className="text-xs opacity-60 whitespace-nowrap truncate">
+														unlimited
+													</div>
+												);
+											}
+
+											const usedPctRaw =
+												(summary.used_bytes / summary.quota_limit_bytes) * 100;
+											const remainingPctRaw =
+												(summary.remaining_bytes / summary.quota_limit_bytes) *
+												100;
+
+											const usedPct = Math.min(100, Math.max(0, usedPctRaw));
+											// Keep the segments from overlapping when rounding or data is inconsistent.
+											const remainingPct = Math.min(
+												100 - usedPct,
+												Math.min(100, Math.max(0, remainingPctRaw)),
+											);
+
+											const used = formatQuotaBytesHuman(summary.used_bytes);
+											const remaining = formatQuotaBytesHuman(
+												summary.remaining_bytes,
+											);
+
+											return (
+												<div
+													className="h-2.5 rounded bg-base-300 relative overflow-hidden"
+													title={`Used: ${used} · Remaining: ${remaining}`}
+												>
+													<div
+														className="absolute inset-y-0 left-0 bg-primary/70"
+														style={{ width: `${usedPct}%` }}
+													/>
+													<div
+														className="absolute inset-y-0 right-0 bg-success/40"
+														style={{ width: `${remainingPct}%` }}
+													/>
+												</div>
+											);
+										})()}
 							</div>
 						</td>
 					</tr>

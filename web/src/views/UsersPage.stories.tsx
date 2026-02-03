@@ -50,12 +50,10 @@ export const Default: Story = {
 			await canvas.findByRole("heading", { name: "Users" }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Quota usage")).toBeInTheDocument();
-		await expect(
-			await canvas.findByText("remaining/limit"),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText("used/limit")).toBeInTheDocument();
 
 		// Aggregated quota for the first user: 10 GiB + 5 GiB.
-		await expect(await canvas.findByText("15 GiB/15 GiB")).toBeInTheDocument();
+		await expect(await canvas.findByText("0/15 GiB")).toBeInTheDocument();
 	},
 };
 
