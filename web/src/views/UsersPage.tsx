@@ -273,11 +273,11 @@ export function UsersPage() {
 													title={`Used: ${used} · Remaining: ${remaining}`}
 												>
 													<div
-														className="absolute inset-y-0 left-0 bg-warning/80"
+														className="absolute inset-y-0 left-0 bg-amber-400/80"
 														style={{ width: `${usedPct}%` }}
 													/>
 													<div
-														className="absolute inset-y-0 right-0 bg-success/70"
+														className="absolute inset-y-0 right-0 bg-emerald-500/60"
 														style={{ width: `${remainingPct}%` }}
 													/>
 												</div>
