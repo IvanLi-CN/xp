@@ -52,4 +52,3 @@
 ## 风险与备注（Risks / Notes）
 
 - `supervise-daemon` 会持续拉起进程；若配置错误导致持续崩溃，应依赖 `respawn_delay` 避免忙等并减少日志噪音。
-
