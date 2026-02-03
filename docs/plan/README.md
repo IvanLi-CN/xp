@@ -87,3 +87,4 @@
 | apxdg | 本地 docker compose：3 节点订阅回归测试环境                 | 已完成 | `apxdg:subscription-3node-compose-env/PLAN.md`       | 2026-02-02 | PR #57           |
 | m6mer | 订阅输出：name 全局唯一，避免客户端覆盖                     | 已完成 | `m6mer:subscription-name-uniqueness/PLAN.md`         | 2026-02-02 | PR #58           |
 | 8rrmk | 用户接入点配置：不再依赖 Grant groups（移除 managed group） | 待实现 | `8rrmk:user-node-quotas-no-groups/PLAN.md`           | 2026-02-02 | Follow-up bz652  |
+| y6vvg | Web UI：User 剩余额度展示                                   | 待实现 | `y6vvg:user-remaining-quotas/PLAN.md`                | 2026-02-03 | -                |
