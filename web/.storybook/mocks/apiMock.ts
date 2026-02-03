@@ -688,18 +688,18 @@ async function handleRequest(
 			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }
 		>();
 		for (const q of state.nodeQuotas) {
-			const prev = totals.get(q.user_id) ?? {
-				quota_limit_bytes: 0,
-				used_bytes: 0,
-				remaining_bytes: 0,
-			};
+			const prev = totals.get(q.user_id);
+
 			// Keep semantics consistent with the backend:
-			// `quota_limit_bytes === 0` means "unlimited", so any unlimited node keeps the
-			// aggregated limit as unlimited (0).
-			const nextLimit =
-				prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
+			// `quota_limit_bytes === 0` means "unlimited".
+			// Important: the first seen node quota must not be treated as "unlimited"
+			// just because our accumulator starts at 0.
+			const nextLimit = !prev
+				? q.quota_limit_bytes
+				: prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
 					? 0
 					: prev.quota_limit_bytes + q.quota_limit_bytes;
+
 			totals.set(q.user_id, {
 				quota_limit_bytes: nextLimit,
 				used_bytes: 0,

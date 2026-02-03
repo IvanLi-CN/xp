@@ -215,7 +215,9 @@ describe("<UserDetailsPage />", () => {
 			}),
 		).toBeInTheDocument();
 		// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
-		expect(await within(view.container).findByText("-/unlimited")).toBeInTheDocument();
+		expect(
+			await within(view.container).findByText("-/unlimited"),
+		).toBeInTheDocument();
 
 		fireEvent.click(
 			within(view.container).getByRole("button", { name: "User" }),
