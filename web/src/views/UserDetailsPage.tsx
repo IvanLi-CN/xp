@@ -12,6 +12,7 @@ import {
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import {
 	fetchAdminUserNodeQuotas,
 	putAdminUserNodeQuota,
@@ -38,10 +39,12 @@ import {
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ResourceTable } from "../components/ResourceTable";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { formatQuotaBytesHuman } from "../utils/quota";
 
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
@@ -57,6 +60,35 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
+function formatLocalDateTime(value: Date): string {
+	const yyyy = String(value.getFullYear()).padStart(4, "0");
+	const mm = String(value.getMonth() + 1).padStart(2, "0");
+	const dd = String(value.getDate()).padStart(2, "0");
+	const hh = String(value.getHours()).padStart(2, "0");
+	const min = String(value.getMinutes()).padStart(2, "0");
+	return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+function formatRelativeTimeFromNow(target: Date, now = new Date()): string {
+	const diffMs = target.getTime() - now.getTime();
+	const diffSeconds = Math.round(diffMs / 1000);
+	const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+	const absSeconds = Math.abs(diffSeconds);
+	if (absSeconds < 60) return rtf.format(diffSeconds, "second");
+
+	const diffMinutes = Math.round(diffSeconds / 60);
+	const absMinutes = Math.abs(diffMinutes);
+	if (absMinutes < 60) return rtf.format(diffMinutes, "minute");
+
+	const diffHours = Math.round(diffMinutes / 60);
+	const absHours = Math.abs(diffHours);
+	if (absHours < 24) return rtf.format(diffHours, "hour");
+
+	const diffDays = Math.round(diffHours / 24);
+	return rtf.format(diffDays, "day");
+}
+
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
@@ -64,7 +96,7 @@ export function UserDetailsPage() {
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
 
-	const [tab, setTab] = useState<"user" | "nodeQuotas">("user");
+	const [tab, setTab] = useState<"user" | "access" | "quotaStatus">("user");
 
 	const inputClass =
 		prefs.density === "compact"
@@ -98,6 +130,14 @@ export function UserDetailsPage() {
 		enabled: adminToken.length > 0 && userId.length > 0,
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotas(adminToken, userId, signal),
+	});
+
+	const nodeQuotaStatusQuery = useQuery({
+		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
+		enabled:
+			adminToken.length > 0 && userId.length > 0 && tab === "quotaStatus",
+		queryFn: ({ signal }) =>
+			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
 
 	const endpointsQuery = useQuery({
@@ -353,21 +393,33 @@ export function UserDetailsPage() {
 				</button>
 				<button
 					type="button"
-					onClick={() => setTab("nodeQuotas")}
+					onClick={() => setTab("access")}
 					className={[
 						"px-5 py-1.5 rounded-full text-xs font-semibold",
-						tab === "nodeQuotas"
+						tab === "access"
 							? "bg-base-100 border border-primary/35 text-primary shadow-sm"
 							: "bg-transparent border border-transparent text-base-content/70 hover:bg-base-200/40",
 					].join(" ")}
 				>
-					Node quotas
+					Quota limits
+				</button>
+				<button
+					type="button"
+					onClick={() => setTab("quotaStatus")}
+					className={[
+						"px-5 py-1.5 rounded-full text-xs font-semibold",
+						tab === "quotaStatus"
+							? "bg-base-100 border border-primary/35 text-primary shadow-sm"
+							: "bg-transparent border border-transparent text-base-content/70 hover:bg-base-200/40",
+					].join(" ")}
+				>
+					Quota usage
 				</button>
 			</div>
 		</div>
 	);
 
-	const nodeQuotasTab = (() => {
+	const accessTab = (() => {
 		if (
 			nodesQuery.isLoading ||
 			endpointsQuery.isLoading ||
@@ -377,7 +429,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading node quotas"
+					title="Loading quota limits"
 					description="Fetching nodes, endpoints, quotas and access state."
 				/>
 			);
@@ -401,7 +453,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load node quotas"
+					title="Failed to load quota limits"
 					description={message}
 					action={
 						<Button
@@ -429,8 +481,8 @@ export function UserDetailsPage() {
 					title="Missing dependencies"
 					description={
 						nodes.length === 0
-							? "Create a node before configuring access."
-							: "Create an endpoint before configuring access."
+							? "Create a node before configuring quota limits."
+							: "Create an endpoint before configuring quota limits."
 					}
 				/>
 			);
@@ -811,7 +863,7 @@ export function UserDetailsPage() {
 				}
 
 				await grantGroupQuery.refetch();
-				pushToast({ variant: "success", message: "Node quotas updated." });
+				pushToast({ variant: "success", message: "Quota limits updated." });
 			} catch (err) {
 				// If purge partially succeeded but we failed before applying the managed
 				// group update, restore whatever we already changed.
@@ -822,7 +874,7 @@ export function UserDetailsPage() {
 				setAccessError(message);
 				pushToast({
 					variant: "error",
-					message: `Failed to update node quotas: ${message}`,
+					message: `Failed to update quota limits: ${message}`,
 				});
 			} finally {
 				setIsApplyingAccess(false);
@@ -831,7 +883,7 @@ export function UserDetailsPage() {
 
 		return (
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-6">
-				<h2 className="text-lg font-semibold">Node quotas</h2>
+				<h2 className="text-lg font-semibold">Quota limits</h2>
 
 				<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
 					<div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -990,6 +1042,172 @@ export function UserDetailsPage() {
 		);
 	})();
 
+	const quotaStatusTab = (() => {
+		if (nodesQuery.isLoading || nodeQuotaStatusQuery.isLoading) {
+			return (
+				<PageState
+					variant="loading"
+					title="Loading quota usage"
+					description="Fetching node quota usage from the xp API."
+				/>
+			);
+		}
+
+		if (nodesQuery.isError || nodeQuotaStatusQuery.isError) {
+			const message = nodesQuery.isError
+				? formatError(nodesQuery.error)
+				: nodeQuotaStatusQuery.isError
+					? formatError(nodeQuotaStatusQuery.error)
+					: "Unknown error";
+			return (
+				<PageState
+					variant="error"
+					title="Failed to load quota usage"
+					description={message}
+					action={
+						<Button
+							variant="secondary"
+							onClick={() => {
+								nodesQuery.refetch();
+								nodeQuotaStatusQuery.refetch();
+							}}
+						>
+							Retry
+						</Button>
+					}
+				/>
+			);
+		}
+
+		const data = nodeQuotaStatusQuery.data;
+		const items = data?.items ?? [];
+
+		if (items.length === 0) {
+			if (data?.partial) {
+				return (
+					<PageState
+						variant="empty"
+						title="Quota usage data unavailable"
+						description={`Partial data: unreachable nodes: ${data.unreachable_nodes.join(
+							", ",
+						)}`}
+						action={
+							<Button
+								variant="secondary"
+								onClick={() => {
+									nodesQuery.refetch();
+									nodeQuotaStatusQuery.refetch();
+								}}
+							>
+								Retry
+							</Button>
+						}
+					/>
+				);
+			}
+			return (
+				<PageState
+					variant="empty"
+					title="No quota usage data"
+					description="No quota limits configured for this user."
+				/>
+			);
+		}
+
+		const nodeById = new Map(nodes.map((n) => [n.node_id, n]));
+		const sorted = [...items].sort((a, b) => {
+			const aKey = nodeById.get(a.node_id)?.node_name ?? a.node_id;
+			const bKey = nodeById.get(b.node_id)?.node_name ?? b.node_id;
+			return aKey.localeCompare(bKey);
+		});
+
+		return (
+			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+				<div className="flex items-start justify-between gap-3 flex-wrap">
+					<div>
+						<h2 className="text-lg font-semibold">Quota usage</h2>
+						<p className="text-xs opacity-60">
+							Remaining quota is computed per node from local grant usage.
+						</p>
+					</div>
+					{data?.partial ? (
+						<div
+							className="badge badge-warning badge-sm"
+							title={`Unreachable nodes: ${data.unreachable_nodes.join(", ")}`}
+						>
+							partial
+						</div>
+					) : null}
+				</div>
+
+				{data?.partial ? (
+					<p className="text-xs text-warning font-semibold">
+						Partial data: unreachable nodes:{" "}
+						<span className="font-mono">
+							{data.unreachable_nodes.join(", ")}
+						</span>
+					</p>
+				) : null}
+
+				<ResourceTable
+					headers={[
+						{ key: "node", label: "Node" },
+						{ key: "quota", label: "Usage (remaining/limit)" },
+						{ key: "reset", label: "Next reset" },
+					]}
+				>
+					{sorted.map((q) => {
+						const node = nodeById.get(q.node_id);
+						const used = formatQuotaBytesHuman(q.used_bytes);
+						const remaining = formatQuotaBytesHuman(q.remaining_bytes);
+						const isUnlimited = q.quota_limit_bytes === 0;
+						const limit = isUnlimited
+							? "unlimited"
+							: formatQuotaBytesHuman(q.quota_limit_bytes);
+						const reset = q.cycle_end_at ? new Date(q.cycle_end_at) : null;
+
+						return (
+							<tr key={q.node_id}>
+								<td>
+									<div className="font-semibold">
+										{node?.node_name ?? q.node_id}
+									</div>
+									<div className="font-mono text-xs opacity-60">
+										{q.node_id}
+									</div>
+								</td>
+								<td
+									className="font-mono text-xs"
+									title={
+										isUnlimited
+											? `Used: ${used} · Unlimited quota`
+											: `Used: ${used}`
+									}
+								>
+									{isUnlimited ? "-" : remaining}/{limit}
+								</td>
+								<td>
+									{reset ? (
+										<div title={q.cycle_end_at ?? undefined}>
+											<div className="font-mono text-xs">
+												{formatLocalDateTime(reset)}
+											</div>
+											<div className="text-xs opacity-60">
+												{formatRelativeTimeFromNow(reset)}
+											</div>
+										</div>
+									) : (
+										<span className="opacity-60">-</span>
+									)}
+								</td>
+							</tr>
+						);
+					})}
+				</ResourceTable>
+			</div>
+		);
+	})();
+
 	return (
 		<div className="space-y-6">
 			<PageHeader
@@ -1010,8 +1228,10 @@ export function UserDetailsPage() {
 
 			{tabs}
 
-			{tab === "nodeQuotas" ? (
-				nodeQuotasTab
+			{tab === "access" ? (
+				accessTab
+			) : tab === "quotaStatus" ? (
+				quotaStatusTab
 			) : (
 				<>
 					<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">

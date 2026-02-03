@@ -72,6 +72,16 @@ describe("storybook api mock", () => {
 	it("supports grant group CRUD", async () => {
 		const mock = createMockApi();
 
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
 		const listRes = await mock.handle(
 			jsonRequest("/api/admin/grant-groups", { method: "GET" }),
 		);
@@ -89,7 +99,7 @@ describe("storybook api mock", () => {
 					group_name: "group-mock-new",
 					members: [
 						{
-							user_id: "user-1",
+							user_id: userId,
 							endpoint_id: "endpoint-1",
 							enabled: true,
 							quota_limit_bytes: 123,
@@ -115,7 +125,7 @@ describe("storybook api mock", () => {
 					rename_to: "group-mock-renamed",
 					members: [
 						{
-							user_id: "user-1",
+							user_id: userId,
 							endpoint_id: "endpoint-1",
 							enabled: false,
 							quota_limit_bytes: 456,
@@ -168,7 +178,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "sub-user-1";
+		const token = usersData.items[0]?.subscription_token ?? "";
+		expect(token.length).toBeGreaterThan(0);
 
 		const subRes = await mock.handle(
 			jsonRequest(`/api/sub/${encodeURIComponent(token)}`, {
@@ -192,7 +203,8 @@ describe("storybook api mock", () => {
 		const usersData = (await listUsers.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "user-1";
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
 
 		const listNodes = await mock.handle(
 			jsonRequest("/api/admin/nodes", { method: "GET" }),

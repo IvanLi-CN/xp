@@ -17,6 +17,7 @@ import {
 	replaceAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import {
 	fetchAdminUserNodeQuotas,
 	putAdminUserNodeQuota,
@@ -54,6 +55,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminUsers");
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminUserNodeQuotas");
+vi.mock("../api/adminUserNodeQuotaStatus");
 vi.mock("../api/adminEndpoints");
 vi.mock("../api/adminGrantGroups");
 
@@ -147,6 +149,22 @@ function setupHappyPathMocks(args: {
 			quota_reset_source: q.quota_reset_source ?? "user",
 		})),
 	});
+
+	vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValue({
+		partial: false,
+		unreachable_nodes: [],
+		items: nodeQuotas.map((q) => ({
+			user_id: userId,
+			node_id: q.node_id,
+			quota_limit_bytes: q.quota_limit_bytes,
+			used_bytes: 0,
+			remaining_bytes: q.quota_limit_bytes,
+			cycle_end_at: new Date(
+				Date.now() + 10 * 24 * 60 * 60 * 1000,
+			).toISOString(),
+			quota_reset_source: q.quota_reset_source ?? "user",
+		})),
+	});
 }
 
 describe("<UserDetailsPage />", () => {
@@ -158,7 +176,7 @@ describe("<UserDetailsPage />", () => {
 		cleanup();
 	});
 
-	it("renders two tabs and switches between User and Node quotas", async () => {
+	it("renders three tabs and switches between User, Quota limits and Quota usage", async () => {
 		setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
 		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
 			new BackendApiError({ status: 404, message: "not found" }),
@@ -173,16 +191,32 @@ describe("<UserDetailsPage />", () => {
 			within(view.container).getByRole("button", { name: "User" }),
 		).toBeInTheDocument();
 		expect(
-			within(view.container).getByRole("button", { name: "Node quotas" }),
+			within(view.container).getByRole("button", { name: "Quota limits" }),
+		).toBeInTheDocument();
+		expect(
+			within(view.container).getByRole("button", { name: "Quota usage" }),
 		).toBeInTheDocument();
 
 		fireEvent.click(
-			within(view.container).getByRole("button", { name: "Node quotas" }),
+			within(view.container).getByRole("button", { name: "Quota limits" }),
 		);
 		expect(
 			await within(view.container).findByRole("heading", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
+		).toBeInTheDocument();
+
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Quota usage" }),
+		);
+		expect(
+			await within(view.container).findByRole("heading", {
+				name: "Quota usage",
+			}),
+		).toBeInTheDocument();
+		// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
+		expect(
+			await within(view.container).findByText("-/unlimited"),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -245,11 +279,11 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		expect(
-			await within(view.container).findByText("Failed to load node quotas"),
+			await within(view.container).findByText("Failed to load quota limits"),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -284,7 +318,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -344,7 +378,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -422,7 +456,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -522,7 +556,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -624,7 +658,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -724,7 +758,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -808,7 +842,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText(/Selected 1 \/ 1/);
@@ -885,7 +919,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -979,7 +1013,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Node quotas",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");

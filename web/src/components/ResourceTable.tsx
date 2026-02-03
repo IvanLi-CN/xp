@@ -10,8 +10,17 @@ export type ResourceTableHeader = {
 type ResourceTableProps = {
 	headers: ResourceTableHeader[];
 	children: ReactNode;
+	tableClassName?: string;
 };
 
-export function ResourceTable({ headers, children }: ResourceTableProps) {
-	return <DataTable headers={headers}>{children}</DataTable>;
+export function ResourceTable({
+	headers,
+	children,
+	tableClassName,
+}: ResourceTableProps) {
+	return (
+		<DataTable headers={headers} tableClassName={tableClassName}>
+			{children}
+		</DataTable>
+	);
 }

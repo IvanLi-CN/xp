@@ -10,7 +10,9 @@ import type {
 	AdminGrantGroupReplaceRequest,
 } from "../../src/api/adminGrantGroups";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
+import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
 	AdminUser,
 	AdminUserCreateRequest,
@@ -55,6 +57,7 @@ type MockStateSeed = {
 	users: AdminUser[];
 	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
+	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
 };
@@ -211,17 +214,23 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	];
 
+	// Keep IDs close to prod behavior: user_id is a ULID, token is `sub_<ulid>`.
+	const userId1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
+	const userId2 = "01HF7YAT01YVKWQ847J5T9EY84";
+	const subToken1 = `sub_${userId1}`;
+	const subToken2 = `sub_${userId2}`;
+
 	const users: AdminUser[] = [
 		{
-			user_id: "user-1",
+			user_id: userId1,
 			display_name: "Alice",
-			subscription_token: "sub-user-1",
+			subscription_token: subToken1,
 			quota_reset: defaultUserQuotaReset(1),
 		},
 		{
-			user_id: "user-2",
+			user_id: userId2,
 			display_name: "Bob",
-			subscription_token: "sub-user-2",
+			subscription_token: subToken2,
 			quota_reset: defaultUserQuotaReset(15),
 		},
 	];
@@ -231,7 +240,7 @@ function createDefaultSeed(): MockStateSeed {
 			group: { group_name: "group-demo" },
 			members: [
 				{
-					user_id: "user-1",
+					user_id: userId1,
 					endpoint_id: "endpoint-1",
 					enabled: true,
 					quota_limit_bytes: 10_000_000,
@@ -239,7 +248,7 @@ function createDefaultSeed(): MockStateSeed {
 					credentials: createGrantCredentials(endpoints[0], 1),
 				},
 				{
-					user_id: "user-2",
+					user_id: userId2,
 					endpoint_id: "endpoint-2",
 					enabled: true,
 					quota_limit_bytes: 5_000_000,
@@ -270,8 +279,8 @@ function createDefaultSeed(): MockStateSeed {
 	};
 
 	const subscriptions: Record<string, string> = {
-		"sub-user-1": "# raw subscription for sub-user-1\nnode-1",
-		"sub-user-2": "# raw subscription for sub-user-2\nnode-2",
+		[subToken1]: `# raw subscription for ${subToken1}\nnode-1`,
+		[subToken2]: `# raw subscription for ${subToken2}\nnode-2`,
 	};
 
 	return {
@@ -320,6 +329,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		users: overrides?.users ?? base.users,
 		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
 			...base.subscriptions,
@@ -668,6 +678,56 @@ async function handleRequest(
 		return jsonResponse({ items: clone(state.users) });
 	}
 
+	if (path === "/api/admin/users/quota-summaries" && method === "GET") {
+		if (state.quotaSummaries) {
+			return jsonResponse(clone(state.quotaSummaries));
+		}
+
+		const totals = new Map<
+			string,
+			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }
+		>();
+		for (const q of state.nodeQuotas) {
+			const prev = totals.get(q.user_id);
+
+			// Keep semantics consistent with the backend:
+			// `quota_limit_bytes === 0` means "unlimited".
+			// Important: the first seen node quota must not be treated as "unlimited"
+			// just because our accumulator starts at 0.
+			const nextLimit = !prev
+				? q.quota_limit_bytes
+				: prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
+					? 0
+					: prev.quota_limit_bytes + q.quota_limit_bytes;
+
+			totals.set(q.user_id, {
+				quota_limit_bytes: nextLimit,
+				used_bytes: 0,
+				remaining_bytes: nextLimit === 0 ? 0 : nextLimit,
+			});
+		}
+		// Only include users that have any quota data (real API omits users without quotas).
+		const items = state.users.flatMap((u) => {
+			const t = totals.get(u.user_id);
+			if (!t) return [];
+			return [
+				{
+					user_id: u.user_id,
+					quota_limit_bytes: t.quota_limit_bytes,
+					used_bytes: t.used_bytes,
+					remaining_bytes: t.remaining_bytes,
+				},
+			];
+		});
+
+		const response: AdminUserQuotaSummariesResponse = {
+			partial: false,
+			unreachable_nodes: [],
+			items,
+		};
+		return jsonResponse(response);
+	}
+
 	if (path === "/api/admin/users" && method === "POST") {
 		const payload = await readJson<AdminUserCreateRequest>(req);
 		if (!payload) {
@@ -742,6 +802,38 @@ async function handleRequest(
 		);
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		const response: AdminUserTokenResponse = { subscription_token: token };
+		return jsonResponse(response);
+	}
+
+	const userNodeQuotaStatusMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-quotas\/status$/,
+	);
+	if (userNodeQuotaStatusMatch && method === "GET") {
+		const userId = decodeURIComponent(userNodeQuotaStatusMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const cycleEnd = new Date(
+			Date.now() + 10 * 24 * 60 * 60 * 1000,
+		).toISOString();
+		const items = state.nodeQuotas
+			.filter((q) => q.user_id === userId)
+			.map((q) => ({
+				user_id: q.user_id,
+				node_id: q.node_id,
+				quota_limit_bytes: q.quota_limit_bytes,
+				used_bytes: 0,
+				remaining_bytes: q.quota_limit_bytes,
+				cycle_end_at: cycleEnd,
+				quota_reset_source: q.quota_reset_source,
+			}));
+
+		const response: AdminUserNodeQuotaStatusResponse = {
+			partial: false,
+			unreachable_nodes: [],
+			items,
+		};
 		return jsonResponse(response);
 	}
 
