@@ -112,10 +112,10 @@ export const LongValues: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await canvas.findByText("Alice with a very long display name"),
+			await canvas.findByText(/Alice with a very long display name/),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText("sub_01HF7YAT00T6RTJH6T9Z8ZPMDV"),
+			await canvas.findByText(/sub_01HF7YAT00T6RTJH6T9Z8ZPMDV/),
 		).toBeInTheDocument();
 	},
 };
