@@ -176,7 +176,7 @@ describe("<UserDetailsPage />", () => {
 		cleanup();
 	});
 
-	it("renders three tabs and switches between User, Access and Quota status", async () => {
+	it("renders three tabs and switches between User, Quota limits and Quota usage", async () => {
 		setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
 		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
 			new BackendApiError({ status: 404, message: "not found" }),
@@ -191,27 +191,27 @@ describe("<UserDetailsPage />", () => {
 			within(view.container).getByRole("button", { name: "User" }),
 		).toBeInTheDocument();
 		expect(
-			within(view.container).getByRole("button", { name: "Access" }),
+			within(view.container).getByRole("button", { name: "Quota limits" }),
 		).toBeInTheDocument();
 		expect(
-			within(view.container).getByRole("button", { name: "Quota status" }),
+			within(view.container).getByRole("button", { name: "Quota usage" }),
 		).toBeInTheDocument();
 
 		fireEvent.click(
-			within(view.container).getByRole("button", { name: "Access" }),
+			within(view.container).getByRole("button", { name: "Quota limits" }),
 		);
 		expect(
 			await within(view.container).findByRole("heading", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		).toBeInTheDocument();
 
 		fireEvent.click(
-			within(view.container).getByRole("button", { name: "Quota status" }),
+			within(view.container).getByRole("button", { name: "Quota usage" }),
 		);
 		expect(
 			await within(view.container).findByRole("heading", {
-				name: "Quota status",
+				name: "Quota usage",
 			}),
 		).toBeInTheDocument();
 
@@ -275,11 +275,11 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		expect(
-			await within(view.container).findByText("Failed to load access"),
+			await within(view.container).findByText("Failed to load quota limits"),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -314,7 +314,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -374,7 +374,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -452,7 +452,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -552,7 +552,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -654,7 +654,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -754,7 +754,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -838,7 +838,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText(/Selected 1 \/ 1/);
@@ -915,7 +915,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -1009,7 +1009,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Access",
+				name: "Quota limits",
 			}),
 		);
 		await within(view.container).findByText("Matrix");

@@ -400,7 +400,7 @@ export function UserDetailsPage() {
 							: "bg-transparent border border-transparent text-base-content/70 hover:bg-base-200/40",
 					].join(" ")}
 				>
-					Access
+					Quota limits
 				</button>
 				<button
 					type="button"
@@ -412,7 +412,7 @@ export function UserDetailsPage() {
 							: "bg-transparent border border-transparent text-base-content/70 hover:bg-base-200/40",
 					].join(" ")}
 				>
-					Quota status
+					Quota usage
 				</button>
 			</div>
 		</div>
@@ -428,7 +428,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading access"
+					title="Loading quota limits"
 					description="Fetching nodes, endpoints, quotas and access state."
 				/>
 			);
@@ -452,7 +452,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load access"
+					title="Failed to load quota limits"
 					description={message}
 					action={
 						<Button
@@ -480,8 +480,8 @@ export function UserDetailsPage() {
 					title="Missing dependencies"
 					description={
 						nodes.length === 0
-							? "Create a node before configuring access."
-							: "Create an endpoint before configuring access."
+							? "Create a node before configuring quota limits."
+							: "Create an endpoint before configuring quota limits."
 					}
 				/>
 			);
@@ -862,7 +862,7 @@ export function UserDetailsPage() {
 				}
 
 				await grantGroupQuery.refetch();
-				pushToast({ variant: "success", message: "Access updated." });
+				pushToast({ variant: "success", message: "Quota limits updated." });
 			} catch (err) {
 				// If purge partially succeeded but we failed before applying the managed
 				// group update, restore whatever we already changed.
@@ -873,7 +873,7 @@ export function UserDetailsPage() {
 				setAccessError(message);
 				pushToast({
 					variant: "error",
-					message: `Failed to update node quotas: ${message}`,
+					message: `Failed to update quota limits: ${message}`,
 				});
 			} finally {
 				setIsApplyingAccess(false);
@@ -882,7 +882,7 @@ export function UserDetailsPage() {
 
 		return (
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-6">
-				<h2 className="text-lg font-semibold">Access</h2>
+				<h2 className="text-lg font-semibold">Quota limits</h2>
 
 				<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
 					<div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -1046,7 +1046,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading quota status"
+					title="Loading quota usage"
 					description="Fetching node quota usage from the xp API."
 				/>
 			);
@@ -1061,7 +1061,7 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load quota status"
+					title="Failed to load quota usage"
 					description={message}
 					action={
 						<Button
@@ -1085,8 +1085,8 @@ export function UserDetailsPage() {
 			return (
 				<PageState
 					variant="empty"
-					title="No quota data"
-					description="No node quotas found for this user."
+					title="No quota usage data"
+					description="No quota limits configured for this user."
 				/>
 			);
 		}
@@ -1102,7 +1102,7 @@ export function UserDetailsPage() {
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
 				<div className="flex items-start justify-between gap-3 flex-wrap">
 					<div>
-						<h2 className="text-lg font-semibold">Quota status</h2>
+						<h2 className="text-lg font-semibold">Quota usage</h2>
 						<p className="text-xs opacity-60">
 							Remaining quota is computed per node from local grant usage.
 						</p>
@@ -1129,7 +1129,7 @@ export function UserDetailsPage() {
 				<ResourceTable
 					headers={[
 						{ key: "node", label: "Node" },
-						{ key: "quota", label: "Quota (remaining/limit)" },
+						{ key: "quota", label: "Usage (remaining/limit)" },
 						{ key: "reset", label: "Next reset" },
 					]}
 				>

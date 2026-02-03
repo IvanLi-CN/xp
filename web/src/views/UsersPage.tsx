@@ -117,7 +117,7 @@ export function UsersPage() {
 											: undefined
 								}
 							>
-								Quota (remaining/limit)
+								Quota usage (remaining/limit)
 							</span>
 						),
 					},

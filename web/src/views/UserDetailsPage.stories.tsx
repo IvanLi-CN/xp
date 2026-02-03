@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, userEvent, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/UserDetailsPage",
@@ -72,5 +73,30 @@ export const User2: Story = {
 		router: {
 			initialEntry: "/users/user-2",
 		},
+	},
+};
+
+export const QuotaLimitsTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Quota limits" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Quota limits" }),
+		).toBeInTheDocument();
+	},
+};
+
+export const QuotaUsageTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Quota usage" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Quota usage" }),
+		).toBeInTheDocument();
+		await expect(await canvas.findByText("Next reset")).toBeInTheDocument();
 	},
 };
