@@ -1653,10 +1653,10 @@ fn build_local_user_quota_summaries(
             let Some(usage) = usage else {
                 return acc;
             };
-            if let (Some(expected_start), Some(expected_end)) = (&cycle_start_at, &cycle_end_at) {
-                if usage.cycle_start_at != *expected_start || usage.cycle_end_at != *expected_end {
-                    return acc;
-                }
+            if let (Some(expected_start), Some(expected_end)) = (&cycle_start_at, &cycle_end_at)
+                && (usage.cycle_start_at != *expected_start || usage.cycle_end_at != *expected_end)
+            {
+                return acc;
             }
             acc.saturating_add(usage.used_bytes)
         });
@@ -1860,10 +1860,10 @@ fn build_local_user_node_quota_status(
         let Some(usage) = usage else {
             return acc;
         };
-        if let Some(expected_end) = &cycle_end_at {
-            if usage.cycle_end_at != *expected_end {
-                return acc;
-            }
+        if let Some(expected_end) = &cycle_end_at
+            && usage.cycle_end_at != *expected_end
+        {
+            return acc;
         }
         acc.saturating_add(usage.used_bytes)
     });
