@@ -693,25 +693,31 @@ async function handleRequest(
 				used_bytes: 0,
 				remaining_bytes: 0,
 			};
-			const nextLimit = prev.quota_limit_bytes + q.quota_limit_bytes;
+			// Keep semantics consistent with the backend:
+			// `quota_limit_bytes === 0` means "unlimited", so any unlimited node keeps the
+			// aggregated limit as unlimited (0).
+			const nextLimit =
+				prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
+					? 0
+					: prev.quota_limit_bytes + q.quota_limit_bytes;
 			totals.set(q.user_id, {
 				quota_limit_bytes: nextLimit,
 				used_bytes: 0,
-				remaining_bytes: nextLimit,
+				remaining_bytes: nextLimit === 0 ? 0 : nextLimit,
 			});
 		}
-		const items = state.users.map((u) => {
-			const t = totals.get(u.user_id) ?? {
-				quota_limit_bytes: 0,
-				used_bytes: 0,
-				remaining_bytes: 0,
-			};
-			return {
-				user_id: u.user_id,
-				quota_limit_bytes: t.quota_limit_bytes,
-				used_bytes: t.used_bytes,
-				remaining_bytes: t.remaining_bytes,
-			};
+		// Only include users that have any quota data (real API omits users without quotas).
+		const items = state.users.flatMap((u) => {
+			const t = totals.get(u.user_id);
+			if (!t) return [];
+			return [
+				{
+					user_id: u.user_id,
+					quota_limit_bytes: t.quota_limit_bytes,
+					used_bytes: t.used_bytes,
+					remaining_bytes: t.remaining_bytes,
+				},
+			];
 		});
 
 		const response: AdminUserQuotaSummariesResponse = {

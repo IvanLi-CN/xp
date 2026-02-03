@@ -1160,7 +1160,10 @@ export function UserDetailsPage() {
 						const node = nodeById.get(q.node_id);
 						const used = formatQuotaBytesHuman(q.used_bytes);
 						const remaining = formatQuotaBytesHuman(q.remaining_bytes);
-						const limit = formatQuotaBytesHuman(q.quota_limit_bytes);
+						const isUnlimited = q.quota_limit_bytes === 0;
+						const limit = isUnlimited
+							? "unlimited"
+							: formatQuotaBytesHuman(q.quota_limit_bytes);
 						const reset = q.cycle_end_at ? new Date(q.cycle_end_at) : null;
 
 						return (
@@ -1173,8 +1176,15 @@ export function UserDetailsPage() {
 										{q.node_id}
 									</div>
 								</td>
-								<td className="font-mono text-xs" title={`Used: ${used}`}>
-									{remaining}/{limit}
+								<td
+									className="font-mono text-xs"
+									title={
+										isUnlimited
+											? `Used: ${used} · Unlimited quota`
+											: `Used: ${used}`
+									}
+								>
+									{isUnlimited ? "-" : remaining}/{limit}
 								</td>
 								<td>
 									{reset ? (
