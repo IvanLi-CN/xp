@@ -152,12 +152,19 @@ pub struct Config {
     )]
     pub admin_token_hash: String,
 
-    #[arg(long, global = true, value_name = "NAME", default_value = "node-1")]
+    #[arg(
+        long,
+        global = true,
+        env = "XP_NODE_NAME",
+        value_name = "NAME",
+        default_value = "node-1"
+    )]
     pub node_name: String,
 
     #[arg(
         long = "access-host",
         global = true,
+        env = "XP_ACCESS_HOST",
         value_name = "HOST",
         default_value = ""
     )]
@@ -166,6 +173,7 @@ pub struct Config {
     #[arg(
         long,
         global = true,
+        env = "XP_API_BASE_URL",
         value_name = "ORIGIN",
         default_value = "https://127.0.0.1:62416"
     )]

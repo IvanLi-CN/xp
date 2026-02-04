@@ -77,6 +77,11 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             // Runtime command only: no filesystem preflight needed.
             Ok(())
         }
+        Command::Xp(XpCommand::SyncNodeMeta(_args)) => {
+            // Runtime command: it reads /etc/xp/xp.env and talks to the local xp API.
+            // Any actionable errors are surfaced by the command itself.
+            Ok(())
+        }
 
         Command::Deploy(args) => preflight_deploy(paths, args),
 

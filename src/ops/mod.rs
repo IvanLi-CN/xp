@@ -15,3 +15,4 @@ mod tui;
 mod upgrade;
 mod util;
 mod xp;
+mod xp_env;

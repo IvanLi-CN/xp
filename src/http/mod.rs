@@ -54,6 +54,7 @@ pub struct AppState {
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
     pub raft: Arc<dyn RaftFacade>,
+    pub raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     pub version_check_cache: Arc<Mutex<VersionCheckCache>>,
     pub ops_github_repo: Arc<String>,
     pub ops_github_api_base_url: Arc<String>,
@@ -398,6 +399,7 @@ pub fn build_router(
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
         raft,
+        raft_rpc: raft_rpc.clone(),
         version_check_cache: Arc::new(Mutex::new(VersionCheckCache { entry: None })),
         ops_github_repo: Arc::new(ops_github_repo),
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
@@ -408,6 +410,10 @@ pub fn build_router(
         .route(
             "/_internal/raft/client-write",
             post(admin_internal_raft_client_write),
+        )
+        .route(
+            "/_internal/raft/set-nodes",
+            post(admin_internal_raft_set_nodes),
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
@@ -493,7 +499,7 @@ pub fn build_router(
 
 async fn admin_auth(
     State(auth): State<AdminAuthState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     if let (Some(sig), Some(ca_key_pem)) = (
@@ -501,6 +507,8 @@ async fn admin_auth(
         auth.cluster_ca_key_pem.as_deref(),
     ) && internal_auth::verify_request(ca_key_pem, req.method(), req.uri(), &sig)
     {
+        // Mark the request so handlers can distinguish internal-signed calls from bearer-token calls.
+        req.extensions_mut().insert(InternalSignatureAuth);
         return next.run(req).await;
     }
 
@@ -527,6 +535,9 @@ async fn admin_auth(
 
     ApiError::unauthorized("missing or invalid authorization token").into_response()
 }
+
+#[derive(Clone, Copy)]
+struct InternalSignatureAuth;
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(header::AUTHORIZATION)?;
@@ -853,16 +864,114 @@ fn parse_simple_semver(raw: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
+    let url = reqwest::Url::parse(origin)
+        .map_err(|_| ApiError::invalid_request("api_base_url must be a valid URL"))?;
+    if url.scheme() != "https" {
+        return Err(ApiError::invalid_request("api_base_url must use https"));
+    }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err(ApiError::invalid_request(
+            "api_base_url must be an origin (no path/query)",
+        ));
+    }
+    Ok(())
+}
+
 async fn admin_internal_raft_client_write(
     Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
     ApiJson(cmd): ApiJson<DesiredStateCommand>,
 ) -> Result<Json<RaftClientResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
     let resp = state
         .raft
         .client_write(cmd)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(resp))
+}
+
+#[derive(Deserialize)]
+struct InternalSetNodesRequest {
+    nodes: Vec<InternalSetNode>,
+}
+
+#[derive(Deserialize)]
+struct InternalSetNode {
+    node_id: String,
+    node_name: String,
+    api_base_url: String,
+}
+
+async fn admin_internal_raft_set_nodes(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(req): ApiJson<InternalSetNodesRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    if req.nodes.is_empty() {
+        return Err(ApiError::invalid_request("nodes is empty"));
+    }
+
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+
+    let Some(raft) = state.raft_rpc.clone() else {
+        return Err(ApiError::not_implemented("raft rpc is not available"));
+    };
+
+    let mut map = std::collections::BTreeMap::new();
+    for n in req.nodes {
+        if n.node_id.trim().is_empty() {
+            return Err(ApiError::invalid_request("node_id is empty"));
+        }
+        if n.node_name.trim().is_empty() {
+            return Err(ApiError::invalid_request("node_name is empty"));
+        }
+        validate_https_origin(&n.api_base_url)?;
+
+        let raft_node_id = raft_node_id_from_ulid(&n.node_id)
+            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+        let exists = metrics
+            .membership_config
+            .nodes()
+            .any(|(id, _node)| *id == raft_node_id);
+        if !exists {
+            return Err(ApiError::invalid_request(format!(
+                "node is not in membership: {}",
+                n.node_id
+            )));
+        }
+
+        if map.contains_key(&raft_node_id) {
+            return Err(ApiError::invalid_request(format!(
+                "duplicate node_id: {}",
+                n.node_id
+            )));
+        }
+
+        map.insert(
+            raft_node_id,
+            RaftNodeMeta {
+                name: n.node_name,
+                api_base_url: n.api_base_url.clone(),
+                raft_endpoint: n.api_base_url,
+            },
+        );
+    }
+
+    raft.change_membership(openraft::ChangeMembers::SetNodes(map), true)
+        .await
+        .map_err(|e| ApiError::internal(format!("change_membership set_nodes: {e}")))?;
+
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn admin_create_join_token(
@@ -882,7 +991,7 @@ async fn admin_create_join_token(
 
     let token = JoinToken::issue_signed_at(
         state.cluster.cluster_id.clone(),
-        state.cluster.api_base_url.clone(),
+        state.config.api_base_url.clone(),
         state.cluster_ca_pem.as_str(),
         req.ttl_seconds,
         Utc::now(),
@@ -934,9 +1043,9 @@ async fn cluster_join(
             .get_node(&state.cluster.node_id)
             .unwrap_or_else(|| Node {
                 node_id: state.cluster.node_id.clone(),
-                node_name: state.cluster.node_name.clone(),
-                access_host: state.cluster.access_host.clone(),
-                api_base_url: state.cluster.api_base_url.clone(),
+                node_name: state.config.node_name.clone(),
+                access_host: state.config.access_host.clone(),
+                api_base_url: state.config.api_base_url.clone(),
                 quota_reset: NodeQuotaReset::default(),
             })
     };
@@ -1110,6 +1219,12 @@ async fn admin_patch_node(
     Path(node_id): Path<String>,
     ApiJson(req): ApiJson<PatchNodeRequest>,
 ) -> Result<Json<Node>, ApiError> {
+    if req.node_name.is_some() || req.access_host.is_some() || req.api_base_url.is_some() {
+        return Err(ApiError::invalid_request(
+            "node meta (node_name/access_host/api_base_url) is managed by xp-ops and cannot be edited via API",
+        ));
+    }
+
     let mut node = {
         let store = state.store.lock().await;
         store
@@ -1117,24 +1232,6 @@ async fn admin_patch_node(
             .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
     };
 
-    if let Some(node_name) = req.node_name {
-        let Some(node_name) = node_name else {
-            return Err(ApiError::invalid_request("node_name cannot be null"));
-        };
-        node.node_name = node_name;
-    }
-    if let Some(access_host) = req.access_host {
-        let Some(access_host) = access_host else {
-            return Err(ApiError::invalid_request("access_host cannot be null"));
-        };
-        node.access_host = access_host;
-    }
-    if let Some(api_base_url) = req.api_base_url {
-        let Some(api_base_url) = api_base_url else {
-            return Err(ApiError::invalid_request("api_base_url cannot be null"));
-        };
-        node.api_base_url = api_base_url;
-    }
     if let Some(quota_reset) = req.quota_reset {
         node.quota_reset = quota_reset;
     }

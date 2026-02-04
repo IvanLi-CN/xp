@@ -642,6 +642,46 @@ async fn internal_client_write_requires_admin_auth() {
 }
 
 #[tokio::test]
+async fn patch_node_rejects_node_meta_but_allows_quota_reset() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+
+    let uri = format!("/api/admin/nodes/{}", meta.node_id);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &uri,
+            json!({ "node_name": "evil" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+
+    let res = app.clone().oneshot(req_authed("GET", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["node_name"], "node-1");
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &uri,
+            json!({ "quota_reset": { "policy": "unlimited" } }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["quota_reset"]["policy"], "unlimited");
+}
+
+#[tokio::test]
 async fn cluster_info_is_single_node_leader_and_ids_present() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -1040,13 +1080,14 @@ async fn patch_admin_node_updates_fields() {
     let node_id = node["node_id"].as_str().unwrap();
     let original_node_name = node["node_name"].as_str().unwrap();
     let original_api_base_url = node["api_base_url"].as_str().unwrap();
+    let original_access_host = node["access_host"].as_str().unwrap();
 
     let res = app
         .oneshot(req_authed_json(
             "PATCH",
             &format!("/api/admin/nodes/{node_id}"),
             json!({
-              "access_host": "node.example.com"
+              "quota_reset": { "policy": "unlimited" }
             }),
         ))
         .await
@@ -1055,8 +1096,9 @@ async fn patch_admin_node_updates_fields() {
     let updated = body_json(res).await;
     assert_eq!(updated["node_id"], node_id);
     assert_eq!(updated["node_name"], original_node_name);
-    assert_eq!(updated["access_host"], "node.example.com");
+    assert_eq!(updated["access_host"], original_access_host);
     assert_eq!(updated["api_base_url"], original_api_base_url);
+    assert_eq!(updated["quota_reset"]["policy"], "unlimited");
 }
 
 #[tokio::test]
@@ -1070,7 +1112,7 @@ async fn patch_admin_node_unknown_returns_404() {
             "PATCH",
             &format!("/api/admin/nodes/{node_id}"),
             json!({
-              "access_host": "node.example.com"
+              "quota_reset": { "policy": "unlimited" }
             }),
         ))
         .await
