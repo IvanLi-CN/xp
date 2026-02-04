@@ -106,8 +106,11 @@ export function NodeDetailsPage() {
 			return;
 		}
 
-		if (resetPolicy === "monthly" && (resetDay < 1 || resetDay > 31)) {
-			setSaveError("Reset day must be between 1 and 31.");
+		if (
+			resetPolicy === "monthly" &&
+			(!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31)
+		) {
+			setSaveError("Reset day must be an integer between 1 and 31.");
 			return;
 		}
 
@@ -285,6 +288,7 @@ export function NodeDetailsPage() {
 									type="number"
 									min={1}
 									max={31}
+									step={1}
 									disabled={resetPolicy !== "monthly"}
 									value={resetDay}
 									onChange={(e) => setResetDay(Number(e.target.value))}
