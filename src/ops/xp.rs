@@ -217,7 +217,7 @@ pub async fn cmd_xp_sync_node_meta(
     if node_name.trim().is_empty() {
         return Err(ExitError::new(2, "invalid_input: XP_NODE_NAME is empty"));
     }
-    validate_https_origin(&api_base_url)?;
+    validate_https_origin_xp_env(&api_base_url, "XP_API_BASE_URL")?;
 
     let data_dir = parsed
         .data_dir
@@ -432,6 +432,28 @@ fn validate_https_origin(origin: &str) -> Result<(), ExitError> {
         return Err(ExitError::new(
             2,
             "invalid_args: --api-base-url must be an origin (no path/query)",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_https_origin_xp_env(origin: &str, key: &str) -> Result<(), ExitError> {
+    let url = reqwest::Url::parse(origin).map_err(|_| {
+        ExitError::new(
+            2,
+            format!("invalid_input: {key} in /etc/xp/xp.env must be a valid URL"),
+        )
+    })?;
+    if url.scheme() != "https" {
+        return Err(ExitError::new(
+            2,
+            format!("invalid_input: {key} in /etc/xp/xp.env must use https"),
+        ));
+    }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err(ExitError::new(
+            2,
+            format!("invalid_input: {key} in /etc/xp/xp.env must be an origin (no path/query)"),
         ));
     }
     Ok(())
