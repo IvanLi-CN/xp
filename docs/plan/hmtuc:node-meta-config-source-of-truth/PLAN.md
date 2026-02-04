@@ -2,9 +2,10 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-04
 - Last: 2026-02-04
+- PR: #62
 
 ## 背景 / 问题陈述
 
@@ -90,10 +91,10 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 后端禁用 node meta 的公开编辑（保留 quota_reset）
-- [ ] M2: 前端移除 node meta 编辑入口（保留展示；按需补上 quota_reset 编辑）
-- [ ] M3: xp/xp-ops 增加“配置文件为单一事实来源 + 同步到集群”的能力
-- [ ] M4: docker compose 3 节点环境回归测试脚本覆盖本计划场景
+- [x] M1: 后端禁用 node meta 的公开编辑（保留 quota_reset）
+- [x] M2: 前端移除 node meta 编辑入口（保留展示；按需补上 quota_reset 编辑）
+- [x] M3: xp/xp-ops 增加“配置文件为单一事实来源 + 同步到集群”的能力
+- [x] M4: docker compose 3 节点环境回归测试脚本覆盖本计划场景
 
 ## 风险 / 开放问题
 
