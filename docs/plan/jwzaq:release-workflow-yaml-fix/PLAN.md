@@ -2,9 +2,10 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-05
 - Last: 2026-02-05
+- Notes: PR #65
 
 ## 背景 / 问题陈述
 
@@ -54,8 +55,8 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 修复 release workflow YAML 语法并通过 PR checks
-- [ ] M2: 合并到 main 后验证 release workflow 可正常执行（至少能跑到 “skip release”）
+- [x] M1: 修复 release workflow YAML 语法并通过 PR checks
+- [x] M2: 合并到 main 后验证 release workflow 可正常执行（至少能跑到 “skip release”）
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
