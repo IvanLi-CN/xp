@@ -92,4 +92,5 @@
 | hmtuc | Node 元数据：配置文件为唯一来源（禁用 UI/API 编辑）         | 已完成 | `hmtuc:node-meta-config-source-of-truth/PLAN.md`     | 2026-02-04 | PR #62           |
 | z27vg | PR intent labels：用标签驱动 Release 自动发版               | 已完成 | `z27vg:pr-intent-label-release/PLAN.md`              | 2026-02-05 | PR #63           |
 | hshdf | Prerelease release channel：用标签产出 rc 预发布            | 已完成 | `hshdf:prerelease-release-channel/PLAN.md`           | 2026-02-05 | PR #64           |
-| jwzaq | Release workflow：修复 YAML 语法错误                        | 待实现 | `jwzaq:release-workflow-yaml-fix/PLAN.md`            | 2026-02-05 | -                |
+| jwzaq | Release workflow：修复 YAML 语法错误                        | 已完成 | `jwzaq:release-workflow-yaml-fix/PLAN.md`            | 2026-02-05 | PR #65           |
+| eu2rn | Prerelease：E2E 验证（rc 发布 + xp-ops upgrade）            | 待实现 | `eu2rn:prerelease-e2e-verification/PLAN.md`          | 2026-02-05 | -                |
