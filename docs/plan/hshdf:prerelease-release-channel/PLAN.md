@@ -108,3 +108,11 @@
 - [ ] M1: 新增 `channel:prerelease` label，并让 release intent 解析脚本输出 `is_prerelease`
 - [ ] M2: 版本计算脚本支持 `X.Y.Z-rc.N`，release workflow 设置 `prerelease: true`
 - [ ] M3: 文档/计划同步（必要时补齐 contracts 的 tag 说明）
+
+## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
+
+- 风险：
+  - prerelease（rc）与 stable 的“同 commit 晋升”不在本计划范围内：当前工作流在 main 上打 tag，因此 stable `vX.Y.Z` 需要通过后续一次合并（不带 `channel:prerelease`）触发；该 stable tag 可能对应一个“与 rc commit 不完全相同”的 commit。
+  - `channel:prerelease` 仅在 `type:*` 允许发布时生效：若 PR 为 `type:docs` / `type:skip`，即使标了 `channel:prerelease` 也会跳过发布（设计如此）。
+- 开放问题：None
+- 假设（需主人确认）：prerelease 仍在“合并到 main 且 CI 通过”后产出（不从 PR head 直接发布）。
