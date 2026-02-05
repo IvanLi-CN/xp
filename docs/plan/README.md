@@ -89,3 +89,4 @@
 | 8rrmk | 用户接入点配置：不再依赖 Grant groups（移除 managed group） | 待实现 | `8rrmk:user-node-quotas-no-groups/PLAN.md`           | 2026-02-02 | Follow-up bz652  |
 | y6vvg | Web UI：User 剩余额度展示                                   | 已完成 | `y6vvg:user-remaining-quotas/PLAN.md`                | 2026-02-03 | PR #59           |
 | ma8jj | cloudflared：OpenRC supervise-daemon 自动重启               | 待实现 | `ma8jj:cloudflared-openrc-supervision/PLAN.md`       | 2026-02-03 | -                |
+| z27vg | PR intent labels：用标签驱动 Release 自动发版               | 待实现 | `z27vg:pr-intent-label-release/PLAN.md`              | 2026-02-05 | -                |
