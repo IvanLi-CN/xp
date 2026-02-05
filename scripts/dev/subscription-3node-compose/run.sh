@@ -60,6 +60,29 @@ wait_https_ok() {
   done
 }
 
+wait_https_ok_ca() {
+  name="$1"
+  path="$2"
+  ca_path="$3"
+  i=0
+  echo "waiting for https://${name}:6443${path} ..."
+  while :; do
+    if compose exec -T tool curl -fsS --connect-timeout 1 --max-time 2 \
+      --cacert "$ca_path" \
+      "https://${name}:6443${path}" >/dev/null 2>&1; then
+      break
+    fi
+    i=$((i + 1))
+    if [ "$i" -gt 600 ]; then
+      echo "timeout waiting for ${name}" >&2
+      compose logs --no-color "$name" || true
+      compose logs --no-color "${name}-app" || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
 json_get() {
   need_python3
   key="$1"
@@ -162,25 +185,35 @@ cp /vol/${from}/cluster/https_key.pem /vol/${to}/cluster/https_key.pem
 }
 
 create_join_token() {
+  create_join_token_from xp1
+}
+
+create_join_token_from() {
+  node="$1"
   ensure_admin_token
   out="$(
-    compose exec -T xp1-app curl -fsSL \
+    compose exec -T "${node}-app" curl -fsSL \
       --cacert /data/cluster/cluster_ca.pem \
       -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
       -H "Content-Type: application/json" \
       -d '{"ttl_seconds":300}' \
-      https://xp1:6443/api/admin/cluster/join-tokens
+      "https://${node}:6443/api/admin/cluster/join-tokens"
   )"
   printf '%s\n' "$out"
 }
 
 create_join_token_value() {
+  create_join_token_value_from xp1
+}
+
+create_join_token_value_from() {
+  node="$1"
   ensure_admin_token
   need_python3
 
   i=0
   while :; do
-    out="$(create_join_token 2>/dev/null || true)"
+    out="$(create_join_token_from "$node" 2>/dev/null || true)"
     if [ -n "$out" ]; then
       if token="$(printf '%s' "$out" | json_get join_token 2>/dev/null)"; then
         printf '%s\n' "$token"
@@ -194,8 +227,8 @@ create_join_token_value() {
       if [ -n "$out" ]; then
         echo "last response: $out" >&2
       fi
-      compose logs --no-color xp1 || true
-      compose logs --no-color xp1-app || true
+      compose logs --no-color "$node" || true
+      compose logs --no-color "${node}-app" || true
       exit 1
     fi
     sleep 0.2
@@ -657,6 +690,105 @@ reset_and_verify() {
   verify
 }
 
+raft_recover_single_node() {
+  ensure_ports
+  ensure_admin_token
+
+  reset
+  up
+
+  echo "simulating quorum loss: stop xp1+xp3 (leave only xp2 running)"
+  compose stop xp1 xp1-app xp3 xp3-app
+
+  info="$(
+    compose exec -T tool curl -fsS \
+      --cacert /vol/xp2/cluster/cluster_ca.pem \
+      https://xp2:6443/api/cluster/info
+  )"
+  role="$(printf '%s' "$info" | json_get role)"
+  if [ "$role" = "leader" ]; then
+    echo "expected xp2 not to be leader after quorum loss, got role=leader" >&2
+    printf '%s\n' "$info" >&2
+    exit 1
+  fi
+
+  echo "stop xp2 so we can rewrite local raft persistence"
+  compose stop xp2 xp2-app
+
+  echo "running xp-ops raft recovery on xp2 volume"
+  compose run --rm --no-deps --entrypoint sh xp2-app -c "
+set -eu
+mkdir -p /etc/xp
+cat > /etc/xp/xp.env <<'EOF'
+XP_NODE_NAME=node-2
+XP_ACCESS_HOST=xp2
+XP_API_BASE_URL=https://xp2:6443
+XP_DATA_DIR=/data
+EOF
+xp-ops xp recover-single-node -y
+"
+
+  compose up -d xp2-app xp2
+  wait_https_ok_ca xp2 "/api/cluster/info" "/vol/xp2/cluster/cluster_ca.pem"
+
+  i=0
+  while :; do
+    info2="$(
+      compose exec -T tool curl -fsS \
+        --cacert /vol/xp2/cluster/cluster_ca.pem \
+        https://xp2:6443/api/cluster/info
+    )"
+    role2="$(printf '%s' "$info2" | json_get role)"
+    leader2="$(printf '%s' "$info2" | json_get leader_api_base_url)"
+    if [ "$role2" = "leader" ] && [ "$leader2" = "https://xp2:6443" ]; then
+      break
+    fi
+    i=$((i + 1))
+    if [ "$i" -gt 200 ]; then
+      echo "timeout waiting for xp2 to become leader after recovery (last role=${role2}, leader=${leader2})" >&2
+      printf '%s\n' "$info2" >&2
+      compose logs --no-color xp2 || true
+      compose logs --no-color xp2-app || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  echo "simulate wiped leader: wipe xp1 volume and re-join to xp2"
+  compose exec -T tool sh -c "find /vol/xp1 -mindepth 1 -maxdepth 1 -exec rm -rf {} +"
+
+  t1="$(create_join_token_value_from xp2)"
+  join_node xp1 "$t1"
+  copy_https_cert_to_joiner xp2 xp1
+
+  compose up -d xp1-app xp1
+  wait_https_ok_ca xp1 "/api/cluster/info" "/vol/xp2/cluster/cluster_ca.pem"
+
+  i=0
+  while :; do
+    info1="$(
+      compose exec -T tool curl -fsS \
+        --cacert /vol/xp2/cluster/cluster_ca.pem \
+        https://xp1:6443/api/cluster/info
+    )"
+    leader1="$(printf '%s' "$info1" | json_get leader_api_base_url)"
+    if [ "$leader1" = "https://xp2:6443" ]; then
+      break
+    fi
+    i=$((i + 1))
+    if [ "$i" -gt 200 ]; then
+      echo "timeout waiting for xp1 to report leader_api_base_url=https://xp2:6443 after rejoin (last leader=${leader1})" >&2
+      printf '%s\n' "$info1" >&2
+      compose logs --no-color xp1 || true
+      compose logs --no-color xp1-app || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  echo "raft single-node recovery ok (xp2 became leader; wiped node re-joined)"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   reset) reset ;;
@@ -665,11 +797,12 @@ case "$cmd" in
   seed) seed ;;
   meta-sync) meta_sync ;;
   verify) verify ;;
+  raft-recover-single-node) raft_recover_single_node ;;
   logs) logs ;;
   urls) urls ;;
   reset-and-verify) reset_and_verify ;;
   ""|-h|--help|help)
-    echo "usage: $0 {reset|build|up|seed|meta-sync|verify|reset-and-verify|urls|logs}" >&2
+    echo "usage: $0 {reset|build|up|seed|meta-sync|verify|raft-recover-single-node|reset-and-verify|urls|logs}" >&2
     exit 2
     ;;
   *)

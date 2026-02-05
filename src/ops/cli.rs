@@ -102,6 +102,10 @@ pub enum XpCommand {
     Bootstrap(XpBootstrapArgs),
     Restart(XpRestartArgs),
     SyncNodeMeta(XpSyncNodeMetaArgs),
+    /// Disaster recovery: force this node to become the only Raft voter.
+    ///
+    /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
+    RecoverSingleNode(XpRecoverSingleNodeArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -212,6 +216,24 @@ pub struct XpSyncNodeMetaArgs {
     /// Recommended (typical): http://127.0.0.1:62416
     #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
     pub xp_base_url: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpRecoverSingleNodeArgs {
+    /// Skip interactive prompts (required).
+    ///
+    /// This command performs unsafe changes to the local Raft state.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+
+    /// Do not create a backup copy of the local Raft directory.
+    ///
+    /// Not recommended; the backup is useful if recovery fails or you need to inspect history.
+    #[arg(long)]
+    pub no_backup: bool,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -426,6 +448,7 @@ pub async fn run() -> i32 {
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
             XpCommand::Restart(args) => xp::cmd_xp_restart(paths, args).await,
             XpCommand::SyncNodeMeta(args) => xp::cmd_xp_sync_node_meta(paths, args).await,
+            XpCommand::RecoverSingleNode(args) => xp::cmd_xp_recover_single_node(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {

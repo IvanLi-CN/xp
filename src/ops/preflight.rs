@@ -82,6 +82,11 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             // Any actionable errors are surfaced by the command itself.
             Ok(())
         }
+        Command::Xp(XpCommand::RecoverSingleNode(_args)) => {
+            // Runtime command: it reads /etc/xp/xp.env and rewrites local Raft persistence.
+            // Any actionable errors are surfaced by the command itself.
+            Ok(())
+        }
 
         Command::Deploy(args) => preflight_deploy(paths, args),
 

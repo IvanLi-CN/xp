@@ -187,6 +187,40 @@ Rollback notes:
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
 - On upgrade failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
 
+## Disaster recovery: quorum lost (single-node leader recovery)
+
+If a voter node is wiped and quorum is permanently lost (e.g. a 2-voter cluster loses 1 node),
+the remaining node cannot elect a leader by itself. In this case you can force a single-node Raft
+membership on the surviving node to restore write availability.
+
+Warning:
+
+- This is an unsafe recovery procedure. Any committed state that existed only on the wiped node is
+  lost permanently.
+- This rewrites local Raft persistence on disk. Stop `xp` before running it.
+
+Procedure (surviving node):
+
+1. Stop `xp` (systemd/OpenRC).
+2. Run the recovery command:
+
+```
+sudo xp-ops xp recover-single-node -y
+```
+
+Notes:
+
+- By default, `xp-ops` creates a backup copy at `${XP_DATA_DIR}/raft.bak-<timestamp>`. You can skip
+  it with `--no-backup` (not recommended).
+- After restart, leader election may take up to ~6-12 seconds (WAN-tuned defaults).
+
+After recovery:
+
+- Re-join the wiped node using a join token issued by the recovered leader (`/api/admin/cluster/join-tokens`),
+  then run `xp join` on the wiped node and restart its service.
+- Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
+  `NodeMeta` (leader discovery/forwarding) matches config.
+
 ### Backup before upgrade
 
 Before upgrading the binary, stop the service and back up the entire `XP_DATA_DIR`. The most critical parts are:
