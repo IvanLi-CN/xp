@@ -4,7 +4,7 @@
 
 ## Release tag
 
-- Tag 格式（normative）：`v<semver>`（例如 `v0.2.3`）
+- Tag 格式（normative）：`v<semver>`（例如 `v0.2.3` 或 `v0.2.3-rc.1`）
 
 ## Assets naming
 
