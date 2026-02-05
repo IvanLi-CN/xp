@@ -43,6 +43,7 @@ jobs:
             echo "- workflow_run: ${{ github.event.workflow_run.name }} @ ${{ github.event.workflow_run.head_sha }}"
             echo "- pr: #${{ steps.intent.outputs.pr_number }} (${{ steps.intent.outputs.pr_url }})"
             echo "- intent_label: ${{ steps.intent.outputs.release_intent_label }}"
+            echo "- is_prerelease: ${{ steps.intent.outputs.is_prerelease }}"
             echo "- should_release: ${{ steps.intent.outputs.should_release }}"
             echo "- bump_level: ${{ steps.intent.outputs.bump_level }}"
             echo "- reason: ${{ steps.intent.outputs.reason }}"
@@ -58,6 +59,7 @@ jobs:
         if: steps.intent.outputs.should_release == 'true'
         env:
           BUMP_LEVEL: ${{ steps.intent.outputs.bump_level }}
+          IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
         run: |
           set -euo pipefail
           chmod +x .github/scripts/compute-version.sh
@@ -164,6 +166,7 @@ jobs:
         with:
           tag: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.intent.outputs.is_prerelease }}
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true
