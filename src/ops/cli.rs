@@ -101,6 +101,7 @@ pub enum XpCommand {
     Install(XpInstallArgs),
     Bootstrap(XpBootstrapArgs),
     Restart(XpRestartArgs),
+    SyncNodeMeta(XpSyncNodeMetaArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -199,6 +200,18 @@ pub struct XpRestartArgs {
     /// Service name to restart (OpenRC: `rc-service <name> restart`, systemd: `<name>.service`).
     #[arg(long, value_name = "NAME", default_value = "xp")]
     pub service_name: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpSyncNodeMetaArgs {
+    /// Local xp API base URL (scheme+host+port), used to talk to the running service.
+    ///
+    /// Recommended (typical): http://127.0.0.1:62416
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub xp_base_url: String,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -412,6 +425,7 @@ pub async fn run() -> i32 {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
             XpCommand::Restart(args) => xp::cmd_xp_restart(paths, args).await,
+            XpCommand::SyncNodeMeta(args) => xp::cmd_xp_sync_node_meta(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {

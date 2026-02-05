@@ -1,0 +1,21 @@
+# Keep Docker build contexts small (especially for local compose regression runs).
+# This repo is a Rust workspace with optional web tooling; none of these artifacts
+# are needed to build `xp` / `xp-ops` in the Dockerfile used by scripts/.
+
+.git
+.github
+.DS_Store
+
+# Rust build artifacts
+target
+
+# Node/bun artifacts (tooling + web)
+node_modules
+web/node_modules
+web/dist
+web/playwright-report
+web/test-results
+web/.vite
+
+# Misc outputs
+*.log

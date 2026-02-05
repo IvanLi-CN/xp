@@ -20,9 +20,6 @@ export const AdminNodesResponseSchema = z.object({
 export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 
 export type AdminNodePatchRequest = {
-	node_name?: string;
-	access_host?: string;
-	api_base_url?: string;
 	quota_reset?: NodeQuotaReset;
 };
 

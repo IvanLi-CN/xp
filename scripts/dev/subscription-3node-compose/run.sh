@@ -139,6 +139,7 @@ DNS.1=xp1
 DNS.2=xp2
 DNS.3=xp3
 DNS.4=localhost
+DNS.5=xp1-alt
 IP.1=127.0.0.1
 EOF
 
@@ -410,6 +411,128 @@ print("")
   echo "seed ok (user=alice, 4 endpoints, 4 grants in group=\"${group_name}\" with note=\"same\")"
 }
 
+meta_sync() {
+  ensure_admin_token
+  need_python3
+
+  nodes_json="$(
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      https://xp1:6443/api/admin/nodes
+  )"
+
+  node1_id="$(
+    printf '%s' "$nodes_json" | python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+for n in obj.get("items", []):
+    if n.get("api_base_url") == "https://xp1:6443":
+        print(n["node_id"])
+        raise SystemExit(0)
+raise SystemExit("node-1 not found (api_base_url=https://xp1:6443)")
+'
+  )"
+
+  # Ensure public admin API does NOT allow editing node meta.
+  patch_out="$(
+    compose exec -T xp1-app sh -c "
+set -eu
+curl -sS \
+  --cacert /data/cluster/cluster_ca.pem \
+  -H 'Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}' \
+  -H 'Content-Type: application/json' \
+  -X PATCH \
+  -d '{\"node_name\":\"evil\"}' \
+  -w '\n%{http_code}\n' \
+  https://xp1:6443/api/admin/nodes/${node1_id}
+"
+  )"
+  patch_code="$(printf '%s' "$patch_out" | tail -n 1)"
+  patch_body="$(printf '%s' "$patch_out" | sed '$d')"
+  if [ "$patch_code" != "400" ]; then
+    echo "expected PATCH node meta to return 400, got ${patch_code}" >&2
+    printf '%s\n' "$patch_body" >&2
+    exit 1
+  fi
+  err_code="$(
+    printf '%s' "$patch_body" | python3 -c '
+import json
+import sys
+obj = json.load(sys.stdin)
+print(obj.get("error", {}).get("code", ""))
+'
+  )"
+  if [ "$err_code" != "invalid_request" ]; then
+    echo "expected error.code=invalid_request, got ${err_code}" >&2
+    printf '%s\n' "$patch_body" >&2
+    exit 1
+  fi
+
+  # Simulate ops-managed config file changes and apply them via xp-ops.
+  compose exec -T xp1-app sh -c "
+set -eu
+mkdir -p /etc/xp
+cat > /etc/xp/xp.env <<'EOF'
+XP_NODE_NAME=node-1
+XP_ACCESS_HOST=xp1-alt
+XP_API_BASE_URL=https://xp1-alt:6443
+XP_DATA_DIR=/data
+EOF
+"
+
+  compose exec -T xp1-app xp-ops xp sync-node-meta
+
+  nodes_after="$(
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      https://xp1:6443/api/admin/nodes
+  )"
+
+  printf '%s' "$nodes_after" | python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+for n in obj.get("items", []):
+    if n.get("api_base_url") == "https://xp1-alt:6443":
+        assert n.get("access_host") == "xp1-alt", n
+        print("node meta sync ok (state machine updated)")
+        raise SystemExit(0)
+raise SystemExit("node meta sync failed: updated node not found")
+'
+
+  # Leader discovery / forwarding must follow membership NodeMeta.
+  info="$(
+    compose exec -T tool curl -fsS \
+      --cacert /vol/xp1/cluster/cluster_ca.pem \
+      https://xp2:6443/api/cluster/info
+  )"
+  leader_url="$(printf '%s' "$info" | json_get leader_api_base_url)"
+  if [ "$leader_url" != "https://xp1-alt:6443" ]; then
+    echo "expected leader_api_base_url=https://xp1-alt:6443, got ${leader_url}" >&2
+    printf '%s\n' "$info" >&2
+    exit 1
+  fi
+
+  compose exec -T tool curl -fsS --cacert /vol/xp1/cluster/cluster_ca.pem \
+    https://xp1-alt:6443/api/cluster/info >/dev/null
+
+  # Write from follower must still succeed (tests follower->leader forwarding).
+  compose exec -T tool curl -fsS \
+    --cacert /vol/xp1/cluster/cluster_ca.pem \
+    -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -X PATCH \
+    -d '{"quota_reset":{"policy":"unlimited"}}' \
+    "https://xp2:6443/api/admin/nodes/${node1_id}" >/dev/null
+
+  echo "meta sync ok (API edit blocked; xp-ops sync updates state+membership; forwarding works)"
+}
+
 verify_one_raw() {
   node="$1"
   token="$2"
@@ -530,6 +653,7 @@ reset_and_verify() {
   reset
   up
   seed
+  meta_sync
   verify
 }
 
@@ -539,12 +663,13 @@ case "$cmd" in
   build) build ;;
   up) up ;;
   seed) seed ;;
+  meta-sync) meta_sync ;;
   verify) verify ;;
   logs) logs ;;
   urls) urls ;;
   reset-and-verify) reset_and_verify ;;
   ""|-h|--help|help)
-    echo "usage: $0 {reset|build|up|seed|verify|reset-and-verify|urls|logs}" >&2
+    echo "usage: $0 {reset|build|up|seed|meta-sync|verify|reset-and-verify|urls|logs}" >&2
     exit 2
     ;;
   *)

@@ -178,17 +178,12 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     Ok(())
 }
 
-async fn run_server(mut config: xp::config::Config) -> Result<()> {
+async fn run_server(config: xp::config::Config) -> Result<()> {
     let cluster = xp::cluster_metadata::ClusterMetadata::load(&config.data_dir)?;
     let cluster_ca_pem = cluster.read_cluster_ca_pem(&config.data_dir)?;
     let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(&config.data_dir)?;
     let node_cert_pem = cluster.read_node_cert_pem(&config.data_dir)?;
     let node_key_pem = cluster.read_node_key_pem(&config.data_dir)?;
-
-    // Prefer persisted cluster metadata for node identity fields.
-    config.node_name = cluster.node_name.clone();
-    config.access_host = cluster.access_host.clone();
-    config.api_base_url = cluster.api_base_url.clone();
 
     let config_arc = Arc::new(config.clone());
     let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {

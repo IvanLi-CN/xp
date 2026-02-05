@@ -43,7 +43,9 @@ services:
     volumes:
       - xp1_data:/data:ro
     networks:
-      - xpnet
+      xpnet:
+        aliases:
+          - xp1-alt
 
   xp2-app:
     image: xp-local:apxdg
