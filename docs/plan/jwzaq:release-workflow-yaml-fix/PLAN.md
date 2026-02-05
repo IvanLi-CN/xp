@@ -8,7 +8,7 @@
 
 ## 背景 / 问题陈述
 
-当前 `release` GitHub Actions workflow 被 GitHub 判定为 **YAML 语法错误**（plain scalar 中包含 `: `），导致：
+当前 `release` GitHub Actions workflow 被 GitHub 判定为 **YAML 语法错误**（plain scalar 中包含 `:`），导致：
 
 - `release.yml` 无法被加载；
 - workflow run 直接失败且没有 jobs（表现为 “jobs=0 / logs=404”）；
@@ -29,7 +29,7 @@
 
 ### In scope
 
-- 将 `skip release (intent says no)` step 的 `run:` 由 plain scalar 改为 quoted scalar，避免 `: ` 触发 YAML 解析失败。
+- 将 `skip release (intent says no)` step 的 `run:` 由 plain scalar 改为 quoted scalar，避免 `:` 触发 YAML 解析失败。
 
 ### Out of scope
 
