@@ -51,7 +51,8 @@ jobs:
 
       - name: skip release (intent says no)
         if: steps.intent.outputs.should_release != 'true'
-        run: echo "skip release: intent says no"
+        # Quote as YAML scalar (plain scalars cannot contain ': ').
+        run: 'echo "skip release: intent says no"'
 
       - name: compute version
         id: version
