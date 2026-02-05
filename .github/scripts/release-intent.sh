@@ -13,6 +13,7 @@ set -euo pipefail
 # - should_release=true|false
 # - bump_level=major|minor|patch|<empty>
 # - release_intent_label=type:...
+# - is_prerelease=true|false
 # - pr_number=<int>|<empty>
 # - pr_url=<url>|<empty>
 # - reason=<string>
@@ -44,6 +45,7 @@ conservative_skip() {
   echo "should_release=false"
   echo "bump_level="
   echo "release_intent_label="
+  echo "is_prerelease=false"
   echo "pr_number="
   echo "pr_url="
   echo "reason=${reason}"
@@ -53,6 +55,7 @@ conservative_skip() {
       echo "should_release=false"
       echo "bump_level="
       echo "release_intent_label="
+      echo "is_prerelease=false"
       echo "pr_number="
       echo "pr_url="
       echo "reason=${reason}"
@@ -147,6 +150,8 @@ allowed = {
 
 labels = json.loads(os.environ["labels_json"])
 names = [l.get("name", "") for l in labels if isinstance(l, dict)]
+is_prerelease = "channel:prerelease" in names
+is_prerelease_s = "true" if is_prerelease else "false"
 type_like = {n for n in names if n.startswith("type:")}
 unknown_type = sorted({n for n in type_like if n not in allowed})
 present = sorted({n for n in names if n in allowed})
@@ -155,6 +160,7 @@ if unknown_type:
     print("should_release=false")
     print("bump_level=")
     print("release_intent_label=")
+    print(f"is_prerelease={is_prerelease_s}")
     print(f"reason=unknown_intent_label({','.join(unknown_type)})")
     sys.exit(0)
 
@@ -162,6 +168,7 @@ if len(present) != 1:
     print("should_release=false")
     print("bump_level=")
     print("release_intent_label=")
+    print(f"is_prerelease={is_prerelease_s}")
     print(f"reason=invalid_intent_label_count({len(present)})")
     sys.exit(0)
 
@@ -170,6 +177,7 @@ if label in ("type:docs", "type:skip"):
     print("should_release=false")
     print("bump_level=")
     print(f"release_intent_label={label}")
+    print(f"is_prerelease={is_prerelease_s}")
     print("reason=intent_skip")
     sys.exit(0)
 
@@ -177,6 +185,7 @@ bump_level = label.removeprefix("type:")
 print("should_release=true")
 print(f"bump_level={bump_level}")
 print(f"release_intent_label={label}")
+print(f"is_prerelease={is_prerelease_s}")
 print("reason=intent_release")
 PY
 )"
@@ -184,12 +193,14 @@ PY
 should_release="$(echo "$decision" | sed -n 's/^should_release=//p')"
 bump_level="$(echo "$decision" | sed -n 's/^bump_level=//p')"
 intent_label="$(echo "$decision" | sed -n 's/^release_intent_label=//p')"
+is_prerelease="$(echo "$decision" | sed -n 's/^is_prerelease=//p')"
 reason="$(echo "$decision" | sed -n 's/^reason=//p')"
 
 echo "Release intent decision:"
 echo "  sha=${sha}"
 echo "  pr_number=${pr_number}"
 echo "  intent_label=${intent_label:-<none>}"
+echo "  is_prerelease=${is_prerelease:-false}"
 echo "  should_release=${should_release}"
 echo "  bump_level=${bump_level:-<none>}"
 echo "  reason=${reason}"
@@ -199,9 +210,9 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "should_release=${should_release}"
     echo "bump_level=${bump_level}"
     echo "release_intent_label=${intent_label}"
+    echo "is_prerelease=${is_prerelease:-false}"
     echo "pr_number=${pr_number}"
     echo "pr_url=${pr_url}"
     echo "reason=${reason}"
   } >>"${GITHUB_OUTPUT}"
 fi
-

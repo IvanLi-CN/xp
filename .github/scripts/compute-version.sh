@@ -4,7 +4,8 @@ set -euo pipefail
 # Compute the next effective semver version by:
 # - base version: max semver tag (accepts v<semver> and <semver>), fallback Cargo.toml version
 # - bump: major/minor/patch, controlled by $BUMP_LEVEL
-# - uniqueness: if tag exists (including legacy w/ or w/o leading v), keep incrementing patch until free
+# - prerelease: when $IS_PRERELEASE=true, emit <base>-rc.<N> and mark GitHub release as prerelease
+# - uniqueness: if tag exists (including legacy w/ or w/o leading v), keep incrementing patch/rc until free
 #
 # Outputs:
 # - XP_EFFECTIVE_VERSION=<semver> (no leading v)
@@ -38,6 +39,12 @@ fi
 
 if [[ "${BUMP_LEVEL}" != "major" && "${BUMP_LEVEL}" != "minor" && "${BUMP_LEVEL}" != "patch" ]]; then
   echo "invalid BUMP_LEVEL=${BUMP_LEVEL} (expected: major|minor|patch)" >&2
+  exit 1
+fi
+
+is_prerelease="${IS_PRERELEASE:-false}"
+if [[ "${is_prerelease}" != "true" && "${is_prerelease}" != "false" ]]; then
+  echo "invalid IS_PRERELEASE=${is_prerelease} (expected: true|false)" >&2
   exit 1
 fi
 
@@ -82,11 +89,21 @@ while \
 done
 
 effective_version="${next_major}.${next_minor}.${candidate}"
+if [[ "${is_prerelease}" == "true" ]]; then
+  rc=1
+  while \
+    git rev-parse -q --verify "refs/tags/v${effective_version}-rc.${rc}" >/dev/null \
+    || git rev-parse -q --verify "refs/tags/${effective_version}-rc.${rc}" >/dev/null; do
+    rc="$((rc + 1))"
+  done
+  effective_version="${effective_version}-rc.${rc}"
+fi
 
 echo "XP_EFFECTIVE_VERSION=${effective_version}"
 echo "Computed XP_EFFECTIVE_VERSION=${effective_version}"
 echo "  base_version=${base_ver} (max_tag=${max_tag:-<none>}, cargo=${cargo_ver})"
 echo "  bump_level=${BUMP_LEVEL}"
+echo "  is_prerelease=${is_prerelease}"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   echo "XP_EFFECTIVE_VERSION=${effective_version}" >>"${GITHUB_ENV}"
