@@ -90,3 +90,4 @@
 | y6vvg | Web UI：User 剩余额度展示                                   | 已完成 | `y6vvg:user-remaining-quotas/PLAN.md`                | 2026-02-03 | PR #59           |
 | ma8jj | cloudflared：OpenRC supervise-daemon 自动重启               | 待实现 | `ma8jj:cloudflared-openrc-supervision/PLAN.md`       | 2026-02-03 | -                |
 | z27vg | PR intent labels：用标签驱动 Release 自动发版               | 待实现 | `z27vg:pr-intent-label-release/PLAN.md`              | 2026-02-05 | -                |
+| hshdf | Prerelease release channel：用标签产出 rc 预发布            | 待实现 | `hshdf:prerelease-release-channel/PLAN.md`           | 2026-02-05 | -                |
