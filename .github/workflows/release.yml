@@ -1,12 +1,15 @@
 name: release
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
+  issues: read
+  pull-requests: read
 
 concurrency:
   group: release-main
@@ -14,38 +17,93 @@ concurrency:
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: determine release intent (labels)
+        id: intent
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: bash ./.github/scripts/release-intent.sh
+
+      - name: summary (release intent)
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Release intent"
+            echo "- workflow_run: ${{ github.event.workflow_run.name }} @ ${{ github.event.workflow_run.head_sha }}"
+            echo "- pr: #${{ steps.intent.outputs.pr_number }} (${{ steps.intent.outputs.pr_url }})"
+            echo "- intent_label: ${{ steps.intent.outputs.release_intent_label }}"
+            echo "- should_release: ${{ steps.intent.outputs.should_release }}"
+            echo "- bump_level: ${{ steps.intent.outputs.bump_level }}"
+            echo "- reason: ${{ steps.intent.outputs.reason }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: skip release (intent says no)
+        if: steps.intent.outputs.should_release != 'true'
+        run: echo "skip release: intent says no"
 
       - name: compute version
         id: version
         shell: bash
+        if: steps.intent.outputs.should_release == 'true'
+        env:
+          BUMP_LEVEL: ${{ steps.intent.outputs.bump_level }}
         run: |
           set -euo pipefail
           chmod +x .github/scripts/compute-version.sh
           .github/scripts/compute-version.sh
 
+      - name: configure git user
+        if: steps.intent.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: create and push tag (if missing)
+        if: steps.intent.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          echo "target tag: $tag"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "tag exists: ${tag}"
+            exit 0
+          fi
+          git tag -a "${tag}" -m "${tag}"
+          git push origin "${tag}"
+
       - name: setup rust
+        if: steps.intent.outputs.should_release == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.91.0
           components: rustfmt, clippy
 
       - name: rustfmt
+        if: steps.intent.outputs.should_release == 'true'
         env:
           XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: cargo fmt --check
 
       - name: setup bun
+        if: steps.intent.outputs.should_release == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
 
       - name: build embedded web assets
+        if: steps.intent.outputs.should_release == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -54,21 +112,25 @@ jobs:
           bun run build
 
       - name: clippy
+        if: steps.intent.outputs.should_release == 'true'
         env:
           XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: cargo clippy -- -D warnings
 
       - name: test
+        if: steps.intent.outputs.should_release == 'true'
         env:
           XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: cargo test
 
       - name: install cross
+        if: steps.intent.outputs.should_release == 'true'
         uses: taiki-e/install-action@v2
         with:
           tool: cross
 
       - name: build assets (linux musl)
+        if: steps.intent.outputs.should_release == 'true'
         shell: bash
         env:
           XP_EFFECTIVE_VERSION: ${{ steps.version.outputs.version }}
@@ -97,9 +159,14 @@ jobs:
           sha256sum xp-* > checksums.txt
 
       - name: create release
+        if: steps.intent.outputs.should_release == 'true'
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
+          generateReleaseNotes: true
+          allowUpdates: true
+          omitBodyDuringUpdate: true
           artifacts: release/*
           artifactErrorsFailBuild: true
+          replacesArtifacts: true
