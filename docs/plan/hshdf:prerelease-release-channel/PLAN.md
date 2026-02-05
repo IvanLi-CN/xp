@@ -54,8 +54,8 @@
 - Given PR 同时包含：
   - 1 个合法 intent label（`type:patch|type:minor|type:major`），以及
   - `channel:prerelease`，
-  When PR 合并到 `main` 且主 CI 通过，
-  Then release workflow 必须创建 **prerelease release**，其 tag 必须为 `vX.Y.Z-rc.N`（保证不与 stable `vX.Y.Z` 冲突）。
+    When PR 合并到 `main` 且主 CI 通过，
+    Then release workflow 必须创建 **prerelease release**，其 tag 必须为 `vX.Y.Z-rc.N`（保证不与 stable `vX.Y.Z` 冲突）。
 
 - Given PR intent label 为 `type:docs` / `type:skip`，
   When PR 合并到 `main` 且主 CI 通过，
@@ -108,4 +108,3 @@
 - [ ] M1: 新增 `channel:prerelease` label，并让 release intent 解析脚本输出 `is_prerelease`
 - [ ] M2: 版本计算脚本支持 `X.Y.Z-rc.N`，release workflow 设置 `prerelease: true`
 - [ ] M3: 文档/计划同步（必要时补齐 contracts 的 tag 说明）
-
