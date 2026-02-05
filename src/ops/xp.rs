@@ -355,10 +355,7 @@ fn recover_single_node_membership(
     voters.insert(raft_node_id);
 
     let membership = openraft::Membership::new(vec![voters], nodes);
-    Ok(openraft::StoredMembership::new(
-        old.log_id().clone(),
-        membership,
-    ))
+    Ok(openraft::StoredMembership::new(*old.log_id(), membership))
 }
 
 pub async fn cmd_xp_recover_single_node(
