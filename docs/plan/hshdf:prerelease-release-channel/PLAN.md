@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-05
 - Last: 2026-02-05
 
@@ -105,9 +105,9 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 新增 `channel:prerelease` label，并让 release intent 解析脚本输出 `is_prerelease`
-- [ ] M2: 版本计算脚本支持 `X.Y.Z-rc.N`，release workflow 设置 `prerelease: true`
-- [ ] M3: 文档/计划同步（必要时补齐 contracts 的 tag 说明）
+- [x] M1: 新增 `channel:prerelease` label，并让 release intent 解析脚本输出 `is_prerelease`
+- [x] M2: 版本计算脚本支持 `X.Y.Z-rc.N`，release workflow 设置 `prerelease: true`
+- [x] M3: 文档/计划同步（必要时补齐 contracts 的 tag 说明）
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

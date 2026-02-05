@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-05
 - Last: 2026-02-05
 
@@ -86,6 +86,6 @@
 
 ## 6) 里程碑（Milestones）
 
-- [ ] M1: 创建 intent labels + PR label gate
-- [ ] M2: release intent 脚本 + 版本计算脚本
-- [ ] M3: release workflow 按 labels 发布/跳过 + 幂等性处理
+- [x] M1: 创建 intent labels + PR label gate
+- [x] M2: release intent 脚本 + 版本计算脚本
+- [x] M3: release workflow 按 labels 发布/跳过 + 幂等性处理
