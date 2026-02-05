@@ -94,3 +94,4 @@
 | hshdf | Prerelease release channel：用标签产出 rc 预发布            | 已完成 | `hshdf:prerelease-release-channel/PLAN.md`           | 2026-02-05 | PR #64           |
 | jwzaq | Release workflow：修复 YAML 语法错误                        | 已完成 | `jwzaq:release-workflow-yaml-fix/PLAN.md`            | 2026-02-05 | PR #65           |
 | eu2rn | Prerelease：E2E 验证（rc 发布 + xp-ops upgrade）            | 待实现 | `eu2rn:prerelease-e2e-verification/PLAN.md`          | 2026-02-05 | -                |
+| c2v6d | Raft quorum 丢失：单节点 leader 灾难恢复（xp-ops）          | 待实现 | `c2v6d:raft-single-node-recovery/PLAN.md`            | 2026-02-05 | -                |

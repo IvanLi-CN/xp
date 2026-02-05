@@ -1,9 +1,12 @@
 use crate::ops::cli::{
-    ExitError, XpBootstrapArgs, XpInstallArgs, XpRestartArgs, XpSyncNodeMetaArgs,
+    ExitError, XpBootstrapArgs, XpInstallArgs, XpRecoverSingleNodeArgs, XpRestartArgs,
+    XpSyncNodeMetaArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
 use axum::http::{Method, Uri, header::HeaderName};
+use chrono::Utc;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -319,6 +322,250 @@ pub async fn cmd_xp_sync_node_meta(
     Ok(())
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct PersistedStateMachineMeta {
+    last_applied: Option<openraft::LogId<crate::raft::types::NodeId>>,
+    last_membership:
+        openraft::StoredMembership<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
+}
+
+fn recover_single_node_membership(
+    old: &openraft::StoredMembership<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
+    raft_node_id: crate::raft::types::NodeId,
+    desired_self_meta: crate::raft::types::NodeMeta,
+) -> Result<
+    openraft::StoredMembership<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
+    ExitError,
+> {
+    let had_self = old.nodes().any(|(id, _node)| *id == raft_node_id);
+    if !had_self {
+        return Err(ExitError::new(
+            5,
+            format!(
+                "raft_recovery_error: current node is not in membership nodes map: {raft_node_id}"
+            ),
+        ));
+    }
+
+    let mut nodes: BTreeMap<crate::raft::types::NodeId, crate::raft::types::NodeMeta> =
+        old.nodes().map(|(id, n)| (*id, n.clone())).collect();
+    nodes.insert(raft_node_id, desired_self_meta);
+
+    let mut voters = BTreeSet::new();
+    voters.insert(raft_node_id);
+
+    let membership = openraft::Membership::new(vec![voters], nodes);
+    Ok(openraft::StoredMembership::new(*old.log_id(), membership))
+}
+
+pub async fn cmd_xp_recover_single_node(
+    paths: Paths,
+    args: XpRecoverSingleNodeArgs,
+) -> Result<(), ExitError> {
+    let mode = if args.dry_run {
+        Mode::DryRun
+    } else {
+        Mode::Real
+    };
+
+    if !args.yes {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: this is a dangerous command; pass -y/--yes to continue",
+        ));
+    }
+
+    let env_path = paths.etc_xp_env();
+    let raw_env = fs::read_to_string(&env_path)
+        .map_err(|_| ExitError::new(2, "invalid_input: /etc/xp/xp.env not found"))?;
+    let parsed = crate::ops::xp_env::parse_xp_env(Some(raw_env));
+
+    let node_name = parsed.node_name.ok_or_else(|| {
+        ExitError::new(2, "invalid_input: XP_NODE_NAME missing in /etc/xp/xp.env")
+    })?;
+    let api_base_url = parsed.api_base_url.ok_or_else(|| {
+        ExitError::new(
+            2,
+            "invalid_input: XP_API_BASE_URL missing in /etc/xp/xp.env",
+        )
+    })?;
+    validate_https_origin_xp_env(&api_base_url, "XP_API_BASE_URL")?;
+
+    let data_dir = parsed
+        .data_dir
+        .unwrap_or_else(|| "/var/lib/xp/data".to_string());
+    if data_dir.trim().is_empty() {
+        return Err(ExitError::new(2, "invalid_input: XP_DATA_DIR is empty"));
+    }
+    let abs_data_dir = paths.map_abs(Path::new(&data_dir));
+
+    let cluster_meta = crate::cluster_metadata::ClusterMetadata::load(&abs_data_dir)
+        .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
+    let raft_node_id = crate::raft::types::raft_node_id_from_ulid(&cluster_meta.node_id)
+        .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
+
+    let store_paths = crate::raft::storage::StorePaths::new(&abs_data_dir);
+    let raft_dir = store_paths
+        .sm_meta_json
+        .parent()
+        .ok_or_else(|| ExitError::new(5, "raft_recovery_error: invalid raft paths"))?
+        .to_path_buf();
+
+    if !store_paths.sm_meta_json.exists() {
+        return Err(ExitError::new(
+            5,
+            format!(
+                "raft_recovery_error: missing raft state machine meta: {}",
+                store_paths.sm_meta_json.display()
+            ),
+        ));
+    }
+
+    eprintln!("xp raft recovery (single node):");
+    eprintln!("  data_dir: {}", abs_data_dir.display());
+    eprintln!("  node_id: {}", cluster_meta.node_id);
+    eprintln!("  raft_node_id: {raft_node_id}");
+    eprintln!("  desired api_base_url: {api_base_url}");
+    eprintln!(
+        "  WARNING: this is an unsafe disaster recovery operation; do not run it unless quorum is permanently lost"
+    );
+
+    if mode == Mode::DryRun {
+        if args.no_backup {
+            eprintln!("dry-run: would NOT create a raft backup (--no-backup)");
+        } else {
+            eprintln!("dry-run: would back up raft dir: {}", raft_dir.display());
+        }
+        eprintln!(
+            "dry-run: would rewrite membership in: {}",
+            store_paths.sm_meta_json.display()
+        );
+        if store_paths.snapshot_meta_json.exists() {
+            eprintln!(
+                "dry-run: would also rewrite snapshot meta: {}",
+                store_paths.snapshot_meta_json.display()
+            );
+        }
+        eprintln!("dry-run: no changes applied");
+        return Ok(());
+    }
+
+    if !args.no_backup {
+        let ts = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+        let backup_dir = abs_data_dir.join(format!("raft.bak-{ts}"));
+        if backup_dir.exists() {
+            return Err(ExitError::new(
+                5,
+                format!(
+                    "raft_recovery_error: backup dir already exists: {}",
+                    backup_dir.display()
+                ),
+            ));
+        }
+        copy_dir_recursive(&raft_dir, &backup_dir).map_err(|e| {
+            ExitError::new(
+                5,
+                format!(
+                    "filesystem_error: back up raft dir {} -> {}: {e}",
+                    raft_dir.display(),
+                    backup_dir.display()
+                ),
+            )
+        })?;
+        eprintln!("  backed up raft dir to: {}", backup_dir.display());
+    }
+
+    let desired_self_meta = crate::raft::types::NodeMeta {
+        name: node_name,
+        api_base_url: api_base_url.clone(),
+        raft_endpoint: api_base_url.clone(),
+    };
+
+    let raw_sm = fs::read(&store_paths.sm_meta_json).map_err(|e| {
+        ExitError::new(
+            5,
+            format!(
+                "filesystem_error: read raft state machine meta {}: {e}",
+                store_paths.sm_meta_json.display()
+            ),
+        )
+    })?;
+    let mut sm: PersistedStateMachineMeta = serde_json::from_slice(&raw_sm).map_err(|e| {
+        ExitError::new(
+            5,
+            format!("raft_recovery_error: parse state_machine.json: {e}"),
+        )
+    })?;
+
+    let old_voters: BTreeSet<_> = sm.last_membership.membership().voter_ids().collect();
+    eprintln!("  current voters: {}", old_voters.len());
+
+    sm.last_membership =
+        recover_single_node_membership(&sm.last_membership, raft_node_id, desired_self_meta)?;
+
+    fs::write(
+        &store_paths.sm_meta_json,
+        serde_json::to_vec_pretty(&sm).map_err(|e| {
+            ExitError::new(
+                5,
+                format!("raft_recovery_error: serialize state_machine.json: {e}"),
+            )
+        })?,
+    )
+    .map_err(|e| {
+        ExitError::new(
+            5,
+            format!(
+                "filesystem_error: write raft state machine meta {}: {e}",
+                store_paths.sm_meta_json.display()
+            ),
+        )
+    })?;
+
+    if store_paths.snapshot_meta_json.exists() {
+        let raw_snap = fs::read(&store_paths.snapshot_meta_json).map_err(|e| {
+            ExitError::new(
+                5,
+                format!(
+                    "filesystem_error: read snapshot meta {}: {e}",
+                    store_paths.snapshot_meta_json.display()
+                ),
+            )
+        })?;
+        let mut snap: openraft::SnapshotMeta<
+            crate::raft::types::NodeId,
+            crate::raft::types::NodeMeta,
+        > = serde_json::from_slice(&raw_snap).map_err(|e| {
+            ExitError::new(
+                5,
+                format!("raft_recovery_error: parse current_meta.json: {e}"),
+            )
+        })?;
+        snap.last_membership = sm.last_membership.clone();
+        fs::write(
+            &store_paths.snapshot_meta_json,
+            serde_json::to_vec_pretty(&snap).map_err(|e| {
+                ExitError::new(
+                    5,
+                    format!("raft_recovery_error: serialize current_meta.json: {e}"),
+                )
+            })?,
+        )
+        .map_err(|e| {
+            ExitError::new(
+                5,
+                format!(
+                    "filesystem_error: write snapshot meta {}: {e}",
+                    store_paths.snapshot_meta_json.display()
+                ),
+            )
+        })?;
+    }
+
+    eprintln!("  ok: membership rewritten to single-node voter; restart xp to take effect");
+    Ok(())
+}
+
 pub async fn cmd_xp_join(
     paths: Paths,
     xp_data_dir: std::path::PathBuf,
@@ -417,6 +664,92 @@ fn sh_quote(s: &str) -> String {
     }
     out.push('\'');
     out
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !src.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "source is not a directory",
+        ));
+    }
+    std::fs::create_dir_all(dst)?;
+    for ent in std::fs::read_dir(src)? {
+        let ent = ent?;
+        let file_type = ent.file_type()?;
+        let from = ent.path();
+        let to = dst.join(ent.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if file_type.is_file() {
+            std::fs::copy(&from, &to)?;
+        } else if file_type.is_symlink() {
+            // Best-effort: preserve symlink targets.
+            let target = std::fs::read_link(&from)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &to)?;
+            #[cfg(not(unix))]
+            {
+                // Fallback: copy the symlink target contents if possible.
+                if from.is_file() {
+                    std::fs::copy(&from, &to)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod recover_single_node_tests {
+    use super::*;
+
+    #[test]
+    fn recover_single_node_membership_shrinks_voters_and_updates_self_meta() {
+        let mut voters = BTreeSet::new();
+        voters.insert(1u64);
+        voters.insert(2u64);
+
+        let nodes = BTreeMap::from([
+            (
+                1u64,
+                crate::raft::types::NodeMeta {
+                    name: "node-1".to_string(),
+                    api_base_url: "https://xp1:6443".to_string(),
+                    raft_endpoint: "https://xp1:6443".to_string(),
+                },
+            ),
+            (
+                2u64,
+                crate::raft::types::NodeMeta {
+                    name: "node-2".to_string(),
+                    api_base_url: "https://xp2:6443".to_string(),
+                    raft_endpoint: "https://xp2:6443".to_string(),
+                },
+            ),
+        ]);
+
+        let membership = openraft::Membership::new(vec![voters], nodes);
+        let log_id = openraft::LogId::new(openraft::CommittedLeaderId::new(1, 1), 10);
+        let stored = openraft::StoredMembership::new(Some(log_id), membership);
+
+        let desired = crate::raft::types::NodeMeta {
+            name: "node-2-new".to_string(),
+            api_base_url: "https://xp2-alt:6443".to_string(),
+            raft_endpoint: "https://xp2-alt:6443".to_string(),
+        };
+        let out = recover_single_node_membership(&stored, 2u64, desired.clone()).unwrap();
+
+        let voter_ids: BTreeSet<_> = out.membership().voter_ids().collect();
+        assert_eq!(voter_ids, BTreeSet::from([2u64]));
+        assert_eq!(out.log_id(), stored.log_id());
+
+        let meta = out
+            .membership()
+            .get_node(&2u64)
+            .expect("self node meta exists");
+        assert_eq!(meta, &desired);
+    }
 }
 
 fn validate_https_origin(origin: &str) -> Result<(), ExitError> {
