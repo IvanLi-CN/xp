@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
 	type AdminNodePatchRequest,
+	deleteAdminNode,
 	fetchAdminNode,
 	patchAdminNode,
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
@@ -29,6 +31,7 @@ export function NodeDetailsPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
+	const navigate = useNavigate();
 
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
@@ -43,6 +46,8 @@ export function NodeDetailsPage() {
 	const [resetTzOffsetMinutes, setResetTzOffsetMinutes] = useState<string>("");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
 
 	useEffect(() => {
 		if (nodeQuery.data) {
@@ -331,6 +336,69 @@ export function NodeDetailsPage() {
 						</div>
 					</div>
 				</div>
+
+				<div className="card bg-base-100 shadow border border-error/30">
+					<div className="card-body space-y-4">
+						<h2 className="card-title text-error">Danger zone</h2>
+						<p className="text-sm opacity-70">
+							Deleting a node removes it from the cluster membership and
+							inventory. This action cannot be undone. Only delete nodes that
+							have no endpoints.
+						</p>
+						<div>
+							<Button
+								variant="danger"
+								onClick={() => setDeleteOpen(true)}
+								disabled={isDeleting}
+							>
+								Delete node
+							</Button>
+						</div>
+					</div>
+				</div>
+
+				<ConfirmDialog
+					open={deleteOpen}
+					title="Delete node?"
+					description="This action cannot be undone. The node must have no endpoints."
+					onCancel={() => setDeleteOpen(false)}
+					footer={
+						<div className="modal-action">
+							<Button
+								variant="secondary"
+								onClick={() => setDeleteOpen(false)}
+								disabled={isDeleting}
+							>
+								Cancel
+							</Button>
+							<Button
+								variant="danger"
+								loading={isDeleting}
+								onClick={async () => {
+									setIsDeleting(true);
+									try {
+										await deleteAdminNode(adminToken, nodeId);
+										pushToast({
+											variant: "success",
+											message: "Node deleted.",
+										});
+										navigate({ to: "/nodes" });
+									} catch (error) {
+										pushToast({
+											variant: "error",
+											message: formatErrorMessage(error),
+										});
+									} finally {
+										setIsDeleting(false);
+										setDeleteOpen(false);
+									}
+								}}
+							>
+								Delete
+							</Button>
+						</div>
+					}
+				/>
 			</div>
 		);
 	})();

@@ -682,6 +682,109 @@ async fn patch_node_rejects_node_meta_but_allows_quota_reset() {
 }
 
 #[tokio::test]
+async fn delete_node_removes_from_inventory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+    }
+
+    let uri = format!("/api/admin/nodes/{}", node.node_id);
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let items = json["items"].as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .all(|n| n["node_id"].as_str().unwrap() != node.node_id)
+    );
+}
+
+#[tokio::test]
+async fn delete_node_rejects_if_endpoints_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node.node_id.clone(),
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let uri = format!("/api/admin/nodes/{}", node.node_id);
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    let res = app.clone().oneshot(req_authed("GET", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_node_rejects_local_node() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+
+    let uri = format!("/api/admin/nodes/{}", meta.node_id);
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
 async fn cluster_info_is_single_node_leader_and_ids_present() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
