@@ -173,6 +173,30 @@ async fn version_check_uses_github_and_caches_and_compares() {
 
     // semver compare + caching (second call must not hit upstream)
     {
+        fn parse_simple_semver(raw: &str) -> Option<(u64, u64, u64)> {
+            let raw = raw.trim();
+            let raw = raw
+                .strip_prefix('v')
+                .or_else(|| raw.strip_prefix('V'))
+                .unwrap_or(raw);
+            let core = raw.split(['-', '+']).next()?;
+            let mut parts = core.split('.');
+            let major: u64 = parts.next()?.parse().ok()?;
+            let minor: u64 = parts.next()?.parse().ok()?;
+            let patch: u64 = parts.next()?.parse().ok()?;
+            if parts.next().is_some() {
+                return None;
+            }
+            Some((major, minor, patch))
+        }
+
+        // This test runs in CI and also in the release workflow where XP_BUILD_VERSION can set
+        // crate::version::VERSION to a prerelease like `0.2.0-rc.1`. Use a mocked tag that is
+        // always strictly higher than the current core semver to keep the expectation stable.
+        let latest_tag = parse_simple_semver(crate::version::VERSION)
+            .map(|(major, minor, patch)| format!("v{major}.{minor}.{}", patch + 1))
+            .unwrap_or_else(|| "v99.99.99".to_string());
+
         let github = MockServer::start().await;
         unsafe {
             std::env::set_var("XP_OPS_GITHUB_API_BASE_URL", github.uri());
@@ -182,7 +206,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
         Mock::given(method("GET"))
             .and(path("/repos/acme/xp/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "tag_name": "v0.2.0",
+                "tag_name": latest_tag,
                 "published_at": "2026-01-31T00:00:00Z"
             })))
             .mount(&github)
@@ -207,7 +231,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
         );
         assert_eq!(
             body.pointer("/latest/release_tag").and_then(|v| v.as_str()),
-            Some("v0.2.0")
+            Some(latest_tag.as_str())
         );
         assert_eq!(body.get("has_update").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(
