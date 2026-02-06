@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-06
 - Last: 2026-02-06
 
@@ -85,6 +85,10 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: Server 端 `DELETE /api/admin/nodes/:node_id` + state command + 保护逻辑
-- [ ] M2: Web Node details 增加 delete 入口 + 错误展示
-- [ ] M3: 回归验证（单测 + compose env）
+- [x] M1: Server 端 `DELETE /api/admin/nodes/:node_id` + state command + 保护逻辑
+- [x] M2: Web Node details 增加 delete 入口 + 错误展示
+- [x] M3: 回归验证（单测 + compose env）
+
+## 变更记录 / Change log
+
+- 2026-02-06: 已实现并验证（API + Web + tests + compose），PR #68。
