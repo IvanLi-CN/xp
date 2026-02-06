@@ -1492,7 +1492,9 @@ async fn admin_patch_endpoint(
                 return Err(ApiError::invalid_request("node_id is empty"));
             }
             if !nodes.iter().any(|n| n.node_id == node_id) {
-                return Err(ApiError::invalid_request(format!("node not found: {node_id}")));
+                return Err(ApiError::invalid_request(format!(
+                    "node not found: {node_id}"
+                )));
             }
             node_id
         }
@@ -1500,7 +1502,9 @@ async fn admin_patch_endpoint(
 
     let desired_port = req.port.unwrap_or(endpoint.port);
     if endpoints.iter().any(|e| {
-        e.endpoint_id != endpoint.endpoint_id && e.node_id == desired_node_id && e.port == desired_port
+        e.endpoint_id != endpoint.endpoint_id
+            && e.node_id == desired_node_id
+            && e.port == desired_port
     }) {
         return Err(ApiError::conflict(format!(
             "endpoint port conflict on target node: node_id={desired_node_id} port={desired_port}"

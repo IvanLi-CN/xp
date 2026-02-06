@@ -91,4 +91,3 @@
 
 - 风险：迁移 endpoint 可能会改变用户侧“同一 grant 对应的出口节点”，需要运维确认迁移窗口（但不会改变 endpoint_id/tag/meta，客户端刷新订阅即可获取新 host）。
 - 开放问题：是否需要限制目标 node 必须在 Raft membership 中（当前先只要求 nodes inventory 存在，以保持灵活性）。
-
