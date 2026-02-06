@@ -1534,6 +1534,215 @@ async fn patch_admin_endpoint_unknown_returns_404() {
 }
 
 #[tokio::test]
+async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let dst_node_id = new_ulid_string();
+    {
+        let mut store = store.lock().await;
+        store.state_mut().nodes.insert(
+            dst_node_id.clone(),
+            Node {
+                node_id: dst_node_id.clone(),
+                node_name: "node-2".to_string(),
+                access_host: "node-2.example.com".to_string(),
+                api_base_url: "https://node-2.example.com".to_string(),
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": src_node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+    let tag = created["tag"].as_str().unwrap().to_string();
+    let meta = created["meta"].clone();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "node_id": dst_node_id.clone()
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["endpoint_id"], endpoint_id);
+    assert_eq!(updated["tag"], tag);
+    assert_eq!(updated["node_id"], dst_node_id);
+    assert_eq!(updated["port"], 443);
+    assert_eq!(updated["meta"], meta);
+}
+
+#[tokio::test]
+async fn patch_admin_endpoint_rejects_unknown_node_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "node_id": new_ulid_string()
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let dst_node_id = new_ulid_string();
+    {
+        let mut store = store.lock().await;
+        store.state_mut().nodes.insert(
+            dst_node_id.clone(),
+            Node {
+                node_id: dst_node_id.clone(),
+                node_name: "node-2".to_string(),
+                access_host: "node-2.example.com".to_string(),
+                api_base_url: "https://node-2.example.com".to_string(),
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    // Create an endpoint on the target node that reserves port 443.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": dst_node_id.clone(),
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 443
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Create another endpoint on the source node, also using port 443.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": src_node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "node_id": dst_node_id.clone()
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+}
+
+#[tokio::test]
 async fn create_grant_group_with_missing_resources_returns_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

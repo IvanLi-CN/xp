@@ -358,6 +358,8 @@ enum CreateEndpointRequest {
 
 #[derive(Deserialize)]
 struct PatchEndpointRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    node_id: Option<Option<String>>,
     port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_optional_reality")]
     reality: Option<Option<RealityConfig>>,
@@ -1472,16 +1474,45 @@ async fn admin_patch_endpoint(
     Path(endpoint_id): Path<String>,
     ApiJson(req): ApiJson<PatchEndpointRequest>,
 ) -> Result<Json<Endpoint>, ApiError> {
-    let mut endpoint = {
+    let (mut endpoint, nodes, endpoints) = {
         let store = state.store.lock().await;
-        store
+        let endpoint = store
             .get_endpoint(&endpoint_id)
-            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+        (endpoint, store.list_nodes(), store.list_endpoints())
     };
 
-    if let Some(port) = req.port {
-        endpoint.port = port;
+    let desired_node_id = match req.node_id {
+        None => endpoint.node_id.clone(),
+        Some(None) => {
+            return Err(ApiError::invalid_request("node_id cannot be null"));
+        }
+        Some(Some(node_id)) => {
+            if node_id.trim().is_empty() {
+                return Err(ApiError::invalid_request("node_id is empty"));
+            }
+            if !nodes.iter().any(|n| n.node_id == node_id) {
+                return Err(ApiError::invalid_request(format!(
+                    "node not found: {node_id}"
+                )));
+            }
+            node_id
+        }
+    };
+
+    let desired_port = req.port.unwrap_or(endpoint.port);
+    if endpoints.iter().any(|e| {
+        e.endpoint_id != endpoint.endpoint_id
+            && e.node_id == desired_node_id
+            && e.port == desired_port
+    }) {
+        return Err(ApiError::conflict(format!(
+            "endpoint port conflict on target node: node_id={desired_node_id} port={desired_port}"
+        )));
     }
+
+    endpoint.node_id = desired_node_id;
+    endpoint.port = desired_port;
 
     match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
