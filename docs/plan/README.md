@@ -96,4 +96,4 @@
 | eu2rn | Prerelease：E2E 验证（rc 发布 + xp-ops upgrade）            | 待实现 | `eu2rn:prerelease-e2e-verification/PLAN.md`          | 2026-02-05 | -                |
 | c2v6d | Raft quorum 丢失：单节点 leader 灾难恢复（xp-ops）          | 待实现 | `c2v6d:raft-single-node-recovery/PLAN.md`            | 2026-02-05 | -                |
 | 3hpk4 | Admin：删除集群节点（Node inventory clean-up）              | 已完成 | `3hpk4:admin-delete-node/PLAN.md`                    | 2026-02-06 | PR #68           |
-| xkzjb | Admin：Endpoint 迁移到新节点（endpoint node reassignment）  | 待实现 | `xkzjb:endpoint-node-reassign/PLAN.md`               | 2026-02-06 | -                |
+| xkzjb | Admin：Endpoint 迁移到新节点（endpoint node reassignment）  | 已完成 | `xkzjb:endpoint-node-reassign/PLAN.md`               | 2026-02-06 | PR #70           |

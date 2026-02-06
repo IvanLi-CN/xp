@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-06
 - Last: 2026-02-06
 
@@ -83,11 +83,16 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: Server 端支持 patch endpoint node_id + 校验
-- [ ] M2: 单测/HTTP tests 覆盖 + 回归
-- [ ] M3: Compose 环境验证（手动）
+- [x] M1: Server 端支持 patch endpoint node_id + 校验
+- [x] M2: 单测/HTTP tests 覆盖 + 回归
+- [x] M3: Compose 环境验证（手动）
 
 ## 风险与开放问题
 
 - 风险：迁移 endpoint 可能会改变用户侧“同一 grant 对应的出口节点”，需要运维确认迁移窗口（但不会改变 endpoint_id/tag/meta，客户端刷新订阅即可获取新 host）。
 - 开放问题：是否需要限制目标 node 必须在 Raft membership 中（当前先只要求 nodes inventory 存在，以保持灵活性）。
+
+## 交付记录（Delivery）
+
+- PR: #70
+- Compose 验证：`scripts/dev/subscription-3node-compose/` 已覆盖“旧 node 有 endpoints → 删除 409 → patch endpoints.node_id → 删除旧 node 204 → 订阅 host 更新”。
