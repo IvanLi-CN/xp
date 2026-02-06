@@ -84,3 +84,20 @@ export async function patchAdminNode(
 	const json: unknown = await res.json();
 	return AdminNodeSchema.parse(json);
 }
+
+export async function deleteAdminNode(
+	adminToken: string,
+	nodeId: string,
+	signal?: AbortSignal,
+): Promise<void> {
+	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
+		method: "DELETE",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+		},
+		signal,
+	});
+
+	await throwIfNotOk(res);
+}

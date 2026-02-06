@@ -1077,6 +1077,17 @@ mod tests {
         ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
             self.inner.add_voters(node_ids)
         }
+
+        fn change_membership(
+            &self,
+            changes: openraft::ChangeMembers<
+                crate::raft::types::NodeId,
+                crate::raft::types::NodeMeta,
+            >,
+            retain: bool,
+        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+            self.inner.change_membership(changes, retain)
+        }
     }
 
     fn recording_raft(
@@ -1145,6 +1156,17 @@ mod tests {
             node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
         ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
             self.inner.add_voters(node_ids)
+        }
+
+        fn change_membership(
+            &self,
+            changes: openraft::ChangeMembers<
+                crate::raft::types::NodeId,
+                crate::raft::types::NodeMeta,
+            >,
+            retain: bool,
+        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+            self.inner.change_membership(changes, retain)
         }
     }
 

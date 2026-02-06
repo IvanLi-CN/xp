@@ -115,7 +115,8 @@ impl From<StoreError> for ApiError {
                     ApiError::not_found(domain.to_string())
                 }
                 crate::domain::DomainError::GroupNameConflict { .. }
-                | crate::domain::DomainError::GrantPairConflict { .. } => {
+                | crate::domain::DomainError::GrantPairConflict { .. }
+                | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
                 _ => ApiError::invalid_request(domain.to_string()),
@@ -412,6 +413,10 @@ pub fn build_router(
             post(admin_internal_raft_client_write),
         )
         .route(
+            "/_internal/raft/change-membership",
+            post(admin_internal_raft_change_membership),
+        )
+        .route(
             "/_internal/raft/set-nodes",
             post(admin_internal_raft_set_nodes),
         )
@@ -420,7 +425,9 @@ pub fn build_router(
         .route("/nodes", get(admin_list_nodes))
         .route(
             "/nodes/:node_id",
-            get(admin_get_node).patch(admin_patch_node),
+            get(admin_get_node)
+                .patch(admin_patch_node)
+                .delete(admin_delete_node),
         )
         .route(
             "/endpoints",
@@ -895,6 +902,59 @@ async fn admin_internal_raft_client_write(
 }
 
 #[derive(Deserialize)]
+struct InternalChangeMembershipRequest {
+    retain: bool,
+    changes: InternalChangeMembers,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum InternalChangeMembers {
+    RemoveVoters { node_ids: Vec<RaftNodeId> },
+    RemoveNodes { node_ids: Vec<RaftNodeId> },
+}
+
+async fn admin_internal_raft_change_membership(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(req): ApiJson<InternalChangeMembershipRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+
+    let node_ids: BTreeSet<RaftNodeId> = match &req.changes {
+        InternalChangeMembers::RemoveVoters { node_ids } => node_ids.iter().cloned().collect(),
+        InternalChangeMembers::RemoveNodes { node_ids } => node_ids.iter().cloned().collect(),
+    };
+    if node_ids.is_empty() {
+        return Err(ApiError::invalid_request("node_ids is empty"));
+    }
+
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+
+    let Some(raft) = state.raft_rpc.clone() else {
+        return Err(ApiError::not_implemented("raft rpc is not available"));
+    };
+
+    let changes = match req.changes {
+        InternalChangeMembers::RemoveVoters { .. } => {
+            openraft::ChangeMembers::RemoveVoters(node_ids)
+        }
+        InternalChangeMembers::RemoveNodes { .. } => openraft::ChangeMembers::RemoveNodes(node_ids),
+    };
+
+    raft.change_membership(changes, req.retain)
+        .await
+        .map_err(|e| ApiError::internal(format!("change_membership: {e}")))?;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
 struct InternalSetNodesRequest {
     nodes: Vec<InternalSetNode>,
 }
@@ -1242,6 +1302,87 @@ async fn admin_patch_node(
     )
     .await?;
     Ok(Json(node))
+}
+
+async fn admin_delete_node(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if node_id == state.cluster.node_id {
+        return Err(ApiError::invalid_request("cannot delete local node"));
+    }
+
+    // Preflight validation before touching Raft membership, to avoid partial updates.
+    {
+        let store = state.store.lock().await;
+        if store.get_node(&node_id).is_none() {
+            return Err(ApiError::not_found(format!("node not found: {node_id}")));
+        }
+        if let Some(endpoint) = store
+            .list_endpoints()
+            .into_iter()
+            .find(|endpoint| endpoint.node_id == node_id)
+        {
+            return Err(ApiError::conflict(
+                crate::domain::DomainError::NodeInUse {
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint.endpoint_id,
+                }
+                .to_string(),
+            ));
+        }
+    }
+
+    let raft_node_id =
+        raft_node_id_from_ulid(&node_id).map_err(|e| ApiError::invalid_request(e.to_string()))?;
+
+    let metrics = raft_metrics(&state);
+    if metrics.current_leader == Some(raft_node_id) {
+        return Err(ApiError::invalid_request("cannot delete current leader"));
+    }
+
+    let membership = metrics.membership_config.membership();
+    if membership.get_node(&raft_node_id).is_some() {
+        let is_voter = membership
+            .voter_ids()
+            .any(|voter_id| voter_id == raft_node_id);
+
+        if is_voter {
+            state
+                .raft
+                .change_membership(
+                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+                    true,
+                )
+                .await
+                .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
+        }
+
+        state
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
+                true,
+            )
+            .await
+            .map_err(|e| ApiError::internal(format!("change_membership remove_nodes: {e}")))?;
+    }
+
+    let out = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::DeleteNode {
+            node_id: node_id.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::NodeDeleted { deleted } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+    if !deleted {
+        return Err(ApiError::not_found(format!("node not found: {node_id}")));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn admin_get_config(

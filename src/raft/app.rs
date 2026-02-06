@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::Context;
 use axum::http::{Method, Uri, header::HeaderName};
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use crate::{
@@ -25,6 +26,12 @@ pub trait RaftFacade: Send + Sync + 'static {
     fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>>;
 
     fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+        retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
 #[derive(Clone)]
@@ -101,6 +108,20 @@ impl RaftFacade for RealRaft {
                 .change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true)
                 .await
                 .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
+            Ok(())
+        })
+    }
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+        retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            self.raft
+                .change_membership(changes, retain)
+                .await
+                .map_err(|e| anyhow::anyhow!("raft change_membership: {e}"))?;
             Ok(())
         })
     }
@@ -196,6 +217,46 @@ impl RaftFacade for ForwardingRaftFacade {
             Ok(())
         })
     }
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+        retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let raft = self.raft.clone();
+        let metrics = self.metrics.clone();
+        let client = self.client.clone();
+        let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
+        Box::pin(async move {
+            let changes_clone = changes.clone();
+            match raft.change_membership(changes, retain).await {
+                Ok(_resp) => Ok(()),
+                Err(err) => {
+                    let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
+                        err.api_error()
+                    else {
+                        return Err(anyhow::anyhow!("raft change_membership: {err}"));
+                    };
+                    let metrics_snapshot = metrics.borrow().clone();
+                    let leader_base_url = leader_api_base_url_from_forward(
+                        forward,
+                        &metrics_snapshot,
+                    )
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("raft change_membership forward: leader not available")
+                    })?;
+                    forward_change_membership(
+                        &client,
+                        &cluster_ca_key_pem,
+                        &leader_base_url,
+                        &changes_clone,
+                        retain,
+                    )
+                    .await
+                }
+            }
+        })
+    }
 }
 
 fn leader_api_base_url_from_forward(
@@ -219,6 +280,68 @@ fn leader_api_base_url_from_forward(
                 Some(node.api_base_url.clone())
             }
         })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InternalChangeMembershipRequest {
+    retain: bool,
+    changes: InternalChangeMembers,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum InternalChangeMembers {
+    RemoveVoters { node_ids: Vec<NodeId> },
+    RemoveNodes { node_ids: Vec<NodeId> },
+}
+
+async fn forward_change_membership(
+    client: &reqwest::Client,
+    cluster_ca_key_pem: &str,
+    leader_base_url: &str,
+    changes: &openraft::ChangeMembers<NodeId, NodeMeta>,
+    retain: bool,
+) -> anyhow::Result<()> {
+    let url = format!(
+        "{}/api/admin/_internal/raft/change-membership",
+        leader_base_url.trim_end_matches('/')
+    );
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/_internal/...` (not `/api/admin/...`).
+    let uri: Uri = "/_internal/raft/change-membership"
+        .parse()
+        .expect("valid uri");
+    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
+        .map_err(|e| anyhow::anyhow!("sign internal request: {e}"))?;
+
+    let changes = match changes {
+        openraft::ChangeMembers::RemoveVoters(node_ids) => InternalChangeMembers::RemoveVoters {
+            node_ids: node_ids.iter().cloned().collect(),
+        },
+        openraft::ChangeMembers::RemoveNodes(node_ids) => InternalChangeMembers::RemoveNodes {
+            node_ids: node_ids.iter().cloned().collect(),
+        },
+        other => {
+            return Err(anyhow::anyhow!(
+                "forward change_membership: unsupported change type: {other:?}"
+            ));
+        }
+    };
+
+    client
+        .post(url)
+        .header(
+            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .json(&InternalChangeMembershipRequest { retain, changes })
+        .send()
+        .await
+        .context("forward change_membership request")?
+        .error_for_status()
+        .context("forward change_membership response status")?;
+
+    Ok(())
 }
 
 async fn forward_client_write(
@@ -392,6 +515,14 @@ impl RaftFacade for LocalRaft {
     fn add_voters(&self, _node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
     }
+
+    fn change_membership(
+        &self,
+        _changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+        _retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move { Ok(()) })
+    }
 }
 
 fn map_store_error(err: StoreError) -> ClientResponse {
@@ -411,6 +542,11 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                     message: domain.to_string(),
                 }
             }
+            DomainError::NodeInUse { .. } => ClientResponse::Err {
+                status: 409,
+                code: "conflict".to_string(),
+                message: domain.to_string(),
+            },
             _ => ClientResponse::Err {
                 status: 400,
                 code: "invalid_request".to_string(),

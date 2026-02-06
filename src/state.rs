@@ -545,6 +545,9 @@ pub enum DesiredStateCommand {
     UpsertNode {
         node: Node,
     },
+    DeleteNode {
+        node_id: String,
+    },
     UpsertEndpoint {
         endpoint: Endpoint,
     },
@@ -599,6 +602,9 @@ pub enum DesiredStateCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateApplyResult {
     Applied,
+    NodeDeleted {
+        deleted: bool,
+    },
     EndpointDeleted {
         deleted: bool,
     },
@@ -675,6 +681,35 @@ impl DesiredStateCommand {
                 validate_node_quota_reset(&node.quota_reset)?;
                 state.nodes.insert(node.node_id.clone(), node.clone());
                 Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteNode { node_id } => {
+                if !state.nodes.contains_key(node_id) {
+                    return Ok(DesiredStateApplyResult::NodeDeleted { deleted: false });
+                }
+
+                if let Some(endpoint) = state
+                    .endpoints
+                    .values()
+                    .find(|endpoint| endpoint.node_id == *node_id)
+                {
+                    return Err(crate::domain::DomainError::NodeInUse {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    }
+                    .into());
+                }
+
+                state.nodes.remove(node_id);
+
+                // A node-scoped quota config becomes meaningless once the node is removed.
+                for (_user_id, nodes) in state.user_node_quotas.iter_mut() {
+                    nodes.remove(node_id);
+                }
+                state
+                    .user_node_quotas
+                    .retain(|_user_id, nodes| !nodes.is_empty());
+
+                Ok(DesiredStateApplyResult::NodeDeleted { deleted: true })
             }
             Self::UpsertEndpoint { endpoint } => {
                 validate_port(endpoint.port)?;

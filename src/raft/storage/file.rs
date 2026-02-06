@@ -601,6 +601,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 | crate::domain::DomainError::GrantPairConflict { .. } => {
                                     (409, "conflict")
                                 }
+                                crate::domain::DomainError::NodeInUse { .. } => (409, "conflict"),
                                 _ => (400, "invalid_request"),
                             };
                             ClientResponse::Err {

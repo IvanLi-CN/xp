@@ -39,6 +39,10 @@ pub enum DomainError {
     MissingGrantGroup {
         group_name: String,
     },
+    NodeInUse {
+        node_id: String,
+        endpoint_id: String,
+    },
     GroupNameConflict {
         group_name: String,
     },
@@ -61,6 +65,7 @@ impl DomainError {
                 "invalid_request"
             }
             Self::MissingGrantGroup { .. } => "not_found",
+            Self::NodeInUse { .. } => "conflict",
             Self::GroupNameConflict { .. } | Self::GrantPairConflict { .. } => "conflict",
         }
     }
@@ -91,6 +96,13 @@ impl std::fmt::Display for DomainError {
             Self::MissingGrantGroup { group_name } => {
                 write!(f, "grant group not found: {group_name}")
             }
+            Self::NodeInUse {
+                node_id,
+                endpoint_id,
+            } => write!(
+                f,
+                "node is still referenced by endpoints: node_id={node_id} endpoint_id={endpoint_id}"
+            ),
             Self::GroupNameConflict { group_name } => {
                 write!(f, "group_name already exists: {group_name}")
             }
