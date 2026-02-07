@@ -179,7 +179,7 @@ struct Items<T> {
     items: Vec<T>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EndpointProbeStatus {
     Missing,
@@ -1609,13 +1609,56 @@ fn probe_status_for_counts(
     if sample_count == 0 {
         return EndpointProbeStatus::Missing;
     }
+    // If not all nodes have reported, treat this hour bucket as incomplete.
+    if sample_count < expected_nodes {
+        return EndpointProbeStatus::Missing;
+    }
     if ok_count == 0 {
         return EndpointProbeStatus::Down;
     }
-    if sample_count >= expected_nodes && ok_count >= expected_nodes {
+    if ok_count >= expected_nodes {
         return EndpointProbeStatus::Up;
     }
     EndpointProbeStatus::Degraded
+}
+
+#[cfg(test)]
+mod endpoint_probe_status_tests {
+    use super::{EndpointProbeStatus, probe_status_for_counts};
+
+    #[test]
+    fn probe_status_handles_incomplete_hours_as_missing() {
+        assert_eq!(
+            probe_status_for_counts(3, 2, 0),
+            EndpointProbeStatus::Missing
+        );
+        assert_eq!(
+            probe_status_for_counts(3, 2, 1),
+            EndpointProbeStatus::Missing
+        );
+    }
+
+    #[test]
+    fn probe_status_down_when_all_nodes_report_and_all_fail() {
+        assert_eq!(probe_status_for_counts(3, 3, 0), EndpointProbeStatus::Down);
+    }
+
+    #[test]
+    fn probe_status_up_when_all_nodes_report_and_all_ok() {
+        assert_eq!(probe_status_for_counts(3, 3, 3), EndpointProbeStatus::Up);
+    }
+
+    #[test]
+    fn probe_status_degraded_when_mixed_ok_and_fail() {
+        assert_eq!(
+            probe_status_for_counts(3, 3, 2),
+            EndpointProbeStatus::Degraded
+        );
+        assert_eq!(
+            probe_status_for_counts(3, 3, 1),
+            EndpointProbeStatus::Degraded
+        );
+    }
 }
 
 fn percentile_ms(sorted: &[u32], percentile: f64) -> Option<u32> {

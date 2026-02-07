@@ -376,10 +376,10 @@ async fn run_probe_once(
     )
     .await?;
 
-    // Refresh grants snapshot to ensure we can resolve credentials for probes.
-    let (nodes, grants) = {
+    // Refresh nodes snapshot after the bootstrap step; node list can change during a run.
+    let nodes = {
         let store = inner.store.lock().await;
-        (store.list_nodes(), store.list_grants())
+        store.list_nodes()
     };
 
     let nodes_by_id: BTreeMap<String, crate::domain::Node> =
@@ -390,12 +390,12 @@ async fn run_probe_once(
     let mut tasks = Vec::new();
 
     let nodes_by_id = Arc::new(nodes_by_id);
-    let grants = Arc::new(grants);
+    let probe_secret = Arc::clone(&inner.probe_secret);
 
     for endpoint in endpoints {
         let permit = sem.clone().acquire_owned().await.expect("semaphore");
         let nodes_by_id = Arc::clone(&nodes_by_id);
-        let grants = Arc::clone(&grants);
+        let probe_secret = Arc::clone(&probe_secret);
         let config_hash = req.config_hash.clone();
         let run_id = req.run_id.clone();
 
@@ -405,8 +405,8 @@ async fn run_probe_once(
                 &run_id,
                 &config_hash,
                 endpoint,
+                probe_secret.as_ref(),
                 nodes_by_id.as_ref(),
-                grants.as_ref(),
             )
             .await
         }));
@@ -514,7 +514,7 @@ async fn ensure_probe_user_and_grants(
         };
 
         // Conflicts are expected if multiple nodes bootstrap at once.
-        let _ = raft_write_best_effort(raft, DesiredStateCommand::UpsertGrant { grant }).await;
+        raft_write_best_effort(raft, DesiredStateCommand::UpsertGrant { grant }).await?;
     }
 
     Ok(())
@@ -557,8 +557,8 @@ async fn probe_one_endpoint(
     run_id: &str,
     config_hash: &str,
     endpoint: Endpoint,
+    probe_secret: &[u8],
     nodes_by_id: &BTreeMap<String, crate::domain::Node>,
-    grants: &[Grant],
 ) -> EndpointProbeAppendSample {
     let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
 
@@ -588,28 +588,12 @@ async fn probe_one_endpoint(
         };
     }
 
-    let grant = grants
-        .iter()
-        .find(|g| g.user_id == PROBE_USER_ID && g.endpoint_id == endpoint.endpoint_id);
-    let Some(grant) = grant else {
-        return EndpointProbeAppendSample {
-            endpoint_id: endpoint.endpoint_id,
-            ok: false,
-            checked_at,
-            latency_ms: None,
-            target_id: None,
-            target_url: None,
-            error: Some("probe grant not found for endpoint".to_string()),
-            config_hash: config_hash.to_string(),
-        };
-    };
-
     let result = match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
-            probe_vless_reality(run_id, node, &endpoint, grant).await
+            probe_vless_reality(run_id, probe_secret, node, &endpoint).await
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            probe_ss2022(run_id, node, &endpoint, grant).await
+            probe_ss2022(run_id, probe_secret, node, &endpoint).await
         }
     };
 
@@ -648,17 +632,11 @@ struct ProbeOk {
 
 async fn probe_vless_reality(
     run_id: &str,
+    probe_secret: &[u8],
     node: &crate::domain::Node,
     endpoint: &Endpoint,
-    grant: &Grant,
 ) -> Result<ProbeOk, EndpointProbeError> {
-    let cred = grant
-        .credentials
-        .vless
-        .as_ref()
-        .ok_or_else(|| EndpointProbeError::Store {
-            message: "missing vless credentials".to_string(),
-        })?;
+    let uuid = derive_probe_vless_uuid(probe_secret, &endpoint.endpoint_id);
 
     let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta.clone())
         .map_err(|e| EndpointProbeError::Store {
@@ -687,7 +665,7 @@ async fn probe_vless_reality(
                 "address": node.access_host,
                 "port": endpoint.port,
                 "users": [{
-                    "id": cred.uuid,
+                    "id": uuid,
                     "flow": "xtls-rprx-vision",
                     "encryption": "none"
                 }]
@@ -712,17 +690,16 @@ async fn probe_vless_reality(
 
 async fn probe_ss2022(
     run_id: &str,
+    probe_secret: &[u8],
     node: &crate::domain::Node,
     endpoint: &Endpoint,
-    grant: &Grant,
 ) -> Result<ProbeOk, EndpointProbeError> {
-    let cred = grant
-        .credentials
-        .ss2022
-        .as_ref()
-        .ok_or_else(|| EndpointProbeError::Store {
-            message: "missing ss2022 credentials".to_string(),
+    let meta: Ss2022EndpointMeta =
+        serde_json::from_value(endpoint.meta.clone()).map_err(|e| EndpointProbeError::Store {
+            message: e.to_string(),
         })?;
+    let user_psk_b64 = derive_probe_ss2022_user_psk_b64(probe_secret, &endpoint.endpoint_id);
+    let password = ss2022_password(&meta.server_psk_b64, &user_psk_b64);
 
     let outbound = serde_json::json!({
         "protocol": "shadowsocks",
@@ -730,8 +707,8 @@ async fn probe_ss2022(
             "servers": [{
                 "address": node.access_host,
                 "port": endpoint.port,
-                "method": cred.method,
-                "password": cred.password,
+                "method": meta.method,
+                "password": password,
                 "uot": false,
                 "UoTVersion": 2
             }],
