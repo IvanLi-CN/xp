@@ -4,6 +4,7 @@ pub mod cluster_metadata;
 pub mod config;
 pub mod cycle;
 pub mod domain;
+pub mod endpoint_probe;
 pub mod http;
 pub mod id;
 pub mod internal_auth;

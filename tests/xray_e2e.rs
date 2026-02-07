@@ -260,11 +260,17 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config,
         store.clone(),
         reconcile,
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -467,11 +473,17 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config.clone(),
         store.clone(),
         reconcile.clone(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

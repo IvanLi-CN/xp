@@ -261,11 +261,18 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         raft_facade.clone(),
     );
 
+    let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft_facade.clone(),
+    );
+
     let app = xp::http::build_router(
         config.clone(),
         store.clone(),
         reconcile,
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

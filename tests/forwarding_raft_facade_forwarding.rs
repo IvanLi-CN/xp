@@ -311,15 +311,22 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
     };
 
     let xray_health = xp::xray_supervisor::XrayHealthHandle::new_unknown();
+    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> = Arc::new(leader.clone());
+    let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        leader_store.clone(),
+        raft_facade.clone(),
+    );
     let router = build_router(
         config,
         leader_store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem.clone(),
         cluster_ca_key_pem.clone(),
-        Arc::new(leader.clone()),
+        raft_facade,
         None,
     );
 

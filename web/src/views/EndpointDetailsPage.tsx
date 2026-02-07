@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import {
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
@@ -208,6 +209,26 @@ export function EndpointDetailsPage() {
 				message: "Endpoint deleted.",
 			});
 			navigate({ to: "/endpoints" });
+		},
+		onError: (error) => {
+			pushToast({
+				variant: "error",
+				message: formatErrorMessage(error),
+			});
+		},
+	});
+
+	const probeRunMutation = useMutation({
+		mutationFn: () => runAdminEndpointProbeRun(adminToken),
+		onSuccess: (data) => {
+			pushToast({
+				variant: "success",
+				message: `Probe started (hour=${data.hour}).`,
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["adminEndpoints", adminToken],
+			});
+			navigate({ to: "/endpoints/$endpointId/probe", params: { endpointId } });
 		},
 		onError: (error) => {
 			pushToast({
@@ -457,6 +478,25 @@ export function EndpointDetailsPage() {
 							</Button>
 						</div>
 					</form>
+				</div>
+			</div>
+
+			<div className="card bg-base-100 shadow">
+				<div className="card-body space-y-4">
+					<h2 className="card-title">Probe</h2>
+					<p className="text-sm opacity-70">
+						Run a cluster-wide probe for all endpoints. Results are stored
+						hourly and shown in the endpoint list.
+					</p>
+					<div className="card-actions justify-end">
+						<Button
+							variant="secondary"
+							loading={probeRunMutation.isPending}
+							onClick={() => probeRunMutation.mutate()}
+						>
+							Test now
+						</Button>
+					</div>
 				</div>
 			</div>
 

@@ -105,12 +105,18 @@ fn app_with(
 
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
 
     let router = build_router(
         config,
         store.clone(),
         reconcile,
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -961,11 +967,17 @@ async fn follower_admin_write_does_not_redirect() {
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2248,11 +2260,17 @@ async fn grant_usage_includes_warning_fields() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2434,11 +2452,17 @@ async fn grant_usage_warns_on_quota_mismatch() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config,
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2969,11 +2993,17 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config.clone(),
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster.clone(),
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -3008,11 +3038,17 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+    );
     let app = build_router(
         config,
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

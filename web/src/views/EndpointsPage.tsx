@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { EndpointProbeBar } from "../components/EndpointProbeBar";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -105,6 +106,8 @@ export function EndpointsPage() {
 		return (
 			<ResourceTable
 				headers={[
+					{ key: "probe", label: "Probe (24h)" },
+					{ key: "latency", label: "Latency (p50 ms)" },
 					{ key: "kind", label: "Kind" },
 					{ key: "node", label: "Node" },
 					{ key: "port", label: "Listen port" },
@@ -114,6 +117,18 @@ export function EndpointsPage() {
 			>
 				{endpoints.map((endpoint) => (
 					<tr key={endpoint.endpoint_id}>
+						<td>
+							<Link
+								className="inline-flex items-center"
+								to="/endpoints/$endpointId/probe"
+								params={{ endpointId: endpoint.endpoint_id }}
+							>
+								<EndpointProbeBar slots={endpoint.probe?.slots ?? []} />
+							</Link>
+						</td>
+						<td className="font-mono text-xs">
+							{endpoint.probe?.latest_latency_ms_p50 ?? "-"}
+						</td>
 						<td className="font-mono text-xs">{endpoint.kind}</td>
 						<td className="font-mono text-xs">{endpoint.node_id}</td>
 						<td className="font-mono text-xs">{endpoint.port}</td>
