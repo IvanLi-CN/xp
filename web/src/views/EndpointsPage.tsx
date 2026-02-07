@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -23,6 +23,7 @@ function formatErrorMessage(error: unknown): string {
 
 export function EndpointsPage() {
 	const adminToken = readAdminToken();
+	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const endpointsQuery = useQuery({
@@ -40,6 +41,10 @@ export function EndpointsPage() {
 			});
 			queryClient.invalidateQueries({
 				queryKey: ["adminEndpoints", adminToken],
+			});
+			navigate({
+				to: "/endpoints/probe/runs/$runId",
+				params: { runId: data.run_id },
 			});
 		},
 		onError: (error) => {

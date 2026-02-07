@@ -283,6 +283,83 @@ struct AdminEndpointProbeRunResponse {
     nodes: Vec<AdminEndpointProbeRunNode>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunProgressStatus {
+    Running,
+    Finished,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminEndpointProbeRunProgress {
+    run_id: String,
+    hour: String,
+    config_hash: String,
+    status: AdminEndpointProbeRunProgressStatus,
+    endpoints_total: usize,
+    endpoints_done: usize,
+    started_at: String,
+    updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointProbeRunStatusResponse {
+    requested_run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requested: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<AdminEndpointProbeRunProgress>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunNodeStatus {
+    Running,
+    Finished,
+    Failed,
+    Busy,
+    NotFound,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunOverallStatus {
+    Running,
+    Finished,
+    Failed,
+    NotFound,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunStatusNode {
+    node_id: String,
+    status: AdminEndpointProbeRunNodeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    progress: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunStatusResponse {
+    run_id: String,
+    status: AdminEndpointProbeRunOverallStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hour: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_hash: Option<String>,
+    nodes: Vec<AdminEndpointProbeRunStatusNode>,
+}
+
 #[derive(Serialize)]
 struct ClusterInfoResponse {
     cluster_id: String,
@@ -555,6 +632,10 @@ pub fn build_router(
         )
         .route("/endpoints/probe/run", post(admin_run_endpoint_probe_run))
         .route(
+            "/endpoints/probe/runs/:run_id",
+            get(admin_get_endpoint_probe_run_status),
+        )
+        .route(
             "/endpoints/:endpoint_id/probe-history",
             get(admin_get_endpoint_probe_history),
         )
@@ -595,6 +676,10 @@ pub fn build_router(
         .route(
             "/_internal/endpoint-probe/run",
             post(admin_internal_endpoint_probe_run),
+        )
+        .route(
+            "/_internal/endpoint-probe/runs/:run_id",
+            get(admin_internal_endpoint_probe_run_status),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -2043,6 +2128,255 @@ async fn admin_run_endpoint_probe_run(
     }))
 }
 
+fn map_probe_run_snapshot(
+    snapshot: crate::endpoint_probe::EndpointProbeRunSnapshot,
+) -> AdminEndpointProbeRunProgress {
+    let status = match snapshot.status {
+        crate::endpoint_probe::EndpointProbeRunStatus::Running => {
+            AdminEndpointProbeRunProgressStatus::Running
+        }
+        crate::endpoint_probe::EndpointProbeRunStatus::Finished => {
+            AdminEndpointProbeRunProgressStatus::Finished
+        }
+        crate::endpoint_probe::EndpointProbeRunStatus::Failed => {
+            AdminEndpointProbeRunProgressStatus::Failed
+        }
+    };
+
+    AdminEndpointProbeRunProgress {
+        run_id: snapshot.run_id,
+        hour: snapshot.hour,
+        config_hash: snapshot.config_hash,
+        status,
+        endpoints_total: snapshot.endpoints_total,
+        endpoints_done: snapshot.endpoints_done,
+        started_at: snapshot.started_at,
+        updated_at: snapshot.updated_at,
+        finished_at: snapshot.finished_at,
+        error: snapshot.error,
+    }
+}
+
+fn map_node_status(
+    run_id: &str,
+    node_id: String,
+    requested: Option<AdminEndpointProbeRunProgress>,
+    current: Option<AdminEndpointProbeRunProgress>,
+    error: Option<String>,
+) -> AdminEndpointProbeRunStatusNode {
+    if let Some(error) = error {
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status: AdminEndpointProbeRunNodeStatus::Unknown,
+            progress: requested,
+            current,
+            error: Some(error),
+        };
+    }
+
+    if let Some(progress) = requested {
+        let status = match progress.status {
+            AdminEndpointProbeRunProgressStatus::Running => {
+                AdminEndpointProbeRunNodeStatus::Running
+            }
+            AdminEndpointProbeRunProgressStatus::Finished => {
+                AdminEndpointProbeRunNodeStatus::Finished
+            }
+            AdminEndpointProbeRunProgressStatus::Failed => AdminEndpointProbeRunNodeStatus::Failed,
+        };
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status,
+            progress: Some(progress),
+            current,
+            error: None,
+        };
+    }
+
+    if let Some(current) = current {
+        if current.run_id != run_id {
+            return AdminEndpointProbeRunStatusNode {
+                node_id,
+                status: AdminEndpointProbeRunNodeStatus::Busy,
+                progress: None,
+                current: Some(current),
+                error: None,
+            };
+        }
+
+        // Requested run is the current run, but snapshot lookup failed for some reason.
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status: AdminEndpointProbeRunNodeStatus::Running,
+            progress: Some(current),
+            current: None,
+            error: None,
+        };
+    }
+
+    AdminEndpointProbeRunStatusNode {
+        node_id,
+        status: AdminEndpointProbeRunNodeStatus::NotFound,
+        progress: None,
+        current: None,
+        error: None,
+    }
+}
+
+async fn admin_get_endpoint_probe_run_status(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<AdminEndpointProbeRunStatusResponse>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+
+    let client = build_cluster_http_client(&state)?;
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the verifier
+    // sees a stripped path like `/_internal/...` (not `/api/admin/...`).
+    let uri: axum::http::Uri = format!("/_internal/endpoint-probe/runs/{run_id}")
+        .parse()
+        .map_err(|_| ApiError::invalid_request("run_id is invalid"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let mut tasks = Vec::new();
+    for node in nodes {
+        let node_id = node.node_id.clone();
+
+        if node_id == local_node_id {
+            let handle = state.endpoint_probe.clone();
+            let run_id = run_id.clone();
+            tasks.push(tokio::spawn(async move {
+                let requested = handle
+                    .run_snapshot(&run_id)
+                    .await
+                    .map(map_probe_run_snapshot);
+                let current = handle
+                    .current_run_snapshot()
+                    .await
+                    .map(map_probe_run_snapshot);
+                map_node_status(&run_id, node_id, requested, current, None)
+            }));
+            continue;
+        }
+
+        let client = client.clone();
+        let sig = sig.clone();
+        let run_id = run_id.clone();
+        let url = format!(
+            "{}/api/admin/_internal/endpoint-probe/runs/{}",
+            node.api_base_url.trim_end_matches('/'),
+            run_id
+        );
+
+        tasks.push(tokio::spawn(async move {
+            let request = client
+                .get(url)
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig,
+                )
+                .send();
+
+            let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
+            let resp = match resp {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    return map_node_status(&run_id, node_id, None, None, Some(err.to_string()));
+                }
+                Err(_) => {
+                    return map_node_status(
+                        &run_id,
+                        node_id,
+                        None,
+                        None,
+                        Some("timeout".to_string()),
+                    );
+                }
+            };
+
+            if !resp.status().is_success() {
+                return map_node_status(
+                    &run_id,
+                    node_id,
+                    None,
+                    None,
+                    Some(format!("http {}", resp.status())),
+                );
+            }
+
+            match resp
+                .json::<AdminInternalEndpointProbeRunStatusResponse>()
+                .await
+            {
+                Ok(out) => map_node_status(&run_id, node_id, out.requested, out.current, None),
+                Err(err) => map_node_status(&run_id, node_id, None, None, Some(err.to_string())),
+            }
+        }));
+    }
+
+    let mut nodes = Vec::new();
+    for item in join_all(tasks).await.into_iter().flatten() {
+        nodes.push(item);
+    }
+    nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+
+    let mut hour = None;
+    let mut config_hash = None;
+    for node in &nodes {
+        if let Some(progress) = node.progress.as_ref() {
+            hour = Some(progress.hour.clone());
+            config_hash = Some(progress.config_hash.clone());
+            break;
+        }
+    }
+
+    let any_running = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Running));
+    let any_failed = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Failed));
+    let any_finished = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Finished));
+    let any_unknown = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Unknown));
+
+    let status = if any_running {
+        AdminEndpointProbeRunOverallStatus::Running
+    } else if any_failed {
+        AdminEndpointProbeRunOverallStatus::Failed
+    } else if any_finished {
+        AdminEndpointProbeRunOverallStatus::Finished
+    } else if any_unknown {
+        AdminEndpointProbeRunOverallStatus::Unknown
+    } else {
+        AdminEndpointProbeRunOverallStatus::NotFound
+    };
+
+    Ok(Json(AdminEndpointProbeRunStatusResponse {
+        run_id,
+        status,
+        hour,
+        config_hash,
+        nodes,
+    }))
+}
+
 async fn admin_internal_endpoint_probe_run(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<AdminInternalEndpointProbeRunRequest>,
@@ -2078,6 +2412,32 @@ async fn admin_internal_endpoint_probe_run(
         already_running: accepted.already_running,
         run_id: req.run_id,
         hour: req.hour,
+    }))
+}
+
+async fn admin_internal_endpoint_probe_run_status(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<AdminInternalEndpointProbeRunStatusResponse>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let requested = state
+        .endpoint_probe
+        .run_snapshot(&run_id)
+        .await
+        .map(map_probe_run_snapshot);
+    let current = state
+        .endpoint_probe
+        .current_run_snapshot()
+        .await
+        .map(map_probe_run_snapshot);
+
+    Ok(Json(AdminInternalEndpointProbeRunStatusResponse {
+        requested_run_id: run_id,
+        requested,
+        current,
     }))
 }
 

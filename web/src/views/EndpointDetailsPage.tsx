@@ -228,7 +228,10 @@ export function EndpointDetailsPage() {
 			queryClient.invalidateQueries({
 				queryKey: ["adminEndpoints", adminToken],
 			});
-			navigate({ to: "/endpoints/$endpointId/probe", params: { endpointId } });
+			navigate({
+				to: "/endpoints/probe/runs/$runId",
+				params: { runId: data.run_id },
+			});
 		},
 		onError: (error) => {
 			pushToast({

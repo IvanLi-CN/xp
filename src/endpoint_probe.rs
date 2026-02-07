@@ -94,6 +94,128 @@ pub struct EndpointProbeRunAccepted {
     pub hour: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointProbeRunStatus {
+    Running,
+    Finished,
+    Failed,
+}
+
+impl EndpointProbeRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EndpointProbeRunSnapshot {
+    pub run_id: String,
+    pub hour: String,
+    pub config_hash: String,
+    pub reason: &'static str,
+    pub status: EndpointProbeRunStatus,
+    pub started_at: String,
+    pub updated_at: String,
+    pub finished_at: Option<String>,
+    pub endpoints_total: usize,
+    pub endpoints_done: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct EndpointProbeRuns {
+    current_run_id: Option<String>,
+    by_id: BTreeMap<String, EndpointProbeRunSnapshot>,
+}
+
+impl EndpointProbeRuns {
+    fn now_key() -> String {
+        Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+    }
+
+    fn begin_run(&mut self, req: &EndpointProbeRunRequest, endpoints_total: usize) {
+        let now = Self::now_key();
+        let run = EndpointProbeRunSnapshot {
+            run_id: req.run_id.clone(),
+            hour: req.hour.clone(),
+            config_hash: req.config_hash.clone(),
+            reason: req.reason,
+            status: EndpointProbeRunStatus::Running,
+            started_at: now.clone(),
+            updated_at: now,
+            finished_at: None,
+            endpoints_total,
+            endpoints_done: 0,
+            error: None,
+        };
+
+        self.current_run_id = Some(req.run_id.clone());
+        self.by_id.insert(req.run_id.clone(), run);
+
+        const MAX_RUNS: usize = 100;
+        while self.by_id.len() > MAX_RUNS {
+            let Some(oldest) = self.by_id.keys().next().cloned() else {
+                break;
+            };
+            // Current run IDs are monotonic ULIDs; the oldest entry should never be the current
+            // one, but keep this robust in case of future ID format changes.
+            if self.current_run_id.as_deref() == Some(oldest.as_str()) {
+                break;
+            }
+            self.by_id.remove(&oldest);
+        }
+    }
+
+    fn mark_endpoint_done(&mut self, run_id: &str) {
+        let Some(run) = self.by_id.get_mut(run_id) else {
+            return;
+        };
+        if run.status != EndpointProbeRunStatus::Running {
+            return;
+        }
+
+        run.endpoints_done = (run.endpoints_done + 1).min(run.endpoints_total);
+        run.updated_at = Self::now_key();
+    }
+
+    fn finish_run(&mut self, run_id: &str, error: Option<String>) {
+        let Some(run) = self.by_id.get_mut(run_id) else {
+            return;
+        };
+
+        run.error = error;
+        run.status = if run.error.is_some() {
+            EndpointProbeRunStatus::Failed
+        } else {
+            EndpointProbeRunStatus::Finished
+        };
+
+        let now = Self::now_key();
+        run.updated_at = now.clone();
+        run.finished_at = Some(now);
+        if run.status == EndpointProbeRunStatus::Finished {
+            run.endpoints_done = run.endpoints_total;
+        }
+
+        if self.current_run_id.as_deref() == Some(run_id) {
+            self.current_run_id = None;
+        }
+    }
+
+    fn get(&self, run_id: &str) -> Option<EndpointProbeRunSnapshot> {
+        self.by_id.get(run_id).cloned()
+    }
+
+    fn get_current(&self) -> Option<EndpointProbeRunSnapshot> {
+        let run_id = self.current_run_id.as_deref()?;
+        self.get(run_id)
+    }
+}
+
 #[derive(Debug)]
 pub enum EndpointProbeError {
     ConfigHashMismatch { expected: String, got: String },
@@ -232,6 +354,7 @@ struct EndpointProbeInner {
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
     run_gate: Arc<Semaphore>,
+    runs: Arc<Mutex<EndpointProbeRuns>>,
     probe_secret: Arc<[u8]>,
 }
 
@@ -288,6 +411,7 @@ pub fn new_endpoint_probe_handle(
             store,
             raft,
             run_gate: Arc::new(Semaphore::new(1)),
+            runs: Arc::new(Mutex::new(EndpointProbeRuns::default())),
             probe_secret: Arc::from(probe_secret.into_bytes()),
         }),
     }
@@ -312,6 +436,15 @@ impl EndpointProbeHandle {
 
         let run_id = req.run_id.clone();
         let hour = req.hour.clone();
+
+        let endpoints_total = {
+            let store = self.inner.store.lock().await;
+            store.list_endpoints().len()
+        };
+        {
+            let mut runs = self.inner.runs.lock().await;
+            runs.begin_run(&req, endpoints_total);
+        }
 
         let inner = self.inner.clone();
         tokio::spawn(async move {
@@ -341,11 +474,45 @@ impl EndpointProbeHandle {
             .await
             .map_err(|_| EndpointProbeError::AlreadyRunning)?;
         let _permit = permit;
+
+        let endpoints_total = {
+            let store = self.inner.store.lock().await;
+            store.list_endpoints().len()
+        };
+        {
+            let mut runs = self.inner.runs.lock().await;
+            runs.begin_run(&req, endpoints_total);
+        }
+
         run_probe_once(self.inner.clone(), req).await
+    }
+
+    pub async fn run_snapshot(&self, run_id: &str) -> Option<EndpointProbeRunSnapshot> {
+        let runs = self.inner.runs.lock().await;
+        runs.get(run_id)
+    }
+
+    pub async fn current_run_snapshot(&self) -> Option<EndpointProbeRunSnapshot> {
+        let runs = self.inner.runs.lock().await;
+        runs.get_current()
     }
 }
 
 async fn run_probe_once(
+    inner: Arc<EndpointProbeInner>,
+    req: EndpointProbeRunRequest,
+) -> Result<(), EndpointProbeError> {
+    let run_id = req.run_id.clone();
+    let out = run_probe_once_inner(inner.clone(), req).await;
+    let error = out.as_ref().err().map(|e| e.to_string());
+    {
+        let mut runs = inner.runs.lock().await;
+        runs.finish_run(&run_id, error);
+    }
+    out
+}
+
+async fn run_probe_once_inner(
     inner: Arc<EndpointProbeInner>,
     req: EndpointProbeRunRequest,
 ) -> Result<(), EndpointProbeError> {
@@ -391,6 +558,7 @@ async fn run_probe_once(
 
     let nodes_by_id = Arc::new(nodes_by_id);
     let probe_secret = Arc::clone(&inner.probe_secret);
+    let runs = Arc::clone(&inner.runs);
 
     for endpoint in endpoints {
         let permit = sem.clone().acquire_owned().await.expect("semaphore");
@@ -398,17 +566,26 @@ async fn run_probe_once(
         let probe_secret = Arc::clone(&probe_secret);
         let config_hash = req.config_hash.clone();
         let run_id = req.run_id.clone();
+        let runs = Arc::clone(&runs);
 
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
-            probe_one_endpoint(
+            let sample = probe_one_endpoint(
                 &run_id,
                 &config_hash,
                 endpoint,
                 probe_secret.as_ref(),
                 nodes_by_id.as_ref(),
             )
-            .await
+            .await;
+
+            // Best-effort progress tracking for the UI.
+            {
+                let mut runs = runs.lock().await;
+                runs.mark_endpoint_done(&run_id);
+            }
+
+            sample
         }));
     }
 

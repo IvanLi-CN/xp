@@ -107,3 +107,102 @@ export async function fetchAdminEndpointProbeHistory(
 	const json: unknown = await res.json();
 	return AdminEndpointProbeHistoryResponseSchema.parse(json);
 }
+
+export const AdminEndpointProbeRunProgressStatusSchema = z.enum([
+	"running",
+	"finished",
+	"failed",
+]);
+
+export type AdminEndpointProbeRunProgressStatus = z.infer<
+	typeof AdminEndpointProbeRunProgressStatusSchema
+>;
+
+export const AdminEndpointProbeRunProgressSchema = z.object({
+	run_id: z.string(),
+	hour: z.string(),
+	config_hash: z.string(),
+	status: AdminEndpointProbeRunProgressStatusSchema,
+	endpoints_total: z.number().int().nonnegative(),
+	endpoints_done: z.number().int().nonnegative(),
+	started_at: z.string(),
+	updated_at: z.string(),
+	finished_at: z.string().optional(),
+	error: z.string().optional(),
+});
+
+export type AdminEndpointProbeRunProgress = z.infer<
+	typeof AdminEndpointProbeRunProgressSchema
+>;
+
+export const AdminEndpointProbeRunNodeStatusSchema = z.enum([
+	"running",
+	"finished",
+	"failed",
+	"busy",
+	"not_found",
+	"unknown",
+]);
+
+export type AdminEndpointProbeRunNodeStatus = z.infer<
+	typeof AdminEndpointProbeRunNodeStatusSchema
+>;
+
+export const AdminEndpointProbeRunOverallStatusSchema = z.enum([
+	"running",
+	"finished",
+	"failed",
+	"not_found",
+	"unknown",
+]);
+
+export type AdminEndpointProbeRunOverallStatus = z.infer<
+	typeof AdminEndpointProbeRunOverallStatusSchema
+>;
+
+export const AdminEndpointProbeRunStatusNodeSchema = z.object({
+	node_id: z.string(),
+	status: AdminEndpointProbeRunNodeStatusSchema,
+	progress: AdminEndpointProbeRunProgressSchema.optional(),
+	current: AdminEndpointProbeRunProgressSchema.optional(),
+	error: z.string().optional(),
+});
+
+export type AdminEndpointProbeRunStatusNode = z.infer<
+	typeof AdminEndpointProbeRunStatusNodeSchema
+>;
+
+export const AdminEndpointProbeRunStatusResponseSchema = z.object({
+	run_id: z.string(),
+	status: AdminEndpointProbeRunOverallStatusSchema,
+	hour: z.string().optional(),
+	config_hash: z.string().optional(),
+	nodes: z.array(AdminEndpointProbeRunStatusNodeSchema),
+});
+
+export type AdminEndpointProbeRunStatusResponse = z.infer<
+	typeof AdminEndpointProbeRunStatusResponseSchema
+>;
+
+export async function fetchAdminEndpointProbeRunStatus(
+	adminToken: string,
+	runId: string,
+	signal?: AbortSignal,
+): Promise<AdminEndpointProbeRunStatusResponse> {
+	const res = await fetch(
+		`/api/admin/endpoints/probe/runs/${encodeURIComponent(runId)}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminEndpointProbeRunStatusResponseSchema.parse(json);
+}

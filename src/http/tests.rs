@@ -3572,3 +3572,52 @@ async fn user_node_quota_status_returns_404_for_missing_user() {
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "not_found");
 }
+
+#[tokio::test]
+async fn endpoint_probe_run_status_shows_progress() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("POST", "/api/admin/endpoints/probe/run"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let started = body_json(res).await;
+    let run_id = started["run_id"].as_str().unwrap().to_string();
+
+    // The probe runner might finish quickly when there are no endpoints. Poll a few times to
+    // avoid flaky timing assumptions.
+    for _ in 0..20 {
+        let res = app
+            .clone()
+            .oneshot(req_authed(
+                "GET",
+                &format!("/api/admin/endpoints/probe/runs/{run_id}"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let status = body_json(res).await;
+
+        assert_eq!(status["run_id"].as_str().unwrap(), run_id);
+        let nodes = status["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0]["node_id"].as_str().unwrap().len() > 0);
+
+        let overall = status["status"].as_str().unwrap();
+        if overall == "finished" || overall == "failed" {
+            let progress = nodes[0]["progress"].as_object().unwrap();
+            assert_eq!(progress["run_id"].as_str().unwrap(), run_id);
+            assert!(progress["hour"].as_str().unwrap().len() > 0);
+            assert!(progress["config_hash"].as_str().unwrap().len() > 0);
+            assert!(progress["updated_at"].as_str().unwrap().len() > 0);
+            return;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    panic!("timeout waiting for endpoint probe run status to finish");
+}

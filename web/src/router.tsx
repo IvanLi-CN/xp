@@ -12,6 +12,7 @@ import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
+import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
 import { EndpointProbeStatsPage } from "./views/EndpointProbeStatsPage";
 import { EndpointsPage } from "./views/EndpointsPage";
 import { GrantGroupDetailsPage } from "./views/GrantGroupDetailsPage";
@@ -89,6 +90,12 @@ const endpointProbeRoute = createRoute({
 	component: EndpointProbeStatsPage,
 });
 
+const endpointProbeRunRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/endpoints/probe/runs/$runId",
+	component: EndpointProbeRunPage,
+});
+
 const usersRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/users",
@@ -139,6 +146,7 @@ const appRouteTree = appRoute.addChildren([
 	endpointNewRoute,
 	endpointDetailsRoute,
 	endpointProbeRoute,
+	endpointProbeRunRoute,
 	usersRoute,
 	userNewRoute,
 	userDetailsRoute,
