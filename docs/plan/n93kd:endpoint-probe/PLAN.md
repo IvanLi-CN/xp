@@ -22,6 +22,7 @@
   - Endpoint list 直接展示：
     - 最新一次探测延迟（ms，canonical target）；
     - 24 格“每小时可用性条”（类似 `||||||||`），可点击进入统计页。
+  - Endpoint list 提供 **Test all now** 按钮，触发一次 **cluster-wide** 的探测（所有 endpoints）。
   - Endpoint details 提供 **Test now** 按钮，触发一次 **cluster-wide** 的探测（所有 endpoints）。
   - 统计页展示 last-24h summaries，并可查看 per-node 样本。
 - Backend：
@@ -92,6 +93,7 @@
   - `degraded`：部分节点成功
   - `down`：全部节点失败
 - Endpoint details 有 **Test now**，点击后触发 cluster-wide probing。
+- Endpoint list 有 **Test all now**，点击后触发 cluster-wide probing。
 - Stats page 能加载并展示某 endpoint 的 last-24h summaries，并可查看某小时的 per-node samples。
 - 对 loopback host 的 endpoint 不发起探测请求，UI 中展示对应错误。
 
@@ -128,3 +130,4 @@
 ## 变更记录 / Change log
 
 - 2026-02-07: 已实现并验证（backend + web + tests），PR #72。
+- 2026-02-07: Endpoint list 增加 Test all now 按钮，便于手动全量触发探测。
