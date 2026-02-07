@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -96,6 +96,11 @@ pub struct PersistedState {
     pub nodes: BTreeMap<String, Node>,
     #[serde(default)]
     pub endpoints: BTreeMap<String, Endpoint>,
+    /// Endpoint probe history (hour buckets, per node).
+    ///
+    /// Keyed by `endpoint_id`.
+    #[serde(default)]
+    pub endpoint_probe_history: BTreeMap<String, EndpointProbeHistory>,
     #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
@@ -110,11 +115,58 @@ impl PersistedState {
             schema_version: SCHEMA_VERSION,
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
+            endpoint_probe_history: BTreeMap::new(),
             users: BTreeMap::new(),
             grants: BTreeMap::new(),
             user_node_quotas: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointProbeHistory {
+    /// Keyed by an hour key like `2026-02-07T12:00:00Z`.
+    #[serde(default)]
+    pub hours: BTreeMap<String, EndpointProbeHour>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointProbeHour {
+    /// Keyed by `node_id`.
+    #[serde(default)]
+    pub by_node: BTreeMap<String, EndpointProbeNodeSample>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointProbeNodeSample {
+    pub ok: bool,
+    pub checked_at: String,
+    #[serde(default)]
+    pub latency_ms: Option<u32>,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub target_url: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// Hash of the probe configuration to ensure cluster-wide consistency.
+    pub config_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointProbeAppendSample {
+    pub endpoint_id: String,
+    pub ok: bool,
+    pub checked_at: String,
+    #[serde(default)]
+    pub latency_ms: Option<u32>,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub target_url: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    pub config_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -428,6 +480,19 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
     Ok(out)
 }
 
+fn migrate_v3_to_v4(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != 3 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for v3->v4 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
+    input.schema_version = SCHEMA_VERSION;
+    Ok(input)
+}
+
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
@@ -596,6 +661,12 @@ pub enum DesiredStateCommand {
         #[serde(default)]
         source: GrantEnabledSource,
     },
+    AppendEndpointProbeSamples {
+        /// Hour bucket key like `2026-02-07T12:00:00Z`.
+        hour: String,
+        from_node_id: String,
+        samples: Vec<EndpointProbeAppendSample>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -709,6 +780,19 @@ impl DesiredStateCommand {
                     .user_node_quotas
                     .retain(|_user_id, nodes| !nodes.is_empty());
 
+                // Cleanup endpoint probe samples for the removed node.
+                for (_endpoint_id, history) in state.endpoint_probe_history.iter_mut() {
+                    for (_hour, bucket) in history.hours.iter_mut() {
+                        bucket.by_node.remove(node_id);
+                    }
+                    history
+                        .hours
+                        .retain(|_hour, bucket| !bucket.by_node.is_empty());
+                }
+                state
+                    .endpoint_probe_history
+                    .retain(|_endpoint_id, history| !history.hours.is_empty());
+
                 Ok(DesiredStateApplyResult::NodeDeleted { deleted: true })
             }
             Self::UpsertEndpoint { endpoint } => {
@@ -720,6 +804,7 @@ impl DesiredStateCommand {
             }
             Self::DeleteEndpoint { endpoint_id } => {
                 let deleted = state.endpoints.remove(endpoint_id).is_some();
+                state.endpoint_probe_history.remove(endpoint_id);
                 Ok(DesiredStateApplyResult::EndpointDeleted { deleted })
             }
             Self::UpsertUser { user } => {
@@ -1097,6 +1182,47 @@ impl DesiredStateCommand {
                     changed: true,
                 })
             }
+            Self::AppendEndpointProbeSamples {
+                hour,
+                from_node_id,
+                samples,
+            } => {
+                for sample in samples {
+                    if !state.endpoints.contains_key(&sample.endpoint_id) {
+                        // Endpoints can be deleted concurrently with a probe run. Ignore samples
+                        // for missing endpoints to keep probing resilient.
+                        continue;
+                    }
+
+                    let history = state
+                        .endpoint_probe_history
+                        .entry(sample.endpoint_id.clone())
+                        .or_default();
+                    let bucket = history.hours.entry(hour.clone()).or_default();
+                    bucket.by_node.insert(
+                        from_node_id.clone(),
+                        EndpointProbeNodeSample {
+                            ok: sample.ok,
+                            checked_at: sample.checked_at.clone(),
+                            latency_ms: sample.latency_ms,
+                            target_id: sample.target_id.clone(),
+                            target_url: sample.target_url.clone(),
+                            error: sample.error.clone(),
+                            config_hash: sample.config_hash.clone(),
+                        },
+                    );
+
+                    // Keep the latest 24 hour buckets to bound Raft state growth.
+                    while history.hours.len() > 24 {
+                        let Some(oldest) = history.hours.keys().next().cloned() else {
+                            break;
+                        };
+                        history.hours.remove(&oldest);
+                    }
+                }
+
+                Ok(DesiredStateApplyResult::Applied)
+            }
         }
     }
 }
@@ -1159,7 +1285,12 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
             match schema_version {
-                3 => (serde_json::from_value(raw)?, false, false),
+                4 => (serde_json::from_value(raw)?, false, false),
+                3 => {
+                    let v3: PersistedState = serde_json::from_value(raw)?;
+                    let v4 = migrate_v3_to_v4(v3)?;
+                    (v4, false, true)
+                }
                 2 | 1 => {
                     let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
                     let v3 = migrate_v2_like_to_v3(v2)?;
