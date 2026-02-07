@@ -1,112 +1,130 @@
-# Endpoint Probe（接入点可用性 / 延迟探测）
+# Endpoint 探测：可用性/延迟（24h）（#n93kd）
 
-## Background
+## 状态
 
-We need a cluster-wide probe mechanism to test **all endpoints** using **HTTPS requests to public fixed-content pages** (e.g. gstatic / Cloudflare), record **real latency**, and present the last **24 hourly slots** in the Admin UI.
+- Status: 已完成
+- Created: 2026-02-07
+- Last: 2026-02-07
 
-Key constraints from requirements:
+## 背景 / 问题陈述
 
-- Probe runs on **all nodes concurrently** (including self-test), using the **same probe configuration**.
-- **No loopback endpoint testing**: do not probe an endpoint via `127.0.0.1` / `localhost` (even for self-test). Always use the endpoint's public `access_host`.
-- Probe user must automatically have permission to use **all endpoints**.
+- 需要一个集群级探测机制：通过 **HTTPS 请求公共固定内容页面**（如 gstatic / Cloudflare）来测试 **所有 endpoints**，记录真实延迟，并在 Admin UI 展示最近 **24 小时**（每小时一格）的可用性。
+- 关键约束：
+  - 探测必须在 **所有节点同时进行**（允许自我测试），且必须使用 **相同的探测配置**（targets/timeouts）。
+  - 不得做本机回环：禁止对 `access_host` 为 `localhost` / `127.0.0.1` / `::1` 的 endpoint 发起探测（记录失败即可）。
+  - `probe` 用户需要自动获得全部 endpoints 的使用权限。
 
-## Goals
+## 目标 / 非目标
 
-- Admin UI:
-  - Endpoint list shows:
-    - latest probe latency (ms) for a canonical target;
-    - a 24-slot hourly availability bar (like `||||||||`), clickable to drill down.
-  - Endpoint details page provides a **Test** button that triggers a **cluster-wide** probe of **all endpoints**.
-  - A dedicated stats page (from the list click) shows last-24h summaries and per-node breakdown.
-- Backend:
-  - Automatic probe runs every hour, producing data for the last 24 hours.
-  - Manual probe run starts probes on **all nodes at (roughly) the same time**.
-  - Probe results are persisted via Raft so the UI can query from the leader.
-- Probe traffic uses a dedicated **probe user** with grants to all endpoints.
+### Goals
 
-## Non-Goals
+- Admin UI：
+  - Endpoint list 直接展示：
+    - 最新一次探测延迟（ms，canonical target）；
+    - 24 格“每小时可用性条”（类似 `||||||||`），可点击进入统计页。
+  - Endpoint details 提供 **Test now** 按钮，触发一次 **cluster-wide** 的探测（所有 endpoints）。
+  - 统计页展示 last-24h summaries，并可查看 per-node 样本。
+- Backend：
+  - 每小时自动探测，保留 24 小时数据。
+  - 支持手动触发，尽量让各节点在同一时刻开始。
+  - 结果通过 Raft 持久化，由 leader 统一对 UI 提供查询。
+- 探测流量使用独立的 `probe` 用户（自动 grants 到所有 endpoints）。
 
-- Long-term retention beyond 24 hours (future extension).
-- Full-blown charting library (keep UI lightweight).
-- Probing via "direct" network path without going through the endpoint proxy.
+### Non-goals
 
-## Scope (In / Out)
+- 不做 24 小时之外的长期留存（未来扩展）。
+- 不引入重型图表库（保持 UI 轻量）。
+- 不做“绕过 endpoint proxy 的直连探测”（探测必须走 endpoint 代理路径）。
 
-### In
+## 范围（Scope）
 
-- Add persisted probe history per endpoint (hourly buckets, last 24).
-- Add internal/system user `probe` and ensure it has grants for all endpoints.
-- Implement probe runner:
-  - uses Xray client-side config to create a local SOCKS proxy;
-  - sends HTTPS requests through the SOCKS proxy to a fixed-content target.
-- Add Admin APIs:
-  - trigger probe run (cluster-wide);
-  - query endpoint probe summaries & detailed history.
-- Web UI changes for list + detail + stats.
+### In scope
 
-### Out
+- 持久化 probe history（per endpoint / per hour / per node；保留 last 24h）。
+- 增加系统用户 `probe`，并确保其对所有 endpoints 都有 grants。
+- 实现探测 runner：
+  - 使用 Xray client config 创建本地 SOCKS；
+  - 通过 SOCKS 对固定内容 target 发起 HTTPS 请求并计时。
+- 增加 Admin APIs：
+  - trigger probe run（cluster-wide）；
+  - query probe summary + history。
+- Web UI：endpoint list + detail + stats 页面改造。
 
-- Exposing probe user credentials to UI.
-- SLA / alerting / notifications (future).
+### Out of scope
 
-## Requirements
+- 在 UI 中暴露 probe 用户的任何凭据。
+- SLA / 告警 / 通知（后续计划）。
+
+## 需求（Requirements）
 
 ### MUST
 
-- All nodes run probes **concurrently**; self-test is allowed.
-- All nodes use **identical probe configuration** (targets + timeouts); manual runs validate a config hash.
-- No loopback endpoint testing:
-  - Reject probing endpoints whose `access_host` is `localhost`/`127.0.0.1`/`::1`.
-  - Self-test still uses `access_host`, not loopback.
-- Probe uses HTTPS requests to public pages with fixed response:
-  - Required: `https://www.gstatic.com/generate_204` (expect `204`).
-  - Optional additional check: `https://www.cloudflare.com/robots.txt` (expect `200` + prefix check).
-- Endpoint list shows:
-  - 24 hourly availability slots;
-  - latest canonical latency (ms).
-- Clicking the availability bar navigates to a stats page with per-hour + per-node details.
-- Probe user automatically gets grants for all endpoints.
+- 所有节点并发运行探测；允许 self-test。
+- 所有节点必须使用 **相同探测配置**；手动触发需校验 `config_hash` 一致性。
+- 不得做本机回环探测：
+  - `access_host` 为 `localhost` / `127.0.0.1` / `::1` 时直接拒绝（记录错误，不发起请求）。
+  - self-test 仍走 `access_host`，不得 special-case 成 loopback。
+- 探测 target 使用 HTTPS 固定响应页面：
+  - Required: `https://www.gstatic.com/generate_204`（期望 `204`，作为 canonical latency）。
+  - Optional: `https://www.cloudflare.com/robots.txt`（期望 `200` + prefix check）。
+- Endpoint list 展示：
+  - 24 格每小时可用性；
+  - 最新 canonical latency（ms）。
+- 点击可用性条进入统计页，并可查看 per-hour + per-node 结果。
+- `probe` 用户自动获得全部 endpoints 的使用权限。
 
 ### SHOULD
 
-- Mark partial outages (some nodes ok, some fail) distinct from total down.
-- Limit per-node probe concurrency to avoid spawning too many Xray processes at once.
-- Ensure one probe run at a time per node (mutex/lock).
+- 将 partial outage（部分节点成功）与 total down 区分展示。
+- 限制每个节点的探测并发，避免一次启动过多 Xray 进程。
+- 每节点同一时刻只允许运行 1 次 probe run（mutex/lock）。
 
-## Acceptance Criteria
+## 验收标准（Acceptance Criteria）
 
-- Given a cluster with N nodes and M endpoints,
-  - When a probe run is triggered (manual or scheduled),
-  - Then each node attempts to probe **every endpoint** using the same config,
-  - And the leader stores the merged results (per endpoint/hour/node) with retention of 24 hours.
-- Endpoint list shows a 24-slot bar where each slot reflects:
-  - `unknown` when missing data,
-  - `up` when all nodes succeeded,
-  - `degraded` when some succeeded,
-  - `down` when none succeeded.
-- Endpoint details page contains a **Test now** button that triggers cluster-wide probing.
-- Stats page loads for an endpoint and shows last-24h summaries + per-node results for a selected hour.
-- Probing does not attempt loopback endpoint hostnames; such endpoints show probe errors instead.
+- Given 集群有 N 个 nodes / M 个 endpoints，
+  When 触发一次 probe run（手动或定时），
+  Then
+  - 每个 node 都会尝试探测每个 endpoint（同配置）；
+  - leader 端可查询到 last-24h 的 merged samples（per endpoint/hour/node）。
+- Endpoint list 的 24 格状态含义：
+  - `unknown`：缺失数据
+  - `up`：所有节点成功
+  - `degraded`：部分节点成功
+  - `down`：全部节点失败
+- Endpoint details 有 **Test now**，点击后触发 cluster-wide probing。
+- Stats page 能加载并展示某 endpoint 的 last-24h summaries，并可查看某小时的 per-node samples。
+- 对 loopback host 的 endpoint 不发起探测请求，UI 中展示对应错误。
 
-## Testing
+## 测试与验证（Testing）
 
-- Rust:
-  - Unit tests for:
-    - hourly bucket pruning (keep last 24);
-    - apply/merge behavior of the new Raft command (no overwrites across nodes);
-    - loopback host rejection logic.
-- Web:
-  - Unit tests for zod schema parsing of probe summary/history.
-  - (Optional) Storybook story for the availability bar + stats page states.
+- Rust：
+  - `cargo test`
+  - 覆盖：
+    - hourly bucket pruning（保留 last 24）
+    - Raft command merge/append 行为（跨 node 不互相覆盖）
+    - loopback host rejection
+- Web：
+  - `cd web && bun run lint`
+  - `cd web && bun run typecheck`
+  - zod schema 覆盖 probe summary/history parsing
 
-## Risks / Open Questions
+## 风险与开放问题
 
-- Requires `xray` binary to be present on nodes for client-side probing.
-  - Mitigation: clear error path when missing; keep probe runner abstracted for future alternatives.
-- Mixed-version clusters may disagree on probe config; manual run should fail-fast on hash mismatch.
+- 依赖节点上存在 `xray` binary 才能执行探测。
+  - 缓解：缺失时记录清晰错误；后续可抽象 runner 以支持替代方案。
+- mixed-version cluster 可能导致 probe config 不一致；手动触发需 fail-fast（hash mismatch）。
 
-## Milestones
+## 里程碑（Milestones）
 
-1. Backend: persisted state + Raft command + APIs for probe summaries/history.
-2. Backend: probe user bootstrap + per-node probe runner + hourly scheduler + internal trigger endpoint.
-3. Web UI: list columns (latency + 24-slot bar) + stats page + detail page "Test" button.
+- [x] M1: Backend persisted state + Raft command + APIs（summary/history）
+- [x] M2: probe 用户 bootstrap + per-node runner + hourly scheduler + internal trigger
+- [x] M3: Web UI：24h bar + latest latency + stats page + detail page Test now
+
+## 交付记录（Delivery）
+
+- PR: #72
+- CI: `ci` / `xray-e2e` / `pr-label-gate` green
+
+## 变更记录 / Change log
+
+- 2026-02-07: 已实现并验证（backend + web + tests），PR #72。
