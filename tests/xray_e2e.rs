@@ -264,6 +264,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config,
@@ -477,6 +478,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config.clone(),

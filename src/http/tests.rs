@@ -109,6 +109,7 @@ fn app_with(
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
 
     let router = build_router(
@@ -971,6 +972,7 @@ async fn follower_admin_write_does_not_redirect() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config,
@@ -2264,6 +2266,7 @@ async fn grant_usage_includes_warning_fields() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config,
@@ -2456,6 +2459,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config,
@@ -2997,6 +3001,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config.clone(),
@@ -3042,6 +3047,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         cluster.node_id.clone(),
         store.clone(),
         raft.clone(),
+        "test-probe-secret".to_string(),
     );
     let app = build_router(
         config,

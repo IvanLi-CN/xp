@@ -1639,7 +1639,9 @@ fn build_endpoint_probe_summary(
     now: chrono::DateTime<Utc>,
     hours: usize,
 ) -> AdminEndpointProbeSummary {
-    let expected_nodes = store.list_nodes().len();
+    let node_ids: std::collections::BTreeSet<String> =
+        store.list_nodes().into_iter().map(|n| n.node_id).collect();
+    let expected_nodes = node_ids.len();
     let history = store.state().endpoint_probe_history.get(endpoint_id);
 
     let now_hour = now
@@ -1673,18 +1675,32 @@ fn build_endpoint_probe_summary(
             continue;
         };
 
-        let sample_count = bucket.by_node.len();
-        let ok_count = bucket.by_node.values().filter(|s| s.ok).count();
+        let sample_count = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .count();
+        let ok_count = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .map(|(_node_id, sample)| sample)
+            .filter(|s| s.ok)
+            .count();
         let (p50, _p95) = compute_latency_p50_p95_ms(
             bucket
                 .by_node
-                .values()
+                .iter()
+                .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+                .map(|(_node_id, sample)| sample)
                 .filter(|s| s.ok)
                 .filter_map(|s| s.latency_ms),
         );
         let checked_at_max = bucket
             .by_node
-            .values()
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .map(|(_node_id, sample)| sample)
             .map(|s| s.checked_at.as_str())
             .max()
             .map(|s| s.to_string());
@@ -1716,7 +1732,9 @@ fn build_endpoint_probe_history_response(
     now: chrono::DateTime<Utc>,
     hours: usize,
 ) -> AdminEndpointProbeHistoryResponse {
-    let expected_nodes = store.list_nodes().len();
+    let node_ids: std::collections::BTreeSet<String> =
+        store.list_nodes().into_iter().map(|n| n.node_id).collect();
+    let expected_nodes = node_ids.len();
     let history = store.state().endpoint_probe_history.get(endpoint_id);
 
     let now_hour = now
@@ -1737,6 +1755,9 @@ fn build_endpoint_probe_history_response(
         let mut by_node = Vec::new();
         if let Some(bucket) = bucket {
             for (node_id, sample) in &bucket.by_node {
+                if !node_ids.contains(node_id.as_str()) {
+                    continue;
+                }
                 by_node.push(AdminEndpointProbeHistoryNode {
                     node_id: node_id.clone(),
                     ok: sample.ok,

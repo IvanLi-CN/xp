@@ -1,7 +1,10 @@
 use std::{collections::BTreeMap, net::IpAddr, sync::Arc, time::Duration};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::future::join_all;
+use hmac::{Hmac, Mac as _};
 use reqwest::Proxy;
 use sha2::{Digest as _, Sha256};
 use tokio::{
@@ -19,8 +22,8 @@ use crate::{
     },
     id::new_ulid_string,
     protocol::{
-        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
-        VlessRealityVisionTcpEndpointMeta, generate_ss2022_psk_b64, ss2022_password,
+        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, SS2022_PSK_LEN_BYTES_AES_128, Ss2022EndpointMeta,
+        VlessRealityVisionTcpEndpointMeta, ss2022_password,
     },
     raft::app::RaftFacade,
     raft::types::ClientResponse,
@@ -30,7 +33,6 @@ use crate::{
 
 const PROBE_USER_ID: &str = "user_probe";
 const PROBE_USER_DISPLAY_NAME: &str = "probe";
-const PROBE_USER_SUBSCRIPTION_TOKEN: &str = "sub_probe";
 const PROBE_GRANT_GROUP_NAME: &str = "probe";
 const PROBE_GRANT_NOTE: &str = "system: probe";
 
@@ -42,6 +44,8 @@ const DEFAULT_CONCURRENCY: usize = 4;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_XRAY_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
 pub struct ProbeTarget {
@@ -184,6 +188,40 @@ pub fn is_loopback_host(host: &str) -> bool {
     false
 }
 
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut mac = HmacSha256::new_from_slice(key).expect("hmac key");
+    mac.update(msg);
+    let tag = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(tag.as_slice());
+    out
+}
+
+fn derive_probe_subscription_token(probe_secret: &[u8]) -> String {
+    // Needs to be unguessable because /api/sub/:token is intentionally unauthenticated.
+    let digest = hmac_sha256(probe_secret, b"xp:probe-user:subscription-token");
+    format!("sub_probe_{}", URL_SAFE_NO_PAD.encode(digest))
+}
+
+fn derive_probe_vless_uuid(probe_secret: &[u8], endpoint_id: &str) -> String {
+    let msg = format!("xp:probe-grant:vless-uuid:{endpoint_id}");
+    let digest = hmac_sha256(probe_secret, msg.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // RFC4122 v4 + variant bits (we only need a stable UUID string, not a specific version).
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
+
+fn derive_probe_ss2022_user_psk_b64(probe_secret: &[u8], endpoint_id: &str) -> String {
+    let msg = format!("xp:probe-grant:ss2022-user-psk:{endpoint_id}");
+    let digest = hmac_sha256(probe_secret, msg.as_bytes());
+    let mut key = [0u8; SS2022_PSK_LEN_BYTES_AES_128];
+    key.copy_from_slice(&digest[..SS2022_PSK_LEN_BYTES_AES_128]);
+    STANDARD.encode(key)
+}
+
 #[derive(Clone)]
 pub struct EndpointProbeHandle {
     inner: Arc<EndpointProbeInner>,
@@ -194,14 +232,16 @@ struct EndpointProbeInner {
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
     run_gate: Arc<Semaphore>,
+    probe_secret: Arc<[u8]>,
 }
 
 pub fn spawn_endpoint_probe_worker(
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
+    probe_secret: String,
 ) -> EndpointProbeHandle {
-    let handle = new_endpoint_probe_handle(local_node_id, store, raft);
+    let handle = new_endpoint_probe_handle(local_node_id, store, raft, probe_secret);
 
     // Hourly auto probe aligned to UTC hour boundaries.
     let worker = handle.clone();
@@ -240,6 +280,7 @@ pub fn new_endpoint_probe_handle(
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
+    probe_secret: String,
 ) -> EndpointProbeHandle {
     EndpointProbeHandle {
         inner: Arc::new(EndpointProbeInner {
@@ -247,6 +288,7 @@ pub fn new_endpoint_probe_handle(
             store,
             raft,
             run_gate: Arc::new(Semaphore::new(1)),
+            probe_secret: Arc::from(probe_secret.into_bytes()),
         }),
     }
 }
@@ -325,7 +367,14 @@ async fn run_probe_once(
         )
     };
 
-    ensure_probe_user_and_grants(&inner.raft, &endpoints, &nodes, &grants).await?;
+    ensure_probe_user_and_grants(
+        &inner.raft,
+        inner.probe_secret.as_ref(),
+        &endpoints,
+        &nodes,
+        &grants,
+    )
+    .await?;
 
     // Refresh grants snapshot to ensure we can resolve credentials for probes.
     let (nodes, grants) = {
@@ -416,6 +465,7 @@ async fn raft_write_best_effort(
 
 async fn ensure_probe_user_and_grants(
     raft: &Arc<dyn RaftFacade>,
+    probe_secret: &[u8],
     endpoints: &[Endpoint],
     nodes: &[crate::domain::Node],
     grants: &[Grant],
@@ -424,7 +474,7 @@ async fn ensure_probe_user_and_grants(
     let user = User {
         user_id: PROBE_USER_ID.to_string(),
         display_name: PROBE_USER_DISPLAY_NAME.to_string(),
-        subscription_token: PROBE_USER_SUBSCRIPTION_TOKEN.to_string(),
+        subscription_token: derive_probe_subscription_token(probe_secret),
         quota_reset: UserQuotaReset::Unlimited {
             tz_offset_minutes: 0,
         },
@@ -451,7 +501,7 @@ async fn ensure_probe_user_and_grants(
             continue;
         }
 
-        let credentials = build_probe_credentials(endpoint, &desired_grant_id)?;
+        let credentials = build_probe_credentials(probe_secret, endpoint, &desired_grant_id)?;
         let grant = Grant {
             grant_id: desired_grant_id,
             group_name: PROBE_GRANT_GROUP_NAME.to_string(),
@@ -471,13 +521,14 @@ async fn ensure_probe_user_and_grants(
 }
 
 fn build_probe_credentials(
+    probe_secret: &[u8],
     endpoint: &Endpoint,
     grant_id: &str,
 ) -> Result<GrantCredentials, EndpointProbeError> {
     match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => Ok(GrantCredentials {
             vless: Some(VlessCredentials {
-                uuid: uuid::Uuid::new_v4().to_string(),
+                uuid: derive_probe_vless_uuid(probe_secret, &endpoint.endpoint_id),
                 email: format!("grant:{grant_id}"),
             }),
             ss2022: None,
@@ -489,8 +540,8 @@ fn build_probe_credentials(
                         message: e.to_string(),
                     }
                 })?;
-            let mut rng = rand::rngs::OsRng;
-            let user_psk_b64 = generate_ss2022_psk_b64(&mut rng);
+            let user_psk_b64 =
+                derive_probe_ss2022_user_psk_b64(probe_secret, &endpoint.endpoint_id);
             Ok(GrantCredentials {
                 vless: None,
                 ss2022: Some(Ss2022Credentials {
@@ -728,11 +779,12 @@ async fn probe_via_xray_socks(
         message: format!("create temp dir: {e}"),
     })?;
     let config_path = tmp_dir.join("config.json");
-    std::fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).map_err(|e| {
-        EndpointProbeError::XrayFailed {
+    if let Err(e) = std::fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()) {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(EndpointProbeError::XrayFailed {
             message: format!("write xray config: {e}"),
-        }
-    })?;
+        });
+    }
 
     let mut child = match Command::new(&xray_bin)
         .arg("run")
@@ -744,9 +796,11 @@ async fn probe_via_xray_socks(
     {
         Ok(child) => child,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err(EndpointProbeError::XrayNotFound);
         }
         Err(err) => {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err(EndpointProbeError::XrayFailed {
                 message: format!("spawn xray: {err}"),
             });
@@ -758,6 +812,8 @@ async fn probe_via_xray_socks(
     loop {
         if started.elapsed() > DEFAULT_XRAY_STARTUP_TIMEOUT {
             let _ = child.kill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err(EndpointProbeError::XrayFailed {
                 message: "xray socks startup timeout".to_string(),
             });
@@ -769,17 +825,33 @@ async fn probe_via_xray_socks(
     }
 
     let proxy_url = format!("socks5h://127.0.0.1:{socks_port}");
-    let proxy = Proxy::all(&proxy_url).map_err(|e| EndpointProbeError::Reqwest {
-        message: e.to_string(),
-    })?;
-    let client = reqwest::Client::builder()
+    let proxy = match Proxy::all(&proxy_url) {
+        Ok(proxy) => proxy,
+        Err(err) => {
+            let _ = child.kill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(EndpointProbeError::Reqwest {
+                message: err.to_string(),
+            });
+        }
+    };
+    let client = match reqwest::Client::builder()
         .proxy(proxy)
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
         .timeout(DEFAULT_REQUEST_TIMEOUT)
         .build()
-        .map_err(|e| EndpointProbeError::Reqwest {
-            message: e.to_string(),
-        })?;
+    {
+        Ok(client) => client,
+        Err(err) => {
+            let _ = child.kill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(EndpointProbeError::Reqwest {
+                message: err.to_string(),
+            });
+        }
+    };
 
     let mut canonical_latency_ms: Option<u32> = None;
     let mut canonical_target_id: Option<String> = None;
@@ -796,14 +868,13 @@ async fn probe_via_xray_socks(
                 if resp.status().as_u16() != target.expected_status {
                     false
                 } else if let Some(prefix) = target.expected_body_prefix {
-                    let bytes = resp
-                        .bytes()
-                        .await
-                        .map_err(|e| EndpointProbeError::Reqwest {
-                            message: e.to_string(),
-                        })?;
-                    let s = String::from_utf8_lossy(&bytes);
-                    s.starts_with(prefix)
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            let s = String::from_utf8_lossy(&bytes);
+                            s.starts_with(prefix)
+                        }
+                        Err(_) => false,
+                    }
                 } else {
                     true
                 }
@@ -849,6 +920,7 @@ async fn probe_via_xray_socks(
     };
 
     let _ = child.kill().await;
+    let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
     let _ = std::fs::remove_dir_all(&tmp_dir);
     Ok(out)
 }

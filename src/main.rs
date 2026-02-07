@@ -261,10 +261,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         raft_facade.clone(),
     );
 
+    let probe_secret = cluster_ca_key_pem
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("cluster ca key is not available on this node"))?;
     let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(
         cluster.node_id.clone(),
         store.clone(),
         raft_facade.clone(),
+        probe_secret,
     );
 
     let app = xp::http::build_router(

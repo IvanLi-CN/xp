@@ -316,6 +316,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         cluster.node_id.clone(),
         leader_store.clone(),
         raft_facade.clone(),
+        "test-probe-secret".to_string(),
     );
     let router = build_router(
         config,
