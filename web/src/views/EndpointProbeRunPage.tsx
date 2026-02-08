@@ -258,9 +258,7 @@ export function EndpointProbeRunPage() {
 			<ResourceTable
 				headers={[
 					{ key: "endpoint", label: "Endpoint" },
-					{ key: "status", label: "Status (this hour)" },
-					{ key: "latency", label: "Latency (p50 ms)" },
-					{ key: "checkedAt", label: "Checked at" },
+					{ key: "result", label: "Result" },
 				]}
 			>
 				{endpoints.map((endpoint) => {
@@ -276,6 +274,8 @@ export function EndpointProbeRunPage() {
 						null;
 					const checkedAt =
 						hourSlot?.checked_at ?? endpoint.probe?.latest_checked_at ?? null;
+
+					const resultTooltip = checkedAt ? `Checked at: ${checkedAt}` : undefined;
 					return (
 						<tr key={endpoint.endpoint_id}>
 							<td className="space-y-1">
@@ -297,14 +297,18 @@ export function EndpointProbeRunPage() {
 									View stats
 								</Link>
 							</td>
-							<td>
-								<span className={endpointStatusBadgeClass(hourStatus)}>
-									{endpointStatusLabel(hourStatus)}
-								</span>
-							</td>
-							<td className="font-mono text-xs">{latencyMs ?? "-"}</td>
-							<td className="font-mono text-xs opacity-70">
-								{checkedAt ?? "-"}
+							<td title={resultTooltip}>
+								<div className="flex flex-wrap items-center gap-2">
+									<span className={endpointStatusBadgeClass(hourStatus)}>
+										{endpointStatusLabel(hourStatus)}
+									</span>
+									<span className="font-mono text-xs">
+										{latencyMs ?? "-"}{" "}
+										{typeof latencyMs === "number" ? (
+											<span className="opacity-70">ms</span>
+										) : null}
+									</span>
+								</div>
 							</td>
 						</tr>
 					);
