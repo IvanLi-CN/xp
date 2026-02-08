@@ -271,7 +271,9 @@ export function EndpointProbeRunPage() {
 							: null;
 					const hourStatus: EndpointProbeStatus = hourSlot?.status ?? "missing";
 					const latencyMs =
-						hourSlot?.latency_ms_p50 ?? endpoint.probe?.latest_latency_ms_p50 ?? null;
+						hourSlot?.latency_ms_p50 ??
+						endpoint.probe?.latest_latency_ms_p50 ??
+						null;
 					const checkedAt =
 						hourSlot?.checked_at ?? endpoint.probe?.latest_checked_at ?? null;
 					return (
@@ -300,9 +302,7 @@ export function EndpointProbeRunPage() {
 									{endpointStatusLabel(hourStatus)}
 								</span>
 							</td>
-							<td className="font-mono text-xs">
-								{latencyMs ?? "-"}
-							</td>
+							<td className="font-mono text-xs">{latencyMs ?? "-"}</td>
 							<td className="font-mono text-xs opacity-70">
 								{checkedAt ?? "-"}
 							</td>
