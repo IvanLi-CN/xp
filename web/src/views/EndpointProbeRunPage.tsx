@@ -275,7 +275,9 @@ export function EndpointProbeRunPage() {
 					const checkedAt =
 						hourSlot?.checked_at ?? endpoint.probe?.latest_checked_at ?? null;
 
-					const resultTooltip = checkedAt ? `Checked at: ${checkedAt}` : undefined;
+					const resultTooltip = checkedAt
+						? `Checked at: ${checkedAt}`
+						: undefined;
 					return (
 						<tr key={endpoint.endpoint_id}>
 							<td className="space-y-1">
