@@ -137,3 +137,4 @@
 - 2026-02-07: Endpoint list 增加 Test all now 按钮，便于手动全量触发探测。
 - 2026-02-07: 手动触发后跳转到 run 详情页，展示 per-node 探测进度。
 - 2026-02-08: run 详情页增加 per-endpoint 延迟列表（p50, ms），运行中自动刷新。
+- 2026-02-08: run 详情页调整为 endpoints 优先展示；node runner 进度移至折叠区。
