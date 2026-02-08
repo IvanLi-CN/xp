@@ -21,6 +21,8 @@ export type EndpointProbeStatus = z.infer<typeof EndpointProbeStatusSchema>;
 export const AdminEndpointProbeSlotSchema = z.object({
 	hour: z.string(),
 	status: EndpointProbeStatusSchema,
+	checked_at: z.string().optional(),
+	latency_ms_p50: z.number().int().nonnegative().optional(),
 });
 
 export type AdminEndpointProbeSlot = z.infer<

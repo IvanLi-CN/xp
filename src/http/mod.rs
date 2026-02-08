@@ -192,6 +192,10 @@ enum EndpointProbeStatus {
 struct AdminEndpointProbeSlot {
     hour: String,
     status: EndpointProbeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms_p50: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1791,6 +1795,8 @@ fn build_endpoint_probe_summary(
             slots.push(AdminEndpointProbeSlot {
                 hour: hour_key,
                 status: EndpointProbeStatus::Missing,
+                checked_at: None,
+                latency_ms_p50: None,
             });
             continue;
         };
@@ -1799,6 +1805,8 @@ fn build_endpoint_probe_summary(
             slots.push(AdminEndpointProbeSlot {
                 hour: hour_key,
                 status: EndpointProbeStatus::Missing,
+                checked_at: None,
+                latency_ms_p50: None,
             });
             continue;
         };
@@ -1837,13 +1845,15 @@ fn build_endpoint_probe_summary(
 
         // Iterate oldest -> newest. Keep the last seen as the "latest".
         if sample_count > 0 {
-            latest_checked_at = checked_at_max;
+            latest_checked_at = checked_at_max.clone();
             latest_latency_ms_p50 = p50;
         }
 
         slots.push(AdminEndpointProbeSlot {
             hour: hour_key,
             status,
+            checked_at: checked_at_max,
+            latency_ms_p50: p50,
         });
     }
 
