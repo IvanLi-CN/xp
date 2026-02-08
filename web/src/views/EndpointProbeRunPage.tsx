@@ -5,6 +5,10 @@ import {
 	type AdminEndpointProbeRunNodeStatus,
 	fetchAdminEndpointProbeRunStatus,
 } from "../api/adminEndpointProbes";
+import {
+	type EndpointProbeStatus,
+	fetchAdminEndpoints,
+} from "../api/adminEndpoints";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
@@ -55,6 +59,32 @@ function statusLabel(status: AdminEndpointProbeRunNodeStatus): string {
 	}
 }
 
+function endpointStatusBadgeClass(status: EndpointProbeStatus): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success";
+		case "degraded":
+			return "badge badge-warning";
+		case "down":
+			return "badge badge-error";
+		case "missing":
+			return "badge badge-neutral";
+	}
+}
+
+function endpointStatusLabel(status: EndpointProbeStatus): string {
+	switch (status) {
+		case "up":
+			return "Up";
+		case "degraded":
+			return "Degraded";
+		case "down":
+			return "Down";
+		case "missing":
+			return "Missing";
+	}
+}
+
 export function EndpointProbeRunPage() {
 	const { runId } = useParams({ from: "/app/endpoints/probe/runs/$runId" });
 	const navigate = useNavigate();
@@ -67,6 +97,14 @@ export function EndpointProbeRunPage() {
 			fetchAdminEndpointProbeRunStatus(adminToken, runId, signal),
 		refetchInterval: (query) =>
 			query.state.data?.status === "running" ? 1000 : false,
+	});
+
+	const endpointsQuery = useQuery({
+		queryKey: ["adminEndpoints", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
+		refetchInterval: () =>
+			statusQuery.data?.status === "running" ? 2000 : false,
 	});
 
 	if (adminToken.length === 0) {
@@ -95,8 +133,11 @@ export function EndpointProbeRunPage() {
 			</Button>
 			<Button
 				variant="secondary"
-				loading={statusQuery.isFetching}
-				onClick={() => statusQuery.refetch()}
+				loading={statusQuery.isFetching || endpointsQuery.isFetching}
+				onClick={() => {
+					statusQuery.refetch();
+					endpointsQuery.refetch();
+				}}
 			>
 				Refresh
 			</Button>
@@ -186,6 +227,88 @@ export function EndpointProbeRunPage() {
 						? "Unknown"
 						: "Not found";
 
+	const resultsContent = (() => {
+		if (endpointsQuery.isLoading) {
+			return (
+				<div className="text-sm opacity-70">
+					Loading endpoint results (latency)...
+				</div>
+			);
+		}
+
+		if (endpointsQuery.isError) {
+			return (
+				<div className="text-sm text-error">
+					Failed to load endpoint results:{" "}
+					{formatErrorMessage(endpointsQuery.error)}
+				</div>
+			);
+		}
+
+		const endpoints = endpointsQuery.data?.items ?? [];
+		if (endpoints.length === 0) {
+			return (
+				<div className="text-sm opacity-70">
+					No endpoints found for this cluster.
+				</div>
+			);
+		}
+
+		return (
+			<ResourceTable
+				headers={[
+					{ key: "endpoint", label: "Endpoint" },
+					{ key: "status", label: "Status (this hour)" },
+					{ key: "latency", label: "Latency (p50 ms)" },
+					{ key: "checkedAt", label: "Checked at" },
+				]}
+			>
+				{endpoints.map((endpoint) => {
+					const hourSlot =
+						data.hour && endpoint.probe?.slots
+							? (endpoint.probe.slots.find((slot) => slot.hour === data.hour) ??
+								null)
+							: null;
+					const hourStatus: EndpointProbeStatus = hourSlot?.status ?? "missing";
+					return (
+						<tr key={endpoint.endpoint_id}>
+							<td className="space-y-1">
+								<Link
+									className="link link-primary font-mono text-xs"
+									to="/endpoints/$endpointId"
+									params={{ endpointId: endpoint.endpoint_id }}
+								>
+									{endpoint.tag}
+								</Link>
+								<div className="font-mono text-xs opacity-70">
+									{endpoint.endpoint_id}
+								</div>
+								<Link
+									className="link link-secondary text-xs"
+									to="/endpoints/$endpointId/probe"
+									params={{ endpointId: endpoint.endpoint_id }}
+								>
+									View stats
+								</Link>
+							</td>
+							<td>
+								<span className={endpointStatusBadgeClass(hourStatus)}>
+									{endpointStatusLabel(hourStatus)}
+								</span>
+							</td>
+							<td className="font-mono text-xs">
+								{endpoint.probe?.latest_latency_ms_p50 ?? "-"}
+							</td>
+							<td className="font-mono text-xs opacity-70">
+								{endpoint.probe?.latest_checked_at ?? "-"}
+							</td>
+						</tr>
+					);
+				})}
+			</ResourceTable>
+		);
+	})();
+
 	return (
 		<div className="space-y-6">
 			<PageHeader
@@ -272,6 +395,17 @@ export function EndpointProbeRunPage() {
 					);
 				})}
 			</ResourceTable>
+
+			<div className="card bg-base-100 shadow">
+				<div className="card-body space-y-4">
+					<h2 className="card-title">Latency (live)</h2>
+					<p className="text-sm opacity-70">
+						Latency results are aggregated from node samples as they are
+						reported.
+					</p>
+					{resultsContent}
+				</div>
+			</div>
 		</div>
 	);
 }

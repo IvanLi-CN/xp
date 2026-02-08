@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-02-07
-- Last: 2026-02-07
+- Last: 2026-02-08
 
 ## 背景 / 问题陈述
 
@@ -25,6 +25,7 @@
   - Endpoint list 提供 **Test all now** 按钮，触发一次 **cluster-wide** 的探测（所有 endpoints）。
   - Endpoint details 提供 **Test now** 按钮，触发一次 **cluster-wide** 的探测（所有 endpoints）。
   - 手动触发后跳转到一次 run 的详情页，展示 per-node 进度（运行中自动刷新）。
+  - run 详情页同时展示 per-endpoint 延迟（p50, ms），并在运行中随数据写入自动刷新。
   - 统计页展示 last-24h summaries，并可查看 per-node 样本。
 - Backend：
   - 每小时自动探测，保留 24 小时数据。
@@ -96,6 +97,7 @@
 - Endpoint details 有 **Test now**，点击后触发 cluster-wide probing。
 - Endpoint list 有 **Test all now**，点击后触发 cluster-wide probing。
 - 手动触发后有 run 详情页可查看进度，直到完成。
+- run 详情页展示每个 endpoint 的 p50 latency（ms）与该小时 bucket 状态，运行中自动刷新。
 - Stats page 能加载并展示某 endpoint 的 last-24h summaries，并可查看某小时的 per-node samples。
 - 对 loopback host 的 endpoint 不发起探测请求，UI 中展示对应错误。
 
@@ -134,3 +136,4 @@
 - 2026-02-07: 已实现并验证（backend + web + tests），PR #72。
 - 2026-02-07: Endpoint list 增加 Test all now 按钮，便于手动全量触发探测。
 - 2026-02-07: 手动触发后跳转到 run 详情页，展示 per-node 探测进度。
+- 2026-02-08: run 详情页增加 per-endpoint 延迟列表（p50, ms），运行中自动刷新。
