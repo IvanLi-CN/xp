@@ -231,7 +231,7 @@ export function EndpointProbeRunPage() {
 		if (endpointsQuery.isLoading) {
 			return (
 				<div className="text-sm opacity-70">
-					Loading endpoint results (latency)...
+					Loading endpoint results (status/latency)...
 				</div>
 			);
 		}
@@ -313,11 +313,68 @@ export function EndpointProbeRunPage() {
 		);
 	})();
 
+	const nodeRunnersContent = (
+		<ResourceTable
+			headers={[
+				{ key: "node", label: "Node" },
+				{ key: "status", label: "Status" },
+				{ key: "progress", label: "Progress" },
+				{ key: "updated", label: "Updated" },
+				{ key: "error", label: "Error" },
+			]}
+		>
+			{data.nodes.map((node) => {
+				const progress = node.progress;
+				const done = progress?.endpoints_done ?? 0;
+				const total = progress?.endpoints_total ?? 0;
+
+				const progressLabel = progress
+					? `${done}/${total}`
+					: node.status === "busy" && node.current
+						? `busy: ${node.current.run_id}`
+						: "-";
+
+				const progressMax = total > 0 ? total : 1;
+				const error =
+					node.error ??
+					node.progress?.error ??
+					(node.status === "failed" ? "-" : "");
+
+				return (
+					<tr key={node.node_id}>
+						<td className="font-mono text-xs">{node.node_id}</td>
+						<td>
+							<span className={statusBadgeClass(node.status)}>
+								{statusLabel(node.status)}
+							</span>
+						</td>
+						<td className="min-w-48">
+							<div className="space-y-1">
+								<div className="font-mono text-xs opacity-70">
+									{progressLabel}
+								</div>
+								<progress
+									className="progress progress-primary"
+									value={done}
+									max={progressMax}
+								/>
+							</div>
+						</td>
+						<td className="font-mono text-xs opacity-70">
+							{progress?.updated_at ?? "-"}
+						</td>
+						<td className="font-mono text-xs text-error">{error || "-"}</td>
+					</tr>
+				);
+			})}
+		</ResourceTable>
+	);
+
 	return (
 		<div className="space-y-6">
 			<PageHeader
 				title="Endpoint probe run"
-				description="Cluster-wide probe progress across nodes."
+				description="Cluster-wide endpoint test progress."
 				meta={
 					<div className="flex flex-wrap items-center gap-2">
 						<span className={overallBadgeClass}>{overallLabel}</span>
@@ -345,71 +402,23 @@ export function EndpointProbeRunPage() {
 				</div>
 			</div>
 
-			<ResourceTable
-				headers={[
-					{ key: "node", label: "Node" },
-					{ key: "status", label: "Status" },
-					{ key: "progress", label: "Progress" },
-					{ key: "updated", label: "Updated" },
-					{ key: "error", label: "Error" },
-				]}
-			>
-				{data.nodes.map((node) => {
-					const progress = node.progress;
-					const done = progress?.endpoints_done ?? 0;
-					const total = progress?.endpoints_total ?? 0;
-
-					const progressLabel = progress
-						? `${done}/${total}`
-						: node.status === "busy" && node.current
-							? `busy: ${node.current.run_id}`
-							: "-";
-
-					const progressMax = total > 0 ? total : 1;
-					const error =
-						node.error ??
-						node.progress?.error ??
-						(node.status === "failed" ? "-" : "");
-
-					return (
-						<tr key={node.node_id}>
-							<td className="font-mono text-xs">{node.node_id}</td>
-							<td>
-								<span className={statusBadgeClass(node.status)}>
-									{statusLabel(node.status)}
-								</span>
-							</td>
-							<td className="min-w-48">
-								<div className="space-y-1">
-									<div className="font-mono text-xs opacity-70">
-										{progressLabel}
-									</div>
-									<progress
-										className="progress progress-primary"
-										value={done}
-										max={progressMax}
-									/>
-								</div>
-							</td>
-							<td className="font-mono text-xs opacity-70">
-								{progress?.updated_at ?? "-"}
-							</td>
-							<td className="font-mono text-xs text-error">{error || "-"}</td>
-						</tr>
-					);
-				})}
-			</ResourceTable>
-
 			<div className="card bg-base-100 shadow">
 				<div className="card-body space-y-4">
-					<h2 className="card-title">Latency (live)</h2>
+					<h2 className="card-title">Endpoints (live)</h2>
 					<p className="text-sm opacity-70">
-						Latency results are aggregated from node samples as they are
-						reported.
+						This run tests endpoints. Status/latency is aggregated from node
+						samples as they are reported.
 					</p>
 					{resultsContent}
 				</div>
 			</div>
+
+			<details className="collapse collapse-arrow border border-base-300 bg-base-100 shadow-sm">
+				<summary className="collapse-title text-sm font-medium">
+					Node runners (progress)
+				</summary>
+				<div className="collapse-content pt-0">{nodeRunnersContent}</div>
+			</details>
 		</div>
 	);
 }
