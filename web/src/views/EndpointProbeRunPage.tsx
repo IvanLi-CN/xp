@@ -98,6 +98,23 @@ function endpointStatusLabel(status: EndpointProbeStatus): string {
 
 type NodeRunner = AdminEndpointProbeRunStatusResponse["nodes"][number];
 
+type HasUpdatedAt = { updated_at: string };
+
+function pickNewestByUpdatedAt<T extends HasUpdatedAt>(
+	a: T | undefined,
+	b: T | undefined,
+): T | undefined {
+	if (!a) return b;
+	if (!b) return a;
+
+	const aTs = Date.parse(a.updated_at);
+	const bTs = Date.parse(b.updated_at);
+	if (Number.isNaN(aTs) || Number.isNaN(bTs)) {
+		return a.updated_at >= b.updated_at ? a : b;
+	}
+	return aTs >= bTs ? a : b;
+}
+
 function percentile(values: number[], p: number): number | null {
 	if (values.length === 0) return null;
 	const sorted = [...values].sort((a, b) => a - b);
@@ -158,8 +175,8 @@ export function EndpointProbeRunPage() {
 				const existing = prev[node.node_id];
 				next[node.node_id] = {
 					...node,
-					progress: existing?.progress ?? node.progress,
-					current: existing?.current ?? node.current,
+					progress: pickNewestByUpdatedAt(existing?.progress, node.progress),
+					current: pickNewestByUpdatedAt(existing?.current, node.current),
 				};
 			}
 			return next;
