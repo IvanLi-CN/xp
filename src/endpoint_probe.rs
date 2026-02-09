@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, net::IpAddr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, net::IpAddr, path::Path, sync::Arc, time::Duration};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -982,11 +982,11 @@ async fn probe_via_xray_socks(
 
     let tmp_dir =
         std::env::temp_dir().join(format!("xp-endpoint-probe-{run_id}-{}", new_ulid_string()));
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| EndpointProbeError::XrayFailed {
+    create_private_dir(&tmp_dir).map_err(|e| EndpointProbeError::XrayFailed {
         message: format!("create temp dir: {e}"),
     })?;
     let config_path = tmp_dir.join("config.json");
-    if let Err(e) = std::fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()) {
+    if let Err(e) = write_private_file(&config_path, &serde_json::to_vec_pretty(&config).unwrap()) {
         let _ = std::fs::remove_dir_all(&tmp_dir);
         return Err(EndpointProbeError::XrayFailed {
             message: format!("write xray config: {e}"),
@@ -1130,4 +1130,73 @@ async fn probe_via_xray_socks(
     let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
     let _ = std::fs::remove_dir_all(&tmp_dir);
     Ok(out)
+}
+
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700).create(path)
+    }
+
+    #[cfg(not(unix))]
+    std::fs::create_dir(path)
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(bytes)?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    std::fs::write(path, bytes)
+}
+
+#[cfg(test)]
+mod private_tmp_tests {
+    use super::{create_private_dir, write_private_file};
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn probe_temp_files_are_not_world_readable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("xp-probe-perm-test");
+
+        create_private_dir(&dir).expect("create private dir");
+
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&dir)
+                .expect("dir meta")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700, "dir mode should be 0700");
+        }
+
+        let file = dir.join("config.json");
+        write_private_file(&file, b"{}").expect("write private file");
+
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&file)
+                .expect("file meta")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "file mode should be 0600");
+        }
+    }
 }
