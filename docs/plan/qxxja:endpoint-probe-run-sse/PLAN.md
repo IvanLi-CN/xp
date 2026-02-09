@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-08
-- Last: 2026-02-08
+- Last: 2026-02-09
 
 ## 背景 / 问题陈述
 
@@ -75,6 +75,10 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: Backend SSE（internal events + cluster fan-out）
-- [ ] M2: Web run 页 SSE client + UI 精简
-- [ ] M3: Compose seed 补齐 endpoints kinds
+- [x] M1: Backend SSE（internal events + cluster fan-out）
+- [x] M2: Web run 页 SSE client + UI 精简
+- [x] M3: Compose seed 补齐 endpoints kinds
+
+## 交付记录（Delivery）
+
+- PR: #72
