@@ -4,10 +4,28 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 compose() {
+  extra="${XP_APXDG_COMPOSE_EXTRA_FILE:-}"
+  project="${XP_APXDG_COMPOSE_PROJECT:-}"
   if docker compose version >/dev/null 2>&1; then
-    docker compose -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    if [ -n "$project" ] && [ -n "$extra" ]; then
+      docker compose -p "$project" -f "$SCRIPT_DIR/docker-compose.yml" -f "$extra" "$@"
+    elif [ -n "$project" ]; then
+      docker compose -p "$project" -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    elif [ -n "$extra" ]; then
+      docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$extra" "$@"
+    else
+      docker compose -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    fi
   else
-    docker-compose -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    if [ -n "$project" ] && [ -n "$extra" ]; then
+      docker-compose -p "$project" -f "$SCRIPT_DIR/docker-compose.yml" -f "$extra" "$@"
+    elif [ -n "$project" ]; then
+      docker-compose -p "$project" -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    elif [ -n "$extra" ]; then
+      docker-compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$extra" "$@"
+    else
+      docker-compose -f "$SCRIPT_DIR/docker-compose.yml" "$@"
+    fi
   fi
 }
 
@@ -356,6 +374,24 @@ print(pick("https://xp2:"))
 '
 	  )"
 
+  node3_id="$(
+    printf '%s' "$nodes_json" | python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+items = obj["items"]
+
+def pick(prefix: str) -> str:
+    for n in items:
+        if n["api_base_url"].startswith(prefix):
+            return n["node_id"]
+    raise SystemExit("node not found for prefix: %s" % prefix)
+
+print(pick("https://xp3:"))
+'
+	  )"
+
   endpoints_list="$(
     compose exec -T xp1-app curl -fsS \
       --cacert /data/cluster/cluster_ca.pem \
@@ -395,6 +431,17 @@ print("")
       https://xp1:6443/api/admin/endpoints
   }
 
+  create_vless_endpoint() {
+    node_id="$1"
+    port="$2"
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{\"node_id\":\"${node_id}\",\"kind\":\"vless_reality_vision_tcp\",\"port\":${port},\"reality\":{\"dest\":\"www.cloudflare.com:443\",\"server_names\":[\"www.cloudflare.com\"],\"fingerprint\":\"chrome\"}}" \
+      https://xp1:6443/api/admin/endpoints
+  }
+
   kind="ss2022_2022_blake3_aes_128_gcm"
   e1="$(find_endpoint_id "$node1_id" 31081 "$kind")"
   if [ -z "$e1" ]; then e1="$(create_endpoint "$node1_id" 31081 | json_get endpoint_id)"; fi
@@ -404,6 +451,20 @@ print("")
   if [ -z "$e3" ]; then e3="$(create_endpoint "$node2_id" 31083 | json_get endpoint_id)"; fi
   e4="$(find_endpoint_id "$node2_id" 31084 "$kind")"
   if [ -z "$e4" ]; then e4="$(create_endpoint "$node2_id" 31084 | json_get endpoint_id)"; fi
+  e5="$(find_endpoint_id "$node3_id" 31085 "$kind")"
+  if [ -z "$e5" ]; then e5="$(create_endpoint "$node3_id" 31085 | json_get endpoint_id)"; fi
+
+  vless_kind="vless_reality_vision_tcp"
+  v1="$(find_endpoint_id "$node1_id" 32081 "$vless_kind")"
+  if [ -z "$v1" ]; then v1="$(create_vless_endpoint "$node1_id" 32081 | json_get endpoint_id)"; fi
+  v2="$(find_endpoint_id "$node1_id" 32082 "$vless_kind")"
+  if [ -z "$v2" ]; then v2="$(create_vless_endpoint "$node1_id" 32082 | json_get endpoint_id)"; fi
+  v3="$(find_endpoint_id "$node2_id" 32083 "$vless_kind")"
+  if [ -z "$v3" ]; then v3="$(create_vless_endpoint "$node2_id" 32083 | json_get endpoint_id)"; fi
+  v4="$(find_endpoint_id "$node2_id" 32084 "$vless_kind")"
+  if [ -z "$v4" ]; then v4="$(create_vless_endpoint "$node2_id" 32084 | json_get endpoint_id)"; fi
+  v5="$(find_endpoint_id "$node3_id" 32085 "$vless_kind")"
+  if [ -z "$v5" ]; then v5="$(create_vless_endpoint "$node3_id" 32085 | json_get endpoint_id)"; fi
 
   group_name="apxdg"
   if compose exec -T xp1-app curl -fsS \
@@ -441,7 +502,7 @@ print("")
       https://xp1:6443/api/admin/grant-groups >/dev/null
   fi
 
-  echo "seed ok (user=alice, 4 endpoints, 4 grants in group=\"${group_name}\" with note=\"same\")"
+  echo "seed ok (user=alice, 4 subscription endpoints + 4 grants in group=\"${group_name}\"; extra endpoints added for probe kinds)"
 }
 
 meta_sync() {

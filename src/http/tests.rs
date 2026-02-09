@@ -3621,3 +3621,49 @@ async fn endpoint_probe_run_status_shows_progress() {
 
     panic!("timeout waiting for endpoint probe run status to finish");
 }
+
+#[tokio::test]
+async fn endpoint_probe_run_events_streams_sse() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("POST", "/api/admin/endpoints/probe/run"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let started = body_json(res).await;
+    let run_id = started["run_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/endpoints/probe/runs/{run_id}/events"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let content_type = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "unexpected content-type: {content_type}"
+    );
+
+    let body = body_text(res).await;
+    assert!(body.contains("event: hello"), "missing hello event: {body}");
+    assert!(
+        body.contains(&format!("\"run_id\":\"{run_id}\"")),
+        "missing run_id in body: {body}"
+    );
+    assert!(
+        body.contains("event: progress"),
+        "missing progress event: {body}"
+    );
+}

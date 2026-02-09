@@ -206,3 +206,77 @@ export async function fetchAdminEndpointProbeRunStatus(
 	const json: unknown = await res.json();
 	return AdminEndpointProbeRunStatusResponseSchema.parse(json);
 }
+
+export const EndpointProbeAppendSampleSchema = z.object({
+	endpoint_id: z.string(),
+	ok: z.boolean(),
+	checked_at: z.string(),
+	latency_ms: z.number().int().nonnegative().optional(),
+	target_id: z.string().optional(),
+	target_url: z.string().optional(),
+	error: z.string().optional(),
+	config_hash: z.string(),
+});
+
+export type EndpointProbeAppendSample = z.infer<
+	typeof EndpointProbeAppendSampleSchema
+>;
+
+export const AdminEndpointProbeRunSseHelloSchema = z.object({
+	run_id: z.string(),
+	connected_at: z.string(),
+	nodes: z.array(z.string()),
+});
+
+export type AdminEndpointProbeRunSseHello = z.infer<
+	typeof AdminEndpointProbeRunSseHelloSchema
+>;
+
+export const AdminEndpointProbeRunSseNodeProgressSchema = z.object({
+	node_id: z.string(),
+	progress: AdminEndpointProbeRunProgressSchema,
+});
+
+export type AdminEndpointProbeRunSseNodeProgress = z.infer<
+	typeof AdminEndpointProbeRunSseNodeProgressSchema
+>;
+
+export const AdminEndpointProbeRunSseEndpointSampleSchema = z.object({
+	node_id: z.string(),
+	run_id: z.string(),
+	hour: z.string(),
+	sample: EndpointProbeAppendSampleSchema,
+});
+
+export type AdminEndpointProbeRunSseEndpointSample = z.infer<
+	typeof AdminEndpointProbeRunSseEndpointSampleSchema
+>;
+
+export const AdminEndpointProbeRunSseNodeErrorSchema = z.object({
+	node_id: z.string(),
+	run_id: z.string(),
+	error: z.string(),
+});
+
+export type AdminEndpointProbeRunSseNodeError = z.infer<
+	typeof AdminEndpointProbeRunSseNodeErrorSchema
+>;
+
+export const AdminEndpointProbeRunSseLaggedSchema = z.object({
+	node_id: z.string(),
+	run_id: z.string(),
+	missed: z.number().int().nonnegative(),
+});
+
+export type AdminEndpointProbeRunSseLagged = z.infer<
+	typeof AdminEndpointProbeRunSseLaggedSchema
+>;
+
+export const AdminEndpointProbeRunSseNotFoundSchema = z.object({
+	node_id: z.string(),
+	run_id: z.string(),
+});
+
+export type AdminEndpointProbeRunSseNotFound = z.infer<
+	typeof AdminEndpointProbeRunSseNotFoundSchema
+>;

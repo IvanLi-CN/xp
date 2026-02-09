@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    convert::Infallible,
+    sync::Arc,
+};
 
 use axum::{
     Json, Router,
@@ -6,15 +10,18 @@ use axum::{
     extract::{Extension, FromRequest, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Redirect, Response},
+    response::{
+        IntoResponse, Redirect, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post, put},
 };
 use chrono::{SecondsFormat, Timelike as _, Utc};
-use futures_util::future::join_all;
+use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::{
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -364,6 +371,47 @@ struct AdminEndpointProbeRunStatusResponse {
     nodes: Vec<AdminEndpointProbeRunStatusNode>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseHello {
+    run_id: String,
+    connected_at: String,
+    nodes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNodeProgress {
+    node_id: String,
+    progress: AdminEndpointProbeRunProgress,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseEndpointSample {
+    node_id: String,
+    run_id: String,
+    hour: String,
+    sample: crate::state::EndpointProbeAppendSample,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNodeError {
+    node_id: String,
+    run_id: String,
+    error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseLagged {
+    node_id: String,
+    run_id: String,
+    missed: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNotFound {
+    node_id: String,
+    run_id: String,
+}
+
 #[derive(Serialize)]
 struct ClusterInfoResponse {
     cluster_id: String,
@@ -640,6 +688,10 @@ pub fn build_router(
             get(admin_get_endpoint_probe_run_status),
         )
         .route(
+            "/endpoints/probe/runs/:run_id/events",
+            get(admin_stream_endpoint_probe_run_events),
+        )
+        .route(
             "/endpoints/:endpoint_id/probe-history",
             get(admin_get_endpoint_probe_history),
         )
@@ -684,6 +736,10 @@ pub fn build_router(
         .route(
             "/_internal/endpoint-probe/runs/:run_id",
             get(admin_internal_endpoint_probe_run_status),
+        )
+        .route(
+            "/_internal/endpoint-probe/runs/:run_id/events",
+            get(admin_internal_endpoint_probe_run_events),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -2387,6 +2443,335 @@ async fn admin_get_endpoint_probe_run_status(
     }))
 }
 
+fn sse_json_event<T: Serialize>(event: &'static str, payload: &T) -> Event {
+    match serde_json::to_string(payload) {
+        Ok(data) => Event::default().event(event).data(data),
+        Err(err) => Event::default().event("error").data(err.to_string()),
+    }
+}
+
+async fn forward_local_endpoint_probe_run_events(
+    handle: crate::endpoint_probe::EndpointProbeHandle,
+    node_id: String,
+    run_id: String,
+    tx: mpsc::Sender<Event>,
+) {
+    let requested = handle.run_snapshot(&run_id).await;
+    let current = handle.current_run_snapshot().await;
+
+    let Some(initial) = requested.or_else(|| {
+        current.and_then(|snapshot| {
+            if snapshot.run_id == run_id {
+                Some(snapshot)
+            } else {
+                None
+            }
+        })
+    }) else {
+        let _ = tx
+            .send(sse_json_event(
+                "not_found",
+                &AdminEndpointProbeRunSseNotFound { node_id, run_id },
+            ))
+            .await;
+        return;
+    };
+
+    let progress = map_probe_run_snapshot(initial.clone());
+    if tx
+        .send(sse_json_event(
+            "progress",
+            &AdminEndpointProbeRunSseNodeProgress {
+                node_id: node_id.clone(),
+                progress,
+            },
+        ))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    if !matches!(
+        initial.status,
+        crate::endpoint_probe::EndpointProbeRunStatus::Running
+    ) {
+        return;
+    }
+
+    let mut rx = handle.subscribe();
+    loop {
+        if tx.is_closed() {
+            return;
+        }
+
+        match rx.recv().await {
+            Ok(crate::endpoint_probe::EndpointProbeEvent::RunSnapshot(snapshot)) => {
+                if snapshot.run_id != run_id {
+                    continue;
+                }
+                let progress = map_probe_run_snapshot(snapshot.clone());
+                if tx
+                    .send(sse_json_event(
+                        "progress",
+                        &AdminEndpointProbeRunSseNodeProgress {
+                            node_id: node_id.clone(),
+                            progress,
+                        },
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+
+                if !matches!(
+                    snapshot.status,
+                    crate::endpoint_probe::EndpointProbeRunStatus::Running
+                ) {
+                    return;
+                }
+            }
+            Ok(crate::endpoint_probe::EndpointProbeEvent::EndpointSample {
+                run_id: sample_run_id,
+                hour,
+                from_node_id,
+                sample,
+            }) => {
+                if sample_run_id != run_id {
+                    continue;
+                }
+                if tx
+                    .send(sse_json_event(
+                        "sample",
+                        &AdminEndpointProbeRunSseEndpointSample {
+                            node_id: from_node_id,
+                            run_id: sample_run_id,
+                            hour,
+                            sample,
+                        },
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "lagged",
+                        &AdminEndpointProbeRunSseLagged {
+                            node_id: node_id.clone(),
+                            run_id: run_id.clone(),
+                            missed,
+                        },
+                    ))
+                    .await;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return;
+            }
+        }
+    }
+}
+
+async fn forward_remote_endpoint_probe_run_events(
+    client: reqwest::Client,
+    url: String,
+    sig: String,
+    node_id: String,
+    run_id: String,
+    tx: mpsc::Sender<Event>,
+) {
+    let resp = match client
+        .get(url)
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            let _ = tx
+                .send(sse_json_event(
+                    "node_error",
+                    &AdminEndpointProbeRunSseNodeError {
+                        node_id,
+                        run_id,
+                        error: err.to_string(),
+                    },
+                ))
+                .await;
+            return;
+        }
+    };
+
+    if !resp.status().is_success() {
+        let _ = tx
+            .send(sse_json_event(
+                "node_error",
+                &AdminEndpointProbeRunSseNodeError {
+                    node_id,
+                    run_id,
+                    error: format!("http {}", resp.status()),
+                },
+            ))
+            .await;
+        return;
+    }
+
+    let mut buffer = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if tx.is_closed() {
+            return;
+        }
+
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "node_error",
+                        &AdminEndpointProbeRunSseNodeError {
+                            node_id,
+                            run_id,
+                            error: err.to_string(),
+                        },
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        let chunk_text = String::from_utf8_lossy(bytes.as_ref()).replace("\r\n", "\n");
+        buffer.push_str(&chunk_text);
+
+        while let Some(split) = buffer.find("\n\n") {
+            let frame = buffer[..split].to_string();
+            buffer = buffer[split + 2..].to_string();
+
+            let mut event_type: Option<String> = None;
+            let mut data_lines: Vec<&str> = Vec::new();
+            for line in frame.lines() {
+                let line = line.trim_end_matches('\r');
+                if line.starts_with(':') {
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("event:") {
+                    event_type = Some(rest.trim().to_string());
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("data:") {
+                    data_lines.push(rest.trim_start());
+                }
+            }
+
+            let Some(event_type) = event_type else {
+                continue;
+            };
+            let data = data_lines.join("\n");
+            if data.is_empty() {
+                continue;
+            }
+
+            if tx
+                .send(Event::default().event(event_type).data(data))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+}
+
+async fn admin_stream_endpoint_probe_run_events(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let node_ids: Vec<String> = nodes.iter().map(|n| n.node_id.clone()).collect();
+
+    let hello = AdminEndpointProbeRunSseHello {
+        run_id: run_id.clone(),
+        connected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        nodes: node_ids,
+    };
+
+    let mut initial_events = VecDeque::new();
+    initial_events.push_back(sse_json_event("hello", &hello));
+
+    let local_node_id = state.cluster.node_id.clone();
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+
+    let client = build_cluster_http_client(&state)?;
+    let uri: axum::http::Uri = format!("/_internal/endpoint-probe/runs/{run_id}/events")
+        .parse()
+        .map_err(|_| ApiError::invalid_request("run_id is invalid"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+
+    for node in nodes {
+        let node_id = node.node_id.clone();
+
+        if node_id == local_node_id {
+            let handle = state.endpoint_probe.clone();
+            let tx = tx.clone();
+            let run_id = run_id.clone();
+            tokio::spawn(async move {
+                forward_local_endpoint_probe_run_events(handle, node_id, run_id, tx).await;
+            });
+            continue;
+        }
+
+        let client = client.clone();
+        let sig = sig.clone();
+        let tx = tx.clone();
+        let run_id = run_id.clone();
+        let url = format!(
+            "{}/api/admin/_internal/endpoint-probe/runs/{}/events",
+            node.api_base_url.trim_end_matches('/'),
+            run_id
+        );
+
+        tokio::spawn(async move {
+            forward_remote_endpoint_probe_run_events(client, url, sig, node_id, run_id, tx).await;
+        });
+    }
+
+    drop(tx);
+
+    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
+        if let Some(event) = initial.pop_front() {
+            return Some((Ok(event), (initial, rx)));
+        }
+
+        let next = rx.recv().await?;
+        Some((Ok(next), (initial, rx)))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
+}
+
 async fn admin_internal_endpoint_probe_run(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<AdminInternalEndpointProbeRunRequest>,
@@ -2449,6 +2834,34 @@ async fn admin_internal_endpoint_probe_run_status(
         requested,
         current,
     }))
+}
+
+async fn admin_internal_endpoint_probe_run_events(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let node_id = state.cluster.node_id.clone();
+    let handle = state.endpoint_probe.clone();
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+    tokio::spawn(async move {
+        forward_local_endpoint_probe_run_events(handle, node_id, run_id, tx).await;
+    });
+
+    let out_stream = stream::unfold(rx, |mut rx| async move {
+        let next = rx.recv().await?;
+        Some((Ok(next), rx))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
 }
 
 async fn admin_patch_endpoint(

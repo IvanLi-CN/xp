@@ -1,8 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 
 import {
 	type AdminEndpointProbeRunNodeStatus,
+	AdminEndpointProbeRunSseEndpointSampleSchema,
+	AdminEndpointProbeRunSseHelloSchema,
+	AdminEndpointProbeRunSseLaggedSchema,
+	AdminEndpointProbeRunSseNodeErrorSchema,
+	AdminEndpointProbeRunSseNodeProgressSchema,
+	AdminEndpointProbeRunSseNotFoundSchema,
+	type AdminEndpointProbeRunStatusResponse,
+	type EndpointProbeAppendSample,
 	fetchAdminEndpointProbeRunStatus,
 } from "../api/adminEndpointProbes";
 import {
@@ -10,10 +19,12 @@ import {
 	fetchAdminEndpoints,
 } from "../api/adminEndpoints";
 import { isBackendApiError } from "../api/backendError";
+import { startSseStream } from "../api/sse";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
+import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 
 function formatErrorMessage(error: unknown): string {
@@ -85,27 +96,233 @@ function endpointStatusLabel(status: EndpointProbeStatus): string {
 	}
 }
 
+type NodeRunner = AdminEndpointProbeRunStatusResponse["nodes"][number];
+
+function percentile(values: number[], p: number): number | null {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	const idx = Math.round((sorted.length - 1) * Math.max(0, Math.min(1, p)));
+	return sorted[idx] ?? null;
+}
+
+function computeEndpointProbeStatus(args: {
+	expectedNodes: number;
+	sampleCount: number;
+	okCount: number;
+}): EndpointProbeStatus {
+	if (args.expectedNodes === 0) return "missing";
+	if (args.sampleCount === 0) return "missing";
+	if (args.sampleCount < args.expectedNodes) return "missing";
+	if (args.okCount === 0) return "down";
+	if (args.okCount >= args.expectedNodes) return "up";
+	return "degraded";
+}
+
 export function EndpointProbeRunPage() {
 	const { runId } = useParams({ from: "/app/endpoints/probe/runs/$runId" });
 	const navigate = useNavigate();
 	const adminToken = readAdminToken();
+	const { pushToast } = useToast();
+
+	const [sseConnected, setSseConnected] = useState(false);
+	const [nodeRunnersById, setNodeRunnersById] = useState<
+		Record<string, NodeRunner>
+	>({});
+	const [endpointSamplesById, setEndpointSamplesById] = useState<
+		Record<string, Record<string, EndpointProbeAppendSample>>
+	>({});
+	const [liveHour, setLiveHour] = useState<string | null>(null);
+	const [liveConfigHash, setLiveConfigHash] = useState<string | null>(null);
 
 	const statusQuery = useQuery({
 		queryKey: ["adminEndpointProbeRunStatus", adminToken, runId],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) =>
 			fetchAdminEndpointProbeRunStatus(adminToken, runId, signal),
-		refetchInterval: (query) =>
-			query.state.data?.status === "running" ? 1000 : false,
 	});
 
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
-		refetchInterval: () =>
-			statusQuery.data?.status === "running" ? 2000 : false,
 	});
+
+	useEffect(() => {
+		const data = statusQuery.data;
+		if (!data) return;
+
+		setNodeRunnersById((prev) => {
+			const next: Record<string, NodeRunner> = {};
+			for (const node of data.nodes) {
+				const existing = prev[node.node_id];
+				next[node.node_id] = {
+					...node,
+					progress: existing?.progress ?? node.progress,
+					current: existing?.current ?? node.current,
+				};
+			}
+			return next;
+		});
+	}, [statusQuery.data]);
+
+	useEffect(() => {
+		setSseConnected(false);
+		setEndpointSamplesById({});
+		setLiveHour(null);
+		setLiveConfigHash(null);
+
+		if (adminToken.length === 0) return;
+
+		const handle = startSseStream({
+			url: `/api/admin/endpoints/probe/runs/${encodeURIComponent(runId)}/events`,
+			headers: {
+				Authorization: `Bearer ${adminToken}`,
+			},
+			onMessage: ({ event, data }) => {
+				let json: unknown;
+				try {
+					json = JSON.parse(data);
+				} catch {
+					return;
+				}
+
+				if (event === "hello") {
+					const parsed = AdminEndpointProbeRunSseHelloSchema.safeParse(json);
+					if (parsed.success) setSseConnected(true);
+					return;
+				}
+
+				if (event === "progress") {
+					const parsed =
+						AdminEndpointProbeRunSseNodeProgressSchema.safeParse(json);
+					if (!parsed.success) return;
+
+					const { node_id, progress } = parsed.data;
+					setLiveHour(progress.hour);
+					setLiveConfigHash(progress.config_hash);
+					setNodeRunnersById((prev) => {
+						const existing = prev[node_id];
+						const status: AdminEndpointProbeRunNodeStatus =
+							progress.status === "running"
+								? "running"
+								: progress.status === "finished"
+									? "finished"
+									: "failed";
+						const nextNode: NodeRunner = {
+							node_id,
+							status,
+							progress,
+							current: existing?.current,
+							error: progress.error ?? existing?.error,
+						};
+						return { ...prev, [node_id]: nextNode };
+					});
+					return;
+				}
+
+				if (event === "sample") {
+					const parsed =
+						AdminEndpointProbeRunSseEndpointSampleSchema.safeParse(json);
+					if (!parsed.success) return;
+
+					const { node_id, sample } = parsed.data;
+					setEndpointSamplesById((prev) => {
+						const endpointId = sample.endpoint_id;
+						const byNode = prev[endpointId] ?? {};
+						return {
+							...prev,
+							[endpointId]: {
+								...byNode,
+								[node_id]: sample,
+							},
+						};
+					});
+					return;
+				}
+
+				if (event === "node_error") {
+					const parsed =
+						AdminEndpointProbeRunSseNodeErrorSchema.safeParse(json);
+					if (!parsed.success) return;
+					pushToast({
+						variant: "error",
+						message: `SSE node error (${parsed.data.node_id}): ${parsed.data.error}`,
+					});
+					return;
+				}
+
+				if (event === "lagged") {
+					const parsed = AdminEndpointProbeRunSseLaggedSchema.safeParse(json);
+					if (!parsed.success) return;
+					pushToast({
+						variant: "info",
+						message: `SSE lagged (${parsed.data.node_id}): missed ${parsed.data.missed} events`,
+					});
+					return;
+				}
+
+				if (event === "not_found") {
+					const parsed = AdminEndpointProbeRunSseNotFoundSchema.safeParse(json);
+					if (!parsed.success) return;
+					setNodeRunnersById((prev) => {
+						const existing = prev[parsed.data.node_id];
+						const nextNode: NodeRunner = {
+							node_id: parsed.data.node_id,
+							status: "not_found",
+							progress: existing?.progress,
+							current: existing?.current,
+							error: existing?.error,
+						};
+						return { ...prev, [parsed.data.node_id]: nextNode };
+					});
+				}
+			},
+			onOpen: () => {
+				setSseConnected(true);
+			},
+			onError: (err) => {
+				pushToast({
+					variant: "error",
+					message: `SSE connection failed: ${formatErrorMessage(err)}`,
+				});
+			},
+			onClose: () => {
+				setSseConnected(false);
+			},
+		});
+
+		return () => handle.close();
+	}, [adminToken, runId, pushToast]);
+
+	const nodesForUi = useMemo(() => {
+		const data = statusQuery.data;
+		if (!data) return [];
+
+		const liveNodes = Object.values(nodeRunnersById);
+		if (liveNodes.length > 0) {
+			return liveNodes
+				.slice()
+				.sort((a, b) => a.node_id.localeCompare(b.node_id));
+		}
+
+		return data.nodes;
+	}, [nodeRunnersById, statusQuery.data]);
+
+	const overallStatus = useMemo(() => {
+		const data = statusQuery.data;
+		if (!data) return "unknown";
+
+		const anyRunning = nodesForUi.some((n) => n.status === "running");
+		const anyFailed = nodesForUi.some((n) => n.status === "failed");
+		const anyFinished = nodesForUi.some((n) => n.status === "finished");
+		const anyUnknown = nodesForUi.some((n) => n.status === "unknown");
+
+		if (anyRunning) return "running";
+		if (anyFailed) return "failed";
+		if (anyFinished) return "finished";
+		if (anyUnknown) return "unknown";
+		return data.status;
+	}, [nodesForUi, statusQuery.data]);
 
 	if (adminToken.length === 0) {
 		return (
@@ -200,32 +417,34 @@ export function EndpointProbeRunPage() {
 			</div>
 		);
 	}
-	const hour = data.hour ?? "-";
-	const configHash = data.config_hash
-		? `${data.config_hash.slice(0, 12)}…`
-		: "-";
+	const hour = liveHour ?? data.hour ?? "-";
+	const configHash = liveConfigHash ?? data.config_hash ?? "";
+	const configHashShort = configHash ? `${configHash.slice(0, 12)}…` : "-";
 
 	const overallBadgeClass =
-		data.status === "running"
+		overallStatus === "running"
 			? "badge badge-info"
-			: data.status === "finished"
+			: overallStatus === "finished"
 				? "badge badge-success"
-				: data.status === "failed"
+				: overallStatus === "failed"
 					? "badge badge-error"
-					: data.status === "unknown"
+					: overallStatus === "unknown"
 						? "badge badge-neutral"
 						: "badge";
 
 	const overallLabel =
-		data.status === "running"
+		overallStatus === "running"
 			? "Running"
-			: data.status === "finished"
+			: overallStatus === "finished"
 				? "Finished"
-				: data.status === "failed"
+				: overallStatus === "failed"
 					? "Failed"
-					: data.status === "unknown"
+					: overallStatus === "unknown"
 						? "Unknown"
 						: "Not found";
+
+	const expectedNodes = data.nodes.length;
+	const runHourKey = liveHour ?? data.hour ?? null;
 
 	const resultsContent = (() => {
 		if (endpointsQuery.isLoading) {
@@ -262,18 +481,38 @@ export function EndpointProbeRunPage() {
 				]}
 			>
 				{endpoints.map((endpoint) => {
-					const hourSlot =
-						data.hour && endpoint.probe?.slots
-							? (endpoint.probe.slots.find((slot) => slot.hour === data.hour) ??
+					const samplesByNode = endpointSamplesById[endpoint.endpoint_id] ?? {};
+					const samples = Object.values(samplesByNode);
+
+					const okSamples = samples.filter((s) => s.ok);
+					const okCount = okSamples.length;
+					const sampleCount = samples.length;
+					const latencies = okSamples
+						.map((s) => s.latency_ms)
+						.filter((v): v is number => typeof v === "number");
+					const latencyP50 = percentile(latencies, 0.5);
+					const checkedAtFromSse =
+						samples
+							.map((s) => s.checked_at)
+							.sort()
+							.pop() ?? null;
+
+					const slot =
+						runHourKey && endpoint.probe?.slots
+							? (endpoint.probe.slots.find((s) => s.hour === runHourKey) ??
 								null)
 							: null;
-					const hourStatus: EndpointProbeStatus = hourSlot?.status ?? "missing";
-					const latencyMs =
-						hourSlot?.latency_ms_p50 ??
-						endpoint.probe?.latest_latency_ms_p50 ??
-						null;
-					const checkedAt =
-						hourSlot?.checked_at ?? endpoint.probe?.latest_checked_at ?? null;
+
+					const hourStatus: EndpointProbeStatus =
+						sampleCount > 0
+							? computeEndpointProbeStatus({
+									expectedNodes,
+									sampleCount,
+									okCount,
+								})
+							: (slot?.status ?? "missing");
+					const latencyMs = latencyP50 ?? slot?.latency_ms_p50 ?? null;
+					const checkedAt = checkedAtFromSse ?? slot?.checked_at ?? null;
 
 					const resultTooltip = checkedAt
 						? `Checked at: ${checkedAt}`
@@ -329,7 +568,7 @@ export function EndpointProbeRunPage() {
 				{ key: "error", label: "Error" },
 			]}
 		>
-			{data.nodes.map((node) => {
+			{nodesForUi.map((node) => {
 				const progress = node.progress;
 				const done = progress?.endpoints_done ?? 0;
 				const total = progress?.endpoints_total ?? 0;
@@ -384,9 +623,12 @@ export function EndpointProbeRunPage() {
 				meta={
 					<div className="flex flex-wrap items-center gap-2">
 						<span className={overallBadgeClass}>{overallLabel}</span>
+						{sseConnected ? (
+							<span className="badge badge-ghost text-xs">live</span>
+						) : null}
 						<span className="badge badge-ghost font-mono text-xs">{hour}</span>
 						<span className="badge badge-ghost font-mono text-xs">
-							cfg {configHash}
+							cfg {configHashShort}
 						</span>
 					</div>
 				}
@@ -402,7 +644,7 @@ export function EndpointProbeRunPage() {
 					<div>
 						<div className="text-sm opacity-70">Note</div>
 						<div className="text-sm opacity-70">
-							This page auto-refreshes while the run is running.
+							This page updates live via SSE while the run is running.
 						</div>
 					</div>
 				</div>

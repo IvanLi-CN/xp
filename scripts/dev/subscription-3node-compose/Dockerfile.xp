@@ -28,6 +28,10 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
   && cp /app/target/release/xp /out/xp \
   && cp /app/target/release/xp-ops /out/xp-ops
 
+ARG XRAY_DOCKER_TAG=25.12.8
+FROM ghcr.io/xtls/xray-core:${XRAY_DOCKER_TAG} AS xray
+RUN mkdir -p /out && cp "$(command -v xray)" /out/xray
+
 FROM debian:bookworm-slim
 
 RUN apt-get update \
@@ -36,5 +40,6 @@ RUN apt-get update \
 
 COPY --from=builder /out/xp /usr/local/bin/xp
 COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
+COPY --from=xray /out/xray /usr/local/bin/xray
 
 ENTRYPOINT ["xp"]

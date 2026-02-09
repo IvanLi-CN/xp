@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 use tokio::{
     net::TcpStream,
     process::Command,
-    sync::{Mutex, Semaphore},
+    sync::{Mutex, Semaphore, broadcast},
     time::Instant,
 };
 use tracing::{debug, warn};
@@ -349,6 +349,17 @@ pub struct EndpointProbeHandle {
     inner: Arc<EndpointProbeInner>,
 }
 
+#[derive(Debug, Clone)]
+pub enum EndpointProbeEvent {
+    RunSnapshot(EndpointProbeRunSnapshot),
+    EndpointSample {
+        run_id: String,
+        hour: String,
+        from_node_id: String,
+        sample: EndpointProbeAppendSample,
+    },
+}
+
 struct EndpointProbeInner {
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -356,6 +367,7 @@ struct EndpointProbeInner {
     run_gate: Arc<Semaphore>,
     runs: Arc<Mutex<EndpointProbeRuns>>,
     probe_secret: Arc<[u8]>,
+    events: broadcast::Sender<EndpointProbeEvent>,
 }
 
 pub fn spawn_endpoint_probe_worker(
@@ -405,6 +417,8 @@ pub fn new_endpoint_probe_handle(
     raft: Arc<dyn RaftFacade>,
     probe_secret: String,
 ) -> EndpointProbeHandle {
+    let (events, _events_rx) = broadcast::channel(1024);
+
     EndpointProbeHandle {
         inner: Arc::new(EndpointProbeInner {
             local_node_id,
@@ -413,11 +427,20 @@ pub fn new_endpoint_probe_handle(
             run_gate: Arc::new(Semaphore::new(1)),
             runs: Arc::new(Mutex::new(EndpointProbeRuns::default())),
             probe_secret: Arc::from(probe_secret.into_bytes()),
+            events,
         }),
     }
 }
 
 impl EndpointProbeHandle {
+    pub fn subscribe(&self) -> broadcast::Receiver<EndpointProbeEvent> {
+        self.inner.events.subscribe()
+    }
+
+    pub fn local_node_id(&self) -> &str {
+        self.inner.local_node_id.as_str()
+    }
+
     pub async fn start_background(
         &self,
         req: EndpointProbeRunRequest,
@@ -444,6 +467,12 @@ impl EndpointProbeHandle {
         {
             let mut runs = self.inner.runs.lock().await;
             runs.begin_run(&req, endpoints_total);
+            if let Some(snapshot) = runs.get(&req.run_id) {
+                let _ = self
+                    .inner
+                    .events
+                    .send(EndpointProbeEvent::RunSnapshot(snapshot));
+            }
         }
 
         let inner = self.inner.clone();
@@ -482,6 +511,12 @@ impl EndpointProbeHandle {
         {
             let mut runs = self.inner.runs.lock().await;
             runs.begin_run(&req, endpoints_total);
+            if let Some(snapshot) = runs.get(&req.run_id) {
+                let _ = self
+                    .inner
+                    .events
+                    .send(EndpointProbeEvent::RunSnapshot(snapshot));
+            }
         }
 
         run_probe_once(self.inner.clone(), req).await
@@ -508,6 +543,9 @@ async fn run_probe_once(
     {
         let mut runs = inner.runs.lock().await;
         runs.finish_run(&run_id, error);
+        if let Some(snapshot) = runs.get(&run_id) {
+            let _ = inner.events.send(EndpointProbeEvent::RunSnapshot(snapshot));
+        }
     }
     out
 }
@@ -559,6 +597,8 @@ async fn run_probe_once_inner(
     let nodes_by_id = Arc::new(nodes_by_id);
     let probe_secret = Arc::clone(&inner.probe_secret);
     let runs = Arc::clone(&inner.runs);
+    let events = inner.events.clone();
+    let from_node_id = inner.local_node_id.clone();
 
     for endpoint in endpoints {
         let permit = sem.clone().acquire_owned().await.expect("semaphore");
@@ -566,7 +606,10 @@ async fn run_probe_once_inner(
         let probe_secret = Arc::clone(&probe_secret);
         let config_hash = req.config_hash.clone();
         let run_id = req.run_id.clone();
+        let hour = req.hour.clone();
         let runs = Arc::clone(&runs);
+        let events = events.clone();
+        let from_node_id = from_node_id.clone();
 
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
@@ -583,7 +626,17 @@ async fn run_probe_once_inner(
             {
                 let mut runs = runs.lock().await;
                 runs.mark_endpoint_done(&run_id);
+                if let Some(snapshot) = runs.get(&run_id) {
+                    let _ = events.send(EndpointProbeEvent::RunSnapshot(snapshot));
+                }
             }
+
+            let _ = events.send(EndpointProbeEvent::EndpointSample {
+                run_id: run_id.clone(),
+                hour,
+                from_node_id,
+                sample: sample.clone(),
+            });
 
             sample
         }));

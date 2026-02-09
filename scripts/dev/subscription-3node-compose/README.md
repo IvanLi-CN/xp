@@ -40,5 +40,8 @@ This directory provides a docker-compose based 3-node `xp` cluster on a single d
 - `seed` is idempotent: it reuses `alice` and endpoints (by port) and replaces the `apxdg` grant group if it already exists.
 - Seed data creates:
   - 1 user (`alice`)
-  - 4 endpoints across 2 nodes
-  - 4 enabled grants with the same `note` (`"same"`) to reproduce name-collision behavior.
+  - Subscription fixtures:
+    - 4 SS endpoints across 2 nodes
+    - 4 enabled grants with the same `note` (`"same"`) in grant group `apxdg` (keeps `verify` stable)
+  - Probe fixtures (not granted to `alice`):
+    - extra endpoints across all 3 nodes (SS + VLESS Reality) for endpoint probe UI testing.
