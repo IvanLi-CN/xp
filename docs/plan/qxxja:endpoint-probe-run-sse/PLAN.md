@@ -78,4 +78,3 @@
 - [ ] M1: Backend SSE（internal events + cluster fan-out）
 - [ ] M2: Web run 页 SSE client + UI 精简
 - [ ] M3: Compose seed 补齐 endpoints kinds
-
