@@ -211,10 +211,10 @@ export const EndpointProbeAppendSampleSchema = z.object({
 	endpoint_id: z.string(),
 	ok: z.boolean(),
 	checked_at: z.string(),
-	latency_ms: z.number().int().nonnegative().optional(),
-	target_id: z.string().optional(),
-	target_url: z.string().optional(),
-	error: z.string().optional(),
+	latency_ms: z.number().int().nonnegative().nullable().optional(),
+	target_id: z.string().nullable().optional(),
+	target_url: z.string().nullable().optional(),
+	error: z.string().nullable().optional(),
 	config_hash: z.string(),
 });
 
