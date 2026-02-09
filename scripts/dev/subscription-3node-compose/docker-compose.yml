@@ -6,26 +6,21 @@ services:
       context: ../../..
       dockerfile: scripts/dev/subscription-3node-compose/Dockerfile.xp
     image: xp-local:apxdg
-    command:
-      [
-        "run",
-        "--bind",
-        "0.0.0.0:62416",
-        "--data-dir",
-        "/data",
-        "--node-name",
-        "node-1",
-        "--access-host",
-        "xp1",
-        "--api-base-url",
-        "https://xp1:6443",
-        "--xray-restart-mode",
-        "none",
-      ]
+    entrypoint: ["sh", "-lc"]
+    command: >-
+      xray run -c /etc/xray/config.json &
+      exec xp run
+      --bind 0.0.0.0:62416
+      --data-dir /data
+      --node-name node-1
+      --access-host xp1-app
+      --api-base-url https://xp1:6443
+      --xray-restart-mode none
     environment:
       XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
     volumes:
       - xp1_data:/data
+      - ./xray-config.json:/etc/xray/config.json:ro
     networks:
       - xpnet
 
@@ -49,26 +44,21 @@ services:
 
   xp2-app:
     image: xp-local:apxdg
-    command:
-      [
-        "run",
-        "--bind",
-        "0.0.0.0:62416",
-        "--data-dir",
-        "/data",
-        "--node-name",
-        "node-2",
-        "--access-host",
-        "xp2",
-        "--api-base-url",
-        "https://xp2:6443",
-        "--xray-restart-mode",
-        "none",
-      ]
+    entrypoint: ["sh", "-lc"]
+    command: >-
+      xray run -c /etc/xray/config.json &
+      exec xp run
+      --bind 0.0.0.0:62416
+      --data-dir /data
+      --node-name node-2
+      --access-host xp2-app
+      --api-base-url https://xp2:6443
+      --xray-restart-mode none
     environment:
       XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
     volumes:
       - xp2_data:/data
+      - ./xray-config.json:/etc/xray/config.json:ro
     networks:
       - xpnet
 
@@ -90,26 +80,21 @@ services:
 
   xp3-app:
     image: xp-local:apxdg
-    command:
-      [
-        "run",
-        "--bind",
-        "0.0.0.0:62416",
-        "--data-dir",
-        "/data",
-        "--node-name",
-        "node-3",
-        "--access-host",
-        "xp3",
-        "--api-base-url",
-        "https://xp3:6443",
-        "--xray-restart-mode",
-        "none",
-      ]
+    entrypoint: ["sh", "-lc"]
+    command: >-
+      xray run -c /etc/xray/config.json &
+      exec xp run
+      --bind 0.0.0.0:62416
+      --data-dir /data
+      --node-name node-3
+      --access-host xp3-app
+      --api-base-url https://xp3:6443
+      --xray-restart-mode none
     environment:
       XP_ADMIN_TOKEN_HASH: ${XP_APXDG_ADMIN_TOKEN_HASH:?}
     volumes:
       - xp3_data:/data
+      - ./xray-config.json:/etc/xray/config.json:ro
     networks:
       - xpnet
 

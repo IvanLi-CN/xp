@@ -150,7 +150,7 @@ init_leader_and_cert() {
   ensure_ports
   ensure_admin_token
 
-  compose run --rm --no-deps xp1-app init --data-dir /data --node-name node-1 --access-host xp1 --api-base-url https://xp1:6443
+  compose run --rm --no-deps --entrypoint xp xp1-app init --data-dir /data --node-name node-1 --access-host xp1-app --api-base-url https://xp1:6443
 
   compose run --rm --no-deps --entrypoint sh xp1-app -c '
 set -eu
@@ -258,11 +258,12 @@ join_node() {
   token="$2"
 
   node_name="node-${node#xp}"
-  compose run --rm --no-deps "${node}-app" join \
+  access_host="${node}-app"
+  compose run --rm --no-deps --entrypoint xp "${node}-app" join \
     --token "$token" \
     --data-dir /data \
     --node-name "$node_name" \
-    --access-host "$node" \
+    --access-host "$access_host" \
     --api-base-url "https://${node}:6443"
 }
 
@@ -571,7 +572,7 @@ set -eu
 mkdir -p /etc/xp
 cat > /etc/xp/xp.env <<'EOF'
 XP_NODE_NAME=node-1
-XP_ACCESS_HOST=xp1-alt
+XP_ACCESS_HOST=xp1-app
 XP_API_BASE_URL=https://xp1-alt:6443
 XP_DATA_DIR=/data
 EOF
@@ -593,7 +594,7 @@ import sys
 obj = json.load(sys.stdin)
 for n in obj.get("items", []):
     if n.get("api_base_url") == "https://xp1-alt:6443":
-        assert n.get("access_host") == "xp1-alt", n
+        assert n.get("access_host") == "xp1-app", n
         print("node meta sync ok (state machine updated)")
         raise SystemExit(0)
 raise SystemExit("node meta sync failed: updated node not found")
