@@ -1075,6 +1075,75 @@ async fn fetch_github_latest_release(
         .get(url)
         .header(header::ACCEPT, "application/vnd.github+json")
         .send()
+        .await;
+
+    match resp {
+        Ok(resp) if resp.status().is_success() => {
+            let body: GithubLatestReleaseResponse = resp.json().await.map_err(|e| {
+                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
+            })?;
+
+            let published_at = match body.published_at {
+                Some(raw) => {
+                    let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
+                        ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
+                    })?;
+                    Some(
+                        dt.with_timezone(&Utc)
+                            .to_rfc3339_opts(SecondsFormat::Secs, true),
+                    )
+                }
+                None => None,
+            };
+
+            Ok((body.tag_name, published_at))
+        }
+        Ok(resp) => {
+            // Avoid surfacing flaky GitHub API failures (rate-limits, transient 5xx) as hard UI
+            // errors if we can derive the latest release tag from the HTML redirect endpoint.
+            if api_base == "https://api.github.com" {
+                if let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await {
+                    return Ok(out);
+                }
+            }
+
+            Err(ApiError::new(
+                "upstream_error",
+                StatusCode::BAD_GATEWAY,
+                format!("github returned status: {}", resp.status()),
+            ))
+        }
+        Err(err) => {
+            if api_base == "https://api.github.com" {
+                if let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await {
+                    return Ok(out);
+                }
+            }
+
+            Err(ApiError::new(
+                "upstream_error",
+                StatusCode::BAD_GATEWAY,
+                err.to_string(),
+            ))
+        }
+    }
+}
+
+async fn fetch_github_latest_release_via_redirect(
+    state: &AppState,
+    repo: &str,
+) -> Result<(String, Option<String>), ApiError> {
+    let repo = repo.trim().trim_matches('/');
+    if repo.is_empty() {
+        return Err(ApiError::invalid_request("github repo is required"));
+    }
+
+    let url = format!("https://github.com/{repo}/releases/latest");
+    let resp = state
+        .ops_github_client
+        .get(url)
+        .header(header::ACCEPT, "text/html")
+        .send()
         .await
         .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
 
@@ -1082,29 +1151,30 @@ async fn fetch_github_latest_release(
         return Err(ApiError::new(
             "upstream_error",
             StatusCode::BAD_GATEWAY,
-            format!("github returned status: {}", resp.status()),
+            format!("github releases/latest returned status: {}", resp.status()),
         ));
     }
 
-    let body: GithubLatestReleaseResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
-
-    let published_at = match body.published_at {
-        Some(raw) => {
-            let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
-                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
-            })?;
-            Some(
-                dt.with_timezone(&Utc)
-                    .to_rfc3339_opts(SecondsFormat::Secs, true),
-            )
-        }
-        None => None,
+    let Some(tag) = github_release_tag_from_url(resp.url()) else {
+        return Err(ApiError::new(
+            "upstream_error",
+            StatusCode::BAD_GATEWAY,
+            "github releases/latest returned unexpected url".to_string(),
+        ));
     };
 
-    Ok((body.tag_name, published_at))
+    // Redirect-based lookup does not expose published_at without fetching the API JSON.
+    Ok((tag, None))
+}
+
+fn github_release_tag_from_url(url: &reqwest::Url) -> Option<String> {
+    let segments: Vec<_> = url.path_segments()?.collect();
+    let idx = segments.iter().position(|s| *s == "tag")?;
+    let tag = segments.get(idx + 1)?;
+    if tag.trim().is_empty() {
+        return None;
+    }
+    Some(tag.to_string())
 }
 
 fn compare_simple_semver(current: &str, latest: &str) -> (Option<bool>, VersionCheckCompareReason) {
