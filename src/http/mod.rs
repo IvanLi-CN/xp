@@ -1101,10 +1101,10 @@ async fn fetch_github_latest_release(
         Ok(resp) => {
             // Avoid surfacing flaky GitHub API failures (rate-limits, transient 5xx) as hard UI
             // errors if we can derive the latest release tag from the HTML redirect endpoint.
-            if api_base == "https://api.github.com" {
-                if let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await {
-                    return Ok(out);
-                }
+            if api_base == "https://api.github.com"
+                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
+            {
+                return Ok(out);
             }
 
             Err(ApiError::new(
@@ -1114,10 +1114,10 @@ async fn fetch_github_latest_release(
             ))
         }
         Err(err) => {
-            if api_base == "https://api.github.com" {
-                if let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await {
-                    return Ok(out);
-                }
+            if api_base == "https://api.github.com"
+                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
+            {
+                return Ok(out);
             }
 
             Err(ApiError::new(
