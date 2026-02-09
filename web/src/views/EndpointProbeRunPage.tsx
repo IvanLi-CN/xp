@@ -133,6 +133,7 @@ export function EndpointProbeRunPage() {
 	>({});
 	const [liveHour, setLiveHour] = useState<string | null>(null);
 	const [liveConfigHash, setLiveConfigHash] = useState<string | null>(null);
+	const [autoRefreshedResults, setAutoRefreshedResults] = useState(false);
 
 	const statusQuery = useQuery({
 		queryKey: ["adminEndpointProbeRunStatus", adminToken, runId],
@@ -170,6 +171,7 @@ export function EndpointProbeRunPage() {
 		setEndpointSamplesById({});
 		setLiveHour(null);
 		setLiveConfigHash(null);
+		setAutoRefreshedResults(false);
 
 		if (adminToken.length === 0) return;
 
@@ -323,6 +325,15 @@ export function EndpointProbeRunPage() {
 		if (anyUnknown) return "unknown";
 		return data.status;
 	}, [nodesForUi, statusQuery.data]);
+
+	useEffect(() => {
+		if (autoRefreshedResults) return;
+		if (overallStatus !== "finished" && overallStatus !== "failed") return;
+
+		setAutoRefreshedResults(true);
+		statusQuery.refetch();
+		endpointsQuery.refetch();
+	}, [autoRefreshedResults, overallStatus, endpointsQuery, statusQuery]);
 
 	if (adminToken.length === 0) {
 		return (
