@@ -105,12 +105,19 @@ fn app_with(
 
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
 
     let router = build_router(
         config,
         store.clone(),
         reconcile,
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -961,11 +968,18 @@ async fn follower_admin_write_does_not_redirect() {
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2248,11 +2262,18 @@ async fn grant_usage_includes_warning_fields() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
     let app = build_router(
         config,
         store,
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2434,11 +2455,18 @@ async fn grant_usage_warns_on_quota_mismatch() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
     let app = build_router(
         config,
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -2969,11 +2997,18 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
     let app = build_router(
         config.clone(),
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster.clone(),
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -3008,11 +3043,18 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+    );
     let app = build_router(
         config,
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        endpoint_probe,
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -3529,4 +3571,99 @@ async fn user_node_quota_status_returns_404_for_missing_user() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn endpoint_probe_run_status_shows_progress() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("POST", "/api/admin/endpoints/probe/run"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let started = body_json(res).await;
+    let run_id = started["run_id"].as_str().unwrap().to_string();
+
+    // The probe runner might finish quickly when there are no endpoints. Poll a few times to
+    // avoid flaky timing assumptions.
+    for _ in 0..20 {
+        let res = app
+            .clone()
+            .oneshot(req_authed(
+                "GET",
+                &format!("/api/admin/endpoints/probe/runs/{run_id}"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let status = body_json(res).await;
+
+        assert_eq!(status["run_id"].as_str().unwrap(), run_id);
+        let nodes = status["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0]["node_id"].as_str().unwrap().len() > 0);
+
+        let overall = status["status"].as_str().unwrap();
+        if overall == "finished" || overall == "failed" {
+            let progress = nodes[0]["progress"].as_object().unwrap();
+            assert_eq!(progress["run_id"].as_str().unwrap(), run_id);
+            assert!(progress["hour"].as_str().unwrap().len() > 0);
+            assert!(progress["config_hash"].as_str().unwrap().len() > 0);
+            assert!(progress["updated_at"].as_str().unwrap().len() > 0);
+            return;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    panic!("timeout waiting for endpoint probe run status to finish");
+}
+
+#[tokio::test]
+async fn endpoint_probe_run_events_streams_sse() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("POST", "/api/admin/endpoints/probe/run"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let started = body_json(res).await;
+    let run_id = started["run_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/endpoints/probe/runs/{run_id}/events"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let content_type = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "unexpected content-type: {content_type}"
+    );
+
+    let body = body_text(res).await;
+    assert!(body.contains("event: hello"), "missing hello event: {body}");
+    assert!(
+        body.contains(&format!("\"run_id\":\"{run_id}\"")),
+        "missing run_id in body: {body}"
+    );
+    assert!(
+        body.contains("event: progress"),
+        "missing progress event: {body}"
+    );
 }

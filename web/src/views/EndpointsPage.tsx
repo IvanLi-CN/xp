@@ -1,12 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 
+import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { EndpointProbeBar } from "../components/EndpointProbeBar";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
+import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 
 function formatErrorMessage(error: unknown): string {
@@ -20,10 +23,36 @@ function formatErrorMessage(error: unknown): string {
 
 export function EndpointsPage() {
 	const adminToken = readAdminToken();
+	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const { pushToast } = useToast();
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
+	});
+
+	const probeRunMutation = useMutation({
+		mutationFn: () => runAdminEndpointProbeRun(adminToken),
+		onSuccess: (data) => {
+			pushToast({
+				variant: "success",
+				message: `Probe started (hour=${data.hour}).`,
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["adminEndpoints", adminToken],
+			});
+			navigate({
+				to: "/endpoints/probe/runs/$runId",
+				params: { runId: data.run_id },
+			});
+		},
+		onError: (error) => {
+			pushToast({
+				variant: "error",
+				message: formatErrorMessage(error),
+			});
+		},
 	});
 
 	const actions =
@@ -33,6 +62,13 @@ export function EndpointsPage() {
 			</Link>
 		) : (
 			<>
+				<Button
+					variant="secondary"
+					loading={probeRunMutation.isPending}
+					onClick={() => probeRunMutation.mutate()}
+				>
+					Test all now
+				</Button>
 				<Link className="btn btn-primary" to="/endpoints/new">
 					New endpoint
 				</Link>
@@ -105,6 +141,8 @@ export function EndpointsPage() {
 		return (
 			<ResourceTable
 				headers={[
+					{ key: "probe", label: "Probe (24h)" },
+					{ key: "latency", label: "Latency (p50 ms)" },
 					{ key: "kind", label: "Kind" },
 					{ key: "node", label: "Node" },
 					{ key: "port", label: "Listen port" },
@@ -114,6 +152,18 @@ export function EndpointsPage() {
 			>
 				{endpoints.map((endpoint) => (
 					<tr key={endpoint.endpoint_id}>
+						<td>
+							<Link
+								className="inline-flex items-center"
+								to="/endpoints/$endpointId/probe"
+								params={{ endpointId: endpoint.endpoint_id }}
+							>
+								<EndpointProbeBar slots={endpoint.probe?.slots ?? []} />
+							</Link>
+						</td>
+						<td className="font-mono text-xs">
+							{endpoint.probe?.latest_latency_ms_p50 ?? "-"}
+						</td>
 						<td className="font-mono text-xs">{endpoint.kind}</td>
 						<td className="font-mono text-xs">{endpoint.node_id}</td>
 						<td className="font-mono text-xs">{endpoint.port}</td>

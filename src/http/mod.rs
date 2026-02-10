@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    convert::Infallible,
+    sync::Arc,
+};
 
 use axum::{
     Json, Router,
@@ -6,14 +10,18 @@ use axum::{
     extract::{Extension, FromRequest, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Redirect, Response},
+    response::{
+        IntoResponse, Redirect, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post, put},
 };
-use chrono::{SecondsFormat, Utc};
+use chrono::{SecondsFormat, Timelike as _, Utc};
+use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::{
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -50,6 +58,7 @@ pub struct AppState {
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
+    pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
@@ -175,6 +184,232 @@ where
 #[derive(Serialize)]
 struct Items<T> {
     items: Vec<T>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EndpointProbeStatus {
+    Missing,
+    Up,
+    Degraded,
+    Down,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeSlot {
+    hour: String,
+    status: EndpointProbeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms_p50: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_checked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_latency_ms_p50: Option<u32>,
+    slots: Vec<AdminEndpointProbeSlot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointWithProbe {
+    #[serde(flatten)]
+    endpoint: Endpoint,
+    probe: AdminEndpointProbeSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeHistoryNode {
+    node_id: String,
+    ok: bool,
+    checked_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    config_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeHistorySlot {
+    hour: String,
+    status: EndpointProbeStatus,
+    ok_count: usize,
+    sample_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms_p50: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms_p95: Option<u32>,
+    by_node: Vec<AdminEndpointProbeHistoryNode>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeHistoryResponse {
+    endpoint_id: String,
+    expected_nodes: usize,
+    slots: Vec<AdminEndpointProbeHistorySlot>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EndpointProbeHistoryQuery {
+    hours: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointProbeRunRequest {
+    run_id: String,
+    hour: String,
+    config_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointProbeRunResponse {
+    accepted: bool,
+    already_running: bool,
+    run_id: String,
+    hour: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminEndpointProbeRunNode {
+    node_id: String,
+    accepted: bool,
+    already_running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminEndpointProbeRunResponse {
+    run_id: String,
+    hour: String,
+    config_hash: String,
+    nodes: Vec<AdminEndpointProbeRunNode>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunProgressStatus {
+    Running,
+    Finished,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminEndpointProbeRunProgress {
+    run_id: String,
+    hour: String,
+    config_hash: String,
+    status: AdminEndpointProbeRunProgressStatus,
+    endpoints_total: usize,
+    endpoints_done: usize,
+    started_at: String,
+    updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointProbeRunStatusResponse {
+    requested_run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requested: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<AdminEndpointProbeRunProgress>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunNodeStatus {
+    Running,
+    Finished,
+    Failed,
+    Busy,
+    NotFound,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminEndpointProbeRunOverallStatus {
+    Running,
+    Finished,
+    Failed,
+    NotFound,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunStatusNode {
+    node_id: String,
+    status: AdminEndpointProbeRunNodeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    progress: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<AdminEndpointProbeRunProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunStatusResponse {
+    run_id: String,
+    status: AdminEndpointProbeRunOverallStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hour: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_hash: Option<String>,
+    nodes: Vec<AdminEndpointProbeRunStatusNode>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseHello {
+    run_id: String,
+    connected_at: String,
+    nodes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNodeProgress {
+    node_id: String,
+    progress: AdminEndpointProbeRunProgress,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseEndpointSample {
+    node_id: String,
+    run_id: String,
+    hour: String,
+    sample: crate::state::EndpointProbeAppendSample,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNodeError {
+    node_id: String,
+    run_id: String,
+    error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseLagged {
+    node_id: String,
+    run_id: String,
+    missed: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointProbeRunSseNotFound {
+    node_id: String,
+    run_id: String,
 }
 
 #[derive(Serialize)]
@@ -371,6 +606,7 @@ pub fn build_router(
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
     xray_health: XrayHealthHandle,
+    endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     cluster: ClusterMetadata,
     cluster_ca_pem: String,
     cluster_ca_key_pem: Option<String>,
@@ -398,6 +634,7 @@ pub fn build_router(
         store,
         reconcile,
         xray_health,
+        endpoint_probe,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
@@ -445,6 +682,19 @@ pub fn build_router(
             "/endpoints/:endpoint_id/rotate-shortid",
             post(admin_rotate_short_id),
         )
+        .route("/endpoints/probe/run", post(admin_run_endpoint_probe_run))
+        .route(
+            "/endpoints/probe/runs/:run_id",
+            get(admin_get_endpoint_probe_run_status),
+        )
+        .route(
+            "/endpoints/probe/runs/:run_id/events",
+            get(admin_stream_endpoint_probe_run_events),
+        )
+        .route(
+            "/endpoints/:endpoint_id/probe-history",
+            get(admin_get_endpoint_probe_history),
+        )
         .route("/users", post(admin_create_user).get(admin_list_users))
         .route(
             "/users/quota-summaries",
@@ -478,6 +728,18 @@ pub fn build_router(
             get(admin_get_grant_group)
                 .put(admin_replace_grant_group)
                 .delete(admin_delete_grant_group),
+        )
+        .route(
+            "/_internal/endpoint-probe/run",
+            post(admin_internal_endpoint_probe_run),
+        )
+        .route(
+            "/_internal/endpoint-probe/runs/:run_id",
+            get(admin_internal_endpoint_probe_run_status),
+        )
+        .route(
+            "/_internal/endpoint-probe/runs/:run_id/events",
+            get(admin_internal_endpoint_probe_run_events),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -813,6 +1075,75 @@ async fn fetch_github_latest_release(
         .get(url)
         .header(header::ACCEPT, "application/vnd.github+json")
         .send()
+        .await;
+
+    match resp {
+        Ok(resp) if resp.status().is_success() => {
+            let body: GithubLatestReleaseResponse = resp.json().await.map_err(|e| {
+                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
+            })?;
+
+            let published_at = match body.published_at {
+                Some(raw) => {
+                    let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
+                        ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
+                    })?;
+                    Some(
+                        dt.with_timezone(&Utc)
+                            .to_rfc3339_opts(SecondsFormat::Secs, true),
+                    )
+                }
+                None => None,
+            };
+
+            Ok((body.tag_name, published_at))
+        }
+        Ok(resp) => {
+            // Avoid surfacing flaky GitHub API failures (rate-limits, transient 5xx) as hard UI
+            // errors if we can derive the latest release tag from the HTML redirect endpoint.
+            if api_base == "https://api.github.com"
+                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
+            {
+                return Ok(out);
+            }
+
+            Err(ApiError::new(
+                "upstream_error",
+                StatusCode::BAD_GATEWAY,
+                format!("github returned status: {}", resp.status()),
+            ))
+        }
+        Err(err) => {
+            if api_base == "https://api.github.com"
+                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
+            {
+                return Ok(out);
+            }
+
+            Err(ApiError::new(
+                "upstream_error",
+                StatusCode::BAD_GATEWAY,
+                err.to_string(),
+            ))
+        }
+    }
+}
+
+async fn fetch_github_latest_release_via_redirect(
+    state: &AppState,
+    repo: &str,
+) -> Result<(String, Option<String>), ApiError> {
+    let repo = repo.trim().trim_matches('/');
+    if repo.is_empty() {
+        return Err(ApiError::invalid_request("github repo is required"));
+    }
+
+    let url = format!("https://github.com/{repo}/releases/latest");
+    let resp = state
+        .ops_github_client
+        .get(url)
+        .header(header::ACCEPT, "text/html")
+        .send()
         .await
         .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
 
@@ -820,29 +1151,30 @@ async fn fetch_github_latest_release(
         return Err(ApiError::new(
             "upstream_error",
             StatusCode::BAD_GATEWAY,
-            format!("github returned status: {}", resp.status()),
+            format!("github releases/latest returned status: {}", resp.status()),
         ));
     }
 
-    let body: GithubLatestReleaseResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
-
-    let published_at = match body.published_at {
-        Some(raw) => {
-            let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
-                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
-            })?;
-            Some(
-                dt.with_timezone(&Utc)
-                    .to_rfc3339_opts(SecondsFormat::Secs, true),
-            )
-        }
-        None => None,
+    let Some(tag) = github_release_tag_from_url(resp.url()) else {
+        return Err(ApiError::new(
+            "upstream_error",
+            StatusCode::BAD_GATEWAY,
+            "github releases/latest returned unexpected url".to_string(),
+        ));
     };
 
-    Ok((body.tag_name, published_at))
+    // Redirect-based lookup does not expose published_at without fetching the API JSON.
+    Ok((tag, None))
+}
+
+fn github_release_tag_from_url(url: &reqwest::Url) -> Option<String> {
+    let segments: Vec<_> = url.path_segments()?.collect();
+    let idx = segments.iter().position(|s| *s == "tag")?;
+    let tag = segments.get(idx + 1)?;
+    if tag.trim().is_empty() {
+        return None;
+    }
+    Some(tag.to_string())
 }
 
 fn compare_simple_semver(current: &str, latest: &str) -> (Option<bool>, VersionCheckCompareReason) {
@@ -1451,22 +1783,1155 @@ async fn admin_create_endpoint(
 
 async fn admin_list_endpoints(
     Extension(state): Extension<AppState>,
-) -> Result<Json<Items<Endpoint>>, ApiError> {
+) -> Result<Json<Items<AdminEndpointWithProbe>>, ApiError> {
     let store = state.store.lock().await;
+    let now = Utc::now();
     Ok(Json(Items {
-        items: store.list_endpoints(),
+        items: store
+            .list_endpoints()
+            .into_iter()
+            .map(|endpoint| AdminEndpointWithProbe {
+                probe: build_endpoint_probe_summary(&store, &endpoint.endpoint_id, now, 24),
+                endpoint,
+            })
+            .collect(),
     }))
 }
 
 async fn admin_get_endpoint(
     Extension(state): Extension<AppState>,
     Path(endpoint_id): Path<String>,
-) -> Result<Json<Endpoint>, ApiError> {
+) -> Result<Json<AdminEndpointWithProbe>, ApiError> {
     let store = state.store.lock().await;
     let endpoint = store
         .get_endpoint(&endpoint_id)
         .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
-    Ok(Json(endpoint))
+    let now = Utc::now();
+    Ok(Json(AdminEndpointWithProbe {
+        probe: build_endpoint_probe_summary(&store, &endpoint.endpoint_id, now, 24),
+        endpoint,
+    }))
+}
+
+fn probe_status_for_counts(
+    expected_nodes: usize,
+    sample_count: usize,
+    ok_count: usize,
+) -> EndpointProbeStatus {
+    if expected_nodes == 0 {
+        return EndpointProbeStatus::Missing;
+    }
+    if sample_count == 0 {
+        return EndpointProbeStatus::Missing;
+    }
+    // If not all nodes have reported, treat this hour bucket as incomplete.
+    if sample_count < expected_nodes {
+        return EndpointProbeStatus::Missing;
+    }
+    if ok_count == 0 {
+        return EndpointProbeStatus::Down;
+    }
+    if ok_count >= expected_nodes {
+        return EndpointProbeStatus::Up;
+    }
+    EndpointProbeStatus::Degraded
+}
+
+#[cfg(test)]
+mod endpoint_probe_status_tests {
+    use super::{EndpointProbeStatus, probe_status_for_counts};
+
+    #[test]
+    fn probe_status_handles_incomplete_hours_as_missing() {
+        assert_eq!(
+            probe_status_for_counts(3, 2, 0),
+            EndpointProbeStatus::Missing
+        );
+        assert_eq!(
+            probe_status_for_counts(3, 2, 1),
+            EndpointProbeStatus::Missing
+        );
+    }
+
+    #[test]
+    fn probe_status_down_when_all_nodes_report_and_all_fail() {
+        assert_eq!(probe_status_for_counts(3, 3, 0), EndpointProbeStatus::Down);
+    }
+
+    #[test]
+    fn probe_status_up_when_all_nodes_report_and_all_ok() {
+        assert_eq!(probe_status_for_counts(3, 3, 3), EndpointProbeStatus::Up);
+    }
+
+    #[test]
+    fn probe_status_degraded_when_mixed_ok_and_fail() {
+        assert_eq!(
+            probe_status_for_counts(3, 3, 2),
+            EndpointProbeStatus::Degraded
+        );
+        assert_eq!(
+            probe_status_for_counts(3, 3, 1),
+            EndpointProbeStatus::Degraded
+        );
+    }
+}
+
+fn percentile_ms(sorted: &[u32], percentile: f64) -> Option<u32> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let p = percentile.clamp(0.0, 1.0);
+    let idx = ((sorted.len() as f64 - 1.0) * p).round() as usize;
+    sorted.get(idx).copied()
+}
+
+fn compute_latency_p50_p95_ms(samples: impl Iterator<Item = u32>) -> (Option<u32>, Option<u32>) {
+    let mut values: Vec<u32> = samples.collect();
+    values.sort_unstable();
+    (percentile_ms(&values, 0.50), percentile_ms(&values, 0.95))
+}
+
+fn build_endpoint_probe_summary(
+    store: &JsonSnapshotStore,
+    endpoint_id: &str,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+) -> AdminEndpointProbeSummary {
+    let node_ids: std::collections::BTreeSet<String> =
+        store.list_nodes().into_iter().map(|n| n.node_id).collect();
+    let expected_nodes = node_ids.len();
+    let history = store.state().endpoint_probe_history.get(endpoint_id);
+
+    let now_hour = now
+        .with_minute(0)
+        .and_then(|v| v.with_second(0))
+        .and_then(|v| v.with_nanosecond(0))
+        .unwrap_or(now);
+    let start = now_hour - chrono::Duration::hours(hours.saturating_sub(1) as i64);
+
+    let mut slots = Vec::with_capacity(hours);
+    let mut latest_checked_at: Option<String> = None;
+    let mut latest_latency_ms_p50: Option<u32> = None;
+
+    for i in 0..hours {
+        let hour_dt = start + chrono::Duration::hours(i as i64);
+        let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+
+        let Some(history) = history else {
+            slots.push(AdminEndpointProbeSlot {
+                hour: hour_key,
+                status: EndpointProbeStatus::Missing,
+                checked_at: None,
+                latency_ms_p50: None,
+            });
+            continue;
+        };
+
+        let Some(bucket) = history.hours.get(&hour_key) else {
+            slots.push(AdminEndpointProbeSlot {
+                hour: hour_key,
+                status: EndpointProbeStatus::Missing,
+                checked_at: None,
+                latency_ms_p50: None,
+            });
+            continue;
+        };
+
+        let sample_count = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .count();
+        let ok_count = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .map(|(_node_id, sample)| sample)
+            .filter(|s| s.ok)
+            .count();
+        let (p50, _p95) = compute_latency_p50_p95_ms(
+            bucket
+                .by_node
+                .iter()
+                .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+                .map(|(_node_id, sample)| sample)
+                .filter(|s| s.ok)
+                .filter_map(|s| s.latency_ms),
+        );
+        let checked_at_max = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .map(|(_node_id, sample)| sample)
+            .map(|s| s.checked_at.as_str())
+            .max()
+            .map(|s| s.to_string());
+
+        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count);
+
+        // Iterate oldest -> newest. Keep the last seen as the "latest".
+        if sample_count > 0 {
+            latest_checked_at = checked_at_max.clone();
+            latest_latency_ms_p50 = p50;
+        }
+
+        slots.push(AdminEndpointProbeSlot {
+            hour: hour_key,
+            status,
+            checked_at: checked_at_max,
+            latency_ms_p50: p50,
+        });
+    }
+
+    AdminEndpointProbeSummary {
+        latest_checked_at,
+        latest_latency_ms_p50,
+        slots,
+    }
+}
+
+fn build_endpoint_probe_history_response(
+    store: &JsonSnapshotStore,
+    endpoint_id: &str,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+) -> AdminEndpointProbeHistoryResponse {
+    let node_ids: std::collections::BTreeSet<String> =
+        store.list_nodes().into_iter().map(|n| n.node_id).collect();
+    let expected_nodes = node_ids.len();
+    let history = store.state().endpoint_probe_history.get(endpoint_id);
+
+    let now_hour = now
+        .with_minute(0)
+        .and_then(|v| v.with_second(0))
+        .and_then(|v| v.with_nanosecond(0))
+        .unwrap_or(now);
+    let start = now_hour - chrono::Duration::hours(hours.saturating_sub(1) as i64);
+
+    let mut slots = Vec::with_capacity(hours);
+
+    for i in 0..hours {
+        let hour_dt = start + chrono::Duration::hours(i as i64);
+        let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+
+        let bucket = history.and_then(|h| h.hours.get(&hour_key));
+
+        let mut by_node = Vec::new();
+        if let Some(bucket) = bucket {
+            for (node_id, sample) in &bucket.by_node {
+                if !node_ids.contains(node_id.as_str()) {
+                    continue;
+                }
+                by_node.push(AdminEndpointProbeHistoryNode {
+                    node_id: node_id.clone(),
+                    ok: sample.ok,
+                    checked_at: sample.checked_at.clone(),
+                    latency_ms: sample.latency_ms,
+                    target_id: sample.target_id.clone(),
+                    target_url: sample.target_url.clone(),
+                    error: sample.error.clone(),
+                    config_hash: sample.config_hash.clone(),
+                });
+            }
+            by_node.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+        }
+
+        let sample_count = by_node.len();
+        let ok_count = by_node.iter().filter(|s| s.ok).count();
+        let (p50, p95) = compute_latency_p50_p95_ms(
+            by_node.iter().filter(|s| s.ok).filter_map(|s| s.latency_ms),
+        );
+
+        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count);
+
+        slots.push(AdminEndpointProbeHistorySlot {
+            hour: hour_key,
+            status,
+            ok_count,
+            sample_count,
+            latency_ms_p50: p50,
+            latency_ms_p95: p95,
+            by_node,
+        });
+    }
+
+    AdminEndpointProbeHistoryResponse {
+        endpoint_id: endpoint_id.to_string(),
+        expected_nodes,
+        slots,
+    }
+}
+
+async fn admin_get_endpoint_probe_history(
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
+    Query(q): Query<EndpointProbeHistoryQuery>,
+) -> Result<Json<AdminEndpointProbeHistoryResponse>, ApiError> {
+    let hours = q.hours.unwrap_or(24).clamp(1, 24) as usize;
+    let store = state.store.lock().await;
+    if store.get_endpoint(&endpoint_id).is_none() {
+        return Err(ApiError::not_found(format!(
+            "endpoint not found: {endpoint_id}"
+        )));
+    }
+    let now = Utc::now();
+    Ok(Json(build_endpoint_probe_history_response(
+        &store,
+        &endpoint_id,
+        now,
+        hours,
+    )))
+}
+
+fn build_cluster_http_client(state: &AppState) -> Result<reqwest::Client, ApiError> {
+    let ca = reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let mut builder = reqwest::Client::builder().add_root_certificate(ca);
+
+    // Best effort: if the edge requires mTLS, attach node identity.
+    let cert = state
+        .cluster
+        .read_node_cert_pem(&state.config.data_dir)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let key = state
+        .cluster
+        .read_node_key_pem(&state.config.data_dir)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let identity_pem = format!("{cert}\n{key}");
+    let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    builder = builder.identity(identity);
+
+    builder
+        .build()
+        .map_err(|e| ApiError::internal(format!("build cluster reqwest client: {e}")))
+}
+
+async fn admin_run_endpoint_probe_run(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminEndpointProbeRunResponse>, ApiError> {
+    let run_id = crate::id::new_ulid_string();
+    let now = Utc::now();
+    let hour = crate::endpoint_probe::format_hour_key(now);
+    let config_hash = crate::endpoint_probe::probe_config_hash();
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+
+    let local_node_id = state.cluster.node_id.clone();
+
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+
+    let client = build_cluster_http_client(&state)?;
+    let uri: axum::http::Uri = "/_internal/endpoint-probe/run".parse().expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let mut tasks = Vec::new();
+    for node in nodes {
+        let node_id = node.node_id.clone();
+        let req_body = AdminInternalEndpointProbeRunRequest {
+            run_id: run_id.clone(),
+            hour: hour.clone(),
+            config_hash: config_hash.clone(),
+        };
+
+        if node_id == local_node_id {
+            let handle = state.endpoint_probe.clone();
+            tasks.push(tokio::spawn(async move {
+                let out = handle
+                    .start_background(crate::endpoint_probe::EndpointProbeRunRequest {
+                        hour: req_body.hour.clone(),
+                        run_id: req_body.run_id.clone(),
+                        config_hash: req_body.config_hash.clone(),
+                        reason: "manual",
+                    })
+                    .await;
+                match out {
+                    Ok(accepted) => AdminEndpointProbeRunNode {
+                        node_id,
+                        accepted: accepted.accepted,
+                        already_running: accepted.already_running,
+                        error: None,
+                    },
+                    Err(err) => AdminEndpointProbeRunNode {
+                        node_id,
+                        accepted: false,
+                        already_running: false,
+                        error: Some(err.to_string()),
+                    },
+                }
+            }));
+            continue;
+        }
+
+        let client = client.clone();
+        let sig = sig.clone();
+        let url = format!(
+            "{}/api/admin/_internal/endpoint-probe/run",
+            node.api_base_url.trim_end_matches('/')
+        );
+
+        tasks.push(tokio::spawn(async move {
+            let request = client
+                .post(url)
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig,
+                )
+                .json(&req_body)
+                .send();
+
+            let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
+            let resp = match resp {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    return AdminEndpointProbeRunNode {
+                        node_id,
+                        accepted: false,
+                        already_running: false,
+                        error: Some(err.to_string()),
+                    };
+                }
+                Err(_) => {
+                    return AdminEndpointProbeRunNode {
+                        node_id,
+                        accepted: false,
+                        already_running: false,
+                        error: Some("timeout".to_string()),
+                    };
+                }
+            };
+
+            if resp.status() == StatusCode::CONFLICT {
+                let body = match resp.text().await {
+                    Ok(body) => body,
+                    Err(err) => err.to_string(),
+                };
+                return AdminEndpointProbeRunNode {
+                    node_id,
+                    accepted: false,
+                    already_running: false,
+                    error: Some(if body.trim().is_empty() {
+                        "conflict".to_string()
+                    } else {
+                        format!("conflict: {body}")
+                    }),
+                };
+            }
+
+            if !resp.status().is_success() {
+                return AdminEndpointProbeRunNode {
+                    node_id,
+                    accepted: false,
+                    already_running: false,
+                    error: Some(format!("http {}", resp.status())),
+                };
+            }
+
+            match resp.json::<AdminInternalEndpointProbeRunResponse>().await {
+                Ok(out) => AdminEndpointProbeRunNode {
+                    node_id,
+                    accepted: out.accepted,
+                    already_running: out.already_running,
+                    error: None,
+                },
+                Err(err) => AdminEndpointProbeRunNode {
+                    node_id,
+                    accepted: false,
+                    already_running: false,
+                    error: Some(err.to_string()),
+                },
+            }
+        }));
+    }
+
+    let mut nodes = Vec::new();
+    for item in join_all(tasks).await.into_iter().flatten() {
+        nodes.push(item);
+    }
+    nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+
+    Ok(Json(AdminEndpointProbeRunResponse {
+        run_id,
+        hour,
+        config_hash,
+        nodes,
+    }))
+}
+
+fn map_probe_run_snapshot(
+    snapshot: crate::endpoint_probe::EndpointProbeRunSnapshot,
+) -> AdminEndpointProbeRunProgress {
+    let status = match snapshot.status {
+        crate::endpoint_probe::EndpointProbeRunStatus::Running => {
+            AdminEndpointProbeRunProgressStatus::Running
+        }
+        crate::endpoint_probe::EndpointProbeRunStatus::Finished => {
+            AdminEndpointProbeRunProgressStatus::Finished
+        }
+        crate::endpoint_probe::EndpointProbeRunStatus::Failed => {
+            AdminEndpointProbeRunProgressStatus::Failed
+        }
+    };
+
+    AdminEndpointProbeRunProgress {
+        run_id: snapshot.run_id,
+        hour: snapshot.hour,
+        config_hash: snapshot.config_hash,
+        status,
+        endpoints_total: snapshot.endpoints_total,
+        endpoints_done: snapshot.endpoints_done,
+        started_at: snapshot.started_at,
+        updated_at: snapshot.updated_at,
+        finished_at: snapshot.finished_at,
+        error: snapshot.error,
+    }
+}
+
+fn map_node_status(
+    run_id: &str,
+    node_id: String,
+    requested: Option<AdminEndpointProbeRunProgress>,
+    current: Option<AdminEndpointProbeRunProgress>,
+    error: Option<String>,
+) -> AdminEndpointProbeRunStatusNode {
+    if let Some(error) = error {
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status: AdminEndpointProbeRunNodeStatus::Unknown,
+            progress: requested,
+            current,
+            error: Some(error),
+        };
+    }
+
+    if let Some(progress) = requested {
+        let status = match progress.status {
+            AdminEndpointProbeRunProgressStatus::Running => {
+                AdminEndpointProbeRunNodeStatus::Running
+            }
+            AdminEndpointProbeRunProgressStatus::Finished => {
+                AdminEndpointProbeRunNodeStatus::Finished
+            }
+            AdminEndpointProbeRunProgressStatus::Failed => AdminEndpointProbeRunNodeStatus::Failed,
+        };
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status,
+            progress: Some(progress),
+            current,
+            error: None,
+        };
+    }
+
+    if let Some(current) = current {
+        if current.run_id != run_id {
+            return AdminEndpointProbeRunStatusNode {
+                node_id,
+                status: AdminEndpointProbeRunNodeStatus::Busy,
+                progress: None,
+                current: Some(current),
+                error: None,
+            };
+        }
+
+        // Requested run is the current run, but snapshot lookup failed for some reason.
+        return AdminEndpointProbeRunStatusNode {
+            node_id,
+            status: AdminEndpointProbeRunNodeStatus::Running,
+            progress: Some(current),
+            current: None,
+            error: None,
+        };
+    }
+
+    AdminEndpointProbeRunStatusNode {
+        node_id,
+        status: AdminEndpointProbeRunNodeStatus::NotFound,
+        progress: None,
+        current: None,
+        error: None,
+    }
+}
+
+async fn admin_get_endpoint_probe_run_status(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<AdminEndpointProbeRunStatusResponse>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+
+    let client = build_cluster_http_client(&state)?;
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the verifier
+    // sees a stripped path like `/_internal/...` (not `/api/admin/...`).
+    let uri: axum::http::Uri = format!("/_internal/endpoint-probe/runs/{run_id}")
+        .parse()
+        .map_err(|_| ApiError::invalid_request("run_id is invalid"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let mut tasks = Vec::new();
+    for node in nodes {
+        let node_id = node.node_id.clone();
+
+        if node_id == local_node_id {
+            let handle = state.endpoint_probe.clone();
+            let run_id = run_id.clone();
+            tasks.push(tokio::spawn(async move {
+                let requested = handle
+                    .run_snapshot(&run_id)
+                    .await
+                    .map(map_probe_run_snapshot);
+                let current = handle
+                    .current_run_snapshot()
+                    .await
+                    .map(map_probe_run_snapshot);
+                map_node_status(&run_id, node_id, requested, current, None)
+            }));
+            continue;
+        }
+
+        let client = client.clone();
+        let sig = sig.clone();
+        let run_id = run_id.clone();
+        let url = format!(
+            "{}/api/admin/_internal/endpoint-probe/runs/{}",
+            node.api_base_url.trim_end_matches('/'),
+            run_id
+        );
+
+        tasks.push(tokio::spawn(async move {
+            let request = client
+                .get(url)
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig,
+                )
+                .send();
+
+            let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
+            let resp = match resp {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    return map_node_status(&run_id, node_id, None, None, Some(err.to_string()));
+                }
+                Err(_) => {
+                    return map_node_status(
+                        &run_id,
+                        node_id,
+                        None,
+                        None,
+                        Some("timeout".to_string()),
+                    );
+                }
+            };
+
+            if !resp.status().is_success() {
+                return map_node_status(
+                    &run_id,
+                    node_id,
+                    None,
+                    None,
+                    Some(format!("http {}", resp.status())),
+                );
+            }
+
+            match resp
+                .json::<AdminInternalEndpointProbeRunStatusResponse>()
+                .await
+            {
+                Ok(out) => map_node_status(&run_id, node_id, out.requested, out.current, None),
+                Err(err) => map_node_status(&run_id, node_id, None, None, Some(err.to_string())),
+            }
+        }));
+    }
+
+    let mut nodes = Vec::new();
+    for item in join_all(tasks).await.into_iter().flatten() {
+        nodes.push(item);
+    }
+    nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+
+    let mut hour = None;
+    let mut config_hash = None;
+    for node in &nodes {
+        if let Some(progress) = node.progress.as_ref() {
+            hour = Some(progress.hour.clone());
+            config_hash = Some(progress.config_hash.clone());
+            break;
+        }
+    }
+
+    let any_running = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Running));
+    let any_failed = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Failed));
+    let any_finished = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Finished));
+    let any_unknown = nodes
+        .iter()
+        .any(|n| matches!(n.status, AdminEndpointProbeRunNodeStatus::Unknown));
+
+    let status = if any_running {
+        AdminEndpointProbeRunOverallStatus::Running
+    } else if any_failed {
+        AdminEndpointProbeRunOverallStatus::Failed
+    } else if any_finished {
+        AdminEndpointProbeRunOverallStatus::Finished
+    } else if any_unknown {
+        AdminEndpointProbeRunOverallStatus::Unknown
+    } else {
+        AdminEndpointProbeRunOverallStatus::NotFound
+    };
+
+    Ok(Json(AdminEndpointProbeRunStatusResponse {
+        run_id,
+        status,
+        hour,
+        config_hash,
+        nodes,
+    }))
+}
+
+fn sse_json_event<T: Serialize>(event: &'static str, payload: &T) -> Event {
+    match serde_json::to_string(payload) {
+        Ok(data) => Event::default().event(event).data(data),
+        Err(err) => Event::default().event("error").data(err.to_string()),
+    }
+}
+
+async fn forward_local_endpoint_probe_run_events(
+    handle: crate::endpoint_probe::EndpointProbeHandle,
+    node_id: String,
+    run_id: String,
+    tx: mpsc::Sender<Event>,
+) {
+    let requested = handle.run_snapshot(&run_id).await;
+    let current = handle.current_run_snapshot().await;
+
+    let Some(initial) = requested.or_else(|| {
+        current.and_then(|snapshot| {
+            if snapshot.run_id == run_id {
+                Some(snapshot)
+            } else {
+                None
+            }
+        })
+    }) else {
+        let _ = tx
+            .send(sse_json_event(
+                "not_found",
+                &AdminEndpointProbeRunSseNotFound { node_id, run_id },
+            ))
+            .await;
+        return;
+    };
+
+    let progress = map_probe_run_snapshot(initial.clone());
+    if tx
+        .send(sse_json_event(
+            "progress",
+            &AdminEndpointProbeRunSseNodeProgress {
+                node_id: node_id.clone(),
+                progress,
+            },
+        ))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    if !matches!(
+        initial.status,
+        crate::endpoint_probe::EndpointProbeRunStatus::Running
+    ) {
+        return;
+    }
+
+    let mut rx = handle.subscribe();
+    loop {
+        if tx.is_closed() {
+            return;
+        }
+
+        match rx.recv().await {
+            Ok(crate::endpoint_probe::EndpointProbeEvent::RunSnapshot(snapshot)) => {
+                if snapshot.run_id != run_id {
+                    continue;
+                }
+                let progress = map_probe_run_snapshot(snapshot.clone());
+                if tx
+                    .send(sse_json_event(
+                        "progress",
+                        &AdminEndpointProbeRunSseNodeProgress {
+                            node_id: node_id.clone(),
+                            progress,
+                        },
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+
+                if !matches!(
+                    snapshot.status,
+                    crate::endpoint_probe::EndpointProbeRunStatus::Running
+                ) {
+                    return;
+                }
+            }
+            Ok(crate::endpoint_probe::EndpointProbeEvent::EndpointSample {
+                run_id: sample_run_id,
+                hour,
+                from_node_id,
+                sample,
+            }) => {
+                if sample_run_id != run_id {
+                    continue;
+                }
+                if tx
+                    .send(sse_json_event(
+                        "sample",
+                        &AdminEndpointProbeRunSseEndpointSample {
+                            node_id: from_node_id,
+                            run_id: sample_run_id,
+                            hour,
+                            sample,
+                        },
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "lagged",
+                        &AdminEndpointProbeRunSseLagged {
+                            node_id: node_id.clone(),
+                            run_id: run_id.clone(),
+                            missed,
+                        },
+                    ))
+                    .await;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return;
+            }
+        }
+    }
+}
+
+async fn forward_remote_endpoint_probe_run_events(
+    client: reqwest::Client,
+    url: String,
+    sig: String,
+    node_id: String,
+    run_id: String,
+    tx: mpsc::Sender<Event>,
+) {
+    let resp = match client
+        .get(url)
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            let _ = tx
+                .send(sse_json_event(
+                    "node_error",
+                    &AdminEndpointProbeRunSseNodeError {
+                        node_id,
+                        run_id,
+                        error: err.to_string(),
+                    },
+                ))
+                .await;
+            return;
+        }
+    };
+
+    if !resp.status().is_success() {
+        let _ = tx
+            .send(sse_json_event(
+                "node_error",
+                &AdminEndpointProbeRunSseNodeError {
+                    node_id,
+                    run_id,
+                    error: format!("http {}", resp.status()),
+                },
+            ))
+            .await;
+        return;
+    }
+
+    let mut buffer = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if tx.is_closed() {
+            return;
+        }
+
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "node_error",
+                        &AdminEndpointProbeRunSseNodeError {
+                            node_id,
+                            run_id,
+                            error: err.to_string(),
+                        },
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        let chunk_text = String::from_utf8_lossy(bytes.as_ref()).replace("\r\n", "\n");
+        buffer.push_str(&chunk_text);
+
+        while let Some(split) = buffer.find("\n\n") {
+            let frame = buffer[..split].to_string();
+            buffer = buffer[split + 2..].to_string();
+
+            let mut event_type: Option<String> = None;
+            let mut data_lines: Vec<&str> = Vec::new();
+            for line in frame.lines() {
+                let line = line.trim_end_matches('\r');
+                if line.starts_with(':') {
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("event:") {
+                    event_type = Some(rest.trim().to_string());
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("data:") {
+                    data_lines.push(rest.trim_start());
+                }
+            }
+
+            let Some(event_type) = event_type else {
+                continue;
+            };
+            let data = data_lines.join("\n");
+            if data.is_empty() {
+                continue;
+            }
+
+            if tx
+                .send(Event::default().event(event_type).data(data))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+}
+
+async fn admin_stream_endpoint_probe_run_events(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let node_ids: Vec<String> = nodes.iter().map(|n| n.node_id.clone()).collect();
+
+    let hello = AdminEndpointProbeRunSseHello {
+        run_id: run_id.clone(),
+        connected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        nodes: node_ids,
+    };
+
+    let mut initial_events = VecDeque::new();
+    initial_events.push_back(sse_json_event("hello", &hello));
+
+    let local_node_id = state.cluster.node_id.clone();
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+
+    let client = build_cluster_http_client(&state)?;
+    let uri: axum::http::Uri = format!("/_internal/endpoint-probe/runs/{run_id}/events")
+        .parse()
+        .map_err(|_| ApiError::invalid_request("run_id is invalid"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+
+    for node in nodes {
+        let node_id = node.node_id.clone();
+
+        if node_id == local_node_id {
+            let handle = state.endpoint_probe.clone();
+            let tx = tx.clone();
+            let run_id = run_id.clone();
+            tokio::spawn(async move {
+                forward_local_endpoint_probe_run_events(handle, node_id, run_id, tx).await;
+            });
+            continue;
+        }
+
+        let client = client.clone();
+        let sig = sig.clone();
+        let tx = tx.clone();
+        let run_id = run_id.clone();
+        let url = format!(
+            "{}/api/admin/_internal/endpoint-probe/runs/{}/events",
+            node.api_base_url.trim_end_matches('/'),
+            run_id
+        );
+
+        tokio::spawn(async move {
+            forward_remote_endpoint_probe_run_events(client, url, sig, node_id, run_id, tx).await;
+        });
+    }
+
+    drop(tx);
+
+    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
+        if let Some(event) = initial.pop_front() {
+            return Some((Ok(event), (initial, rx)));
+        }
+
+        let next = rx.recv().await?;
+        Some((Ok(next), (initial, rx)))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
+}
+
+async fn admin_internal_endpoint_probe_run(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<AdminInternalEndpointProbeRunRequest>,
+) -> Result<Json<AdminInternalEndpointProbeRunResponse>, ApiError> {
+    if req.run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+    if req.hour.trim().is_empty() {
+        return Err(ApiError::invalid_request("hour is empty"));
+    }
+
+    let local_hash = crate::endpoint_probe::probe_config_hash();
+    if local_hash != req.config_hash {
+        return Err(ApiError::conflict(format!(
+            "probe config hash mismatch: expected {local_hash}, got {}",
+            req.config_hash
+        )));
+    }
+
+    let accepted = state
+        .endpoint_probe
+        .start_background(crate::endpoint_probe::EndpointProbeRunRequest {
+            hour: req.hour.clone(),
+            run_id: req.run_id.clone(),
+            config_hash: req.config_hash.clone(),
+            reason: "internal",
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(AdminInternalEndpointProbeRunResponse {
+        accepted: accepted.accepted,
+        already_running: accepted.already_running,
+        run_id: req.run_id,
+        hour: req.hour,
+    }))
+}
+
+async fn admin_internal_endpoint_probe_run_status(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<AdminInternalEndpointProbeRunStatusResponse>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let requested = state
+        .endpoint_probe
+        .run_snapshot(&run_id)
+        .await
+        .map(map_probe_run_snapshot);
+    let current = state
+        .endpoint_probe
+        .current_run_snapshot()
+        .await
+        .map(map_probe_run_snapshot);
+
+    Ok(Json(AdminInternalEndpointProbeRunStatusResponse {
+        requested_run_id: run_id,
+        requested,
+        current,
+    }))
+}
+
+async fn admin_internal_endpoint_probe_run_events(
+    Extension(state): Extension<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    if run_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("run_id is empty"));
+    }
+
+    let node_id = state.cluster.node_id.clone();
+    let handle = state.endpoint_probe.clone();
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+    tokio::spawn(async move {
+        forward_local_endpoint_probe_run_events(handle, node_id, run_id, tx).await;
+    });
+
+    let out_stream = stream::unfold(rx, |mut rx| async move {
+        let next = rx.recv().await?;
+        Some((Ok(next), rx))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
 }
 
 async fn admin_patch_endpoint(

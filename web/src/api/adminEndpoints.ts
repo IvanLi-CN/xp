@@ -9,6 +9,36 @@ export const AdminEndpointKindSchema = z.enum([
 
 export type AdminEndpointKind = z.infer<typeof AdminEndpointKindSchema>;
 
+export const EndpointProbeStatusSchema = z.enum([
+	"missing",
+	"up",
+	"degraded",
+	"down",
+]);
+
+export type EndpointProbeStatus = z.infer<typeof EndpointProbeStatusSchema>;
+
+export const AdminEndpointProbeSlotSchema = z.object({
+	hour: z.string(),
+	status: EndpointProbeStatusSchema,
+	checked_at: z.string().optional(),
+	latency_ms_p50: z.number().int().nonnegative().optional(),
+});
+
+export type AdminEndpointProbeSlot = z.infer<
+	typeof AdminEndpointProbeSlotSchema
+>;
+
+export const AdminEndpointProbeSummarySchema = z.object({
+	latest_checked_at: z.string().optional(),
+	latest_latency_ms_p50: z.number().int().nonnegative().optional(),
+	slots: z.array(AdminEndpointProbeSlotSchema),
+});
+
+export type AdminEndpointProbeSummary = z.infer<
+	typeof AdminEndpointProbeSummarySchema
+>;
+
 export const RealityConfigSchema = z.object({
 	dest: z.string(),
 	server_names: z.array(z.string()),
@@ -24,6 +54,7 @@ export const AdminEndpointSchema = z.object({
 	kind: AdminEndpointKindSchema,
 	port: z.number().int().nonnegative(),
 	meta: z.record(z.unknown()),
+	probe: AdminEndpointProbeSummarySchema.optional(),
 });
 
 export type AdminEndpoint = z.infer<typeof AdminEndpointSchema>;
