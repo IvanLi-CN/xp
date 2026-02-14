@@ -25,6 +25,7 @@ describe("validateRealityServerName", () => {
 
 	it("rejects invalid hostname formats", () => {
 		expect(validateRealityServerName("")).not.toBeNull();
+		expect(validateRealityServerName("cc.c")).not.toBeNull();
 		expect(validateRealityServerName("localhost")).not.toBeNull();
 		expect(validateRealityServerName("a..b.com")).not.toBeNull();
 		expect(validateRealityServerName(".example.com")).not.toBeNull();

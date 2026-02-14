@@ -36,6 +36,11 @@ export function validateRealityServerName(value: string): string | null {
 		return "serverName must contain at least one dot (example.com).";
 	}
 
+	// Heuristic: public TLDs are at least 2 chars today; this blocks obvious typos like "cc.c".
+	// If you need internal single-letter TLDs, relax this rule.
+	const tld = labels[labels.length - 1] ?? "";
+	if (tld.length < 2) return "serverName TLD is too short (min 2).";
+
 	for (const label of labels) {
 		if (label.length === 0) return "serverName contains an empty label.";
 		if (label.length > 63) return "serverName label is too long (max 63).";
