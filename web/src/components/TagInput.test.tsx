@@ -43,7 +43,7 @@ describe("<TagInput />", () => {
 		expect(screen.getByText("a.example.com")).toBeInTheDocument();
 		expect(screen.getByText("b.example.com")).toBeInTheDocument();
 		// Primary marker should be shown on the first tag.
-		expect(screen.getByText("primary")).toBeInTheDocument();
+		expect(screen.getByLabelText("Primary")).toBeInTheDocument();
 
 		// Make the 2nd tag primary.
 		const makePrimaryButtons = screen.getAllByTitle("Make primary");

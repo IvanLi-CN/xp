@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 
 import { Icon } from "./Icon";
 
@@ -53,6 +53,7 @@ export function TagInput({
 	const inputId = useId();
 	const helperTextId = useId();
 	const errorTextId = useId();
+	const inputRef = useRef<HTMLInputElement | null>(null);
 
 	const [draft, setDraft] = useState("");
 	const [error, setError] = useState<string | null>(null);
@@ -122,24 +123,50 @@ export function TagInput({
 			</div>
 
 			<div className="space-y-2">
-				<div className="flex flex-wrap gap-2">
+				<div
+					className={[
+						// A custom tag input that looks/behaves like a single "input" control.
+						// We reuse DaisyUI's input classes passed from the page so density is consistent.
+						inputClass,
+						"w-full !h-auto min-h-12 flex flex-wrap items-center gap-2 py-2",
+						disabled ? "opacity-60" : null,
+						error ? "input-error" : null,
+						// Focus ring to match other inputs.
+						"focus-within:outline focus-within:outline-2 focus-within:outline-primary/30",
+					].join(" ")}
+					onMouseDown={(event) => {
+						if (disabled) return;
+						// Clicking empty space should focus the input (chips UIs usually behave this way).
+						// Do not steal events from action buttons.
+						const target = event.target as HTMLElement | null;
+						if (target?.closest("button")) return;
+						event.preventDefault();
+						inputRef.current?.focus();
+					}}
+				>
 					{tags.map((tag, idx) => (
-						<div key={tag} className="flex items-center gap-1">
+						<div key={tag} className="join">
 							<span
 								className={[
-									"badge gap-2 font-mono",
+									"badge join-item gap-2 font-mono",
 									idx === 0 ? "badge-primary" : "badge-ghost",
 								].join(" ")}
 								title={idx === 0 ? "Primary (used for dest / probe)" : tag}
 							>
+								{idx === 0 ? (
+									<Icon
+										name="tabler:star-filled"
+										size={14}
+										ariaLabel="Primary"
+									/>
+								) : null}
 								<span>{tag}</span>
-								{idx === 0 ? <span className="opacity-80">primary</span> : null}
 							</span>
 
 							{idx !== 0 ? (
 								<button
 									type="button"
-									className="btn btn-ghost btn-xs"
+									className="btn join-item btn-ghost btn-xs"
 									onClick={() => makePrimaryAt(idx)}
 									disabled={disabled}
 									title="Make primary"
@@ -150,7 +177,7 @@ export function TagInput({
 
 							<button
 								type="button"
-								className="btn btn-ghost btn-xs"
+								className="btn join-item btn-ghost btn-xs"
 								onClick={() => removeAt(idx)}
 								disabled={disabled}
 								title="Remove"
@@ -159,12 +186,17 @@ export function TagInput({
 							</button>
 						</div>
 					))}
-				</div>
 
-				<div className="flex items-center gap-2">
 					<input
+						ref={inputRef}
 						type="text"
-						className={inputClass}
+						className={[
+							// Keep visual parity with other fields while allowing chips to wrap.
+							"min-w-[12ch] grow bg-transparent font-mono outline-none",
+							disabled ? "opacity-60" : null,
+						]
+							.filter(Boolean)
+							.join(" ")}
 						id={inputId}
 						value={draft}
 						placeholder={placeholder}
@@ -207,12 +239,13 @@ export function TagInput({
 
 					<button
 						type="button"
-						className="btn btn-secondary btn-sm"
+						className="btn btn-ghost btn-sm"
 						onClick={() => commitDraft()}
 						disabled={disabled || draft.trim().length === 0}
+						aria-label="Add"
 						title="Add"
 					>
-						Add
+						<Icon name="tabler:plus" size={16} ariaLabel="Add" />
 					</button>
 				</div>
 
