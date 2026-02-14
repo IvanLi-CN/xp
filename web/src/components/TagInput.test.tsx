@@ -85,4 +85,23 @@ describe("<TagInput />", () => {
 		expect(screen.queryByText("https://example.com")).toBeNull();
 		expect(screen.getByRole("alert")).toBeInTheDocument();
 	});
+
+	it("does not remove tags when clicking helper/empty areas", () => {
+		render(<Harness />);
+
+		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		fireEvent.change(input, {
+			target: { value: "a.example.com, b.example.com" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+		expect(screen.getByText("a.example.com")).toBeInTheDocument();
+		expect(screen.getByText("b.example.com")).toBeInTheDocument();
+
+		// Clicking the helper text / primary hint should not activate any "Remove" buttons.
+		fireEvent.click(screen.getByText(/\(primary=/));
+
+		expect(screen.getByText("a.example.com")).toBeInTheDocument();
+		expect(screen.getByText("b.example.com")).toBeInTheDocument();
+	});
 });

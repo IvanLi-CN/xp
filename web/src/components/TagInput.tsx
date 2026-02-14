@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { Icon } from "./Icon";
 
@@ -50,6 +50,10 @@ export function TagInput({
 	inputClass = "input input-bordered",
 	validateTag = defaultValidateTag,
 }: TagInputProps) {
+	const inputId = useId();
+	const helperTextId = useId();
+	const errorTextId = useId();
+
 	const [draft, setDraft] = useState("");
 	const [error, setError] = useState<string | null>(null);
 
@@ -107,9 +111,14 @@ export function TagInput({
 	}
 
 	return (
-		<label className="form-control">
+		<div className="form-control">
 			<div className="label">
-				<span className="label-text font-mono">{label}</span>
+				<label
+					className="label-text font-mono cursor-pointer"
+					htmlFor={inputId}
+				>
+					{label}
+				</label>
 			</div>
 
 			<div className="space-y-2">
@@ -156,9 +165,15 @@ export function TagInput({
 					<input
 						type="text"
 						className={inputClass}
+						id={inputId}
 						value={draft}
 						placeholder={placeholder}
 						disabled={disabled}
+						aria-label={label}
+						aria-invalid={error ? true : undefined}
+						aria-describedby={
+							error ? `${helperTextId} ${errorTextId}` : helperTextId
+						}
 						onChange={(event) => {
 							setDraft(event.target.value);
 							if (error) setError(null);
@@ -201,7 +216,7 @@ export function TagInput({
 					</button>
 				</div>
 
-				<p className="text-xs opacity-70">
+				<p className="text-xs opacity-70" id={helperTextId}>
 					{helperText ? helperText : null}
 					{primary ? (
 						<span className="ml-2 font-mono opacity-70">
@@ -211,11 +226,11 @@ export function TagInput({
 				</p>
 
 				{error ? (
-					<p className="text-xs text-error" role="alert">
+					<p className="text-xs text-error" role="alert" id={errorTextId}>
 						{error}
 					</p>
 				) : null}
 			</div>
-		</label>
+		</div>
 	);
 }
