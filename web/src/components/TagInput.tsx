@@ -187,66 +187,68 @@ export function TagInput({
 						</div>
 					))}
 
-					<input
-						ref={inputRef}
-						type="text"
-						className={[
-							// Keep visual parity with other fields while allowing chips to wrap.
-							"min-w-[12ch] grow bg-transparent font-mono outline-none",
-							disabled ? "opacity-60" : null,
-						]
-							.filter(Boolean)
-							.join(" ")}
-						id={inputId}
-						value={draft}
-						placeholder={placeholder}
-						disabled={disabled}
-						aria-label={label}
-						aria-invalid={error ? true : undefined}
-						aria-describedby={
-							error ? `${helperTextId} ${errorTextId}` : helperTextId
-						}
-						onChange={(event) => {
-							setDraft(event.target.value);
-							if (error) setError(null);
-						}}
-						onKeyDown={(event) => {
-							if (event.key === "Enter" || event.key === ",") {
-								event.preventDefault();
-								commitDraft();
-								return;
+					<div className="flex min-w-[16ch] grow items-center gap-2">
+						<input
+							ref={inputRef}
+							type="text"
+							className={[
+								// Keep visual parity with other fields while allowing chips to wrap.
+								"grow bg-transparent font-mono outline-none",
+								disabled ? "opacity-60" : null,
+							]
+								.filter(Boolean)
+								.join(" ")}
+							id={inputId}
+							value={draft}
+							placeholder={placeholder}
+							disabled={disabled}
+							aria-label={label}
+							aria-invalid={error ? true : undefined}
+							aria-describedby={
+								error ? `${helperTextId} ${errorTextId}` : helperTextId
 							}
+							onChange={(event) => {
+								setDraft(event.target.value);
+								if (error) setError(null);
+							}}
+							onKeyDown={(event) => {
+								if (event.key === "Enter" || event.key === ",") {
+									event.preventDefault();
+									commitDraft();
+									return;
+								}
 
-							if (
-								event.key === "Backspace" &&
-								draft.length === 0 &&
-								tags.length > 0
-							) {
-								event.preventDefault();
-								removeAt(tags.length - 1);
-							}
-						}}
-						onPaste={(event) => {
-							const text = event.clipboardData?.getData("text") ?? "";
-							const tokens = splitTokens(text);
-							if (tokens.length >= 2) {
-								event.preventDefault();
-								addManyTokens(tokens);
-								setDraft("");
-							}
-						}}
-					/>
+								if (
+									event.key === "Backspace" &&
+									draft.length === 0 &&
+									tags.length > 0
+								) {
+									event.preventDefault();
+									removeAt(tags.length - 1);
+								}
+							}}
+							onPaste={(event) => {
+								const text = event.clipboardData?.getData("text") ?? "";
+								const tokens = splitTokens(text);
+								if (tokens.length >= 2) {
+									event.preventDefault();
+									addManyTokens(tokens);
+									setDraft("");
+								}
+							}}
+						/>
 
-					<button
-						type="button"
-						className="btn btn-ghost btn-sm"
-						onClick={() => commitDraft()}
-						disabled={disabled || draft.trim().length === 0}
-						aria-label="Add"
-						title="Add"
-					>
-						<Icon name="tabler:plus" size={16} ariaLabel="Add" />
-					</button>
+						<button
+							type="button"
+							className="btn btn-ghost btn-sm btn-square"
+							onClick={() => commitDraft()}
+							disabled={disabled || draft.trim().length === 0}
+							aria-label="Add"
+							title="Add"
+						>
+							<Icon name="tabler:plus" size={16} ariaLabel="Add" />
+						</button>
+					</div>
 				</div>
 
 				<p className="text-xs opacity-70" id={helperTextId}>
