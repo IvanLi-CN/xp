@@ -2581,7 +2581,7 @@ async fn subscription_endpoint_does_not_require_auth() {
 }
 
 #[tokio::test]
-async fn subscription_default_base64_matches_raw_and_content_type() {
+async fn subscription_default_base64_decodes_to_subscription_text_and_content_type() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
@@ -2605,6 +2605,11 @@ async fn subscription_default_base64_matches_raw_and_content_type() {
         .decode(base64_body.trim())
         .unwrap();
     let decoded_text = String::from_utf8(decoded).unwrap();
+    assert!(decoded_text.ends_with('\n'));
+    assert!(
+        decoded_text.contains("ss://") || decoded_text.contains("vless://"),
+        "expected decoded subscription text to contain at least one proxy uri"
+    );
 
     let res = app
         .oneshot(req("GET", &format!("/api/sub/{token}?format=raw")))
@@ -2617,7 +2622,11 @@ async fn subscription_default_base64_matches_raw_and_content_type() {
     );
     let raw_body = body_text(res).await;
 
-    assert_eq!(decoded_text, raw_body);
+    assert!(raw_body.ends_with('\n'));
+    assert!(
+        raw_body.contains("ss://") || raw_body.contains("vless://"),
+        "expected raw subscription text to contain at least one proxy uri"
+    );
 }
 
 #[tokio::test]
