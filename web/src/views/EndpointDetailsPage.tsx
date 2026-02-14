@@ -404,8 +404,8 @@ export function EndpointDetailsPage() {
 						{endpoint.kind === "vless_reality_vision_tcp" ? (
 							<div className="space-y-4 border-t border-base-200 pt-4">
 								<h3 className="text-lg font-semibold">VLESS settings</h3>
-								<div className="grid gap-4 md:grid-cols-3">
-									<label className="form-control md:col-span-1">
+								<div className="grid gap-4">
+									<label className="form-control">
 										<div className="label">
 											<span className="label-text font-mono">port</span>
 										</div>
@@ -420,19 +420,17 @@ export function EndpointDetailsPage() {
 											The inbound listen port on this node.
 										</p>
 									</label>
-									<div className="md:col-span-2">
-										<TagInput
-											label="serverNames"
-											value={realityServerNames}
-											onChange={setRealityServerNames}
-											placeholder="oneclient.sfx.ms"
-											disabled={patchMutation.isPending}
-											inputClass={inputClass}
-											validateTag={validateRealityServerName}
-											helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
-										/>
-									</div>
-									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40 md:col-span-3">
+									<TagInput
+										label="serverNames"
+										value={realityServerNames}
+										onChange={setRealityServerNames}
+										placeholder="oneclient.sfx.ms"
+										disabled={patchMutation.isPending}
+										inputClass={inputClass}
+										validateTag={validateRealityServerName}
+										helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
+									/>
+									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40">
 										<summary className="collapse-title text-sm font-medium">
 											Advanced (optional)
 										</summary>
