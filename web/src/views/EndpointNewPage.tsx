@@ -12,6 +12,7 @@ import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
@@ -49,6 +50,16 @@ function isValidRealityServerName(value: string): boolean {
 	return true;
 }
 
+function validateRealityServerName(value: string): string | null {
+	const trimmed = normalizeRealityServerName(value);
+	if (!trimmed) return "serverName is required.";
+	if (!isValidRealityServerName(trimmed)) {
+		return "serverName must be a domain (no scheme/path/port).";
+	}
+	if (trimmed.includes("*")) return "Wildcard is not supported.";
+	return null;
+}
+
 export function EndpointNewPage() {
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
@@ -75,7 +86,7 @@ export function EndpointNewPage() {
 	);
 	const [nodeId, setNodeId] = useState("");
 	const [port, setPort] = useState("443");
-	const [realityServerName, setRealityServerName] = useState("");
+	const [realityServerNames, setRealityServerNames] = useState<string[]>([]);
 	const [realityFingerprint, setRealityFingerprint] = useState("chrome");
 
 	useEffect(() => {
@@ -97,21 +108,26 @@ export function EndpointNewPage() {
 			}
 
 			if (kind === "vless_reality_vision_tcp") {
-				const serverNameTrimmed = normalizeRealityServerName(realityServerName);
-				if (!serverNameTrimmed) throw new Error("serverName is required.");
-				if (!isValidRealityServerName(serverNameTrimmed)) {
-					throw new Error("serverName must be a domain (no scheme/path/port).");
+				const serverNames = realityServerNames
+					.map(normalizeRealityServerName)
+					.filter((s) => s.length > 0);
+				if (serverNames.length === 0)
+					throw new Error("serverName is required.");
+				for (const name of serverNames) {
+					const err = validateRealityServerName(name);
+					if (err) throw new Error(err);
 				}
 
 				const fingerprintValue = realityFingerprint.trim() || "chrome";
+				const primary = serverNames[0];
 
 				return createAdminEndpoint(adminToken, {
 					kind,
 					node_id: nodeId,
 					port: portNumber,
 					reality: {
-						dest: `${serverNameTrimmed}:443`,
-						server_names: [serverNameTrimmed],
+						dest: `${primary}:443`,
+						server_names: serverNames,
 						fingerprint: fingerprintValue,
 					},
 				});
@@ -282,24 +298,16 @@ export function EndpointNewPage() {
 											The inbound listen port on this node.
 										</p>
 									</label>
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">serverName</span>
-										</div>
-										<input
-											type="text"
-											className={inputClass}
-											value={realityServerName}
-											placeholder="chatgpt.com"
-											onChange={(event) =>
-												setRealityServerName(event.target.value)
-											}
-										/>
-										<p className="text-xs opacity-70">
-											Camouflage domain (TLS SNI). Upstream port defaults to{" "}
-											<span className="font-mono">443</span>.
-										</p>
-									</label>
+									<TagInput
+										label="serverNames"
+										value={realityServerNames}
+										onChange={setRealityServerNames}
+										placeholder="oneclient.sfx.ms"
+										disabled={createMutation.isPending}
+										inputClass={inputClass}
+										validateTag={validateRealityServerName}
+										helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
+									/>
 									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40 md:col-span-2">
 										<summary className="collapse-title text-sm font-medium">
 											Advanced (optional)
