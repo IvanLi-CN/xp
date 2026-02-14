@@ -71,4 +71,18 @@ describe("<TagInput />", () => {
 		expect(screen.queryByText("https://example.com")).toBeNull();
 		expect(screen.getByRole("alert")).toBeInTheDocument();
 	});
+
+	it("keeps an error visible when some tokens are accepted and some are rejected", () => {
+		render(<Harness />);
+
+		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		fireEvent.change(input, {
+			target: { value: "a.example.com, https://example.com" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+		expect(screen.getByText("a.example.com")).toBeInTheDocument();
+		expect(screen.queryByText("https://example.com")).toBeNull();
+		expect(screen.getByRole("alert")).toBeInTheDocument();
+	});
 });

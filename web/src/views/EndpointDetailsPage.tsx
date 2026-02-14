@@ -18,6 +18,10 @@ import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import {
+	normalizeRealityServerName,
+	validateRealityServerName,
+} from "../utils/realityServerName";
 
 type VlessMetaSnapshot = {
 	realityDest: string;
@@ -32,29 +36,6 @@ function formatErrorMessage(error: unknown): string {
 	}
 	if (error instanceof Error) return error.message;
 	return String(error);
-}
-
-function normalizeRealityServerName(value: string): string {
-	return value.trim();
-}
-
-function isValidRealityServerName(value: string): boolean {
-	if (!value) return false;
-	if (/\s/.test(value)) return false;
-	if (value.includes("://")) return false;
-	if (value.includes("/")) return false;
-	if (value.includes(":")) return false;
-	return true;
-}
-
-function validateRealityServerName(value: string): string | null {
-	const trimmed = normalizeRealityServerName(value);
-	if (!trimmed) return "serverName is required.";
-	if (!isValidRealityServerName(trimmed)) {
-		return "serverName must be a domain (no scheme/path/port).";
-	}
-	if (trimmed.includes("*")) return "Wildcard is not supported.";
-	return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

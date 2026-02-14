@@ -69,20 +69,21 @@ export function TagInput({
 	function addManyTokens(rawTokens: string[]): void {
 		if (rawTokens.length === 0) return;
 		let next = tags.slice();
+		let nextError: string | null = null;
 		for (const raw of rawTokens) {
 			const token = normalizeToken(raw);
 			if (!token) continue;
 			const validateMessage = validateTag(token);
 			if (validateMessage) {
 				// Keep best-effort behavior: add valid tokens, surface the first error.
-				if (!error) setError(validateMessage);
+				if (!nextError) nextError = validateMessage;
 				continue;
 			}
 			next.push(token);
 		}
 		next = dedupePreserveOrder(next);
 		setTags(next);
-		if (next.length > tags.length) setError(null);
+		setError(nextError);
 	}
 
 	function removeAt(index: number): void {
