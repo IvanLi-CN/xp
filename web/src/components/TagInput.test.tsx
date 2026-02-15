@@ -35,7 +35,10 @@ describe("<TagInput />", () => {
 		render(<Harness />);
 
 		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
-		const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+		const evt = new MouseEvent("mousedown", {
+			bubbles: true,
+			cancelable: true,
+		});
 		input.dispatchEvent(evt);
 		expect(evt.defaultPrevented).toBe(false);
 	});
