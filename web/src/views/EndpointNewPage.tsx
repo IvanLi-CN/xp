@@ -12,9 +12,14 @@ import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import {
+	normalizeRealityServerName,
+	validateRealityServerName,
+} from "../utils/realityServerName";
 
 const kindOptions = [
 	{
@@ -34,19 +39,6 @@ function formatErrorMessage(error: unknown): string {
 	}
 	if (error instanceof Error) return error.message;
 	return String(error);
-}
-
-function normalizeRealityServerName(value: string): string {
-	return value.trim();
-}
-
-function isValidRealityServerName(value: string): boolean {
-	if (!value) return false;
-	if (/\s/.test(value)) return false;
-	if (value.includes("://")) return false;
-	if (value.includes("/")) return false;
-	if (value.includes(":")) return false;
-	return true;
 }
 
 export function EndpointNewPage() {
@@ -75,7 +67,7 @@ export function EndpointNewPage() {
 	);
 	const [nodeId, setNodeId] = useState("");
 	const [port, setPort] = useState("443");
-	const [realityServerName, setRealityServerName] = useState("");
+	const [realityServerNames, setRealityServerNames] = useState<string[]>([]);
 	const [realityFingerprint, setRealityFingerprint] = useState("chrome");
 
 	useEffect(() => {
@@ -97,21 +89,26 @@ export function EndpointNewPage() {
 			}
 
 			if (kind === "vless_reality_vision_tcp") {
-				const serverNameTrimmed = normalizeRealityServerName(realityServerName);
-				if (!serverNameTrimmed) throw new Error("serverName is required.");
-				if (!isValidRealityServerName(serverNameTrimmed)) {
-					throw new Error("serverName must be a domain (no scheme/path/port).");
+				const serverNames = realityServerNames
+					.map(normalizeRealityServerName)
+					.filter((s) => s.length > 0);
+				if (serverNames.length === 0)
+					throw new Error("serverName is required.");
+				for (const name of serverNames) {
+					const err = validateRealityServerName(name);
+					if (err) throw new Error(err);
 				}
 
 				const fingerprintValue = realityFingerprint.trim() || "chrome";
+				const primary = serverNames[0];
 
 				return createAdminEndpoint(adminToken, {
 					kind,
 					node_id: nodeId,
 					port: portNumber,
 					reality: {
-						dest: `${serverNameTrimmed}:443`,
-						server_names: [serverNameTrimmed],
+						dest: `${primary}:443`,
+						server_names: serverNames,
 						fingerprint: fingerprintValue,
 					},
 				});
@@ -266,7 +263,7 @@ export function EndpointNewPage() {
 						{kind === "vless_reality_vision_tcp" ? (
 							<div className="space-y-4 border-t border-base-200 pt-4">
 								<h2 className="text-lg font-semibold">VLESS settings</h2>
-								<div className="grid gap-4 md:grid-cols-2">
+								<div className="grid gap-4">
 									<label className="form-control">
 										<div className="label">
 											<span className="label-text font-mono">port</span>
@@ -282,25 +279,17 @@ export function EndpointNewPage() {
 											The inbound listen port on this node.
 										</p>
 									</label>
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">serverName</span>
-										</div>
-										<input
-											type="text"
-											className={inputClass}
-											value={realityServerName}
-											placeholder="chatgpt.com"
-											onChange={(event) =>
-												setRealityServerName(event.target.value)
-											}
-										/>
-										<p className="text-xs opacity-70">
-											Camouflage domain (TLS SNI). Upstream port defaults to{" "}
-											<span className="font-mono">443</span>.
-										</p>
-									</label>
-									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40 md:col-span-2">
+									<TagInput
+										label="serverNames"
+										value={realityServerNames}
+										onChange={setRealityServerNames}
+										placeholder="oneclient.sfx.ms"
+										disabled={createMutation.isPending}
+										inputClass={inputClass}
+										validateTag={validateRealityServerName}
+										helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
+									/>
+									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40">
 										<summary className="collapse-title text-sm font-medium">
 											Advanced (optional)
 										</summary>

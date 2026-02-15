@@ -1,4 +1,5 @@
 use base64::Engine as _;
+use rand::RngCore;
 
 use crate::domain::{Endpoint, EndpointKind, Grant, Node, User};
 use crate::protocol::SS2022_METHOD_2022_BLAKE3_AES_128_GCM;
@@ -154,6 +155,19 @@ fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
     }
 }
 
+fn pick_server_name<'a, R: RngCore + ?Sized>(
+    server_names: &'a [String],
+    rng: &mut R,
+) -> Option<&'a str> {
+    if server_names.is_empty() {
+        return None;
+    }
+    // Prefer deterministic selection when an RNG is injected (tests), while remaining
+    // unpredictable with `thread_rng()` in production.
+    let idx = (rng.next_u64() as usize) % server_names.len();
+    Some(server_names[idx].as_str())
+}
+
 pub fn build_raw_lines(
     user: &User,
     grants: &[Grant],
@@ -204,6 +218,17 @@ fn build_items(
     grants: &[Grant],
     endpoints: &[Endpoint],
     nodes: &[Node],
+) -> Result<Vec<SubscriptionItem>, SubscriptionError> {
+    let mut rng = rand::thread_rng();
+    build_items_with_rng(user, grants, endpoints, nodes, &mut rng)
+}
+
+fn build_items_with_rng<R: RngCore + ?Sized>(
+    user: &User,
+    grants: &[Grant],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+    rng: &mut R,
 ) -> Result<Vec<SubscriptionItem>, SubscriptionError> {
     let endpoints_by_id: std::collections::HashMap<&str, &Endpoint> = endpoints
         .iter()
@@ -297,14 +322,11 @@ fn build_items(
                         }
                     })?;
 
-                let sni = meta
-                    .reality
-                    .server_names
-                    .first()
-                    .map(|s| s.as_str())
-                    .ok_or_else(|| SubscriptionError::VlessRealityServerNamesEmpty {
+                let sni = pick_server_name(&meta.reality.server_names, rng).ok_or_else(|| {
+                    SubscriptionError::VlessRealityServerNamesEmpty {
                         endpoint_id: endpoint.endpoint_id.clone(),
-                    })?;
+                    }
+                })?;
 
                 let fp = meta.reality.fingerprint.as_str();
                 let pbk = meta.reality_keys.public_key.as_str();
@@ -507,6 +529,7 @@ struct ClashSsProxy {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use rand::RngCore;
     use serde_yaml::Value;
 
     fn node(node_id: &str, node_name: &str, access_host: &str) -> Node {
@@ -686,6 +709,71 @@ mod tests {
                 endpoint_id: "e1".to_string(),
             }
         );
+    }
+
+    #[derive(Debug, Clone)]
+    struct FixedRng(u64);
+
+    impl RngCore for FixedRng {
+        fn next_u32(&mut self) -> u32 {
+            self.0 as u32
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.0
+        }
+
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            for b in dest {
+                *b = 0;
+            }
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+            self.fill_bytes(dest);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn vless_server_name_is_picked_from_candidates_and_is_not_always_first() {
+        let u = user("u1", "alice");
+        let n = node("n1", "node-1", "example.com");
+        let meta = serde_json::json!({
+          "reality": {"dest": "example.com:443", "server_names": ["a.example.com", "b.example.com", "c.example.com"], "fingerprint": "chrome"},
+          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+          "short_ids": ["0123456789abcdef"],
+          "active_short_id": "0123456789abcdef"
+        });
+        let ep = endpoint_vless("e1", "n1", "vless", 443, meta);
+        let g = grant_vless(
+            "u1",
+            "g1",
+            "e1",
+            true,
+            None,
+            "11111111-1111-1111-1111-111111111111",
+        );
+
+        // Choose the 2nd entry (index=1) deterministically.
+        let mut rng = FixedRng(1);
+        let items = build_items_with_rng(&u, &[g], &[ep], &[n], &mut rng).unwrap();
+        assert_eq!(items.len(), 1);
+
+        let raw = &items[0].raw_uri;
+        let sni_q = raw
+            .split("sni=")
+            .nth(1)
+            .expect("raw uri must include sni")
+            .split('&')
+            .next()
+            .unwrap_or("");
+        assert_eq!(sni_q, "b.example.com");
+
+        let ClashProxy::Vless(vless) = &items[0].clash_proxy else {
+            panic!("expected vless proxy");
+        };
+        assert_eq!(vless.servername, "b.example.com");
     }
 
     #[test]
