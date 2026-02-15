@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-14
-- Last: 2026-02-14
+- Last: 2026-02-15
 
 ## 背景 / 问题陈述
 
@@ -80,6 +80,6 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: docs freeze + API payload/compat 明确（本计划文档）
-- [ ] M2: Web tags 输入组件 + 新建/编辑页接入
-- [ ] M3: Subscription 随机挑选 + Rust/Web tests 更新
+- [x] M1: docs freeze + API payload/compat 明确（本计划文档）
+- [x] M2: Web tags 输入组件 + 新建/编辑页接入
+- [x] M3: Subscription 随机挑选 + Rust/Web tests 更新
