@@ -31,6 +31,15 @@ function Harness() {
 describe("<TagInput />", () => {
 	afterEach(() => cleanup());
 
+	it("does not prevent default mousedown on the input (caret/selection should work)", () => {
+		render(<Harness />);
+
+		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+		input.dispatchEvent(evt);
+		expect(evt.defaultPrevented).toBe(false);
+	});
+
 	it("adds multiple tags from a comma-separated draft and allows make primary", () => {
 		render(<Harness />);
 

@@ -140,6 +140,8 @@ export function TagInput({
 						// Do not steal events from action buttons.
 						const target = event.target as HTMLElement | null;
 						if (target?.closest("button")) return;
+						// Do not cancel the default on the actual input; otherwise caret placement/selection breaks.
+						if (target?.closest("input")) return;
 						event.preventDefault();
 						inputRef.current?.focus();
 					}}
