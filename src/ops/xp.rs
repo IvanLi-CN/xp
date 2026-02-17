@@ -253,6 +253,7 @@ pub async fn cmd_xp_sync_node_meta(
         access_host: meta.access_host.clone(),
         api_base_url: meta.api_base_url.clone(),
         quota_reset: crate::domain::NodeQuotaReset::default(),
+        quota_limit_bytes: 0,
     });
 
     eprintln!("xp node meta sync:");
@@ -285,6 +286,7 @@ pub async fn cmd_xp_sync_node_meta(
         access_host: access_host.clone(),
         api_base_url: api_base_url.clone(),
         quota_reset: current.quota_reset.clone(),
+        quota_limit_bytes: current.quota_limit_bytes,
     };
     internal_client_write(
         &client,

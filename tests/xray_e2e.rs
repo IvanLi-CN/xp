@@ -595,7 +595,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let now = chrono::Utc::now();
-    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -603,7 +603,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let store = store.lock().await;
         let grant = store.get_grant(&grant_id_ss).unwrap();
         let usage = store.get_grant_usage(&grant_id_ss).unwrap();
-        assert_eq!(grant.enabled, false);
+        assert_eq!(grant.enabled, true, "quota enforcement must not mutate desired state");
         assert_eq!(usage.quota_banned, true);
     }
 
@@ -621,7 +621,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let later = now + chrono::Duration::days(40);
-    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile)
         .await
         .unwrap();
 

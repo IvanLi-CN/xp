@@ -67,6 +67,7 @@ const DESIGN_NODES: AdminNode[] = [
 			day_of_month: 1,
 			tz_offset_minutes: null,
 		} satisfies NodeQuotaReset,
+		quota_limit_bytes: 0,
 	},
 	{
 		node_id: "n2",
@@ -78,6 +79,7 @@ const DESIGN_NODES: AdminNode[] = [
 			day_of_month: 15,
 			tz_offset_minutes: null,
 		} satisfies NodeQuotaReset,
+		quota_limit_bytes: 0,
 	},
 	{
 		node_id: "n3",
@@ -88,6 +90,7 @@ const DESIGN_NODES: AdminNode[] = [
 			policy: "unlimited",
 			tz_offset_minutes: null,
 		} satisfies NodeQuotaReset,
+		quota_limit_bytes: 0,
 	},
 ];
 

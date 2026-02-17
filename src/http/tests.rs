@@ -723,6 +723,7 @@ async fn delete_node_removes_from_inventory() {
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
         quota_reset: NodeQuotaReset::default(),
+        quota_limit_bytes: 0,
     };
     {
         let mut store = store.lock().await;
@@ -763,6 +764,7 @@ async fn delete_node_rejects_if_endpoints_exist() {
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
         quota_reset: NodeQuotaReset::default(),
+        quota_limit_bytes: 0,
     };
     {
         let mut store = store.lock().await;
@@ -1243,6 +1245,101 @@ async fn patch_admin_node_updates_fields() {
 }
 
 #[tokio::test]
+async fn patch_admin_node_quota_usage_sets_and_clears_exhausted_and_triggers_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let reconcile = ReconcileHandle::from_sender(tx);
+    let (app, store) = app_with(&tmp, reconcile);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let limit_bytes: u64 = 100 * 1024 * 1024;
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_reset": { "policy": "monthly", "day_of_month": 1, "tz_offset_minutes": 0 },
+              "quota_limit_bytes": limit_bytes
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Ensure we only observe reconcile requests caused by usage override.
+    let _ = drain_reconcile_requests(&mut rx);
+
+    let used_over: u64 = limit_bytes;
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}/quota-usage"),
+            json!({ "used_bytes": used_over, "sync_baseline": false }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["status"]["node_id"], node_id);
+    assert_eq!(json["status"]["quota_limit_bytes"], limit_bytes);
+    assert_eq!(json["status"]["used_bytes"], used_over);
+    assert_eq!(json["status"]["exhausted"], true);
+
+    {
+        let store = store.lock().await;
+        let usage = store.get_node_usage(&node_id).unwrap();
+        assert_eq!(usage.used_bytes, used_over);
+        assert!(usage.exhausted);
+    }
+
+    assert!(
+        drain_reconcile_requests(&mut rx)
+            .iter()
+            .any(|r| matches!(r, ReconcileRequest::Full)),
+        "expected exhausted=true to request full reconcile",
+    );
+
+    let used_under: u64 = 0;
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}/quota-usage"),
+            json!({ "used_bytes": used_under, "sync_baseline": false }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["status"]["used_bytes"], used_under);
+    assert_eq!(json["status"]["exhausted"], false);
+
+    {
+        let store = store.lock().await;
+        let usage = store.get_node_usage(&node_id).unwrap();
+        assert_eq!(usage.used_bytes, used_under);
+        assert!(!usage.exhausted);
+    }
+
+    assert!(
+        drain_reconcile_requests(&mut rx)
+            .iter()
+            .any(|r| matches!(r, ReconcileRequest::Full)),
+        "expected exhausted=false to request full reconcile (restore access)",
+    );
+}
+
+#[tokio::test]
 async fn patch_admin_node_unknown_returns_404() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -1572,6 +1669,7 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
                 access_host: "node-2.example.com".to_string(),
                 api_base_url: "https://node-2.example.com".to_string(),
                 quota_reset: NodeQuotaReset::default(),
+                quota_limit_bytes: 0,
             },
         );
         store.save().unwrap();
@@ -1697,6 +1795,7 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
                 access_host: "node-2.example.com".to_string(),
                 api_base_url: "https://node-2.example.com".to_string(),
                 quota_reset: NodeQuotaReset::default(),
+                quota_limit_bytes: 0,
             },
         );
         store.save().unwrap();
@@ -2910,6 +3009,7 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
                 access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:1".to_string(),
                 quota_reset: NodeQuotaReset::default(),
+                quota_limit_bytes: 0,
             })
             .unwrap();
     }

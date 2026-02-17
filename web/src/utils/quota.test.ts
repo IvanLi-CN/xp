@@ -87,6 +87,25 @@ describe("quota utils", () => {
 			});
 		});
 
+		it("parses TiB/PiB and treats TB/PB as TiB/PiB", () => {
+			expect(parseQuotaInputToBytes("2TiB")).toEqual({
+				ok: true,
+				bytes: 2 * 2 ** 40,
+			});
+			expect(parseQuotaInputToBytes("2TB")).toEqual({
+				ok: true,
+				bytes: 2 * 2 ** 40,
+			});
+			expect(parseQuotaInputToBytes("1PiB")).toEqual({
+				ok: true,
+				bytes: 1 * 2 ** 50,
+			});
+			expect(parseQuotaInputToBytes("1PB")).toEqual({
+				ok: true,
+				bytes: 1 * 2 ** 50,
+			});
+		});
+
 		it("rejects empty and invalid input", () => {
 			expect(parseQuotaInputToBytes("")).toEqual({
 				ok: false,
@@ -102,7 +121,8 @@ describe("quota utils", () => {
 			});
 			expect(parseQuotaInputToBytes("10XB")).toEqual({
 				ok: false,
-				error: "Unsupported unit (use MiB/GiB; also accepts M/G, MB/GB).",
+				error:
+					"Unsupported unit (use MiB/GiB/TiB/PiB; also accepts M/G/T/P, MB/GB/TB/PB).",
 			});
 		});
 
@@ -116,12 +136,16 @@ describe("quota utils", () => {
 	describe("formatters", () => {
 		it("formats bytes to human readable", () => {
 			expect(formatQuotaBytesHuman(0)).toBe("0");
+			expect(formatQuotaBytesHuman(1 * 2 ** 50)).toBe("1 PiB");
+			expect(formatQuotaBytesHuman(2 * 2 ** 40)).toBe("2 TiB");
 			expect(formatQuotaBytesHuman(10 * 2 ** 30)).toBe("10 GiB");
 			expect(formatQuotaBytesHuman(512 * 2 ** 20)).toBe("512 MiB");
 		});
 
 		it("formats compact input", () => {
 			expect(formatQuotaBytesCompactInput(0)).toBe("0");
+			expect(formatQuotaBytesCompactInput(1 * 2 ** 50)).toBe("1PiB");
+			expect(formatQuotaBytesCompactInput(2 * 2 ** 40)).toBe("2TiB");
 			expect(formatQuotaBytesCompactInput(10 * 2 ** 30)).toBe("10GiB");
 			expect(formatQuotaBytesCompactInput(512 * 2 ** 20)).toBe("512MiB");
 		});

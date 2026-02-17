@@ -88,6 +88,7 @@ function setupHappyPathMocks(args: {
 		api_base_url: string;
 		access_host: string;
 		quota_reset: NodeQuotaReset;
+		quota_limit_bytes?: number;
 	}>;
 	endpoints?: Array<{
 		endpoint_id: string;
@@ -118,10 +119,14 @@ function setupHappyPathMocks(args: {
 			api_base_url: "http://localhost",
 			access_host: "localhost",
 			quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 0 },
+			quota_limit_bytes: 0,
 		},
 	];
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
-		items: nodes,
+		items: nodes.map((n) => ({
+			...n,
+			quota_limit_bytes: n.quota_limit_bytes ?? 0,
+		})),
 	});
 
 	const endpoints = args.endpoints ?? [

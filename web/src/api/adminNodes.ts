@@ -9,6 +9,7 @@ export const AdminNodeSchema = z.object({
 	api_base_url: z.string(),
 	access_host: z.string(),
 	quota_reset: NodeQuotaResetSchema,
+	quota_limit_bytes: z.number().int().nonnegative(),
 });
 
 export type AdminNode = z.infer<typeof AdminNodeSchema>;
@@ -21,6 +22,7 @@ export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 
 export type AdminNodePatchRequest = {
 	quota_reset?: NodeQuotaReset;
+	quota_limit_bytes?: number;
 };
 
 export async function fetchAdminNodes(
@@ -100,4 +102,86 @@ export async function deleteAdminNode(
 	});
 
 	await throwIfNotOk(res);
+}
+
+export const AdminNodeQuotaStatusItemSchema = z.object({
+	node_id: z.string(),
+	quota_limit_bytes: z.number().int().nonnegative(),
+	used_bytes: z.number().int().nonnegative(),
+	remaining_bytes: z.number().int().nonnegative(),
+	cycle_end_at: z.string().nullable(),
+	exhausted: z.boolean(),
+	exhausted_at: z.string().nullable(),
+	warning: z.string().nullable(),
+});
+
+export type AdminNodeQuotaStatusItem = z.infer<
+	typeof AdminNodeQuotaStatusItemSchema
+>;
+
+export const AdminNodeQuotaStatusResponseSchema = z.object({
+	partial: z.boolean(),
+	unreachable_nodes: z.array(z.string()),
+	items: z.array(AdminNodeQuotaStatusItemSchema),
+});
+
+export type AdminNodeQuotaStatusResponse = z.infer<
+	typeof AdminNodeQuotaStatusResponseSchema
+>;
+
+export async function fetchAdminNodeQuotaStatus(
+	adminToken: string,
+	signal?: AbortSignal,
+): Promise<AdminNodeQuotaStatusResponse> {
+	const res = await fetch("/api/admin/nodes/quota-status", {
+		method: "GET",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+		},
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminNodeQuotaStatusResponseSchema.parse(json);
+}
+
+export type AdminNodeQuotaUsageOverrideRequest = {
+	used_bytes: number;
+	sync_baseline?: boolean;
+};
+
+export const AdminNodeQuotaUsageOverrideResponseSchema = z.object({
+	status: AdminNodeQuotaStatusItemSchema,
+	synced_baseline: z.boolean(),
+	warning: z.string().nullable(),
+});
+
+export type AdminNodeQuotaUsageOverrideResponse = z.infer<
+	typeof AdminNodeQuotaUsageOverrideResponseSchema
+>;
+
+export async function patchAdminNodeQuotaUsage(
+	adminToken: string,
+	nodeId: string,
+	payload: AdminNodeQuotaUsageOverrideRequest,
+	signal?: AbortSignal,
+): Promise<AdminNodeQuotaUsageOverrideResponse> {
+	const res = await fetch(`/api/admin/nodes/${nodeId}/quota-usage`, {
+		method: "PATCH",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(payload),
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminNodeQuotaUsageOverrideResponseSchema.parse(json);
 }

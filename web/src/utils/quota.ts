@@ -1,5 +1,7 @@
 const MIB_BYTES = 1024 * 1024;
 const GIB_BYTES = 1024 * 1024 * 1024;
+const TIB_BYTES = 1024 * 1024 * 1024 * 1024;
+const PIB_BYTES = 1024 * 1024 * 1024 * 1024 * 1024;
 
 export type QuotaParseResult =
 	| { ok: true; bytes: number }
@@ -11,7 +13,9 @@ function normalizeUnit(unitRaw: string): string {
 
 function parseUnitFactor(
 	unitRaw: string,
-): { ok: true; factor: number; unit: "MiB" | "GiB" } | { ok: false } {
+):
+	| { ok: true; factor: number; unit: "MiB" | "GiB" | "TiB" | "PiB" }
+	| { ok: false } {
 	const unit = normalizeUnit(unitRaw);
 	if (!unit) return { ok: true, factor: MIB_BYTES, unit: "MiB" };
 
@@ -43,6 +47,34 @@ function parseUnitFactor(
 	]);
 	if (gib.has(unit)) return { ok: true, factor: GIB_BYTES, unit: "GiB" };
 
+	const tib = new Set([
+		"t",
+		"ti",
+		"tib",
+		"tibyte",
+		"tibytes",
+		"tebibyte",
+		"tebibytes",
+		"tb", // compatibility: treat as TiB
+		"tbyte",
+		"tbytes",
+	]);
+	if (tib.has(unit)) return { ok: true, factor: TIB_BYTES, unit: "TiB" };
+
+	const pib = new Set([
+		"p",
+		"pi",
+		"pib",
+		"pibyte",
+		"pibytes",
+		"pebibyte",
+		"pebibytes",
+		"pb", // compatibility: treat as PiB
+		"pbyte",
+		"pbytes",
+	]);
+	if (pib.has(unit)) return { ok: true, factor: PIB_BYTES, unit: "PiB" };
+
 	return { ok: false };
 }
 
@@ -64,7 +96,8 @@ export function parseQuotaInputToBytes(input: string): QuotaParseResult {
 	if (!unit.ok) {
 		return {
 			ok: false,
-			error: "Unsupported unit (use MiB/GiB; also accepts M/G, MB/GB).",
+			error:
+				"Unsupported unit (use MiB/GiB/TiB/PiB; also accepts M/G/T/P, MB/GB/TB/PB).",
 		};
 	}
 
@@ -88,6 +121,12 @@ function formatRounded(value: number, fractionDigits: number): string {
 
 export function formatQuotaBytesHuman(bytes: number): string {
 	if (bytes === 0) return "0";
+	if (bytes >= PIB_BYTES) {
+		return `${formatRounded(bytes / PIB_BYTES, 2)} PiB`;
+	}
+	if (bytes >= TIB_BYTES) {
+		return `${formatRounded(bytes / TIB_BYTES, 2)} TiB`;
+	}
 	if (bytes >= GIB_BYTES) {
 		return `${formatRounded(bytes / GIB_BYTES, 2)} GiB`;
 	}
@@ -96,8 +135,12 @@ export function formatQuotaBytesHuman(bytes: number): string {
 
 export function formatQuotaBytesCompactInput(bytes: number): string {
 	if (bytes === 0) return "0";
+	if (bytes % PIB_BYTES === 0) return `${bytes / PIB_BYTES}PiB`;
+	if (bytes % TIB_BYTES === 0) return `${bytes / TIB_BYTES}TiB`;
 	if (bytes % GIB_BYTES === 0) return `${bytes / GIB_BYTES}GiB`;
 	if (bytes % MIB_BYTES === 0) return `${bytes / MIB_BYTES}MiB`;
+	if (bytes >= PIB_BYTES) return `${formatRounded(bytes / PIB_BYTES, 2)}PiB`;
+	if (bytes >= TIB_BYTES) return `${formatRounded(bytes / TIB_BYTES, 2)}TiB`;
 	if (bytes >= GIB_BYTES) return `${formatRounded(bytes / GIB_BYTES, 2)}GiB`;
 	return `${formatRounded(bytes / MIB_BYTES, 2)}MiB`;
 }

@@ -539,6 +539,7 @@ mod tests {
             access_host: access_host.to_string(),
             api_base_url: "http://127.0.0.1:0".to_string(),
             quota_reset: crate::domain::NodeQuotaReset::default(),
+            quota_limit_bytes: 0,
         }
     }
 

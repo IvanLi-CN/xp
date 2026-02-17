@@ -24,8 +24,8 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 4;
-pub const USAGE_SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 5;
+pub const USAGE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct StoreInit {
@@ -493,6 +493,19 @@ fn migrate_v3_to_v4(mut input: PersistedState) -> Result<PersistedState, StoreEr
     Ok(input)
 }
 
+fn migrate_v4_to_v5(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != 4 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for v4->v5 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
+    input.schema_version = SCHEMA_VERSION;
+    Ok(input)
+}
+
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
@@ -512,6 +525,7 @@ mod migrate_tests {
                 node_name: "node-1".to_string(),
                 access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
         );
@@ -1232,6 +1246,8 @@ pub struct PersistedUsage {
     pub schema_version: u32,
     #[serde(default)]
     pub grants: BTreeMap<String, GrantUsage>,
+    #[serde(default)]
+    pub nodes: BTreeMap<String, NodeUsage>,
 }
 
 impl PersistedUsage {
@@ -1239,8 +1255,32 @@ impl PersistedUsage {
         Self {
             schema_version: USAGE_SCHEMA_VERSION,
             grants: BTreeMap::new(),
+            nodes: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PersistedUsageV1 {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub grants: BTreeMap<String, GrantUsage>,
+}
+
+fn migrate_usage_v1_to_v2(input: PersistedUsageV1) -> Result<PersistedUsage, StoreError> {
+    if input.schema_version != 1 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for usage v1->v2 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
+    Ok(PersistedUsage {
+        schema_version: USAGE_SCHEMA_VERSION,
+        grants: input.grants,
+        nodes: BTreeMap::new(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1255,6 +1295,26 @@ pub struct GrantUsage {
     pub quota_banned: bool,
     #[serde(default)]
     pub quota_banned_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InboundTrafficBaseline {
+    pub last_uplink_total: u64,
+    pub last_downlink_total: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeUsage {
+    pub cycle_start_at: String,
+    pub cycle_end_at: String,
+    pub used_bytes: u64,
+    pub last_seen_at: String,
+    #[serde(default)]
+    pub exhausted: bool,
+    #[serde(default)]
+    pub exhausted_at: Option<String>,
+    #[serde(default)]
+    pub inbounds: BTreeMap<String, InboundTrafficBaseline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1285,7 +1345,12 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
             match schema_version {
-                4 => (serde_json::from_value(raw)?, false, false),
+                5 => (serde_json::from_value(raw)?, false, false),
+                4 => {
+                    let v4: PersistedState = serde_json::from_value(raw)?;
+                    let v5 = migrate_v4_to_v5(v4)?;
+                    (v5, false, true)
+                }
                 3 => {
                     let v3: PersistedState = serde_json::from_value(raw)?;
                     let v4 = migrate_v3_to_v4(v3)?;
@@ -1310,6 +1375,7 @@ impl JsonSnapshotStore {
                 node_name: init.bootstrap_node_name,
                 access_host: init.bootstrap_access_host,
                 api_base_url: init.bootstrap_api_base_url,
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             };
 
@@ -1337,18 +1403,29 @@ impl JsonSnapshotStore {
         }
 
         let usage_path = init.data_dir.join("usage.json");
-        let usage = if usage_path.exists() {
+        let (usage, usage_migrated) = if usage_path.exists() {
             let bytes = fs::read(&usage_path)?;
-            let usage: PersistedUsage = serde_json::from_slice(&bytes)?;
-            if usage.schema_version != USAGE_SCHEMA_VERSION {
-                return Err(StoreError::SchemaVersionMismatch {
-                    expected: USAGE_SCHEMA_VERSION,
-                    got: usage.schema_version,
-                });
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let schema_version = raw
+                .get("schema_version")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            match schema_version {
+                2 => (serde_json::from_value(raw)?, false),
+                1 => {
+                    let v1: PersistedUsageV1 = serde_json::from_value(raw)?;
+                    let v2 = migrate_usage_v1_to_v2(v1)?;
+                    (v2, true)
+                }
+                got => {
+                    return Err(StoreError::SchemaVersionMismatch {
+                        expected: USAGE_SCHEMA_VERSION,
+                        got,
+                    });
+                }
             }
-            usage
         } else {
-            PersistedUsage::empty()
+            (PersistedUsage::empty(), false)
         };
 
         let store = Self {
@@ -1360,6 +1437,9 @@ impl JsonSnapshotStore {
 
         if is_new_state || migrated {
             store.save()?;
+        }
+        if usage_migrated {
+            store.save_usage()?;
         }
 
         Ok(store)
@@ -1387,6 +1467,10 @@ impl JsonSnapshotStore {
 
     pub fn get_grant_usage(&self, grant_id: &str) -> Option<GrantUsage> {
         self.usage.grants.get(grant_id).cloned()
+    }
+
+    pub fn get_node_usage(&self, node_id: &str) -> Option<NodeUsage> {
+        self.usage.nodes.get(node_id).cloned()
     }
 
     pub fn clear_grant_usage(&mut self, grant_id: &str) -> Result<(), StoreError> {
@@ -1491,6 +1575,181 @@ impl JsonSnapshotStore {
             cycle_end_at,
             used_bytes,
         })
+    }
+
+    pub fn apply_node_inbound_usage_sample(
+        &mut self,
+        node_id: &str,
+        cycle_start_at: String,
+        cycle_end_at: String,
+        inbound_totals: &BTreeMap<String, (u64, u64)>,
+        seen_at: String,
+    ) -> Result<(u64, bool), StoreError> {
+        let (used_bytes, window_changed) = {
+            let entry = self
+                .usage
+                .nodes
+                .entry(node_id.to_string())
+                .or_insert_with(|| NodeUsage {
+                    cycle_start_at: cycle_start_at.clone(),
+                    cycle_end_at: cycle_end_at.clone(),
+                    used_bytes: 0,
+                    last_seen_at: seen_at.clone(),
+                    exhausted: false,
+                    exhausted_at: None,
+                    inbounds: BTreeMap::new(),
+                });
+
+            let window_changed =
+                entry.cycle_start_at != cycle_start_at || entry.cycle_end_at != cycle_end_at;
+            if window_changed {
+                entry.cycle_start_at = cycle_start_at;
+                entry.cycle_end_at = cycle_end_at;
+                entry.used_bytes = 0;
+                entry.last_seen_at = seen_at;
+                entry.inbounds.clear();
+                for (tag, (uplink_total, downlink_total)) in inbound_totals {
+                    entry.inbounds.insert(
+                        tag.clone(),
+                        InboundTrafficBaseline {
+                            last_uplink_total: *uplink_total,
+                            last_downlink_total: *downlink_total,
+                        },
+                    );
+                }
+                (entry.used_bytes, true)
+            } else {
+                let mut delta_total: u64 = 0;
+                for (tag, (uplink_total, downlink_total)) in inbound_totals {
+                    let baseline = entry.inbounds.entry(tag.clone()).or_insert_with(|| {
+                        // First observation: seed baseline; don't count past traffic into this cycle.
+                        InboundTrafficBaseline {
+                            last_uplink_total: *uplink_total,
+                            last_downlink_total: *downlink_total,
+                        }
+                    });
+
+                    if *uplink_total < baseline.last_uplink_total
+                        || *downlink_total < baseline.last_downlink_total
+                    {
+                        // Counter reset / xray restart: don't subtract, just reset the baseline.
+                        baseline.last_uplink_total = *uplink_total;
+                        baseline.last_downlink_total = *downlink_total;
+                        continue;
+                    }
+
+                    let delta_up = *uplink_total - baseline.last_uplink_total;
+                    let delta_down = *downlink_total - baseline.last_downlink_total;
+                    delta_total = delta_total.saturating_add(delta_up.saturating_add(delta_down));
+                    baseline.last_uplink_total = *uplink_total;
+                    baseline.last_downlink_total = *downlink_total;
+                }
+
+                entry.used_bytes = entry.used_bytes.saturating_add(delta_total);
+                entry.last_seen_at = seen_at;
+                (entry.used_bytes, false)
+            }
+        };
+
+        self.save_usage()?;
+        Ok((used_bytes, window_changed))
+    }
+
+    pub fn set_node_used_bytes_override(
+        &mut self,
+        node_id: &str,
+        cycle_start_at: String,
+        cycle_end_at: String,
+        used_bytes: u64,
+        seen_at: String,
+    ) -> Result<(), StoreError> {
+        let entry = self
+            .usage
+            .nodes
+            .entry(node_id.to_string())
+            .or_insert_with(|| NodeUsage {
+                cycle_start_at: cycle_start_at.clone(),
+                cycle_end_at: cycle_end_at.clone(),
+                used_bytes: 0,
+                last_seen_at: seen_at.clone(),
+                exhausted: false,
+                exhausted_at: None,
+                inbounds: BTreeMap::new(),
+            });
+
+        entry.cycle_start_at = cycle_start_at;
+        entry.cycle_end_at = cycle_end_at;
+        entry.used_bytes = used_bytes;
+        entry.last_seen_at = seen_at;
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn sync_node_inbound_baselines(
+        &mut self,
+        node_id: &str,
+        cycle_start_at: String,
+        cycle_end_at: String,
+        inbound_totals: &BTreeMap<String, (u64, u64)>,
+        seen_at: String,
+    ) -> Result<(), StoreError> {
+        let entry = self
+            .usage
+            .nodes
+            .entry(node_id.to_string())
+            .or_insert_with(|| NodeUsage {
+                cycle_start_at: cycle_start_at.clone(),
+                cycle_end_at: cycle_end_at.clone(),
+                used_bytes: 0,
+                last_seen_at: seen_at.clone(),
+                exhausted: false,
+                exhausted_at: None,
+                inbounds: BTreeMap::new(),
+            });
+        entry.cycle_start_at = cycle_start_at;
+        entry.cycle_end_at = cycle_end_at;
+        entry.last_seen_at = seen_at;
+        entry.inbounds.clear();
+        for (tag, (uplink_total, downlink_total)) in inbound_totals {
+            entry.inbounds.insert(
+                tag.clone(),
+                InboundTrafficBaseline {
+                    last_uplink_total: *uplink_total,
+                    last_downlink_total: *downlink_total,
+                },
+            );
+        }
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn set_node_exhausted(&mut self, node_id: &str, exhausted_at: String) -> Result<(), StoreError> {
+        let entry = self
+            .usage
+            .nodes
+            .entry(node_id.to_string())
+            .or_insert_with(|| NodeUsage {
+                cycle_start_at: exhausted_at.clone(),
+                cycle_end_at: exhausted_at.clone(),
+                used_bytes: 0,
+                last_seen_at: exhausted_at.clone(),
+                exhausted: false,
+                exhausted_at: None,
+                inbounds: BTreeMap::new(),
+            });
+        entry.exhausted = true;
+        entry.exhausted_at = Some(exhausted_at);
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn clear_node_exhausted(&mut self, node_id: &str) -> Result<(), StoreError> {
+        if let Some(entry) = self.usage.nodes.get_mut(node_id) {
+            entry.exhausted = false;
+            entry.exhausted_at = None;
+            self.save_usage()?;
+        }
+        Ok(())
     }
 
     pub fn build_endpoint(
@@ -2052,6 +2311,49 @@ mod tests {
     }
 
     #[test]
+    fn load_or_init_migrates_v4_state_json_defaults_node_quota_limit_bytes_to_0() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+
+        let state_path = data_dir.join("state.json");
+        fs::write(
+            &state_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+              "schema_version": 4,
+              "nodes": {
+                "node_1": {
+                  "node_id": "node_1",
+                  "node_name": "node-1",
+                  "access_host": "example.com",
+                  "api_base_url": "https://127.0.0.1:62416",
+                  "quota_reset": { "policy": "monthly", "day_of_month": 1, "tz_offset_minutes": 0 }
+                }
+              }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: data_dir.to_path_buf(),
+            bootstrap_node_id: None,
+            bootstrap_node_name: "node-1".to_string(),
+            bootstrap_access_host: "".to_string(),
+            bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+        let node = store.state().nodes.get("node_1").unwrap();
+        assert_eq!(node.quota_limit_bytes, 0);
+
+        let bytes = fs::read(&state_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["schema_version"], SCHEMA_VERSION);
+        assert_eq!(saved["nodes"]["node_1"]["quota_limit_bytes"], 0);
+    }
+
+    #[test]
     fn set_grant_enabled_missing_source_defaults_manual() {
         let cmd: DesiredStateCommand = serde_json::from_value(json!({
             "type": "set_grant_enabled",
@@ -2179,6 +2481,38 @@ mod tests {
     }
 
     #[test]
+    fn load_usage_json_v1_is_migrated_to_v2_with_empty_nodes() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path()).unwrap();
+
+        let usage_path = tmp.path().join("usage.json");
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "grants": {
+                "grant_1": {
+                    "cycle_start_at": "2025-12-01T00:00:00Z",
+                    "cycle_end_at": "2026-01-01T00:00:00Z",
+                    "used_bytes": 123,
+                    "last_uplink_total": 100,
+                    "last_downlink_total": 23,
+                    "last_seen_at": "2025-12-18T00:00:00Z"
+                }
+            }
+        }))
+        .unwrap();
+        fs::write(&usage_path, bytes).unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(store.get_grant_usage("grant_1").is_some());
+
+        let bytes = fs::read(&usage_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["schema_version"], USAGE_SCHEMA_VERSION);
+        assert!(saved.get("nodes").is_some());
+        assert_eq!(saved["nodes"], json!({}));
+    }
+
+    #[test]
     fn set_and_clear_quota_banned_persists_and_survives_reload() {
         let tmp = tempfile::tempdir().unwrap();
         let banned_at = "2025-12-18T00:00:00Z".to_string();
@@ -2285,6 +2619,7 @@ mod tests {
             access_host: "example.com".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
             quota_reset: NodeQuotaReset::default(),
+            quota_limit_bytes: 0,
         };
 
         DesiredStateCommand::UpsertNode { node: node.clone() }

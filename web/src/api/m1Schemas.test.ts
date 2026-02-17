@@ -67,6 +67,7 @@ describe("AdminNodesResponseSchema", () => {
 							day_of_month: 1,
 							tz_offset_minutes: null,
 						},
+						quota_limit_bytes: 0,
 					},
 				],
 			}),
@@ -82,6 +83,7 @@ describe("AdminNodesResponseSchema", () => {
 						day_of_month: 1,
 						tz_offset_minutes: null,
 					},
+					quota_limit_bytes: 0,
 				},
 			],
 		});

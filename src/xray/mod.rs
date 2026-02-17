@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use tonic::transport::{Channel, Endpoint};
 
@@ -128,6 +128,46 @@ impl XrayClient {
             .await?
             .unwrap_or(0);
         Ok((uplink, downlink))
+    }
+
+    pub async fn query_inbound_traffic_totals(
+        &mut self,
+    ) -> Result<BTreeMap<String, (u64, u64)>, tonic::Status> {
+        let req = QueryStatsRequest {
+            pattern: "inbound".to_string(),
+            reset: false,
+        };
+        let resp = self.query_stats(req).await?;
+
+        let mut out: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+        for stat in resp.stat {
+            if stat.value < 0 {
+                return Err(tonic::Status::internal(format!(
+                    "xray stat value must be non-negative: name={} value={}",
+                    stat.name, stat.value
+                )));
+            }
+            let value = stat.value as u64;
+            let parts: Vec<&str> = stat.name.split(">>>").collect();
+            if parts.len() != 4 {
+                continue;
+            }
+            let prefix = parts[0];
+            let tag = parts[1];
+            let kind = parts[2];
+            let dir = parts[3];
+            if prefix != "inbound" || kind != "traffic" {
+                continue;
+            }
+
+            let entry = out.entry(tag.to_string()).or_insert((0, 0));
+            match dir {
+                "uplink" => entry.0 = entry.0.max(value),
+                "downlink" => entry.1 = entry.1.max(value),
+                _ => {}
+            }
+        }
+        Ok(out)
     }
 }
 

@@ -14,7 +14,7 @@ use axum::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
@@ -47,6 +47,7 @@ use crate::{
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
     subscription,
+    xray,
     xray_supervisor::XrayHealthHandle,
 };
 
@@ -471,6 +472,8 @@ struct PatchNodeRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     api_base_url: Option<Option<String>>,
     #[serde(default)]
+    quota_limit_bytes: Option<u64>,
+    #[serde(default)]
     quota_reset: Option<NodeQuotaReset>,
 }
 
@@ -662,12 +665,14 @@ pub fn build_router(
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
         .route("/nodes", get(admin_list_nodes))
+        .route("/nodes/quota-status", get(admin_get_node_quota_status))
         .route(
             "/nodes/:node_id",
             get(admin_get_node)
                 .patch(admin_patch_node)
                 .delete(admin_delete_node),
         )
+        .route("/nodes/:node_id/quota-usage", patch(admin_patch_node_quota_usage))
         .route(
             "/endpoints",
             post(admin_create_endpoint).get(admin_list_endpoints),
@@ -1441,6 +1446,7 @@ async fn cluster_join(
                 access_host: state.config.access_host.clone(),
                 api_base_url: state.config.api_base_url.clone(),
                 quota_reset: NodeQuotaReset::default(),
+                quota_limit_bytes: 0,
             })
     };
     let _ = raft_write(
@@ -1464,6 +1470,7 @@ async fn cluster_join(
         access_host: req.access_host.clone(),
         api_base_url: req.api_base_url.clone(),
         quota_reset: NodeQuotaReset::default(),
+        quota_limit_bytes: 0,
     };
 
     let raft_node_id =
@@ -1628,6 +1635,29 @@ async fn admin_patch_node(
 
     if let Some(quota_reset) = req.quota_reset {
         node.quota_reset = quota_reset;
+    }
+    if let Some(quota_limit_bytes) = req.quota_limit_bytes {
+        node.quota_limit_bytes = quota_limit_bytes;
+    }
+
+    // Node traffic mode is explicit:
+    // - quota_limit_bytes == 0 => unlimited (no enforcement)
+    // - quota_limit_bytes > 0  => monthly limit, with explicit tz offset (no local timezone).
+    if node.quota_limit_bytes > 0 {
+        match node.quota_reset {
+            NodeQuotaReset::Monthly { tz_offset_minutes, .. } => {
+                if tz_offset_minutes.is_none() {
+                    return Err(ApiError::invalid_request(
+                        "node quota reset tz_offset_minutes is required when quota_limit_bytes > 0",
+                    ));
+                }
+            }
+            _ => {
+                return Err(ApiError::invalid_request(
+                    "node quota_reset must be monthly when quota_limit_bytes > 0",
+                ));
+            }
+        }
     }
 
     let _ = raft_write(
@@ -3706,6 +3736,456 @@ async fn admin_get_user_node_quota_status(
         partial,
         unreachable_nodes,
         items,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminNodeQuotaStatusItem {
+    node_id: String,
+    quota_limit_bytes: u64,
+    used_bytes: u64,
+    remaining_bytes: u64,
+    cycle_end_at: Option<String>,
+    exhausted: bool,
+    exhausted_at: Option<String>,
+    warning: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminNodeQuotaStatusResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    items: Vec<AdminNodeQuotaStatusItem>,
+}
+
+fn build_local_node_quota_status(
+    store: &JsonSnapshotStore,
+    local_node_id: &str,
+) -> Result<AdminNodeQuotaStatusItem, ApiError> {
+    let now = Utc::now();
+    let node = store
+        .get_node(local_node_id)
+        .ok_or_else(|| ApiError::internal("local node not found in store"))?;
+
+    let mut warning: Option<String> = None;
+
+    let (cycle_end_at, expected_cycle_end_at) = match node.quota_reset {
+        NodeQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes: Some(tz_offset_minutes),
+        } => {
+            let (_start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                day_of_month,
+                now,
+            )
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+            let end_at = end.to_rfc3339();
+            (Some(end_at.clone()), Some(end_at))
+        }
+        NodeQuotaReset::Monthly { .. } => {
+            // Missing tz is not acceptable for node monthly enforcement; return a warning so UI can surface it.
+            warning = Some("missing_tz_offset_minutes".to_string());
+            (None, None)
+        }
+        NodeQuotaReset::Unlimited { .. } => (None, None),
+    };
+
+    // Node-wide traffic mode:
+    // - quota_limit_bytes == 0 => unlimited
+    // - quota_limit_bytes > 0  => monthly limit with explicit tz offset.
+    if node.quota_limit_bytes > 0 {
+        match node.quota_reset {
+            NodeQuotaReset::Monthly {
+                tz_offset_minutes: Some(_),
+                ..
+            } => {}
+            NodeQuotaReset::Monthly { .. } => {
+                warning.get_or_insert_with(|| "missing_tz_offset_minutes".to_string());
+            }
+            _ => {
+                warning.get_or_insert_with(|| "invalid_quota_reset_policy".to_string());
+            }
+        }
+    }
+
+    let usage = store.get_node_usage(local_node_id);
+    let (used_bytes, exhausted, exhausted_at) = if let (Some(usage), Some(expected_end)) =
+        (usage, expected_cycle_end_at.as_deref())
+    {
+        if usage.cycle_end_at != expected_end {
+            (0, false, None)
+        } else {
+            (usage.used_bytes, usage.exhausted, usage.exhausted_at)
+        }
+    } else {
+        (0, false, None)
+    };
+
+    let remaining_bytes = if node.quota_limit_bytes == 0 {
+        0
+    } else {
+        node.quota_limit_bytes.saturating_sub(used_bytes)
+    };
+
+    Ok(AdminNodeQuotaStatusItem {
+        node_id: local_node_id.to_string(),
+        quota_limit_bytes: node.quota_limit_bytes,
+        used_bytes,
+        remaining_bytes,
+        cycle_end_at,
+        exhausted,
+        exhausted_at,
+        warning,
+    })
+}
+
+async fn admin_get_node_quota_status(
+    Extension(state): Extension<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<AdminNodeQuotaStatusResponse>, ApiError> {
+    if let Some(scope) = query.scope.as_deref()
+        && scope != "local"
+    {
+        return Err(ApiError::invalid_request(
+            "invalid scope, expected local or omit",
+        ));
+    }
+
+    let local_node_id = state.cluster.node_id.clone();
+    let local_item = {
+        let store = state.store.lock().await;
+        build_local_node_quota_status(&store, &local_node_id)?
+    };
+
+    if query.scope.as_deref() == Some("local") {
+        return Ok(Json(AdminNodeQuotaStatusResponse {
+            partial: false,
+            unreachable_nodes: Vec::new(),
+            items: vec![local_item],
+        }));
+    }
+
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    let mut items = vec![local_item];
+    let mut unreachable_nodes = Vec::new();
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/nodes/quota-status?...` (not `/api/admin/...`).
+    let local_uri: axum::http::Uri = "/nodes/quota-status?scope=local"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
+        .map_err(ApiError::internal)?;
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+        let url = format!("{base}/api/admin/nodes/quota-status?scope=local");
+        let request = client
+            .get(url)
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id);
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id);
+            continue;
+        }
+
+        match response.json::<AdminNodeQuotaStatusResponse>().await {
+            Ok(remote) => items.extend(remote.items),
+            Err(_) => unreachable_nodes.push(node.node_id),
+        }
+    }
+
+    let partial = !unreachable_nodes.is_empty();
+    Ok(Json(AdminNodeQuotaStatusResponse {
+        partial,
+        unreachable_nodes,
+        items,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PatchNodeQuotaUsageRequest {
+    used_bytes: u64,
+    #[serde(default)]
+    sync_baseline: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PatchNodeQuotaUsageResponse {
+    status: AdminNodeQuotaStatusItem,
+    synced_baseline: bool,
+    warning: Option<String>,
+}
+
+async fn admin_patch_node_quota_usage(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    Query(query): Query<ScopeQuery>,
+    ApiJson(req): ApiJson<PatchNodeQuotaUsageRequest>,
+) -> Result<Json<PatchNodeQuotaUsageResponse>, ApiError> {
+    if let Some(scope) = query.scope.as_deref()
+        && scope != "local"
+    {
+        return Err(ApiError::invalid_request(
+            "invalid scope, expected local or omit",
+        ));
+    }
+
+    let local_node_id = state.cluster.node_id.clone();
+    if query.scope.as_deref() == Some("local") {
+        if node_id != local_node_id {
+            return Err(ApiError::invalid_request(
+                "invalid node_id for local scope (must be local node)",
+            ));
+        }
+        return apply_local_node_quota_usage_override(&state, &node_id, req).await;
+    }
+
+    if node_id == local_node_id {
+        return apply_local_node_quota_usage_override(&state, &node_id, req).await;
+    }
+
+    // Forward to the target node via internal signature.
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    let base = node.api_base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err(ApiError::internal("target node api_base_url is empty"));
+    }
+
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    // Note: the admin auth middleware is attached to the `/admin` nested router, so the
+    // verifier sees a stripped path like `/nodes/:node_id/quota-usage?...` (not `/api/admin/...`).
+    let local_uri: axum::http::Uri = format!("/nodes/{node_id}/quota-usage?scope=local")
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::PATCH, &local_uri)
+        .map_err(ApiError::internal)?;
+
+    let url = format!("{base}/api/admin/nodes/{node_id}/quota-usage?scope=local");
+    let request = client
+        .patch(url)
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .json(&req);
+    let response = tokio::time::timeout(Duration::from_secs(5), request.send())
+        .await
+        .map_err(|_| ApiError::internal("timeout forwarding quota usage override"))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if !response.status().is_success() {
+        return Err(ApiError::internal(format!(
+            "forward quota usage override failed: {}",
+            response.status()
+        )));
+    }
+    let remote = response
+        .json::<PatchNodeQuotaUsageResponse>()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(remote))
+}
+
+async fn apply_local_node_quota_usage_override(
+    state: &AppState,
+    node_id: &str,
+    req: PatchNodeQuotaUsageRequest,
+) -> Result<Json<PatchNodeQuotaUsageResponse>, ApiError> {
+    let now = Utc::now();
+    let sync_baseline = req.sync_baseline.unwrap_or(true);
+
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    let (day_of_month, tz_offset_minutes) = match node.quota_reset {
+        NodeQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes: Some(tz_offset_minutes),
+        } => (day_of_month, tz_offset_minutes),
+        NodeQuotaReset::Monthly { .. } => {
+            return Err(ApiError::invalid_request(
+                "node quota reset tz_offset_minutes is required to override used_bytes",
+            ));
+        }
+        _ => {
+            return Err(ApiError::invalid_request(
+                "node quota_reset must be monthly to override used_bytes",
+            ));
+        }
+    };
+
+    let (cycle_start, cycle_end) = current_cycle_window_at(
+        CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+        day_of_month,
+        now,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let cycle_start_at = cycle_start.to_rfc3339();
+    let cycle_end_at = cycle_end.to_rfc3339();
+    let seen_at = now.to_rfc3339();
+
+    let mut synced_baseline = false;
+    let mut warning: Option<String> = None;
+    let inbound_totals = if sync_baseline {
+        match xray::connect(state.config.xray_api_addr).await {
+            Ok(mut client) => match client.query_inbound_traffic_totals().await {
+                Ok(v) => {
+                    synced_baseline = true;
+                    Some(v)
+                }
+                Err(status) => {
+                    warning = Some(format!("sync_baseline_failed: {status}"));
+                    None
+                }
+            },
+            Err(err) => {
+                warning = Some(format!("sync_baseline_failed: {err}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let threshold_reached =
+        node.quota_limit_bytes > 0
+            && req.used_bytes.saturating_add(10 * 1024 * 1024) >= node.quota_limit_bytes;
+    let mut remove_ops: Vec<(String, String)> = Vec::new();
+
+    {
+        let mut store = state.store.lock().await;
+        store.set_node_used_bytes_override(
+            node_id,
+            cycle_start_at.clone(),
+            cycle_end_at.clone(),
+            req.used_bytes,
+            seen_at.clone(),
+        )?;
+        if let Some(totals) = inbound_totals.as_ref() {
+            store.sync_node_inbound_baselines(
+                node_id,
+                cycle_start_at.clone(),
+                cycle_end_at.clone(),
+                totals,
+                seen_at.clone(),
+            )?;
+        }
+
+        // Update exhausted state immediately so reconcile can converge without waiting for a tick.
+        let exhausted = store.get_node_usage(node_id).is_some_and(|u| u.exhausted);
+
+        if node.quota_limit_bytes == 0 {
+            if exhausted {
+                store.clear_node_exhausted(node_id)?;
+                state.reconcile.request_full();
+            }
+        } else if threshold_reached && !exhausted {
+            store.set_node_exhausted(node_id, now.to_rfc3339())?;
+            state.reconcile.request_full();
+
+            // Best-effort immediate cut: remove all local users from all local inbounds.
+            let endpoints_by_id = store
+                .list_endpoints()
+                .into_iter()
+                .map(|e| (e.endpoint_id.clone(), e))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            for grant in store.list_grants() {
+                let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id) else {
+                    continue;
+                };
+                if endpoint.node_id != node_id {
+                    continue;
+                }
+                remove_ops.push((endpoint.tag.clone(), format!("grant:{}", grant.grant_id)));
+            }
+        } else if !threshold_reached && exhausted {
+            store.clear_node_exhausted(node_id)?;
+            state.reconcile.request_full();
+        }
+    }
+
+    if threshold_reached && !remove_ops.is_empty() {
+        match xray::connect(state.config.xray_api_addr).await {
+            Ok(mut client) => {
+                use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
+                for (tag, email) in remove_ops {
+                    let op = crate::xray::builder::build_remove_user_operation(&email);
+                    let req = AlterInboundRequest {
+                        tag: tag.clone(),
+                        operation: Some(op),
+                    };
+                    match client.alter_inbound(req).await {
+                        Ok(_) => {}
+                        Err(status) if xray::is_not_found(&status) => {}
+                        Err(status) => tracing::warn!(
+                            node_id = node_id,
+                            endpoint_tag = tag,
+                            %status,
+                            "quota usage override: xray alter_inbound remove_user failed"
+                        ),
+                    }
+                }
+            }
+            Err(err) => {
+                warning.get_or_insert_with(|| format!("xray_connect_failed: {err}"));
+            }
+        }
+    }
+
+    let status = {
+        let store = state.store.lock().await;
+        build_local_node_quota_status(&store, node_id)?
+    };
+
+    Ok(Json(PatchNodeQuotaUsageResponse {
+        status,
+        synced_baseline,
+        warning,
     }))
 }
 

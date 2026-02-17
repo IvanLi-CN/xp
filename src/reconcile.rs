@@ -297,6 +297,7 @@ struct Snapshot {
     endpoints: Vec<Endpoint>,
     grants: Vec<Grant>,
     quota_banned_by_grant: BTreeMap<String, bool>,
+    node_exhausted: bool,
 }
 
 async fn reconcile_once(
@@ -338,12 +339,16 @@ async fn reconcile_once(
                 quota_banned_by_grant.insert(grant.grant_id.clone(), true);
             }
         }
+        let node_exhausted = store
+            .get_node_usage(&local_node_id)
+            .is_some_and(|u| u.exhausted);
         (
             local_node_id,
             Snapshot {
                 endpoints,
                 grants,
                 quota_banned_by_grant,
+                node_exhausted,
             },
             local_vless_endpoint_ids,
         )
@@ -415,6 +420,7 @@ async fn reconcile_snapshot(
         endpoints,
         grants,
         quota_banned_by_grant,
+        node_exhausted,
     } = snapshot;
 
     let endpoints_by_id: BTreeMap<String, Endpoint> = endpoints
@@ -437,6 +443,7 @@ async fn reconcile_snapshot(
 
     let is_effective_enabled = |grant: &Grant| {
         grant.enabled
+            && !node_exhausted
             && !quota_banned_by_grant
                 .get(&grant.grant_id)
                 .copied()
@@ -991,6 +998,7 @@ mod tests {
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
                     quota_reset: NodeQuotaReset::default(),
+                    quota_limit_bytes: 0,
                 })
                 .unwrap();
 

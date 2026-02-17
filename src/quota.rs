@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
@@ -8,9 +8,8 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
     domain::{NodeQuotaReset, QuotaResetSource, UserQuotaReset},
-    raft::app::RaftFacade,
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
+    state::JsonSnapshotStore,
     xray,
 };
 
@@ -34,7 +33,6 @@ pub fn spawn_quota_worker(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
-    raft: Arc<dyn RaftFacade>,
 ) -> QuotaHandle {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = QuotaHandle {
@@ -48,7 +46,7 @@ pub fn spawn_quota_worker(
             tokio::select! {
                 _ = interval.tick() => {
                     let now = Utc::now();
-                    if let Err(err) = run_quota_tick_at(now, &config, &store, &reconcile, &raft).await {
+                    if let Err(err) = run_quota_tick_at(now, &config, &store, &reconcile).await {
                         warn!(%err, "quota tick failed");
                     }
                 }
@@ -163,38 +161,13 @@ fn resolve_user_node_quota_reset(
     Ok((source, policy, tz, day_of_month))
 }
 
-async fn set_grant_enabled_via_raft(
-    raft: &Arc<dyn RaftFacade>,
-    grant_id: &str,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    let resp = raft
-        .client_write(DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.to_string(),
-            enabled,
-            source: GrantEnabledSource::Quota,
-        })
-        .await?;
-    match resp {
-        crate::raft::types::ClientResponse::Ok { .. } => Ok(()),
-        crate::raft::types::ClientResponse::Err {
-            status,
-            code,
-            message,
-        } => Err(anyhow::anyhow!(
-            "raft client_write failed: status={status} code={code} message={message}"
-        )),
-    }
-}
-
 pub async fn run_quota_tick_at(
     now: DateTime<Utc>,
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
 ) -> anyhow::Result<()> {
-    let snapshots = {
+    let (local_node_id, local_node_quota_limit_bytes, local_node_quota_reset, local_node_exhausted, snapshots) = {
         let store = store.lock().await;
         let Some(local_node_id) = crate::reconcile::resolve_local_node_id(config, &store) else {
             warn!(
@@ -204,6 +177,19 @@ pub async fn run_quota_tick_at(
             );
             return Ok(());
         };
+        let local_node = match store.get_node(&local_node_id) {
+            Some(n) => n,
+            None => {
+                warn!(
+                    local_node_id = %local_node_id,
+                    "quota tick: local node not found in store; skipping"
+                );
+                return Ok(());
+            }
+        };
+        let local_node_exhausted = store
+            .get_node_usage(&local_node_id)
+            .is_some_and(|u| u.exhausted);
 
         let endpoints_by_id = store
             .list_endpoints()
@@ -254,10 +240,17 @@ pub async fn run_quota_tick_at(
                 prev_cycle_end_at: usage.as_ref().map(|u| u.cycle_end_at.clone()),
             });
         }
-        out
+        (
+            local_node_id,
+            local_node.quota_limit_bytes,
+            local_node.quota_reset,
+            local_node_exhausted,
+            out,
+        )
     };
 
-    if snapshots.is_empty() {
+    let need_node_enforcement = local_node_quota_limit_bytes > 0 || local_node_exhausted;
+    if snapshots.is_empty() && !need_node_enforcement {
         return Ok(());
     }
 
@@ -268,6 +261,145 @@ pub async fn run_quota_tick_at(
             return Ok(());
         }
     };
+
+    // Node-wide enforcement: do not touch desired state; only adjust local enforcement markers
+    // and reconcile Xray runtime state.
+    if local_node_quota_limit_bytes == 0 {
+        if local_node_exhausted {
+            let mut store = store.lock().await;
+            store.clear_node_exhausted(&local_node_id)?;
+            reconcile.request_full();
+        }
+    } else {
+        let (day_of_month, tz_offset_minutes) = match local_node_quota_reset {
+            NodeQuotaReset::Monthly {
+                day_of_month,
+                tz_offset_minutes: Some(tz_offset_minutes),
+            } => (day_of_month, tz_offset_minutes),
+            NodeQuotaReset::Monthly { .. } => {
+                warn!(
+                    local_node_id = %local_node_id,
+                    "quota tick: node quota reset missing tz_offset_minutes; skipping node-wide quota enforcement"
+                );
+                (1, 0)
+            }
+            _ => {
+                warn!(
+                    local_node_id = %local_node_id,
+                    "quota tick: node quota_reset is not monthly but quota_limit_bytes > 0; skipping node-wide quota enforcement"
+                );
+                (1, 0)
+            }
+        };
+
+        if matches!(
+            local_node_quota_reset,
+            NodeQuotaReset::Monthly {
+                tz_offset_minutes: Some(_),
+                ..
+            }
+        ) {
+            let seen_at = now.to_rfc3339();
+            let inbound_totals = match client.query_inbound_traffic_totals().await {
+                Ok(v) => v,
+                Err(status) => {
+                    warn!(%status, "quota tick: xray query_inbound_traffic_totals failed");
+                    BTreeMap::new()
+                }
+            };
+
+            let (cycle_start_at, cycle_end_at, used_bytes, window_changed, exhausted) = {
+                let (cycle_start, cycle_end) = current_cycle_window_at(
+                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                    day_of_month,
+                    now,
+                )
+                .map_err(|err| map_cycle_error(&local_node_id, err))?;
+
+                let cycle_start_at = cycle_start.to_rfc3339();
+                let cycle_end_at = cycle_end.to_rfc3339();
+
+                let mut store = store.lock().await;
+                let (used_bytes, window_changed) = store.apply_node_inbound_usage_sample(
+                    &local_node_id,
+                    cycle_start_at.clone(),
+                    cycle_end_at.clone(),
+                    &inbound_totals,
+                    seen_at,
+                )?;
+
+                if window_changed {
+                    store.clear_node_exhausted(&local_node_id)?;
+                }
+                let exhausted = store
+                    .get_node_usage(&local_node_id)
+                    .is_some_and(|u| u.exhausted);
+
+                (cycle_start_at, cycle_end_at, used_bytes, window_changed, exhausted)
+            };
+
+            // Evaluate threshold after persisting usage.
+            let threshold_reached =
+                used_bytes.saturating_add(QUOTA_TOLERANCE_BYTES) >= local_node_quota_limit_bytes;
+            if window_changed {
+                debug!(
+                    local_node_id = %local_node_id,
+                    cycle_start_at,
+                    cycle_end_at,
+                    "quota tick: node cycle rollover detected, clearing exhausted state"
+                );
+                reconcile.request_full();
+            } else if threshold_reached && !exhausted {
+                debug!(
+                    local_node_id = %local_node_id,
+                    used_bytes,
+                    quota_limit_bytes = local_node_quota_limit_bytes,
+                    "quota tick: node quota exceeded, enforcing"
+                );
+                {
+                    let mut store = store.lock().await;
+                    store.set_node_exhausted(&local_node_id, now.to_rfc3339())?;
+                }
+                reconcile.request_full();
+
+                // Best-effort immediate cut: remove all local users from all local inbounds.
+                for snapshot in snapshots.iter() {
+                    let Some(tag) = snapshot.endpoint_tag.as_deref() else {
+                        continue;
+                    };
+                    let email = format!("grant:{}", snapshot.grant_id);
+                    use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
+                    let op = crate::xray::builder::build_remove_user_operation(&email);
+                    let req = AlterInboundRequest {
+                        tag: tag.to_string(),
+                        operation: Some(op),
+                    };
+                    match client.alter_inbound(req).await {
+                        Ok(_) => {}
+                        Err(status) if xray::is_not_found(&status) => {}
+                        Err(status) => warn!(
+                            grant_id = snapshot.grant_id,
+                            endpoint_tag = tag,
+                            %status,
+                            "quota tick: xray alter_inbound remove_user failed (node exhausted)"
+                        ),
+                    }
+                }
+            } else if !threshold_reached && exhausted {
+                debug!(
+                    local_node_id = %local_node_id,
+                    used_bytes,
+                    quota_limit_bytes = local_node_quota_limit_bytes,
+                    "quota tick: node quota no longer exceeded, clearing exhausted state"
+                );
+                {
+                    let mut store = store.lock().await;
+                    store.clear_node_exhausted(&local_node_id)?;
+                }
+                reconcile.request_full();
+            }
+        }
+    }
 
     let mut ticks = Vec::new();
     for snapshot in snapshots {
@@ -310,7 +442,6 @@ pub async fn run_quota_tick_at(
                 config,
                 store,
                 reconcile,
-                raft,
                 &mut client,
                 &group,
                 limit,
@@ -326,7 +457,6 @@ pub async fn run_quota_tick_at(
                     config,
                     store,
                     reconcile,
-                    raft,
                     &mut client,
                     tick,
                 )
@@ -420,7 +550,6 @@ async fn enforce_grant_quota_legacy(
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
     client: &mut xray::XrayClient,
     tick: GrantUsageTick,
 ) -> anyhow::Result<()> {
@@ -430,14 +559,8 @@ async fn enforce_grant_quota_legacy(
 
     if snapshot.quota_reset_policy == QuotaResetPolicy::Unlimited {
         if tick.quota_banned {
-            if tick.grant_enabled {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-            } else {
-                let _ = set_grant_enabled_via_raft(raft, &grant_id, true).await;
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-            }
+            let mut store = store.lock().await;
+            store.clear_quota_banned(&grant_id)?;
             reconcile.request_full();
         }
         return Ok(());
@@ -448,38 +571,9 @@ async fn enforce_grant_quota_legacy(
             grant_id = grant_id,
             "quota tick: cycle rollover detected, auto-unbanning"
         );
-        if tick.grant_enabled {
-            let mut store = store.lock().await;
-            store.clear_quota_banned(&grant_id)?;
-            reconcile.request_full();
-            return Ok(());
-        }
-
-        match set_grant_enabled_via_raft(raft, &grant_id, true).await {
-            Ok(_) => {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-                reconcile.request_full();
-            }
-            Err(err) => {
-                warn!(
-                    grant_id = grant_id,
-                    %err,
-                    "quota tick: auto-unban enable via raft failed"
-                );
-            }
-        }
-        return Ok(());
-    }
-
-    if tick.quota_banned && tick.grant_enabled {
-        if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
-            debug!(
-                grant_id = grant_id,
-                %err,
-                "quota tick: raft disable retry failed"
-            );
-        }
+        let mut store = store.lock().await;
+        store.clear_quota_banned(&grant_id)?;
+        reconcile.request_full();
         return Ok(());
     }
 
@@ -525,14 +619,6 @@ async fn enforce_grant_quota_legacy(
         );
     }
 
-    if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
-        warn!(
-            grant_id = grant_id,
-            %err,
-            "quota tick: raft disable failed"
-        );
-    }
-
     Ok(())
 }
 
@@ -542,7 +628,6 @@ async fn enforce_node_quota_group(
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
     client: &mut xray::XrayClient,
     group: &[GrantUsageTick],
     quota_limit_bytes: u64,
@@ -559,14 +644,8 @@ async fn enforce_node_quota_group(
             debug!("quota tick: quota reset is unlimited, clearing quota bans");
             for g in group {
                 let grant_id = &g.snapshot.grant_id;
-                if g.grant_enabled {
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                } else {
-                    let _ = set_grant_enabled_via_raft(raft, grant_id, true).await;
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                }
+                let mut store = store.lock().await;
+                store.clear_quota_banned(grant_id)?;
             }
             reconcile.request_full();
         }
@@ -577,40 +656,10 @@ async fn enforce_node_quota_group(
         debug!("quota tick: node cycle rollover detected, auto-unbanning");
         for g in group {
             let grant_id = &g.snapshot.grant_id;
-            if g.grant_enabled {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(grant_id)?;
-                continue;
-            }
-            match set_grant_enabled_via_raft(raft, grant_id, true).await {
-                Ok(_) => {
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                }
-                Err(err) => warn!(
-                    grant_id = grant_id,
-                    %err,
-                    "quota tick: auto-unban enable via raft failed"
-                ),
-            }
+            let mut store = store.lock().await;
+            store.clear_quota_banned(grant_id)?;
         }
         reconcile.request_full();
-        return Ok(());
-    }
-
-    for g in group {
-        if g.quota_banned
-            && g.grant_enabled
-            && let Err(err) = set_grant_enabled_via_raft(raft, &g.snapshot.grant_id, false).await
-        {
-            debug!(
-                grant_id = g.snapshot.grant_id,
-                %err,
-                "quota tick: raft disable retry failed"
-            );
-        }
-    }
-    if group.iter().any(|g| g.quota_banned && g.grant_enabled) {
         return Ok(());
     }
 
@@ -672,14 +721,6 @@ async fn enforce_node_quota_group(
                 "quota tick: missing endpoint tag, skipping xray remove_user"
             );
         }
-
-        if let Err(err) = set_grant_enabled_via_raft(raft, grant_id, false).await {
-            warn!(
-                grant_id = grant_id,
-                %err,
-                "quota tick: raft disable failed"
-            );
-        }
     }
 
     Ok(())
@@ -692,12 +733,11 @@ mod tests {
     use std::{collections::BTreeMap, net::SocketAddr};
 
     use pretty_assertions::assert_eq;
-    use tokio::sync::{Mutex, oneshot, watch};
+    use tokio::sync::{Mutex, oneshot};
 
     use crate::{
         domain::{EndpointKind, Node, NodeQuotaReset},
-        raft::app::{LocalRaft, RaftFacade},
-        state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
+        state::{JsonSnapshotStore, StoreInit},
         xray::proto::xray::{
             app::{
                 proxyman::command::handler_service_server::{HandlerService, HandlerServiceServer},
@@ -1027,156 +1067,6 @@ mod tests {
         format!("user>>>{email}>>>traffic>>>{direction}")
     }
 
-    fn test_raft(store: Arc<Mutex<JsonSnapshotStore>>) -> Arc<dyn RaftFacade> {
-        let (_tx, metrics) = watch::channel(openraft::RaftMetrics::<
-            crate::raft::types::NodeId,
-            crate::raft::types::NodeMeta,
-        >::new_initial(0));
-        Arc::new(LocalRaft::new(store, metrics))
-    }
-
-    #[derive(Clone)]
-    struct RecordingRaft {
-        inner: Arc<dyn RaftFacade>,
-        calls: Arc<Mutex<Vec<DesiredStateCommand>>>,
-    }
-
-    impl RaftFacade for RecordingRaft {
-        fn metrics(
-            &self,
-        ) -> watch::Receiver<
-            openraft::RaftMetrics<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
-        > {
-            self.inner.metrics()
-        }
-
-        fn client_write(
-            &self,
-            cmd: DesiredStateCommand,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>>
-        {
-            let inner = self.inner.clone();
-            let calls = self.calls.clone();
-            Box::pin(async move {
-                calls.lock().await.push(cmd.clone());
-                inner.client_write(cmd).await
-            })
-        }
-
-        fn add_learner(
-            &self,
-            node_id: crate::raft::types::NodeId,
-            node: crate::raft::types::NodeMeta,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_learner(node_id, node)
-        }
-
-        fn add_voters(
-            &self,
-            node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_voters(node_ids)
-        }
-
-        fn change_membership(
-            &self,
-            changes: openraft::ChangeMembers<
-                crate::raft::types::NodeId,
-                crate::raft::types::NodeMeta,
-            >,
-            retain: bool,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.change_membership(changes, retain)
-        }
-    }
-
-    fn recording_raft(
-        store: Arc<Mutex<JsonSnapshotStore>>,
-    ) -> (Arc<dyn RaftFacade>, Arc<Mutex<Vec<DesiredStateCommand>>>) {
-        let inner = test_raft(store);
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let raft = RecordingRaft {
-            inner,
-            calls: calls.clone(),
-        };
-        (Arc::new(raft), calls)
-    }
-
-    #[derive(Clone)]
-    struct FailOnceRaft {
-        inner: Arc<dyn RaftFacade>,
-        failed: Arc<Mutex<bool>>,
-    }
-
-    impl RaftFacade for FailOnceRaft {
-        fn metrics(
-            &self,
-        ) -> watch::Receiver<
-            openraft::RaftMetrics<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
-        > {
-            self.inner.metrics()
-        }
-
-        fn client_write(
-            &self,
-            cmd: DesiredStateCommand,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>>
-        {
-            let inner = self.inner.clone();
-            let failed = self.failed.clone();
-            Box::pin(async move {
-                if matches!(
-                    cmd,
-                    DesiredStateCommand::SetGrantEnabled {
-                        enabled: false,
-                        source: GrantEnabledSource::Quota,
-                        ..
-                    }
-                ) {
-                    let mut failed = failed.lock().await;
-                    if !*failed {
-                        *failed = true;
-                        return Err(anyhow::anyhow!("injected raft failure"));
-                    }
-                }
-                inner.client_write(cmd).await
-            })
-        }
-
-        fn add_learner(
-            &self,
-            node_id: crate::raft::types::NodeId,
-            node: crate::raft::types::NodeMeta,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_learner(node_id, node)
-        }
-
-        fn add_voters(
-            &self,
-            node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_voters(node_ids)
-        }
-
-        fn change_membership(
-            &self,
-            changes: openraft::ChangeMembers<
-                crate::raft::types::NodeId,
-                crate::raft::types::NodeMeta,
-            >,
-            retain: bool,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.change_membership(changes, retain)
-        }
-    }
-
-    fn fail_once_raft(store: Arc<Mutex<JsonSnapshotStore>>) -> Arc<dyn RaftFacade> {
-        Arc::new(FailOnceRaft {
-            inner: test_raft(store),
-            failed: Arc::new(Mutex::new(false)),
-        })
-    }
-
     #[tokio::test]
     async fn poll_updates_usage() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
@@ -1184,7 +1074,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let grant_id = {
             let mut store = store.lock().await;
@@ -1222,7 +1111,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1231,7 +1120,7 @@ mod tests {
             st.stats.insert(stat_name(&email, "uplink"), 150);
             st.stats.insert(stat_name(&email, "downlink"), 250);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1249,7 +1138,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let grant_id = {
             let mut store = store.lock().await;
@@ -1261,6 +1149,7 @@ mod tests {
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
                     quota_reset: NodeQuotaReset::default(),
+                    quota_limit_bytes: 0,
                 })
                 .unwrap();
 
@@ -1297,7 +1186,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1319,7 +1208,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (local_grant_id, remote_grant_id) = {
             let mut store = store.lock().await;
@@ -1332,6 +1220,7 @@ mod tests {
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
                     quota_reset: NodeQuotaReset::default(),
+                    quota_limit_bytes: 0,
                 })
                 .unwrap();
 
@@ -1391,7 +1280,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1423,7 +1312,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let (raft, raft_calls) = recording_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
@@ -1463,13 +1351,13 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
         let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
+        assert!(grant.enabled, "quota enforcement must not mutate desired state");
         let usage = store_guard.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
         assert!(usage.quota_banned_at.is_some());
@@ -1483,107 +1371,6 @@ mod tests {
             "expected quota enforcement to request reconcile"
         );
 
-        let calls = raft_calls.lock().await.clone();
-        assert!(calls.iter().any(|cmd| {
-            matches!(
-                cmd,
-                DesiredStateCommand::SetGrantEnabled {
-                    grant_id: cmd_grant_id,
-                    enabled: false,
-                    source: GrantEnabledSource::Quota,
-                } if cmd_grant_id == &grant_id
-            )
-        }));
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn quota_raft_retry_disables_grant_after_first_failure() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = fail_once_raft(store.clone());
-
-        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let grant_id = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
-                .unwrap();
-            let (start, end) = current_cycle_window_at(
-                CycleTimeZone::FixedOffsetMinutes {
-                    tz_offset_minutes: 480,
-                },
-                1,
-                now,
-            )
-            .unwrap();
-            store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
-                    start.to_rfc3339(),
-                    end.to_rfc3339(),
-                    0,
-                    0,
-                    now.to_rfc3339(),
-                )
-                .unwrap();
-            store
-                .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
-                .unwrap();
-            grant.grant_id
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 0);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let reconcile = ReconcileHandle::noop();
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
-        drop(store_guard);
-
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-
         let _ = shutdown.send(());
     }
 
@@ -1594,7 +1381,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
@@ -1620,9 +1406,6 @@ mod tests {
                     true,
                     None,
                 )
-                .unwrap();
-            store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
                 .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
@@ -1662,7 +1445,7 @@ mod tests {
         let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(new_now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1689,7 +1472,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let grant_id = {
             let mut store = store.lock().await;
@@ -1714,7 +1496,7 @@ mod tests {
                 )
                 .unwrap();
             store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Manual)
+                .set_grant_enabled(&grant.grant_id, false, crate::state::GrantEnabledSource::Manual)
                 .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
@@ -1753,7 +1535,7 @@ mod tests {
         let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(new_now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1773,7 +1555,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let grant_id = {
             let mut store = store.lock().await;
@@ -1812,13 +1593,13 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
         let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
+        assert!(grant.enabled, "quota enforcement must not mutate desired state");
         let usage = store_guard.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
         assert!(usage.quota_banned_at.is_some());
@@ -1837,7 +1618,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, false);
-        let raft = test_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
@@ -1864,9 +1644,6 @@ mod tests {
                     true,
                     None,
                 )
-                .unwrap();
-            store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
                 .unwrap();
 
             let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
@@ -1906,13 +1683,13 @@ mod tests {
         let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(new_now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
         let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
+        assert!(grant.enabled, "quota enforcement must not mutate desired state");
         let usage = store_guard.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at));
@@ -1931,7 +1708,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let grant_id = {
             let mut store = store.lock().await;
@@ -1963,7 +1739,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert!(
-            run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            run_quota_tick_at(now, &config, &store, &reconcile)
                 .await
                 .is_ok()
         );
@@ -1979,7 +1755,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
@@ -2036,7 +1811,7 @@ mod tests {
             st.stats.insert(stat_name(&email, "uplink"), -1);
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 

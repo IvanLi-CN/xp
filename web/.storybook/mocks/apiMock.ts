@@ -172,6 +172,7 @@ function createDefaultSeed(): MockStateSeed {
 			api_base_url: "https://tokyo-1.example.com",
 			access_host: "tokyo-1.example.com",
 			quota_reset: defaultNodeQuotaReset(1),
+			quota_limit_bytes: 0,
 		},
 		{
 			node_id: "node-2",
@@ -179,6 +180,7 @@ function createDefaultSeed(): MockStateSeed {
 			api_base_url: "https://osaka-1.example.com",
 			access_host: "osaka-1.example.com",
 			quota_reset: defaultNodeQuotaReset(15),
+			quota_limit_bytes: 0,
 		},
 	];
 

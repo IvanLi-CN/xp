@@ -6,7 +6,9 @@ import {
 	type AdminNodePatchRequest,
 	deleteAdminNode,
 	fetchAdminNode,
+	fetchAdminNodeQuotaStatus,
 	patchAdminNode,
+	patchAdminNodeQuotaUsage,
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
@@ -17,6 +19,12 @@ import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import {
+	type QuotaParseResult,
+	formatQuotaBytesCompactInput,
+	formatQuotaBytesHuman,
+	parseQuotaInputToBytes,
+} from "../utils/quota";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -39,6 +47,24 @@ export function NodeDetailsPage() {
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
 	});
 
+	const quotaStatusQuery = useQuery({
+		queryKey: ["adminNodeQuotaStatus", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodeQuotaStatus(adminToken, signal),
+	});
+
+	const quotaStatusItem = useMemo(() => {
+		if (!quotaStatusQuery.data) return null;
+		return (
+			quotaStatusQuery.data.items.find((i) => i.node_id === nodeId) ?? null
+		);
+	}, [nodeId, quotaStatusQuery.data]);
+
+	const [trafficMode, setTrafficMode] = useState<"unlimited" | "monthly_limit">(
+		"unlimited",
+	);
+	const [limitDraft, setLimitDraft] = useState("");
+
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
 	);
@@ -49,9 +75,23 @@ export function NodeDetailsPage() {
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
+	const [usedDraft, setUsedDraft] = useState("");
+	const [syncBaseline, setSyncBaseline] = useState(true);
+	const [overrideError, setOverrideError] = useState<string | null>(null);
+	const [isOverriding, setIsOverriding] = useState(false);
+
 	useEffect(() => {
 		if (nodeQuery.data) {
 			const q = nodeQuery.data.quota_reset;
+			const trafficMode =
+				nodeQuery.data.quota_limit_bytes === 0 ? "unlimited" : "monthly_limit";
+			setTrafficMode(trafficMode);
+			setLimitDraft(
+				nodeQuery.data.quota_limit_bytes === 0
+					? ""
+					: formatQuotaBytesCompactInput(nodeQuery.data.quota_limit_bytes),
+			);
+
 			if (q.policy === "monthly") {
 				setResetPolicy("monthly");
 				setResetDay(q.day_of_month);
@@ -65,6 +105,7 @@ export function NodeDetailsPage() {
 					: String(q.tz_offset_minutes);
 			setResetTzOffsetMinutes(tz);
 			setSaveError(null);
+			setOverrideError(null);
 		}
 	}, [nodeQuery.data]);
 
@@ -88,6 +129,19 @@ export function NodeDetailsPage() {
 				};
 	}, [resetDay, resetPolicy, resetTzOffsetMinutes]);
 
+	const desiredQuotaLimitBytes = useMemo<QuotaParseResult>(() => {
+		if (trafficMode === "unlimited") return { ok: true, bytes: 0 as number };
+		const parsed = parseQuotaInputToBytes(limitDraft);
+		if (!parsed.ok) return parsed;
+		if (parsed.bytes === 0) {
+			return {
+				ok: false,
+				error: "Monthly limit must be greater than 0.",
+			} as const;
+		}
+		return parsed;
+	}, [limitDraft, trafficMode]);
+
 	const isDirty = useMemo(() => {
 		if (!nodeQuery.data) return false;
 		const q = nodeQuery.data.quota_reset;
@@ -97,17 +151,46 @@ export function NodeDetailsPage() {
 			q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
 				? ""
 				: String(q.tz_offset_minutes);
-		return (
+		const quotaResetDirty =
 			resetPolicy !== currentPolicy ||
 			(resetPolicy === "monthly" && resetDay !== currentDay) ||
-			resetTzOffsetMinutes.trim() !== currentTz
-		);
-	}, [nodeQuery.data, resetDay, resetPolicy, resetTzOffsetMinutes]);
+			resetTzOffsetMinutes.trim() !== currentTz;
 
-	const handleSaveQuotaReset = async () => {
+		const desiredLimitBytes =
+			desiredQuotaLimitBytes.ok === true ? desiredQuotaLimitBytes.bytes : null;
+		const quotaLimitDirty =
+			desiredLimitBytes === null
+				? true
+				: desiredLimitBytes !== nodeQuery.data.quota_limit_bytes;
+
+		return quotaResetDirty || quotaLimitDirty;
+	}, [
+		nodeQuery.data,
+		resetDay,
+		resetPolicy,
+		resetTzOffsetMinutes,
+		desiredQuotaLimitBytes,
+	]);
+
+	const handleSaveNodeTraffic = async () => {
 		if (!nodeQuery.data) return;
 		if (!isDirty) {
 			pushToast({ variant: "info", message: "No changes to save." });
+			return;
+		}
+
+		if (!desiredQuotaLimitBytes.ok) {
+			setSaveError(desiredQuotaLimitBytes.error);
+			return;
+		}
+
+		if (
+			trafficMode === "monthly_limit" &&
+			(resetPolicy !== "monthly" || desiredQuotaReset.policy !== "monthly")
+		) {
+			setSaveError(
+				'Monthly limit requires quota_reset.policy="monthly" (pick monthly first).',
+			);
 			return;
 		}
 
@@ -120,6 +203,10 @@ export function NodeDetailsPage() {
 		}
 
 		const tzRaw = resetTzOffsetMinutes.trim();
+		if (trafficMode === "monthly_limit" && tzRaw.length === 0) {
+			setSaveError("tz_offset_minutes is required for monthly node limit.");
+			return;
+		}
 		if (tzRaw.length > 0) {
 			const tz = Number(tzRaw);
 			if (!Number.isFinite(tz) || !Number.isInteger(tz)) {
@@ -133,12 +220,13 @@ export function NodeDetailsPage() {
 
 		const payload: AdminNodePatchRequest = {
 			quota_reset: desiredQuotaReset,
+			quota_limit_bytes: desiredQuotaLimitBytes.bytes,
 		};
 
 		try {
 			await patchAdminNode(adminToken, nodeId, payload);
 			pushToast({ variant: "success", message: "Node updated." });
-			await nodeQuery.refetch();
+			await Promise.all([nodeQuery.refetch(), quotaStatusQuery.refetch()]);
 		} catch (error) {
 			const message = formatErrorMessage(error);
 			setSaveError(message);
@@ -148,6 +236,48 @@ export function NodeDetailsPage() {
 			});
 		} finally {
 			setIsSaving(false);
+		}
+	};
+
+	const handleOverrideUsedBytes = async () => {
+		if (!nodeQuery.data) return;
+
+		const parsed = parseQuotaInputToBytes(usedDraft);
+		if (!parsed.ok) {
+			setOverrideError(parsed.error);
+			return;
+		}
+
+		const tzRaw = resetTzOffsetMinutes.trim();
+		if (resetPolicy !== "monthly" || tzRaw.length === 0) {
+			setOverrideError(
+				"Usage override requires quota_reset.policy=monthly and tz_offset_minutes set.",
+			);
+			return;
+		}
+
+		setIsOverriding(true);
+		setOverrideError(null);
+		try {
+			const res = await patchAdminNodeQuotaUsage(adminToken, nodeId, {
+				used_bytes: parsed.bytes,
+				sync_baseline: syncBaseline,
+			});
+			const warning = res.warning ? ` (${res.warning})` : "";
+			pushToast({
+				variant: "success",
+				message: `Usage updated.${warning}`,
+			});
+			await quotaStatusQuery.refetch();
+		} catch (error) {
+			const message = formatErrorMessage(error);
+			setOverrideError(message);
+			pushToast({
+				variant: "error",
+				message: "Failed to update usage.",
+			});
+		} finally {
+			setIsOverriding(false);
 		}
 	};
 
@@ -263,11 +393,53 @@ export function NodeDetailsPage() {
 				<div className="card bg-base-100 shadow">
 					<div className="card-body space-y-4">
 						<div>
-							<h2 className="card-title">Quota reset</h2>
+							<h2 className="card-title">Node traffic</h2>
 							<p className="text-sm opacity-70">
-								Runtime admin setting. Safe to edit via the admin API.
+								Runtime admin setting. Unlimited or monthly limit. Quota
+								enforcement never mutates desired state.
 							</p>
 						</div>
+						<div className="grid gap-4 md:grid-cols-3">
+							<label className="form-control">
+								<div className="label">
+									<span className="label-text">Mode</span>
+								</div>
+								<select
+									className={selectClass}
+									value={trafficMode}
+									onChange={(e) => {
+										const v = e.target.value as "unlimited" | "monthly_limit";
+										setTrafficMode(v);
+										if (v === "monthly_limit") {
+											setResetPolicy("monthly");
+										}
+									}}
+								>
+									<option value="unlimited">unlimited</option>
+									<option value="monthly_limit">monthly limit</option>
+								</select>
+							</label>
+							<label className="form-control md:col-span-2">
+								<div className="label">
+									<span className="label-text">Monthly limit</span>
+								</div>
+								<input
+									className={inputClass}
+									type="text"
+									disabled={trafficMode !== "monthly_limit"}
+									value={limitDraft}
+									onChange={(e) => setLimitDraft(e.target.value)}
+									placeholder="e.g. 2TiB"
+								/>
+								<div className="label">
+									<span className="label-text-alt opacity-70">
+										Supports MiB/GiB/TiB/PiB; GB/TB/PB are accepted as
+										GiB/TiB/PiB.
+									</span>
+								</div>
+							</label>
+						</div>
+
 						<div className="grid gap-4 md:grid-cols-3">
 							<label className="form-control">
 								<div className="label">
@@ -279,6 +451,7 @@ export function NodeDetailsPage() {
 									onChange={(e) =>
 										setResetPolicy(e.target.value as "monthly" | "unlimited")
 									}
+									disabled={trafficMode === "monthly_limit"}
 								>
 									<option value="monthly">monthly</option>
 									<option value="unlimited">unlimited</option>
@@ -310,6 +483,13 @@ export function NodeDetailsPage() {
 									onChange={(e) => setResetTzOffsetMinutes(e.target.value)}
 									placeholder="(empty)"
 								/>
+								{trafficMode === "monthly_limit" ? (
+									<div className="label">
+										<span className="label-text-alt text-warning">
+											Required for monthly node limit.
+										</span>
+									</div>
+								) : null}
 							</label>
 						</div>
 
@@ -329,9 +509,139 @@ export function NodeDetailsPage() {
 								variant="primary"
 								loading={isSaving}
 								disabled={!isDirty}
-								onClick={handleSaveQuotaReset}
+								onClick={handleSaveNodeTraffic}
 							>
 								Save changes
+							</Button>
+						</div>
+					</div>
+				</div>
+
+				<div className="card bg-base-100 shadow">
+					<div className="card-body space-y-4">
+						<div>
+							<h2 className="card-title">Usage override (IDC align)</h2>
+							<p className="text-sm opacity-70">
+								Set absolute used bytes for the current node cycle. This will
+								immediately re-evaluate exhaustion and trigger reconcile.
+							</p>
+						</div>
+
+						{quotaStatusItem ? (
+							<div className="rounded-box bg-base-200 p-4 space-y-2">
+								<div className="grid gap-2 md:grid-cols-2">
+									<div>
+										<div className="text-xs uppercase tracking-wide opacity-60">
+											Limit
+										</div>
+										<div className="font-mono text-sm break-all">
+											{quotaStatusItem.quota_limit_bytes === 0
+												? "unlimited"
+												: formatQuotaBytesHuman(
+														quotaStatusItem.quota_limit_bytes,
+													)}
+										</div>
+									</div>
+									<div>
+										<div className="text-xs uppercase tracking-wide opacity-60">
+											Used
+										</div>
+										<div className="font-mono text-sm break-all">
+											{formatQuotaBytesHuman(quotaStatusItem.used_bytes)}
+										</div>
+									</div>
+									<div>
+										<div className="text-xs uppercase tracking-wide opacity-60">
+											Remaining
+										</div>
+										<div className="font-mono text-sm break-all">
+											{quotaStatusItem.quota_limit_bytes === 0
+												? "-"
+												: formatQuotaBytesHuman(
+														quotaStatusItem.remaining_bytes,
+													)}
+										</div>
+									</div>
+									<div>
+										<div className="text-xs uppercase tracking-wide opacity-60">
+											Next reset
+										</div>
+										<div className="font-mono text-sm break-all">
+											{quotaStatusItem.cycle_end_at ?? "-"}
+										</div>
+									</div>
+								</div>
+								<div className="flex items-center gap-2 pt-2">
+									{quotaStatusItem.exhausted ? (
+										<span className="badge badge-error">exhausted</span>
+									) : (
+										<span className="badge badge-success">ok</span>
+									)}
+									{quotaStatusItem.warning ? (
+										<span className="badge badge-warning">
+											{quotaStatusItem.warning}
+										</span>
+									) : null}
+								</div>
+							</div>
+						) : quotaStatusQuery.isFetching ? (
+							<p className="text-sm opacity-70">Loading quota status...</p>
+						) : (
+							<p className="text-sm text-warning">
+								Quota status is unavailable for this node.
+							</p>
+						)}
+
+						<div className="grid gap-4 md:grid-cols-3">
+							<label className="form-control md:col-span-2">
+								<div className="label">
+									<span className="label-text">Set used</span>
+								</div>
+								<input
+									className={inputClass}
+									type="text"
+									value={usedDraft}
+									onChange={(e) => setUsedDraft(e.target.value)}
+									placeholder="e.g. 123GiB"
+								/>
+							</label>
+							<label className="form-control">
+								<div className="label">
+									<span className="label-text">sync_baseline</span>
+								</div>
+								<input
+									className="toggle toggle-primary"
+									type="checkbox"
+									checked={syncBaseline}
+									onChange={(e) => setSyncBaseline(e.target.checked)}
+								/>
+								<div className="label">
+									<span className="label-text-alt opacity-70">
+										Align inbound baselines.
+									</span>
+								</div>
+							</label>
+						</div>
+
+						{overrideError ? (
+							<p className="text-sm text-error">{overrideError}</p>
+						) : null}
+
+						<div className="flex justify-end gap-2">
+							<Button
+								variant="secondary"
+								loading={quotaStatusQuery.isFetching}
+								onClick={() => quotaStatusQuery.refetch()}
+							>
+								Refresh
+							</Button>
+							<Button
+								variant="primary"
+								loading={isOverriding}
+								disabled={usedDraft.trim().length === 0}
+								onClick={handleOverrideUsedBytes}
+							>
+								Apply override
 							</Button>
 						</div>
 					</div>

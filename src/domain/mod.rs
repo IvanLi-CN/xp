@@ -237,6 +237,11 @@ pub struct Node {
     #[serde(alias = "public_domain")]
     pub access_host: String,
     pub api_base_url: String,
+    /// Node-wide traffic quota cap per cycle window (bytes).
+    ///
+    /// `0` means unlimited (no quota enforcement at the node level).
+    #[serde(default)]
+    pub quota_limit_bytes: u64,
     #[serde(default)]
     pub quota_reset: NodeQuotaReset,
 }
