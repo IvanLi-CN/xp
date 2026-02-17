@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-17
 - Last: 2026-02-17
 
@@ -86,8 +86,12 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: docs freeze + schema/migration/AC 冻结（本计划文档）
-- [ ] M2: Backend state + admin API（CRUD/reorder）+ endpoint meta normalization
-- [ ] M3: Reconcile 配置变化检测 + inbound rebuild
-- [ ] M4: Web Settings 页 + Endpoint source selector + storybook/mocks
-- [ ] M5: Rust/Web tests 全绿 + PR checks 结果明确
+- [x] M1: docs freeze + schema/migration/AC 冻结（本计划文档）
+- [x] M2: Backend state + admin API（CRUD/reorder）+ endpoint meta normalization
+- [x] M3: Reconcile 配置变化检测 + inbound rebuild
+- [x] M4: Web Settings 页 + Endpoint source selector + storybook/mocks
+- [x] M5: Rust/Web tests 全绿 + PR checks 结果明确
+
+## 变更记录（Change log）
+
+- 2026-02-17: 实现完成，PR #74。
