@@ -984,14 +984,12 @@ impl DesiredStateCommand {
                                 .into());
                             }
                             for name in normalized.iter() {
-                                let reason =
-                                    validate_reality_server_name(name).map_err(|reason| {
-                                        DomainError::InvalidRealityServerName {
-                                            server_name: name.clone(),
-                                            reason: reason.to_string(),
-                                        }
-                                    })?;
-                                let _ = reason;
+                                validate_reality_server_name(name).map_err(|reason| {
+                                    DomainError::InvalidRealityServerName {
+                                        server_name: name.clone(),
+                                        reason: reason.to_string(),
+                                    }
+                                })?;
                             }
                             normalized
                         }
@@ -1008,14 +1006,12 @@ impl DesiredStateCommand {
                                 .into());
                             }
                             for name in derived.iter() {
-                                let reason =
-                                    validate_reality_server_name(name).map_err(|reason| {
-                                        DomainError::InvalidRealityServerName {
-                                            server_name: name.clone(),
-                                            reason: reason.to_string(),
-                                        }
-                                    })?;
-                                let _ = reason;
+                                validate_reality_server_name(name).map_err(|reason| {
+                                    DomainError::InvalidRealityServerName {
+                                        server_name: name.clone(),
+                                        reason: reason.to_string(),
+                                    }
+                                })?;
                             }
                             derived
                         }
@@ -1159,8 +1155,8 @@ impl DesiredStateCommand {
                 let mut next_domains: Vec<RealityDomain> = state
                     .reality_domains
                     .iter()
-                    .cloned()
                     .filter(|d| d.domain_id != *domain_id)
+                    .cloned()
                     .collect();
 
                 // Ensure we do not end up with duplicate IDs (should be impossible) and keep

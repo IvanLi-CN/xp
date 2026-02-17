@@ -18,17 +18,12 @@ pub struct RealityConfig {
     pub fingerprint: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealityServerNamesSource {
+    #[default]
     Manual,
     Global,
-}
-
-impl Default for RealityServerNamesSource {
-    fn default() -> Self {
-        Self::Manual
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
