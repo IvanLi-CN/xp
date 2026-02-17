@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
 	type AdminEndpointKind,
@@ -8,6 +8,7 @@ import {
 	createAdminEndpoint,
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
@@ -16,6 +17,7 @@ import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
 	validateRealityServerName,
@@ -62,12 +64,23 @@ export function EndpointNewPage() {
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
+	const realityDomainsQuery = useQuery({
+		queryKey: ["adminRealityDomains", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
+	});
+
 	const [kind, setKind] = useState<AdminEndpointKind>(
 		"vless_reality_vision_tcp",
 	);
 	const [nodeId, setNodeId] = useState("");
 	const [port, setPort] = useState("443");
-	const [realityServerNames, setRealityServerNames] = useState<string[]>([]);
+	const [realityServerNamesSource, setRealityServerNamesSource] = useState<
+		"manual" | "global"
+	>("global");
+	const [realityServerNamesManual, setRealityServerNamesManual] = useState<
+		string[]
+	>([]);
 	const [realityFingerprint, setRealityFingerprint] = useState("chrome");
 
 	useEffect(() => {
@@ -77,6 +90,12 @@ export function EndpointNewPage() {
 			setNodeId(nodes[0].node_id);
 		}
 	}, [nodeId, nodesQuery.data]);
+
+	const derivedGlobalServerNames = useMemo(() => {
+		if (!nodeId) return [];
+		const domains = realityDomainsQuery.data?.items ?? [];
+		return deriveGlobalRealityServerNames(domains, nodeId);
+	}, [nodeId, realityDomainsQuery.data]);
 
 	const createMutation = useMutation({
 		mutationFn: async () => {
@@ -89,17 +108,36 @@ export function EndpointNewPage() {
 			}
 
 			if (kind === "vless_reality_vision_tcp") {
-				const serverNames = realityServerNames
-					.map(normalizeRealityServerName)
-					.filter((s) => s.length > 0);
-				if (serverNames.length === 0)
-					throw new Error("serverName is required.");
-				for (const name of serverNames) {
-					const err = validateRealityServerName(name);
-					if (err) throw new Error(err);
+				const fingerprintValue = realityFingerprint.trim() || "chrome";
+				const serverNames =
+					realityServerNamesSource === "global"
+						? derivedGlobalServerNames
+						: realityServerNamesManual
+								.map(normalizeRealityServerName)
+								.filter((s) => s.length > 0);
+
+				if (realityServerNamesSource === "manual") {
+					if (serverNames.length === 0) {
+						throw new Error("serverName is required.");
+					}
+					for (const name of serverNames) {
+						const err = validateRealityServerName(name);
+						if (err) throw new Error(err);
+					}
+				} else {
+					if (realityDomainsQuery.isLoading) {
+						throw new Error("Reality domains are still loading.");
+					}
+					if (realityDomainsQuery.isError) {
+						throw new Error("Failed to load reality domains.");
+					}
+					if (serverNames.length === 0) {
+						throw new Error(
+							"No enabled reality domains for this node. Add some in Settings > Reality domains.",
+						);
+					}
 				}
 
-				const fingerprintValue = realityFingerprint.trim() || "chrome";
 				const primary = serverNames[0];
 
 				return createAdminEndpoint(adminToken, {
@@ -109,6 +147,7 @@ export function EndpointNewPage() {
 					reality: {
 						dest: `${primary}:443`,
 						server_names: serverNames,
+						server_names_source: realityServerNamesSource,
 						fingerprint: fingerprintValue,
 					},
 				});
@@ -137,6 +176,10 @@ export function EndpointNewPage() {
 			});
 		},
 	});
+
+	const globalDomainsReady =
+		!realityDomainsQuery.isLoading && !realityDomainsQuery.isError;
+	const globalHasDomains = derivedGlobalServerNames.length > 0;
 
 	const content = (() => {
 		if (adminToken.length === 0) {
@@ -279,16 +322,99 @@ export function EndpointNewPage() {
 											The inbound listen port on this node.
 										</p>
 									</label>
-									<TagInput
-										label="serverNames"
-										value={realityServerNames}
-										onChange={setRealityServerNames}
-										placeholder="oneclient.sfx.ms"
-										disabled={createMutation.isPending}
-										inputClass={inputClass}
-										validateTag={validateRealityServerName}
-										helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
-									/>
+									<label className="form-control">
+										<div className="label">
+											<span className="label-text font-mono">
+												serverNamesSource
+											</span>
+										</div>
+										<select
+											className={selectClass}
+											value={realityServerNamesSource}
+											onChange={(event) =>
+												setRealityServerNamesSource(
+													event.target.value as "manual" | "global",
+												)
+											}
+											disabled={createMutation.isPending}
+										>
+											<option value="global">global</option>
+											<option value="manual">manual</option>
+										</select>
+										<p className="text-xs opacity-70">
+											<span className="font-mono">global</span> derives
+											serverNames from{" "}
+											<Link className="link link-primary" to="/reality-domains">
+												Settings &gt; Reality domains
+											</Link>{" "}
+											(enabled per node).{" "}
+											<span className="font-mono">manual</span> stores the list
+											on this endpoint.
+										</p>
+									</label>
+
+									{realityServerNamesSource === "manual" ? (
+										<TagInput
+											label="serverNames"
+											value={realityServerNamesManual}
+											onChange={setRealityServerNamesManual}
+											placeholder="oneclient.sfx.ms"
+											disabled={createMutation.isPending}
+											inputClass={inputClass}
+											validateTag={validateRealityServerName}
+											helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
+										/>
+									) : (
+										<div className="form-control">
+											<div className="label">
+												<span className="label-text font-mono">
+													derived serverNames
+												</span>
+											</div>
+											<div className="rounded-lg border border-base-300 bg-base-200 px-3 py-3 text-sm">
+												{realityDomainsQuery.isLoading ? (
+													<span className="opacity-70">
+														Loading reality domains...
+													</span>
+												) : realityDomainsQuery.isError ? (
+													<span className="text-error">
+														Failed to load reality domains.
+													</span>
+												) : derivedGlobalServerNames.length === 0 ? (
+													<span className="text-warning">
+														No enabled domains for this node.
+													</span>
+												) : (
+													<div className="flex flex-wrap gap-2">
+														{derivedGlobalServerNames.map((name, idx) => (
+															<span
+																key={`${idx}:${name}`}
+																className={[
+																	"badge font-mono gap-2",
+																	idx === 0 ? "badge-primary" : "badge-ghost",
+																].join(" ")}
+																title={
+																	idx === 0
+																		? "Primary (used for dest / probe)"
+																		: name
+																}
+															>
+																<span>{name}</span>
+																{idx === 0 ? (
+																	<span className="opacity-80">primary</span>
+																) : null}
+															</span>
+														))}
+													</div>
+												)}
+											</div>
+											<p className="text-xs opacity-70">
+												Derived from the ordered registry; the first enabled
+												domain becomes primary.
+											</p>
+										</div>
+									)}
+
 									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40">
 										<summary className="collapse-title text-sm font-medium">
 											Advanced (optional)
@@ -346,7 +472,12 @@ export function EndpointNewPage() {
 							</Link>
 							<Button
 								loading={createMutation.isPending}
-								disabled={createMutation.isPending}
+								disabled={
+									createMutation.isPending ||
+									(kind === "vless_reality_vision_tcp" &&
+										realityServerNamesSource === "global" &&
+										(!globalDomainsReady || !globalHasDomains))
+								}
 								type="submit"
 							>
 								Create endpoint

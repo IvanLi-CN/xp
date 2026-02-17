@@ -13,7 +13,22 @@ pub const REALITY_X25519_PRIVATE_KEY_LEN_BYTES: usize = 32;
 pub struct RealityConfig {
     pub dest: String,
     pub server_names: Vec<String>,
+    #[serde(default)]
+    pub server_names_source: RealityServerNamesSource,
     pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RealityServerNamesSource {
+    Manual,
+    Global,
+}
+
+impl Default for RealityServerNamesSource {
+    fn default() -> Self {
+        Self::Manual
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,6 +55,79 @@ pub struct Ss2022EndpointMeta {
 pub struct RotateShortIdResult {
     pub active_short_id: String,
     pub short_ids: Vec<String>,
+}
+
+pub fn validate_reality_server_name(host: &str) -> Result<(), &'static str> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("server_name is required");
+    }
+    if trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err("server_name must not contain spaces");
+    }
+
+    // Common copy/paste mistakes: URL / path / host:port / wildcard.
+    if trimmed.contains("://") {
+        return Err("server_name must not include scheme (://)");
+    }
+    if trimmed.contains('/') {
+        return Err("server_name must not include path (/)");
+    }
+    if trimmed.contains(':') {
+        return Err("server_name must not include port (:)");
+    }
+    if trimmed.contains('*') {
+        return Err("server_name must not include wildcard (*)");
+    }
+
+    // RFC 1035/1123-ish hostname rules (ASCII only).
+    if trimmed.len() > 253 {
+        return Err("server_name is too long (max 253)");
+    }
+    if trimmed.starts_with('.') || trimmed.ends_with('.') {
+        return Err("server_name must not start or end with a dot (.)");
+    }
+    if trimmed.contains("..") {
+        return Err("server_name must not contain consecutive dots (..)");
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return Err("server_name must be a valid hostname (letters/digits/dots/hyphens)");
+    }
+
+    let labels: Vec<&str> = trimmed.split('.').collect();
+    if labels.len() < 2 {
+        return Err("server_name must contain at least one dot (example.com)");
+    }
+
+    // Heuristic: public TLDs are at least 2 chars today; blocks obvious typos like "cc.c".
+    let tld = labels.last().copied().unwrap_or_default();
+    if tld.len() < 2 {
+        return Err("server_name TLD is too short (min 2)");
+    }
+
+    for label in labels {
+        if label.is_empty() {
+            return Err("server_name contains an empty label");
+        }
+        if label.len() > 63 {
+            return Err("server_name label is too long (max 63)");
+        }
+        let bytes = label.as_bytes();
+        if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
+            return Err("server_name labels must not start/end with '-'");
+        }
+        if !label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("server_name labels must be alnum or '-'");
+        }
+    }
+
+    Ok(())
 }
 
 pub fn validate_short_id(short_id: &str) -> Result<(), &'static str> {

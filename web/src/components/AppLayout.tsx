@@ -25,6 +25,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 					title: "Settings",
 					items: [
 						{
+							label: "Reality domains",
+							to: "/reality-domains",
+							icon: "tabler:world",
+						},
+						{
 							label: "Service config",
 							to: "/service-config",
 							icon: "tabler:settings",

@@ -7,6 +7,7 @@ use std::{
 };
 
 use rand::{RngCore, SeedableRng, rngs::StdRng};
+use sha2::{Digest as _, Sha256};
 use tokio::{
     sync::{Mutex, mpsc},
     time::{Instant, MissedTickBehavior},
@@ -16,6 +17,7 @@ use tracing::{debug, warn};
 use crate::{
     config::Config,
     domain::{Endpoint, EndpointKind, Grant},
+    protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
     state::JsonSnapshotStore,
     xray,
     xray::builder,
@@ -240,6 +242,7 @@ async fn reconciler_task<R: RngCore>(
     let mut debounce_until: Option<Instant> = Some(Instant::now());
     let mut backoff_until: Option<Instant> = None;
     let mut backoff = BackoffState::new(options.backoff, options.rng);
+    let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
 
     let mut periodic = tokio::time::interval_at(
         Instant::now() + options.periodic_full,
@@ -277,7 +280,14 @@ async fn reconciler_task<R: RngCore>(
                 }
             }, if run_at.is_some() => {
                 debounce_until = None;
-                if let Err(err) = reconcile_once(&config, &store, &pending).await {
+                if let Err(err) = reconcile_once(
+                    &config,
+                    &store,
+                    &pending,
+                    &mut last_applied_hash_by_endpoint_id,
+                )
+                .await
+                {
                     let delay = backoff.next_delay();
                     debug!(?err, ?delay, "reconcile connect failed; backing off");
                     backoff_until = Some(Instant::now() + delay);
@@ -299,12 +309,54 @@ struct Snapshot {
     quota_banned_by_grant: BTreeMap<String, bool>,
 }
 
+#[derive(Debug, Default)]
+struct ReconcileOutcome {
+    rebuilt_inbounds: BTreeSet<String>,
+}
+
+fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
+    match kind {
+        EndpointKind::VlessRealityVisionTcp => "vless_reality_vision_tcp",
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022_2022_blake3_aes_128_gcm",
+    }
+}
+
+fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
+    let meta = match endpoint.kind {
+        EndpointKind::VlessRealityVisionTcp => {
+            serde_json::from_value::<VlessRealityVisionTcpEndpointMeta>(endpoint.meta.clone())
+                .ok()
+                .and_then(|m| serde_json::to_value(m).ok())
+                .unwrap_or_else(|| endpoint.meta.clone())
+        }
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            serde_json::from_value::<Ss2022EndpointMeta>(endpoint.meta.clone())
+                .ok()
+                .and_then(|m| serde_json::to_value(m).ok())
+                .unwrap_or_else(|| endpoint.meta.clone())
+        }
+    };
+
+    let cfg = serde_json::json!({
+        "kind": endpoint_kind_key(&endpoint.kind),
+        "tag": endpoint.tag,
+        "port": endpoint.port,
+        "meta": meta,
+    });
+
+    let bytes = serde_json::to_vec(&cfg).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Some(hex::encode(hasher.finalize()))
+}
+
 async fn reconcile_once(
     config: &Arc<Config>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     pending: &PendingBatch,
+    last_applied_hash_by_endpoint_id: &mut BTreeMap<String, String>,
 ) -> Result<(), xray::XrayError> {
-    let (local_node_id, snapshot, local_vless_endpoint_ids) = {
+    let (local_node_id, snapshot, local_vless_endpoint_ids, desired_hash_by_endpoint_id) = {
         let store = store.lock().await;
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
@@ -338,6 +390,11 @@ async fn reconcile_once(
                 quota_banned_by_grant.insert(grant.grant_id.clone(), true);
             }
         }
+        let desired_hash_by_endpoint_id = endpoints
+            .iter()
+            .filter(|e| e.node_id == local_node_id)
+            .filter_map(|e| desired_inbound_hash(e).map(|h| (e.endpoint_id.clone(), h)))
+            .collect::<BTreeMap<_, _>>();
         (
             local_node_id,
             Snapshot {
@@ -346,6 +403,7 @@ async fn reconcile_once(
                 quota_banned_by_grant,
             },
             local_vless_endpoint_ids,
+            desired_hash_by_endpoint_id,
         )
     };
 
@@ -359,13 +417,21 @@ async fn reconcile_once(
         && (!migration_marker_user_encryption_path.exists()
             || !migration_marker_reality_type_path.exists());
 
-    let forced_rebuild_inbounds = if should_force_rebuild_vless_inbounds {
-        local_vless_endpoint_ids.clone()
-    } else {
-        BTreeSet::new()
-    };
+    let mut forced_rebuild_inbounds = BTreeSet::new();
+    for (endpoint_id, desired_hash) in desired_hash_by_endpoint_id.iter() {
+        let changed = match last_applied_hash_by_endpoint_id.get(endpoint_id) {
+            None => true,
+            Some(prev) => prev != desired_hash,
+        };
+        if changed {
+            forced_rebuild_inbounds.insert(endpoint_id.clone());
+        }
+    }
+    if should_force_rebuild_vless_inbounds {
+        forced_rebuild_inbounds.extend(local_vless_endpoint_ids.clone());
+    }
 
-    let result = reconcile_snapshot(
+    let outcome = reconcile_snapshot(
         config.xray_api_addr,
         &local_node_id,
         snapshot,
@@ -374,7 +440,24 @@ async fn reconcile_once(
     )
     .await;
 
-    if result.is_ok() && should_force_rebuild_vless_inbounds {
+    if let Ok(outcome) = &outcome {
+        // Only advance the hash cache when we are confident the inbound was rebuilt. This ensures
+        // we keep retrying rebuilds when xray calls fail.
+        last_applied_hash_by_endpoint_id
+            .retain(|endpoint_id, _hash| desired_hash_by_endpoint_id.contains_key(endpoint_id));
+        for endpoint_id in outcome.rebuilt_inbounds.iter() {
+            if let Some(hash) = desired_hash_by_endpoint_id.get(endpoint_id) {
+                last_applied_hash_by_endpoint_id.insert(endpoint_id.clone(), hash.clone());
+            }
+        }
+    }
+
+    if outcome.is_ok()
+        && should_force_rebuild_vless_inbounds
+        && outcome
+            .as_ref()
+            .is_ok_and(|o| local_vless_endpoint_ids.is_subset(&o.rebuilt_inbounds))
+    {
         for marker_path in [
             &migration_marker_user_encryption_path,
             &migration_marker_reality_type_path,
@@ -397,7 +480,7 @@ async fn reconcile_once(
         }
     }
 
-    result
+    outcome.map(|_o| ())
 }
 
 async fn reconcile_snapshot(
@@ -406,7 +489,7 @@ async fn reconcile_snapshot(
     snapshot: Snapshot,
     pending: &PendingBatch,
     forced_rebuild_inbounds: &BTreeSet<String>,
-) -> Result<(), xray::XrayError> {
+) -> Result<ReconcileOutcome, xray::XrayError> {
     use crate::xray::proto::xray::app::proxyman::command::{
         AlterInboundRequest, RemoveInboundRequest,
     };
@@ -469,7 +552,7 @@ async fn reconcile_snapshot(
         || has_local_remove_inbounds
         || has_local_remove_users)
     {
-        return Ok(());
+        return Ok(ReconcileOutcome::default());
     }
 
     let mut client = xray::connect(xray_api_addr).await?;
@@ -512,6 +595,7 @@ async fn reconcile_snapshot(
     let mut rebuild_inbounds = pending.rebuild_inbounds.clone();
     rebuild_inbounds.extend(forced_rebuild_inbounds.iter().cloned());
 
+    let mut rebuilt_ok = BTreeSet::<String>::new();
     for endpoint_id in rebuild_inbounds.iter() {
         let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
             continue;
@@ -520,6 +604,7 @@ async fn reconcile_snapshot(
             continue;
         }
 
+        let mut ok_remove = true;
         let req = RemoveInboundRequest {
             tag: endpoint.tag.clone(),
         };
@@ -527,14 +612,20 @@ async fn reconcile_snapshot(
             Ok(_) => {}
             Err(status) if xray::is_not_found(&status) => {}
             Err(status) => {
+                ok_remove = false;
                 warn!(tag = endpoint.tag, %status, "xray remove_inbound (rebuild) failed")
             }
         }
 
+        let mut ok_add = false;
         match builder::build_add_inbound_request(endpoint) {
             Ok(req) => match client.add_inbound(req).await {
-                Ok(_) => {}
-                Err(status) if xray::is_already_exists(&status) => {}
+                Ok(_) => ok_add = true,
+                Err(status) if xray::is_already_exists(&status) => {
+                    // If an inbound still exists after a remove attempt, the rebuild is not
+                    // guaranteed to have applied the desired config. Keep retrying.
+                    ok_add = false;
+                }
                 Err(status) => {
                     warn!(tag = endpoint.tag, %status, "xray add_inbound (rebuild) failed")
                 }
@@ -548,6 +639,10 @@ async fn reconcile_snapshot(
             for grant in grants.iter().filter(|g| is_effective_enabled(g)) {
                 apply_grant_enabled(&mut client, endpoint, grant).await;
             }
+        }
+
+        if ok_remove && ok_add {
+            rebuilt_ok.insert(endpoint_id.clone());
         }
     }
 
@@ -603,7 +698,9 @@ async fn reconcile_snapshot(
         }
     }
 
-    Ok(())
+    Ok(ReconcileOutcome {
+        rebuilt_inbounds: rebuilt_ok,
+    })
 }
 
 async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint, grant: &Grant) {
@@ -671,7 +768,7 @@ async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint,
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
     use pretty_assertions::assert_eq;
@@ -963,7 +1060,15 @@ mod tests {
             full: true,
             ..Default::default()
         };
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let calls = calls.lock().await.clone();
         assert!(calls.iter().any(|c| matches!(c, Call::AddInbound { .. })));
@@ -1037,11 +1142,19 @@ mod tests {
             (local_endpoint.tag, remote_endpoint.tag)
         };
 
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
         let pending = PendingBatch {
             full: true,
             ..Default::default()
         };
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let calls_snapshot = calls.lock().await.clone();
         assert!(
@@ -1063,7 +1176,14 @@ mod tests {
         calls.lock().await.clear();
         let mut pending = PendingBatch::default();
         pending.add(ReconcileRequest::RemoveInbound { tag: remote_tag });
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
         let calls_snapshot = calls.lock().await.clone();
         assert!(
             !calls_snapshot
@@ -1111,7 +1231,15 @@ mod tests {
             full: true,
             ..Default::default()
         };
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let calls = calls.lock().await.clone();
         assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == &format!("grant:{grant_id}"))));
@@ -1159,7 +1287,15 @@ mod tests {
             full: true,
             ..Default::default()
         };
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let email = format!("grant:{grant_id}");
         let calls = calls.lock().await.clone();
@@ -1206,7 +1342,15 @@ mod tests {
         pending.add(ReconcileRequest::RebuildInbound {
             endpoint_id: endpoint_id.clone(),
         });
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let calls = calls.lock().await.clone();
         assert!(calls.len() >= 3);
@@ -1227,6 +1371,86 @@ mod tests {
             Call::AlterInbound { tag, op_type, .. }
                 if tag == endpoint_tag && op_type == "xray.app.proxyman.command.AddUserOperation"
         ));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn config_change_triggers_automatic_rebuild_inbound() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint_id, endpoint_tag) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            (endpoint.endpoint_id, endpoint.tag)
+        };
+
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
+
+        calls.lock().await.clear();
+
+        // Mutate the endpoint meta to simulate a config change that needs an inbound rebuild.
+        {
+            let mut store = store.lock().await;
+            let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+            let mut meta: Ss2022EndpointMeta =
+                serde_json::from_value(endpoint.meta.clone()).unwrap();
+            meta.server_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==".to_string();
+            endpoint.meta = serde_json::to_value(meta).unwrap();
+            store
+                .state_mut()
+                .endpoints
+                .insert(endpoint_id.clone(), endpoint);
+            store.save().unwrap();
+        }
+
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(calls.len() >= 2);
+        assert_eq!(
+            calls[0],
+            Call::RemoveInbound {
+                tag: endpoint_tag.clone()
+            }
+        );
+        assert_eq!(
+            calls[1],
+            Call::AddInbound {
+                tag: endpoint_tag.clone()
+            }
+        );
 
         let _ = shutdown.send(());
     }
@@ -1256,7 +1480,15 @@ mod tests {
             email: "grant:missing".to_string(),
         });
 
-        reconcile_once(&config, &store, &pending).await.unwrap();
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+        )
+        .await
+        .unwrap();
 
         let calls = calls.lock().await.clone();
         assert!(
