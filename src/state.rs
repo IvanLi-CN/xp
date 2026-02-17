@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -11,20 +11,22 @@ use uuid::Uuid;
 use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
-        QuotaResetSource, Ss2022Credentials, User, UserNodeQuota, UserQuotaReset, VlessCredentials,
-        validate_cycle_day_of_month, validate_group_name, validate_port,
+        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserQuotaReset,
+        VlessCredentials, validate_cycle_day_of_month, validate_group_name, validate_port,
         validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
-        RealityKeys, RotateShortIdResult, SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-        Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
-        generate_short_id_16hex, generate_ss2022_psk_b64, rotate_short_ids_in_place,
-        ss2022_password,
+        RealityKeys, RealityServerNamesSource, RotateShortIdResult,
+        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
+        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
+        generate_ss2022_psk_b64, rotate_short_ids_in_place, ss2022_password,
+        validate_reality_server_name,
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -106,6 +108,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub grants: BTreeMap<String, Grant>,
     #[serde(default)]
+    pub reality_domains: Vec<RealityDomain>,
+    #[serde(default)]
     pub user_node_quotas: BTreeMap<String, BTreeMap<String, UserNodeQuotaConfig>>,
 }
 
@@ -118,6 +122,7 @@ impl PersistedState {
             endpoint_probe_history: BTreeMap::new(),
             users: BTreeMap::new(),
             grants: BTreeMap::new(),
+            reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
         }
     }
@@ -270,7 +275,7 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
     let users_v2 = users;
 
     let mut out = PersistedState::empty();
-    out.schema_version = SCHEMA_VERSION;
+    out.schema_version = SCHEMA_VERSION_V4;
     out.nodes = nodes;
     out.endpoints = endpoints;
 
@@ -489,14 +494,51 @@ fn migrate_v3_to_v4(mut input: PersistedState) -> Result<PersistedState, StoreEr
             ),
         });
     }
+    input.schema_version = SCHEMA_VERSION_V4;
+    Ok(input)
+}
+
+fn default_seed_reality_domains() -> Vec<RealityDomain> {
+    // Deterministic IDs: avoid cluster divergence when seeding during migrations.
+    vec![
+        RealityDomain {
+            domain_id: "seed_public_sn_files_1drv_com".to_string(),
+            server_name: "public.sn.files.1drv.com".to_string(),
+            disabled_node_ids: BTreeSet::new(),
+        },
+        RealityDomain {
+            domain_id: "seed_public_bn_files_1drv_com".to_string(),
+            server_name: "public.bn.files.1drv.com".to_string(),
+            disabled_node_ids: BTreeSet::new(),
+        },
+        RealityDomain {
+            domain_id: "seed_oneclient_sfx_ms".to_string(),
+            server_name: "oneclient.sfx.ms".to_string(),
+            disabled_node_ids: BTreeSet::new(),
+        },
+    ]
+}
+
+fn migrate_v4_to_v5(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V4 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for v4->v5 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
     input.schema_version = SCHEMA_VERSION;
+    if input.reality_domains.is_empty() {
+        input.reality_domains = default_seed_reality_domains();
+    }
     Ok(input)
 }
 
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn migrate_v2_like_to_v3_overrides_seeded_quota_reset_source_from_grants() {
@@ -586,6 +628,34 @@ mod migrate_tests {
         assert_eq!(cfg.quota_limit_bytes, Some(456));
         assert_eq!(cfg.quota_reset_source, QuotaResetSource::Node);
     }
+
+    #[test]
+    fn migrate_v4_to_v5_seeds_reality_domains_when_empty() {
+        let mut v4 = PersistedState::empty();
+        v4.schema_version = SCHEMA_VERSION_V4;
+        v4.reality_domains = Vec::new();
+
+        let v5 = migrate_v4_to_v5(v4).expect("migration should succeed");
+        assert_eq!(v5.schema_version, SCHEMA_VERSION);
+        assert_eq!(v5.reality_domains, default_seed_reality_domains());
+    }
+
+    #[test]
+    fn migrate_v4_to_v5_does_not_override_existing_reality_domains() {
+        let mut v4 = PersistedState::empty();
+        v4.schema_version = SCHEMA_VERSION_V4;
+        v4.reality_domains = vec![RealityDomain {
+            domain_id: "custom_1".to_string(),
+            server_name: "example.com".to_string(),
+            disabled_node_ids: BTreeSet::new(),
+        }];
+
+        let v5 = migrate_v4_to_v5(v4).expect("migration should succeed");
+        assert_eq!(v5.schema_version, SCHEMA_VERSION);
+        assert_eq!(v5.reality_domains.len(), 1);
+        assert_eq!(v5.reality_domains[0].domain_id, "custom_1");
+        assert_eq!(v5.reality_domains[0].server_name, "example.com");
+    }
 }
 
 fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
@@ -618,6 +688,22 @@ pub enum DesiredStateCommand {
     },
     DeleteEndpoint {
         endpoint_id: String,
+    },
+    CreateRealityDomain {
+        domain: RealityDomain,
+    },
+    PatchRealityDomain {
+        domain_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        server_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disabled_node_ids: Option<BTreeSet<String>>,
+    },
+    DeleteRealityDomain {
+        domain_id: String,
+    },
+    ReorderRealityDomains {
+        domain_ids: Vec<String>,
     },
     UpsertUser {
         user: User,
@@ -745,6 +831,87 @@ fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> 
     Ok(())
 }
 
+fn normalize_reality_server_names(input: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::<String>::new();
+    for raw in input {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Domain names are case-insensitive; dedupe by a canonical lowercase key.
+        let key = trimmed.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
+}
+
+fn derive_global_reality_server_names(domains: &[RealityDomain], node_id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::<String>::new();
+    for domain in domains.iter() {
+        if domain.disabled_node_ids.contains(node_id) {
+            continue;
+        }
+        let trimmed = domain.server_name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
+}
+
+fn build_global_vless_meta_updates(
+    endpoints: &BTreeMap<String, Endpoint>,
+    domains: &[RealityDomain],
+) -> Result<BTreeMap<String, serde_json::Value>, StoreError> {
+    let mut out = BTreeMap::<String, serde_json::Value>::new();
+    for (endpoint_id, endpoint) in endpoints.iter() {
+        if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+            continue;
+        }
+        let mut meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(endpoint.meta.clone())?;
+        if meta.reality.server_names_source != RealityServerNamesSource::Global {
+            continue;
+        }
+
+        let derived = derive_global_reality_server_names(domains, &endpoint.node_id);
+        if derived.is_empty() {
+            return Err(DomainError::RealityDomainsWouldBreakEndpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id: endpoint.node_id.clone(),
+            }
+            .into());
+        }
+
+        meta.reality.server_names = derived;
+        meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+        out.insert(endpoint_id.clone(), serde_json::to_value(meta)?);
+    }
+    Ok(out)
+}
+
+fn apply_vless_meta_updates(
+    endpoints: &mut BTreeMap<String, Endpoint>,
+    updates: BTreeMap<String, serde_json::Value>,
+) -> Result<(), StoreError> {
+    for (endpoint_id, meta) in updates.into_iter() {
+        if let Some(endpoint) = endpoints.get_mut(&endpoint_id) {
+            endpoint.meta = meta;
+        }
+    }
+    Ok(())
+}
+
 impl DesiredStateCommand {
     pub fn apply(&self, state: &mut PersistedState) -> Result<DesiredStateApplyResult, StoreError> {
         match self {
@@ -771,6 +938,9 @@ impl DesiredStateCommand {
                 }
 
                 state.nodes.remove(node_id);
+                for domain in state.reality_domains.iter_mut() {
+                    domain.disabled_node_ids.remove(node_id);
+                }
 
                 // A node-scoped quota config becomes meaningless once the node is removed.
                 for (_user_id, nodes) in state.user_node_quotas.iter_mut() {
@@ -797,15 +967,264 @@ impl DesiredStateCommand {
             }
             Self::UpsertEndpoint { endpoint } => {
                 validate_port(endpoint.port)?;
+
+                let mut endpoint = endpoint.clone();
+                if endpoint.kind == EndpointKind::VlessRealityVisionTcp {
+                    let mut meta: VlessRealityVisionTcpEndpointMeta =
+                        serde_json::from_value(endpoint.meta.clone())?;
+
+                    let server_names = match meta.reality.server_names_source {
+                        RealityServerNamesSource::Manual => {
+                            let normalized =
+                                normalize_reality_server_names(&meta.reality.server_names);
+                            if normalized.is_empty() {
+                                return Err(DomainError::VlessRealityServerNamesEmpty {
+                                    endpoint_id: endpoint.endpoint_id.clone(),
+                                }
+                                .into());
+                            }
+                            for name in normalized.iter() {
+                                validate_reality_server_name(name).map_err(|reason| {
+                                    DomainError::InvalidRealityServerName {
+                                        server_name: name.clone(),
+                                        reason: reason.to_string(),
+                                    }
+                                })?;
+                            }
+                            normalized
+                        }
+                        RealityServerNamesSource::Global => {
+                            let derived = derive_global_reality_server_names(
+                                &state.reality_domains,
+                                &endpoint.node_id,
+                            );
+                            if derived.is_empty() {
+                                return Err(DomainError::RealityDomainsWouldBreakEndpoint {
+                                    endpoint_id: endpoint.endpoint_id.clone(),
+                                    node_id: endpoint.node_id.clone(),
+                                }
+                                .into());
+                            }
+                            for name in derived.iter() {
+                                validate_reality_server_name(name).map_err(|reason| {
+                                    DomainError::InvalidRealityServerName {
+                                        server_name: name.clone(),
+                                        reason: reason.to_string(),
+                                    }
+                                })?;
+                            }
+                            derived
+                        }
+                    };
+
+                    meta.reality.server_names = server_names;
+                    meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                    endpoint.meta = serde_json::to_value(meta)?;
+                }
+
                 state
                     .endpoints
-                    .insert(endpoint.endpoint_id.clone(), endpoint.clone());
+                    .insert(endpoint.endpoint_id.clone(), endpoint);
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::DeleteEndpoint { endpoint_id } => {
                 let deleted = state.endpoints.remove(endpoint_id).is_some();
                 state.endpoint_probe_history.remove(endpoint_id);
                 Ok(DesiredStateApplyResult::EndpointDeleted { deleted })
+            }
+            Self::CreateRealityDomain { domain } => {
+                let mut domain = domain.clone();
+                domain.server_name = domain.server_name.trim().to_string();
+                if let Err(reason) = validate_reality_server_name(domain.server_name.as_str()) {
+                    return Err(DomainError::InvalidRealityServerName {
+                        server_name: domain.server_name,
+                        reason: reason.to_string(),
+                    }
+                    .into());
+                }
+
+                // Uniqueness (case-insensitive).
+                let key = domain.server_name.to_ascii_lowercase();
+                if state
+                    .reality_domains
+                    .iter()
+                    .any(|d| d.server_name.to_ascii_lowercase() == key)
+                {
+                    return Err(DomainError::RealityDomainNameConflict {
+                        server_name: domain.server_name,
+                    }
+                    .into());
+                }
+
+                // Node IDs must exist.
+                for node_id in domain.disabled_node_ids.iter() {
+                    if !state.nodes.contains_key(node_id) {
+                        return Err(DomainError::MissingNode {
+                            node_id: node_id.clone(),
+                        }
+                        .into());
+                    }
+                }
+
+                let mut next_domains = state.reality_domains.clone();
+                next_domains.push(domain);
+                let updates = build_global_vless_meta_updates(&state.endpoints, &next_domains)?;
+
+                state.reality_domains = next_domains;
+                apply_vless_meta_updates(&mut state.endpoints, updates)?;
+
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::PatchRealityDomain {
+                domain_id,
+                server_name,
+                disabled_node_ids,
+            } => {
+                let Some(existing_idx) = state
+                    .reality_domains
+                    .iter()
+                    .position(|d| d.domain_id == *domain_id)
+                else {
+                    return Err(DomainError::RealityDomainNotFound {
+                        domain_id: domain_id.clone(),
+                    }
+                    .into());
+                };
+
+                let mut next_domains = state.reality_domains.clone();
+                let mut next = next_domains
+                    .get(existing_idx)
+                    .cloned()
+                    .expect("index checked above");
+
+                if let Some(server_name) = server_name.as_ref() {
+                    let trimmed = server_name.trim();
+                    if let Err(reason) = validate_reality_server_name(trimmed) {
+                        return Err(DomainError::InvalidRealityServerName {
+                            server_name: trimmed.to_string(),
+                            reason: reason.to_string(),
+                        }
+                        .into());
+                    }
+
+                    let key = trimmed.to_ascii_lowercase();
+                    if next_domains.iter().any(|d| {
+                        d.domain_id != next.domain_id && d.server_name.to_ascii_lowercase() == key
+                    }) {
+                        return Err(DomainError::RealityDomainNameConflict {
+                            server_name: trimmed.to_string(),
+                        }
+                        .into());
+                    }
+
+                    next.server_name = trimmed.to_string();
+                }
+
+                if let Some(disabled) = disabled_node_ids.as_ref() {
+                    for node_id in disabled.iter() {
+                        if !state.nodes.contains_key(node_id) {
+                            return Err(DomainError::MissingNode {
+                                node_id: node_id.clone(),
+                            }
+                            .into());
+                        }
+                    }
+                    next.disabled_node_ids = disabled.clone();
+                }
+
+                next_domains[existing_idx] = next;
+                let updates = build_global_vless_meta_updates(&state.endpoints, &next_domains)?;
+
+                state.reality_domains = next_domains;
+                apply_vless_meta_updates(&mut state.endpoints, updates)?;
+
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteRealityDomain { domain_id } => {
+                if !state
+                    .reality_domains
+                    .iter()
+                    .any(|d| d.domain_id == *domain_id)
+                {
+                    return Err(DomainError::RealityDomainNotFound {
+                        domain_id: domain_id.clone(),
+                    }
+                    .into());
+                }
+
+                let mut next_domains: Vec<RealityDomain> = state
+                    .reality_domains
+                    .iter()
+                    .filter(|d| d.domain_id != *domain_id)
+                    .cloned()
+                    .collect();
+
+                // Ensure we do not end up with duplicate IDs (should be impossible) and keep
+                // deterministic seed behavior.
+                if next_domains.len() == state.reality_domains.len() {
+                    return Err(DomainError::RealityDomainNotFound {
+                        domain_id: domain_id.clone(),
+                    }
+                    .into());
+                }
+
+                let updates = build_global_vless_meta_updates(&state.endpoints, &next_domains)?;
+
+                state.reality_domains = std::mem::take(&mut next_domains);
+                apply_vless_meta_updates(&mut state.endpoints, updates)?;
+
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::ReorderRealityDomains { domain_ids } => {
+                if domain_ids.len() != state.reality_domains.len() {
+                    return Err(DomainError::RealityDomainsReorderInvalid {
+                        reason: format!(
+                            "length mismatch: expected {} got {}",
+                            state.reality_domains.len(),
+                            domain_ids.len()
+                        ),
+                    }
+                    .into());
+                }
+
+                let mut seen = BTreeSet::new();
+                for id in domain_ids.iter() {
+                    if !seen.insert(id.clone()) {
+                        return Err(DomainError::RealityDomainsReorderInvalid {
+                            reason: format!("duplicate domain_id: {id}"),
+                        }
+                        .into());
+                    }
+                }
+
+                let mut by_id = std::collections::BTreeMap::<String, RealityDomain>::new();
+                for d in state.reality_domains.iter() {
+                    by_id.insert(d.domain_id.clone(), d.clone());
+                }
+
+                let mut next_domains = Vec::with_capacity(domain_ids.len());
+                for id in domain_ids.iter() {
+                    let Some(domain) = by_id.remove(id) else {
+                        return Err(DomainError::RealityDomainsReorderInvalid {
+                            reason: format!("unknown domain_id: {id}"),
+                        }
+                        .into());
+                    };
+                    next_domains.push(domain);
+                }
+
+                if !by_id.is_empty() {
+                    return Err(DomainError::RealityDomainsReorderInvalid {
+                        reason: "missing some domain_ids in reorder payload".to_string(),
+                    }
+                    .into());
+                }
+
+                let updates = build_global_vless_meta_updates(&state.endpoints, &next_domains)?;
+                state.reality_domains = next_domains;
+                apply_vless_meta_updates(&mut state.endpoints, updates)?;
+
+                Ok(DesiredStateApplyResult::Applied)
             }
             Self::UpsertUser { user } => {
                 validate_user_quota_reset(&user.quota_reset)?;
@@ -1285,16 +1704,23 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
             match schema_version {
-                4 => (serde_json::from_value(raw)?, false, false),
+                5 => (serde_json::from_value(raw)?, false, false),
+                4 => {
+                    let v4: PersistedState = serde_json::from_value(raw)?;
+                    let v5 = migrate_v4_to_v5(v4)?;
+                    (v5, false, true)
+                }
                 3 => {
                     let v3: PersistedState = serde_json::from_value(raw)?;
                     let v4 = migrate_v3_to_v4(v3)?;
-                    (v4, false, true)
+                    let v5 = migrate_v4_to_v5(v4)?;
+                    (v5, false, true)
                 }
                 2 | 1 => {
                     let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
-                    let v3 = migrate_v2_like_to_v3(v2)?;
-                    (v3, false, true)
+                    let v4 = migrate_v2_like_to_v3(v2)?;
+                    let v5 = migrate_v4_to_v5(v4)?;
+                    (v5, false, true)
                 }
                 got => {
                     return Err(StoreError::SchemaVersionMismatch {
@@ -1315,6 +1741,7 @@ impl JsonSnapshotStore {
 
             let mut state = PersistedState::empty();
             state.nodes.insert(node_id, node);
+            state.reality_domains = default_seed_reality_domains();
             (state, true, false)
         };
 
@@ -1682,6 +2109,18 @@ impl JsonSnapshotStore {
         self.state.nodes.get(node_id).cloned()
     }
 
+    pub fn list_reality_domains(&self) -> Vec<RealityDomain> {
+        self.state.reality_domains.clone()
+    }
+
+    pub fn get_reality_domain(&self, domain_id: &str) -> Option<RealityDomain> {
+        self.state
+            .reality_domains
+            .iter()
+            .find(|d| d.domain_id == domain_id)
+            .cloned()
+    }
+
     pub fn upsert_node(&mut self, node: Node) -> Result<Node, StoreError> {
         DesiredStateCommand::UpsertNode { node: node.clone() }.apply(&mut self.state)?;
         self.save()?;
@@ -1969,7 +2408,9 @@ mod tests {
             validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
-        protocol::{RealityConfig, RealityKeys, VlessRealityVisionTcpEndpointMeta},
+        protocol::{
+            RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
+        },
     };
 
     fn test_init(tmp_dir: &Path) -> StoreInit {
@@ -2069,6 +2510,122 @@ mod tests {
     }
 
     #[test]
+    fn upsert_vless_endpoint_manual_enforces_dest_from_primary() {
+        let mut state = PersistedState::empty();
+
+        let endpoint_id = "endpoint_1".to_string();
+        let node_id = "node_1".to_string();
+
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: "ignored.example.com:443".to_string(),
+                server_names: vec![
+                    " b.example.com ".to_string(),
+                    "a.example.com".to_string(),
+                    "B.example.com".to_string(),
+                ],
+                server_names_source: RealityServerNamesSource::Manual,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        let endpoint = Endpoint {
+            endpoint_id: endpoint_id.clone(),
+            node_id,
+            tag: "vless-test".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        };
+
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap();
+
+        let saved = state.endpoints.get(&endpoint_id).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(saved.meta.clone()).expect("vless meta");
+
+        assert_eq!(
+            meta.reality.server_names,
+            vec!["b.example.com".to_string(), "a.example.com".to_string()]
+        );
+        assert_eq!(meta.reality.dest, "b.example.com:443");
+    }
+
+    #[test]
+    fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
+        let mut state = PersistedState::empty();
+
+        state.reality_domains = vec![
+            crate::domain::RealityDomain {
+                domain_id: "d1".to_string(),
+                server_name: "first.example.com".to_string(),
+                disabled_node_ids: BTreeSet::new(),
+            },
+            crate::domain::RealityDomain {
+                domain_id: "d2".to_string(),
+                server_name: "second.example.com".to_string(),
+                disabled_node_ids: BTreeSet::from(["node_1".to_string()]),
+            },
+            crate::domain::RealityDomain {
+                domain_id: "d3".to_string(),
+                server_name: "third.example.com".to_string(),
+                disabled_node_ids: BTreeSet::new(),
+            },
+        ];
+
+        let endpoint_id = "endpoint_1".to_string();
+
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: String::new(),
+                server_names: vec![],
+                server_names_source: RealityServerNamesSource::Global,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        let endpoint = Endpoint {
+            endpoint_id: endpoint_id.clone(),
+            node_id: "node_1".to_string(),
+            tag: "vless-test".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        };
+
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap();
+
+        let saved = state.endpoints.get(&endpoint_id).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(saved.meta.clone()).expect("vless meta");
+
+        assert_eq!(
+            meta.reality.server_names,
+            vec![
+                "first.example.com".to_string(),
+                "third.example.com".to_string()
+            ]
+        );
+        assert_eq!(meta.reality.dest, "first.example.com:443");
+    }
+
+    #[test]
     fn rotate_vless_reality_short_id_updates_meta_and_persists() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
@@ -2081,6 +2638,7 @@ mod tests {
             reality: RealityConfig {
                 dest: "example.com:443".to_string(),
                 server_names: vec!["example.com".to_string()],
+                server_names_source: Default::default(),
                 fingerprint: "chrome".to_string(),
             },
             reality_keys: RealityKeys {

@@ -42,6 +42,7 @@ export type AdminEndpointProbeSummary = z.infer<
 export const RealityConfigSchema = z.object({
 	dest: z.string(),
 	server_names: z.array(z.string()),
+	server_names_source: z.enum(["manual", "global"]).default("manual"),
 	fingerprint: z.string(),
 });
 

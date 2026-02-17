@@ -22,6 +22,7 @@ import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
+import { RealityDomainsPage } from "./views/RealityDomainsPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
 import { UserNewPage } from "./views/UserNewPage";
@@ -126,6 +127,12 @@ const serviceConfigRoute = createRoute({
 	component: ServiceConfigPage,
 });
 
+const realityDomainsRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/reality-domains",
+	component: RealityDomainsPage,
+});
+
 const grantGroupNewRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/grant-groups/new",
@@ -154,6 +161,7 @@ const appRouteTree = appRoute.addChildren([
 	grantGroupNewRoute,
 	grantGroupDetailsRoute,
 	serviceConfigRoute,
+	realityDomainsRoute,
 ]);
 
 const routeTree = rootRoute.addChildren([loginRoute, appRouteTree]);

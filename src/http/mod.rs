@@ -14,7 +14,7 @@ use axum::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
@@ -32,11 +32,11 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
-        Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, User, UserNodeQuota,
-        UserQuotaReset, validate_group_name,
+        Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
+        UserNodeQuota, UserQuotaReset, validate_group_name,
     },
     internal_auth,
-    protocol::VlessRealityVisionTcpEndpointMeta,
+    protocol::{RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta},
     raft::{
         app::RaftFacade,
         types::{
@@ -558,6 +558,8 @@ struct AdminGrantGroupDetail {
 struct RealityConfig {
     dest: String,
     server_names: Vec<String>,
+    #[serde(default)]
+    server_names_source: RealityServerNamesSource,
     fingerprint: String,
 }
 
@@ -598,6 +600,26 @@ struct PatchEndpointRequest {
     port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_optional_reality")]
     reality: Option<Option<RealityConfig>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateRealityDomainRequest {
+    server_name: String,
+    #[serde(default)]
+    disabled_node_ids: BTreeSet<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchRealityDomainRequest {
+    #[serde(default)]
+    server_name: Option<String>,
+    #[serde(default)]
+    disabled_node_ids: Option<BTreeSet<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderRealityDomainsRequest {
+    domain_ids: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -681,6 +703,18 @@ pub fn build_router(
         .route(
             "/endpoints/:endpoint_id/rotate-shortid",
             post(admin_rotate_short_id),
+        )
+        .route(
+            "/reality-domains",
+            get(admin_list_reality_domains).post(admin_create_reality_domain),
+        )
+        .route(
+            "/reality-domains/reorder",
+            post(admin_reorder_reality_domains),
+        )
+        .route(
+            "/reality-domains/:domain_id",
+            patch(admin_patch_reality_domain).delete(admin_delete_reality_domain),
         )
         .route("/endpoints/probe/run", post(admin_run_endpoint_probe_run))
         .route(
@@ -2994,6 +3028,7 @@ async fn admin_patch_endpoint(
                 meta.reality = crate::protocol::RealityConfig {
                     dest: reality.dest,
                     server_names: reality.server_names,
+                    server_names_source: reality.server_names_source,
                     fingerprint: reality.fingerprint,
                 };
             }
@@ -3049,6 +3084,87 @@ async fn admin_delete_endpoint(
         )));
     }
     state.reconcile.request_remove_inbound(tag);
+    state.reconcile.request_full();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_list_reality_domains(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<Items<RealityDomain>>, ApiError> {
+    let store = state.store.lock().await;
+    Ok(Json(Items {
+        items: store.list_reality_domains(),
+    }))
+}
+
+async fn admin_create_reality_domain(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<CreateRealityDomainRequest>,
+) -> Result<Json<RealityDomain>, ApiError> {
+    let domain = RealityDomain {
+        domain_id: crate::id::new_ulid_string(),
+        server_name: req.server_name,
+        disabled_node_ids: req.disabled_node_ids,
+    };
+
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::CreateRealityDomain {
+            domain: domain.clone(),
+        },
+    )
+    .await?;
+    state.reconcile.request_full();
+    Ok(Json(domain))
+}
+
+async fn admin_patch_reality_domain(
+    Extension(state): Extension<AppState>,
+    Path(domain_id): Path<String>,
+    ApiJson(req): ApiJson<PatchRealityDomainRequest>,
+) -> Result<Json<RealityDomain>, ApiError> {
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::PatchRealityDomain {
+            domain_id: domain_id.clone(),
+            server_name: req.server_name,
+            disabled_node_ids: req.disabled_node_ids,
+        },
+    )
+    .await?;
+    state.reconcile.request_full();
+
+    let store = state.store.lock().await;
+    let domain = store
+        .get_reality_domain(&domain_id)
+        .ok_or_else(|| ApiError::not_found(format!("reality domain not found: {domain_id}")))?;
+    Ok(Json(domain))
+}
+
+async fn admin_delete_reality_domain(
+    Extension(state): Extension<AppState>,
+    Path(domain_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::DeleteRealityDomain { domain_id },
+    )
+    .await?;
+    state.reconcile.request_full();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_reorder_reality_domains(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<ReorderRealityDomainsRequest>,
+) -> Result<StatusCode, ApiError> {
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::ReorderRealityDomains {
+            domain_ids: req.domain_ids,
+        },
+    )
+    .await?;
     state.reconcile.request_full();
     Ok(StatusCode::NO_CONTENT)
 }

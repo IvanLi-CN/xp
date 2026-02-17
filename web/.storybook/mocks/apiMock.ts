@@ -10,6 +10,7 @@ import type {
 	AdminGrantGroupReplaceRequest,
 } from "../../src/api/adminGrantGroups";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
@@ -54,6 +55,7 @@ type MockStateSeed = {
 	versionCheck: VersionCheckResponse;
 	nodes: AdminNode[];
 	endpoints: MockEndpointSeed[];
+	realityDomains: AdminRealityDomain[];
 	users: AdminUser[];
 	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
@@ -73,6 +75,7 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 		endpoint: number;
 		grantGroup: number;
 		joinToken: number;
+		realityDomain: number;
 		shortId: number;
 		subscription: number;
 		user: number;
@@ -152,6 +155,55 @@ function ensureEndpointRecord(
 	};
 }
 
+function deriveGlobalServerNames(
+	domains: AdminRealityDomain[],
+	nodeId: string,
+): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const domain of domains) {
+		if (domain.disabled_node_ids.includes(nodeId)) continue;
+		const trimmed = domain.server_name.trim();
+		if (!trimmed) continue;
+		const key = trimmed.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(trimmed);
+	}
+	return out;
+}
+
+function refreshGlobalEndpointReality(state: MockState): void {
+	for (const endpoint of state.endpoints) {
+		if (endpoint.kind !== "vless_reality_vision_tcp") continue;
+		const meta = endpoint.meta as Record<string, unknown>;
+		const reality = meta.reality as
+			| undefined
+			| null
+			| {
+					dest?: string;
+					server_names?: string[];
+					server_names_source?: string;
+					fingerprint?: string;
+			  };
+		if (!reality || typeof reality !== "object") continue;
+		if (reality.server_names_source !== "global") continue;
+
+		const derived = deriveGlobalServerNames(
+			state.realityDomains,
+			endpoint.node_id,
+		);
+		if (derived.length === 0) continue;
+
+		meta.reality = {
+			...reality,
+			dest: `${derived[0]}:443`,
+			server_names: derived,
+			server_names_source: "global",
+		};
+	}
+}
+
 function createDefaultSeed(): MockStateSeed {
 	const defaultNodeQuotaReset = (dayOfMonth: number): NodeQuotaReset => ({
 		policy: "monthly",
@@ -194,6 +246,7 @@ function createDefaultSeed(): MockStateSeed {
 				reality: {
 					dest: "www.example.com:443",
 					server_names: ["example.com", "www.example.com"],
+					server_names_source: "manual",
 					fingerprint: "chrome",
 				},
 			},
@@ -211,6 +264,24 @@ function createDefaultSeed(): MockStateSeed {
 			},
 			short_ids: ["aa11bb"],
 			active_short_id: "aa11bb",
+		},
+	];
+
+	const realityDomains: AdminRealityDomain[] = [
+		{
+			domain_id: "seed_public_sn_files_1drv_com",
+			server_name: "public.sn.files.1drv.com",
+			disabled_node_ids: [],
+		},
+		{
+			domain_id: "seed_public_bn_files_1drv_com",
+			server_name: "public.bn.files.1drv.com",
+			disabled_node_ids: [],
+		},
+		{
+			domain_id: "seed_oneclient_sfx_ms",
+			server_name: "oneclient.sfx.ms",
+			disabled_node_ids: ["node-2"],
 		},
 	];
 
@@ -308,6 +379,7 @@ function createDefaultSeed(): MockStateSeed {
 		},
 		nodes,
 		endpoints,
+		realityDomains,
 		users,
 		grantGroups,
 		nodeQuotas: [],
@@ -326,6 +398,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		versionCheck: overrides?.versionCheck ?? base.versionCheck,
 		nodes: overrides?.nodes ?? base.nodes,
 		endpoints: overrides?.endpoints ?? base.endpoints,
+		realityDomains: overrides?.realityDomains ?? base.realityDomains,
 		users: overrides?.users ?? base.users,
 		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
@@ -341,6 +414,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		endpoint: 1,
 		grantGroup: 1,
 		joinToken: 1,
+		realityDomain: 1,
 		shortId: 1,
 		subscription: 1,
 		user: 1,
@@ -355,7 +429,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		grantGroupsByName[group.group.group_name] = clone(group);
 	}
 
-	return {
+	const state: MockState = {
 		...clone(merged),
 		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
@@ -365,6 +439,9 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		grantGroupsByName,
 		counters,
 	};
+
+	refreshGlobalEndpointReality(state);
+	return state;
 }
 
 function createGrantCredentials(
@@ -559,6 +636,107 @@ async function handleRequest(
 		return jsonResponse({ join_token: joinToken });
 	}
 
+	if (path === "/api/admin/reality-domains" && method === "GET") {
+		return jsonResponse({ items: clone(state.realityDomains) });
+	}
+
+	if (path === "/api/admin/reality-domains" && method === "POST") {
+		const payload = await readJson<{
+			server_name?: string;
+			disabled_node_ids?: string[];
+		}>(req);
+		if (!payload || typeof payload.server_name !== "string") {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+		const serverName = payload.server_name.trim();
+		if (!serverName) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"server_name must be non-empty",
+			);
+		}
+		const domain: AdminRealityDomain = {
+			domain_id: `domain-mock-${state.counters.realityDomain++}`,
+			server_name: serverName,
+			disabled_node_ids: payload.disabled_node_ids ?? [],
+		};
+		state.realityDomains = [...state.realityDomains, domain];
+		refreshGlobalEndpointReality(state);
+		return jsonResponse(clone(domain));
+	}
+
+	if (path === "/api/admin/reality-domains/reorder" && method === "POST") {
+		const payload = await readJson<{ domain_ids?: string[] }>(req);
+		const ids = payload?.domain_ids;
+		if (
+			!payload ||
+			!Array.isArray(ids) ||
+			!ids.every((id) => typeof id === "string")
+		) {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+
+		const byId = new Map(state.realityDomains.map((d) => [d.domain_id, d]));
+		const next: AdminRealityDomain[] = [];
+		for (const id of ids) {
+			const domain = byId.get(id);
+			if (!domain) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					`unknown domain_id: ${id}`,
+				);
+			}
+			next.push(domain);
+		}
+		state.realityDomains = next;
+		refreshGlobalEndpointReality(state);
+		return new Response(null, { status: 204 });
+	}
+
+	const realityDomainMatch = path.match(
+		/^\/api\/admin\/reality-domains\/([^/]+)$/,
+	);
+	if (realityDomainMatch) {
+		const domainId = decodeURIComponent(realityDomainMatch[1]);
+		const existing = state.realityDomains.find((d) => d.domain_id === domainId);
+		if (!existing) {
+			return errorResponse(404, "not_found", "reality domain not found");
+		}
+		if (method === "PATCH") {
+			const payload = await readJson<{
+				server_name?: string;
+				disabled_node_ids?: string[];
+			}>(req);
+			if (!payload) {
+				return errorResponse(400, "invalid_request", "invalid JSON payload");
+			}
+			const updated: AdminRealityDomain = {
+				...existing,
+				server_name:
+					typeof payload.server_name === "string"
+						? payload.server_name.trim()
+						: existing.server_name,
+				disabled_node_ids: Array.isArray(payload.disabled_node_ids)
+					? payload.disabled_node_ids
+					: existing.disabled_node_ids,
+			};
+			state.realityDomains = state.realityDomains.map((d) =>
+				d.domain_id === domainId ? updated : d,
+			);
+			refreshGlobalEndpointReality(state);
+			return jsonResponse(clone(updated));
+		}
+		if (method === "DELETE") {
+			state.realityDomains = state.realityDomains.filter(
+				(d) => d.domain_id !== domainId,
+			);
+			refreshGlobalEndpointReality(state);
+			return new Response(null, { status: 204 });
+		}
+	}
+
 	if (path === "/api/admin/endpoints" && method === "GET") {
 		return jsonResponse({
 			items: state.endpoints.map(({ active_short_id, short_ids, ...rest }) =>
@@ -590,8 +768,26 @@ async function handleRequest(
 					"missing vless reality fields",
 				);
 			}
+			const source = payload.reality.server_names_source ?? "manual";
+			const derived =
+				source === "global"
+					? deriveGlobalServerNames(state.realityDomains, payload.node_id)
+					: payload.reality.server_names;
+			if (!derived || derived.length === 0) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"server_names must be non-empty",
+				);
+			}
+			const normalizedReality = {
+				...payload.reality,
+				dest: `${derived[0]}:443`,
+				server_names: derived,
+				server_names_source: source,
+			};
 			meta = {
-				reality: payload.reality,
+				reality: normalizedReality,
 			};
 		}
 		const endpoint: AdminEndpoint = {

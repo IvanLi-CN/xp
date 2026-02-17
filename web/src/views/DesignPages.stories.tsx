@@ -5,6 +5,7 @@ import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminGrantGroupDetail } from "../api/adminGrantGroups";
 import type { AdminNode } from "../api/adminNodes";
+import type { AdminRealityDomain } from "../api/adminRealityDomains";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
@@ -125,6 +126,24 @@ const DESIGN_ENDPOINTS: Array<
 	},
 ];
 
+const DESIGN_REALITY_DOMAINS: AdminRealityDomain[] = [
+	{
+		domain_id: "seed_public_sn_files_1drv_com",
+		server_name: "public.sn.files.1drv.com",
+		disabled_node_ids: [],
+	},
+	{
+		domain_id: "seed_public_bn_files_1drv_com",
+		server_name: "public.bn.files.1drv.com",
+		disabled_node_ids: ["n2"],
+	},
+	{
+		domain_id: "seed_oneclient_sfx_ms",
+		server_name: "oneclient.sfx.ms",
+		disabled_node_ids: [],
+	},
+];
+
 const DESIGN_USERS: AdminUser[] = [
 	{
 		user_id: "u_01HUSERAAAAAA",
@@ -209,6 +228,7 @@ const DESIGN_MOCK_API = {
 		},
 		nodes: DESIGN_NODES,
 		endpoints: DESIGN_ENDPOINTS,
+		realityDomains: DESIGN_REALITY_DOMAINS,
 		users: DESIGN_USERS,
 		grantGroups: DESIGN_GRANT_GROUPS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
@@ -284,6 +304,7 @@ export const EndpointNew: Story = pageStory({ path: "/endpoints/new" });
 export const EndpointDetails: Story = pageStory({
 	path: "/endpoints/ep_01HENDPTAAAAAA",
 });
+export const RealityDomains: Story = pageStory({ path: "/reality-domains" });
 export const Users: Story = pageStory({ path: "/users" });
 export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });

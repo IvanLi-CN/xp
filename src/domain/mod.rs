@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -50,6 +52,26 @@ pub enum DomainError {
         user_id: String,
         endpoint_id: String,
     },
+    InvalidRealityServerName {
+        server_name: String,
+        reason: String,
+    },
+    VlessRealityServerNamesEmpty {
+        endpoint_id: String,
+    },
+    RealityDomainNameConflict {
+        server_name: String,
+    },
+    RealityDomainNotFound {
+        domain_id: String,
+    },
+    RealityDomainsReorderInvalid {
+        reason: String,
+    },
+    RealityDomainsWouldBreakEndpoint {
+        endpoint_id: String,
+        node_id: String,
+    },
 }
 
 impl DomainError {
@@ -64,9 +86,15 @@ impl DomainError {
             Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
                 "invalid_request"
             }
-            Self::MissingGrantGroup { .. } => "not_found",
+            Self::MissingGrantGroup { .. } | Self::RealityDomainNotFound { .. } => "not_found",
             Self::NodeInUse { .. } => "conflict",
-            Self::GroupNameConflict { .. } | Self::GrantPairConflict { .. } => "conflict",
+            Self::GroupNameConflict { .. }
+            | Self::GrantPairConflict { .. }
+            | Self::RealityDomainNameConflict { .. } => "conflict",
+            Self::InvalidRealityServerName { .. }
+            | Self::VlessRealityServerNamesEmpty { .. }
+            | Self::RealityDomainsReorderInvalid { .. }
+            | Self::RealityDomainsWouldBreakEndpoint { .. } => "invalid_request",
         }
     }
 }
@@ -112,6 +140,32 @@ impl std::fmt::Display for DomainError {
             } => write!(
                 f,
                 "grant pair already exists: user_id={user_id} endpoint_id={endpoint_id}"
+            ),
+            Self::InvalidRealityServerName {
+                server_name,
+                reason,
+            } => {
+                write!(f, "invalid reality server_name: {server_name} ({reason})")
+            }
+            Self::VlessRealityServerNamesEmpty { endpoint_id } => write!(
+                f,
+                "vless reality server_names is empty: endpoint_id={endpoint_id}"
+            ),
+            Self::RealityDomainNameConflict { server_name } => {
+                write!(f, "reality domain already exists: {server_name}")
+            }
+            Self::RealityDomainNotFound { domain_id } => {
+                write!(f, "reality domain not found: {domain_id}")
+            }
+            Self::RealityDomainsReorderInvalid { reason } => {
+                write!(f, "invalid reality domains reorder: {reason}")
+            }
+            Self::RealityDomainsWouldBreakEndpoint {
+                endpoint_id,
+                node_id,
+            } => write!(
+                f,
+                "reality domains would break global endpoint: endpoint_id={endpoint_id} node_id={node_id}"
             ),
         }
     }
@@ -301,6 +355,14 @@ pub struct VlessCredentials {
 pub struct Ss2022Credentials {
     pub method: String,
     pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RealityDomain {
+    pub domain_id: String,
+    pub server_name: String,
+    #[serde(default)]
+    pub disabled_node_ids: BTreeSet<String>,
 }
 
 #[cfg(test)]

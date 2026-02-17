@@ -3676,3 +3676,182 @@ async fn endpoint_probe_run_events_streams_sse() {
         "missing progress event: {body}"
     );
 }
+
+#[tokio::test]
+async fn reality_domains_list_returns_seeded_items() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/reality-domains"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let items = body["items"].as_array().unwrap();
+    assert!(items.len() >= 2);
+
+    let server_names: Vec<&str> = items
+        .iter()
+        .filter_map(|v| v.get("server_name").and_then(|s| s.as_str()))
+        .collect();
+    assert!(server_names.contains(&"public.sn.files.1drv.com"));
+    assert!(server_names.contains(&"public.bn.files.1drv.com"));
+}
+
+#[tokio::test]
+async fn reality_domains_crud_and_reorder_works() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/reality-domains",
+            json!({
+              "server_name": "example.com",
+              "disabled_node_ids": [node_id]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let domain_id = created["domain_id"].as_str().unwrap().to_string();
+    assert!(is_ulid_string(&domain_id));
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/reality-domains"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    let items = listed["items"].as_array().unwrap();
+    assert!(items.iter().any(|d| d["domain_id"] == domain_id));
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/reality-domains/{domain_id}"),
+            json!({
+              "disabled_node_ids": []
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let patched = body_json(res).await;
+    assert_eq!(patched["domain_id"], domain_id);
+    assert_eq!(patched["disabled_node_ids"].as_array().unwrap().len(), 0);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/reality-domains"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    let items = listed["items"].as_array().unwrap();
+    let original_ids: Vec<String> = items
+        .iter()
+        .filter_map(|d| {
+            d.get("domain_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    let mut desired_ids = original_ids.clone();
+    desired_ids.reverse();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/reality-domains/reorder",
+            json!({ "domain_ids": desired_ids }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/reality-domains"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    let reordered = listed["items"].as_array().unwrap();
+    let got_ids: Vec<String> = reordered
+        .iter()
+        .filter_map(|d| {
+            d.get("domain_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert_eq!(got_ids, original_ids.into_iter().rev().collect::<Vec<_>>());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "DELETE",
+            &format!("/api/admin/reality-domains/{domain_id}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/reality-domains"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    let items = listed["items"].as_array().unwrap();
+    assert!(!items.iter().any(|d| d["domain_id"] == domain_id));
+}
+
+#[tokio::test]
+async fn reality_domains_reject_invalid_server_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    for server_name in [
+        "cc.c",
+        "localhost",
+        "https://example.com",
+        "example.com:443",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "POST",
+                "/api/admin/reality-domains",
+                json!({ "server_name": server_name }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "server_name should be rejected: {server_name}"
+        );
+        let body = body_json(res).await;
+        assert_eq!(body["error"]["code"], "invalid_request");
+    }
+}

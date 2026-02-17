@@ -100,3 +100,4 @@
 | n93kd | Endpoint 探测：可用性/延迟（24h）                           | 已完成 | `n93kd:endpoint-probe/PLAN.md`                       | 2026-02-08 | PR #72           |
 | qxxja | Endpoint probe run：SSE 推送进度与结果（UI 改造）           | 已完成 | `qxxja:endpoint-probe-run-sse/PLAN.md`               | 2026-02-09 | PR #72           |
 | e8c4j | VLESS REALITY：多域名 server_names（tags UI）+ 随机 SNI     | 已完成 | `e8c4j:reality-multi-server-names/PLAN.md`           | 2026-02-15 | PR #73           |
+| gcbwg | VLESS REALITY：全局域名池 + 节点适配 + 自动 Rebuild inbound | 已完成 | `gcbwg:reality-global-domain-registry/PLAN.md`       | 2026-02-17 | PR #74           |

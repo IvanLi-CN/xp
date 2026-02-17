@@ -594,13 +594,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 crate::domain::DomainError::MissingUser { .. }
                                 | crate::domain::DomainError::MissingNode { .. }
                                 | crate::domain::DomainError::MissingEndpoint { .. }
-                                | crate::domain::DomainError::MissingGrantGroup { .. } => {
+                                | crate::domain::DomainError::MissingGrantGroup { .. }
+                                | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                                     (404, "not_found")
                                 }
                                 crate::domain::DomainError::GroupNameConflict { .. }
-                                | crate::domain::DomainError::GrantPairConflict { .. } => {
-                                    (409, "conflict")
-                                }
+                                | crate::domain::DomainError::GrantPairConflict { .. }
+                                | crate::domain::DomainError::RealityDomainNameConflict {
+                                    ..
+                                } => (409, "conflict"),
                                 crate::domain::DomainError::NodeInUse { .. } => (409, "conflict"),
                                 _ => (400, "invalid_request"),
                             };
