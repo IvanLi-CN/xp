@@ -493,6 +493,45 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
     }
 }
 
+#[tokio::test]
+async fn ui_serves_favicon_and_manifest() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let cases = [
+        ("/favicon.ico", "image/x-icon"),
+        ("/favicon-16x16.png", "image/png"),
+        ("/favicon-32x32.png", "image/png"),
+        ("/apple-touch-icon.png", "image/png"),
+        ("/android-chrome-192x192.png", "image/png"),
+        ("/android-chrome-512x512.png", "image/png"),
+        ("/xp-mark.png", "image/png"),
+        (
+            "/site.webmanifest",
+            "application/manifest+json; charset=utf-8",
+        ),
+    ];
+
+    for (path, expected_content_type) in cases {
+        let res = app.clone().oneshot(req("GET", path)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "expected {path} to be served");
+
+        let content_type = res
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            content_type, expected_content_type,
+            "unexpected content-type for {path}"
+        );
+
+        let bytes = body_bytes(res).await;
+        assert!(!bytes.is_empty(), "expected {path} to return a body");
+    }
+}
+
 struct SubscriptionFixtures {
     subscription_token: String,
     group_name: String,

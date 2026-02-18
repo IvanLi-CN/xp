@@ -21,7 +21,7 @@ import {
 } from "./versionCheckUi";
 
 type AppShellProps = {
-	brand: { name: string; subtitle?: string };
+	brand: { name: string; subtitle?: string; markSrc?: string };
 	navItems?: Array<{ label: string; to: string; icon: string }>;
 	navGroups?: Array<{
 		title: string;
@@ -292,7 +292,15 @@ export function AppShell({
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</button>
 
-								<Link to="/" className="flex items-baseline gap-2 min-w-0">
+								<Link to="/" className="flex items-center gap-2 min-w-0">
+									{brand.markSrc ? (
+										<img
+											src={brand.markSrc}
+											alt=""
+											aria-hidden="true"
+											className="size-6 shrink-0"
+										/>
+									) : null}
 									<span className="font-semibold tracking-tight text-lg">
 										{brand.name}
 									</span>

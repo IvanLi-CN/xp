@@ -70,11 +70,19 @@ export function LoginPage() {
 		<div className="min-h-screen bg-base-200 flex items-center justify-center px-6">
 			<div className="card bg-base-100 shadow w-full max-w-lg">
 				<div className="card-body space-y-4">
-					<div>
-						<h1 className="text-2xl font-bold">Admin login</h1>
-						<p className="text-sm opacity-70">
-							Enter the admin token to access the admin UI.
-						</p>
+					<div className="flex items-start gap-3">
+						<img
+							src="/xp-mark.png"
+							alt=""
+							aria-hidden="true"
+							className="size-12 shrink-0"
+						/>
+						<div>
+							<h1 className="text-2xl font-bold">Admin login</h1>
+							<p className="text-sm opacity-70">
+								Enter the admin token to access the admin UI.
+							</p>
+						</div>
 					</div>
 					<div className="space-y-2">
 						<p className="text-xs uppercase tracking-wide opacity-50">
