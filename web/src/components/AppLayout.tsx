@@ -9,7 +9,11 @@ type AppLayoutProps = {
 export function AppLayout({ children }: AppLayoutProps) {
 	return (
 		<AppShell
-			brand={{ name: "xp", subtitle: "cluster manager" }}
+			brand={{
+				name: "xp",
+				subtitle: "cluster manager",
+				markSrc: "/xp-mark.png",
+			}}
 			navGroups={[
 				{
 					title: "Nav",
