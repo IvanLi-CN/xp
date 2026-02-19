@@ -122,6 +122,52 @@ pub fn apply_daily_rollover(
     }
 }
 
+/// Best-effort replay of missed days for a token bank:
+///
+/// - Applies daily rollovers for each day in `[day_start, day_end]` (inclusive)
+/// - Spends up to `spend_bytes` each day from that day's bank
+///
+/// Returns `(bank_bytes, remaining_unspent_bytes)`.
+///
+/// This is used to avoid false bans when quota ticks are delayed across multiple days:
+/// we don't know *when* within the gap the traffic occurred, so we choose a feasible
+/// day-by-day spending schedule (earliest-first) if one exists.
+pub fn replay_rollovers_and_spend(
+    starting_bank_bytes: u64,
+    spend_bytes: u64,
+    base_quota_bytes: u64,
+    cycle_days: u32,
+    day_start: u32,
+    day_end: u32,
+    carry_days: u32,
+) -> (u64, u64) {
+    if cycle_days == 0 || carry_days == 0 || day_start > day_end {
+        return (starting_bank_bytes, spend_bytes);
+    }
+
+    let mut bank = starting_bank_bytes;
+    let mut remaining = spend_bytes;
+
+    for day in day_start..=day_end {
+        let credit = daily_credit_bytes(base_quota_bytes, cycle_days, day);
+        let cap = cap_bytes_for_day(base_quota_bytes, cycle_days, day, carry_days);
+
+        bank = bank.saturating_add(credit);
+        if bank > cap {
+            bank = cap;
+        }
+
+        if remaining == 0 {
+            continue;
+        }
+        let spend_today = remaining.min(bank);
+        bank = bank.saturating_sub(spend_today);
+        remaining = remaining.saturating_sub(spend_today);
+    }
+
+    (bank, remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +232,43 @@ mod tests {
         let (b3, overflow) = apply_daily_rollover(bank, base, days, 2, carry);
         assert_eq!(b3, 2);
         assert_eq!(overflow, 1);
+    }
+
+    #[test]
+    fn replay_rollovers_and_spend_avoids_cap_decrease_false_negative() {
+        // This reproduces a cap decrease across days due to remainder distribution:
+        //
+        // base_quota=311, cycle_days=31 -> base=10, rem=1:
+        // - day0 credit = 11
+        // - day>=1 credit = 10
+        // With carry_days=2:
+        // - cap(day1) = 11 + 10 = 21
+        // - cap(day2) = 10 + 10 = 20 (decreases by 1)
+        //
+        // If a tick is delayed until day2 and we only compare against cap(day2),
+        // spending cap(day1) can look like an overuse; replaying day-by-day shows
+        // it is feasible (spend on day1).
+        let base_quota = 311u64;
+        let cycle_days = 31u32;
+        let carry_days = 2u32;
+
+        let pre_bank = cap_bytes_for_day(base_quota, cycle_days, 0, carry_days);
+        assert_eq!(pre_bank, 11);
+
+        let spend = cap_bytes_for_day(base_quota, cycle_days, 1, carry_days);
+        assert_eq!(spend, 21);
+
+        let (bank_after, remaining) = replay_rollovers_and_spend(
+            pre_bank,
+            spend,
+            base_quota,
+            cycle_days,
+            1,
+            2,
+            carry_days,
+        );
+        assert_eq!(remaining, 0);
+        // Spend all on day1 => bank at day2 is just day2 credit (10).
+        assert_eq!(bank_after, 10);
     }
 }

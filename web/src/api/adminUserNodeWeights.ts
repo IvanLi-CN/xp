@@ -4,7 +4,7 @@ import { throwIfNotOk } from "./backendError";
 
 export const AdminUserNodeWeightItemSchema = z.object({
 	node_id: z.string(),
-	weight: z.number().int().nonnegative(),
+	weight: z.number().int().nonnegative().max(65535),
 });
 
 export type AdminUserNodeWeightItem = z.infer<
