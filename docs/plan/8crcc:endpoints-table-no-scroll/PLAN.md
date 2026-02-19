@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-19
 - Last: 2026-02-19
 
@@ -61,7 +61,13 @@
 
 ## 里程碑（Milestones）
 
-- [ ] M1: 表格列合并设计冻结（本计划）
-- [ ] M2: 实现 EndpointsTable + EndpointsPage 接入（无横向滚动）
-- [ ] M3: Storybook 多宽度验证 + test-storybook 通过
+- [x] M1: 表格列合并设计冻结（本计划）
+- [x] M2: 实现 EndpointsTable + EndpointsPage 接入（无横向滚动）
+- [x] M3: Storybook 多宽度验证 + test-storybook 通过
 
+## 交付记录（Delivery）
+
+- Web quality gates:
+  - `cd web && bun run lint`
+  - `cd web && bun run typecheck`
+  - `cd web && bun run test-storybook`
