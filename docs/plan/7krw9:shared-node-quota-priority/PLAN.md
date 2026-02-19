@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-02-19
 - Last: 2026-02-19
 
@@ -103,10 +103,10 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 数据模型与 Admin API 契约落地（Node quota_limit_bytes / User tier / User×Node weight）
-- [ ] M2: Quota engine 纯函数 + 单测（base/pacing/overflow）
-- [ ] M3: Quota worker + reconcile 集成（本地 ban/remove_user，不写 Raft disable）
-- [ ] M4: Web Admin Quota Policy 页面 + 移除旧 quota 编辑入口
+- [x] M1: 数据模型与 Admin API 契约落地（Node quota_limit_bytes / User tier / User×Node weight）
+- [x] M2: Quota engine 纯函数 + 单测（base/pacing/overflow）
+- [x] M3: Quota worker + reconcile 集成（本地 ban/remove_user，不写 Raft disable）
+- [x] M4: Web Admin Quota Policy 页面 + 移除旧 quota 编辑入口
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
@@ -116,4 +116,4 @@
 ## 变更记录（Change log）
 
 - 2026-02-19: create plan (frozen)
-
+- 2026-02-19: implemented in PR #77
