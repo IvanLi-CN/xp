@@ -6,6 +6,9 @@ export type DataTableHeader = {
 	key: string;
 	label: ReactNode;
 	align?: "left" | "center" | "right";
+	// Extra Tailwind classes applied to the <th>. Useful for fixed table layouts
+	// where column widths should be explicitly controlled.
+	className?: string;
 };
 
 type DataTableProps = {
@@ -46,13 +49,16 @@ export function DataTable({
 							{headers.map((header) => (
 								<th
 									key={header.key}
-									className={
+									className={[
 										header.align === "right"
 											? "text-right"
 											: header.align === "center"
 												? "text-center"
-												: "text-left"
-									}
+												: "text-left",
+										header.className,
+									]
+										.filter(Boolean)
+										.join(" ")}
 								>
 									{header.label}
 								</th>
