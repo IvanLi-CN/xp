@@ -9,8 +9,6 @@ import {
 	createAdminGrantGroup,
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
-import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
-import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
@@ -70,7 +68,6 @@ export function buildGrantGroupCreateRequest(args: {
 	userId: string;
 	selectedEndpointIds: string[];
 	endpoints: AdminEndpoint[];
-	nodeQuotas: AdminUserNodeQuota[];
 	note: string;
 }): AdminGrantGroupCreateRequest {
 	const groupName = args.groupName.trim();
@@ -81,14 +78,12 @@ export function buildGrantGroupCreateRequest(args: {
 		if (!endpoint) {
 			throw new Error(`endpoint not found: ${endpointId}`);
 		}
-		const quotaLimitBytes =
-			args.nodeQuotas.find((q) => q.node_id === endpoint.node_id)
-				?.quota_limit_bytes ?? 0;
 		return {
 			user_id: args.userId,
 			endpoint_id: endpointId,
 			enabled: true,
-			quota_limit_bytes: quotaLimitBytes,
+			// Shared node quota policy does not use static per-member quotas.
+			quota_limit_bytes: 0,
 			note: noteValue,
 		};
 	});
@@ -147,13 +142,6 @@ export function GrantNewPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
-	const nodeQuotasQuery = useQuery({
-		queryKey: ["adminUserNodeQuotas", adminToken, userId],
-		enabled: adminToken.length > 0 && userId.length > 0,
-		queryFn: ({ signal }) =>
-			fetchAdminUserNodeQuotas(adminToken, userId, signal),
-	});
-
 	const selectedUser =
 		usersQuery.data?.items.find((u) => u.user_id === userId) ?? null;
 
@@ -183,33 +171,25 @@ export function GrantNewPage() {
 		if (
 			nodesQuery.isLoading ||
 			usersQuery.isLoading ||
-			endpointsQuery.isLoading ||
-			nodeQuotasQuery.isLoading
+			endpointsQuery.isLoading
 		) {
 			return (
 				<PageState
 					variant="loading"
 					title="Loading grant group form"
-					description="Fetching nodes, users, endpoints and node quotas."
+					description="Fetching nodes, users, and endpoints."
 				/>
 			);
 		}
 
-		if (
-			nodesQuery.isError ||
-			usersQuery.isError ||
-			endpointsQuery.isError ||
-			nodeQuotasQuery.isError
-		) {
+		if (nodesQuery.isError || usersQuery.isError || endpointsQuery.isError) {
 			const message = usersQuery.isError
 				? formatError(usersQuery.error)
 				: nodesQuery.isError
 					? formatError(nodesQuery.error)
 					: endpointsQuery.isError
 						? formatError(endpointsQuery.error)
-						: nodeQuotasQuery.isError
-							? formatError(nodeQuotasQuery.error)
-							: "Unknown error";
+						: "Unknown error";
 			return (
 				<PageState
 					variant="error"
@@ -222,7 +202,6 @@ export function GrantNewPage() {
 								nodesQuery.refetch();
 								usersQuery.refetch();
 								endpointsQuery.refetch();
-								nodeQuotasQuery.refetch();
 							}}
 						>
 							Retry
@@ -235,7 +214,6 @@ export function GrantNewPage() {
 		const nodes = nodesQuery.data?.items ?? [];
 		const users = usersQuery.data?.items ?? [];
 		const endpoints = endpointsQuery.data?.items ?? [];
-		const nodeQuotas = nodeQuotasQuery.data?.items ?? [];
 
 		if (nodes.length === 0 || users.length === 0 || endpoints.length === 0) {
 			return (
@@ -455,7 +433,6 @@ export function GrantNewPage() {
 							userId,
 							selectedEndpointIds,
 							endpoints,
-							nodeQuotas,
 							note,
 						});
 						const created = await createAdminGrantGroup(adminToken, payload);
@@ -603,13 +580,9 @@ export function GrantNewPage() {
 								<span className="label-text">Quota</span>
 							</div>
 							<p className="text-sm opacity-70">
-								Quota is configured per node in{" "}
-								<Link
-									to="/users/$userId"
-									params={{ userId }}
-									className="link link-primary"
-								>
-									user details
+								Quota is shared per node and configured in{" "}
+								<Link to="/quota-policy" className="link link-primary">
+									Quota policy
 								</Link>
 								.
 							</p>

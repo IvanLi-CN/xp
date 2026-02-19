@@ -193,7 +193,7 @@ describe("storybook api mock", () => {
 		expect(text).toContain(token);
 	});
 
-	it("supports user node quotas", async () => {
+	it("supports user node weights", async () => {
 		const mock = createMockApi();
 
 		const listUsers = await mock.handle(
@@ -215,37 +215,36 @@ describe("storybook api mock", () => {
 		};
 		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
 
+		const listRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/node-weights`, { method: "GET" }),
+		);
+		expect(listRes.ok).toBe(true);
+		const listData = (await listRes.json()) as {
+			items: Array<{
+				node_id: string;
+				weight: number;
+			}>;
+		};
+
 		const putRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/node-quotas/${nodeId}`, {
+			jsonRequest(`/api/admin/users/${userId}/node-weights/${nodeId}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					quota_limit_bytes: 10 * 2 ** 30,
-					quota_reset_source: "node",
+					weight: 123,
 				}),
 			}),
 		);
 		expect(putRes.ok).toBe(true);
 
-		const listRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/node-quotas`, { method: "GET" }),
+		const listResAfter = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/node-weights`, { method: "GET" }),
 		);
-		expect(listRes.ok).toBe(true);
-		const listData = (await listRes.json()) as {
-			items: Array<{
-				user_id: string;
-				node_id: string;
-				quota_limit_bytes: number;
-				quota_reset_source: string;
-			}>;
-		};
+		expect(listResAfter.ok).toBe(true);
+		const listDataAfter = (await listResAfter.json()) as typeof listData;
 		expect(
-			listData.items.some(
-				(item) =>
-					item.user_id === userId &&
-					item.node_id === nodeId &&
-					item.quota_limit_bytes === 10 * 2 ** 30 &&
-					item.quota_reset_source === "node",
+			listDataAfter.items.some(
+				(item) => item.node_id === nodeId && item.weight === 123,
 			),
 		).toBe(true);
 	});

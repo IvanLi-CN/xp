@@ -67,6 +67,7 @@ export const LongValues: Story = {
 						display_name:
 							"Alice with a very long display name that should truncate nicely",
 						subscription_token: `sub_${USER_ID_1}_this_is_a_very_long_token_suffix_for_ui_layout_testing`,
+						priority_tier: "p3",
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
@@ -77,6 +78,7 @@ export const LongValues: Story = {
 						user_id: USER_ID_2,
 						display_name: "Bob",
 						subscription_token: `sub_${USER_ID_2}`,
+						priority_tier: "p3",
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 15,

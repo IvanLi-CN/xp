@@ -291,6 +291,12 @@ pub struct Node {
     #[serde(alias = "public_domain")]
     pub access_host: String,
     pub api_base_url: String,
+    /// Total quota budget per cycle for this node.
+    ///
+    /// - `0` means unlimited (no shared-quota enforcement).
+    /// - Non-zero means "bytes per cycle" as defined by `quota_reset`.
+    #[serde(default)]
+    pub quota_limit_bytes: u64,
     #[serde(default)]
     pub quota_reset: NodeQuotaReset,
 }
@@ -312,7 +318,23 @@ pub struct User {
     pub display_name: String,
     pub subscription_token: String,
     #[serde(default)]
+    pub priority_tier: UserPriorityTier,
+    #[serde(default)]
     pub quota_reset: UserQuotaReset,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserPriorityTier {
+    P1,
+    P2,
+    P3,
+}
+
+impl Default for UserPriorityTier {
+    fn default() -> Self {
+        Self::P3
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

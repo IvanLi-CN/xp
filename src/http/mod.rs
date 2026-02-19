@@ -471,6 +471,8 @@ struct PatchNodeRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     api_base_url: Option<Option<String>>,
     #[serde(default)]
+    quota_limit_bytes: Option<u64>,
+    #[serde(default)]
     quota_reset: Option<NodeQuotaReset>,
 }
 
@@ -493,14 +495,9 @@ struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     display_name: Option<Option<String>>,
     #[serde(default)]
-    quota_reset: Option<UserQuotaReset>,
-}
-
-#[derive(Deserialize)]
-struct PutUserNodeQuotaRequest {
-    quota_limit_bytes: u64,
+    priority_tier: Option<crate::domain::UserPriorityTier>,
     #[serde(default)]
-    quota_reset_source: Option<QuotaResetSource>,
+    quota_reset: Option<UserQuotaReset>,
 }
 
 #[derive(Deserialize)]
@@ -752,6 +749,14 @@ pub fn build_router(
         .route(
             "/users/:user_id/node-quotas/:node_id",
             put(admin_put_user_node_quota),
+        )
+        .route(
+            "/users/:user_id/node-weights",
+            get(admin_list_user_node_weights),
+        )
+        .route(
+            "/users/:user_id/node-weights/:node_id",
+            put(admin_put_user_node_weight),
         )
         .route(
             "/grant-groups",
@@ -1474,6 +1479,7 @@ async fn cluster_join(
                 node_name: state.config.node_name.clone(),
                 access_host: state.config.access_host.clone(),
                 api_base_url: state.config.api_base_url.clone(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
     };
@@ -1497,6 +1503,7 @@ async fn cluster_join(
         node_name: req.node_name.clone(),
         access_host: req.access_host.clone(),
         api_base_url: req.api_base_url.clone(),
+        quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
 
@@ -1662,6 +1669,9 @@ async fn admin_patch_node(
 
     if let Some(quota_reset) = req.quota_reset {
         node.quota_reset = quota_reset;
+    }
+    if let Some(quota_limit_bytes) = req.quota_limit_bytes {
+        node.quota_limit_bytes = quota_limit_bytes;
     }
 
     let _ = raft_write(
@@ -3263,6 +3273,9 @@ async fn admin_patch_user(
         };
         user.display_name = display_name;
     }
+    if let Some(priority_tier) = req.priority_tier {
+        user.priority_tier = priority_tier;
+    }
     if let Some(quota_reset) = req.quota_reset {
         user.quota_reset = quota_reset;
     }
@@ -3329,6 +3342,50 @@ async fn admin_list_user_node_quotas(
     let store = state.store.lock().await;
     let items = store.list_user_node_quotas(&user_id)?;
     Ok(Json(Items { items }))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminUserNodeWeightItem {
+    node_id: String,
+    weight: u16,
+}
+
+async fn admin_list_user_node_weights(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<Items<AdminUserNodeWeightItem>>, ApiError> {
+    let store = state.store.lock().await;
+    let items = store
+        .list_user_node_weights(&user_id)?
+        .into_iter()
+        .map(|(node_id, weight)| AdminUserNodeWeightItem { node_id, weight })
+        .collect();
+    Ok(Json(Items { items }))
+}
+
+#[derive(Debug, Deserialize)]
+struct PutUserNodeWeightRequest {
+    weight: u16,
+}
+
+async fn admin_put_user_node_weight(
+    Extension(state): Extension<AppState>,
+    Path((user_id, node_id)): Path<(String, String)>,
+    ApiJson(req): ApiJson<PutUserNodeWeightRequest>,
+) -> Result<Json<AdminUserNodeWeightItem>, ApiError> {
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetUserNodeWeight {
+            user_id: user_id.clone(),
+            node_id: node_id.clone(),
+            weight: req.weight,
+        },
+    )
+    .await?;
+    Ok(Json(AdminUserNodeWeightItem {
+        node_id,
+        weight: req.weight,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -3828,33 +3885,16 @@ async fn admin_get_user_node_quota_status(
 async fn admin_put_user_node_quota(
     Extension(state): Extension<AppState>,
     Path((user_id, node_id)): Path<(String, String)>,
-    ApiJson(req): ApiJson<PutUserNodeQuotaRequest>,
+    ApiJson(req): ApiJson<serde_json::Value>,
 ) -> Result<Json<UserNodeQuota>, ApiError> {
-    let quota_reset_source = match req.quota_reset_source {
-        Some(v) => v,
-        None => {
-            let store = state.store.lock().await;
-            store
-                .get_user_node_quota_reset_source(&user_id, &node_id)
-                .unwrap_or_default()
-        }
-    };
-
-    let out = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::SetUserNodeQuota {
-            user_id: user_id.clone(),
-            node_id: node_id.clone(),
-            quota_limit_bytes: req.quota_limit_bytes,
-            quota_reset_source,
-        },
-    )
-    .await?;
-    let crate::state::DesiredStateApplyResult::UserNodeQuotaSet { quota } = out else {
-        return Err(ApiError::internal("unexpected raft apply result"));
-    };
-    state.reconcile.request_full();
-    Ok(Json(quota))
+    // Deprecated: static per-user node quotas can bypass the shared quota policy.
+    // Keep the read-only status endpoints; deny writes.
+    let _ = (&state, &user_id, &node_id, &req);
+    Err(ApiError::new(
+        "gone",
+        StatusCode::GONE,
+        "user node quotas are no longer editable; configure node quota_limit_bytes + user node weights instead",
+    ))
 }
 
 async fn admin_list_grant_groups(

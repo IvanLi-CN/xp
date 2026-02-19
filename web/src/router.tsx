@@ -22,6 +22,7 @@ import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
+import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { RealityDomainsPage } from "./views/RealityDomainsPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
@@ -121,6 +122,12 @@ const grantGroupsRoute = createRoute({
 	component: GrantGroupsPage,
 });
 
+const quotaPolicyRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/quota-policy",
+	component: QuotaPolicyPage,
+});
+
 const serviceConfigRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/service-config",
@@ -158,6 +165,7 @@ const appRouteTree = appRoute.addChildren([
 	userNewRoute,
 	userDetailsRoute,
 	grantGroupsRoute,
+	quotaPolicyRoute,
 	grantGroupNewRoute,
 	grantGroupDetailsRoute,
 	serviceConfigRoute,

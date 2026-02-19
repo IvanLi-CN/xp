@@ -14,10 +14,6 @@ import {
 import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import {
-	fetchAdminUserNodeQuotas,
-	putAdminUserNodeQuota,
-} from "../api/adminUserNodeQuotas";
-import {
 	deleteAdminUser,
 	fetchAdminUser,
 	patchAdminUser,
@@ -36,7 +32,6 @@ import {
 	GrantAccessMatrix,
 	type GrantAccessMatrixCellState,
 } from "../components/GrantAccessMatrix";
-import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -123,13 +118,6 @@ export function UserDetailsPage() {
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
-	});
-
-	const nodeQuotasQuery = useQuery({
-		queryKey: ["adminUserNodeQuotas", adminToken, userId],
-		enabled: adminToken.length > 0 && userId.length > 0,
-		queryFn: ({ signal }) =>
-			fetchAdminUserNodeQuotas(adminToken, userId, signal),
 	});
 
 	const nodeQuotaStatusQuery = useQuery({
@@ -372,8 +360,6 @@ export function UserDetailsPage() {
 		);
 	}
 
-	const nodeQuotas = nodeQuotasQuery.data?.items ?? [];
-	const quotaByNodeId = new Map(nodeQuotas.map((q) => [q.node_id, q]));
 	const nodes = nodesQuery.data?.items ?? [];
 
 	const tabs = (
@@ -401,7 +387,7 @@ export function UserDetailsPage() {
 							: "bg-transparent border border-transparent text-base-content/70 hover:bg-base-200/40",
 					].join(" ")}
 				>
-					Quota limits
+					Access
 				</button>
 				<button
 					type="button"
@@ -423,14 +409,13 @@ export function UserDetailsPage() {
 		if (
 			nodesQuery.isLoading ||
 			endpointsQuery.isLoading ||
-			nodeQuotasQuery.isLoading ||
 			grantGroupQuery.isLoading
 		) {
 			return (
 				<PageState
 					variant="loading"
-					title="Loading quota limits"
-					description="Fetching nodes, endpoints, quotas and access state."
+					title="Loading access"
+					description="Fetching nodes, endpoints, and access state."
 				/>
 			);
 		}
@@ -438,22 +423,19 @@ export function UserDetailsPage() {
 		if (
 			nodesQuery.isError ||
 			endpointsQuery.isError ||
-			nodeQuotasQuery.isError ||
 			grantGroupQuery.isError
 		) {
 			const message = nodesQuery.isError
 				? formatError(nodesQuery.error)
 				: endpointsQuery.isError
 					? formatError(endpointsQuery.error)
-					: nodeQuotasQuery.isError
-						? formatError(nodeQuotasQuery.error)
-						: grantGroupQuery.isError
-							? formatError(grantGroupQuery.error)
-							: "Unknown error";
+					: grantGroupQuery.isError
+						? formatError(grantGroupQuery.error)
+						: "Unknown error";
 			return (
 				<PageState
 					variant="error"
-					title="Failed to load quota limits"
+					title="Failed to load access"
 					description={message}
 					action={
 						<Button
@@ -461,7 +443,6 @@ export function UserDetailsPage() {
 							onClick={() => {
 								nodesQuery.refetch();
 								endpointsQuery.refetch();
-								nodeQuotasQuery.refetch();
 								grantGroupQuery.refetch();
 							}}
 						>
@@ -481,8 +462,8 @@ export function UserDetailsPage() {
 					title="Missing dependencies"
 					description={
 						nodes.length === 0
-							? "Create a node before configuring quota limits."
-							: "Create an endpoint before configuring quota limits."
+							? "Create a node before configuring access."
+							: "Create an endpoint before configuring access."
 					}
 				/>
 			);
@@ -543,28 +524,20 @@ export function UserDetailsPage() {
 			selectedEndpointIds.length - visibleSelectedCount,
 		);
 
-		const quotaForNode = (nodeId: string): number => {
-			return quotaByNodeId.get(nodeId)?.quota_limit_bytes ?? 0;
-		};
-
 		const buildMembers = (args: {
 			selectedEndpointIds: string[];
-			quotaOverride?: { nodeId: string; quotaLimitBytes: number };
 		}) => {
 			return args.selectedEndpointIds.map((endpointId) => {
 				const endpoint = endpoints.find((ep) => ep.endpoint_id === endpointId);
 				if (!endpoint) {
 					throw new Error(`endpoint not found: ${endpointId}`);
 				}
-				const quotaLimitBytes =
-					args.quotaOverride && args.quotaOverride.nodeId === endpoint.node_id
-						? args.quotaOverride.quotaLimitBytes
-						: quotaForNode(endpoint.node_id);
 				return {
 					user_id: user.user_id,
 					endpoint_id: endpointId,
 					enabled: true,
-					quota_limit_bytes: quotaLimitBytes,
+					// Shared node quota policy does not use static per-member quotas.
+					quota_limit_bytes: 0,
 					note: null,
 				};
 			});
@@ -863,7 +836,7 @@ export function UserDetailsPage() {
 				}
 
 				await grantGroupQuery.refetch();
-				pushToast({ variant: "success", message: "Quota limits updated." });
+				pushToast({ variant: "success", message: "Access updated." });
 			} catch (err) {
 				// If purge partially succeeded but we failed before applying the managed
 				// group update, restore whatever we already changed.
@@ -874,7 +847,7 @@ export function UserDetailsPage() {
 				setAccessError(message);
 				pushToast({
 					variant: "error",
-					message: `Failed to update quota limits: ${message}`,
+					message: `Failed to update access: ${message}`,
 				});
 			} finally {
 				setIsApplyingAccess(false);
@@ -883,7 +856,7 @@ export function UserDetailsPage() {
 
 		return (
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-6">
-				<h2 className="text-lg font-semibold">Quota limits</h2>
+				<h2 className="text-lg font-semibold">Access</h2>
 
 				<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
 					<div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -942,84 +915,6 @@ export function UserDetailsPage() {
 						nodes={visibleNodes.map((n) => ({
 							nodeId: n.node_id,
 							label: n.node_name,
-							details: (
-								<NodeQuotaEditor
-									value={quotaForNode(n.node_id)}
-									disabled={isApplyingAccess}
-									onApply={async (nextBytes) => {
-										try {
-											await putAdminUserNodeQuota(
-												adminToken,
-												user.user_id,
-												n.node_id,
-												nextBytes,
-												quotaByNodeId.get(n.node_id)?.quota_reset_source,
-											);
-											await nodeQuotasQuery.refetch();
-											pushToast({
-												variant: "success",
-												message: "Node quota updated.",
-											});
-
-											if (!grantGroupQuery.data) return;
-
-											// Do not implicitly apply selection changes from the matrix:
-											// only update quotas for endpoints already in the managed group.
-											const endpointsInGroupForNode =
-												grantGroupQuery.data.members
-													.map((m) => {
-														const ep = endpoints.find(
-															(e) => e.endpoint_id === m.endpoint_id,
-														);
-														return ep?.node_id ?? null;
-													})
-													.some((nodeId) => nodeId === n.node_id);
-											if (!endpointsInGroupForNode) return;
-
-											const members = grantGroupQuery.data.members.map((m) => {
-												const ep = endpoints.find(
-													(e) => e.endpoint_id === m.endpoint_id,
-												);
-												const quotaLimitBytes =
-													ep?.node_id === n.node_id
-														? nextBytes
-														: m.quota_limit_bytes;
-												return {
-													user_id: m.user_id,
-													endpoint_id: m.endpoint_id,
-													enabled: m.enabled,
-													quota_limit_bytes: quotaLimitBytes,
-													note: m.note ?? null,
-												};
-											});
-
-											try {
-												await replaceAdminGrantGroup(
-													adminToken,
-													managedGroupName,
-													{
-														members,
-													},
-												);
-												await grantGroupQuery.refetch();
-											} catch (err) {
-												const message = formatError(err);
-												pushToast({
-													variant: "error",
-													message: `Quota updated, but failed to sync access quotas: ${message}`,
-												});
-											}
-										} catch (err) {
-											const message = formatError(err);
-											pushToast({
-												variant: "error",
-												message: `Failed to update node quota: ${message}`,
-											});
-											throw new Error(message);
-										}
-									}}
-								/>
-							),
 						}))}
 						protocols={PROTOCOLS.map((p) => ({
 							protocolId: p.protocolId,
@@ -1109,7 +1004,7 @@ export function UserDetailsPage() {
 				<PageState
 					variant="empty"
 					title="No quota usage data"
-					description="No quota limits configured for this user."
+					description="No legacy quota limits are configured for this user."
 				/>
 			);
 		}

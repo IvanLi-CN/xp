@@ -16,6 +16,7 @@ const meta = {
 						node_name: "node-a",
 						access_host: "node-a.example.invalid",
 						api_base_url: "https://node-a.example.invalid",
+						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
@@ -27,6 +28,7 @@ const meta = {
 						node_name: "node-b",
 						access_host: "node-b.example.invalid",
 						api_base_url: "https://node-b.example.invalid",
+						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 15,

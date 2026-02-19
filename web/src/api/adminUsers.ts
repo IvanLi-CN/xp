@@ -7,6 +7,7 @@ export const AdminUserSchema = z.object({
 	user_id: z.string(),
 	display_name: z.string(),
 	subscription_token: z.string(),
+	priority_tier: z.enum(["p1", "p2", "p3"]),
 	quota_reset: UserQuotaResetSchema,
 });
 
@@ -33,6 +34,7 @@ export type AdminUserCreateRequest = {
 
 export type AdminUserPatchRequest = {
 	display_name?: string;
+	priority_tier?: "p1" | "p2" | "p3";
 	quota_reset?: UserQuotaReset;
 };
 

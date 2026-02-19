@@ -13,6 +13,7 @@ import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
+import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
 	AdminUser,
@@ -23,11 +24,7 @@ import type {
 import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
 import type { GrantCredentials } from "../../src/api/grantCredentials";
 import type { HealthResponse } from "../../src/api/health";
-import type {
-	NodeQuotaReset,
-	QuotaResetSource,
-	UserQuotaReset,
-} from "../../src/api/quotaReset";
+import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import type { VersionCheckResponse } from "../../src/api/versionCheck";
 
 export type StorybookApiMockConfig = {
@@ -59,6 +56,7 @@ type MockStateSeed = {
 	users: AdminUser[];
 	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
+	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
@@ -223,6 +221,7 @@ function createDefaultSeed(): MockStateSeed {
 			node_name: "tokyo-1",
 			api_base_url: "https://tokyo-1.example.com",
 			access_host: "tokyo-1.example.com",
+			quota_limit_bytes: 0,
 			quota_reset: defaultNodeQuotaReset(1),
 		},
 		{
@@ -230,6 +229,7 @@ function createDefaultSeed(): MockStateSeed {
 			node_name: "osaka-1",
 			api_base_url: "https://osaka-1.example.com",
 			access_host: "osaka-1.example.com",
+			quota_limit_bytes: 0,
 			quota_reset: defaultNodeQuotaReset(15),
 		},
 	];
@@ -296,15 +296,22 @@ function createDefaultSeed(): MockStateSeed {
 			user_id: userId1,
 			display_name: "Alice",
 			subscription_token: subToken1,
+			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(1),
 		},
 		{
 			user_id: userId2,
 			display_name: "Bob",
 			subscription_token: subToken2,
+			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(15),
 		},
 	];
+
+	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> = {
+		[userId1]: [{ node_id: "node-1", weight: 120 }],
+		[userId2]: [],
+	};
 
 	const grantGroups: AdminGrantGroupDetail[] = [
 		{
@@ -383,6 +390,7 @@ function createDefaultSeed(): MockStateSeed {
 		users,
 		grantGroups,
 		nodeQuotas: [],
+		userNodeWeights,
 		alerts,
 		subscriptions,
 	};
@@ -402,6 +410,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		users: overrides?.users ?? base.users,
 		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
 		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
@@ -550,8 +559,33 @@ async function handleRequest(
 		/^\/api\/admin\/users\/([^/]+)\/node-quotas\/([^/]+)$/,
 	);
 	if (userNodeQuotaPutMatch && method === "PUT") {
-		const userId = decodeURIComponent(userNodeQuotaPutMatch[1]);
-		const nodeId = decodeURIComponent(userNodeQuotaPutMatch[2]);
+		// Deprecated: static per-user node quotas are no longer editable.
+		return errorResponse(
+			410,
+			"gone",
+			"user node quotas are no longer editable; configure node quota_limit_bytes + user node weights instead",
+		);
+	}
+
+	const userNodeWeightsMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-weights$/,
+	);
+	if (userNodeWeightsMatch && method === "GET") {
+		const userId = decodeURIComponent(userNodeWeightsMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const items = state.userNodeWeights[userId] ?? [];
+		return jsonResponse({ items: clone(items) });
+	}
+
+	const userNodeWeightPutMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/node-weights\/([^/]+)$/,
+	);
+	if (userNodeWeightPutMatch && method === "PUT") {
+		const userId = decodeURIComponent(userNodeWeightPutMatch[1]);
+		const nodeId = decodeURIComponent(userNodeWeightPutMatch[2]);
 		const userExists = state.users.some((u) => u.user_id === userId);
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
@@ -560,36 +594,33 @@ async function handleRequest(
 		if (!nodeExists) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		const payload = await readJson<{
-			quota_limit_bytes?: number;
-			quota_reset_source?: QuotaResetSource;
-		}>(req);
-		if (!payload || typeof payload.quota_limit_bytes !== "number") {
+
+		const payload = await readJson<{ weight?: number }>(req);
+		if (!payload || typeof payload.weight !== "number") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		if (payload.quota_limit_bytes < 0) {
+		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
+			return errorResponse(400, "invalid_request", "weight must be an integer");
+		}
+		if (payload.weight < 0 || payload.weight > 65535) {
 			return errorResponse(
 				400,
 				"invalid_request",
-				"quota_limit_bytes must be non-negative",
+				"weight must be between 0 and 65535",
 			);
 		}
-		const quota = Math.floor(payload.quota_limit_bytes);
-		const updated: AdminUserNodeQuota = {
-			user_id: userId,
-			node_id: nodeId,
-			quota_limit_bytes: quota,
-			quota_reset_source: payload.quota_reset_source ?? "user",
-		};
 
-		state.nodeQuotas = [
-			...state.nodeQuotas.filter(
-				(q) => !(q.user_id === userId && q.node_id === nodeId),
-			),
-			updated,
+		const items = state.userNodeWeights[userId] ?? [];
+		const next: AdminUserNodeWeightItem = {
+			node_id: nodeId,
+			weight: payload.weight,
+		};
+		state.userNodeWeights[userId] = [
+			...items.filter((i) => i.node_id !== nodeId),
+			next,
 		];
 
-		return jsonResponse(clone(updated));
+		return jsonResponse(clone(next));
 	}
 
 	const nodeMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);
@@ -607,6 +638,7 @@ async function handleRequest(
 				node_name?: string;
 				access_host?: string;
 				api_base_url?: string;
+				quota_limit_bytes?: number;
 				quota_reset?: NodeQuotaReset;
 			}>(req);
 			if (!payload) {
@@ -617,6 +649,7 @@ async function handleRequest(
 				node_name: payload.node_name ?? node.node_name,
 				access_host: payload.access_host ?? node.access_host,
 				api_base_url: payload.api_base_url ?? node.api_base_url,
+				quota_limit_bytes: payload.quota_limit_bytes ?? node.quota_limit_bytes,
 				quota_reset: payload.quota_reset ?? node.quota_reset,
 			};
 			state.nodes = state.nodes.map((item) =>
@@ -935,6 +968,7 @@ async function handleRequest(
 			user_id: userId,
 			display_name: payload.display_name,
 			subscription_token: token,
+			priority_tier: "p3",
 			quota_reset:
 				payload.quota_reset ??
 				({
@@ -966,6 +1000,7 @@ async function handleRequest(
 			const updated: AdminUser = {
 				...user,
 				display_name: payload.display_name ?? user.display_name,
+				priority_tier: payload.priority_tier ?? user.priority_tier,
 				quota_reset: payload.quota_reset ?? user.quota_reset,
 			};
 			state.users = state.users.map((item) =>

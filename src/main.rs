@@ -238,6 +238,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
                 node_name: cluster.node_name.clone(),
                 access_host: cluster.access_host.clone(),
                 api_base_url: cluster.api_base_url.clone(),
+                quota_limit_bytes: 0,
                 quota_reset: xp::domain::NodeQuotaReset::default(),
             };
             bootstrap_upsert_node(raft.raft(), node).await?;

@@ -761,6 +761,7 @@ async fn delete_node_removes_from_inventory() {
         node_name: "extra-node".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     {
@@ -801,6 +802,7 @@ async fn delete_node_rejects_if_endpoints_exist() {
         node_name: "extra-node".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     {
@@ -1070,7 +1072,7 @@ async fn create_user_then_list_contains_it() {
 }
 
 #[tokio::test]
-async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
+async fn put_user_node_quota_is_gone() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -1100,110 +1102,21 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
     let nodes = body_json(res).await;
     let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
 
-    // Create endpoint on that node.
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/endpoints",
-            json!({
-              "node_id": node_id,
-              "kind": "ss2022_2022_blake3_aes_128_gcm",
-              "port": 8388
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let created_ep = body_json(res).await;
-    let endpoint_id = created_ep["endpoint_id"].as_str().unwrap().to_string();
-
-    // Create grant group.
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
-            json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id.clone(),
-                "endpoint_id": endpoint_id.clone(),
-                "enabled": true,
-                "quota_limit_bytes": 123,
-                "note": null
-              }]
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    // Set node quota (explicit source).
+    // Deprecated: static per-user node quotas are no longer editable.
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
             json!({
-              "quota_limit_bytes": 456,
-              "quota_reset_source": "node"
+              "quota_limit_bytes": 456
             }),
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let quota = body_json(res).await;
-    assert_eq!(quota["user_id"], user_id);
-    assert_eq!(quota["node_id"], node_id);
-    assert_eq!(quota["quota_limit_bytes"], 456);
-    assert_eq!(quota["quota_reset_source"], "node");
-
-    // Update node quota without specifying source should preserve existing quota_reset_source.
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PUT",
-            &format!("/api/admin/users/{user_id}/node-quotas/{node_id}"),
-            json!({
-              "quota_limit_bytes": 789
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let quota = body_json(res).await;
-    assert_eq!(quota["quota_limit_bytes"], 789);
-    assert_eq!(quota["quota_reset_source"], "node");
-
-    // List node quotas for user.
-    let res = app
-        .clone()
-        .oneshot(req_authed(
-            "GET",
-            &format!("/api/admin/users/{user_id}/node-quotas"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let listed = body_json(res).await;
-    assert!(
-        listed["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 789)
-    );
-
-    // Grant group member quota should be unified.
-    let res = app
-        .clone()
-        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let fetched_group = body_json(res).await;
-    assert_eq!(fetched_group["members"][0]["quota_limit_bytes"], 789);
+    assert_eq!(res.status(), StatusCode::GONE);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "gone");
 }
 
 #[tokio::test]
@@ -1610,6 +1523,7 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
                 node_name: "node-2".to_string(),
                 access_host: "node-2.example.com".to_string(),
                 api_base_url: "https://node-2.example.com".to_string(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
         );
@@ -1735,6 +1649,7 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
                 node_name: "node-2".to_string(),
                 access_host: "node-2.example.com".to_string(),
                 api_base_url: "https://node-2.example.com".to_string(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
         );
@@ -2948,6 +2863,7 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
                 node_name: "node-unreachable".to_string(),
                 access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:1".to_string(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
             .unwrap();
@@ -3421,6 +3337,7 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
                 user_id: "user-1".to_string(),
                 display_name: "User".to_string(),
                 subscription_token: "sub-1".to_string(),
+                priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::Unlimited {
                     tz_offset_minutes: 0,
                 },
@@ -3495,6 +3412,7 @@ async fn user_node_quota_status_include_grants_with_missing_endpoints_as_local()
                 user_id: "user-1".to_string(),
                 display_name: "User".to_string(),
                 subscription_token: "sub-1".to_string(),
+                priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::Unlimited {
                     tz_offset_minutes: 0,
                 },

@@ -31,7 +31,7 @@ use crate::{
     state::{DesiredStateCommand, EndpointProbeAppendSample},
 };
 
-const PROBE_USER_ID: &str = "user_probe";
+pub const PROBE_USER_ID: &str = "user_probe";
 const PROBE_USER_DISPLAY_NAME: &str = "probe";
 const PROBE_GRANT_GROUP_NAME: &str = "probe";
 const PROBE_GRANT_NOTE: &str = "system: probe";
@@ -705,6 +705,7 @@ async fn ensure_probe_user_and_grants(
         user_id: PROBE_USER_ID.to_string(),
         display_name: PROBE_USER_DISPLAY_NAME.to_string(),
         subscription_token: derive_probe_subscription_token(probe_secret),
+        priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Unlimited {
             tz_offset_minutes: 0,
         },

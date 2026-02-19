@@ -12,6 +12,7 @@ pub mod login_token;
 pub mod ops;
 pub mod protocol;
 pub mod quota;
+pub mod quota_policy;
 pub mod raft;
 pub mod reconcile;
 pub mod state;

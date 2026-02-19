@@ -8,6 +8,7 @@ export const AdminNodeSchema = z.object({
 	node_name: z.string(),
 	api_base_url: z.string(),
 	access_host: z.string(),
+	quota_limit_bytes: z.number().int().nonnegative(),
 	quota_reset: NodeQuotaResetSchema,
 });
 
@@ -20,6 +21,7 @@ export const AdminNodesResponseSchema = z.object({
 export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 
 export type AdminNodePatchRequest = {
+	quota_limit_bytes?: number;
 	quota_reset?: NodeQuotaReset;
 };
 
