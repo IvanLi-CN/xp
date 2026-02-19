@@ -26,6 +26,8 @@ export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
 				{ key: "probe", label: "Probe (24h)" },
 				{
 					key: "latency",
+					align: "right",
+					className: "w-24",
 					label: (
 						<div className="flex flex-col leading-tight">
 							<span>Latency</span>
@@ -70,7 +72,7 @@ export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
 							<EndpointProbeBar slots={endpoint.probe?.slots ?? []} />
 						</Link>
 					</td>
-					<td className="font-mono text-xs whitespace-nowrap">
+					<td className="font-mono text-xs text-right tabular-nums truncate">
 						{endpoint.probe?.latest_latency_ms_p50 ?? "-"}
 					</td>
 					<td className="align-top">
