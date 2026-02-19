@@ -1,11 +1,9 @@
 import type { ReactNode } from "react";
 
 import { DataTable } from "./DataTable";
+import type { DataTableHeader } from "./DataTable";
 
-export type ResourceTableHeader = {
-	key: string;
-	label: ReactNode;
-};
+export type ResourceTableHeader = DataTableHeader;
 
 type ResourceTableProps = {
 	headers: ResourceTableHeader[];
