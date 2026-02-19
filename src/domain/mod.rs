@@ -327,8 +327,8 @@ pub struct User {
 #[serde(rename_all = "snake_case")]
 pub enum UserPriorityTier {
     P1,
-    P2,
     #[default]
+    P2,
     P3,
 }
 
