@@ -30,10 +30,10 @@
 ## 方案概述（字段取舍与布局）
 
 - 表格列由 7 列缩减为 4 列：
-  1) Probe (24h)
-  2) Latency (p50 ms)
-  3) Endpoint（两行：Tag / Kind；并提供 copy endpoint_id）
-  4) Node（两行：node_id / port）
+  1. Probe (24h)
+  2. Latency (p50 ms)
+  3. Endpoint（两行：Tag / Kind；并提供 copy endpoint_id）
+  4. Node（两行：node_id / port）
 - Kind 显示短标签：
   - `vless_reality_vision_tcp` -> `VLESS`
   - `ss2022_2022_blake3_aes_128_gcm` -> `SS2022`
