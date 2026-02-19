@@ -51,6 +51,11 @@ type AdminUserNodeQuota = {
 	quota_reset_source: QuotaResetSource;
 };
 
+type AdminUserNodeWeightItem = {
+	node_id: string;
+	weight: number;
+};
+
 type AdminGrantGroupSummary = {
 	group_name: string;
 	member_count: number;
@@ -101,6 +106,7 @@ type MockApiOptions = {
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
+	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
 	grantGroups?: AdminGrantGroupDetail[];
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
@@ -114,6 +120,7 @@ type MockState = {
 	nodes: AdminNode[];
 	endpoints: AdminEndpoint[];
 	nodeQuotas: AdminUserNodeQuota[];
+	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	grantGroups: AdminGrantGroupDetail[];
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
@@ -270,6 +277,14 @@ export async function setupApiMocks(
 			? [...options.endpoints]
 			: [...defaultEndpoints],
 		nodeQuotas: options.nodeQuotas ? [...options.nodeQuotas] : [],
+		userNodeWeights: options.userNodeWeights
+			? Object.fromEntries(
+					Object.entries(options.userNodeWeights).map(([userId, items]) => [
+						userId,
+						[...items],
+					]),
+				)
+			: {},
 		grantGroups: options.grantGroups
 			? [...options.grantGroups]
 			: [...defaultGrantGroups],
@@ -472,8 +487,12 @@ export async function setupApiMocks(
 			const isNodeWeights = segments[5] === "node-weights";
 
 			if (isNodeWeights && method === "GET") {
-				// Defaults: no explicit overrides; UI should treat missing entries as weight=100.
-				jsonResponse(route, { items: [] });
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				jsonResponse(route, { items: state.userNodeWeights[userId] ?? [] });
 				return;
 			}
 
@@ -482,9 +501,46 @@ export async function setupApiMocks(
 			);
 			if (nodeWeightPutMatch && method === "PUT") {
 				const nodeId = decodeURIComponent(nodeWeightPutMatch[2]);
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				const node = state.nodes.find((item) => item.node_id === nodeId);
+				if (!node) {
+					errorResponse(route, `Node not found: ${nodeId}`, 404);
+					return;
+				}
 				const payload = parseJsonBody(request);
-				const weight = Number(payload.weight ?? 100);
-				jsonResponse(route, { user_id: userId, node_id: nodeId, weight });
+				const rawWeight = payload.weight;
+				if (typeof rawWeight !== "number") {
+					errorResponse(route, "invalid JSON payload: missing weight", 400);
+					return;
+				}
+				if (!Number.isFinite(rawWeight) || !Number.isInteger(rawWeight)) {
+					errorResponse(route, "invalid weight: must be an integer", 400);
+					return;
+				}
+				if (rawWeight < 0 || rawWeight > 65535) {
+					errorResponse(
+						route,
+						"invalid weight: must be between 0 and 65535",
+						400,
+					);
+					return;
+				}
+
+				const items = state.userNodeWeights[userId] ?? [];
+				const next: AdminUserNodeWeightItem = {
+					node_id: nodeId,
+					weight: rawWeight,
+				};
+				state.userNodeWeights[userId] = [
+					...items.filter((i) => i.node_id !== nodeId),
+					next,
+				];
+
+				jsonResponse(route, next);
 				return;
 			}
 
