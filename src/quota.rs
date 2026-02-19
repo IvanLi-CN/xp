@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
@@ -350,7 +350,7 @@ pub async fn run_quota_tick_at(
             .push(tick);
     }
 
-    for (node_id, by_user) in by_node {
+    for (node_id, mut by_user) in by_node {
         // When `node.quota_limit_bytes > 0`, use the shared quota policy for this node.
         let node_quota_limit_bytes = by_user
             .values()
@@ -373,6 +373,35 @@ pub async fn run_quota_tick_at(
                 warn!(%err, "quota tick: shared node quota enforcement failed");
             }
             continue;
+        }
+
+        // If shared quota was previously enabled on this node (pacing state exists) but is now
+        // disabled (quota_limit_bytes == 0), clear the shared-policy bans/pacing first. Otherwise,
+        // legacy enforcement can interpret stale `quota_banned` flags as requiring raft disables.
+        let had_shared_pacing = {
+            let store = store.lock().await;
+            store.get_node_pacing(&node_id).is_some()
+        };
+        if had_shared_pacing {
+            if let Err(err) = enforce_shared_node_quota_node(
+                now,
+                store,
+                reconcile,
+                &mut client,
+                &node_id,
+                &by_user,
+            )
+            .await
+            {
+                warn!(%err, "quota tick: shared node quota cleanup failed");
+            } else {
+                // Ensure legacy enforcement below doesn't act on stale in-memory tick flags.
+                for group in by_user.values_mut() {
+                    for tick in group.iter_mut() {
+                        tick.quota_banned = false;
+                    }
+                }
+            }
         }
 
         // Legacy enforcement path (static per-user node quota or per-grant quota).
@@ -577,8 +606,19 @@ async fn enforce_shared_node_quota_node(
     }
     let cycle_days = cycle_days_i64 as u32;
 
-    let now_local = now.with_timezone(cycle_start.offset());
-    let today_index_i64 = (now_local.date_naive() - cycle_start.date_naive()).num_days();
+    // Compute the day index in the configured timezone. For `Local`, don't pin `now` to the cycle
+    // start offset because DST transitions can change the offset within a single cycle.
+    let cycle_start_date_local = match cycle_tz {
+        CycleTimeZone::FixedOffsetMinutes { .. } => cycle_start.date_naive(),
+        CycleTimeZone::Local => cycle_start.with_timezone(&Local).date_naive(),
+    };
+    let now_date_local = match cycle_tz {
+        CycleTimeZone::FixedOffsetMinutes { .. } => {
+            now.with_timezone(cycle_start.offset()).date_naive()
+        }
+        CycleTimeZone::Local => now.with_timezone(&Local).date_naive(),
+    };
+    let today_index_i64 = (now_date_local - cycle_start_date_local).num_days();
     let mut today_index = today_index_i64.max(0) as i32;
     if today_index >= cycle_days as i32 {
         today_index = (cycle_days as i32).saturating_sub(1);

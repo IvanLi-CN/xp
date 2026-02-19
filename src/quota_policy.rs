@@ -35,22 +35,31 @@ pub fn allocate_total_by_weight<I: Clone>(total: u64, items: &[(I, u16)]) -> Vec
     let sum_w: u64 = weights.iter().sum();
 
     let mut out = Vec::with_capacity(items.len());
-    let mut allocated = 0u64;
+    let mut allocated: u128 = 0;
     for ((id, _w), w64) in items.iter().zip(weights.iter()) {
-        let v = (total.saturating_mul(*w64)) / sum_w;
-        allocated = allocated.saturating_add(v);
-        out.push((id.clone(), v));
+        // Use wide intermediates to avoid overflow (total may be large).
+        let v128 = (u128::from(total) * u128::from(*w64)) / u128::from(sum_w);
+        allocated = allocated.saturating_add(v128);
+        out.push((id.clone(), v128 as u64));
     }
 
     // Distribute remainder in stable order to ensure Σ == total.
-    let mut rem = total.saturating_sub(allocated);
-    let mut i = 0usize;
-    while rem > 0 && !out.is_empty() {
-        out[i].1 = out[i].1.saturating_add(1);
-        rem -= 1;
-        i += 1;
-        if i >= out.len() {
-            i = 0;
+    let rem = u128::from(total).saturating_sub(allocated) as u64;
+    if rem > 0 {
+        // Normally, `rem < out.len()` (sum of floors loses <1 per item), but keep this O(n) even
+        // if `rem` is unexpectedly large.
+        let n = out.len() as u64;
+        if n > 0 {
+            let per = rem / n;
+            let extra = rem % n;
+            if per > 0 {
+                for (_id, v) in out.iter_mut() {
+                    *v = v.saturating_add(per);
+                }
+            }
+            for (_, v) in out.iter_mut().take(extra as usize) {
+                *v = v.saturating_add(1);
+            }
         }
     }
 
@@ -124,6 +133,13 @@ mod tests {
         let items = vec![("a", 0u16), ("b", 0u16)];
         let out = allocate_total_by_weight(3, &items);
         assert_eq!(out, vec![("a", 2), ("b", 1)]);
+    }
+
+    #[test]
+    fn allocate_total_by_weight_does_not_overflow_for_huge_totals() {
+        let items = vec![("a", u16::MAX), ("b", u16::MAX)];
+        let out = allocate_total_by_weight(u64::MAX, &items);
+        assert_eq!(out, vec![("a", (u64::MAX / 2) + 1), ("b", u64::MAX / 2)]);
     }
 
     #[test]
