@@ -6,6 +6,7 @@ import type {
 	AdminEndpoint,
 	AdminEndpointProbeSlot,
 } from "../api/adminEndpoints";
+import type { AdminNode } from "../api/adminNodes";
 import { EndpointsTable } from "./EndpointsTable";
 
 function makeSlots(): AdminEndpointProbeSlot[] {
@@ -27,6 +28,8 @@ const LONG_ENDPOINT_ID =
 	"ep_01HENDPT_THIS_IS_A_VERY_LONG_ENDPOINT_ID_FOR_LAYOUT_TESTING";
 const LONG_TAG =
 	"edge-tokyo-with-a-very-long-tag-that-should-truncate-nicely-in-the-table";
+const LONG_NODE_NAME =
+	"tokyo-edge-with-a-very-long-node-name-that-should-truncate-nicely";
 
 const ENDPOINTS: AdminEndpoint[] = [
 	{
@@ -57,6 +60,25 @@ const ENDPOINTS: AdminEndpoint[] = [
 	},
 ];
 
+const NODES: AdminNode[] = [
+	{
+		node_id: LONG_NODE_ID,
+		node_name: LONG_NODE_NAME,
+		api_base_url: "https://tokyo.example.invalid",
+		access_host: "tokyo.example.invalid",
+		quota_reset: { policy: "unlimited" },
+	},
+	{
+		node_id: "01KFTEA58X1RXXVDRD6EPFB63Y",
+		node_name: "osaka-1",
+		api_base_url: "https://osaka.example.invalid",
+		access_host: "osaka.example.invalid",
+		quota_reset: { policy: "unlimited" },
+	},
+];
+
+const NODE_BY_ID = new Map(NODES.map((n) => [n.node_id, n] as const));
+
 function Frame(props: { width: number; label: string; children: ReactNode }) {
 	const { width, label, children } = props;
 	return (
@@ -84,10 +106,10 @@ export const ResponsiveNoScroll: Story = {
 	render: () => (
 		<div className="space-y-6">
 			<Frame width={648} label="Target (>=1024px main content)">
-				<EndpointsTable endpoints={ENDPOINTS} />
+				<EndpointsTable endpoints={ENDPOINTS} nodeById={NODE_BY_ID} />
 			</Frame>
 			<Frame width={936} label="Wide desktop">
-				<EndpointsTable endpoints={ENDPOINTS} />
+				<EndpointsTable endpoints={ENDPOINTS} nodeById={NODE_BY_ID} />
 			</Frame>
 		</div>
 	),
@@ -110,5 +132,8 @@ export const ResponsiveNoScroll: Story = {
 
 		const ss2022 = await canvas.findAllByText("SS2022");
 		expect(ss2022).toHaveLength(2);
+
+		const nodeNames = await canvas.findAllByText(LONG_NODE_NAME);
+		expect(nodeNames).toHaveLength(2);
 	},
 };

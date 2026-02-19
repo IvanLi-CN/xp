@@ -33,11 +33,11 @@
   1. Probe (24h)
   2. Latency (p50 ms)
   3. Endpoint（两行：Tag / Kind；并提供 copy endpoint_id）
-  4. Node（两行：node_id / port）
+  4. Node（两行：node_name / port；node_id 作为 `title`，且缺失时回退显示 node_id）
 - Kind 显示短标签：
   - `vless_reality_vision_tcp` -> `VLESS`
   - `ss2022_2022_blake3_aes_128_gcm` -> `SS2022`
-- 对可能超长字段（tag/node_id）使用 `truncate` + `title`，避免撑宽导致横向滚动。
+- 对可能超长字段（tag/node_name）使用 `truncate` + `title`，避免撑宽导致横向滚动（node_id 仅在 `title` 中展示）。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -48,7 +48,7 @@
   - 第 1 行：Tag（可点击进入 details）
   - 第 2 行：Kind（VLESS/SS2022；原始 kind 作为 `title`）
 - Node 单元格：
-  - 第 1 行：node_id
+  - 第 1 行：node_name（缺失时回退显示 node_id；node_id 作为 `title`）
   - 第 2 行：port
 - 每行字段内容不换行（`nowrap`），超长使用省略号截断（`…`）。
 

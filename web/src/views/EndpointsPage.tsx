@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 
 import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { EndpointsTable } from "../components/EndpointsTable";
@@ -29,6 +30,12 @@ export function EndpointsPage() {
 		queryKey: ["adminEndpoints", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
+	});
+
+	const nodesQuery = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
 	const probeRunMutation = useMutation({
@@ -137,7 +144,9 @@ export function EndpointsPage() {
 			);
 		}
 
-		return <EndpointsTable endpoints={endpoints} />;
+		const nodes = nodesQuery.data?.items ?? [];
+		const nodeById = new Map(nodes.map((n) => [n.node_id, n] as const));
+		return <EndpointsTable endpoints={endpoints} nodeById={nodeById} />;
 	})();
 
 	return (

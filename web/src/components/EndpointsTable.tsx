@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
 import type { AdminEndpoint, AdminEndpointKind } from "../api/adminEndpoints";
+import type { AdminNode } from "../api/adminNodes";
 import { CopyButton } from "./CopyButton";
 import { EndpointProbeBar } from "./EndpointProbeBar";
 import { ResourceTable } from "./ResourceTable";
@@ -16,8 +17,11 @@ function formatKindShort(kind: AdminEndpointKind): string {
 	}
 }
 
-export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
-	const { endpoints } = props;
+export function EndpointsTable(props: {
+	endpoints: AdminEndpoint[];
+	nodeById?: Map<string, AdminNode>;
+}) {
+	const { endpoints, nodeById } = props;
 
 	return (
 		<ResourceTable
@@ -54,7 +58,7 @@ export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
 						<div className="flex flex-col leading-tight">
 							<span>Node</span>
 							<span className="text-xs opacity-60 font-normal whitespace-nowrap">
-								id/port
+								name/port
 							</span>
 						</div>
 					),
@@ -105,13 +109,29 @@ export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
 					</td>
 					<td className="align-top">
 						<div className="flex flex-col gap-1 min-w-0">
+							{(() => {
+								const node = nodeById?.get(endpoint.node_id);
+								const nodeName = node?.node_name?.trim() ?? "";
+								const nodeTitle =
+									nodeName.length > 0
+										? `${nodeName} (${endpoint.node_id})`
+										: endpoint.node_id;
+								const nodeLabel =
+									nodeName.length > 0 ? nodeName : endpoint.node_id;
+
+								return (
+									<div
+										className="text-xs font-medium block truncate min-w-0 whitespace-nowrap"
+										title={nodeTitle}
+									>
+										{nodeLabel}
+									</div>
+								);
+							})()}
 							<div
-								className="font-mono text-xs block truncate min-w-0 whitespace-nowrap"
-								title={endpoint.node_id}
+								className="font-mono text-xs opacity-60 whitespace-nowrap truncate"
+								title={String(endpoint.port)}
 							>
-								{endpoint.node_id}
-							</div>
-							<div className="font-mono text-xs opacity-60 whitespace-nowrap truncate">
 								{endpoint.port}
 							</div>
 						</div>
