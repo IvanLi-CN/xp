@@ -10,6 +10,14 @@ This directory contains sample service definitions and an environment template t
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 
+## Endpoint probe (ingress reachability)
+
+`xp` runs a cluster-wide probe to measure **reachability** and **latency** for every endpoint (last 24 hours, per-hour buckets).
+
+For probe semantics and troubleshooting notes (including what is and is not allowed to "work around"), see:
+
+- `docs/ops/endpoint-probe.md`
+
 ## Optional: public access via Cloudflare Tunnel
 
 If you want to reach `xp` from the public Internet without opening inbound ports, see:
