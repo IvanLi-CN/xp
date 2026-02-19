@@ -44,6 +44,14 @@ function clampU16Weight(
 	return { ok: true, weight: n };
 }
 
+function formatUtcOffsetMinutes(minutes: number): string {
+	const sign = minutes >= 0 ? "+" : "-";
+	const abs = Math.abs(minutes);
+	const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+	const mm = String(abs % 60).padStart(2, "0");
+	return `UTC${sign}${hh}:${mm}`;
+}
+
 function formatNodeQuotaResetBrief(q: {
 	policy: "monthly" | "unlimited";
 	day_of_month?: number;
@@ -52,7 +60,7 @@ function formatNodeQuotaResetBrief(q: {
 	const tz =
 		q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
 			? "(local)"
-			: `UTC${q.tz_offset_minutes >= 0 ? "+" : ""}${q.tz_offset_minutes}`;
+			: formatUtcOffsetMinutes(q.tz_offset_minutes);
 	if (q.policy === "monthly") {
 		return `monthly@${q.day_of_month ?? 1} ${tz}`;
 	}
@@ -175,7 +183,25 @@ export function QuotaPolicyPage() {
 	};
 
 	const weightsModal = (
-		<dialog className="modal" open={weightsOpen}>
+		<dialog
+			className="modal"
+			open={weightsOpen}
+			onCancel={(event) => {
+				// Keep React state in sync when the dialog is closed via Escape.
+				event.preventDefault();
+				if (isSavingWeights) return;
+				setWeightsOpen(false);
+				setWeightsUserId(null);
+				setWeightsError(null);
+			}}
+			onClose={() => {
+				// Keep React state in sync when the dialog is closed by browser UI.
+				if (isSavingWeights) return;
+				setWeightsOpen(false);
+				setWeightsUserId(null);
+				setWeightsError(null);
+			}}
+		>
 			<div className="modal-box max-w-3xl">
 				<div className="space-y-2">
 					<h3 className="text-lg font-bold">Edit node weights</h3>
