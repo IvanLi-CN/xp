@@ -323,18 +323,13 @@ pub struct User {
     pub quota_reset: UserQuotaReset,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UserPriorityTier {
     P1,
     P2,
+    #[default]
     P3,
-}
-
-impl Default for UserPriorityTier {
-    fn default() -> Self {
-        Self::P3
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
