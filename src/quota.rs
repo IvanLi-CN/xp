@@ -776,6 +776,10 @@ async fn enforce_shared_node_quota_node(
                     // P3 quota expires daily.
                     if tier == UserPriorityTier::P3 {
                         entry.bank_bytes = 0;
+                        // Preserve tier state so the reconciliation phase in the same tick doesn't
+                        // treat this as a tier transition and wipe overflow tokens allocated later.
+                        entry.last_base_quota_bytes = 0;
+                        entry.last_priority_tier = tier;
                         continue;
                     }
 
