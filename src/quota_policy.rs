@@ -26,10 +26,7 @@ pub fn allocate_total_by_weight<I: Clone>(total: u64, items: &[(I, u16)]) -> Vec
         return Vec::new();
     }
 
-    let mut weights: Vec<u64> = items
-        .iter()
-        .map(|(_id, w)| u64::from(*w))
-        .collect();
+    let mut weights: Vec<u64> = items.iter().map(|(_id, w)| u64::from(*w)).collect();
     let sum_w: u64 = weights.iter().sum();
     if sum_w == 0 {
         // Fallback: avoid division-by-zero; treat everyone equally.
@@ -133,9 +130,7 @@ mod tests {
     fn daily_credit_sums_to_base_quota() {
         let base = 10u64;
         let days = 3u32;
-        let sum: u64 = (0..days)
-            .map(|i| daily_credit_bytes(base, days, i))
-            .sum();
+        let sum: u64 = (0..days).map(|i| daily_credit_bytes(base, days, i)).sum();
         assert_eq!(sum, base);
     }
 
@@ -160,4 +155,3 @@ mod tests {
         assert_eq!(overflow, 1);
     }
 }
-

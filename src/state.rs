@@ -1969,7 +1969,11 @@ impl JsonSnapshotStore {
         self.usage.node_pacing.get(node_id).cloned()
     }
 
-    pub fn set_node_pacing(&mut self, node_id: String, pacing: NodePacing) -> Result<(), StoreError> {
+    pub fn set_node_pacing(
+        &mut self,
+        node_id: String,
+        pacing: NodePacing,
+    ) -> Result<(), StoreError> {
         self.usage.node_pacing.insert(node_id, pacing);
         self.save_usage()?;
         Ok(())
