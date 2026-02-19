@@ -687,37 +687,309 @@ async fn enforce_shared_node_quota_node(
 
     let now_rfc3339 = now.to_rfc3339();
     let mut store = store.lock().await;
-    let (remove_ops, changed) =
-        store
-            .update_usage(|usage| {
-                let mut changed = false;
-                let mut remove_ops: Vec<(String, String)> = Vec::new();
+    let (remove_ops, changed) = store
+        .update_usage(|usage| {
+            let mut changed = false;
+            let mut remove_ops: Vec<(String, String)> = Vec::new();
 
-                let node_pacing = usage.node_pacing.entry(node_id.to_string()).or_insert(
-                    crate::state::NodePacing {
+            let node_pacing =
+                usage
+                    .node_pacing
+                    .entry(node_id.to_string())
+                    .or_insert(crate::state::NodePacing {
                         cycle_start_at: cycle_start_at.clone(),
                         cycle_end_at: cycle_end_at.clone(),
                         last_day_index: -1,
-                    },
-                );
+                    });
 
-                let cycle_changed = node_pacing.cycle_start_at != cycle_start_at
-                    || node_pacing.cycle_end_at != cycle_end_at;
-                if cycle_changed {
-                    node_pacing.cycle_start_at = cycle_start_at.clone();
-                    node_pacing.cycle_end_at = cycle_end_at.clone();
-                    node_pacing.last_day_index = -1;
+            let cycle_changed = node_pacing.cycle_start_at != cycle_start_at
+                || node_pacing.cycle_end_at != cycle_end_at;
+            if cycle_changed {
+                node_pacing.cycle_start_at = cycle_start_at.clone();
+                node_pacing.cycle_end_at = cycle_end_at.clone();
+                node_pacing.last_day_index = -1;
 
-                    // Reset per-user pacing for this node (bank + last_total_used).
-                    for (_user_id, nodes) in usage.user_node_pacing.iter_mut() {
-                        nodes.remove(node_id);
+                // Reset per-user pacing for this node (bank + last_total_used).
+                for (_user_id, nodes) in usage.user_node_pacing.iter_mut() {
+                    nodes.remove(node_id);
+                }
+                usage
+                    .user_node_pacing
+                    .retain(|_user_id, nodes| !nodes.is_empty());
+
+                // Auto-unban on cycle rollover.
+                for group in by_user.values() {
+                    for tick in group {
+                        if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
+                            && u.quota_banned
+                        {
+                            u.quota_banned = false;
+                            u.quota_banned_at = None;
+                            changed = true;
+                        }
                     }
-                    usage
-                        .user_node_pacing
-                        .retain(|_user_id, nodes| !nodes.is_empty());
+                }
+            }
 
-                    // Auto-unban on cycle rollover.
-                    for group in by_user.values() {
+            if node_pacing.last_day_index > today_index {
+                node_pacing.last_day_index = today_index;
+            }
+
+            // Day rollovers: refill banks + overflow chain.
+            let initial_last_day_index = node_pacing.last_day_index;
+            let mut day = node_pacing.last_day_index.saturating_add(1);
+            while day <= today_index {
+                let day_u32 = day.max(0) as u32;
+                let mut p1_pool = 0u64;
+                let mut p3_pool = 0u64;
+
+                for user_id in enabled_users.iter() {
+                    let tier = tier_by_user.get(user_id).copied().unwrap_or_default();
+                    let base_quota = base_by_user.get(user_id).copied().unwrap_or(0);
+
+                    let entry = usage
+                        .user_node_pacing
+                        .entry(user_id.clone())
+                        .or_default()
+                        .entry(node_id.to_string())
+                        .or_insert(crate::state::UserNodePacing {
+                            bank_bytes: 0,
+                            last_total_used_bytes: 0,
+                            last_base_quota_bytes: 0,
+                            last_priority_tier: Default::default(),
+                        });
+
+                    // P3 quota expires daily.
+                    if tier == UserPriorityTier::P3 {
+                        entry.bank_bytes = 0;
+                        continue;
+                    }
+
+                    let carry_days = match tier {
+                        UserPriorityTier::P1 => P1_CARRY_DAYS,
+                        UserPriorityTier::P2 => P2_CARRY_DAYS,
+                        UserPriorityTier::P3 => 0,
+                    };
+
+                    let (bank, overflow) = quota_policy::apply_daily_rollover(
+                        entry.bank_bytes,
+                        base_quota,
+                        cycle_days,
+                        day_u32,
+                        carry_days,
+                    );
+                    entry.bank_bytes = bank;
+
+                    match tier {
+                        UserPriorityTier::P1 => p3_pool = p3_pool.saturating_add(overflow),
+                        UserPriorityTier::P2 => p1_pool = p1_pool.saturating_add(overflow),
+                        UserPriorityTier::P3 => {}
+                    }
+                }
+
+                // P1 can take P2's pacing overflow.
+                if p1_pool > 0 && !p1_items.is_empty() {
+                    for (user_id, bonus) in
+                        quota_policy::allocate_total_by_weight(p1_pool, &p1_items)
+                    {
+                        let base_quota = base_by_user.get(&user_id).copied().unwrap_or(0);
+                        let entry = usage
+                            .user_node_pacing
+                            .entry(user_id.clone())
+                            .or_default()
+                            .entry(node_id.to_string())
+                            .or_insert(crate::state::UserNodePacing {
+                                bank_bytes: 0,
+                                last_total_used_bytes: 0,
+                                last_base_quota_bytes: 0,
+                                last_priority_tier: Default::default(),
+                            });
+                        entry.bank_bytes = entry.bank_bytes.saturating_add(bonus);
+
+                        let cap = quota_policy::cap_bytes_for_day(
+                            base_quota,
+                            cycle_days,
+                            day_u32,
+                            P1_CARRY_DAYS,
+                        );
+                        if entry.bank_bytes > cap {
+                            let overflow = entry.bank_bytes - cap;
+                            entry.bank_bytes = cap;
+                            p3_pool = p3_pool.saturating_add(overflow);
+                        }
+                    }
+                }
+
+                // P3 can take any remaining overflow (no carry).
+                if p3_pool > 0 && !p3_items.is_empty() {
+                    for (user_id, bonus) in
+                        quota_policy::allocate_total_by_weight(p3_pool, &p3_items)
+                    {
+                        let entry = usage
+                            .user_node_pacing
+                            .entry(user_id.clone())
+                            .or_default()
+                            .entry(node_id.to_string())
+                            .or_insert(crate::state::UserNodePacing {
+                                bank_bytes: 0,
+                                last_total_used_bytes: 0,
+                                last_base_quota_bytes: 0,
+                                last_priority_tier: Default::default(),
+                            });
+                        entry.bank_bytes = entry.bank_bytes.saturating_add(bonus);
+                    }
+                }
+
+                node_pacing.last_day_index = day;
+                day += 1;
+            }
+
+            // Policy reconciliation: when quota inputs change mid-cycle (node quota limit,
+            // user count, user tier, weights), make pacing changes effective immediately
+            // instead of waiting for the next day rollover.
+            //
+            // We do this by adjusting each user's bank by the cap delta for *today*.
+            // If the cap is reduced below what the user already consumed, we force an
+            // immediate local-only ban even when `delta == 0` for this tick.
+            //
+            // Important: when a day rollover ran in this tick, banks have already been computed
+            // against the current policy for today. In that case we should *not* apply the cap
+            // delta again, or we'd risk false bans. We still update `last_*` fields to keep the
+            // next tick consistent.
+            let did_day_rollover = node_pacing.last_day_index != initial_last_day_index;
+            let do_cap_reconcile = !did_day_rollover;
+            let mut force_ban_users = std::collections::BTreeSet::<String>::new();
+            let today_u32 = today_index.max(0) as u32;
+            for user_id in enabled_users.iter() {
+                let tier = tier_by_user.get(user_id).copied().unwrap_or_default();
+                let base_quota = base_by_user.get(user_id).copied().unwrap_or(0);
+
+                let entry = usage
+                    .user_node_pacing
+                    .entry(user_id.clone())
+                    .or_default()
+                    .entry(node_id.to_string())
+                    .or_insert(crate::state::UserNodePacing {
+                        bank_bytes: 0,
+                        last_total_used_bytes: 0,
+                        last_base_quota_bytes: 0,
+                        last_priority_tier: Default::default(),
+                    });
+
+                // P3 has no base quota, but may have overflow tokens for today.
+                // Only clear the bank on a tier transition (e.g. P1->P3).
+                if tier == UserPriorityTier::P3 {
+                    if entry.last_priority_tier != UserPriorityTier::P3 {
+                        entry.bank_bytes = 0;
+                        // P3 should not have access unless it has overflow tokens.
+                        // On transition, force an immediate ban (even if `delta == 0`).
+                        force_ban_users.insert(user_id.clone());
+                    }
+                    entry.last_base_quota_bytes = 0;
+                    entry.last_priority_tier = tier;
+                    continue;
+                }
+
+                let new_carry = match tier {
+                    UserPriorityTier::P1 => P1_CARRY_DAYS,
+                    UserPriorityTier::P2 => P2_CARRY_DAYS,
+                    UserPriorityTier::P3 => 0,
+                };
+                let cap_new =
+                    quota_policy::cap_bytes_for_day(base_quota, cycle_days, today_u32, new_carry);
+
+                if do_cap_reconcile {
+                    let old_base = entry.last_base_quota_bytes;
+                    let old_tier = entry.last_priority_tier;
+
+                    let old_carry = match old_tier {
+                        UserPriorityTier::P1 => P1_CARRY_DAYS,
+                        UserPriorityTier::P2 => P2_CARRY_DAYS,
+                        UserPriorityTier::P3 => 0,
+                    };
+                    let cap_old =
+                        quota_policy::cap_bytes_for_day(old_base, cycle_days, today_u32, old_carry);
+
+                    if cap_new >= cap_old {
+                        entry.bank_bytes = entry.bank_bytes.saturating_add(cap_new - cap_old);
+                    } else {
+                        let drop = cap_old - cap_new;
+                        if entry.bank_bytes < drop {
+                            // User already overused relative to the new cap; ban immediately.
+                            entry.bank_bytes = 0;
+                            force_ban_users.insert(user_id.clone());
+                        } else {
+                            entry.bank_bytes = entry.bank_bytes.saturating_sub(drop);
+                        }
+                    }
+                }
+
+                // Clamp to the new cap (both in reconcile and rollover cases).
+                if entry.bank_bytes > cap_new {
+                    entry.bank_bytes = cap_new;
+                }
+
+                entry.last_base_quota_bytes = base_quota;
+                entry.last_priority_tier = tier;
+            }
+
+            // Apply traffic deltas: consume banks + ban/unban grants locally.
+            for user_id in enabled_users.iter() {
+                let Some(group) = by_user.get(user_id) else {
+                    continue;
+                };
+
+                let total_used = total_used_by_user.get(user_id).copied().unwrap_or(0);
+                let entry = usage
+                    .user_node_pacing
+                    .entry(user_id.clone())
+                    .or_default()
+                    .entry(node_id.to_string())
+                    .or_insert(crate::state::UserNodePacing {
+                        bank_bytes: 0,
+                        last_total_used_bytes: 0,
+                        last_base_quota_bytes: 0,
+                        last_priority_tier: Default::default(),
+                    });
+
+                let delta = total_used.saturating_sub(entry.last_total_used_bytes);
+                entry.last_total_used_bytes = total_used;
+
+                let mut banned_this_tick = false;
+                if force_ban_users.contains(user_id) || delta > entry.bank_bytes {
+                    entry.bank_bytes = 0;
+                    banned_this_tick = true;
+
+                    for tick in group {
+                        if !tick.grant_enabled {
+                            continue;
+                        }
+                        if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
+                            && !u.quota_banned
+                        {
+                            u.quota_banned = true;
+                            u.quota_banned_at = Some(now_rfc3339.clone());
+                            changed = true;
+                        }
+
+                        if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
+                            let email = format!("grant:{}", tick.snapshot.grant_id);
+                            remove_ops.push((tag.to_string(), email));
+                        }
+                    }
+                } else if delta > 0 {
+                    entry.bank_bytes = entry.bank_bytes.saturating_sub(delta);
+                }
+
+                // Auto-unban once the user has positive bank again.
+                if !banned_this_tick && entry.bank_bytes > 0 {
+                    let any_banned = group.iter().any(|tick| {
+                        usage
+                            .grants
+                            .get(&tick.snapshot.grant_id)
+                            .is_some_and(|u| u.quota_banned)
+                    });
+                    if any_banned {
                         for tick in group {
                             if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
                                 && u.quota_banned
@@ -729,184 +1001,11 @@ async fn enforce_shared_node_quota_node(
                         }
                     }
                 }
+            }
 
-                if node_pacing.last_day_index > today_index {
-                    node_pacing.last_day_index = today_index;
-                }
-
-                // Day rollovers: refill banks + overflow chain.
-                let mut day = node_pacing.last_day_index.saturating_add(1);
-                while day <= today_index {
-                    let day_u32 = day.max(0) as u32;
-                    let mut p1_pool = 0u64;
-                    let mut p3_pool = 0u64;
-
-                    for user_id in enabled_users.iter() {
-                        let tier = tier_by_user.get(user_id).copied().unwrap_or_default();
-                        let base_quota = base_by_user.get(user_id).copied().unwrap_or(0);
-
-                        let entry = usage
-                            .user_node_pacing
-                            .entry(user_id.clone())
-                            .or_default()
-                            .entry(node_id.to_string())
-                            .or_insert(crate::state::UserNodePacing {
-                                bank_bytes: 0,
-                                last_total_used_bytes: 0,
-                            });
-
-                        // P3 quota expires daily.
-                        if tier == UserPriorityTier::P3 {
-                            entry.bank_bytes = 0;
-                            continue;
-                        }
-
-                        let carry_days = match tier {
-                            UserPriorityTier::P1 => P1_CARRY_DAYS,
-                            UserPriorityTier::P2 => P2_CARRY_DAYS,
-                            UserPriorityTier::P3 => 0,
-                        };
-
-                        let (bank, overflow) = quota_policy::apply_daily_rollover(
-                            entry.bank_bytes,
-                            base_quota,
-                            cycle_days,
-                            day_u32,
-                            carry_days,
-                        );
-                        entry.bank_bytes = bank;
-
-                        match tier {
-                            UserPriorityTier::P1 => p3_pool = p3_pool.saturating_add(overflow),
-                            UserPriorityTier::P2 => p1_pool = p1_pool.saturating_add(overflow),
-                            UserPriorityTier::P3 => {}
-                        }
-                    }
-
-                    // P1 can take P2's pacing overflow.
-                    if p1_pool > 0 && !p1_items.is_empty() {
-                        for (user_id, bonus) in
-                            quota_policy::allocate_total_by_weight(p1_pool, &p1_items)
-                        {
-                            let base_quota = base_by_user.get(&user_id).copied().unwrap_or(0);
-                            let entry = usage
-                                .user_node_pacing
-                                .entry(user_id.clone())
-                                .or_default()
-                                .entry(node_id.to_string())
-                                .or_insert(crate::state::UserNodePacing {
-                                    bank_bytes: 0,
-                                    last_total_used_bytes: 0,
-                                });
-                            entry.bank_bytes = entry.bank_bytes.saturating_add(bonus);
-
-                            let cap = quota_policy::cap_bytes_for_day(
-                                base_quota,
-                                cycle_days,
-                                day_u32,
-                                P1_CARRY_DAYS,
-                            );
-                            if entry.bank_bytes > cap {
-                                let overflow = entry.bank_bytes - cap;
-                                entry.bank_bytes = cap;
-                                p3_pool = p3_pool.saturating_add(overflow);
-                            }
-                        }
-                    }
-
-                    // P3 can take any remaining overflow (no carry).
-                    if p3_pool > 0 && !p3_items.is_empty() {
-                        for (user_id, bonus) in
-                            quota_policy::allocate_total_by_weight(p3_pool, &p3_items)
-                        {
-                            let entry = usage
-                                .user_node_pacing
-                                .entry(user_id.clone())
-                                .or_default()
-                                .entry(node_id.to_string())
-                                .or_insert(crate::state::UserNodePacing {
-                                    bank_bytes: 0,
-                                    last_total_used_bytes: 0,
-                                });
-                            entry.bank_bytes = entry.bank_bytes.saturating_add(bonus);
-                        }
-                    }
-
-                    node_pacing.last_day_index = day;
-                    day += 1;
-                }
-
-                // Apply traffic deltas: consume banks + ban/unban grants locally.
-                for user_id in enabled_users.iter() {
-                    let Some(group) = by_user.get(user_id) else {
-                        continue;
-                    };
-
-                    let total_used = total_used_by_user.get(user_id).copied().unwrap_or(0);
-                    let entry = usage
-                        .user_node_pacing
-                        .entry(user_id.clone())
-                        .or_default()
-                        .entry(node_id.to_string())
-                        .or_insert(crate::state::UserNodePacing {
-                            bank_bytes: 0,
-                            last_total_used_bytes: 0,
-                        });
-
-                    let delta = total_used.saturating_sub(entry.last_total_used_bytes);
-                    entry.last_total_used_bytes = total_used;
-
-                    let mut banned_this_tick = false;
-                    if delta > entry.bank_bytes {
-                        entry.bank_bytes = 0;
-                        banned_this_tick = true;
-
-                        for tick in group {
-                            if !tick.grant_enabled {
-                                continue;
-                            }
-                            if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
-                                && !u.quota_banned
-                            {
-                                u.quota_banned = true;
-                                u.quota_banned_at = Some(now_rfc3339.clone());
-                                changed = true;
-                            }
-
-                            if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
-                                let email = format!("grant:{}", tick.snapshot.grant_id);
-                                remove_ops.push((tag.to_string(), email));
-                            }
-                        }
-                    } else if delta > 0 {
-                        entry.bank_bytes = entry.bank_bytes.saturating_sub(delta);
-                    }
-
-                    // Auto-unban once the user has positive bank again.
-                    if !banned_this_tick && entry.bank_bytes > 0 {
-                        let any_banned = group.iter().any(|tick| {
-                            usage
-                                .grants
-                                .get(&tick.snapshot.grant_id)
-                                .is_some_and(|u| u.quota_banned)
-                        });
-                        if any_banned {
-                            for tick in group {
-                                if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
-                                    && u.quota_banned
-                                {
-                                    u.quota_banned = false;
-                                    u.quota_banned_at = None;
-                                    changed = true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                (remove_ops, changed)
-            })
-            .map_err(|e| anyhow::anyhow!("update_usage: {e}"))?;
+            (remove_ops, changed)
+        })
+        .map_err(|e| anyhow::anyhow!("update_usage: {e}"))?;
 
     if changed {
         reconcile.request_full();
@@ -1758,6 +1857,473 @@ mod tests {
         let store = store.lock().await;
         let usage = store.get_grant_usage(&grant_id).unwrap();
         assert_eq!(usage.used_bytes, 400);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_weight_change_updates_bank_immediately_same_day() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, p1_id, p2_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            // Enable shared node quota with a deterministic (UTC) reset rule.
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let p1 = store.create_user("p1".to_string(), None).unwrap();
+            let p2 = store.create_user("p2".to_string(), None).unwrap();
+
+            store
+                .state_mut()
+                .users
+                .get_mut(&p1.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P1;
+            store
+                .state_mut()
+                .users
+                .get_mut(&p2.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let ep1 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let ep2 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let _ = store
+                .create_grant(
+                    "g1".to_string(),
+                    p1.user_id.clone(),
+                    ep1.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+            let _ = store
+                .create_grant(
+                    "g2".to_string(),
+                    p2.user_id.clone(),
+                    ep2.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, p1.user_id, p2.user_id)
+        };
+
+        // No traffic yet.
+        for grant in {
+            let store = store.lock().await;
+            store.list_grants()
+        } {
+            let email = format!("grant:{}", grant.grant_id);
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let (bank_p1_before, bank_p2_before) = {
+            let store = store.lock().await;
+            (
+                store
+                    .get_user_node_pacing(&p1_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+                store
+                    .get_user_node_pacing(&p2_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+            )
+        };
+
+        let cycle_days = {
+            let (start, end) = current_cycle_window_at(
+                CycleTimeZone::FixedOffsetMinutes {
+                    tz_offset_minutes: 0,
+                },
+                1,
+                now,
+            )
+            .unwrap();
+            (end.date_naive() - start.date_naive()).num_days() as u32
+        };
+        let distributable = quota_policy::distributable_bytes(1024 * 1024 * 1024);
+        let mut items_before = vec![(p1_id.clone(), 100u16), (p2_id.clone(), 100u16)];
+        items_before.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let base_before: std::collections::BTreeMap<String, u64> =
+            quota_policy::allocate_total_by_weight(distributable, &items_before)
+                .into_iter()
+                .collect();
+        let expected_p1_before = quota_policy::cap_bytes_for_day(
+            *base_before.get(&p1_id).unwrap(),
+            cycle_days,
+            0,
+            P1_CARRY_DAYS,
+        );
+        let expected_p2_before = quota_policy::cap_bytes_for_day(
+            *base_before.get(&p2_id).unwrap(),
+            cycle_days,
+            0,
+            P2_CARRY_DAYS,
+        );
+        assert_eq!(bank_p1_before, expected_p1_before);
+        assert_eq!(bank_p2_before, expected_p2_before);
+
+        // Change P1 weight mid-day and expect the bank to adjust on the next tick (same day).
+        {
+            let mut store = store.lock().await;
+            DesiredStateCommand::SetUserNodeWeight {
+                user_id: p1_id.clone(),
+                node_id: node_id.clone(),
+                weight: 200,
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+        }
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let (bank_p1_after, bank_p2_after) = {
+            let store = store.lock().await;
+            (
+                store
+                    .get_user_node_pacing(&p1_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+                store
+                    .get_user_node_pacing(&p2_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+            )
+        };
+
+        let mut items_after = vec![(p1_id.clone(), 200u16), (p2_id.clone(), 100u16)];
+        items_after.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let base_after: std::collections::BTreeMap<String, u64> =
+            quota_policy::allocate_total_by_weight(distributable, &items_after)
+                .into_iter()
+                .collect();
+        let expected_p1_after = quota_policy::cap_bytes_for_day(
+            *base_after.get(&p1_id).unwrap(),
+            cycle_days,
+            0,
+            P1_CARRY_DAYS,
+        );
+        let expected_p2_after = quota_policy::cap_bytes_for_day(
+            *base_after.get(&p2_id).unwrap(),
+            cycle_days,
+            0,
+            P2_CARRY_DAYS,
+        );
+        assert_eq!(bank_p1_after, expected_p1_after);
+        assert_eq!(bank_p2_after, expected_p2_after);
+        assert!(bank_p1_after > bank_p1_before);
+        assert!(bank_p2_after < bank_p2_before);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_quota_decrease_can_ban_without_new_traffic() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, _user_id, grant_id, endpoint_tag) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 4 * 1024 * 1024 * 1024, // 4GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let user = store.create_user("p2".to_string(), None).unwrap();
+            store
+                .state_mut()
+                .users
+                .get_mut(&user.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let endpoint = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    "g".to_string(),
+                    user.user_id.clone(),
+                    endpoint.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, user.user_id, grant.grant_id, endpoint.tag)
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Tick 1: initialize shared quota pacing (no traffic).
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        // Tick 2: user consumes some quota (but stays within the old cap).
+        // We pick a small constant to keep the test simple; the actual "overuse under new cap"
+        // is asserted by the immediate ban after quota decrease.
+        {
+            let mut st = state.lock().await;
+            st.stats
+                .insert(stat_name(&email, "uplink"), 50 * 1024 * 1024);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        // Lower the node quota budget drastically.
+        {
+            let mut store = store.lock().await;
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+            store.save().unwrap();
+        }
+
+        // Tick 3: no new traffic (delta==0), but the user should be banned immediately if the
+        // new cap is lower than already-consumed bytes.
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert!(usage.quota_banned);
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert!(
+            st.calls
+                .iter()
+                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)),
+            "expected xray remove_user to be issued on immediate ban"
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_quota_decrease_across_day_rollover_does_not_false_ban() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, user_id, grant_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 4 * 1024 * 1024 * 1024, // 4GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let user = store.create_user("p2".to_string(), None).unwrap();
+            store
+                .state_mut()
+                .users
+                .get_mut(&user.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let endpoint = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    "g".to_string(),
+                    user.user_id.clone(),
+                    endpoint.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, user.user_id, grant.grant_id)
+        };
+
+        let reconcile = ReconcileHandle::noop();
+        let now0 = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Day 0 tick: initialize shared quota pacing (no traffic).
+        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        // Lower node quota budget before the next day's tick.
+        {
+            let mut store = store.lock().await;
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+            store.save().unwrap();
+        }
+
+        let now1 = DateTime::parse_from_rfc3339("2026-02-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now1, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        assert!(
+            !usage.quota_banned,
+            "expected no ban when quota decreases across day rollover without traffic"
+        );
+
+        let (cycle_start, cycle_end) = current_cycle_window_at(
+            CycleTimeZone::FixedOffsetMinutes {
+                tz_offset_minutes: 0,
+            },
+            1,
+            now1,
+        )
+        .unwrap();
+        let cycle_days = (cycle_end.date_naive() - cycle_start.date_naive()).num_days() as u32;
+        let distributable = quota_policy::distributable_bytes(1024 * 1024 * 1024);
+        let base = distributable; // only one P2 user
+        let expected_bank = quota_policy::cap_bytes_for_day(base, cycle_days, 1, P2_CARRY_DAYS);
+        let pacing = store_guard
+            .get_user_node_pacing(&user_id, &node_id)
+            .unwrap();
+        assert_eq!(pacing.bank_bytes, expected_bank);
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert!(
+            st.calls.is_empty(),
+            "expected no xray remove_user calls without a ban"
+        );
 
         let _ = shutdown.send(());
     }

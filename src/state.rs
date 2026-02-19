@@ -11,9 +11,9 @@ use uuid::Uuid;
 use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
-        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserQuotaReset,
-        VlessCredentials, validate_cycle_day_of_month, validate_group_name, validate_port,
-        validate_tz_offset_minutes,
+        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserPriorityTier,
+        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month, validate_group_name,
+        validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
@@ -1742,6 +1742,15 @@ pub struct UserNodePacing {
     pub bank_bytes: u64,
     #[serde(default)]
     pub last_total_used_bytes: u64,
+    /// Last computed base quota for this `(user,node)` in bytes.
+    ///
+    /// This allows the quota engine to reconcile pacing immediately when policy inputs
+    /// change mid-cycle (node quota, user weights, user tiers, etc.).
+    #[serde(default)]
+    pub last_base_quota_bytes: u64,
+    /// Last seen user priority tier for this `(user,node)`.
+    #[serde(default)]
+    pub last_priority_tier: UserPriorityTier,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

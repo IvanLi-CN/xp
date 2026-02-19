@@ -46,18 +46,28 @@ pub fn allocate_total_by_weight<I: Clone>(total: u64, items: &[(I, u16)]) -> Vec
     // Distribute remainder in stable order to ensure Σ == total.
     let rem = u128::from(total).saturating_sub(allocated) as u64;
     if rem > 0 {
-        // Normally, `rem < out.len()` (sum of floors loses <1 per item), but keep this O(n) even
-        // if `rem` is unexpectedly large.
-        let n = out.len() as u64;
+        // Normally, `rem < eligible.len()` (sum of floors loses <1 per non-zero-weight item),
+        // but keep this O(n) even if `rem` is unexpectedly large.
+        //
+        // When some items have `weight=0`, don't give them remainder bytes: they should remain at
+        // zero allocation.
+        let eligible: Vec<usize> = weights
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, w)| (*w > 0).then_some(idx))
+            .collect();
+        let n = eligible.len() as u64;
         if n > 0 {
             let per = rem / n;
             let extra = rem % n;
             if per > 0 {
-                for (_id, v) in out.iter_mut() {
+                for idx in eligible.iter() {
+                    let (_id, v) = &mut out[*idx];
                     *v = v.saturating_add(per);
                 }
             }
-            for (_, v) in out.iter_mut().take(extra as usize) {
+            for idx in eligible.into_iter().take(extra as usize) {
+                let (_id, v) = &mut out[idx];
                 *v = v.saturating_add(1);
             }
         }
@@ -140,6 +150,13 @@ mod tests {
         let items = vec![("a", u16::MAX), ("b", u16::MAX)];
         let out = allocate_total_by_weight(u64::MAX, &items);
         assert_eq!(out, vec![("a", (u64::MAX / 2) + 1), ("b", u64::MAX / 2)]);
+    }
+
+    #[test]
+    fn allocate_total_by_weight_does_not_give_remainder_to_zero_weight() {
+        let items = vec![("a", 0u16), ("b", 2u16), ("c", 1u16)];
+        let out = allocate_total_by_weight(1, &items);
+        assert_eq!(out, vec![("a", 0), ("b", 1), ("c", 0)]);
     }
 
     #[test]
