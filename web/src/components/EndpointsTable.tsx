@@ -23,7 +23,7 @@ export function EndpointsTable(props: { endpoints: AdminEndpoint[] }) {
 		<ResourceTable
 			tableClassName="table-fixed w-full"
 			headers={[
-				{ key: "probe", label: "Probe (24h)" },
+				{ key: "probe", label: "Probe (24h)", className: "w-40" },
 				{
 					key: "latency",
 					align: "right",
