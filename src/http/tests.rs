@@ -1181,9 +1181,11 @@ async fn put_user_node_weight_then_list_returns_it() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
     let items = json["items"].as_array().unwrap();
-    assert!(items
-        .iter()
-        .any(|i| i["node_id"] == node_id && i["weight"] == 200));
+    assert!(
+        items
+            .iter()
+            .any(|i| i["node_id"] == node_id && i["weight"] == 200)
+    );
 }
 
 #[tokio::test]
@@ -1289,6 +1291,50 @@ async fn patch_admin_node_allows_quota_limit_bytes_update() {
     let updated = body_json(res).await;
     assert_eq!(updated["node_id"], node_id);
     assert_eq!(updated["quota_limit_bytes"], 456);
+}
+
+#[tokio::test]
+async fn patch_admin_node_rejects_quota_limit_bytes_when_reset_is_unlimited() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    // Unlimited reset is allowed when shared quota is disabled.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_reset": { "policy": "unlimited" }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // But shared quota requires a finite cycle window.
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_limit_bytes": 456
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
 }
 
 #[tokio::test]

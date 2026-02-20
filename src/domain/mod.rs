@@ -21,6 +21,9 @@ pub enum DomainError {
     InvalidTzOffsetMinutes {
         tz_offset_minutes: i16,
     },
+    InvalidNodeQuotaConfig {
+        reason: String,
+    },
     InvalidGroupName {
         group_name: String,
     },
@@ -80,6 +83,7 @@ impl DomainError {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
             | Self::InvalidTzOffsetMinutes { .. }
+            | Self::InvalidNodeQuotaConfig { .. }
             | Self::InvalidGroupName { .. }
             | Self::EmptyGrantGroup
             | Self::DuplicateGrantGroupMember { .. } => "invalid_request",
@@ -108,6 +112,9 @@ impl std::fmt::Display for DomainError {
             }
             Self::InvalidTzOffsetMinutes { tz_offset_minutes } => {
                 write!(f, "invalid tz_offset_minutes: {tz_offset_minutes}")
+            }
+            Self::InvalidNodeQuotaConfig { reason } => {
+                write!(f, "invalid node quota config: {reason}")
             }
             Self::InvalidGroupName { group_name } => write!(f, "invalid group_name: {group_name}"),
             Self::EmptyGrantGroup => write!(f, "grant group must have at least 1 member"),

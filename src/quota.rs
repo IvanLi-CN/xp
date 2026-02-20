@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, FixedOffset, Local, Utc};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
@@ -606,17 +606,26 @@ async fn enforce_shared_node_quota_node(
     }
     let cycle_days = cycle_days_i64 as u32;
 
-    // Compute the day index in the configured timezone. For `Local`, don't pin `now` to the cycle
-    // start offset because DST transitions can change the offset within a single cycle.
-    let cycle_start_date_local = match cycle_tz {
-        CycleTimeZone::FixedOffsetMinutes { .. } => cycle_start.date_naive(),
-        CycleTimeZone::Local => cycle_start.with_timezone(&Local).date_naive(),
-    };
-    let now_date_local = match cycle_tz {
-        CycleTimeZone::FixedOffsetMinutes { .. } => {
-            now.with_timezone(cycle_start.offset()).date_naive()
+    // Compute the day index in the configured timezone.
+    //
+    // - Fixed offset: use the configured offset consistently for both cycle_start and now.
+    // - Local: don't pin `now` to the cycle start offset because DST transitions can change the
+    //   offset within a single cycle.
+    let (cycle_start_date_local, now_date_local) = match cycle_tz {
+        CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes } => {
+            let offset_seconds = i32::from(tz_offset_minutes) * 60;
+            let offset = FixedOffset::east_opt(offset_seconds).ok_or_else(|| {
+                anyhow::anyhow!("node_id={node_id} invalid tz_offset_minutes: {tz_offset_minutes}")
+            })?;
+            (
+                cycle_start.with_timezone(&offset).date_naive(),
+                now.with_timezone(&offset).date_naive(),
+            )
         }
-        CycleTimeZone::Local => now.with_timezone(&Local).date_naive(),
+        CycleTimeZone::Local => (
+            cycle_start.with_timezone(&Local).date_naive(),
+            now.with_timezone(&Local).date_naive(),
+        ),
     };
     let today_index_i64 = (now_date_local - cycle_start_date_local).num_days();
     let mut today_index = today_index_i64.max(0) as i32;
@@ -2129,6 +2138,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_quota_fixed_offset_day_index_starts_at_zero() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, user_id, grant_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            // Enable shared quota with a fixed offset (UTC+8), where the cycle start timestamp is
+            // on the previous UTC date (e.g. local 00:00 == UTC 16:00).
+            let node_quota_limit_bytes = 256 * 1024 * 1024 + 31; // distributable=31 => credit=1/day
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: node_quota_limit_bytes,
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(480),
+                    },
+                })
+                .unwrap();
+
+            let user = store.create_user("p2".to_string(), None).unwrap();
+            store.save().unwrap();
+
+            let endpoint = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    "g".to_string(),
+                    user.user_id.clone(),
+                    endpoint.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, user.user_id, grant.grant_id)
+        };
+
+        let email = format!("grant:{grant_id}");
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        let pacing = store_guard
+            .get_user_node_pacing(&user_id, &node_id)
+            .unwrap();
+
+        // On the first tick day of the cycle, the bank should contain exactly one daily credit.
+        // A day-index off-by-one would apply two rollovers and produce 2 credits.
+        assert_eq!(pacing.bank_bytes, 1);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
     async fn shared_quota_enabled_user_set_change_updates_bank_immediately_same_day() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
@@ -2360,10 +2452,18 @@ mod tests {
             expected_p2b_after
         );
         assert!(
-            store.get_user_node_pacing(&p2_id, &node_id).unwrap().bank_bytes < bank_p2_before
+            store
+                .get_user_node_pacing(&p2_id, &node_id)
+                .unwrap()
+                .bank_bytes
+                < bank_p2_before
         );
         assert!(
-            store.get_user_node_pacing(&p1_id, &node_id).unwrap().bank_bytes < bank_p1_before
+            store
+                .get_user_node_pacing(&p1_id, &node_id)
+                .unwrap()
+                .bank_bytes
+                < bank_p1_before
         );
 
         let _ = shutdown.send(());
@@ -2815,8 +2915,7 @@ mod tests {
         {
             let email = format!("grant:{g1_id}");
             let mut st = state.lock().await;
-            st.stats
-                .insert(stat_name(&email, "uplink"), bank_u1 as i64);
+            st.stats.insert(stat_name(&email, "uplink"), bank_u1 as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
         run_quota_tick_at(now, &config, &store, &reconcile, &raft)
@@ -3510,8 +3609,7 @@ mod tests {
         let email = format!("grant:{grant_id}");
         {
             let mut st = state.lock().await;
-            st.stats
-                .insert(stat_name(&email, "uplink"), used as i64);
+            st.stats.insert(stat_name(&email, "uplink"), used as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
         run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
@@ -3709,7 +3807,10 @@ mod tests {
 
         let store_guard = store.lock().await;
         assert!(
-            store_guard.get_grant_usage(&u1_grant_id).unwrap().quota_banned,
+            store_guard
+                .get_grant_usage(&u1_grant_id)
+                .unwrap()
+                .quota_banned,
             "expected immediate ban after enabling a new user reduces cap below consumed usage"
         );
         drop(store_guard);

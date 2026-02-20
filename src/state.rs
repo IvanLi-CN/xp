@@ -866,6 +866,16 @@ fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> 
     Ok(())
 }
 
+fn validate_node_quota_config(node: &Node) -> Result<(), DomainError> {
+    // Shared node quota enforcement requires a finite cycle window.
+    if node.quota_limit_bytes > 0 && matches!(node.quota_reset, NodeQuotaReset::Unlimited { .. }) {
+        return Err(DomainError::InvalidNodeQuotaConfig {
+            reason: "quota_limit_bytes > 0 requires quota_reset policy monthly".to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn normalize_reality_server_names(input: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::<String>::new();
@@ -952,6 +962,7 @@ impl DesiredStateCommand {
         match self {
             Self::UpsertNode { node } => {
                 validate_node_quota_reset(&node.quota_reset)?;
+                validate_node_quota_config(node)?;
                 state.nodes.insert(node.node_id.clone(), node.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
