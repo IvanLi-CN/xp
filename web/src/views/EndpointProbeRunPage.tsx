@@ -26,6 +26,7 @@ import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { computeEndpointProbeStatus } from "../utils/endpointProbeStatus";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -120,19 +121,6 @@ function percentile(values: number[], p: number): number | null {
 	const sorted = [...values].sort((a, b) => a - b);
 	const idx = Math.round((sorted.length - 1) * Math.max(0, Math.min(1, p)));
 	return sorted[idx] ?? null;
-}
-
-function computeEndpointProbeStatus(args: {
-	expectedNodes: number;
-	sampleCount: number;
-	okCount: number;
-}): EndpointProbeStatus {
-	if (args.expectedNodes === 0) return "missing";
-	if (args.sampleCount === 0) return "missing";
-	if (args.sampleCount < args.expectedNodes) return "missing";
-	if (args.okCount === 0) return "down";
-	if (args.okCount >= args.expectedNodes) return "up";
-	return "degraded";
 }
 
 export function EndpointProbeRunPage() {
@@ -512,7 +500,8 @@ export function EndpointProbeRunPage() {
 					const samplesByNode = endpointSamplesById[endpoint.endpoint_id] ?? {};
 					const samples = Object.values(samplesByNode);
 
-					const okSamples = samples.filter((s) => s.ok);
+					const skippedCount = samples.filter((s) => s.skipped === true).length;
+					const okSamples = samples.filter((s) => s.ok && s.skipped !== true);
 					const okCount = okSamples.length;
 					const sampleCount = samples.length;
 					const latencies = okSamples
@@ -537,6 +526,7 @@ export function EndpointProbeRunPage() {
 									expectedNodes,
 									sampleCount,
 									okCount,
+									skippedCount,
 								})
 							: (slot?.status ?? "missing");
 					const latencyMs = latencyP50 ?? slot?.latency_ms_p50 ?? null;

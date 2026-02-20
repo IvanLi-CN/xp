@@ -270,6 +270,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         store.clone(),
         raft_facade.clone(),
         probe_secret,
+        config.endpoint_probe_skip_self_test,
     );
 
     let app = xp::http::build_router(

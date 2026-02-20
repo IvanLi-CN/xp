@@ -55,6 +55,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
     }
@@ -110,6 +111,7 @@ fn app_with(
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
 
     let router = build_router(
@@ -1014,6 +1016,7 @@ async fn follower_admin_write_does_not_redirect() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config,
@@ -2221,6 +2224,7 @@ async fn grant_usage_includes_warning_fields() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config,
@@ -2414,6 +2418,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config,
@@ -2966,6 +2971,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config.clone(),
@@ -3012,6 +3018,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config,
