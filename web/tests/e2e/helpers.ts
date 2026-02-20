@@ -420,19 +420,20 @@ export async function setupApiMocks(
 			return;
 		}
 
-		if (path === "/api/admin/users/quota-summaries" && method === "GET") {
-			jsonResponse(route, {
-				partial: false,
-				unreachable_nodes: [],
-				items: state.users.map((u) => ({
-					user_id: u.user_id,
-					quota_limit_bytes: 0,
-					used_bytes: 0,
-					remaining_bytes: 0,
-				})),
-			});
-			return;
-		}
+			if (path === "/api/admin/users/quota-summaries" && method === "GET") {
+				jsonResponse(route, {
+					partial: false,
+					unreachable_nodes: [],
+					items: state.users.map((u) => ({
+						user_id: u.user_id,
+						quota_limit_kind: "unlimited",
+						quota_limit_bytes: 0,
+						used_bytes: 0,
+						remaining_bytes: 0,
+					})),
+				});
+				return;
+			}
 
 		if (path === "/api/admin/users" && method === "POST") {
 			const payload = parseJsonBody(request);
