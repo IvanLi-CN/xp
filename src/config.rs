@@ -180,6 +180,17 @@ pub struct Config {
     pub api_base_url: String,
 
     #[arg(
+        long = "endpoint-probe-skip-self-test",
+        global = true,
+        env = "XP_ENDPOINT_PROBE_SKIP_SELF_TEST",
+        value_name = "BOOL",
+        default_value_t = false,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub endpoint_probe_skip_self_test: bool,
+
+    #[arg(
         long = "quota-poll-interval-secs",
         global = true,
         env = "XP_QUOTA_POLL_INTERVAL_SECS",
@@ -221,6 +232,7 @@ mod tests {
         assert_eq!(cli.config.xray_restart_timeout_secs, 5);
         assert_eq!(cli.config.xray_systemd_unit, "xray.service");
         assert_eq!(cli.config.xray_openrc_service, "xray");
+        assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
     }

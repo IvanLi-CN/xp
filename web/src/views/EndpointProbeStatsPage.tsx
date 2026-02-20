@@ -67,6 +67,7 @@ export function EndpointProbeStatsPage() {
 	});
 
 	const slots = historyQuery.data?.slots ?? [];
+	const expectedNodes = historyQuery.data?.expected_nodes ?? 0;
 
 	const defaultSelectedHour = useMemo(() => {
 		// Pick the latest slot with data; fall back to the last slot.
@@ -184,11 +185,20 @@ export function EndpointProbeStatsPage() {
 					<div className="flex flex-wrap items-end gap-1">
 						{slots.map((slot) => {
 							const isSelected = slot.hour === selectedHour;
+							const skippedCount =
+								slot.skipped_count ??
+								slot.by_node.filter((s) => s.skipped === true).length;
+							const testedCount =
+								slot.tested_count ??
+								Math.max(0, slot.sample_count - skippedCount);
+							const reportedLabel = expectedNodes
+								? `${slot.sample_count}/${expectedNodes}`
+								: String(slot.sample_count);
 							return (
 								<button
 									key={slot.hour}
 									type="button"
-									title={`${slot.hour} • ${statusLabel(slot.status)} • ${slot.ok_count}/${slot.sample_count}`}
+									title={`${slot.hour} • ${statusLabel(slot.status)} • OK (tested): ${slot.ok_count}/${testedCount} • Skipped: ${skippedCount} • Reported: ${reportedLabel}`}
 									onClick={() => setSelectedHour(slot.hour)}
 									className={[
 										"h-6 w-2 rounded-sm",
@@ -212,35 +222,56 @@ export function EndpointProbeStatsPage() {
 					<div className="card-body space-y-2">
 						<h2 className="card-title">Selected hour</h2>
 						{selected ? (
-							<div className="space-y-1 text-sm">
-								<p>
-									Hour: <span className="font-mono">{selected.hour}</span>
-								</p>
-								<p>
-									Status:{" "}
-									<span className="font-mono">
-										{statusLabel(selected.status)}
-									</span>
-								</p>
-								<p>
-									OK:{" "}
-									<span className="font-mono">
-										{selected.ok_count}/{selected.sample_count}
-									</span>
-								</p>
-								<p>
-									Latency (p50):{" "}
-									<span className="font-mono">
-										{selected.latency_ms_p50 ?? "-"} ms
-									</span>
-								</p>
-								<p>
-									Latency (p95):{" "}
-									<span className="font-mono">
-										{selected.latency_ms_p95 ?? "-"} ms
-									</span>
-								</p>
-							</div>
+							(() => {
+								const skippedCount =
+									selected.skipped_count ??
+									selected.by_node.filter((s) => s.skipped === true).length;
+								const testedCount =
+									selected.tested_count ??
+									Math.max(0, selected.sample_count - skippedCount);
+								return (
+									<div className="space-y-1 text-sm">
+										<p>
+											Hour: <span className="font-mono">{selected.hour}</span>
+										</p>
+										<p>
+											Status:{" "}
+											<span className="font-mono">
+												{statusLabel(selected.status)}
+											</span>
+										</p>
+										<p>
+											OK (tested):{" "}
+											<span className="font-mono">
+												{selected.ok_count}/{testedCount}
+											</span>
+										</p>
+										<p>
+											Skipped: <span className="font-mono">{skippedCount}</span>
+										</p>
+										<p>
+											Reported:{" "}
+											<span className="font-mono">
+												{expectedNodes
+													? `${selected.sample_count}/${expectedNodes}`
+													: String(selected.sample_count)}
+											</span>
+										</p>
+										<p>
+											Latency (p50):{" "}
+											<span className="font-mono">
+												{selected.latency_ms_p50 ?? "-"} ms
+											</span>
+										</p>
+										<p>
+											Latency (p95):{" "}
+											<span className="font-mono">
+												{selected.latency_ms_p95 ?? "-"} ms
+											</span>
+										</p>
+									</div>
+								);
+							})()
 						) : (
 							<p className="text-sm opacity-70">No slot selected.</p>
 						)}
@@ -286,10 +317,18 @@ export function EndpointProbeStatsPage() {
 											<span
 												className={[
 													"badge badge-sm",
-													sample.ok ? "badge-success" : "badge-error",
+													sample.skipped === true
+														? "badge-neutral"
+														: sample.ok
+															? "badge-success"
+															: "badge-error",
 												].join(" ")}
 											>
-												{sample.ok ? "OK" : "FAIL"}
+												{sample.skipped === true
+													? "SKIP"
+													: sample.ok
+														? "OK"
+														: "FAIL"}
 											</span>
 										</td>
 										<td className="font-mono text-xs">

@@ -63,6 +63,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
     }
@@ -265,6 +266,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config,
@@ -479,6 +481,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         store.clone(),
         raft.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let app = build_router(
         config.clone(),

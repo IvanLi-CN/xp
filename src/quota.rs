@@ -1007,6 +1007,7 @@ mod tests {
             node_name: "node-1".to_string(),
             access_host: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
+            endpoint_probe_skip_self_test: false,
             quota_poll_interval_secs: 10,
             quota_auto_unban,
         };

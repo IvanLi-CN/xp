@@ -102,3 +102,4 @@
 | e8c4j | VLESS REALITY：多域名 server_names（tags UI）+ 随机 SNI     | 已完成 | `e8c4j:reality-multi-server-names/PLAN.md`           | 2026-02-15 | PR #73           |
 | gcbwg | VLESS REALITY：全局域名池 + 节点适配 + 自动 Rebuild inbound | 已完成 | `gcbwg:reality-global-domain-registry/PLAN.md`       | 2026-02-17 | PR #74           |
 | 8crcc | Web UI: endpoints table no horizontal scroll                | 已完成 | `8crcc:endpoints-table-no-scroll/PLAN.md`            | 2026-02-19 | -                |
+| 7ze9h | Endpoint probe：节点可跳过 self-test（hairpin 逃生舱）      | 待实现 | `7ze9h:endpoint-probe-skip-self-test/PLAN.md`        | 2026-02-20 | PR #79           |
