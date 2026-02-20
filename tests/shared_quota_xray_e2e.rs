@@ -366,15 +366,15 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     let members = [p1_user_id.clone(), p2_user_id.clone(), p3_user_id.clone()]
         .into_iter()
         .map(|user_id| {
-        json!({
-          "user_id": user_id,
-          "endpoint_id": endpoint_id_ss,
-          "enabled": true,
-          "quota_limit_bytes": 0,
-          "note": null
+            json!({
+              "user_id": user_id,
+              "endpoint_id": endpoint_id_ss,
+              "enabled": true,
+              "quota_limit_bytes": 0,
+              "note": null
+            })
         })
-    })
-    .collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     let res = app
         .clone()
