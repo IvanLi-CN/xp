@@ -96,6 +96,7 @@ export function QuotaPolicyPage() {
 	const [weightsOpen, setWeightsOpen] = useState(false);
 	const [weightsUserId, setWeightsUserId] = useState<string | null>(null);
 	const [weightsDraft, setWeightsDraft] = useState<Record<string, string>>({});
+	const [weightsDraftDirty, setWeightsDraftDirty] = useState(false);
 	const [weightsError, setWeightsError] = useState<string | null>(null);
 	const [isSavingWeights, setIsSavingWeights] = useState(false);
 
@@ -117,14 +118,31 @@ export function QuotaPolicyPage() {
 		const existing = new Map(
 			(weightsQuery.data?.items ?? []).map((i) => [i.node_id, i.weight]),
 		);
-		const next: Record<string, string> = {};
-		for (const node of nodes) {
-			const w = existing.get(node.node_id) ?? 100;
-			next[node.node_id] = String(w);
+		setWeightsDraft((prev) => {
+			// Only initialize from server data when the draft hasn't been edited yet.
+			// Otherwise, keep the user's in-progress edits and just backfill new nodes.
+			if (!weightsDraftDirty) {
+				const next: Record<string, string> = {};
+				for (const node of nodes) {
+					const w = existing.get(node.node_id) ?? 100;
+					next[node.node_id] = String(w);
+				}
+				return next;
+			}
+
+			const next = { ...prev };
+			for (const node of nodes) {
+				if (next[node.node_id] !== undefined) continue;
+				const w = existing.get(node.node_id) ?? 100;
+				next[node.node_id] = String(w);
+			}
+			return next;
+		});
+
+		if (!weightsDraftDirty) {
+			setWeightsError(null);
 		}
-		setWeightsDraft(next);
-		setWeightsError(null);
-	}, [nodes, weightsOpen, weightsQuery.data, weightsUserId]);
+	}, [nodes, weightsDraftDirty, weightsOpen, weightsQuery.data, weightsUserId]);
 
 	const saveWeights = async () => {
 		if (!weightsUserId) return;
@@ -170,6 +188,8 @@ export function QuotaPolicyPage() {
 			await weightsQuery.refetch();
 			setWeightsOpen(false);
 			setWeightsUserId(null);
+			setWeightsDraft({});
+			setWeightsDraftDirty(false);
 		} catch (err) {
 			const message = formatError(err);
 			setWeightsError(message);
@@ -192,6 +212,8 @@ export function QuotaPolicyPage() {
 				if (isSavingWeights) return;
 				setWeightsOpen(false);
 				setWeightsUserId(null);
+				setWeightsDraft({});
+				setWeightsDraftDirty(false);
 				setWeightsError(null);
 			}}
 			onClose={() => {
@@ -199,6 +221,8 @@ export function QuotaPolicyPage() {
 				if (isSavingWeights) return;
 				setWeightsOpen(false);
 				setWeightsUserId(null);
+				setWeightsDraft({});
+				setWeightsDraftDirty(false);
 				setWeightsError(null);
 			}}
 		>
@@ -257,12 +281,13 @@ export function QuotaPolicyPage() {
 													className={[inputClass, "font-mono"].join(" ")}
 													value={weightsDraft[n.node_id] ?? ""}
 													disabled={isSavingWeights}
-													onChange={(e) =>
+													onChange={(e) => {
+														setWeightsDraftDirty(true);
 														setWeightsDraft((prev) => ({
 															...prev,
 															[n.node_id]: e.target.value,
-														}))
-													}
+														}));
+													}}
 													placeholder="100"
 													aria-label={`Weight for ${n.node_name}`}
 												/>
@@ -291,6 +316,8 @@ export function QuotaPolicyPage() {
 						onClick={() => {
 							setWeightsOpen(false);
 							setWeightsUserId(null);
+							setWeightsDraft({});
+							setWeightsDraftDirty(false);
 							setWeightsError(null);
 						}}
 					>
@@ -312,6 +339,8 @@ export function QuotaPolicyPage() {
 					onClick={() => {
 						setWeightsOpen(false);
 						setWeightsUserId(null);
+						setWeightsDraft({});
+						setWeightsDraftDirty(false);
 						setWeightsError(null);
 					}}
 				>
@@ -521,6 +550,9 @@ export function QuotaPolicyPage() {
 									size="sm"
 									onClick={() => {
 										setWeightsUserId(u.user_id);
+										setWeightsDraft({});
+										setWeightsDraftDirty(false);
+										setWeightsError(null);
 										setWeightsOpen(true);
 									}}
 								>
