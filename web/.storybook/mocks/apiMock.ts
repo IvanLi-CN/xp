@@ -972,7 +972,7 @@ async function handleRequest(
 			user_id: userId,
 			display_name: payload.display_name,
 			subscription_token: token,
-			priority_tier: "p3",
+			priority_tier: "p2",
 			quota_reset:
 				payload.quota_reset ??
 				({

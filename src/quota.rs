@@ -899,8 +899,12 @@ async fn enforce_shared_node_quota_node(
                 if tier == UserPriorityTier::P3 {
                     if entry.last_priority_tier != UserPriorityTier::P3 {
                         entry.bank_bytes = 0;
-                        // P3 should not have access unless it has overflow tokens.
-                        // On transition, force an immediate ban (even if `delta == 0`).
+                    }
+
+                    // P3 should not have access unless it has overflow tokens. If the bank is
+                    // empty, force an immediate ban (even if `delta == 0`), so reconcile removes
+                    // the user from the inbound config.
+                    if entry.bank_bytes == 0 {
                         force_ban_users.insert(user_id.clone());
                     }
                     entry.last_base_quota_bytes = 0;
