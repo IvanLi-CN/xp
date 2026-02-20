@@ -2129,6 +2129,747 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_quota_enabled_user_set_change_updates_bank_immediately_same_day() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, p1_id, p2_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            // Deterministic (UTC) reset rule.
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let p1 = store.create_user("p1".to_string(), None).unwrap();
+            let p2 = store.create_user("p2".to_string(), None).unwrap();
+
+            store
+                .state_mut()
+                .users
+                .get_mut(&p1.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P1;
+            store
+                .state_mut()
+                .users
+                .get_mut(&p2.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let ep1 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let ep2 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let _ = store
+                .create_grant(
+                    "g1".to_string(),
+                    p1.user_id.clone(),
+                    ep1.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+            let _ = store
+                .create_grant(
+                    "g2".to_string(),
+                    p2.user_id.clone(),
+                    ep2.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, p1.user_id, p2.user_id)
+        };
+
+        // No traffic yet.
+        for grant in {
+            let store = store.lock().await;
+            store.list_grants()
+        } {
+            let email = format!("grant:{}", grant.grant_id);
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Initialize pacing.
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let (bank_p1_before, bank_p2_before) = {
+            let store = store.lock().await;
+            (
+                store
+                    .get_user_node_pacing(&p1_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+                store
+                    .get_user_node_pacing(&p2_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+            )
+        };
+
+        // Add a new enabled P2 user mid-day; expect immediate re-allocation on the next tick.
+        let p2b_id = {
+            let mut store = store.lock().await;
+            let p2b = store.create_user("p2b".to_string(), None).unwrap();
+            store
+                .state_mut()
+                .users
+                .get_mut(&p2b.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let ep = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8390,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let _ = store
+                .create_grant(
+                    "g3".to_string(),
+                    p2b.user_id.clone(),
+                    ep.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+            store.save().unwrap();
+            p2b.user_id
+        };
+        // Ensure stats exist for the new grant (still no traffic).
+        for grant in {
+            let store = store.lock().await;
+            store.list_grants()
+        } {
+            let email = format!("grant:{}", grant.grant_id);
+            let mut st = state.lock().await;
+            st.stats.entry(stat_name(&email, "uplink")).or_insert(0);
+            st.stats.entry(stat_name(&email, "downlink")).or_insert(0);
+        }
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let (cycle_start, cycle_end) = current_cycle_window_at(
+            CycleTimeZone::FixedOffsetMinutes {
+                tz_offset_minutes: 0,
+            },
+            1,
+            now,
+        )
+        .unwrap();
+        let cycle_days = (cycle_end.date_naive() - cycle_start.date_naive()).num_days() as u32;
+        let distributable = quota_policy::distributable_bytes(1024 * 1024 * 1024);
+
+        let mut items = vec![
+            (p1_id.clone(), 100u16),
+            (p2_id.clone(), 100u16),
+            (p2b_id.clone(), 100u16),
+        ];
+        items.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let base_by_user: std::collections::BTreeMap<String, u64> =
+            quota_policy::allocate_total_by_weight(distributable, &items)
+                .into_iter()
+                .collect();
+
+        let expected_p1_after = quota_policy::cap_bytes_for_day(
+            *base_by_user.get(&p1_id).unwrap(),
+            cycle_days,
+            0,
+            P1_CARRY_DAYS,
+        );
+        let expected_p2_after = quota_policy::cap_bytes_for_day(
+            *base_by_user.get(&p2_id).unwrap(),
+            cycle_days,
+            0,
+            P2_CARRY_DAYS,
+        );
+        let expected_p2b_after = quota_policy::cap_bytes_for_day(
+            *base_by_user.get(&p2b_id).unwrap(),
+            cycle_days,
+            0,
+            P2_CARRY_DAYS,
+        );
+
+        let store = store.lock().await;
+        assert_eq!(
+            store
+                .get_user_node_pacing(&p1_id, &node_id)
+                .unwrap()
+                .bank_bytes,
+            expected_p1_after
+        );
+        assert_eq!(
+            store
+                .get_user_node_pacing(&p2_id, &node_id)
+                .unwrap()
+                .bank_bytes,
+            expected_p2_after
+        );
+        assert_eq!(
+            store
+                .get_user_node_pacing(&p2b_id, &node_id)
+                .unwrap()
+                .bank_bytes,
+            expected_p2b_after
+        );
+        assert!(
+            store.get_user_node_pacing(&p2_id, &node_id).unwrap().bank_bytes < bank_p2_before
+        );
+        assert!(
+            store.get_user_node_pacing(&p1_id, &node_id).unwrap().bank_bytes < bank_p1_before
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_tier_change_p3_to_p2_unbans_and_allocates_immediately() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
+        let (node_id, p2_id, p3_id, p2_grant_id, p3_grant_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: node_quota_limit_bytes,
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let p2 = store.create_user("p2".to_string(), None).unwrap();
+            let p3 = store.create_user("p3".to_string(), None).unwrap();
+
+            store
+                .state_mut()
+                .users
+                .get_mut(&p2.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+            store
+                .state_mut()
+                .users
+                .get_mut(&p3.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P3;
+
+            let ep2 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let ep3 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let g2 = store
+                .create_grant(
+                    "g2".to_string(),
+                    p2.user_id.clone(),
+                    ep2.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+            let g3 = store
+                .create_grant(
+                    "g3".to_string(),
+                    p3.user_id.clone(),
+                    ep3.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, p2.user_id, p3.user_id, g2.grant_id, g3.grant_id)
+        };
+
+        // No traffic.
+        for grant in {
+            let store = store.lock().await;
+            store.list_grants()
+        } {
+            let email = format!("grant:{}", grant.grant_id);
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        // P3 starts banned (no overflow).
+        {
+            let store = store.lock().await;
+            assert!(store.get_grant_usage(&p3_grant_id).unwrap().quota_banned);
+        }
+
+        // Promote P3 -> P2 mid-day and expect immediate unban + bank allocation.
+        {
+            let mut store = store.lock().await;
+            store
+                .state_mut()
+                .users
+                .get_mut(&p3_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+            store.save().unwrap();
+        }
+
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let (cycle_start, cycle_end) = current_cycle_window_at(
+            CycleTimeZone::FixedOffsetMinutes {
+                tz_offset_minutes: 0,
+            },
+            1,
+            now,
+        )
+        .unwrap();
+        let cycle_days = (cycle_end.date_naive() - cycle_start.date_naive()).num_days() as u32;
+        let distributable = quota_policy::distributable_bytes(node_quota_limit_bytes);
+        assert_eq!(distributable, 1024);
+
+        let mut items = vec![(p2_id.clone(), 100u16), (p3_id.clone(), 100u16)];
+        items.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let base_by_user: std::collections::BTreeMap<String, u64> =
+            quota_policy::allocate_total_by_weight(distributable, &items)
+                .into_iter()
+                .collect();
+
+        let expected_p2_bank =
+            quota_policy::cap_bytes_for_day(*base_by_user.get(&p2_id).unwrap(), cycle_days, 0, 2);
+        let expected_p3_bank =
+            quota_policy::cap_bytes_for_day(*base_by_user.get(&p3_id).unwrap(), cycle_days, 0, 2);
+
+        let store = store.lock().await;
+        assert!(
+            !store.get_grant_usage(&p3_grant_id).unwrap().quota_banned,
+            "expected immediate unban after tier change to P2"
+        );
+        assert_eq!(
+            store
+                .get_user_node_pacing(&p2_id, &node_id)
+                .unwrap()
+                .bank_bytes,
+            expected_p2_bank
+        );
+        assert_eq!(
+            store
+                .get_user_node_pacing(&p3_id, &node_id)
+                .unwrap()
+                .bank_bytes,
+            expected_p3_bank
+        );
+
+        // Sanity: the original P2 grant remains enabled and tracked.
+        assert!(store.get_grant_usage(&p2_grant_id).is_some());
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_quota_increase_unbans_immediately_same_day() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, user_id, grant_id) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 256 * 1024 * 1024 + 1024, // distributable=1024
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let user = store.create_user("p2".to_string(), None).unwrap();
+            store
+                .state_mut()
+                .users
+                .get_mut(&user.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            let endpoint = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(
+                    "g".to_string(),
+                    user.user_id.clone(),
+                    endpoint.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, user.user_id, grant.grant_id)
+        };
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Initialize pacing and compute day-0 cap.
+        {
+            let email = format!("grant:{grant_id}");
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let cap_day0 = {
+            let store = store.lock().await;
+            store
+                .get_user_node_pacing(&user_id, &node_id)
+                .unwrap()
+                .bank_bytes
+        };
+
+        // Overuse by 1 byte to trigger a ban.
+        {
+            let email = format!("grant:{grant_id}");
+            let mut st = state.lock().await;
+            st.stats
+                .insert(stat_name(&email, "uplink"), (cap_day0 + 1) as i64);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+        {
+            let store = store.lock().await;
+            assert!(store.get_grant_usage(&grant_id).unwrap().quota_banned);
+        }
+
+        // Increase node quota budget drastically. No new traffic is reported (delta==0), but
+        // the user should be unbanned immediately once the new cap makes the consumption feasible.
+        {
+            let mut store = store.lock().await;
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 256 * 1024 * 1024 + 8192, // distributable=8192
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+            store.save().unwrap();
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store = store.lock().await;
+        assert!(
+            !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+            "expected immediate unban after quota increase"
+        );
+        assert!(
+            store
+                .get_user_node_pacing(&user_id, &node_id)
+                .unwrap()
+                .bank_bytes
+                > 0,
+            "expected positive bank after quota increase"
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn shared_quota_weight_decrease_can_ban_without_new_traffic() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+        let raft = test_raft(store.clone());
+
+        let (node_id, u1_id, _u2_id, g1_id, endpoint_tag) = {
+            let mut store = store.lock().await;
+            let node_id = store.list_nodes()[0].node_id.clone();
+
+            let _ = store
+                .upsert_node(Node {
+                    node_id: node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(0),
+                    },
+                })
+                .unwrap();
+
+            let u1 = store.create_user("u1".to_string(), None).unwrap();
+            let u2 = store.create_user("u2".to_string(), None).unwrap();
+            store
+                .state_mut()
+                .users
+                .get_mut(&u1.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+            store
+                .state_mut()
+                .users
+                .get_mut(&u2.user_id)
+                .unwrap()
+                .priority_tier = crate::domain::UserPriorityTier::P2;
+
+            // Start with an asymmetric weight for u1.
+            DesiredStateCommand::SetUserNodeWeight {
+                user_id: u1.user_id.clone(),
+                node_id: node_id.clone(),
+                weight: 200,
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::SetUserNodeWeight {
+                user_id: u2.user_id.clone(),
+                node_id: node_id.clone(),
+                weight: 100,
+            }
+            .apply(store.state_mut())
+            .unwrap();
+
+            let ep1 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            let ep2 = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8389,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+
+            let g1 = store
+                .create_grant(
+                    "g1".to_string(),
+                    u1.user_id.clone(),
+                    ep1.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+            let _ = store
+                .create_grant(
+                    "g2".to_string(),
+                    u2.user_id.clone(),
+                    ep2.endpoint_id,
+                    0,
+                    true,
+                    None,
+                )
+                .unwrap();
+
+            store.save().unwrap();
+            (node_id, u1.user_id, u2.user_id, g1.grant_id, ep1.tag)
+        };
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Initialize with no traffic.
+        for grant in {
+            let store = store.lock().await;
+            store.list_grants()
+        } {
+            let email = format!("grant:{}", grant.grant_id);
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        // Spend exactly u1's day-0 cap so its bank becomes 0 without a ban.
+        let bank_u1 = {
+            let store = store.lock().await;
+            store
+                .get_user_node_pacing(&u1_id, &node_id)
+                .unwrap()
+                .bank_bytes
+        };
+        {
+            let email = format!("grant:{g1_id}");
+            let mut st = state.lock().await;
+            st.stats
+                .insert(stat_name(&email, "uplink"), bank_u1 as i64);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+        {
+            let store = store.lock().await;
+            assert!(
+                !store.get_grant_usage(&g1_id).unwrap().quota_banned,
+                "expected no ban when spending within old cap"
+            );
+            assert_eq!(
+                store
+                    .get_user_node_pacing(&u1_id, &node_id)
+                    .unwrap()
+                    .bank_bytes,
+                0
+            );
+        }
+
+        // Drop u1's weight drastically. With no new traffic (delta==0), u1 should be banned
+        // immediately because the new cap is below already-consumed usage.
+        {
+            let mut store = store.lock().await;
+            DesiredStateCommand::SetUserNodeWeight {
+                user_id: u1_id.clone(),
+                node_id: node_id.clone(),
+                weight: 1,
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+        }
+        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        assert!(store_guard.get_grant_usage(&g1_id).unwrap().quota_banned);
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert!(
+            st.calls
+                .iter()
+                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &format!("grant:{g1_id}"))),
+            "expected xray remove_user to be issued on immediate ban"
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
     async fn shared_quota_p2_overflow_reaches_p3_via_p1_when_p1_at_cap() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;

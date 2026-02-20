@@ -1123,6 +1123,70 @@ async fn put_user_node_quota_is_gone() {
 }
 
 #[tokio::test]
+async fn put_user_node_weight_then_list_returns_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    // Create user.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+
+    // Bootstrap node exists.
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    // Put node weight.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/node-weights/{node_id}"),
+            json!({
+              "weight": 200
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["node_id"], node_id);
+    assert_eq!(updated["weight"], 200);
+
+    // List should contain the updated weight.
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/node-weights"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let items = json["items"].as_array().unwrap();
+    assert!(items
+        .iter()
+        .any(|i| i["node_id"] == node_id && i["weight"] == 200));
+}
+
+#[tokio::test]
 async fn create_endpoint_then_list_contains_it() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -1195,6 +1259,36 @@ async fn patch_admin_node_updates_fields() {
     assert_eq!(updated["access_host"], original_access_host);
     assert_eq!(updated["api_base_url"], original_api_base_url);
     assert_eq!(updated["quota_reset"]["policy"], "unlimited");
+}
+
+#[tokio::test]
+async fn patch_admin_node_allows_quota_limit_bytes_update() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_limit_bytes": 456
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["node_id"], node_id);
+    assert_eq!(updated["quota_limit_bytes"], 456);
 }
 
 #[tokio::test]
@@ -1316,6 +1410,42 @@ async fn patch_admin_user_updates_fields_preserves_token() {
     assert_eq!(updated["quota_reset"]["policy"], "monthly");
     assert_eq!(updated["quota_reset"]["day_of_month"], 15);
     assert_eq!(updated["quota_reset"]["tz_offset_minutes"], 0);
+}
+
+#[tokio::test]
+async fn patch_admin_user_allows_priority_tier_update() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            json!({
+              "priority_tier": "p1"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["user_id"], user_id);
+    assert_eq!(updated["priority_tier"], "p1");
 }
 
 #[tokio::test]
