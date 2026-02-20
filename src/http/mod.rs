@@ -474,6 +474,8 @@ struct PatchNodeRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     api_base_url: Option<Option<String>>,
     #[serde(default)]
+    quota_limit_bytes: Option<u64>,
+    #[serde(default)]
     quota_reset: Option<NodeQuotaReset>,
 }
 
@@ -496,14 +498,9 @@ struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     display_name: Option<Option<String>>,
     #[serde(default)]
-    quota_reset: Option<UserQuotaReset>,
-}
-
-#[derive(Deserialize)]
-struct PutUserNodeQuotaRequest {
-    quota_limit_bytes: u64,
+    priority_tier: Option<crate::domain::UserPriorityTier>,
     #[serde(default)]
-    quota_reset_source: Option<QuotaResetSource>,
+    quota_reset: Option<UserQuotaReset>,
 }
 
 #[derive(Deserialize)]
@@ -755,6 +752,14 @@ pub fn build_router(
         .route(
             "/users/:user_id/node-quotas/:node_id",
             put(admin_put_user_node_quota),
+        )
+        .route(
+            "/users/:user_id/node-weights",
+            get(admin_list_user_node_weights),
+        )
+        .route(
+            "/users/:user_id/node-weights/:node_id",
+            put(admin_put_user_node_weight),
         )
         .route(
             "/grant-groups",
@@ -1477,6 +1482,7 @@ async fn cluster_join(
                 node_name: state.config.node_name.clone(),
                 access_host: state.config.access_host.clone(),
                 api_base_url: state.config.api_base_url.clone(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
     };
@@ -1500,6 +1506,7 @@ async fn cluster_join(
         node_name: req.node_name.clone(),
         access_host: req.access_host.clone(),
         api_base_url: req.api_base_url.clone(),
+        quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
 
@@ -1665,6 +1672,9 @@ async fn admin_patch_node(
 
     if let Some(quota_reset) = req.quota_reset {
         node.quota_reset = quota_reset;
+    }
+    if let Some(quota_limit_bytes) = req.quota_limit_bytes {
+        node.quota_limit_bytes = quota_limit_bytes;
     }
 
     let _ = raft_write(
@@ -3320,6 +3330,9 @@ async fn admin_patch_user(
         };
         user.display_name = display_name;
     }
+    if let Some(priority_tier) = req.priority_tier {
+        user.priority_tier = priority_tier;
+    }
     if let Some(quota_reset) = req.quota_reset {
         user.quota_reset = quota_reset;
     }
@@ -3386,6 +3399,50 @@ async fn admin_list_user_node_quotas(
     let store = state.store.lock().await;
     let items = store.list_user_node_quotas(&user_id)?;
     Ok(Json(Items { items }))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminUserNodeWeightItem {
+    node_id: String,
+    weight: u16,
+}
+
+async fn admin_list_user_node_weights(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<Items<AdminUserNodeWeightItem>>, ApiError> {
+    let store = state.store.lock().await;
+    let items = store
+        .list_user_node_weights(&user_id)?
+        .into_iter()
+        .map(|(node_id, weight)| AdminUserNodeWeightItem { node_id, weight })
+        .collect();
+    Ok(Json(Items { items }))
+}
+
+#[derive(Debug, Deserialize)]
+struct PutUserNodeWeightRequest {
+    weight: u16,
+}
+
+async fn admin_put_user_node_weight(
+    Extension(state): Extension<AppState>,
+    Path((user_id, node_id)): Path<(String, String)>,
+    ApiJson(req): ApiJson<PutUserNodeWeightRequest>,
+) -> Result<Json<AdminUserNodeWeightItem>, ApiError> {
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetUserNodeWeight {
+            user_id: user_id.clone(),
+            node_id: node_id.clone(),
+            weight: req.weight,
+        },
+    )
+    .await?;
+    Ok(Json(AdminUserNodeWeightItem {
+        node_id,
+        weight: req.weight,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -3470,9 +3527,64 @@ fn resolve_user_node_quota_reset_for_status(
     Ok((source, policy, tz, day_of_month))
 }
 
+fn resolve_node_quota_reset_for_status(
+    store: &JsonSnapshotStore,
+    node_id: &str,
+) -> Result<(QuotaResetPolicy, CycleTimeZone, u8), ApiError> {
+    let node = store
+        .get_node(node_id)
+        .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
+
+    let (policy, day_of_month, tz) = match node.quota_reset {
+        NodeQuotaReset::Unlimited { tz_offset_minutes } => (
+            QuotaResetPolicy::Unlimited,
+            1,
+            match tz_offset_minutes {
+                Some(tz_offset_minutes) => CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                None => CycleTimeZone::Local,
+            },
+        ),
+        NodeQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes,
+        } => (
+            QuotaResetPolicy::Monthly,
+            day_of_month,
+            match tz_offset_minutes {
+                Some(tz_offset_minutes) => CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                None => CycleTimeZone::Local,
+            },
+        ),
+    };
+
+    if !(1..=31).contains(&day_of_month) {
+        return Err(ApiError::internal(format!(
+            "invalid day_of_month: {day_of_month}"
+        )));
+    }
+
+    Ok((policy, tz, day_of_month))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AdminUserQuotaLimitKind {
+    /// A true "unlimited" quota (no budget) for the relevant scope.
+    Unlimited,
+    /// A static, per-user quota limit (legacy mode).
+    Fixed,
+    /// Shared node quota: this is the user's derived base share of the node budget.
+    SharedBase,
+    /// Shared node quota: no base share; user can only consume overflow.
+    SharedOpportunistic,
+    /// Aggregated across nodes where quota kinds differ (non-unlimited).
+    Mixed,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminUserQuotaSummaryItem {
     user_id: String,
+    quota_limit_kind: AdminUserQuotaLimitKind,
     quota_limit_bytes: u64,
     used_bytes: u64,
     remaining_bytes: u64,
@@ -3485,11 +3597,59 @@ struct AdminUserQuotaSummariesResponse {
     items: Vec<AdminUserQuotaSummaryItem>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdminUserQuotaSummaryItemWire {
+    user_id: String,
+    #[serde(default)]
+    quota_limit_kind: Option<AdminUserQuotaLimitKind>,
+    quota_limit_bytes: u64,
+    used_bytes: u64,
+    remaining_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUserQuotaSummariesResponseWire {
+    items: Vec<AdminUserQuotaSummaryItemWire>,
+}
+
+fn normalize_quota_limit_kind(
+    quota_limit_bytes: u64,
+    kind: Option<AdminUserQuotaLimitKind>,
+) -> AdminUserQuotaLimitKind {
+    // Backward-compat: older nodes didn't return `quota_limit_kind`; they used
+    // `quota_limit_bytes == 0` to mean "unlimited".
+    kind.unwrap_or({
+        if quota_limit_bytes == 0 {
+            AdminUserQuotaLimitKind::Unlimited
+        } else {
+            AdminUserQuotaLimitKind::Fixed
+        }
+    })
+}
+
+fn merge_quota_limit_kind(
+    a: &AdminUserQuotaLimitKind,
+    b: &AdminUserQuotaLimitKind,
+) -> AdminUserQuotaLimitKind {
+    use AdminUserQuotaLimitKind as K;
+    match (a, b) {
+        (K::Unlimited, _) | (_, K::Unlimited) => K::Unlimited,
+        (x, y) if x == y => x.clone(),
+        _ => K::Mixed,
+    }
+}
+
 fn build_local_user_quota_summaries(
     store: &JsonSnapshotStore,
     local_node_id: &str,
 ) -> Result<Vec<AdminUserQuotaSummaryItem>, ApiError> {
     let now = Utc::now();
+
+    let local_node_quota_limit_bytes = store
+        .get_node(local_node_id)
+        .map(|n| n.quota_limit_bytes)
+        .unwrap_or(0);
+    let shared_quota_enabled = local_node_quota_limit_bytes > 0;
 
     let endpoints_by_id = store
         .list_endpoints()
@@ -3514,27 +3674,136 @@ fn build_local_user_quota_summaries(
             .push(grant);
     }
 
+    // In shared-quota mode, the per-user "limit" is derived from the node budget and the user's
+    // tier/weight. Compute it once so the loop can stay simple and stable.
+    let mut shared_cycle: Option<(QuotaResetPolicy, CycleTimeZone, u8)> = None;
+    let mut shared_base_by_user: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+    if shared_quota_enabled {
+        let (policy, tz, day_of_month) = resolve_node_quota_reset_for_status(store, local_node_id)?;
+        shared_cycle = Some((policy, tz, day_of_month));
+
+        if policy != QuotaResetPolicy::Unlimited {
+            // Only allocate base quota among enabled P1/P2 users (matching enforcement behavior).
+            let mut items: Vec<(String, u16)> = Vec::new();
+            for (user_id, grants) in grants_by_user.iter() {
+                if user_id == crate::endpoint_probe::PROBE_USER_ID {
+                    continue;
+                }
+                if !grants.iter().any(|g| g.enabled) {
+                    continue;
+                }
+                let tier = store
+                    .get_user(user_id)
+                    .map(|u| u.priority_tier)
+                    .unwrap_or_default();
+                if tier == crate::domain::UserPriorityTier::P3 {
+                    continue;
+                }
+                let weight = store.resolve_user_node_weight(user_id, local_node_id);
+                items.push((user_id.clone(), weight));
+            }
+            items.sort_by(|a, b| a.0.cmp(&b.0));
+            items.dedup_by(|a, b| a.0 == b.0);
+
+            let distributable =
+                crate::quota_policy::distributable_bytes(local_node_quota_limit_bytes);
+            for (user_id, base) in
+                crate::quota_policy::allocate_total_by_weight(distributable, &items)
+            {
+                shared_base_by_user.insert(user_id, base);
+            }
+        }
+    }
+
     let mut items = Vec::new();
     for user in store.list_users() {
         let user_id = user.user_id;
         let grants = grants_by_user.remove(&user_id).unwrap_or_default();
-        let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
-        let uniform_grant_quota = {
-            let first = grants.first().map(|g| g.quota_limit_bytes);
-            if let Some(first) = first
-                && grants.iter().all(|g| g.quota_limit_bytes == first)
-            {
-                Some(first)
-            } else {
-                None
-            }
-        };
-        let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
-            continue;
-        };
 
-        let (_source, policy, tz, day_of_month) =
-            resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+        // Under the shared node quota policy, per-user quota summaries are derived from the
+        // node's quota budget + quota_reset (not from per-grant/static quotas).
+        let (quota_limit_kind, quota_limit_bytes, policy, tz, day_of_month) =
+            if shared_quota_enabled {
+                if grants.is_empty() {
+                    continue;
+                }
+                let (policy, tz, day_of_month) = shared_cycle
+                    .as_ref()
+                    .cloned()
+                    .expect("shared_cycle is set when shared_quota_enabled");
+
+                if policy == QuotaResetPolicy::Unlimited {
+                    (
+                        AdminUserQuotaLimitKind::Unlimited,
+                        0,
+                        policy,
+                        tz,
+                        day_of_month,
+                    )
+                } else {
+                    let tier = store
+                        .get_user(&user_id)
+                        .map(|u| u.priority_tier)
+                        .unwrap_or_default();
+                    if tier == crate::domain::UserPriorityTier::P3 {
+                        // P3 has no fixed base share; it can only consume overflow.
+                        (
+                            AdminUserQuotaLimitKind::SharedOpportunistic,
+                            0,
+                            policy,
+                            tz,
+                            day_of_month,
+                        )
+                    } else {
+                        let base = shared_base_by_user.get(&user_id).copied().unwrap_or(0);
+                        (
+                            AdminUserQuotaLimitKind::SharedBase,
+                            base,
+                            policy,
+                            tz,
+                            day_of_month,
+                        )
+                    }
+                }
+            } else {
+                let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
+                let uniform_grant_quota = {
+                    let first = grants.first().map(|g| g.quota_limit_bytes);
+                    if let Some(first) = first
+                        && grants.iter().all(|g| g.quota_limit_bytes == first)
+                    {
+                        Some(first)
+                    } else {
+                        None
+                    }
+                };
+                let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+                    continue;
+                };
+
+                let (_source, policy, tz, day_of_month) =
+                    resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+
+                let quota_limit_kind =
+                    if policy == QuotaResetPolicy::Unlimited || quota_limit_bytes == 0 {
+                        AdminUserQuotaLimitKind::Unlimited
+                    } else {
+                        AdminUserQuotaLimitKind::Fixed
+                    };
+                let quota_limit_bytes = if quota_limit_kind == AdminUserQuotaLimitKind::Unlimited {
+                    0
+                } else {
+                    quota_limit_bytes
+                };
+                (
+                    quota_limit_kind,
+                    quota_limit_bytes,
+                    policy,
+                    tz,
+                    day_of_month,
+                )
+            };
 
         let (cycle_start_at, cycle_end_at) = if policy == QuotaResetPolicy::Monthly {
             let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
@@ -3557,9 +3826,13 @@ fn build_local_user_quota_summaries(
             acc.saturating_add(usage.used_bytes)
         });
 
-        let remaining_bytes = quota_limit_bytes.saturating_sub(used_bytes);
+        let remaining_bytes = match quota_limit_kind {
+            AdminUserQuotaLimitKind::Unlimited | AdminUserQuotaLimitKind::SharedOpportunistic => 0,
+            _ => quota_limit_bytes.saturating_sub(used_bytes),
+        };
         items.push(AdminUserQuotaSummaryItem {
             user_id,
+            quota_limit_kind,
             quota_limit_bytes,
             used_bytes,
             remaining_bytes,
@@ -3654,17 +3927,32 @@ async fn admin_list_user_quota_summaries(
             continue;
         }
 
-        match response.json::<AdminUserQuotaSummariesResponse>().await {
+        match response.json::<AdminUserQuotaSummariesResponseWire>().await {
             Ok(remote) => {
-                for item in remote.items {
+                for wire in remote.items {
+                    let item = AdminUserQuotaSummaryItem {
+                        user_id: wire.user_id,
+                        quota_limit_kind: normalize_quota_limit_kind(
+                            wire.quota_limit_bytes,
+                            wire.quota_limit_kind,
+                        ),
+                        quota_limit_bytes: wire.quota_limit_bytes,
+                        used_bytes: wire.used_bytes,
+                        remaining_bytes: wire.remaining_bytes,
+                    };
                     totals
                         .entry(item.user_id.clone())
                         .and_modify(|entry| {
-                            // Keep semantics consistent with enforcement:
-                            // `quota_limit_bytes == 0` means "unlimited", so any unlimited node
-                            // must keep the aggregated limit as unlimited.
+                            // Keep semantics consistent with enforcement: any truly unlimited node
+                            // makes the aggregated quota unlimited.
                             entry.used_bytes = entry.used_bytes.saturating_add(item.used_bytes);
-                            if entry.quota_limit_bytes == 0 || item.quota_limit_bytes == 0 {
+                            entry.quota_limit_kind = merge_quota_limit_kind(
+                                &entry.quota_limit_kind,
+                                &item.quota_limit_kind,
+                            );
+
+                            if matches!(entry.quota_limit_kind, AdminUserQuotaLimitKind::Unlimited)
+                            {
                                 entry.quota_limit_bytes = 0;
                                 entry.remaining_bytes = 0;
                             } else {
@@ -3885,33 +4173,16 @@ async fn admin_get_user_node_quota_status(
 async fn admin_put_user_node_quota(
     Extension(state): Extension<AppState>,
     Path((user_id, node_id)): Path<(String, String)>,
-    ApiJson(req): ApiJson<PutUserNodeQuotaRequest>,
+    ApiJson(req): ApiJson<serde_json::Value>,
 ) -> Result<Json<UserNodeQuota>, ApiError> {
-    let quota_reset_source = match req.quota_reset_source {
-        Some(v) => v,
-        None => {
-            let store = state.store.lock().await;
-            store
-                .get_user_node_quota_reset_source(&user_id, &node_id)
-                .unwrap_or_default()
-        }
-    };
-
-    let out = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::SetUserNodeQuota {
-            user_id: user_id.clone(),
-            node_id: node_id.clone(),
-            quota_limit_bytes: req.quota_limit_bytes,
-            quota_reset_source,
-        },
-    )
-    .await?;
-    let crate::state::DesiredStateApplyResult::UserNodeQuotaSet { quota } = out else {
-        return Err(ApiError::internal("unexpected raft apply result"));
-    };
-    state.reconcile.request_full();
-    Ok(Json(quota))
+    // Deprecated: static per-user node quotas can bypass the shared quota policy.
+    // Keep the read-only status endpoints; deny writes.
+    let _ = (&state, &user_id, &node_id, &req);
+    Err(ApiError::new(
+        "gone",
+        StatusCode::GONE,
+        "user node quotas are no longer editable; configure node quota_limit_bytes + user node weights instead",
+    ))
 }
 
 async fn admin_list_grant_groups(

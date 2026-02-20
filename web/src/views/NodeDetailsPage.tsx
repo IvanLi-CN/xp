@@ -12,6 +12,7 @@ import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
@@ -268,6 +269,41 @@ export function NodeDetailsPage() {
 								Runtime admin setting. Safe to edit via the admin API.
 							</p>
 						</div>
+
+						<div className="rounded-box bg-base-200 p-4 space-y-1">
+							<div className="text-xs uppercase tracking-wide opacity-60">
+								Quota budget
+							</div>
+							<div className="text-sm opacity-70">
+								Total bytes per cycle for this node. Set to{" "}
+								<span className="font-mono">0</span> to disable shared quota
+								enforcement (unlimited).
+							</div>
+							<NodeQuotaEditor
+								value={nodeQuery.data.quota_limit_bytes}
+								disabled={isSaving}
+								onApply={async (nextBytes) => {
+									try {
+										await patchAdminNode(adminToken, nodeId, {
+											quota_limit_bytes: nextBytes,
+										});
+										pushToast({
+											variant: "success",
+											message: "Node quota budget updated.",
+										});
+										await nodeQuery.refetch();
+									} catch (error) {
+										const message = formatErrorMessage(error);
+										pushToast({
+											variant: "error",
+											message: `Failed to update node quota budget: ${message}`,
+										});
+										throw new Error(message);
+									}
+								}}
+							/>
+						</div>
+
 						<div className="grid gap-4 md:grid-cols-3">
 							<label className="form-control">
 								<div className="label">

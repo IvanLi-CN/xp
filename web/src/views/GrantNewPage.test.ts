@@ -26,14 +26,6 @@ describe("buildGrantGroupCreateRequest", () => {
 					meta: {},
 				},
 			],
-			nodeQuotas: [
-				{
-					user_id: "u_01HUSERAAAAAA",
-					node_id: "n1",
-					quota_limit_bytes: 10,
-					quota_reset_source: "user",
-				},
-			],
 			note: "  enterprise quota  ",
 		});
 
@@ -43,7 +35,7 @@ describe("buildGrantGroupCreateRequest", () => {
 				user_id: "u_01HUSERAAAAAA",
 				endpoint_id: "ep-a",
 				enabled: true,
-				quota_limit_bytes: 10,
+				quota_limit_bytes: 0,
 				note: "enterprise quota",
 			},
 			{
@@ -71,7 +63,6 @@ describe("buildGrantGroupCreateRequest", () => {
 					meta: {},
 				},
 			],
-			nodeQuotas: [],
 			note: "   ",
 		});
 
@@ -85,7 +76,6 @@ describe("buildGrantGroupCreateRequest", () => {
 				userId: "u1",
 				selectedEndpointIds: ["missing"],
 				endpoints: [],
-				nodeQuotas: [],
 				note: "",
 			}),
 		).toThrow(/endpoint not found/);

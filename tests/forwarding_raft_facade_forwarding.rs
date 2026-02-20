@@ -352,6 +352,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         user_id: "user-forward".to_string(),
         display_name: "forwarded-write".to_string(),
         subscription_token: "sub_test_token".to_string(),
+        priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Monthly {
             day_of_month: 1,
             tz_offset_minutes: 480,

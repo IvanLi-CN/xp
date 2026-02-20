@@ -22,6 +22,7 @@ type AdminUser = {
 	user_id: string;
 	display_name: string;
 	subscription_token: string;
+	priority_tier: "p1" | "p2" | "p3";
 	quota_reset: UserQuotaReset;
 };
 
@@ -30,6 +31,7 @@ type AdminNode = {
 	node_name: string;
 	api_base_url: string;
 	access_host: string;
+	quota_limit_bytes: number;
 	quota_reset: NodeQuotaReset;
 };
 
@@ -47,6 +49,11 @@ type AdminUserNodeQuota = {
 	node_id: string;
 	quota_limit_bytes: number;
 	quota_reset_source: QuotaResetSource;
+};
+
+type AdminUserNodeWeightItem = {
+	node_id: string;
+	weight: number;
 };
 
 type AdminGrantGroupSummary = {
@@ -99,6 +106,7 @@ type MockApiOptions = {
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
+	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
 	grantGroups?: AdminGrantGroupDetail[];
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
@@ -112,6 +120,7 @@ type MockState = {
 	nodes: AdminNode[];
 	endpoints: AdminEndpoint[];
 	nodeQuotas: AdminUserNodeQuota[];
+	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	grantGroups: AdminGrantGroupDetail[];
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
@@ -126,6 +135,7 @@ const defaultNodes: AdminNode[] = [
 		node_name: "alpha",
 		api_base_url: "http://127.0.0.1:62416",
 		access_host: "alpha.example.com",
+		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 1,
@@ -150,6 +160,7 @@ const defaultUsers: AdminUser[] = [
 		user_id: "user-1",
 		display_name: "Demo user",
 		subscription_token: "sub-user-1",
+		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 1,
@@ -266,6 +277,14 @@ export async function setupApiMocks(
 			? [...options.endpoints]
 			: [...defaultEndpoints],
 		nodeQuotas: options.nodeQuotas ? [...options.nodeQuotas] : [],
+		userNodeWeights: options.userNodeWeights
+			? Object.fromEntries(
+					Object.entries(options.userNodeWeights).map(([userId, items]) => [
+						userId,
+						[...items],
+					]),
+				)
+			: {},
 		grantGroups: options.grantGroups
 			? [...options.grantGroups]
 			: [...defaultGrantGroups],
@@ -308,6 +327,37 @@ export async function setupApiMocks(
 
 		if (path === "/api/admin/nodes" && method === "GET") {
 			jsonResponse(route, { items: state.nodes });
+			return;
+		}
+
+		const nodeGetMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);
+		if (nodeGetMatch && method === "GET") {
+			const nodeId = decodeURIComponent(nodeGetMatch[1]);
+			const node = state.nodes.find((n) => n.node_id === nodeId);
+			if (!node) {
+				errorResponse(route, `node not found: ${nodeId}`, 404);
+				return;
+			}
+			jsonResponse(route, node);
+			return;
+		}
+
+		const nodePatchMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);
+		if (nodePatchMatch && method === "PATCH") {
+			const nodeId = decodeURIComponent(nodePatchMatch[1]);
+			const node = state.nodes.find((n) => n.node_id === nodeId);
+			if (!node) {
+				errorResponse(route, `node not found: ${nodeId}`, 404);
+				return;
+			}
+			const payload = parseJsonBody(request);
+			if (typeof payload.quota_limit_bytes === "number") {
+				node.quota_limit_bytes = payload.quota_limit_bytes;
+			}
+			if (payload.quota_reset) {
+				node.quota_reset = payload.quota_reset as NodeQuotaReset;
+			}
+			jsonResponse(route, node);
 			return;
 		}
 
@@ -370,6 +420,21 @@ export async function setupApiMocks(
 			return;
 		}
 
+		if (path === "/api/admin/users/quota-summaries" && method === "GET") {
+			jsonResponse(route, {
+				partial: false,
+				unreachable_nodes: [],
+				items: state.users.map((u) => ({
+					user_id: u.user_id,
+					quota_limit_kind: "unlimited",
+					quota_limit_bytes: 0,
+					used_bytes: 0,
+					remaining_bytes: 0,
+				})),
+			});
+			return;
+		}
+
 		if (path === "/api/admin/users" && method === "POST") {
 			const payload = parseJsonBody(request);
 			const displayName =
@@ -382,6 +447,7 @@ export async function setupApiMocks(
 				user_id: userId,
 				display_name: displayName,
 				subscription_token: `sub-${userId}`,
+				priority_tier: "p3",
 				quota_reset:
 					quotaReset ??
 					({
@@ -410,28 +476,8 @@ export async function setupApiMocks(
 			/^\/api\/admin\/users\/([^/]+)\/node-quotas\/([^/]+)$/,
 		);
 		if (userNodeQuotaPutMatch && method === "PUT") {
-			const userId = decodeURIComponent(userNodeQuotaPutMatch[1]);
-			const nodeId = decodeURIComponent(userNodeQuotaPutMatch[2]);
-			const payload = parseJsonBody(request);
-			const quotaLimitBytes = Number(payload.quota_limit_bytes ?? 0);
-			const quotaResetSource: QuotaResetSource =
-				payload.quota_reset_source === "node" ? "node" : "user";
-
-			state.nodeQuotas = state.nodeQuotas.filter(
-				(q) => !(q.user_id === userId && q.node_id === nodeId),
-			);
-			state.nodeQuotas.push({
-				user_id: userId,
-				node_id: nodeId,
-				quota_limit_bytes: quotaLimitBytes,
-				quota_reset_source: quotaResetSource,
-			});
-			jsonResponse(route, {
-				user_id: userId,
-				node_id: nodeId,
-				quota_limit_bytes: quotaLimitBytes,
-				quota_reset_source: quotaResetSource,
-			});
+			// Legacy static quotas are deprecated by the shared node quota policy.
+			errorResponse(route, "deprecated endpoint: use quota policy API", 410);
 			return;
 		}
 
@@ -439,6 +485,65 @@ export async function setupApiMocks(
 			const segments = path.split("/");
 			const userId = decodeURIComponent(segments[4] ?? "");
 			const isResetToken = segments[5] === "reset-token";
+			const isNodeWeights = segments[5] === "node-weights";
+
+			if (isNodeWeights && method === "GET") {
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				jsonResponse(route, { items: state.userNodeWeights[userId] ?? [] });
+				return;
+			}
+
+			const nodeWeightPutMatch = path.match(
+				/^\/api\/admin\/users\/([^/]+)\/node-weights\/([^/]+)$/,
+			);
+			if (nodeWeightPutMatch && method === "PUT") {
+				const nodeId = decodeURIComponent(nodeWeightPutMatch[2]);
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				const node = state.nodes.find((item) => item.node_id === nodeId);
+				if (!node) {
+					errorResponse(route, `Node not found: ${nodeId}`, 404);
+					return;
+				}
+				const payload = parseJsonBody(request);
+				const rawWeight = payload.weight;
+				if (typeof rawWeight !== "number") {
+					errorResponse(route, "invalid JSON payload: missing weight", 400);
+					return;
+				}
+				if (!Number.isFinite(rawWeight) || !Number.isInteger(rawWeight)) {
+					errorResponse(route, "invalid weight: must be an integer", 400);
+					return;
+				}
+				if (rawWeight < 0 || rawWeight > 65535) {
+					errorResponse(
+						route,
+						"invalid weight: must be between 0 and 65535",
+						400,
+					);
+					return;
+				}
+
+				const items = state.userNodeWeights[userId] ?? [];
+				const next: AdminUserNodeWeightItem = {
+					node_id: nodeId,
+					weight: rawWeight,
+				};
+				state.userNodeWeights[userId] = [
+					...items.filter((i) => i.node_id !== nodeId),
+					next,
+				];
+
+				jsonResponse(route, next);
+				return;
+			}
 
 			if (isResetToken && method === "POST") {
 				const user = state.users.find((item) => item.user_id === userId);
@@ -471,6 +576,13 @@ export async function setupApiMocks(
 				const payload = parseJsonBody(request);
 				if (typeof payload.display_name === "string") {
 					user.display_name = payload.display_name;
+				}
+				if (
+					payload.priority_tier === "p1" ||
+					payload.priority_tier === "p2" ||
+					payload.priority_tier === "p3"
+				) {
+					user.priority_tier = payload.priority_tier;
 				}
 				if (payload.quota_reset) {
 					user.quota_reset = payload.quota_reset as UserQuotaReset;

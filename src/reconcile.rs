@@ -1096,6 +1096,7 @@ mod tests {
                     node_name: "node-2".to_string(),
                     access_host: "".to_string(),
                     api_base_url: "https://127.0.0.1:62417".to_string(),
+                    quota_limit_bytes: 0,
                     quota_reset: NodeQuotaReset::default(),
                 })
                 .unwrap();

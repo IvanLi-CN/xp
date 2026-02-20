@@ -63,6 +63,7 @@ const DESIGN_NODES: AdminNode[] = [
 		node_name: "tokyo-1",
 		access_host: "tokyo.example.com",
 		api_base_url: "https://n1:62416",
+		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 1,
@@ -74,6 +75,7 @@ const DESIGN_NODES: AdminNode[] = [
 		node_name: "osaka-1",
 		access_host: "osaka.example.com",
 		api_base_url: "https://n2:62416",
+		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 15,
@@ -85,6 +87,7 @@ const DESIGN_NODES: AdminNode[] = [
 		node_name: "nagoya-1",
 		access_host: "nagoya.example.com",
 		api_base_url: "https://n3:62416",
+		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "unlimited",
 			tz_offset_minutes: null,
@@ -149,6 +152,7 @@ const DESIGN_USERS: AdminUser[] = [
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Customer A",
 		subscription_token: "sub_9c1234d2",
+		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 1,
@@ -159,6 +163,7 @@ const DESIGN_USERS: AdminUser[] = [
 		user_id: "u_01HUSERBBBBBB",
 		display_name: "Customer B",
 		subscription_token: "sub_af5678e9",
+		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 15,

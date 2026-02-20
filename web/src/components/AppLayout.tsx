@@ -29,6 +29,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 					title: "Settings",
 					items: [
 						{
+							label: "Quota policy",
+							to: "/quota-policy",
+							icon: "tabler:gauge",
+						},
+						{
 							label: "Reality domains",
 							to: "/reality-domains",
 							icon: "tabler:world",

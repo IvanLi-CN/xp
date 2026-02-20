@@ -538,6 +538,7 @@ mod tests {
             node_name: node_name.to_string(),
             access_host: access_host.to_string(),
             api_base_url: "http://127.0.0.1:0".to_string(),
+            quota_limit_bytes: 0,
             quota_reset: crate::domain::NodeQuotaReset::default(),
         }
     }
@@ -547,6 +548,7 @@ mod tests {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
             subscription_token: "token".to_string(),
+            priority_tier: Default::default(),
             quota_reset: crate::domain::UserQuotaReset::default(),
         }
     }

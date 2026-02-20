@@ -62,6 +62,7 @@ describe("AdminNodesResponseSchema", () => {
 						node_name: "node-1",
 						api_base_url: "https://127.0.0.1:62416",
 						access_host: "",
+						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
@@ -77,6 +78,7 @@ describe("AdminNodesResponseSchema", () => {
 					node_name: "node-1",
 					api_base_url: "https://127.0.0.1:62416",
 					access_host: "",
+					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
 						day_of_month: 1,
@@ -165,6 +167,7 @@ describe("AdminUsersResponseSchema", () => {
 						user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 						display_name: "alice",
 						subscription_token: "sub_123",
+						priority_tier: "p3",
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
@@ -179,6 +182,7 @@ describe("AdminUsersResponseSchema", () => {
 					user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 					display_name: "alice",
 					subscription_token: "sub_123",
+					priority_tier: "p3",
 					quota_reset: {
 						policy: "monthly",
 						day_of_month: 1,

@@ -223,9 +223,15 @@ export function UsersPage() {
 												return <span className="opacity-60">-</span>;
 											const used = formatQuotaBytesHuman(summary.used_bytes);
 											const limit =
-												summary.quota_limit_bytes === 0
+												summary.quota_limit_kind === "unlimited"
 													? "unlimited"
-													: formatQuotaBytesHuman(summary.quota_limit_bytes);
+													: summary.quota_limit_kind === "shared_opportunistic"
+														? "opportunistic"
+														: summary.quota_limit_kind === "mixed"
+															? "mixed"
+															: formatQuotaBytesHuman(
+																	summary.quota_limit_bytes,
+																);
 											return (
 												<span title="Used / limit">
 													{used}/{limit}
@@ -240,11 +246,20 @@ export function UsersPage() {
 											const summary = quotaSummaryByUserId.get(user.user_id);
 											if (!summary) return null;
 
-											// If the user has no quota cap, don't render a misleading bar.
-											if (summary.quota_limit_bytes === 0) {
+											// If the user has no meaningful cap, don't render a misleading bar.
+											if (
+												summary.quota_limit_kind === "unlimited" ||
+												summary.quota_limit_kind === "shared_opportunistic" ||
+												summary.quota_limit_bytes === 0
+											) {
 												return (
 													<div className="text-xs opacity-60 whitespace-nowrap truncate">
-														unlimited
+														{summary.quota_limit_kind === "unlimited"
+															? "unlimited"
+															: summary.quota_limit_kind ===
+																	"shared_opportunistic"
+																? "opportunistic"
+																: "-"}
 													</div>
 												);
 											}
