@@ -3509,9 +3509,25 @@ fn resolve_node_quota_reset_for_status(
     Ok((policy, tz, day_of_month))
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AdminUserQuotaLimitKind {
+    /// A true "unlimited" quota (no budget) for the relevant scope.
+    Unlimited,
+    /// A static, per-user quota limit (legacy mode).
+    Fixed,
+    /// Shared node quota: this is the user's derived base share of the node budget.
+    SharedBase,
+    /// Shared node quota: no base share; user can only consume overflow.
+    SharedOpportunistic,
+    /// Aggregated across nodes where quota kinds differ (non-unlimited).
+    Mixed,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminUserQuotaSummaryItem {
     user_id: String,
+    quota_limit_kind: AdminUserQuotaLimitKind,
     quota_limit_bytes: u64,
     used_bytes: u64,
     remaining_bytes: u64,
@@ -3522,6 +3538,48 @@ struct AdminUserQuotaSummariesResponse {
     partial: bool,
     unreachable_nodes: Vec<String>,
     items: Vec<AdminUserQuotaSummaryItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUserQuotaSummaryItemWire {
+    user_id: String,
+    #[serde(default)]
+    quota_limit_kind: Option<AdminUserQuotaLimitKind>,
+    quota_limit_bytes: u64,
+    used_bytes: u64,
+    remaining_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUserQuotaSummariesResponseWire {
+    items: Vec<AdminUserQuotaSummaryItemWire>,
+}
+
+fn normalize_quota_limit_kind(
+    quota_limit_bytes: u64,
+    kind: Option<AdminUserQuotaLimitKind>,
+) -> AdminUserQuotaLimitKind {
+    // Backward-compat: older nodes didn't return `quota_limit_kind`; they used
+    // `quota_limit_bytes == 0` to mean "unlimited".
+    kind.unwrap_or({
+        if quota_limit_bytes == 0 {
+            AdminUserQuotaLimitKind::Unlimited
+        } else {
+            AdminUserQuotaLimitKind::Fixed
+        }
+    })
+}
+
+fn merge_quota_limit_kind(
+    a: &AdminUserQuotaLimitKind,
+    b: &AdminUserQuotaLimitKind,
+) -> AdminUserQuotaLimitKind {
+    use AdminUserQuotaLimitKind as K;
+    match (a, b) {
+        (K::Unlimited, _) | (_, K::Unlimited) => K::Unlimited,
+        (x, y) if x == y => x.clone(),
+        _ => K::Mixed,
+    }
 }
 
 fn build_local_user_quota_summaries(
@@ -3559,6 +3617,48 @@ fn build_local_user_quota_summaries(
             .push(grant);
     }
 
+    // In shared-quota mode, the per-user "limit" is derived from the node budget and the user's
+    // tier/weight. Compute it once so the loop can stay simple and stable.
+    let mut shared_cycle: Option<(QuotaResetPolicy, CycleTimeZone, u8)> = None;
+    let mut shared_base_by_user: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+    if shared_quota_enabled {
+        let (policy, tz, day_of_month) = resolve_node_quota_reset_for_status(store, local_node_id)?;
+        shared_cycle = Some((policy, tz, day_of_month));
+
+        if policy != QuotaResetPolicy::Unlimited {
+            // Only allocate base quota among enabled P1/P2 users (matching enforcement behavior).
+            let mut items: Vec<(String, u16)> = Vec::new();
+            for (user_id, grants) in grants_by_user.iter() {
+                if user_id == crate::endpoint_probe::PROBE_USER_ID {
+                    continue;
+                }
+                if !grants.iter().any(|g| g.enabled) {
+                    continue;
+                }
+                let tier = store
+                    .get_user(user_id)
+                    .map(|u| u.priority_tier)
+                    .unwrap_or_default();
+                if tier == crate::domain::UserPriorityTier::P3 {
+                    continue;
+                }
+                let weight = store.resolve_user_node_weight(user_id, local_node_id);
+                items.push((user_id.clone(), weight));
+            }
+            items.sort_by(|a, b| a.0.cmp(&b.0));
+            items.dedup_by(|a, b| a.0 == b.0);
+
+            let distributable =
+                crate::quota_policy::distributable_bytes(local_node_quota_limit_bytes);
+            for (user_id, base) in
+                crate::quota_policy::allocate_total_by_weight(distributable, &items)
+            {
+                shared_base_by_user.insert(user_id, base);
+            }
+        }
+    }
+
     let mut items = Vec::new();
     for user in store.list_users() {
         let user_id = user.user_id;
@@ -3566,42 +3666,87 @@ fn build_local_user_quota_summaries(
 
         // Under the shared node quota policy, per-user quota summaries are derived from the
         // node's quota budget + quota_reset (not from per-grant/static quotas).
-        //
-        // Note: `quota_limit_bytes == 0` is used throughout the UI as "unlimited", so we must
-        // avoid returning `0` here for shared-quota nodes, otherwise admins will see incorrect
-        // "unlimited" summaries.
-        let (quota_limit_bytes, policy, tz, day_of_month) = if shared_quota_enabled {
-            if grants.is_empty() {
-                continue;
-            }
-            let (policy, tz, day_of_month) =
-                resolve_node_quota_reset_for_status(store, local_node_id)?;
-            let quota_limit_bytes = if policy == QuotaResetPolicy::Unlimited {
-                0
-            } else {
-                local_node_quota_limit_bytes
-            };
-            (quota_limit_bytes, policy, tz, day_of_month)
-        } else {
-            let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
-            let uniform_grant_quota = {
-                let first = grants.first().map(|g| g.quota_limit_bytes);
-                if let Some(first) = first
-                    && grants.iter().all(|g| g.quota_limit_bytes == first)
-                {
-                    Some(first)
-                } else {
-                    None
+        let (quota_limit_kind, quota_limit_bytes, policy, tz, day_of_month) =
+            if shared_quota_enabled {
+                if grants.is_empty() {
+                    continue;
                 }
-            };
-            let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
-                continue;
-            };
+                let (policy, tz, day_of_month) = shared_cycle
+                    .as_ref()
+                    .cloned()
+                    .expect("shared_cycle is set when shared_quota_enabled");
 
-            let (_source, policy, tz, day_of_month) =
-                resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
-            (quota_limit_bytes, policy, tz, day_of_month)
-        };
+                if policy == QuotaResetPolicy::Unlimited {
+                    (
+                        AdminUserQuotaLimitKind::Unlimited,
+                        0,
+                        policy,
+                        tz,
+                        day_of_month,
+                    )
+                } else {
+                    let tier = store
+                        .get_user(&user_id)
+                        .map(|u| u.priority_tier)
+                        .unwrap_or_default();
+                    if tier == crate::domain::UserPriorityTier::P3 {
+                        // P3 has no fixed base share; it can only consume overflow.
+                        (
+                            AdminUserQuotaLimitKind::SharedOpportunistic,
+                            0,
+                            policy,
+                            tz,
+                            day_of_month,
+                        )
+                    } else {
+                        let base = shared_base_by_user.get(&user_id).copied().unwrap_or(0);
+                        (
+                            AdminUserQuotaLimitKind::SharedBase,
+                            base,
+                            policy,
+                            tz,
+                            day_of_month,
+                        )
+                    }
+                }
+            } else {
+                let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
+                let uniform_grant_quota = {
+                    let first = grants.first().map(|g| g.quota_limit_bytes);
+                    if let Some(first) = first
+                        && grants.iter().all(|g| g.quota_limit_bytes == first)
+                    {
+                        Some(first)
+                    } else {
+                        None
+                    }
+                };
+                let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+                    continue;
+                };
+
+                let (_source, policy, tz, day_of_month) =
+                    resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+
+                let quota_limit_kind =
+                    if policy == QuotaResetPolicy::Unlimited || quota_limit_bytes == 0 {
+                        AdminUserQuotaLimitKind::Unlimited
+                    } else {
+                        AdminUserQuotaLimitKind::Fixed
+                    };
+                let quota_limit_bytes = if quota_limit_kind == AdminUserQuotaLimitKind::Unlimited {
+                    0
+                } else {
+                    quota_limit_bytes
+                };
+                (
+                    quota_limit_kind,
+                    quota_limit_bytes,
+                    policy,
+                    tz,
+                    day_of_month,
+                )
+            };
 
         let (cycle_start_at, cycle_end_at) = if policy == QuotaResetPolicy::Monthly {
             let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
@@ -3624,9 +3769,13 @@ fn build_local_user_quota_summaries(
             acc.saturating_add(usage.used_bytes)
         });
 
-        let remaining_bytes = quota_limit_bytes.saturating_sub(used_bytes);
+        let remaining_bytes = match quota_limit_kind {
+            AdminUserQuotaLimitKind::Unlimited | AdminUserQuotaLimitKind::SharedOpportunistic => 0,
+            _ => quota_limit_bytes.saturating_sub(used_bytes),
+        };
         items.push(AdminUserQuotaSummaryItem {
             user_id,
+            quota_limit_kind,
             quota_limit_bytes,
             used_bytes,
             remaining_bytes,
@@ -3721,17 +3870,32 @@ async fn admin_list_user_quota_summaries(
             continue;
         }
 
-        match response.json::<AdminUserQuotaSummariesResponse>().await {
+        match response.json::<AdminUserQuotaSummariesResponseWire>().await {
             Ok(remote) => {
-                for item in remote.items {
+                for wire in remote.items {
+                    let item = AdminUserQuotaSummaryItem {
+                        user_id: wire.user_id,
+                        quota_limit_kind: normalize_quota_limit_kind(
+                            wire.quota_limit_bytes,
+                            wire.quota_limit_kind,
+                        ),
+                        quota_limit_bytes: wire.quota_limit_bytes,
+                        used_bytes: wire.used_bytes,
+                        remaining_bytes: wire.remaining_bytes,
+                    };
                     totals
                         .entry(item.user_id.clone())
                         .and_modify(|entry| {
-                            // Keep semantics consistent with enforcement:
-                            // `quota_limit_bytes == 0` means "unlimited", so any unlimited node
-                            // must keep the aggregated limit as unlimited.
+                            // Keep semantics consistent with enforcement: any truly unlimited node
+                            // makes the aggregated quota unlimited.
                             entry.used_bytes = entry.used_bytes.saturating_add(item.used_bytes);
-                            if entry.quota_limit_bytes == 0 || item.quota_limit_bytes == 0 {
+                            entry.quota_limit_kind = merge_quota_limit_kind(
+                                &entry.quota_limit_kind,
+                                &item.quota_limit_kind,
+                            );
+
+                            if matches!(entry.quota_limit_kind, AdminUserQuotaLimitKind::Unlimited)
+                            {
                                 entry.quota_limit_bytes = 0;
                                 entry.remaining_bytes = 0;
                             } else {

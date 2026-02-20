@@ -1016,11 +1016,11 @@ async fn enforce_shared_node_quota_node(
                             changed = true;
                         }
 
-                        if tick.grant_enabled {
-                            if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
-                                let email = format!("grant:{}", tick.snapshot.grant_id);
-                                remove_ops.push((tag.to_string(), email));
-                            }
+                        if tick.grant_enabled
+                            && let Some(tag) = tick.snapshot.endpoint_tag.as_deref()
+                        {
+                            let email = format!("grant:{}", tick.snapshot.grant_id);
+                            remove_ops.push((tag.to_string(), email));
                         }
                     }
                 } else if delta > 0 && !consumed_via_replay {

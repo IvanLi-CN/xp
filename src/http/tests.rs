@@ -3383,9 +3383,13 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
         .iter()
         .find(|i| i.user_id == "user-1")
         .expect("missing user summary");
-    assert_eq!(user.quota_limit_bytes, 1000);
+    assert_eq!(
+        user.quota_limit_kind,
+        super::AdminUserQuotaLimitKind::Unlimited
+    );
+    assert_eq!(user.quota_limit_bytes, 0);
     assert_eq!(user.used_bytes, 700);
-    assert_eq!(user.remaining_bytes, 300);
+    assert_eq!(user.remaining_bytes, 0);
 }
 
 #[tokio::test]

@@ -942,6 +942,10 @@ async function handleRequest(
 			return [
 				{
 					user_id: u.user_id,
+					quota_limit_kind:
+						t.quota_limit_bytes === 0
+							? ("unlimited" as const)
+							: ("fixed" as const),
 					quota_limit_bytes: t.quota_limit_bytes,
 					used_bytes: t.used_bytes,
 					remaining_bytes: t.remaining_bytes,
