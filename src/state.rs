@@ -145,6 +145,9 @@ pub struct EndpointProbeHour {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EndpointProbeNodeSample {
     pub ok: bool,
+    /// When true, this sample is intentionally skipped (reported but not tested).
+    #[serde(default)]
+    pub skipped: bool,
     pub checked_at: String,
     #[serde(default)]
     pub latency_ms: Option<u32>,
@@ -162,6 +165,9 @@ pub struct EndpointProbeNodeSample {
 pub struct EndpointProbeAppendSample {
     pub endpoint_id: String,
     pub ok: bool,
+    /// When true, this sample is intentionally skipped (reported but not tested).
+    #[serde(default)]
+    pub skipped: bool,
     pub checked_at: String,
     #[serde(default)]
     pub latency_ms: Option<u32>,
@@ -1622,6 +1628,7 @@ impl DesiredStateCommand {
                         from_node_id.clone(),
                         EndpointProbeNodeSample {
                             ok: sample.ok,
+                            skipped: sample.skipped,
                             checked_at: sample.checked_at.clone(),
                             latency_ms: sample.latency_ms,
                             target_id: sample.target_id.clone(),

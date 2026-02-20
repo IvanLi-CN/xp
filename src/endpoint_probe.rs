@@ -362,6 +362,7 @@ pub enum EndpointProbeEvent {
 
 struct EndpointProbeInner {
     local_node_id: String,
+    skip_self_test: bool,
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
     run_gate: Arc<Semaphore>,
@@ -375,8 +376,10 @@ pub fn spawn_endpoint_probe_worker(
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
     probe_secret: String,
+    skip_self_test: bool,
 ) -> EndpointProbeHandle {
-    let handle = new_endpoint_probe_handle(local_node_id, store, raft, probe_secret);
+    let handle =
+        new_endpoint_probe_handle(local_node_id, store, raft, probe_secret, skip_self_test);
 
     // Hourly auto probe aligned to UTC hour boundaries.
     let worker = handle.clone();
@@ -416,12 +419,14 @@ pub fn new_endpoint_probe_handle(
     store: Arc<Mutex<JsonSnapshotStore>>,
     raft: Arc<dyn RaftFacade>,
     probe_secret: String,
+    skip_self_test: bool,
 ) -> EndpointProbeHandle {
     let (events, _events_rx) = broadcast::channel(1024);
 
     EndpointProbeHandle {
         inner: Arc::new(EndpointProbeInner {
             local_node_id,
+            skip_self_test,
             store,
             raft,
             run_gate: Arc::new(Semaphore::new(1)),
@@ -599,8 +604,62 @@ async fn run_probe_once_inner(
     let runs = Arc::clone(&inner.runs);
     let events = inner.events.clone();
     let from_node_id = inner.local_node_id.clone();
+    let local_node_id = inner.local_node_id.clone();
+    let skip_self_test = inner.skip_self_test;
 
     for endpoint in endpoints {
+        let should_skip = skip_self_test && endpoint.node_id == local_node_id;
+        let should_skip = should_skip
+            && nodes_by_id
+                .get(&endpoint.node_id)
+                .is_some_and(|node| !is_loopback_host(&node.access_host));
+
+        if should_skip {
+            let config_hash = req.config_hash.clone();
+            let run_id = req.run_id.clone();
+            let hour = req.hour.clone();
+            let runs = Arc::clone(&runs);
+            let events = events.clone();
+            let from_node_id = from_node_id.clone();
+
+            tasks.push(tokio::spawn(async move {
+                let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+                let sample = EndpointProbeAppendSample {
+                    endpoint_id: endpoint.endpoint_id,
+                    ok: false,
+                    skipped: true,
+                    checked_at,
+                    latency_ms: None,
+                    target_id: None,
+                    target_url: None,
+                    error: Some(
+                        "skipped: self-test disabled (XP_ENDPOINT_PROBE_SKIP_SELF_TEST)"
+                            .to_string(),
+                    ),
+                    config_hash,
+                };
+
+                // Best-effort progress tracking for the UI.
+                {
+                    let mut runs = runs.lock().await;
+                    runs.mark_endpoint_done(&run_id);
+                    if let Some(snapshot) = runs.get(&run_id) {
+                        let _ = events.send(EndpointProbeEvent::RunSnapshot(snapshot));
+                    }
+                }
+
+                let _ = events.send(EndpointProbeEvent::EndpointSample {
+                    run_id: run_id.clone(),
+                    hour,
+                    from_node_id,
+                    sample: sample.clone(),
+                });
+
+                sample
+            }));
+            continue;
+        }
+
         let permit = sem.clone().acquire_owned().await.expect("semaphore");
         let nodes_by_id = Arc::clone(&nodes_by_id);
         let probe_secret = Arc::clone(&probe_secret);
@@ -796,6 +855,7 @@ async fn probe_one_endpoint(
         return EndpointProbeAppendSample {
             endpoint_id: endpoint.endpoint_id,
             ok: false,
+            skipped: false,
             checked_at,
             latency_ms: None,
             target_id: None,
@@ -809,6 +869,7 @@ async fn probe_one_endpoint(
         return EndpointProbeAppendSample {
             endpoint_id: endpoint.endpoint_id,
             ok: false,
+            skipped: false,
             checked_at,
             latency_ms: None,
             target_id: None,
@@ -831,6 +892,7 @@ async fn probe_one_endpoint(
         Ok(ok) => EndpointProbeAppendSample {
             endpoint_id: endpoint.endpoint_id,
             ok: ok.ok,
+            skipped: false,
             checked_at,
             latency_ms: ok.latency_ms,
             target_id: ok.target_id,
@@ -841,6 +903,7 @@ async fn probe_one_endpoint(
         Err(err) => EndpointProbeAppendSample {
             endpoint_id: endpoint.endpoint_id,
             ok: false,
+            skipped: false,
             checked_at,
             latency_ms: None,
             target_id: None,

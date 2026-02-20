@@ -306,6 +306,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
+        endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
     };
@@ -317,6 +318,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         leader_store.clone(),
         raft_facade.clone(),
         "test-probe-secret".to_string(),
+        false,
     );
     let router = build_router(
         config,

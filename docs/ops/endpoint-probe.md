@@ -41,6 +41,29 @@ Operationally, this also means:
 If a node cannot reach its own `access_host` due to provider/network restrictions (no hairpin), fix the
 network/ingress design instead (see below).
 
+## Escape hatch: skip self-test on a node (NAT hairpin)
+
+Some providers/networks do not support NAT hairpin (a node cannot reach its own public ingress IP and
+"hairpin" back to itself). In that case, the endpoint can be fully reachable from **other nodes**,
+but the hosting node's self-test will always fail and pollute the aggregated status.
+
+To avoid false negatives, you can explicitly disable self-test **on that node only**:
+
+- env: `XP_ENDPOINT_PROBE_SKIP_SELF_TEST=true`
+- flag: `--endpoint-probe-skip-self-test true`
+
+Behavior:
+
+- For endpoints hosted on the local node (`endpoint.node_id == local_node_id`), the node reports a
+  sample with `skipped=true` (shown as `SKIP` in the Admin UI).
+- Skipped samples count as "reported" but do not count as OK/FAIL. Aggregated status is computed from
+  **tested** samples only.
+- If an hour bucket has only skipped samples (for example, a single-node cluster with self-test
+  skipped), the bucket status must be `missing` (never "up").
+
+This is an escape hatch, not a loopback workaround. Do NOT override `access_host` resolution to
+`127.0.0.1` via `/etc/hosts` or split DNS.
+
 ## Interpreting common errors
 
 ### `required targets failed: gstatic-204`

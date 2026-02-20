@@ -28,6 +28,7 @@ export type AdminEndpointProbeRunResponse = z.infer<
 export const AdminEndpointProbeHistoryNodeSchema = z.object({
 	node_id: z.string(),
 	ok: z.boolean(),
+	skipped: z.boolean().optional(),
 	checked_at: z.string(),
 	latency_ms: z.number().int().nonnegative().optional(),
 	target_id: z.string().optional(),
@@ -45,6 +46,8 @@ export const AdminEndpointProbeHistorySlotSchema = z.object({
 	status: EndpointProbeStatusSchema,
 	ok_count: z.number().int().nonnegative(),
 	sample_count: z.number().int().nonnegative(),
+	skipped_count: z.number().int().nonnegative().optional(),
+	tested_count: z.number().int().nonnegative().optional(),
 	latency_ms_p50: z.number().int().nonnegative().optional(),
 	latency_ms_p95: z.number().int().nonnegative().optional(),
 	by_node: z.array(AdminEndpointProbeHistoryNodeSchema),
@@ -210,6 +213,7 @@ export async function fetchAdminEndpointProbeRunStatus(
 export const EndpointProbeAppendSampleSchema = z.object({
 	endpoint_id: z.string(),
 	ok: z.boolean(),
+	skipped: z.boolean().optional(),
 	checked_at: z.string(),
 	latency_ms: z.number().int().nonnegative().nullable().optional(),
 	target_id: z.string().nullable().optional(),

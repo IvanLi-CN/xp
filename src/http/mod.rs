@@ -225,6 +225,7 @@ struct AdminEndpointWithProbe {
 struct AdminEndpointProbeHistoryNode {
     node_id: String,
     ok: bool,
+    skipped: bool,
     checked_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     latency_ms: Option<u32>,
@@ -243,6 +244,8 @@ struct AdminEndpointProbeHistorySlot {
     status: EndpointProbeStatus,
     ok_count: usize,
     sample_count: usize,
+    skipped_count: usize,
+    tested_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     latency_ms_p50: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1851,6 +1854,7 @@ fn probe_status_for_counts(
     expected_nodes: usize,
     sample_count: usize,
     ok_count: usize,
+    skipped_count: usize,
 ) -> EndpointProbeStatus {
     if expected_nodes == 0 {
         return EndpointProbeStatus::Missing;
@@ -1862,10 +1866,15 @@ fn probe_status_for_counts(
     if sample_count < expected_nodes {
         return EndpointProbeStatus::Missing;
     }
+    let tested_count = sample_count.saturating_sub(skipped_count);
+    if tested_count == 0 {
+        // Reported, but no real tests (e.g. single-node cluster with self-test skipped).
+        return EndpointProbeStatus::Missing;
+    }
     if ok_count == 0 {
         return EndpointProbeStatus::Down;
     }
-    if ok_count >= expected_nodes {
+    if ok_count >= tested_count {
         return EndpointProbeStatus::Up;
     }
     EndpointProbeStatus::Degraded
@@ -1878,34 +1887,66 @@ mod endpoint_probe_status_tests {
     #[test]
     fn probe_status_handles_incomplete_hours_as_missing() {
         assert_eq!(
-            probe_status_for_counts(3, 2, 0),
+            probe_status_for_counts(3, 2, 0, 0),
             EndpointProbeStatus::Missing
         );
         assert_eq!(
-            probe_status_for_counts(3, 2, 1),
+            probe_status_for_counts(3, 2, 1, 0),
             EndpointProbeStatus::Missing
         );
     }
 
     #[test]
     fn probe_status_down_when_all_nodes_report_and_all_fail() {
-        assert_eq!(probe_status_for_counts(3, 3, 0), EndpointProbeStatus::Down);
+        assert_eq!(
+            probe_status_for_counts(3, 3, 0, 0),
+            EndpointProbeStatus::Down
+        );
     }
 
     #[test]
     fn probe_status_up_when_all_nodes_report_and_all_ok() {
-        assert_eq!(probe_status_for_counts(3, 3, 3), EndpointProbeStatus::Up);
+        assert_eq!(probe_status_for_counts(3, 3, 3, 0), EndpointProbeStatus::Up);
     }
 
     #[test]
     fn probe_status_degraded_when_mixed_ok_and_fail() {
         assert_eq!(
-            probe_status_for_counts(3, 3, 2),
+            probe_status_for_counts(3, 3, 2, 0),
             EndpointProbeStatus::Degraded
         );
         assert_eq!(
-            probe_status_for_counts(3, 3, 1),
+            probe_status_for_counts(3, 3, 1, 0),
             EndpointProbeStatus::Degraded
+        );
+    }
+
+    #[test]
+    fn probe_status_up_allows_skipped_samples_when_all_tested_ok() {
+        assert_eq!(probe_status_for_counts(3, 3, 2, 1), EndpointProbeStatus::Up);
+    }
+
+    #[test]
+    fn probe_status_missing_when_all_samples_are_skipped() {
+        assert_eq!(
+            probe_status_for_counts(1, 1, 0, 1),
+            EndpointProbeStatus::Missing
+        );
+    }
+
+    #[test]
+    fn probe_status_degraded_when_tested_samples_mixed_even_with_skips() {
+        assert_eq!(
+            probe_status_for_counts(3, 3, 1, 1),
+            EndpointProbeStatus::Degraded
+        );
+    }
+
+    #[test]
+    fn probe_status_down_when_all_tested_samples_fail_even_with_skips() {
+        assert_eq!(
+            probe_status_for_counts(3, 3, 0, 1),
+            EndpointProbeStatus::Down
         );
     }
 }
@@ -1976,12 +2017,19 @@ fn build_endpoint_probe_summary(
             .iter()
             .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
             .count();
+        let skipped_count = bucket
+            .by_node
+            .iter()
+            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
+            .map(|(_node_id, sample)| sample)
+            .filter(|s| s.skipped)
+            .count();
         let ok_count = bucket
             .by_node
             .iter()
             .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
             .map(|(_node_id, sample)| sample)
-            .filter(|s| s.ok)
+            .filter(|s| s.ok && !s.skipped)
             .count();
         let (p50, _p95) = compute_latency_p50_p95_ms(
             bucket
@@ -1989,7 +2037,7 @@ fn build_endpoint_probe_summary(
                 .iter()
                 .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
                 .map(|(_node_id, sample)| sample)
-                .filter(|s| s.ok)
+                .filter(|s| s.ok && !s.skipped)
                 .filter_map(|s| s.latency_ms),
         );
         let checked_at_max = bucket
@@ -2001,10 +2049,11 @@ fn build_endpoint_probe_summary(
             .max()
             .map(|s| s.to_string());
 
-        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count);
+        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count, skipped_count);
 
         // Iterate oldest -> newest. Keep the last seen as the "latest".
-        if sample_count > 0 {
+        let tested_count = sample_count.saturating_sub(skipped_count);
+        if tested_count > 0 {
             latest_checked_at = checked_at_max.clone();
             latest_latency_ms_p50 = p50;
         }
@@ -2059,6 +2108,7 @@ fn build_endpoint_probe_history_response(
                 by_node.push(AdminEndpointProbeHistoryNode {
                     node_id: node_id.clone(),
                     ok: sample.ok,
+                    skipped: sample.skipped,
                     checked_at: sample.checked_at.clone(),
                     latency_ms: sample.latency_ms,
                     target_id: sample.target_id.clone(),
@@ -2071,18 +2121,25 @@ fn build_endpoint_probe_history_response(
         }
 
         let sample_count = by_node.len();
-        let ok_count = by_node.iter().filter(|s| s.ok).count();
+        let skipped_count = by_node.iter().filter(|s| s.skipped).count();
+        let tested_count = sample_count.saturating_sub(skipped_count);
+        let ok_count = by_node.iter().filter(|s| s.ok && !s.skipped).count();
         let (p50, p95) = compute_latency_p50_p95_ms(
-            by_node.iter().filter(|s| s.ok).filter_map(|s| s.latency_ms),
+            by_node
+                .iter()
+                .filter(|s| s.ok && !s.skipped)
+                .filter_map(|s| s.latency_ms),
         );
 
-        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count);
+        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count, skipped_count);
 
         slots.push(AdminEndpointProbeHistorySlot {
             hour: hour_key,
             status,
             ok_count,
             sample_count,
+            skipped_count,
+            tested_count,
             latency_ms_p50: p50,
             latency_ms_p95: p95,
             by_node,
