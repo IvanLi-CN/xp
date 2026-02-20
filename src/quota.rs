@@ -989,23 +989,12 @@ async fn enforce_shared_node_quota_node(
                     && carry_days > 0
                     && !force_ban_users.contains(user_id)
                 {
-                    let pre_bank = pre_rollover_bank_by_user
-                        .get(user_id)
-                        .copied()
-                        .unwrap_or(0);
-                    let day_start = initial_last_day_index
-                        .saturating_add(1)
-                        .max(0) as u32;
+                    let pre_bank = pre_rollover_bank_by_user.get(user_id).copied().unwrap_or(0);
+                    let day_start = initial_last_day_index.saturating_add(1).max(0) as u32;
                     let day_end = today_u32;
 
                     let (bank_after, remaining) = quota_policy::replay_rollovers_and_spend(
-                        pre_bank,
-                        delta,
-                        base_quota,
-                        cycle_days,
-                        day_start,
-                        day_end,
-                        carry_days,
+                        pre_bank, delta, base_quota, cycle_days, day_start, day_end, carry_days,
                     );
                     if remaining == 0 {
                         entry.bank_bytes = bank_after;
@@ -1019,9 +1008,6 @@ async fn enforce_shared_node_quota_node(
                     banned_this_tick = true;
 
                     for tick in group {
-                        if !tick.grant_enabled {
-                            continue;
-                        }
                         if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
                             && !u.quota_banned
                         {
@@ -1030,9 +1016,11 @@ async fn enforce_shared_node_quota_node(
                             changed = true;
                         }
 
-                        if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
-                            let email = format!("grant:{}", tick.snapshot.grant_id);
-                            remove_ops.push((tag.to_string(), email));
+                        if tick.grant_enabled {
+                            if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
+                                let email = format!("grant:{}", tick.snapshot.grant_id);
+                                remove_ops.push((tag.to_string(), email));
+                            }
                         }
                     }
                 } else if delta > 0 && !consumed_via_replay {
@@ -2492,7 +2480,8 @@ mod tests {
         // delayed until day2, naive charging against cap(day2) can cause a false ban.
         {
             let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), cap_day1 as i64);
+            st.stats
+                .insert(stat_name(&email, "uplink"), cap_day1 as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
 
@@ -2505,7 +2494,10 @@ mod tests {
 
         let store_guard = store.lock().await;
         let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(!usage.quota_banned, "expected no ban for feasible day1 usage");
+        assert!(
+            !usage.quota_banned,
+            "expected no ban for feasible day1 usage"
+        );
 
         let expected_bank = quota_policy::daily_credit_bytes(base, cycle_days, 2);
         let pacing = store_guard
@@ -2516,7 +2508,9 @@ mod tests {
 
         let st = state.lock().await;
         assert!(
-            !st.calls.iter().any(|c| matches!(c, Call::RemoveUser { .. })),
+            !st.calls
+                .iter()
+                .any(|c| matches!(c, Call::RemoveUser { .. })),
             "expected no xray remove_user to be issued without a ban"
         );
 

@@ -258,15 +258,8 @@ mod tests {
         let spend = cap_bytes_for_day(base_quota, cycle_days, 1, carry_days);
         assert_eq!(spend, 21);
 
-        let (bank_after, remaining) = replay_rollovers_and_spend(
-            pre_bank,
-            spend,
-            base_quota,
-            cycle_days,
-            1,
-            2,
-            carry_days,
-        );
+        let (bank_after, remaining) =
+            replay_rollovers_and_spend(pre_bank, spend, base_quota, cycle_days, 1, 2, carry_days);
         assert_eq!(remaining, 0);
         // Spend all on day1 => bank at day2 is just day2 credit (10).
         assert_eq!(bank_after, 10);

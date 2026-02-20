@@ -3470,6 +3470,45 @@ fn resolve_user_node_quota_reset_for_status(
     Ok((source, policy, tz, day_of_month))
 }
 
+fn resolve_node_quota_reset_for_status(
+    store: &JsonSnapshotStore,
+    node_id: &str,
+) -> Result<(QuotaResetPolicy, CycleTimeZone, u8), ApiError> {
+    let node = store
+        .get_node(node_id)
+        .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
+
+    let (policy, day_of_month, tz) = match node.quota_reset {
+        NodeQuotaReset::Unlimited { tz_offset_minutes } => (
+            QuotaResetPolicy::Unlimited,
+            1,
+            match tz_offset_minutes {
+                Some(tz_offset_minutes) => CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                None => CycleTimeZone::Local,
+            },
+        ),
+        NodeQuotaReset::Monthly {
+            day_of_month,
+            tz_offset_minutes,
+        } => (
+            QuotaResetPolicy::Monthly,
+            day_of_month,
+            match tz_offset_minutes {
+                Some(tz_offset_minutes) => CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
+                None => CycleTimeZone::Local,
+            },
+        ),
+    };
+
+    if !(1..=31).contains(&day_of_month) {
+        return Err(ApiError::internal(format!(
+            "invalid day_of_month: {day_of_month}"
+        )));
+    }
+
+    Ok((policy, tz, day_of_month))
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminUserQuotaSummaryItem {
     user_id: String,
@@ -3490,6 +3529,12 @@ fn build_local_user_quota_summaries(
     local_node_id: &str,
 ) -> Result<Vec<AdminUserQuotaSummaryItem>, ApiError> {
     let now = Utc::now();
+
+    let local_node_quota_limit_bytes = store
+        .get_node(local_node_id)
+        .map(|n| n.quota_limit_bytes)
+        .unwrap_or(0);
+    let shared_quota_enabled = local_node_quota_limit_bytes > 0;
 
     let endpoints_by_id = store
         .list_endpoints()
@@ -3518,23 +3563,45 @@ fn build_local_user_quota_summaries(
     for user in store.list_users() {
         let user_id = user.user_id;
         let grants = grants_by_user.remove(&user_id).unwrap_or_default();
-        let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
-        let uniform_grant_quota = {
-            let first = grants.first().map(|g| g.quota_limit_bytes);
-            if let Some(first) = first
-                && grants.iter().all(|g| g.quota_limit_bytes == first)
-            {
-                Some(first)
-            } else {
-                None
-            }
-        };
-        let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
-            continue;
-        };
 
-        let (_source, policy, tz, day_of_month) =
-            resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+        // Under the shared node quota policy, per-user quota summaries are derived from the
+        // node's quota budget + quota_reset (not from per-grant/static quotas).
+        //
+        // Note: `quota_limit_bytes == 0` is used throughout the UI as "unlimited", so we must
+        // avoid returning `0` here for shared-quota nodes, otherwise admins will see incorrect
+        // "unlimited" summaries.
+        let (quota_limit_bytes, policy, tz, day_of_month) = if shared_quota_enabled {
+            if grants.is_empty() {
+                continue;
+            }
+            let (policy, tz, day_of_month) =
+                resolve_node_quota_reset_for_status(store, local_node_id)?;
+            let quota_limit_bytes = if policy == QuotaResetPolicy::Unlimited {
+                0
+            } else {
+                local_node_quota_limit_bytes
+            };
+            (quota_limit_bytes, policy, tz, day_of_month)
+        } else {
+            let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
+            let uniform_grant_quota = {
+                let first = grants.first().map(|g| g.quota_limit_bytes);
+                if let Some(first) = first
+                    && grants.iter().all(|g| g.quota_limit_bytes == first)
+                {
+                    Some(first)
+                } else {
+                    None
+                }
+            };
+            let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+                continue;
+            };
+
+            let (_source, policy, tz, day_of_month) =
+                resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
+            (quota_limit_bytes, policy, tz, day_of_month)
+        };
 
         let (cycle_start_at, cycle_end_at) = if policy == QuotaResetPolicy::Monthly {
             let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
