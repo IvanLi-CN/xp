@@ -131,12 +131,14 @@ export const WithUsage: Story = {
 					items: [
 						{
 							user_id: USER_ID_1,
+							quota_limit_kind: "fixed",
 							quota_limit_bytes: 15 * 2 ** 30,
 							used_bytes: 4 * 2 ** 30,
 							remaining_bytes: 11 * 2 ** 30,
 						},
 						{
 							user_id: USER_ID_2,
+							quota_limit_kind: "fixed",
 							quota_limit_bytes: 5 * 2 ** 30,
 							used_bytes: 1 * 2 ** 30,
 							remaining_bytes: 4 * 2 ** 30,
