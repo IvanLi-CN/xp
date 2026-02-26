@@ -48,6 +48,8 @@ function componentBadgeClass(status: string): string {
 			return "badge badge-success badge-sm";
 		case "down":
 			return "badge badge-error badge-sm";
+		case "unknown":
+			return "badge badge-warning badge-sm";
 		case "disabled":
 			return "badge badge-ghost badge-sm";
 		default:
@@ -311,17 +313,52 @@ export function NodesPage() {
 								</span>
 							</td>
 							<td>
-								<div className="flex flex-wrap gap-1">
-									{node.components.map((component) => (
-										<span
-											key={component.component}
-											className={componentBadgeClass(component.status)}
-											title={`${component.component}: ${component.status}`}
-										>
-											{component.component}:{component.status}
-										</span>
-									))}
-								</div>
+								{(() => {
+									const problematic = node.components.filter(
+										(component) =>
+											component.status === "down" ||
+											component.status === "unknown",
+									);
+									if (problematic.length === 0) {
+										return (
+											<span
+												className="badge badge-success badge-sm"
+												title="All monitored components are healthy."
+											>
+												normal
+											</span>
+										);
+									}
+
+									const first = problematic[0];
+									const moreCount = problematic.length - 1;
+									const moreTitle = problematic
+										.slice(1)
+										.map(
+											(component) =>
+												`${component.component}:${component.status}`,
+										)
+										.join(", ");
+
+									return (
+										<div className="flex flex-wrap items-center gap-1">
+											<span
+												className={componentBadgeClass(first.status)}
+												title={`${first.component}:${first.status}`}
+											>
+												{first.component}:{first.status}
+											</span>
+											{moreCount > 0 ? (
+												<span
+													className="badge badge-outline badge-sm"
+													title={moreTitle}
+												>
+													+{moreCount}
+												</span>
+											) : null}
+										</div>
+									);
+								})()}
 							</td>
 							<td>
 								<div className="flex items-end gap-px min-w-56">
