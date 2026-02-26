@@ -8,7 +8,6 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
-import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -260,114 +259,116 @@ export function NodesPage() {
 				</div>
 				<ResourceTable
 					headers={[
-						{ key: "node_id", label: "Node ID" },
-						{ key: "node_name", label: "Name" },
-						{ key: "components", label: "Components" },
-						{ key: "recent_slots", label: "7d (30m)" },
-						{ key: "access_host", label: "Access host" },
-						{ key: "api_base_url", label: "API base URL" },
+						{
+							key: "identity",
+							label: (
+								<div className="flex flex-col gap-1 leading-tight">
+									<span className="whitespace-nowrap">Node ID</span>
+									<span className="whitespace-nowrap opacity-70">Name</span>
+								</div>
+							),
+							className: "w-[46%]",
+						},
+						{
+							key: "runtime",
+							label: (
+								<div className="flex flex-col gap-1 leading-tight">
+									<span className="whitespace-nowrap">Components</span>
+									<span className="whitespace-nowrap opacity-70">7d (30m)</span>
+								</div>
+							),
+							className: "w-[54%]",
+						},
 					]}
+					tableClassName="table-fixed w-full"
 				>
 					{nodes.map((node) => (
 						<tr key={node.node_id}>
-							<td className="font-mono text-sm">
-								<Link
-									to="/nodes/$nodeId"
-									params={{ nodeId: node.node_id }}
-									className="link link-primary"
-								>
-									{node.node_id}
-								</Link>
-							</td>
-							<td>
-								<Link
-									to="/nodes/$nodeId"
-									params={{ nodeId: node.node_id }}
-									className="link link-hover"
-								>
-									{node.node_name || "(unnamed)"}
-								</Link>
-							</td>
-							<td>
-								{(() => {
-									const problematic = node.components.filter(
-										(component) =>
-											component.status === "down" ||
-											component.status === "unknown",
-									);
-									if (problematic.length === 0) {
-										return (
-											<span
-												className="badge badge-success badge-sm"
-												title="All monitored components are healthy."
-											>
-												normal
-											</span>
-										);
-									}
-
-									const first = problematic[0];
-									const moreCount = problematic.length - 1;
-									const moreTitle = problematic
-										.slice(1)
-										.map(
-											(component) =>
-												`${component.component}:${component.status}`,
-										)
-										.join(", ");
-									const moreBadgeClass = problematic.some(
-										(component) => component.status === "down",
-									)
-										? "badge badge-error badge-sm"
-										: "badge badge-warning badge-sm";
-
-									return (
-										<div className="inline-flex items-center gap-1 whitespace-nowrap">
-											<span
-												className={componentBadgeClass(first.status)}
-												title={`${first.component}:${first.status}`}
-											>
-												{first.component}:{first.status}
-											</span>
-											{moreCount > 0 ? (
-												<span className={moreBadgeClass} title={moreTitle}>
-													+{moreCount}
-												</span>
-											) : null}
-										</div>
-									);
-								})()}
-							</td>
-							<td>
-								<div className="flex items-end gap-px min-w-56">
-									{node.recent_slots.map((slot) => (
-										<div
-											key={slot.slot_start}
-											className={`h-4 w-[1px] ${historySlotClass(slot.status)}`}
-											title={`${slot.slot_start} • ${slot.status}`}
-										/>
-									))}
+							<td className="align-top">
+								<div className="flex max-w-full flex-col gap-1">
+									<Link
+										to="/nodes/$nodeId"
+										params={{ nodeId: node.node_id }}
+										className="link link-primary block max-w-full truncate whitespace-nowrap font-mono text-sm"
+										title={node.node_id}
+									>
+										{node.node_id}
+									</Link>
+									<Link
+										to="/nodes/$nodeId"
+										params={{ nodeId: node.node_id }}
+										className="link link-hover block max-w-full truncate whitespace-nowrap"
+										title={node.node_name || "(unnamed)"}
+									>
+										{node.node_name || "(unnamed)"}
+									</Link>
 								</div>
 							</td>
-							<td className="font-mono text-sm">{node.access_host || "-"}</td>
-							<td className="font-mono text-sm">
-								{node.api_base_url ? (
-									<a
-										href={node.api_base_url}
-										className="link link-primary inline-flex items-center gap-1"
+							<td className="align-top">
+								<div className="flex max-w-full flex-col gap-1">
+									<div className="max-w-full truncate whitespace-nowrap">
+										{(() => {
+											const problematic = node.components.filter(
+												(component) =>
+													component.status === "down" ||
+													component.status === "unknown",
+											);
+											if (problematic.length === 0) {
+												return (
+													<span
+														className="badge badge-success badge-sm"
+														title="All monitored components are healthy."
+													>
+														normal
+													</span>
+												);
+											}
+
+											const first = problematic[0];
+											const moreCount = problematic.length - 1;
+											const moreTitle = problematic
+												.slice(1)
+												.map(
+													(component) =>
+														`${component.component}:${component.status}`,
+												)
+												.join(", ");
+											const moreBadgeClass = problematic.some(
+												(component) => component.status === "down",
+											)
+												? "badge badge-error badge-sm"
+												: "badge badge-warning badge-sm";
+
+											return (
+												<div className="inline-flex items-center gap-1 whitespace-nowrap">
+													<span
+														className={componentBadgeClass(first.status)}
+														title={`${first.component}:${first.status}`}
+													>
+														{first.component}:{first.status}
+													</span>
+													{moreCount > 0 ? (
+														<span className={moreBadgeClass} title={moreTitle}>
+															+{moreCount}
+														</span>
+													) : null}
+												</div>
+											);
+										})()}
+									</div>
+									<div
+										className="grid h-4 w-full grid-flow-col auto-cols-fr overflow-hidden rounded-sm"
+										title="Last 7 days status (30-minute slots)."
 									>
-										<span aria-hidden="true">
-											<Icon
-												name="tabler:external-link"
-												size={16}
-												className="opacity-70"
+										{node.recent_slots.map((slot) => (
+											<div
+												key={slot.slot_start}
+												className={`h-4 ${historySlotClass(slot.status)}`}
+												title={`${slot.slot_start} • ${slot.status}`}
 											/>
-										</span>
-										{node.api_base_url}
-									</a>
-								) : (
-									"-"
-								)}
+										))}
+									</div>
+								</div>
 							</td>
 						</tr>
 					))}
