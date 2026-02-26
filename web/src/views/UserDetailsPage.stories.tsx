@@ -80,14 +80,14 @@ export const User2: Story = {
 	},
 };
 
-export const QuotaLimitsTab: Story = {
+export const AccessTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Quota limits" }),
+			await canvas.findByRole("button", { name: "Access" }),
 		);
 		await expect(
-			await canvas.findByRole("heading", { name: "Quota limits" }),
+			await canvas.findByRole("heading", { name: "Access" }),
 		).toBeInTheDocument();
 	},
 };

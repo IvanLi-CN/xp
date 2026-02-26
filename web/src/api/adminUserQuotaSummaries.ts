@@ -4,6 +4,13 @@ import { throwIfNotOk } from "./backendError";
 
 export const AdminUserQuotaSummaryItemSchema = z.object({
 	user_id: z.string(),
+	quota_limit_kind: z.enum([
+		"unlimited",
+		"fixed",
+		"shared_base",
+		"shared_opportunistic",
+		"mixed",
+	]),
 	quota_limit_bytes: z.number().int().nonnegative(),
 	used_bytes: z.number().int().nonnegative(),
 	remaining_bytes: z.number().int().nonnegative(),

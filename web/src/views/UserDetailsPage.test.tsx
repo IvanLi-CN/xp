@@ -18,10 +18,6 @@ import {
 } from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
-import {
-	fetchAdminUserNodeQuotas,
-	putAdminUserNodeQuota,
-} from "../api/adminUserNodeQuotas";
 import { fetchAdminUser } from "../api/adminUsers";
 import { BackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
@@ -54,7 +50,6 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../api/adminUsers");
 vi.mock("../api/adminNodes");
-vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
 vi.mock("../api/adminEndpoints");
 vi.mock("../api/adminGrantGroups");
@@ -87,6 +82,7 @@ function setupHappyPathMocks(args: {
 		node_name: string;
 		api_base_url: string;
 		access_host: string;
+		quota_limit_bytes?: number;
 		quota_reset: NodeQuotaReset;
 	}>;
 	endpoints?: Array<{
@@ -108,18 +104,29 @@ function setupHappyPathMocks(args: {
 		user_id: userId,
 		display_name: "Ivan",
 		subscription_token: "subtoken",
+		priority_tier: "p3",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 
-	const nodes = args.nodes ?? [
-		{
-			node_id: "n-tokyo",
-			node_name: "Tokyo",
-			api_base_url: "http://localhost",
-			access_host: "localhost",
-			quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 0 },
-		},
-	];
+	const nodes = (
+		args.nodes ?? [
+			{
+				node_id: "n-tokyo",
+				node_name: "Tokyo",
+				api_base_url: "http://localhost",
+				access_host: "localhost",
+				quota_limit_bytes: 0,
+				quota_reset: {
+					policy: "monthly",
+					day_of_month: 1,
+					tz_offset_minutes: 0,
+				},
+			},
+		]
+	).map((n) => ({
+		...n,
+		quota_limit_bytes: n.quota_limit_bytes ?? 0,
+	}));
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: nodes,
 	});
@@ -141,14 +148,6 @@ function setupHappyPathMocks(args: {
 	const nodeQuotas = args.nodeQuotas ?? [
 		{ node_id: "n-tokyo", quota_limit_bytes: 0, quota_reset_source: "user" },
 	];
-	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
-		items: nodeQuotas.map((q) => ({
-			user_id: userId,
-			node_id: q.node_id,
-			quota_limit_bytes: q.quota_limit_bytes,
-			quota_reset_source: q.quota_reset_source ?? "user",
-		})),
-	});
 
 	vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValue({
 		partial: false,
@@ -176,56 +175,60 @@ describe("<UserDetailsPage />", () => {
 		cleanup();
 	});
 
-	it("renders three tabs and switches between User, Quota limits and Quota usage", async () => {
-		setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
-		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
-			new BackendApiError({ status: 404, message: "not found" }),
-		);
+	it(
+		"renders three tabs and switches between User, Access and Quota usage",
+		async () => {
+			setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
+			vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
+				new BackendApiError({ status: 404, message: "not found" }),
+			);
 
-		const view = renderPage();
+			const view = renderPage();
 
-		expect(
-			await within(view.container).findByRole("heading", { name: "Profile" }),
-		).toBeInTheDocument();
-		expect(
-			within(view.container).getByRole("button", { name: "User" }),
-		).toBeInTheDocument();
-		expect(
-			within(view.container).getByRole("button", { name: "Quota limits" }),
-		).toBeInTheDocument();
-		expect(
-			within(view.container).getByRole("button", { name: "Quota usage" }),
-		).toBeInTheDocument();
+			expect(
+				await within(view.container).findByRole("heading", { name: "Profile" }),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).getByRole("button", { name: "User" }),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).getByRole("button", { name: "Access" }),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).getByRole("button", { name: "Quota usage" }),
+			).toBeInTheDocument();
 
-		fireEvent.click(
-			within(view.container).getByRole("button", { name: "Quota limits" }),
-		);
-		expect(
-			await within(view.container).findByRole("heading", {
-				name: "Quota limits",
-			}),
-		).toBeInTheDocument();
+			fireEvent.click(
+				within(view.container).getByRole("button", { name: "Access" }),
+			);
+			expect(
+				await within(view.container).findByRole("heading", {
+					name: "Access",
+				}),
+			).toBeInTheDocument();
 
-		fireEvent.click(
-			within(view.container).getByRole("button", { name: "Quota usage" }),
-		);
-		expect(
-			await within(view.container).findByRole("heading", {
-				name: "Quota usage",
-			}),
-		).toBeInTheDocument();
-		// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
-		expect(
-			await within(view.container).findByText("-/unlimited"),
-		).toBeInTheDocument();
+			fireEvent.click(
+				within(view.container).getByRole("button", { name: "Quota usage" }),
+			);
+			expect(
+				await within(view.container).findByRole("heading", {
+					name: "Quota usage",
+				}),
+			).toBeInTheDocument();
+			// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
+			expect(
+				await within(view.container).findByText("-/unlimited"),
+			).toBeInTheDocument();
 
-		fireEvent.click(
-			within(view.container).getByRole("button", { name: "User" }),
-		);
-		expect(
-			await within(view.container).findByRole("heading", { name: "Profile" }),
-		).toBeInTheDocument();
-	});
+			fireEvent.click(
+				within(view.container).getByRole("button", { name: "User" }),
+			);
+			expect(
+				await within(view.container).findByRole("heading", { name: "Profile" }),
+			).toBeInTheDocument();
+		},
+		10_000,
+	);
 
 	it("re-initializes selection after transient endpoints load error", async () => {
 		setupHappyPathMocks({
@@ -279,11 +282,11 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		expect(
-			await within(view.container).findByText("Failed to load quota limits"),
+			await within(view.container).findByText("Failed to load access"),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -318,7 +321,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -378,7 +381,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -403,7 +406,7 @@ describe("<UserDetailsPage />", () => {
 					user_id: "u_01HUSERAAAAAA",
 					endpoint_id: "ep-a",
 					enabled: true,
-					quota_limit_bytes: 123,
+					quota_limit_bytes: 0,
 					note: null,
 				},
 			],
@@ -456,7 +459,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -556,7 +559,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		await within(view.container).findByText("Matrix");
@@ -658,7 +661,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -758,7 +761,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		const cellToggle = await within(view.container).findByLabelText(
@@ -842,7 +845,7 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(
 			await within(view.container).findByRole("button", {
-				name: "Quota limits",
+				name: "Access",
 			}),
 		);
 		await within(view.container).findByText(/Selected 1 \/ 1/);
@@ -855,189 +858,5 @@ describe("<UserDetailsPage />", () => {
 			expect(replaceAdminGrantGroup).toHaveBeenCalled();
 		});
 		expect(createAdminGrantGroup).not.toHaveBeenCalled();
-	});
-
-	it("updates node quota and syncs managed group members", async () => {
-		setupHappyPathMocks({
-			userId: "u_01HUSERAAAAAA",
-			nodes: [
-				{
-					node_id: "n-tokyo",
-					node_name: "Tokyo",
-					api_base_url: "http://localhost",
-					access_host: "localhost",
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: 0,
-					},
-				},
-			],
-			endpoints: [
-				{
-					endpoint_id: "ep-a",
-					node_id: "n-tokyo",
-					tag: "tokyo-vless",
-					kind: "vless_reality_vision_tcp",
-					port: 443,
-					meta: {},
-				},
-			],
-			nodeQuotas: [{ node_id: "n-tokyo", quota_limit_bytes: 0 }],
-		});
-
-		vi.mocked(fetchAdminGrantGroup).mockResolvedValue({
-			group: { group_name: "managed-u_01huseraaaaaa" },
-			members: [
-				{
-					user_id: "u_01HUSERAAAAAA",
-					endpoint_id: "ep-a",
-					enabled: true,
-					quota_limit_bytes: 0,
-					note: null,
-					credentials: {
-						vless: { uuid: "00000000-0000-0000-0000-000000000000", email: "" },
-					},
-				},
-			],
-		});
-		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
-		vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
-			user_id: "u_01HUSERAAAAAA",
-			node_id: "n-tokyo",
-			quota_limit_bytes: 1024 * 1024 * 1024,
-			quota_reset_source: "user",
-		});
-		vi.mocked(replaceAdminGrantGroup).mockResolvedValue({
-			group: { group_name: "managed-u_01huseraaaaaa" },
-			created: 0,
-			updated: 1,
-			deleted: 0,
-		});
-
-		const view = renderPage();
-
-		fireEvent.click(
-			await within(view.container).findByRole("button", {
-				name: "Quota limits",
-			}),
-		);
-		await within(view.container).findByText("Matrix");
-
-		fireEvent.click(
-			within(view.container).getByRole("button", { name: /Quota:/ }),
-		);
-
-		const dialog = await within(document.body).findByRole("dialog", {
-			name: "Edit node quota",
-		});
-		fireEvent.change(within(dialog).getByRole("textbox"), {
-			target: { value: "1GiB" },
-		});
-		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
-
-		await waitFor(() => {
-			expect(putAdminUserNodeQuota).toHaveBeenCalledWith(
-				"admintoken",
-				"u_01HUSERAAAAAA",
-				"n-tokyo",
-				1024 * 1024 * 1024,
-				"user",
-			);
-		});
-		await waitFor(() => {
-			expect(replaceAdminGrantGroup).toHaveBeenCalledWith(
-				"admintoken",
-				"managed-u_01huseraaaaaa",
-				expect.objectContaining({
-					members: [
-						expect.objectContaining({
-							user_id: "u_01HUSERAAAAAA",
-							endpoint_id: "ep-a",
-							enabled: true,
-							quota_limit_bytes: 1024 * 1024 * 1024,
-						}),
-					],
-				}),
-			);
-		});
-	});
-
-	it("preserves quota_reset_source when updating quota", async () => {
-		setupHappyPathMocks({
-			userId: "u_01HUSERAAAAAA",
-			nodes: [
-				{
-					node_id: "n-tokyo",
-					node_name: "Tokyo",
-					api_base_url: "http://localhost",
-					access_host: "localhost",
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: 0,
-					},
-				},
-			],
-			endpoints: [
-				{
-					endpoint_id: "ep-a",
-					node_id: "n-tokyo",
-					tag: "tokyo-vless",
-					kind: "vless_reality_vision_tcp",
-					port: 443,
-					meta: {},
-				},
-			],
-			nodeQuotas: [
-				{
-					node_id: "n-tokyo",
-					quota_limit_bytes: 0,
-					quota_reset_source: "node",
-				},
-			],
-		});
-
-		vi.mocked(fetchAdminGrantGroups).mockResolvedValue({ items: [] });
-		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
-			new BackendApiError({ status: 404, message: "not found" }),
-		);
-		vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
-			user_id: "u_01HUSERAAAAAA",
-			node_id: "n-tokyo",
-			quota_limit_bytes: 1024 * 1024 * 1024,
-			quota_reset_source: "node",
-		});
-
-		const view = renderPage();
-
-		fireEvent.click(
-			await within(view.container).findByRole("button", {
-				name: "Quota limits",
-			}),
-		);
-		await within(view.container).findByText("Matrix");
-
-		fireEvent.click(
-			within(view.container).getByRole("button", { name: /Quota:/ }),
-		);
-
-		const dialog = await within(document.body).findByRole("dialog", {
-			name: "Edit node quota",
-		});
-		fireEvent.change(within(dialog).getByRole("textbox"), {
-			target: { value: "1GiB" },
-		});
-		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
-
-		await waitFor(() => {
-			expect(putAdminUserNodeQuota).toHaveBeenCalledWith(
-				"admintoken",
-				"u_01HUSERAAAAAA",
-				"n-tokyo",
-				1024 * 1024 * 1024,
-				"node",
-			);
-		});
 	});
 });

@@ -21,6 +21,9 @@ pub enum DomainError {
     InvalidTzOffsetMinutes {
         tz_offset_minutes: i16,
     },
+    InvalidNodeQuotaConfig {
+        reason: String,
+    },
     InvalidGroupName {
         group_name: String,
     },
@@ -80,6 +83,7 @@ impl DomainError {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
             | Self::InvalidTzOffsetMinutes { .. }
+            | Self::InvalidNodeQuotaConfig { .. }
             | Self::InvalidGroupName { .. }
             | Self::EmptyGrantGroup
             | Self::DuplicateGrantGroupMember { .. } => "invalid_request",
@@ -108,6 +112,9 @@ impl std::fmt::Display for DomainError {
             }
             Self::InvalidTzOffsetMinutes { tz_offset_minutes } => {
                 write!(f, "invalid tz_offset_minutes: {tz_offset_minutes}")
+            }
+            Self::InvalidNodeQuotaConfig { reason } => {
+                write!(f, "invalid node quota config: {reason}")
             }
             Self::InvalidGroupName { group_name } => write!(f, "invalid group_name: {group_name}"),
             Self::EmptyGrantGroup => write!(f, "grant group must have at least 1 member"),
@@ -291,6 +298,12 @@ pub struct Node {
     #[serde(alias = "public_domain")]
     pub access_host: String,
     pub api_base_url: String,
+    /// Total quota budget per cycle for this node.
+    ///
+    /// - `0` means unlimited (no shared-quota enforcement).
+    /// - Non-zero means "bytes per cycle" as defined by `quota_reset`.
+    #[serde(default)]
+    pub quota_limit_bytes: u64,
     #[serde(default)]
     pub quota_reset: NodeQuotaReset,
 }
@@ -312,7 +325,18 @@ pub struct User {
     pub display_name: String,
     pub subscription_token: String,
     #[serde(default)]
+    pub priority_tier: UserPriorityTier,
+    #[serde(default)]
     pub quota_reset: UserQuotaReset,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UserPriorityTier {
+    P1,
+    #[default]
+    P2,
+    P3,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -66,6 +66,7 @@ const NODES: AdminNode[] = [
 		node_name: LONG_NODE_NAME,
 		api_base_url: "https://tokyo.example.invalid",
 		access_host: "tokyo.example.invalid",
+		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
@@ -73,6 +74,7 @@ const NODES: AdminNode[] = [
 		node_name: "osaka-1",
 		api_base_url: "https://osaka.example.invalid",
 		access_host: "osaka.example.invalid",
+		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 ];

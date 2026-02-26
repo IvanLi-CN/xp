@@ -252,6 +252,7 @@ pub async fn cmd_xp_sync_node_meta(
         node_name: meta.node_name.clone(),
         access_host: meta.access_host.clone(),
         api_base_url: meta.api_base_url.clone(),
+        quota_limit_bytes: 0,
         quota_reset: crate::domain::NodeQuotaReset::default(),
     });
 
@@ -284,6 +285,7 @@ pub async fn cmd_xp_sync_node_meta(
         node_name: node_name.clone(),
         access_host: access_host.clone(),
         api_base_url: api_base_url.clone(),
+        quota_limit_bytes: current.quota_limit_bytes,
         quota_reset: current.quota_reset.clone(),
     };
     internal_client_write(

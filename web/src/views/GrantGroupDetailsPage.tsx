@@ -183,7 +183,6 @@ export function GrantGroupDetailsPage() {
 	const [addUserId, setAddUserId] = useState("");
 	const [addEndpointId, setAddEndpointId] = useState("");
 	const [addEnabled, setAddEnabled] = useState(true);
-	const [addQuota, setAddQuota] = useState(0);
 	const [addNote, setAddNote] = useState<string>("");
 
 	const handleAddMember = () => {
@@ -207,14 +206,14 @@ export function GrantGroupDetailsPage() {
 				user_id: userId,
 				endpoint_id: endpointId,
 				enabled: addEnabled,
-				quota_limit_bytes: addQuota,
+				// Deprecated: shared node quota policy does not use static per-member quotas.
+				quota_limit_bytes: 0,
 				note: addNote.trim().length ? addNote.trim() : null,
 			},
 		]);
 		setAddUserId("");
 		setAddEndpointId("");
 		setAddEnabled(true);
-		setAddQuota(0);
 		setAddNote("");
 	};
 
@@ -315,8 +314,18 @@ export function GrantGroupDetailsPage() {
 					</label>
 				</div>
 
-				<div className="flex items-center justify-between gap-3">
-					<h2 className="text-lg font-semibold">Members</h2>
+				<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+					<div className="space-y-1">
+						<h2 className="text-lg font-semibold">Members</h2>
+						<p className="text-xs opacity-60">
+							Member quotas are deprecated. Configure node budgets and user
+							weights in{" "}
+							<Link to="/quota-policy" className="link link-primary">
+								Quota policy
+							</Link>
+							.
+						</p>
+					</div>
 					<div className="flex items-center gap-2">
 						<Button
 							variant="primary"
@@ -349,7 +358,6 @@ export function GrantGroupDetailsPage() {
 								<th>User</th>
 								<th>Endpoint</th>
 								<th>Enabled</th>
-								<th className="text-right">Quota (bytes)</th>
 								<th>Note</th>
 								<th />
 							</tr>
@@ -371,25 +379,6 @@ export function GrantGroupDetailsPage() {
 														row.user_id === m.user_id &&
 														row.endpoint_id === m.endpoint_id
 															? { ...row, enabled }
-															: row,
-													),
-												);
-											}}
-										/>
-									</td>
-									<td className="text-right">
-										<input
-											className={inputClass}
-											type="number"
-											min={0}
-											value={m.quota_limit_bytes}
-											onChange={(e) => {
-												const quota = Number(e.target.value);
-												setDraftMembers((prev) =>
-													prev.map((row) =>
-														row.user_id === m.user_id &&
-														row.endpoint_id === m.endpoint_id
-															? { ...row, quota_limit_bytes: quota }
 															: row,
 													),
 												);
@@ -486,18 +475,6 @@ export function GrantGroupDetailsPage() {
 								<option value="yes">yes</option>
 								<option value="no">no</option>
 							</select>
-						</label>
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">Quota (bytes)</span>
-							</div>
-							<input
-								className={inputClass}
-								type="number"
-								min={0}
-								value={addQuota}
-								onChange={(e) => setAddQuota(Number(e.target.value))}
-							/>
 						</label>
 						<label className="form-control md:col-span-2">
 							<div className="label">

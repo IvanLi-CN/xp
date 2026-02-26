@@ -14,6 +14,7 @@ pub mod node_runtime;
 pub mod ops;
 pub mod protocol;
 pub mod quota;
+pub mod quota_policy;
 pub mod raft;
 pub mod reconcile;
 pub mod state;

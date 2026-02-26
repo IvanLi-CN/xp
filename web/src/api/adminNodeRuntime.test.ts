@@ -55,6 +55,7 @@ describe("admin node runtime schemas", () => {
 				node_name: "node-1",
 				api_base_url: "https://node-1.example.com",
 				access_host: "node-1.example.com",
+				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
 					day_of_month: 1,

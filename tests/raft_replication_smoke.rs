@@ -291,6 +291,7 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
         user_id: "user-1".to_string(),
         display_name: "replication-smoke".to_string(),
         subscription_token: "sub_test_token".to_string(),
+        priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Monthly {
             day_of_month: 1,
             tz_offset_minutes: 480,
@@ -384,6 +385,7 @@ async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow:
             user_id: "user-restart".to_string(),
             display_name: "restart-smoke".to_string(),
             subscription_token: "sub_test_token".to_string(),
+            priority_tier: Default::default(),
             quota_reset: UserQuotaReset::Monthly {
                 day_of_month: 1,
                 tz_offset_minutes: 480,

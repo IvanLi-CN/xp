@@ -11,9 +11,9 @@ use uuid::Uuid;
 use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
-        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserQuotaReset,
-        VlessCredentials, validate_cycle_day_of_month, validate_group_name, validate_port,
-        validate_tz_offset_minutes,
+        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserPriorityTier,
+        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month, validate_group_name,
+        validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
@@ -25,7 +25,8 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION_V5: u32 = 5;
 const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 1;
 
@@ -111,6 +112,8 @@ pub struct PersistedState {
     pub reality_domains: Vec<RealityDomain>,
     #[serde(default)]
     pub user_node_quotas: BTreeMap<String, BTreeMap<String, UserNodeQuotaConfig>>,
+    #[serde(default)]
+    pub user_node_weights: BTreeMap<String, BTreeMap<String, UserNodeWeightConfig>>,
 }
 
 impl PersistedState {
@@ -124,6 +127,7 @@ impl PersistedState {
             grants: BTreeMap::new(),
             reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
+            user_node_weights: BTreeMap::new(),
         }
     }
 }
@@ -186,6 +190,11 @@ pub struct UserNodeQuotaConfig {
     pub quota_limit_bytes: Option<u64>,
     #[serde(default)]
     pub quota_reset_source: QuotaResetSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserNodeWeightConfig {
+    pub weight: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -294,6 +303,7 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
                 user_id: user.user_id.clone(),
                 display_name: user.display_name.clone(),
                 subscription_token: user.subscription_token.clone(),
+                priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::Monthly {
                     day_of_month: user.cycle_day_of_month_default,
                     tz_offset_minutes: 480,
@@ -534,10 +544,23 @@ fn migrate_v4_to_v5(mut input: PersistedState) -> Result<PersistedState, StoreEr
             ),
         });
     }
-    input.schema_version = SCHEMA_VERSION;
+    input.schema_version = SCHEMA_VERSION_V5;
     if input.reality_domains.is_empty() {
         input.reality_domains = default_seed_reality_domains();
     }
+    Ok(input)
+}
+
+fn migrate_v5_to_v6(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V5 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for v5->v6 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
+    input.schema_version = SCHEMA_VERSION;
     Ok(input)
 }
 
@@ -560,6 +583,7 @@ mod migrate_tests {
                 node_name: "node-1".to_string(),
                 access_host: "".to_string(),
                 api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
         );
@@ -642,7 +666,7 @@ mod migrate_tests {
         v4.reality_domains = Vec::new();
 
         let v5 = migrate_v4_to_v5(v4).expect("migration should succeed");
-        assert_eq!(v5.schema_version, SCHEMA_VERSION);
+        assert_eq!(v5.schema_version, SCHEMA_VERSION_V5);
         assert_eq!(v5.reality_domains, default_seed_reality_domains());
     }
 
@@ -657,7 +681,7 @@ mod migrate_tests {
         }];
 
         let v5 = migrate_v4_to_v5(v4).expect("migration should succeed");
-        assert_eq!(v5.schema_version, SCHEMA_VERSION);
+        assert_eq!(v5.schema_version, SCHEMA_VERSION_V5);
         assert_eq!(v5.reality_domains.len(), 1);
         assert_eq!(v5.reality_domains[0].domain_id, "custom_1");
         assert_eq!(v5.reality_domains[0].server_name, "example.com");
@@ -727,6 +751,11 @@ pub enum DesiredStateCommand {
         quota_limit_bytes: u64,
         #[serde(default)]
         quota_reset_source: QuotaResetSource,
+    },
+    SetUserNodeWeight {
+        user_id: String,
+        node_id: String,
+        weight: u16,
     },
     UpsertGrant {
         grant: Grant,
@@ -837,6 +866,16 @@ fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> 
     Ok(())
 }
 
+fn validate_node_quota_config(node: &Node) -> Result<(), DomainError> {
+    // Shared node quota enforcement requires a finite cycle window.
+    if node.quota_limit_bytes > 0 && matches!(node.quota_reset, NodeQuotaReset::Unlimited { .. }) {
+        return Err(DomainError::InvalidNodeQuotaConfig {
+            reason: "quota_limit_bytes > 0 requires quota_reset policy monthly".to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn normalize_reality_server_names(input: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::<String>::new();
@@ -923,6 +962,7 @@ impl DesiredStateCommand {
         match self {
             Self::UpsertNode { node } => {
                 validate_node_quota_reset(&node.quota_reset)?;
+                validate_node_quota_config(node)?;
                 state.nodes.insert(node.node_id.clone(), node.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
@@ -954,6 +994,14 @@ impl DesiredStateCommand {
                 }
                 state
                     .user_node_quotas
+                    .retain(|_user_id, nodes| !nodes.is_empty());
+
+                // A node-scoped weight config becomes meaningless once the node is removed.
+                for (_user_id, nodes) in state.user_node_weights.iter_mut() {
+                    nodes.remove(node_id);
+                }
+                state
+                    .user_node_weights
                     .retain(|_user_id, nodes| !nodes.is_empty());
 
                 // Cleanup endpoint probe samples for the removed node.
@@ -1239,6 +1287,8 @@ impl DesiredStateCommand {
             }
             Self::DeleteUser { user_id } => {
                 let deleted = state.users.remove(user_id).is_some();
+                state.user_node_quotas.remove(user_id);
+                state.user_node_weights.remove(user_id);
                 Ok(DesiredStateApplyResult::UserDeleted { deleted })
             }
             Self::ResetUserSubscriptionToken {
@@ -1304,6 +1354,32 @@ impl DesiredStateCommand {
                         quota_reset_source: quota_reset_source.clone(),
                     },
                 })
+            }
+            Self::SetUserNodeWeight {
+                user_id,
+                node_id,
+                weight,
+            } => {
+                if !state.users.contains_key(user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: user_id.clone(),
+                    }
+                    .into());
+                }
+                if !state.nodes.contains_key(node_id) {
+                    return Err(DomainError::MissingNode {
+                        node_id: node_id.clone(),
+                    }
+                    .into());
+                }
+
+                state
+                    .user_node_weights
+                    .entry(user_id.clone())
+                    .or_default()
+                    .insert(node_id.clone(), UserNodeWeightConfig { weight: *weight });
+
+                Ok(DesiredStateApplyResult::Applied)
             }
             Self::UpsertGrant { grant } => {
                 if !state.users.contains_key(&grant.user_id) {
@@ -1658,6 +1734,14 @@ pub struct PersistedUsage {
     pub schema_version: u32,
     #[serde(default)]
     pub grants: BTreeMap<String, GrantUsage>,
+    /// Local-only pacing state for shared node quota enforcement.
+    ///
+    /// Keyed by `(user_id, node_id)`.
+    #[serde(default)]
+    pub user_node_pacing: BTreeMap<String, BTreeMap<String, UserNodePacing>>,
+    /// Local-only pacing state keyed by `node_id`.
+    #[serde(default)]
+    pub node_pacing: BTreeMap<String, NodePacing>,
 }
 
 impl PersistedUsage {
@@ -1665,8 +1749,33 @@ impl PersistedUsage {
         Self {
             schema_version: USAGE_SCHEMA_VERSION,
             grants: BTreeMap::new(),
+            user_node_pacing: BTreeMap::new(),
+            node_pacing: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserNodePacing {
+    pub bank_bytes: u64,
+    #[serde(default)]
+    pub last_total_used_bytes: u64,
+    /// Last computed base quota for this `(user,node)` in bytes.
+    ///
+    /// This allows the quota engine to reconcile pacing immediately when policy inputs
+    /// change mid-cycle (node quota, user weights, user tiers, etc.).
+    #[serde(default)]
+    pub last_base_quota_bytes: u64,
+    /// Last seen user priority tier for this `(user,node)`.
+    #[serde(default)]
+    pub last_priority_tier: UserPriorityTier,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodePacing {
+    pub cycle_start_at: String,
+    pub cycle_end_at: String,
+    pub last_day_index: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1711,23 +1820,31 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
             match schema_version {
-                5 => (serde_json::from_value(raw)?, false, false),
+                6 => (serde_json::from_value(raw)?, false, false),
+                5 => {
+                    let v5: PersistedState = serde_json::from_value(raw)?;
+                    let v6 = migrate_v5_to_v6(v5)?;
+                    (v6, false, true)
+                }
                 4 => {
                     let v4: PersistedState = serde_json::from_value(raw)?;
                     let v5 = migrate_v4_to_v5(v4)?;
-                    (v5, false, true)
+                    let v6 = migrate_v5_to_v6(v5)?;
+                    (v6, false, true)
                 }
                 3 => {
                     let v3: PersistedState = serde_json::from_value(raw)?;
                     let v4 = migrate_v3_to_v4(v3)?;
                     let v5 = migrate_v4_to_v5(v4)?;
-                    (v5, false, true)
+                    let v6 = migrate_v5_to_v6(v5)?;
+                    (v6, false, true)
                 }
                 2 | 1 => {
                     let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
                     let v4 = migrate_v2_like_to_v3(v2)?;
                     let v5 = migrate_v4_to_v5(v4)?;
-                    (v5, false, true)
+                    let v6 = migrate_v5_to_v6(v5)?;
+                    (v6, false, true)
                 }
                 got => {
                     return Err(StoreError::SchemaVersionMismatch {
@@ -1743,6 +1860,7 @@ impl JsonSnapshotStore {
                 node_name: init.bootstrap_node_name,
                 access_host: init.bootstrap_access_host,
                 api_base_url: init.bootstrap_api_base_url,
+                quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             };
 
@@ -1819,6 +1937,15 @@ impl JsonSnapshotStore {
         Ok(())
     }
 
+    pub fn update_usage<R>(
+        &mut self,
+        f: impl FnOnce(&mut PersistedUsage) -> R,
+    ) -> Result<R, StoreError> {
+        let out = f(&mut self.usage);
+        self.save_usage()?;
+        Ok(out)
+    }
+
     pub fn get_grant_usage(&self, grant_id: &str) -> Option<GrantUsage> {
         self.usage.grants.get(grant_id).cloned()
     }
@@ -1860,6 +1987,66 @@ impl JsonSnapshotStore {
         if let Some(entry) = self.usage.grants.get_mut(grant_id) {
             entry.quota_banned = false;
             entry.quota_banned_at = None;
+            self.save_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn get_node_pacing(&self, node_id: &str) -> Option<NodePacing> {
+        self.usage.node_pacing.get(node_id).cloned()
+    }
+
+    pub fn set_node_pacing(
+        &mut self,
+        node_id: String,
+        pacing: NodePacing,
+    ) -> Result<(), StoreError> {
+        self.usage.node_pacing.insert(node_id, pacing);
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn clear_node_pacing(&mut self, node_id: &str) -> Result<(), StoreError> {
+        if self.usage.node_pacing.remove(node_id).is_some() {
+            self.save_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn get_user_node_pacing(&self, user_id: &str, node_id: &str) -> Option<UserNodePacing> {
+        self.usage
+            .user_node_pacing
+            .get(user_id)
+            .and_then(|m| m.get(node_id))
+            .cloned()
+    }
+
+    pub fn set_user_node_pacing(
+        &mut self,
+        user_id: String,
+        node_id: String,
+        pacing: UserNodePacing,
+    ) -> Result<(), StoreError> {
+        self.usage
+            .user_node_pacing
+            .entry(user_id)
+            .or_default()
+            .insert(node_id, pacing);
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn clear_user_node_pacing_for_node(&mut self, node_id: &str) -> Result<(), StoreError> {
+        let mut changed = false;
+        for (_user_id, nodes) in self.usage.user_node_pacing.iter_mut() {
+            if nodes.remove(node_id).is_some() {
+                changed = true;
+            }
+        }
+        self.usage
+            .user_node_pacing
+            .retain(|_user_id, nodes| !nodes.is_empty());
+        if changed {
             self.save_usage()?;
         }
         Ok(())
@@ -1979,6 +2166,7 @@ impl JsonSnapshotStore {
             user_id,
             display_name,
             subscription_token,
+            priority_tier: Default::default(),
             quota_reset,
         })
     }
@@ -2056,6 +2244,34 @@ impl JsonSnapshotStore {
             .user_node_quotas
             .get(user_id)
             .and_then(|m| m.get(node_id).map(|cfg| cfg.quota_reset_source.clone()))
+    }
+
+    pub fn get_user_node_weight(&self, user_id: &str, node_id: &str) -> Option<u16> {
+        self.state
+            .user_node_weights
+            .get(user_id)
+            .and_then(|m| m.get(node_id).map(|cfg| cfg.weight))
+    }
+
+    pub fn resolve_user_node_weight(&self, user_id: &str, node_id: &str) -> u16 {
+        self.get_user_node_weight(user_id, node_id).unwrap_or(100)
+    }
+
+    pub fn list_user_node_weights(&self, user_id: &str) -> Result<Vec<(String, u16)>, StoreError> {
+        if !self.state.users.contains_key(user_id) {
+            return Err(DomainError::MissingUser {
+                user_id: user_id.to_string(),
+            }
+            .into());
+        }
+
+        let mut out = Vec::new();
+        if let Some(nodes) = self.state.user_node_weights.get(user_id) {
+            for (node_id, cfg) in nodes {
+                out.push((node_id.clone(), cfg.weight));
+            }
+        }
+        Ok(out)
     }
 
     pub fn list_user_node_quotas(&self, user_id: &str) -> Result<Vec<UserNodeQuota>, StoreError> {
@@ -2849,6 +3065,7 @@ mod tests {
             node_name: "node-1".to_string(),
             access_host: "example.com".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         };
 
@@ -2919,6 +3136,7 @@ mod tests {
             user_id: "user_1".to_string(),
             display_name: "alice".to_string(),
             subscription_token: "sub_1".to_string(),
+            priority_tier: Default::default(),
             quota_reset: UserQuotaReset::default(),
         };
 
@@ -2965,6 +3183,7 @@ mod tests {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::default(),
             },
         );
@@ -3038,6 +3257,7 @@ mod tests {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::default(),
             },
         );
