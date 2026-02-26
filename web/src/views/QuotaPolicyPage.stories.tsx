@@ -14,10 +14,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: "node-1",
-						node_name: "Node-1",
-						access_host: "node-1.example.invalid",
-						api_base_url: "https://node-1.example.invalid",
+						node_id: "node-tokyo-a",
+						node_name: "Tokyo-A",
+						access_host: "tokyo-a.example.invalid",
+						api_base_url: "https://tokyo-a.example.invalid",
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -26,10 +26,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: "node-b",
-						node_name: "Node B",
-						access_host: "node-b.example.invalid",
-						api_base_url: "https://node-b.example.invalid",
+						node_id: "node-frankfurt-b",
+						node_name: "Frankfurt-B",
+						access_host: "frankfurt-b.example.invalid",
+						api_base_url: "https://frankfurt-b.example.invalid",
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -38,10 +38,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: "node-c",
-						node_name: "节点三",
-						access_host: "node-c.example.invalid",
-						api_base_url: "https://node-c.example.invalid",
+						node_id: "node-sydney-c",
+						node_name: "Sydney-C",
+						access_host: "sydney-c.example.invalid",
+						api_base_url: "https://sydney-c.example.invalid",
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -52,9 +52,9 @@ const meta = {
 				],
 				endpoints: [
 					{
-						endpoint_id: "ep-node-1-vless",
-						node_id: "node-1",
-						tag: "node-1-vless",
+						endpoint_id: "ep-tokyo-a-vless",
+						node_id: "node-tokyo-a",
+						tag: "tokyo-a-vless",
 						kind: "vless_reality_vision_tcp",
 						port: 443,
 						meta: {
@@ -67,9 +67,9 @@ const meta = {
 						},
 					},
 					{
-						endpoint_id: "ep-node-1-ss",
-						node_id: "node-1",
-						tag: "node-1-ss",
+						endpoint_id: "ep-tokyo-a-ss",
+						node_id: "node-tokyo-a",
+						tag: "tokyo-a-ss",
 						kind: "ss2022_2022_blake3_aes_128_gcm",
 						port: 8443,
 						meta: {
@@ -77,9 +77,9 @@ const meta = {
 						},
 					},
 					{
-						endpoint_id: "ep-node-b-vless",
-						node_id: "node-b",
-						tag: "node-b-vless",
+						endpoint_id: "ep-frankfurt-b-vless",
+						node_id: "node-frankfurt-b",
+						tag: "frankfurt-b-vless",
 						kind: "vless_reality_vision_tcp",
 						port: 444,
 						meta: {
@@ -92,9 +92,9 @@ const meta = {
 						},
 					},
 					{
-						endpoint_id: "ep-node-c-vless",
-						node_id: "node-c",
-						tag: "node-c-vless",
+						endpoint_id: "ep-sydney-c-vless",
+						node_id: "node-sydney-c",
+						tag: "sydney-c-vless",
 						kind: "vless_reality_vision_tcp",
 						port: 445,
 						meta: {
@@ -137,7 +137,7 @@ const meta = {
 						members: [
 							{
 								user_id: userIdA,
-								endpoint_id: "ep-node-1-vless",
+								endpoint_id: "ep-tokyo-a-vless",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -150,7 +150,7 @@ const meta = {
 							},
 							{
 								user_id: userIdB,
-								endpoint_id: "ep-node-1-ss",
+								endpoint_id: "ep-tokyo-a-ss",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -163,7 +163,7 @@ const meta = {
 							},
 							{
 								user_id: userIdA,
-								endpoint_id: "ep-node-b-vless",
+								endpoint_id: "ep-frankfurt-b-vless",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -176,7 +176,7 @@ const meta = {
 							},
 							{
 								user_id: userIdB,
-								endpoint_id: "ep-node-b-vless",
+								endpoint_id: "ep-frankfurt-b-vless",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -189,7 +189,7 @@ const meta = {
 							},
 							{
 								user_id: userIdA,
-								endpoint_id: "ep-node-c-vless",
+								endpoint_id: "ep-sydney-c-vless",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -202,7 +202,7 @@ const meta = {
 							},
 							{
 								user_id: userIdB,
-								endpoint_id: "ep-node-c-vless",
+								endpoint_id: "ep-sydney-c-vless",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -218,14 +218,14 @@ const meta = {
 				],
 				userNodeWeights: {
 					[userIdA]: [
-						{ node_id: "node-1", weight: 6500 },
-						{ node_id: "node-b", weight: 5000 },
-						{ node_id: "node-c", weight: 2000 },
+						{ node_id: "node-tokyo-a", weight: 6500 },
+						{ node_id: "node-frankfurt-b", weight: 5000 },
+						{ node_id: "node-sydney-c", weight: 2000 },
 					],
 					[userIdB]: [
-						{ node_id: "node-1", weight: 3500 },
-						{ node_id: "node-b", weight: 5000 },
-						{ node_id: "node-c", weight: 8000 },
+						{ node_id: "node-tokyo-a", weight: 3500 },
+						{ node_id: "node-frankfurt-b", weight: 5000 },
+						{ node_id: "node-sydney-c", weight: 8000 },
 					],
 				},
 				userGlobalWeights: {
@@ -233,16 +233,16 @@ const meta = {
 					[userIdB]: 3500,
 				},
 				nodeWeightPolicies: {
-					"node-1": {
-						node_id: "node-1",
+					"node-tokyo-a": {
+						node_id: "node-tokyo-a",
 						inherit_global: false,
 					},
-					"node-b": {
-						node_id: "node-b",
+					"node-frankfurt-b": {
+						node_id: "node-frankfurt-b",
 						inherit_global: false,
 					},
-					"node-c": {
-						node_id: "node-c",
+					"node-sydney-c": {
+						node_id: "node-sydney-c",
 						inherit_global: false,
 					},
 				},

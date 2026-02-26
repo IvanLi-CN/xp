@@ -570,6 +570,26 @@ export function QuotaPolicyPage() {
 		});
 	}, [pieSegments]);
 	const firstPieSegment = pieSegments[0];
+	const globalPieSegments = useMemo(
+		() => buildPieSegments(globalRatioRows),
+		[globalRatioRows],
+	);
+	const globalPieSlices = useMemo(() => {
+		let cursor = 0;
+		return globalPieSegments.map((segment, index) => {
+			const startAngle = cursor;
+			const sweep = (segment.basisPoints / RATIO_BASIS_POINTS) * 360;
+			const endAngle = startAngle + sweep;
+			cursor = endAngle;
+			return {
+				...segment,
+				index,
+				startAngle,
+				endAngle,
+			};
+		});
+	}, [globalPieSegments]);
+	const firstGlobalPieSegment = globalPieSegments[0];
 
 	const canSaveRatio =
 		!nodeInheritGlobal &&
@@ -1144,39 +1164,54 @@ export function QuotaPolicyPage() {
 				</ResourceTable>
 			</div>
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-4 md:p-6">
-				<div className="tabs tabs-boxed flex-wrap">
-					<button
-						type="button"
-						className={`tab ${selectedWeightTab === "global" ? "tab-active" : ""}`}
-						onClick={() => handleSelectWeightTab("global")}
+			<div className="rounded-box border border-base-200 bg-base-100 px-4 pt-4 md:px-6 md:pt-5">
+				<div className="space-y-2">
+					<div className="text-sm font-medium opacity-80">分配规则作用域</div>
+					<div
+						role="tablist"
+						aria-label="Weight configuration tabs"
+						className="flex flex-wrap items-end gap-2"
 					>
-						默认
-					</button>
-					{nodes.map((node) => (
 						<button
-							key={node.node_id}
 							type="button"
-							className={`tab ${
-								selectedWeightTab === node.node_id ? "tab-active" : ""
+							role="tab"
+							aria-selected={selectedWeightTab === "global"}
+							className={`-mb-px rounded-t-lg border border-base-200 border-b-0 px-3 py-2 text-sm font-medium transition-colors md:px-4 ${
+								selectedWeightTab === "global"
+									? "bg-base-100 text-primary border-primary/60 border-t-2 shadow-sm"
+									: "bg-base-200/60 text-base-content/70 hover:bg-base-200"
 							}`}
-							onClick={() => handleSelectWeightTab(node.node_id)}
+							onClick={() => handleSelectWeightTab("global")}
 						>
-							{node.node_name}
+							全局默认
 						</button>
-					))}
+						{nodes.map((node) => (
+							<button
+								key={node.node_id}
+								type="button"
+								role="tab"
+								aria-selected={selectedWeightTab === node.node_id}
+								className={`-mb-px rounded-t-lg border border-base-200 border-b-0 px-3 py-2 text-sm font-medium transition-colors md:px-4 ${
+									selectedWeightTab === node.node_id
+										? "bg-base-100 text-primary border-primary/60 border-t-2 shadow-sm"
+										: "bg-base-200/60 text-base-content/70 hover:bg-base-200"
+								}`}
+								onClick={() => handleSelectWeightTab(node.node_id)}
+							>
+								{node.node_name}
+							</button>
+						))}
+					</div>
 				</div>
+				<div className="border-t border-base-200" />
 			</div>
 
 			{selectedWeightTab === "global" ? (
 				<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
 					<div className="space-y-1">
-						<h2 className="text-lg font-semibold">
-							Global default weight ratios
-						</h2>
+						<h2 className="text-lg font-semibold">全局默认权重比例</h2>
 						<p className="text-sm opacity-70">
-							Default allocation rule shared by nodes. New nodes inherit this
-							rule until override mode is enabled.
+							全局默认分配规则。新节点默认继承该规则，关闭“继承全局默认比例”后可对单节点单独覆盖。
 						</p>
 					</div>
 
@@ -1204,6 +1239,118 @@ export function QuotaPolicyPage() {
 										)}
 									</span>
 								) : null}
+							</div>
+
+							<div className="rounded-box border border-base-200 p-4 space-y-4">
+								<div className="grid gap-4 md:grid-cols-[320px_1fr]">
+									<div className="flex items-center justify-center">
+										<svg
+											viewBox="0 0 220 220"
+											className="w-64 h-64"
+											role="img"
+											aria-label="Global weight ratio pie chart"
+										>
+											<circle cx="110" cy="110" r="96" fill="hsl(var(--b2))" />
+											{globalPieSegments.length === 1 &&
+											firstGlobalPieSegment &&
+											firstGlobalPieSegment.basisPoints ===
+												RATIO_BASIS_POINTS ? (
+												<circle
+													cx="110"
+													cy="110"
+													r="96"
+													fill={firstGlobalPieSegment.color}
+												/>
+											) : (
+												globalPieSlices.map((segment) => {
+													const isActive =
+														hoveredUserId !== null &&
+														segment.userIds.includes(hoveredUserId);
+													return (
+														<g key={`${segment.key}-${segment.index}`}>
+															<path
+																d={describeArc(
+																	110,
+																	110,
+																	96,
+																	segment.startAngle,
+																	segment.endAngle,
+																)}
+																fill={segment.color}
+																opacity={
+																	hoveredUserId === null || isActive ? 1 : 0.35
+																}
+																onMouseEnter={() => {
+																	if (segment.userIds.length === 1) {
+																		setHoveredUserId(
+																			segment.userIds[0] ?? null,
+																		);
+																	}
+																}}
+																onMouseLeave={() => setHoveredUserId(null)}
+															/>
+														</g>
+													);
+												})
+											)}
+											<circle cx="110" cy="110" r="58" fill="hsl(var(--b1))" />
+											<text
+												x="110"
+												y="104"
+												textAnchor="middle"
+												className="fill-current text-xs"
+											>
+												{globalRatioRows.length} users
+											</text>
+											<text
+												x="110"
+												y="122"
+												textAnchor="middle"
+												className="fill-current text-sm font-semibold"
+											>
+												{formatRatioPercent(globalTotalBasisPoints)}
+											</text>
+										</svg>
+									</div>
+
+									<div
+										data-testid="global-ratio-pie-legend"
+										className="space-y-2"
+									>
+										{globalPieSegments.length === 0 ? (
+											<div className="text-sm opacity-70">
+												No non-zero slices yet.
+											</div>
+										) : (
+											globalPieSegments.map((segment) => {
+												const active =
+													hoveredUserId !== null &&
+													segment.userIds.includes(hoveredUserId);
+												return (
+													<div
+														key={segment.key}
+														className={`flex items-center justify-between rounded-box border border-base-200 px-3 py-2 ${
+															hoveredUserId && !active ? "opacity-50" : ""
+														}`}
+													>
+														<div className="flex items-center gap-2 min-w-0">
+															<span
+																className="inline-block h-3 w-3 rounded-full"
+																style={{ backgroundColor: segment.color }}
+															/>
+															<span className="truncate text-sm">
+																{segment.label}
+															</span>
+														</div>
+														<span className="font-mono text-xs opacity-70">
+															{formatRatioPercent(segment.basisPoints)}
+														</span>
+													</div>
+												);
+											})
+										)}
+									</div>
+								</div>
 							</div>
 
 							<div className="rounded-box border border-base-200 p-4 space-y-4">
@@ -1589,18 +1736,7 @@ export function QuotaPolicyPage() {
 								source of truth.
 							</p>
 						</div>
-						<div className="w-full md:w-[22rem] space-y-3">
-							<div>
-								<span className="label-text">Node</span>
-								<div className="rounded-box border border-base-200 px-3 py-2 mt-1">
-									<div className="font-semibold">
-										{selectedNode?.node_name ?? "-"}
-									</div>
-									<div className="font-mono text-xs opacity-70 break-all">
-										{selectedNode?.node_id ?? ""}
-									</div>
-								</div>
-							</div>
+						<div className="w-full md:w-[20rem]">
 							<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-2">
 								<input
 									type="checkbox"

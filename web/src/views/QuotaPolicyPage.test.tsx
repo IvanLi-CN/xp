@@ -71,7 +71,10 @@ function renderPage() {
 }
 
 async function openNodeTab(container: HTMLElement, nodeName = "tokyo-1") {
-	const tab = await within(container).findByRole("button", { name: nodeName });
+	const tablist = await within(container).findByRole("tablist", {
+		name: "Weight configuration tabs",
+	});
+	const tab = within(tablist).getByText(nodeName, { selector: "button" });
 	fireEvent.click(tab);
 }
 
