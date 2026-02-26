@@ -77,6 +77,31 @@ function readLegendColors(container: HTMLElement): Record<string, string> {
 	return out;
 }
 
+function mockMatchMedia(matches: boolean) {
+	const original = window.matchMedia;
+	Object.defineProperty(window, "matchMedia", {
+		configurable: true,
+		writable: true,
+		value: vi.fn().mockImplementation((query: string) => ({
+			matches,
+			media: query,
+			onchange: null,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+			dispatchEvent: vi.fn(),
+		})),
+	});
+	return () => {
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			writable: true,
+			value: original,
+		});
+	};
+}
+
 function setupDefaultMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
@@ -268,5 +293,26 @@ describe("<QuotaPolicyPage />", () => {
 		const colorsAfter = readLegendColors(view.container);
 		expect(colorsAfter.Alice).toBe(colorsBefore.Alice);
 		expect(colorsAfter.Bob).toBe(colorsBefore.Bob);
+	});
+
+	it("switches to list layout on narrow viewport instead of showing table scroll", async () => {
+		const restore = mockMatchMedia(true);
+		try {
+			const view = renderPage();
+			expect(
+				await within(view.container).findByText(
+					"Weight ratio editor (by node)",
+				),
+			).toBeInTheDocument();
+			await within(view.container).findByLabelText("Ratio input for Alice");
+			expect(
+				within(view.container).getByTestId("ratio-editor-list"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).queryByTestId("ratio-editor-table"),
+			).toBeNull();
+		} finally {
+			restore();
+		}
 	});
 });

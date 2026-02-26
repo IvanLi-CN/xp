@@ -104,6 +104,8 @@ const PIE_COLORS = [
 	"#ec4899",
 ] as const;
 
+const RATIO_TABLE_MIN_VIEWPORT = 1024;
+
 function pieColorAt(index: number): string {
 	return PIE_COLORS[index % PIE_COLORS.length] ?? "#9ca3af";
 }
@@ -218,6 +220,48 @@ function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
 
+function useRatioEditorListLayout(minTableViewport: number): boolean {
+	const [isListLayout, setIsListLayout] = useState(() => {
+		if (typeof window === "undefined") return false;
+		if (typeof window.matchMedia === "function") {
+			return window.matchMedia(
+				`(max-width: ${Math.max(0, minTableViewport - 1)}px)`,
+			).matches;
+		}
+		return window.innerWidth < minTableViewport;
+	});
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const mediaQuery = `(max-width: ${Math.max(0, minTableViewport - 1)}px)`;
+
+		if (typeof window.matchMedia === "function") {
+			const mql = window.matchMedia(mediaQuery);
+			const handleChange = (event: MediaQueryListEvent) => {
+				setIsListLayout(event.matches);
+			};
+
+			setIsListLayout(mql.matches);
+			if (typeof mql.addEventListener === "function") {
+				mql.addEventListener("change", handleChange);
+				return () => mql.removeEventListener("change", handleChange);
+			}
+
+			mql.addListener(handleChange);
+			return () => mql.removeListener(handleChange);
+		}
+
+		const handleResize = () => {
+			setIsListLayout(window.innerWidth < minTableViewport);
+		};
+		handleResize();
+		window.addEventListener("resize", handleResize);
+		return () => window.removeEventListener("resize", handleResize);
+	}, [minTableViewport]);
+
+	return isListLayout;
+}
+
 export function QuotaPolicyPage() {
 	const adminToken = readAdminToken();
 	const { pushToast } = useToast();
@@ -230,6 +274,9 @@ export function QuotaPolicyPage() {
 	const [failedRows, setFailedRows] = useState<SaveFailure[]>([]);
 	const [lastSave, setLastSave] = useState<LastSaveState | null>(null);
 	const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
+	const ratioEditorListLayout = useRatioEditorListLayout(
+		RATIO_TABLE_MIN_VIEWPORT,
+	);
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -735,9 +782,9 @@ export function QuotaPolicyPage() {
 							Weight ratio editor (by node)
 						</h2>
 						<p className="text-sm opacity-70">
-							Top pie chart is display-only; bottom table is the source of truth
-							for editing. Save persists integer{" "}
-							<span className="font-mono">weight</span>
+							Top pie chart is display-only; bottom editor is the source of
+							truth (table on wide screens, list on small screens). Save
+							persists integer <span className="font-mono">weight</span>
 							values.
 						</p>
 					</div>
@@ -919,16 +966,136 @@ export function QuotaPolicyPage() {
 						</div>
 
 						<div className="rounded-box border border-base-200 p-4 space-y-4">
-							<div className="overflow-auto">
-								<table className="table table-fixed w-full">
+							{ratioEditorListLayout ? (
+								<div data-testid="ratio-editor-list" className="space-y-3">
+									{ratioRows.map((row, index) => {
+										const targetWeight = computedWeights[index] ?? 0;
+										const isHighlighted = hoveredUserId === row.userId;
+										const rowClass = isHighlighted
+											? "border-info/50 bg-info/10"
+											: hoveredUserId
+												? "opacity-60"
+												: "";
+										return (
+											<div
+												key={row.userId}
+												className={`rounded-box border border-base-200 p-3 space-y-3 ${rowClass}`}
+												onMouseEnter={() => setHoveredUserId(row.userId)}
+												onMouseLeave={() => setHoveredUserId(null)}
+											>
+												<div className="flex items-start justify-between gap-2">
+													<div className="min-w-0 space-y-1">
+														<div className="font-semibold truncate">
+															{row.displayName}
+														</div>
+														<div className="font-mono text-xs opacity-70 break-all">
+															{row.userId}
+														</div>
+														<div className="text-xs opacity-70">
+															Endpoints {row.endpointIds.length}
+														</div>
+													</div>
+													<span className="badge badge-ghost uppercase shrink-0">
+														{row.priorityTier}
+													</span>
+												</div>
+
+												<div className="space-y-3">
+													<div className="space-y-1">
+														<div className="text-xs opacity-70">Slider</div>
+														<input
+															type="range"
+															className="range range-primary range-sm"
+															min={0}
+															max={100}
+															step={0.1}
+															value={row.basisPoints / 100}
+															disabled={isSavingRatio}
+															aria-label={`Ratio slider for ${row.displayName}`}
+															onFocus={() => setHoveredUserId(row.userId)}
+															onBlur={() => setHoveredUserId(null)}
+															onChange={(event) => {
+																applyRatioEdit(
+																	row.userId,
+																	Math.round(Number(event.target.value) * 100),
+																);
+															}}
+														/>
+														<div className="font-mono text-xs opacity-70">
+															{formatRatioPercent(row.basisPoints)}
+														</div>
+													</div>
+													<div className="space-y-1">
+														<div className="text-xs opacity-70">Input (%)</div>
+														<input
+															type="number"
+															min={0}
+															max={100}
+															step={0.01}
+															className={[inputClass, "font-mono w-full"].join(
+																" ",
+															)}
+															value={row.basisPoints / 100}
+															disabled={isSavingRatio}
+															aria-label={`Ratio input for ${row.displayName}`}
+															onFocus={() => setHoveredUserId(row.userId)}
+															onBlur={() => setHoveredUserId(null)}
+															onChange={(event) => {
+																const parsed = parsePercentInput(
+																	event.target.value,
+																);
+																if (!parsed.ok) {
+																	setRatioError(parsed.error);
+																	return;
+																}
+																applyRatioEdit(row.userId, parsed.basisPoints);
+															}}
+														/>
+													</div>
+												</div>
+
+												<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+													<div className="min-w-0">
+														<div className="text-xs opacity-70">
+															Computed weight
+														</div>
+														<div className="font-mono text-sm">
+															{targetWeight}
+														</div>
+														<div className="text-xs opacity-70">
+															{row.source === "implicit_zero"
+																? "implicit_zero"
+																: "explicit"}
+														</div>
+													</div>
+													<label className="label cursor-pointer justify-start gap-2 py-0">
+														<input
+															type="checkbox"
+															className="checkbox checkbox-sm"
+															checked={row.locked}
+															disabled={isSavingRatio}
+															onChange={() => toggleRowLock(row.userId)}
+														/>
+														<span className="label-text text-xs">Lock</span>
+													</label>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							) : (
+								<table
+									data-testid="ratio-editor-table"
+									className="table table-fixed w-full"
+								>
 									<thead>
 										<tr className="bg-base-200/50">
-											<th className="w-56">User</th>
-											<th className="w-24">Tier</th>
-											<th className="w-56">Slider</th>
-											<th className="w-40">Input (%)</th>
-											<th className="w-36">Computed weight</th>
-											<th className="w-24">Lock</th>
+											<th className="w-[30%]">User</th>
+											<th className="w-[10%]">Tier</th>
+											<th className="w-[24%]">Slider</th>
+											<th className="w-[16%]">Input (%)</th>
+											<th className="w-[12%]">Computed weight</th>
+											<th className="w-[8%]">Lock</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -1041,7 +1208,7 @@ export function QuotaPolicyPage() {
 										})}
 									</tbody>
 								</table>
-							</div>
+							)}
 
 							{ratioError ? (
 								<p className="text-sm text-error">{ratioError}</p>
