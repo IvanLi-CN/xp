@@ -4,6 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
 import {
+	type AdminQuotaPolicyGlobalWeightRow,
+	fetchAdminQuotaPolicyGlobalWeightRows,
+	putAdminQuotaPolicyGlobalWeightRow,
+} from "../api/adminQuotaPolicyGlobalWeightRows";
+import {
+	fetchAdminQuotaPolicyNodePolicy,
+	putAdminQuotaPolicyNodePolicy,
+} from "../api/adminQuotaPolicyNodePolicy";
+import {
 	type AdminQuotaPolicyNodeWeightRow,
 	fetchAdminQuotaPolicyNodeWeightRows,
 } from "../api/adminQuotaPolicyNodeWeightRows";
@@ -67,7 +76,7 @@ type RatioDraftRow = {
 	basisPoints: number;
 	locked: boolean;
 	serverStoredWeight: number | null;
-	source: "explicit" | "implicit_zero";
+	source: "explicit" | "implicit_zero" | "implicit_default";
 };
 
 type SaveFailure = {
@@ -105,6 +114,7 @@ const PIE_COLORS = [
 ] as const;
 
 const RATIO_TABLE_MIN_VIEWPORT = 1024;
+const DEFAULT_GLOBAL_WEIGHT = 100;
 
 function pieColorAt(index: number): string {
 	return PIE_COLORS[index % PIE_COLORS.length] ?? "#9ca3af";
@@ -230,6 +240,24 @@ function toDraftRows(items: AdminQuotaPolicyNodeWeightRow[]): RatioDraftRow[] {
 	}));
 }
 
+function toGlobalDraftRows(
+	items: AdminQuotaPolicyGlobalWeightRow[],
+): RatioDraftRow[] {
+	const basisPoints = weightsToBasisPoints(
+		items.map((item) => item.editor_weight),
+	);
+	return items.map((item, index) => ({
+		userId: item.user_id,
+		displayName: item.display_name,
+		priorityTier: item.priority_tier,
+		endpointIds: [],
+		basisPoints: basisPoints[index] ?? 0,
+		locked: false,
+		serverStoredWeight: item.stored_weight ?? null,
+		source: item.source,
+	}));
+}
+
 function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
@@ -287,6 +315,14 @@ export function QuotaPolicyPage() {
 	const [isSavingRatio, setIsSavingRatio] = useState(false);
 	const [failedRows, setFailedRows] = useState<SaveFailure[]>([]);
 	const [lastSave, setLastSave] = useState<LastSaveState | null>(null);
+	const [globalRatioRows, setGlobalRatioRows] = useState<RatioDraftRow[]>([]);
+	const [globalRatioError, setGlobalRatioError] = useState<string | null>(null);
+	const [isSavingGlobalRatio, setIsSavingGlobalRatio] = useState(false);
+	const [globalFailedRows, setGlobalFailedRows] = useState<SaveFailure[]>([]);
+	const [lastGlobalSave, setLastGlobalSave] = useState<LastSaveState | null>(
+		null,
+	);
+	const [isUpdatingNodePolicy, setIsUpdatingNodePolicy] = useState(false);
 	const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
 	const ratioEditorListLayout = useRatioEditorListLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
@@ -302,6 +338,14 @@ export function QuotaPolicyPage() {
 		queryKey: ["adminUsers", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
+	});
+
+	const globalWeightRowsQuery = useQuery({
+		queryKey: ["adminQuotaPolicyGlobalWeightRows", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) =>
+			fetchAdminQuotaPolicyGlobalWeightRows(adminToken, signal),
+		refetchOnWindowFocus: false,
 	});
 
 	const nodes = nodesQuery.data?.items ?? [];
@@ -332,6 +376,14 @@ export function QuotaPolicyPage() {
 		refetchOnWindowFocus: false,
 	});
 
+	const nodePolicyQuery = useQuery({
+		queryKey: ["adminQuotaPolicyNodePolicy", adminToken, selectedNodeId],
+		enabled: adminToken.length > 0 && Boolean(selectedNodeId),
+		queryFn: ({ signal }) =>
+			fetchAdminQuotaPolicyNodePolicy(adminToken, selectedNodeId ?? "", signal),
+		refetchOnWindowFocus: false,
+	});
+
 	useEffect(() => {
 		if (!selectedNodeId) {
 			setRatioRows([]);
@@ -348,40 +400,123 @@ export function QuotaPolicyPage() {
 		setFailedRows([]);
 	}, [selectedNodeId, weightRowsQuery.data]);
 
+	useEffect(() => {
+		if (!globalWeightRowsQuery.data) {
+			return;
+		}
+		setGlobalRatioRows(toGlobalDraftRows(globalWeightRowsQuery.data.items));
+		setGlobalRatioError(null);
+		setGlobalFailedRows([]);
+	}, [globalWeightRowsQuery.data]);
+
 	const selectedNode = useMemo(() => {
 		if (!selectedNodeId) return null;
 		return nodes.find((node) => node.node_id === selectedNodeId) ?? null;
 	}, [nodes, selectedNodeId]);
 
+	const globalWeightByUserId = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const row of globalWeightRowsQuery.data?.items ?? []) {
+			map.set(row.user_id, row.editor_weight);
+		}
+		return map;
+	}, [globalWeightRowsQuery.data]);
+
+	const nodeInheritGlobal = nodePolicyQuery.data?.inherit_global ?? true;
+	const inheritedNodeBasisPoints = useMemo(
+		() =>
+			weightsToBasisPoints(
+				ratioRows.map(
+					(row) =>
+						globalWeightByUserId.get(row.userId) ?? DEFAULT_GLOBAL_WEIGHT,
+				),
+			),
+		[ratioRows, globalWeightByUserId],
+	);
+	const displayRatioRows = useMemo(() => {
+		if (!nodeInheritGlobal) {
+			return ratioRows;
+		}
+		return ratioRows.map((row, index) => ({
+			...row,
+			basisPoints: inheritedNodeBasisPoints[index] ?? 0,
+			locked: false,
+		}));
+	}, [nodeInheritGlobal, ratioRows, inheritedNodeBasisPoints]);
+
 	const ratioBasisPoints = useMemo(
-		() => ratioRows.map((row) => row.basisPoints),
-		[ratioRows],
+		() => displayRatioRows.map((row) => row.basisPoints),
+		[displayRatioRows],
 	);
 	const computedWeights = useMemo(
-		() => basisPointsToWeights(ratioBasisPoints),
-		[ratioBasisPoints],
+		() =>
+			nodeInheritGlobal
+				? displayRatioRows.map(
+						(row) =>
+							globalWeightByUserId.get(row.userId) ?? DEFAULT_GLOBAL_WEIGHT,
+					)
+				: basisPointsToWeights(ratioBasisPoints),
+		[
+			nodeInheritGlobal,
+			displayRatioRows,
+			globalWeightByUserId,
+			ratioBasisPoints,
+		],
 	);
 	const totalBasisPoints = useMemo(
 		() => ratioBasisPoints.reduce((acc, value) => acc + value, 0),
 		[ratioBasisPoints],
 	);
 	const unlockedCount = useMemo(
-		() => ratioRows.filter((row) => !row.locked).length,
-		[ratioRows],
-	);
-	const changedRows = useMemo(
 		() =>
-			ratioRows.filter((row, index) => {
-				const targetWeight = computedWeights[index] ?? 0;
-				return (
-					row.serverStoredWeight === null ||
-					row.serverStoredWeight !== targetWeight
-				);
+			nodeInheritGlobal ? 0 : ratioRows.filter((row) => !row.locked).length,
+		[nodeInheritGlobal, ratioRows],
+	);
+	const changedRows = useMemo(() => {
+		if (nodeInheritGlobal) {
+			return [];
+		}
+		return ratioRows.filter((row, index) => {
+			const targetWeight = computedWeights[index] ?? 0;
+			return (
+				row.serverStoredWeight === null ||
+				row.serverStoredWeight !== targetWeight
+			);
+		});
+	}, [nodeInheritGlobal, ratioRows, computedWeights]);
+
+	const globalRatioBasisPoints = useMemo(
+		() => globalRatioRows.map((row) => row.basisPoints),
+		[globalRatioRows],
+	);
+	const globalComputedWeights = useMemo(
+		() => basisPointsToWeights(globalRatioBasisPoints),
+		[globalRatioBasisPoints],
+	);
+	const globalTotalBasisPoints = useMemo(
+		() => globalRatioBasisPoints.reduce((acc, value) => acc + value, 0),
+		[globalRatioBasisPoints],
+	);
+	const globalUnlockedCount = useMemo(
+		() => globalRatioRows.filter((row) => !row.locked).length,
+		[globalRatioRows],
+	);
+	const globalChangedRows = useMemo(
+		() =>
+			globalRatioRows.filter((row, index) => {
+				const targetWeight = globalComputedWeights[index] ?? 0;
+				if (row.serverStoredWeight === null) {
+					return targetWeight !== DEFAULT_GLOBAL_WEIGHT;
+				}
+				return row.serverStoredWeight !== targetWeight;
 			}),
-		[ratioRows, computedWeights],
+		[globalRatioRows, globalComputedWeights],
 	);
 
-	const pieSegments = useMemo(() => buildPieSegments(ratioRows), [ratioRows]);
+	const pieSegments = useMemo(
+		() => buildPieSegments(displayRatioRows),
+		[displayRatioRows],
+	);
 	const pieSlices = useMemo(() => {
 		let cursor = 0;
 		return pieSegments.map((segment, index) => {
@@ -400,13 +535,18 @@ export function QuotaPolicyPage() {
 	const firstPieSegment = pieSegments[0];
 
 	const canSaveRatio =
+		!nodeInheritGlobal &&
 		ratioRows.length > 0 &&
 		totalBasisPoints === RATIO_BASIS_POINTS &&
 		!isSavingRatio &&
+		!isUpdatingNodePolicy &&
 		changedRows.length > 0;
 
 	const saveBlockedReason = (() => {
 		if (ratioRows.length === 0) return "No allocatable users on this node.";
+		if (nodeInheritGlobal) {
+			return "This node currently inherits global defaults. Disable inherit to edit node overrides.";
+		}
 		if (totalBasisPoints !== RATIO_BASIS_POINTS) {
 			if (unlockedCount === 0) {
 				return "All rows are locked and total is not 100%. Unlock at least one row.";
@@ -417,7 +557,28 @@ export function QuotaPolicyPage() {
 		return null;
 	})();
 
+	const canSaveGlobalRatio =
+		globalRatioRows.length > 0 &&
+		globalTotalBasisPoints === RATIO_BASIS_POINTS &&
+		!isSavingGlobalRatio &&
+		globalChangedRows.length > 0;
+
+	const globalSaveBlockedReason = (() => {
+		if (globalRatioRows.length === 0) return "No users available.";
+		if (globalTotalBasisPoints !== RATIO_BASIS_POINTS) {
+			if (globalUnlockedCount === 0) {
+				return "All rows are locked and total is not 100%. Unlock at least one row.";
+			}
+			return "Total ratio must be exactly 100% before saving.";
+		}
+		if (globalChangedRows.length === 0) return "No pending changes.";
+		return null;
+	})();
+
 	const applyRatioEdit = (userId: string, nextBasisPoints: number) => {
+		if (nodeInheritGlobal) {
+			return;
+		}
 		setRatioError(null);
 		setFailedRows([]);
 		setRatioRows((prev) => {
@@ -445,6 +606,9 @@ export function QuotaPolicyPage() {
 	};
 
 	const toggleRowLock = (userId: string) => {
+		if (nodeInheritGlobal) {
+			return;
+		}
 		setRatioRows((prev) =>
 			prev.map((row) =>
 				row.userId === userId ? { ...row, locked: !row.locked } : row,
@@ -453,6 +617,9 @@ export function QuotaPolicyPage() {
 	};
 
 	const resetToServerValues = () => {
+		if (nodeInheritGlobal) {
+			return;
+		}
 		setRatioError(null);
 		setFailedRows([]);
 		setRatioRows((prev) => {
@@ -467,7 +634,7 @@ export function QuotaPolicyPage() {
 	};
 
 	const persistRatioRows = async (onlyUserIds?: Set<string>) => {
-		if (!selectedNodeId || ratioRows.length === 0) {
+		if (nodeInheritGlobal || !selectedNodeId || ratioRows.length === 0) {
 			return;
 		}
 
@@ -577,6 +744,214 @@ export function QuotaPolicyPage() {
 		await persistRatioRows(new Set(failedRows.map((item) => item.userId)));
 	};
 
+	const applyGlobalRatioEdit = (userId: string, nextBasisPoints: number) => {
+		setGlobalRatioError(null);
+		setGlobalFailedRows([]);
+		setGlobalRatioRows((prev) => {
+			const result = rebalanceAfterEdit(
+				prev.map((row) => ({
+					rowId: row.userId,
+					basisPoints: row.basisPoints,
+					locked: row.locked,
+				})),
+				userId,
+				nextBasisPoints,
+			);
+			if (!result.ok) {
+				setGlobalRatioError(result.reason);
+				return prev;
+			}
+			const nextById = new Map(
+				result.rows.map((row) => [row.rowId, row.basisPoints]),
+			);
+			return prev.map((row) => ({
+				...row,
+				basisPoints: nextById.get(row.userId) ?? row.basisPoints,
+			}));
+		});
+	};
+
+	const toggleGlobalRowLock = (userId: string) => {
+		setGlobalRatioRows((prev) =>
+			prev.map((row) =>
+				row.userId === userId ? { ...row, locked: !row.locked } : row,
+			),
+		);
+	};
+
+	const resetGlobalToServerValues = () => {
+		setGlobalRatioError(null);
+		setGlobalFailedRows([]);
+		setGlobalRatioRows((prev) => {
+			const serverWeights = prev.map(
+				(row) => row.serverStoredWeight ?? DEFAULT_GLOBAL_WEIGHT,
+			);
+			const resetBasis = weightsToBasisPoints(serverWeights);
+			return prev.map((row, index) => ({
+				...row,
+				basisPoints: resetBasis[index] ?? 0,
+				locked: false,
+			}));
+		});
+	};
+
+	const persistGlobalRatioRows = async (onlyUserIds?: Set<string>) => {
+		if (globalRatioRows.length === 0) {
+			return;
+		}
+
+		const targetByUserId = new Map<string, number>();
+		for (let index = 0; index < globalRatioRows.length; index += 1) {
+			const row = globalRatioRows[index];
+			if (!row) {
+				continue;
+			}
+			targetByUserId.set(row.userId, globalComputedWeights[index] ?? 0);
+		}
+
+		const candidates = globalRatioRows.filter((row) => {
+			if (onlyUserIds && !onlyUserIds.has(row.userId)) {
+				return false;
+			}
+			const targetWeight = targetByUserId.get(row.userId) ?? 0;
+			if (row.serverStoredWeight === null) {
+				return targetWeight !== DEFAULT_GLOBAL_WEIGHT;
+			}
+			return row.serverStoredWeight !== targetWeight;
+		});
+		if (candidates.length === 0) {
+			pushToast({
+				variant: "success",
+				message: "No global ratio changes to save.",
+			});
+			return;
+		}
+
+		setIsSavingGlobalRatio(true);
+		setGlobalRatioError(null);
+		const failures: SaveFailure[] = [];
+		const successByUserId = new Map<string, number>();
+
+		for (const row of candidates) {
+			const targetWeight = targetByUserId.get(row.userId) ?? 0;
+			try {
+				await putAdminQuotaPolicyGlobalWeightRow(
+					adminToken,
+					row.userId,
+					targetWeight,
+				);
+				successByUserId.set(row.userId, targetWeight);
+			} catch (err) {
+				failures.push({
+					userId: row.userId,
+					displayName: row.displayName,
+					targetWeight,
+					error: formatError(err),
+				});
+			}
+		}
+
+		if (successByUserId.size > 0) {
+			setGlobalRatioRows((prev) =>
+				prev.map((row) => {
+					const target = successByUserId.get(row.userId);
+					if (target === undefined) {
+						return row;
+					}
+					return {
+						...row,
+						serverStoredWeight: target,
+						source: "explicit",
+					};
+				}),
+			);
+		}
+
+		const now = new Date().toISOString();
+		if (failures.length > 0) {
+			setGlobalFailedRows(failures);
+			setGlobalRatioError(
+				`Failed to save ${failures.length} user(s). You can retry failed items only.`,
+			);
+			setLastGlobalSave({
+				status: "partial",
+				message: `Saved ${successByUserId.size}, failed ${failures.length}.`,
+				at: now,
+			});
+			pushToast({
+				variant: "error",
+				message: `Saved ${successByUserId.size}, failed ${failures.length}.`,
+			});
+		} else {
+			setGlobalFailedRows([]);
+			setLastGlobalSave({
+				status: "success",
+				message: `Saved ${successByUserId.size} row(s).`,
+				at: now,
+			});
+			pushToast({
+				variant: "success",
+				message: `Saved ${successByUserId.size} row(s).`,
+			});
+			await globalWeightRowsQuery.refetch();
+		}
+		setIsSavingGlobalRatio(false);
+	};
+
+	const retryGlobalFailedRows = async () => {
+		if (globalFailedRows.length === 0) {
+			return;
+		}
+		await persistGlobalRatioRows(
+			new Set(globalFailedRows.map((item) => item.userId)),
+		);
+	};
+
+	const updateNodeInheritGlobal = async (inheritGlobal: boolean) => {
+		if (!selectedNodeId) {
+			return;
+		}
+		setIsUpdatingNodePolicy(true);
+		try {
+			await putAdminQuotaPolicyNodePolicy(
+				adminToken,
+				selectedNodeId,
+				inheritGlobal,
+			);
+			await nodePolicyQuery.refetch();
+			if (!inheritGlobal) {
+				setRatioRows((prev) => {
+					const baseWeights = prev.map(
+						(row) =>
+							globalWeightByUserId.get(row.userId) ?? DEFAULT_GLOBAL_WEIGHT,
+					);
+					const baseBasisPoints = weightsToBasisPoints(baseWeights);
+					return prev.map((row, index) => ({
+						...row,
+						basisPoints: baseBasisPoints[index] ?? 0,
+						locked: false,
+					}));
+				});
+			}
+			setRatioError(null);
+			setFailedRows([]);
+			setLastSave(null);
+			pushToast({
+				variant: "success",
+				message: inheritGlobal
+					? "Node now inherits global default ratios."
+					: "Node override mode enabled. Draft initialized from global defaults.",
+			});
+		} catch (err) {
+			pushToast({
+				variant: "error",
+				message: `Failed to update node inherit policy: ${formatError(err)}`,
+			});
+		} finally {
+			setIsUpdatingNodePolicy(false);
+		}
+	};
+
 	const inputClass =
 		prefs.density === "compact"
 			? "input input-bordered input-sm"
@@ -597,22 +972,32 @@ export function QuotaPolicyPage() {
 		);
 	}
 
-	if (nodesQuery.isLoading || usersQuery.isLoading) {
+	if (
+		nodesQuery.isLoading ||
+		usersQuery.isLoading ||
+		globalWeightRowsQuery.isLoading
+	) {
 		return (
 			<PageState
 				variant="loading"
 				title="Loading quota policy"
-				description="Fetching nodes and users."
+				description="Fetching nodes, users, and global ratios."
 			/>
 		);
 	}
 
-	if (nodesQuery.isError || usersQuery.isError) {
+	if (
+		nodesQuery.isError ||
+		usersQuery.isError ||
+		globalWeightRowsQuery.isError
+	) {
 		const message = nodesQuery.isError
 			? formatError(nodesQuery.error)
 			: usersQuery.isError
 				? formatError(usersQuery.error)
-				: "Unknown error";
+				: globalWeightRowsQuery.isError
+					? formatError(globalWeightRowsQuery.error)
+					: "Unknown error";
 		return (
 			<PageState
 				variant="error"
@@ -624,6 +1009,7 @@ export function QuotaPolicyPage() {
 						onClick={() => {
 							nodesQuery.refetch();
 							usersQuery.refetch();
+							globalWeightRowsQuery.refetch();
 						}}
 					>
 						Retry
@@ -637,6 +1023,12 @@ export function QuotaPolicyPage() {
 		totalBasisPoints === RATIO_BASIS_POINTS
 			? "badge badge-success"
 			: totalBasisPoints < RATIO_BASIS_POINTS
+				? "badge badge-warning"
+				: "badge badge-error";
+	const globalRatioStatusClass =
+		globalTotalBasisPoints === RATIO_BASIS_POINTS
+			? "badge badge-success"
+			: globalTotalBasisPoints < RATIO_BASIS_POINTS
 				? "badge badge-warning"
 				: "badge badge-error";
 
@@ -717,6 +1109,327 @@ export function QuotaPolicyPage() {
 
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
 				<div className="space-y-1">
+					<h2 className="text-lg font-semibold">
+						Global default weight ratios
+					</h2>
+					<p className="text-sm opacity-70">
+						Default allocation rule shared by nodes. New nodes inherit this rule
+						until override mode is enabled.
+					</p>
+				</div>
+
+				{globalRatioRows.length === 0 ? (
+					<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
+						No users available.
+					</div>
+				) : (
+					<>
+						<div className="flex flex-wrap items-center gap-2">
+							<span className={globalRatioStatusClass}>
+								Total {formatRatioPercent(globalTotalBasisPoints)}
+							</span>
+							<span className="badge badge-outline">
+								Users {globalRatioRows.length}
+							</span>
+							<span className="badge badge-outline">
+								Unlocked {globalUnlockedCount}
+							</span>
+							{globalTotalBasisPoints < RATIO_BASIS_POINTS ? (
+								<span className="text-sm text-warning">
+									Remaining{" "}
+									{formatRatioPercent(
+										RATIO_BASIS_POINTS - globalTotalBasisPoints,
+									)}
+								</span>
+							) : null}
+						</div>
+
+						<div className="rounded-box border border-base-200 p-4 space-y-4">
+							{ratioEditorListLayout ? (
+								<div
+									data-testid="global-ratio-editor-list"
+									className="space-y-3"
+								>
+									{globalRatioRows.map((row, index) => {
+										const targetWeight = globalComputedWeights[index] ?? 0;
+										return (
+											<div
+												key={row.userId}
+												className="rounded-box border border-base-200 p-3 space-y-3"
+											>
+												<div className="flex items-start justify-between gap-2">
+													<div className="min-w-0 space-y-1">
+														<div className="font-semibold truncate">
+															{row.displayName}
+														</div>
+														<div className="font-mono text-xs opacity-70 break-all">
+															{row.userId}
+														</div>
+													</div>
+													<span className="badge badge-ghost uppercase shrink-0">
+														{row.priorityTier}
+													</span>
+												</div>
+
+												<div className="space-y-3">
+													<div className="space-y-1">
+														<div className="text-xs opacity-70">Slider</div>
+														<input
+															type="range"
+															className="range range-primary range-sm"
+															min={0}
+															max={100}
+															step={0.1}
+															value={row.basisPoints / 100}
+															disabled={isSavingGlobalRatio}
+															aria-label={`Global ratio slider for ${row.displayName}`}
+															onChange={(event) => {
+																applyGlobalRatioEdit(
+																	row.userId,
+																	Math.round(Number(event.target.value) * 100),
+																);
+															}}
+														/>
+														<div className="font-mono text-xs opacity-70">
+															{formatRatioPercent(row.basisPoints)}
+														</div>
+													</div>
+													<div className="space-y-1">
+														<div className="text-xs opacity-70">Input (%)</div>
+														<input
+															type="number"
+															min={0}
+															max={100}
+															step={0.01}
+															className={[inputClass, "font-mono w-full"].join(
+																" ",
+															)}
+															value={row.basisPoints / 100}
+															disabled={isSavingGlobalRatio}
+															aria-label={`Global ratio input for ${row.displayName}`}
+															onChange={(event) => {
+																const parsed = parsePercentInput(
+																	event.target.value,
+																);
+																if (!parsed.ok) {
+																	setGlobalRatioError(parsed.error);
+																	return;
+																}
+																applyGlobalRatioEdit(
+																	row.userId,
+																	parsed.basisPoints,
+																);
+															}}
+														/>
+													</div>
+												</div>
+
+												<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+													<div className="min-w-0">
+														<div className="text-xs opacity-70">
+															Computed weight
+														</div>
+														<div className="font-mono text-sm">
+															{targetWeight}
+														</div>
+														<div className="text-xs opacity-70">
+															{row.source === "implicit_default"
+																? "implicit_default"
+																: "explicit"}
+														</div>
+													</div>
+													<label className="label cursor-pointer justify-start gap-2 py-0">
+														<input
+															type="checkbox"
+															className="checkbox checkbox-sm"
+															checked={row.locked}
+															disabled={isSavingGlobalRatio}
+															onChange={() => toggleGlobalRowLock(row.userId)}
+														/>
+														<span className="label-text text-xs">Lock</span>
+													</label>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							) : (
+								<table
+									data-testid="global-ratio-editor-table"
+									className="table table-fixed w-full"
+								>
+									<thead>
+										<tr className="bg-base-200/50">
+											<th className="w-[32%]">User</th>
+											<th className="w-[10%]">Tier</th>
+											<th className="w-[24%]">Slider</th>
+											<th className="w-[15%]">Input (%)</th>
+											<th className="w-[11%]">Computed weight</th>
+											<th className="w-[8%]">Lock</th>
+										</tr>
+									</thead>
+									<tbody>
+										{globalRatioRows.map((row, index) => {
+											const targetWeight = globalComputedWeights[index] ?? 0;
+											return (
+												<tr key={row.userId}>
+													<td className="align-top">
+														<div className="flex flex-col gap-1 min-w-0">
+															<span className="font-semibold truncate">
+																{row.displayName}
+															</span>
+															<span className="font-mono text-xs opacity-70 break-all">
+																{row.userId}
+															</span>
+														</div>
+													</td>
+													<td className="align-top">
+														<span className="badge badge-ghost uppercase">
+															{row.priorityTier}
+														</span>
+													</td>
+													<td className="align-top">
+														<input
+															type="range"
+															className="range range-primary range-sm"
+															min={0}
+															max={100}
+															step={0.1}
+															value={row.basisPoints / 100}
+															disabled={isSavingGlobalRatio}
+															aria-label={`Global ratio slider for ${row.displayName}`}
+															onChange={(event) => {
+																applyGlobalRatioEdit(
+																	row.userId,
+																	Math.round(Number(event.target.value) * 100),
+																);
+															}}
+														/>
+														<div className="font-mono text-xs opacity-70 mt-1">
+															{formatRatioPercent(row.basisPoints)}
+														</div>
+													</td>
+													<td className="align-top">
+														<input
+															type="number"
+															min={0}
+															max={100}
+															step={0.01}
+															className={[inputClass, "font-mono w-full"].join(
+																" ",
+															)}
+															value={row.basisPoints / 100}
+															disabled={isSavingGlobalRatio}
+															aria-label={`Global ratio input for ${row.displayName}`}
+															onChange={(event) => {
+																const parsed = parsePercentInput(
+																	event.target.value,
+																);
+																if (!parsed.ok) {
+																	setGlobalRatioError(parsed.error);
+																	return;
+																}
+																applyGlobalRatioEdit(
+																	row.userId,
+																	parsed.basisPoints,
+																);
+															}}
+														/>
+													</td>
+													<td className="align-top">
+														<div className="font-mono text-sm">
+															{targetWeight}
+														</div>
+														<div className="text-xs opacity-70">
+															{row.source === "implicit_default"
+																? "implicit_default"
+																: "explicit"}
+														</div>
+													</td>
+													<td className="align-top">
+														<label className="label cursor-pointer justify-start gap-2 py-0">
+															<input
+																type="checkbox"
+																className="checkbox checkbox-sm"
+																checked={row.locked}
+																disabled={isSavingGlobalRatio}
+																onChange={() => toggleGlobalRowLock(row.userId)}
+															/>
+															<span className="label-text text-xs">Lock</span>
+														</label>
+													</td>
+												</tr>
+											);
+										})}
+									</tbody>
+								</table>
+							)}
+
+							{globalRatioError ? (
+								<p className="text-sm text-error">{globalRatioError}</p>
+							) : null}
+							{globalFailedRows.length > 0 ? (
+								<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
+									<p className="text-sm font-medium text-error">
+										Failed rows ({globalFailedRows.length})
+									</p>
+									<ul className="text-xs space-y-1">
+										{globalFailedRows.map((row) => (
+											<li key={row.userId} className="font-mono">
+												{row.displayName} ({row.userId}) → {row.targetWeight}:{" "}
+												{row.error}
+											</li>
+										))}
+									</ul>
+								</div>
+							) : null}
+
+							<div className="flex flex-wrap items-center gap-2">
+								<Button
+									variant="primary"
+									loading={isSavingGlobalRatio}
+									disabled={!canSaveGlobalRatio}
+									onClick={() => void persistGlobalRatioRows()}
+								>
+									Save global ratios
+								</Button>
+								<Button
+									variant="secondary"
+									disabled={
+										isSavingGlobalRatio || globalFailedRows.length === 0
+									}
+									onClick={() => void retryGlobalFailedRows()}
+								>
+									Retry failed rows
+								</Button>
+								<Button
+									variant="ghost"
+									disabled={isSavingGlobalRatio}
+									onClick={resetGlobalToServerValues}
+								>
+									Reset to server values
+								</Button>
+								{globalSaveBlockedReason ? (
+									<span className="text-xs opacity-70">
+										{globalSaveBlockedReason}
+									</span>
+								) : null}
+							</div>
+
+							{lastGlobalSave ? (
+								<p className="text-xs opacity-70">
+									Last save ({lastGlobalSave.status}) at{" "}
+									{new Date(lastGlobalSave.at).toLocaleString()}:{" "}
+									{lastGlobalSave.message}
+								</p>
+							) : null}
+						</div>
+					</>
+				)}
+			</div>
+
+			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+				<div className="space-y-1">
 					<h2 className="text-lg font-semibold">User tiers</h2>
 					<p className="text-sm opacity-70">
 						Tier controls pacing behavior (P1 less restrictive, P2 balanced, P3
@@ -767,6 +1480,7 @@ export function QuotaPolicyPage() {
 												message: "User tier updated.",
 											});
 											await usersQuery.refetch();
+											await globalWeightRowsQuery.refetch();
 											if (selectedNodeId) {
 												await weightRowsQuery.refetch();
 											}
@@ -792,54 +1506,76 @@ export function QuotaPolicyPage() {
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
 				<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
 					<div className="space-y-1">
-						<h2 className="text-lg font-semibold">
-							Weight ratio editor (by node)
-						</h2>
+						<h2 className="text-lg font-semibold">Node weight ratio editor</h2>
 						<p className="text-sm opacity-70">
-							Top pie chart is display-only; bottom editor is the source of
-							truth (table on wide screens, list on small screens). Save
-							persists integer <span className="font-mono">weight</span>
-							values.
+							Each node can inherit global defaults or use local override
+							ratios. Top pie chart is display-only; bottom editor is the source
+							of truth.
 						</p>
 					</div>
-					<div className="w-full md:w-80">
-						<label className="label pt-0" htmlFor="quota-policy-node-select">
-							<span className="label-text">Node</span>
+					<div className="w-full md:w-[22rem] space-y-3">
+						<div>
+							<label className="label pt-0" htmlFor="quota-policy-node-select">
+								<span className="label-text">Node</span>
+							</label>
+							<select
+								id="quota-policy-node-select"
+								className={
+									prefs.density === "compact"
+										? "select select-bordered select-sm w-full"
+										: "select select-bordered w-full"
+								}
+								value={selectedNodeId ?? ""}
+								onChange={(event) => {
+									setSelectedNodeId(event.target.value || null);
+									setLastSave(null);
+									setFailedRows([]);
+									setRatioError(null);
+								}}
+							>
+								{nodes.map((node) => (
+									<option key={node.node_id} value={node.node_id}>
+										{node.node_name}
+									</option>
+								))}
+							</select>
+						</div>
+						<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-2">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={nodeInheritGlobal}
+								disabled={
+									!selectedNodeId ||
+									nodePolicyQuery.isLoading ||
+									isUpdatingNodePolicy
+								}
+								onChange={(event) =>
+									void updateNodeInheritGlobal(event.target.checked)
+								}
+							/>
+							<span className="label-text text-sm">
+								Inherit global default ratios
+							</span>
 						</label>
-						<select
-							id="quota-policy-node-select"
-							className={
-								prefs.density === "compact"
-									? "select select-bordered select-sm w-full"
-									: "select select-bordered w-full"
-							}
-							value={selectedNodeId ?? ""}
-							onChange={(event) => {
-								setSelectedNodeId(event.target.value || null);
-								setLastSave(null);
-								setFailedRows([]);
-								setRatioError(null);
-							}}
-						>
-							{nodes.map((node) => (
-								<option key={node.node_id} value={node.node_id}>
-									{node.node_name}
-								</option>
-							))}
-						</select>
 					</div>
 				</div>
 
-				{weightRowsQuery.isLoading ? (
+				{weightRowsQuery.isLoading || nodePolicyQuery.isLoading ? (
 					<div className="text-sm opacity-70">Loading node ratio rows...</div>
-				) : weightRowsQuery.isError ? (
+				) : weightRowsQuery.isError || nodePolicyQuery.isError ? (
 					<div className="space-y-3">
 						<p className="text-sm text-error">
-							{formatError(weightRowsQuery.error)}
+							{weightRowsQuery.isError
+								? formatError(weightRowsQuery.error)
+								: formatError(nodePolicyQuery.error)}
 						</p>
 						<Button
 							variant="secondary"
-							onClick={() => weightRowsQuery.refetch()}
+							onClick={() => {
+								weightRowsQuery.refetch();
+								nodePolicyQuery.refetch();
+							}}
 						>
 							Retry
 						</Button>
@@ -856,7 +1592,7 @@ export function QuotaPolicyPage() {
 									Total {formatRatioPercent(totalBasisPoints)}
 								</span>
 								<span className="badge badge-outline">
-									Users {ratioRows.length}
+									Users {displayRatioRows.length}
 								</span>
 								<span className="badge badge-outline">
 									Unlocked {unlockedCount}
@@ -866,6 +1602,11 @@ export function QuotaPolicyPage() {
 										{selectedNode.node_name}
 									</span>
 								) : null}
+								<span className="badge badge-outline">
+									{nodeInheritGlobal
+										? "Mode inherit_global"
+										: "Mode node_override"}
+								</span>
 								{totalBasisPoints < RATIO_BASIS_POINTS ? (
 									<span className="text-sm text-warning">
 										Remaining{" "}
@@ -929,7 +1670,7 @@ export function QuotaPolicyPage() {
 											textAnchor="middle"
 											className="fill-current text-xs"
 										>
-											{ratioRows.length} users
+											{displayRatioRows.length} users
 										</text>
 										<text
 											x="110"
@@ -982,7 +1723,7 @@ export function QuotaPolicyPage() {
 						<div className="rounded-box border border-base-200 p-4 space-y-4">
 							{ratioEditorListLayout ? (
 								<div data-testid="ratio-editor-list" className="space-y-3">
-									{ratioRows.map((row, index) => {
+									{displayRatioRows.map((row, index) => {
 										const targetWeight = computedWeights[index] ?? 0;
 										const isHighlighted = hoveredUserId === row.userId;
 										const rowClass = isHighlighted
@@ -1024,7 +1765,11 @@ export function QuotaPolicyPage() {
 															max={100}
 															step={0.1}
 															value={row.basisPoints / 100}
-															disabled={isSavingRatio}
+															disabled={
+																isSavingRatio ||
+																nodeInheritGlobal ||
+																isUpdatingNodePolicy
+															}
 															aria-label={`Ratio slider for ${row.displayName}`}
 															onFocus={() => setHoveredUserId(row.userId)}
 															onBlur={() => setHoveredUserId(null)}
@@ -1050,7 +1795,11 @@ export function QuotaPolicyPage() {
 																" ",
 															)}
 															value={row.basisPoints / 100}
-															disabled={isSavingRatio}
+															disabled={
+																isSavingRatio ||
+																nodeInheritGlobal ||
+																isUpdatingNodePolicy
+															}
 															aria-label={`Ratio input for ${row.displayName}`}
 															onFocus={() => setHoveredUserId(row.userId)}
 															onBlur={() => setHoveredUserId(null)}
@@ -1077,9 +1826,11 @@ export function QuotaPolicyPage() {
 															{targetWeight}
 														</div>
 														<div className="text-xs opacity-70">
-															{row.source === "implicit_zero"
-																? "implicit_zero"
-																: "explicit"}
+															{nodeInheritGlobal
+																? "inherited_global"
+																: row.source === "implicit_zero"
+																	? "implicit_zero"
+																	: "explicit"}
 														</div>
 													</div>
 													<label className="label cursor-pointer justify-start gap-2 py-0">
@@ -1087,7 +1838,11 @@ export function QuotaPolicyPage() {
 															type="checkbox"
 															className="checkbox checkbox-sm"
 															checked={row.locked}
-															disabled={isSavingRatio}
+															disabled={
+																isSavingRatio ||
+																nodeInheritGlobal ||
+																isUpdatingNodePolicy
+															}
 															onChange={() => toggleRowLock(row.userId)}
 														/>
 														<span className="label-text text-xs">Lock</span>
@@ -1113,7 +1868,7 @@ export function QuotaPolicyPage() {
 										</tr>
 									</thead>
 									<tbody>
-										{ratioRows.map((row, index) => {
+										{displayRatioRows.map((row, index) => {
 											const targetWeight = computedWeights[index] ?? 0;
 											const isHighlighted = hoveredUserId === row.userId;
 											const rowClass = isHighlighted
@@ -1154,7 +1909,11 @@ export function QuotaPolicyPage() {
 															max={100}
 															step={0.1}
 															value={row.basisPoints / 100}
-															disabled={isSavingRatio}
+															disabled={
+																isSavingRatio ||
+																nodeInheritGlobal ||
+																isUpdatingNodePolicy
+															}
 															aria-label={`Ratio slider for ${row.displayName}`}
 															onFocus={() => setHoveredUserId(row.userId)}
 															onBlur={() => setHoveredUserId(null)}
@@ -1179,7 +1938,11 @@ export function QuotaPolicyPage() {
 																" ",
 															)}
 															value={row.basisPoints / 100}
-															disabled={isSavingRatio}
+															disabled={
+																isSavingRatio ||
+																nodeInheritGlobal ||
+																isUpdatingNodePolicy
+															}
 															aria-label={`Ratio input for ${row.displayName}`}
 															onFocus={() => setHoveredUserId(row.userId)}
 															onBlur={() => setHoveredUserId(null)}
@@ -1200,9 +1963,11 @@ export function QuotaPolicyPage() {
 															{targetWeight}
 														</div>
 														<div className="text-xs opacity-70">
-															{row.source === "implicit_zero"
-																? "implicit_zero"
-																: "explicit"}
+															{nodeInheritGlobal
+																? "inherited_global"
+																: row.source === "implicit_zero"
+																	? "implicit_zero"
+																	: "explicit"}
 														</div>
 													</td>
 													<td className="align-top">
@@ -1211,7 +1976,11 @@ export function QuotaPolicyPage() {
 																type="checkbox"
 																className="checkbox checkbox-sm"
 																checked={row.locked}
-																disabled={isSavingRatio}
+																disabled={
+																	isSavingRatio ||
+																	nodeInheritGlobal ||
+																	isUpdatingNodePolicy
+																}
 																onChange={() => toggleRowLock(row.userId)}
 															/>
 															<span className="label-text text-xs">Lock</span>
@@ -1254,14 +2023,20 @@ export function QuotaPolicyPage() {
 								</Button>
 								<Button
 									variant="secondary"
-									disabled={isSavingRatio || failedRows.length === 0}
+									disabled={
+										isSavingRatio ||
+										isUpdatingNodePolicy ||
+										failedRows.length === 0
+									}
 									onClick={() => void retryFailedRows()}
 								>
 									Retry failed rows
 								</Button>
 								<Button
 									variant="ghost"
-									disabled={isSavingRatio}
+									disabled={
+										isSavingRatio || nodeInheritGlobal || isUpdatingNodePolicy
+									}
 									onClick={resetToServerValues}
 								>
 									Reset to server values

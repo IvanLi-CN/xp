@@ -114,6 +114,16 @@ const meta = {
 					[userIdA]: [{ node_id: "node-tokyo", weight: 6500 }],
 					[userIdB]: [{ node_id: "node-tokyo", weight: 3500 }],
 				},
+				userGlobalWeights: {
+					[userIdA]: 6500,
+					[userIdB]: 3500,
+				},
+				nodeWeightPolicies: {
+					"node-tokyo": {
+						node_id: "node-tokyo",
+						inherit_global: false,
+					},
+				},
 			},
 		},
 	},

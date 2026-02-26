@@ -9,6 +9,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
+import { fetchAdminQuotaPolicyGlobalWeightRows } from "../api/adminQuotaPolicyGlobalWeightRows";
+import {
+	fetchAdminQuotaPolicyNodePolicy,
+	putAdminQuotaPolicyNodePolicy,
+} from "../api/adminQuotaPolicyNodePolicy";
 import { fetchAdminQuotaPolicyNodeWeightRows } from "../api/adminQuotaPolicyNodeWeightRows";
 import { putAdminUserNodeWeight } from "../api/adminUserNodeWeights";
 import { fetchAdminUsers, patchAdminUser } from "../api/adminUsers";
@@ -39,6 +44,8 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminUsers");
+vi.mock("../api/adminQuotaPolicyGlobalWeightRows");
+vi.mock("../api/adminQuotaPolicyNodePolicy");
 vi.mock("../api/adminQuotaPolicyNodeWeightRows");
 vi.mock("../api/adminUserNodeWeights");
 
@@ -184,10 +191,38 @@ function setupDefaultMocks() {
 			},
 		],
 	});
+	vi.mocked(fetchAdminQuotaPolicyGlobalWeightRows).mockResolvedValue({
+		items: [
+			{
+				user_id: "user-1",
+				display_name: "Alice",
+				priority_tier: "p1",
+				stored_weight: 6000,
+				editor_weight: 6000,
+				source: "explicit",
+			},
+			{
+				user_id: "user-2",
+				display_name: "Bob",
+				priority_tier: "p2",
+				stored_weight: 4000,
+				editor_weight: 4000,
+				source: "explicit",
+			},
+		],
+	});
+	vi.mocked(fetchAdminQuotaPolicyNodePolicy).mockResolvedValue({
+		node_id: "node-1",
+		inherit_global: false,
+	});
 
 	vi.mocked(putAdminUserNodeWeight).mockResolvedValue({
 		node_id: "node-1",
 		weight: 0,
+	});
+	vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
+		node_id: "node-1",
+		inherit_global: false,
 	});
 	vi.mocked(patchAdminNode).mockResolvedValue({
 		node_id: "node-1",
@@ -228,7 +263,7 @@ describe("<QuotaPolicyPage />", () => {
 		const view = renderPage();
 
 		expect(
-			await within(view.container).findByText("Weight ratio editor (by node)"),
+			await within(view.container).findByText("Node weight ratio editor"),
 		).toBeInTheDocument();
 
 		const aliceInput = await within(view.container).findByLabelText(
@@ -251,7 +286,7 @@ describe("<QuotaPolicyPage />", () => {
 
 		const view = renderPage();
 		expect(
-			await within(view.container).findByText("Weight ratio editor (by node)"),
+			await within(view.container).findByText("Node weight ratio editor"),
 		).toBeInTheDocument();
 
 		const aliceInput = await within(view.container).findByLabelText(
@@ -271,9 +306,15 @@ describe("<QuotaPolicyPage />", () => {
 		});
 		expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(2);
 
-		const retryButton = within(view.container).getByRole("button", {
+		const retryButtons = within(view.container).getAllByRole("button", {
 			name: "Retry failed rows",
 		});
+		const retryButton =
+			retryButtons.find((button) => !button.hasAttribute("disabled")) ??
+			retryButtons[0];
+		if (!retryButton) {
+			throw new Error("expected retry button");
+		}
 		fireEvent.click(retryButton);
 
 		await waitFor(() => {
@@ -283,11 +324,56 @@ describe("<QuotaPolicyPage />", () => {
 		expect(thirdCall?.[1]).toBe("user-2");
 	});
 
+	it("disables node editor in inherit mode and enables after turning inherit off", async () => {
+		vi.mocked(fetchAdminQuotaPolicyNodePolicy)
+			.mockResolvedValueOnce({
+				node_id: "node-1",
+				inherit_global: true,
+			})
+			.mockResolvedValue({
+				node_id: "node-1",
+				inherit_global: false,
+			});
+		vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
+			node_id: "node-1",
+			inherit_global: false,
+		});
+
+		const view = renderPage();
+		expect(
+			await within(view.container).findByText("Node weight ratio editor"),
+		).toBeInTheDocument();
+
+		const aliceInput = await within(view.container).findByLabelText(
+			"Ratio input for Alice",
+		);
+		expect(aliceInput).toBeDisabled();
+
+		const inheritToggle = within(view.container).getByRole("checkbox", {
+			name: "Inherit global default ratios",
+		});
+		fireEvent.click(inheritToggle);
+
+		await waitFor(() => {
+			expect(vi.mocked(putAdminQuotaPolicyNodePolicy)).toHaveBeenCalledWith(
+				"admintoken",
+				"node-1",
+				false,
+			);
+		});
+
+		await waitFor(() => {
+			expect(
+				within(view.container).getByLabelText("Ratio input for Alice"),
+			).not.toBeDisabled();
+		});
+	});
+
 	it("keeps pie legend and slice order stable after ratio ranking changes", async () => {
 		const view = renderPage();
 
 		expect(
-			await within(view.container).findByText("Weight ratio editor (by node)"),
+			await within(view.container).findByText("Node weight ratio editor"),
 		).toBeInTheDocument();
 		await within(view.container).findByLabelText("Node weight ratio pie chart");
 
@@ -323,9 +409,7 @@ describe("<QuotaPolicyPage />", () => {
 		try {
 			const view = renderPage();
 			expect(
-				await within(view.container).findByText(
-					"Weight ratio editor (by node)",
-				),
+				await within(view.container).findByText("Node weight ratio editor"),
 			).toBeInTheDocument();
 			await within(view.container).findByLabelText("Ratio input for Alice");
 			expect(

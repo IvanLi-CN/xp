@@ -17,6 +17,8 @@ import type {
 	NodeRuntimeHistorySlot,
 } from "../../src/api/adminNodeRuntime";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminQuotaPolicyGlobalWeightRow } from "../../src/api/adminQuotaPolicyGlobalWeightRows";
+import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
@@ -65,6 +67,8 @@ type MockStateSeed = {
 	grantGroups: AdminGrantGroupDetail[];
 	nodeQuotas: AdminUserNodeQuota[];
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
+	userGlobalWeights: Record<string, number>;
+	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
 	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
@@ -100,6 +104,7 @@ let originalFetch: typeof fetch | null = null;
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 const TEXT_HEADERS = { "Content-Type": "text/plain" } as const;
+const DEFAULT_GLOBAL_WEIGHT = 100;
 
 function clone<T>(value: T): T {
 	if (typeof structuredClone === "function") {
@@ -467,6 +472,14 @@ function createDefaultSeed(): MockStateSeed {
 		[userId1]: [{ node_id: "node-1", weight: 120 }],
 		[userId2]: [],
 	};
+	const userGlobalWeights: Record<string, number> = {
+		[userId1]: 120,
+		[userId2]: 80,
+	};
+	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
+		"node-1": { node_id: "node-1", inherit_global: true },
+		"node-2": { node_id: "node-2", inherit_global: true },
+	};
 
 	const grantGroups: AdminGrantGroupDetail[] = [
 		{
@@ -546,6 +559,8 @@ function createDefaultSeed(): MockStateSeed {
 		grantGroups,
 		nodeQuotas: [],
 		userNodeWeights,
+		userGlobalWeights,
+		nodeWeightPolicies,
 		alerts,
 		subscriptions,
 	};
@@ -566,6 +581,9 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		grantGroups: overrides?.grantGroups ?? base.grantGroups,
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
+		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
+		nodeWeightPolicies:
+			overrides?.nodeWeightPolicies ?? base.nodeWeightPolicies,
 		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
 		alerts: overrides?.alerts ?? base.alerts,
 		subscriptions: {
@@ -833,6 +851,94 @@ async function handleRequest(
 	const quotaPolicyNodeWeightRowsMatch = path.match(
 		/^\/api\/admin\/quota-policy\/nodes\/([^/]+)\/weight-rows$/,
 	);
+	if (
+		path === "/api/admin/quota-policy/global-weight-rows" &&
+		method === "GET"
+	) {
+		const items: AdminQuotaPolicyGlobalWeightRow[] = state.users.map((user) => {
+			const storedWeight = state.userGlobalWeights[user.user_id];
+			return {
+				user_id: user.user_id,
+				display_name: user.display_name,
+				priority_tier: user.priority_tier,
+				stored_weight: storedWeight,
+				editor_weight: storedWeight ?? DEFAULT_GLOBAL_WEIGHT,
+				source: storedWeight === undefined ? "implicit_default" : "explicit",
+			};
+		});
+		items.sort(
+			(a, b) =>
+				b.editor_weight - a.editor_weight || a.user_id.localeCompare(b.user_id),
+		);
+		return jsonResponse({ items: clone(items) });
+	}
+
+	const quotaPolicyGlobalWeightPutMatch = path.match(
+		/^\/api\/admin\/quota-policy\/global-weight-rows\/([^/]+)$/,
+	);
+	if (quotaPolicyGlobalWeightPutMatch && method === "PUT") {
+		const userId = decodeURIComponent(quotaPolicyGlobalWeightPutMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+
+		const payload = await readJson<{ weight?: number }>(req);
+		if (!payload || typeof payload.weight !== "number") {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
+			return errorResponse(400, "invalid_request", "weight must be an integer");
+		}
+		if (payload.weight < 0 || payload.weight > 65535) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"weight must be between 0 and 65535",
+			);
+		}
+
+		state.userGlobalWeights[userId] = payload.weight;
+		return jsonResponse({ user_id: userId, weight: payload.weight });
+	}
+
+	const quotaPolicyNodePolicyMatch = path.match(
+		/^\/api\/admin\/quota-policy\/nodes\/([^/]+)\/policy$/,
+	);
+	if (quotaPolicyNodePolicyMatch) {
+		const nodeId = decodeURIComponent(quotaPolicyNodePolicyMatch[1]);
+		const nodeExists = state.nodes.some((node) => node.node_id === nodeId);
+		if (!nodeExists) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		if (method === "GET") {
+			return jsonResponse(
+				clone(
+					state.nodeWeightPolicies[nodeId] ?? {
+						node_id: nodeId,
+						inherit_global: true,
+					},
+				),
+			);
+		}
+		if (method === "PUT") {
+			const payload = await readJson<{ inherit_global?: boolean }>(req);
+			if (!payload || typeof payload.inherit_global !== "boolean") {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"inherit_global must be a boolean",
+				);
+			}
+			const nextPolicy: AdminQuotaPolicyNodePolicy = {
+				node_id: nodeId,
+				inherit_global: payload.inherit_global,
+			};
+			state.nodeWeightPolicies[nodeId] = nextPolicy;
+			return jsonResponse(clone(nextPolicy));
+		}
+	}
+
 	if (quotaPolicyNodeWeightRowsMatch && method === "GET") {
 		const nodeId = decodeURIComponent(quotaPolicyNodeWeightRowsMatch[1]);
 		const nodeExists = state.nodes.some((node) => node.node_id === nodeId);

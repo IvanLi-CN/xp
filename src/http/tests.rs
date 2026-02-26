@@ -1426,6 +1426,139 @@ async fn quota_policy_node_weight_rows_requires_admin_auth() {
 }
 
 #[tokio::test]
+async fn quota_policy_global_weight_rows_supports_implicit_default_and_explicit_weight() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/quota-policy/global-weight-rows",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let rows = body_json(res).await;
+    let items = rows["items"].as_array().unwrap();
+    let row = items
+        .iter()
+        .find(|item| item["user_id"] == user_id)
+        .expect("global row must exist for created user");
+    assert_eq!(row["source"], "implicit_default");
+    assert_eq!(row["editor_weight"], 100);
+    assert!(row.get("stored_weight").is_none());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/quota-policy/global-weight-rows/{user_id}"),
+            json!({ "weight": 4321 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/quota-policy/global-weight-rows",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let rows = body_json(res).await;
+    let items = rows["items"].as_array().unwrap();
+    let row = items
+        .iter()
+        .find(|item| item["user_id"] == user_id)
+        .expect("global row must exist for created user");
+    assert_eq!(row["source"], "explicit");
+    assert_eq!(row["stored_weight"], 4321);
+    assert_eq!(row["editor_weight"], 4321);
+}
+
+#[tokio::test]
+async fn quota_policy_node_policy_defaults_to_inherit_and_can_update() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/quota-policy/nodes/{node_id}/policy"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let policy = body_json(res).await;
+    assert_eq!(policy["node_id"], node_id);
+    assert_eq!(policy["inherit_global"], true);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/quota-policy/nodes/{node_id}/policy"),
+            json!({ "inherit_global": false }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let policy = body_json(res).await;
+    assert_eq!(policy["inherit_global"], false);
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/quota-policy/nodes/{node_id}/policy"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let policy = body_json(res).await;
+    assert_eq!(policy["inherit_global"], false);
+}
+
+#[tokio::test]
+async fn quota_policy_global_weight_rows_requires_admin_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req("GET", "/api/admin/quota-policy/global-weight-rows"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn create_endpoint_then_list_contains_it() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
