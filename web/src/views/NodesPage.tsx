@@ -10,7 +10,6 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
-import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
@@ -257,35 +256,28 @@ export function NodesPage() {
 						Refresh
 					</Button>
 				</div>
-				<ResourceTable
-					headers={[
-						{
-							key: "identity",
-							label: (
-								<div className="flex flex-col gap-1 leading-tight">
-									<span className="whitespace-nowrap">Node ID</span>
-									<span className="whitespace-nowrap opacity-70">Name</span>
-								</div>
-							),
-							className: "w-[46%]",
-						},
-						{
-							key: "runtime",
-							label: (
-								<div className="flex flex-col gap-1 leading-tight">
-									<span className="whitespace-nowrap">Components</span>
-									<span className="whitespace-nowrap opacity-70">7d (30m)</span>
-								</div>
-							),
-							className: "w-[54%]",
-						},
-					]}
-					tableClassName="table-fixed w-full"
-				>
-					{nodes.map((node) => (
-						<tr key={node.node_id}>
-							<td className="align-top">
-								<div className="flex max-w-full flex-col gap-1">
+				<div className="rounded-box border border-base-300 bg-base-100 shadow-sm">
+					<div className="grid grid-cols-2 gap-3 border-b border-base-200 px-4 py-3 font-semibold">
+						<div className="flex min-w-0 flex-col gap-1 leading-tight">
+							<span className="truncate whitespace-nowrap">Node ID</span>
+							<span className="truncate whitespace-nowrap opacity-70">
+								Name
+							</span>
+						</div>
+						<div className="flex min-w-0 flex-col gap-1 leading-tight">
+							<span className="truncate whitespace-nowrap">Components</span>
+							<span className="truncate whitespace-nowrap opacity-70">
+								7d (30m)
+							</span>
+						</div>
+					</div>
+					<div className="divide-y divide-base-200">
+						{nodes.map((node) => (
+							<div
+								key={node.node_id}
+								className="grid grid-cols-2 gap-3 px-4 py-3"
+							>
+								<div className="flex min-w-0 flex-col gap-1">
 									<Link
 										to="/nodes/$nodeId"
 										params={{ nodeId: node.node_id }}
@@ -303,9 +295,7 @@ export function NodesPage() {
 										{node.node_name || "(unnamed)"}
 									</Link>
 								</div>
-							</td>
-							<td className="align-top">
-								<div className="flex max-w-full flex-col gap-1">
+								<div className="flex min-w-0 flex-col gap-1">
 									<div className="max-w-full truncate whitespace-nowrap">
 										{(() => {
 											const problematic = node.components.filter(
@@ -369,10 +359,10 @@ export function NodesPage() {
 										))}
 									</div>
 								</div>
-							</td>
-						</tr>
-					))}
-				</ResourceTable>
+							</div>
+						))}
+					</div>
+				</div>
 			</div>
 		);
 	})();
