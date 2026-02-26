@@ -315,9 +315,14 @@ export function NodesPage() {
 												`${component.component}:${component.status}`,
 										)
 										.join(", ");
+									const moreBadgeClass = problematic.some(
+										(component) => component.status === "down",
+									)
+										? "badge badge-error badge-sm"
+										: "badge badge-warning badge-sm";
 
 									return (
-										<div className="flex flex-wrap items-center gap-1">
+										<div className="inline-flex items-center gap-1 whitespace-nowrap">
 											<span
 												className={componentBadgeClass(first.status)}
 												title={`${first.component}:${first.status}`}
@@ -325,10 +330,7 @@ export function NodesPage() {
 												{first.component}:{first.status}
 											</span>
 											{moreCount > 0 ? (
-												<span
-													className="badge badge-outline badge-sm"
-													title={moreTitle}
-												>
+												<span className={moreBadgeClass} title={moreTitle}>
 													+{moreCount}
 												</span>
 											) : null}
