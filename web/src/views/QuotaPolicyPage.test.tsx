@@ -65,7 +65,8 @@ function renderPage() {
 
 function readLegendColors(container: HTMLElement): Record<string, string> {
 	const out: Record<string, string> = {};
-	const labels = Array.from(container.querySelectorAll("span"));
+	const legend = within(container).getByTestId("ratio-pie-legend");
+	const labels = Array.from(legend.querySelectorAll("span.truncate"));
 	for (const labelNode of labels) {
 		const label = labelNode.textContent?.trim();
 		if (!label) continue;
@@ -75,6 +76,20 @@ function readLegendColors(container: HTMLElement): Record<string, string> {
 		out[label] = dot.style.backgroundColor;
 	}
 	return out;
+}
+
+function readLegendOrder(container: HTMLElement): string[] {
+	const legend = within(container).getByTestId("ratio-pie-legend");
+	return Array.from(legend.querySelectorAll("span.truncate"))
+		.map((node) => node.textContent?.trim() ?? "")
+		.filter(Boolean);
+}
+
+function readPieSliceFills(container: HTMLElement): string[] {
+	const chart = within(container).getByLabelText("Node weight ratio pie chart");
+	return Array.from(chart.querySelectorAll("path"))
+		.map((node) => node.getAttribute("fill") ?? "")
+		.filter(Boolean);
 }
 
 function mockMatchMedia(matches: boolean) {
@@ -268,7 +283,7 @@ describe("<QuotaPolicyPage />", () => {
 		expect(thirdCall?.[1]).toBe("user-2");
 	});
 
-	it("keeps per-user legend color stable after ratio ranking changes", async () => {
+	it("keeps pie legend and slice order stable after ratio ranking changes", async () => {
 		const view = renderPage();
 
 		expect(
@@ -277,8 +292,12 @@ describe("<QuotaPolicyPage />", () => {
 		await within(view.container).findByLabelText("Node weight ratio pie chart");
 
 		const colorsBefore = readLegendColors(view.container);
+		const orderBefore = readLegendOrder(view.container);
+		const firstSliceBefore = readPieSliceFills(view.container)[0];
 		expect(colorsBefore.Alice).toBeTruthy();
 		expect(colorsBefore.Bob).toBeTruthy();
+		expect(orderBefore).toEqual(["Alice", "Bob"]);
+		expect(firstSliceBefore).toBeTruthy();
 
 		const aliceInput = await within(view.container).findByLabelText(
 			"Ratio input for Alice",
@@ -291,8 +310,12 @@ describe("<QuotaPolicyPage />", () => {
 		});
 
 		const colorsAfter = readLegendColors(view.container);
+		const orderAfter = readLegendOrder(view.container);
+		const firstSliceAfter = readPieSliceFills(view.container)[0];
 		expect(colorsAfter.Alice).toBe(colorsBefore.Alice);
 		expect(colorsAfter.Bob).toBe(colorsBefore.Bob);
+		expect(orderAfter).toEqual(orderBefore);
+		expect(firstSliceAfter).toBe(firstSliceBefore);
 	});
 
 	it("switches to list layout on narrow viewport instead of showing table scroll", async () => {

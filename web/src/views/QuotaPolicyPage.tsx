@@ -154,19 +154,14 @@ function describeArc(
 }
 
 function buildPieSegments(rows: RatioDraftRow[]): PieSegment[] {
-	const sorted = [...rows]
-		.filter((row) => row.basisPoints > 0)
-		.sort(
-			(a, b) =>
-				b.basisPoints - a.basisPoints || a.userId.localeCompare(b.userId),
-		);
-	if (sorted.length === 0) {
+	const visibleRows = rows.filter((row) => row.basisPoints > 0);
+	if (visibleRows.length === 0) {
 		return [];
 	}
 
 	const maxVisible = 8;
-	if (sorted.length <= maxVisible) {
-		return sorted.map((row) => ({
+	if (visibleRows.length <= maxVisible) {
+		return visibleRows.map((row) => ({
 			key: row.userId,
 			label: row.displayName,
 			basisPoints: row.basisPoints,
@@ -175,27 +170,46 @@ function buildPieSegments(rows: RatioDraftRow[]): PieSegment[] {
 		}));
 	}
 
-	const head = sorted.slice(0, maxVisible - 1).map((row) => ({
-		key: row.userId,
-		label: row.displayName,
-		basisPoints: row.basisPoints,
-		color: pieColorForKey(row.userId),
-		userIds: [row.userId],
-	}));
-	const tail = sorted.slice(maxVisible - 1);
-	const tailPoints = tail.reduce((acc, row) => acc + row.basisPoints, 0);
-	if (tailPoints <= 0) {
-		return head;
+	// Keep slice positions stable while editing by preserving row order in the pie.
+	const topByWeight = [...visibleRows]
+		.sort(
+			(a, b) =>
+				b.basisPoints - a.basisPoints || a.userId.localeCompare(b.userId),
+		)
+		.slice(0, maxVisible - 1);
+	const topUserIdSet = new Set(topByWeight.map((row) => row.userId));
+
+	const segments: PieSegment[] = [];
+	const othersUserIds: string[] = [];
+	let othersBasisPoints = 0;
+
+	for (const row of visibleRows) {
+		if (topUserIdSet.has(row.userId)) {
+			segments.push({
+				key: row.userId,
+				label: row.displayName,
+				basisPoints: row.basisPoints,
+				color: pieColorForKey(row.userId),
+				userIds: [row.userId],
+			});
+			continue;
+		}
+		othersBasisPoints += row.basisPoints;
+		othersUserIds.push(row.userId);
+	}
+
+	if (othersBasisPoints <= 0) {
+		return segments;
 	}
 
 	return [
-		...head,
+		...segments,
 		{
 			key: "others",
 			label: "Others",
-			basisPoints: tailPoints,
+			basisPoints: othersBasisPoints,
 			color: pieColorForKey("others"),
-			userIds: tail.map((row) => row.userId),
+			userIds: othersUserIds,
 		},
 	];
 }
@@ -928,7 +942,7 @@ export function QuotaPolicyPage() {
 									</svg>
 								</div>
 
-								<div className="space-y-2">
+								<div data-testid="ratio-pie-legend" className="space-y-2">
 									{pieSegments.length === 0 ? (
 										<div className="text-sm opacity-70">
 											No non-zero slices yet.
