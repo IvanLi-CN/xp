@@ -1,4 +1,5 @@
 pub mod admin_token;
+pub mod cloudflared_supervisor;
 pub mod cluster_identity;
 pub mod cluster_metadata;
 pub mod config;
@@ -9,6 +10,7 @@ pub mod http;
 pub mod id;
 pub mod internal_auth;
 pub mod login_token;
+pub mod node_runtime;
 pub mod ops;
 pub mod protocol;
 pub mod quota;

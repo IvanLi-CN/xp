@@ -22,6 +22,14 @@ pub struct XpEnvFlags {
     pub has_xray_restart_timeout: bool,
     pub has_xray_systemd_unit: bool,
     pub has_xray_openrc_service: bool,
+
+    pub has_cloudflared_health_interval: bool,
+    pub has_cloudflared_health_fails_before_down: bool,
+    pub has_cloudflared_restart_mode: bool,
+    pub has_cloudflared_restart_cooldown: bool,
+    pub has_cloudflared_restart_timeout: bool,
+    pub has_cloudflared_systemd_unit: bool,
+    pub has_cloudflared_openrc_service: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +181,41 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             retained_lines.push(line.to_string());
             continue;
         }
+        if line.starts_with("XP_CLOUDFLARED_HEALTH_INTERVAL_SECS=") {
+            flags.has_cloudflared_health_interval = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN=") {
+            flags.has_cloudflared_health_fails_before_down = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_RESTART_MODE=") {
+            flags.has_cloudflared_restart_mode = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_RESTART_COOLDOWN_SECS=") {
+            flags.has_cloudflared_restart_cooldown = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS=") {
+            flags.has_cloudflared_restart_timeout = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_SYSTEMD_UNIT=") {
+            flags.has_cloudflared_systemd_unit = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARED_OPENRC_SERVICE=") {
+            flags.has_cloudflared_openrc_service = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
         retained_lines.push(line.to_string());
     }
 
@@ -188,7 +231,7 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
     }
 }
 
-fn default_xray_restart_mode(paths: &Paths) -> &'static str {
+fn default_managed_restart_mode(paths: &Paths) -> &'static str {
     if is_test_root(paths.root()) {
         return "none";
     }
@@ -271,7 +314,7 @@ pub fn write_xp_env(
     if !flags.has_xray_restart_mode {
         lines.push(format!(
             "XP_XRAY_RESTART_MODE={}",
-            default_xray_restart_mode(paths)
+            default_managed_restart_mode(paths)
         ));
     }
     if !flags.has_xray_restart_cooldown {
@@ -285,6 +328,30 @@ pub fn write_xp_env(
     }
     if !flags.has_xray_openrc_service {
         lines.push("XP_XRAY_OPENRC_SERVICE=xray".to_string());
+    }
+    if !flags.has_cloudflared_health_interval {
+        lines.push("XP_CLOUDFLARED_HEALTH_INTERVAL_SECS=5".to_string());
+    }
+    if !flags.has_cloudflared_health_fails_before_down {
+        lines.push("XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
+    }
+    if !flags.has_cloudflared_restart_mode {
+        lines.push(format!(
+            "XP_CLOUDFLARED_RESTART_MODE={}",
+            default_managed_restart_mode(paths)
+        ));
+    }
+    if !flags.has_cloudflared_restart_cooldown {
+        lines.push("XP_CLOUDFLARED_RESTART_COOLDOWN_SECS=30".to_string());
+    }
+    if !flags.has_cloudflared_restart_timeout {
+        lines.push("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS=5".to_string());
+    }
+    if !flags.has_cloudflared_systemd_unit {
+        lines.push("XP_CLOUDFLARED_SYSTEMD_UNIT=cloudflared.service".to_string());
+    }
+    if !flags.has_cloudflared_openrc_service {
+        lines.push("XP_CLOUDFLARED_OPENRC_SERVICE=cloudflared".to_string());
     }
 
     let content = format!("{}\n", lines.join("\n"));

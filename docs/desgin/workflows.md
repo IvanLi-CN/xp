@@ -14,6 +14,7 @@
 
 - 每个 Grant 的累计用量（本机持久化即可）
 - 节点健康、探活时间、`xray` 在线状态等
+- 节点服务运行态历史（`xp/xray/cloudflared` 状态槽位与关键事件，保存在本机 `${XP_DATA_DIR}/service_runtime.json`）
 
 ## 2. 关键不变量（Invariants）
 
@@ -127,6 +128,23 @@
 
 要求：所有操作必须 **幂等**、可重试、按顺序执行（避免抖动）。
 
+## 6.1 节点服务运行态采集与事件
+
+本节点维护三类组件状态：`xp`、`xray`、`cloudflared`。
+
+- 采集：
+  - `xp`：进程存活即 `up`。
+  - `xray`：沿用现有 gRPC 探活与重启请求统计。
+  - `cloudflared`：通过 init system (`systemctl is-active`/`rc-service status`) 探活；达到阈值后按配置请求重启。
+- 聚合：
+  - 按 30 分钟槽位维护 7 天窗口（共 336 槽）；
+  - 计算节点摘要状态：`up|degraded|down|unknown`。
+- 关键事件：
+  - 状态变更（`status_changed`）
+  - 重启请求与结果（`restart_requested` / `restart_succeeded` / `restart_failed`）
+- 持久化：
+  - 写入 `${XP_DATA_DIR}/service_runtime.json`，重启后恢复窗口内历史。
+
 ## 7. 配额统计与封禁流程
 
 ### 7.1 统计采集
@@ -161,3 +179,13 @@
    - VLESS：携带 pbk、active shortId(sid)、fp、flow、sni 等
    - SS2022：method 固定；password=`server_psk:user_psk`
 4. 按请求输出 Raw/Base64/Clash YAML。
+
+## 9. Web 可观测页面数据流
+
+- 节点列表：
+  - 管理端调用 `GET /api/admin/nodes/runtime`，leader 聚合本地与远端 `_internal` 运行态；
+  - 不可达节点以 `partial + unreachable_nodes` 标记，前端降级显示。
+- 节点详情：
+  - 初始加载 `GET /api/admin/nodes/{node_id}/runtime`；
+  - 实时增量通过 `GET /api/admin/nodes/{node_id}/runtime/events` (SSE)；
+  - SSE 断开时退化为轮询详情接口。

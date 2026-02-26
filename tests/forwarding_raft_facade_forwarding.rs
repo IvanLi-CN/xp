@@ -11,6 +11,7 @@ use tokio::{
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use xp::{
+    cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
     config::Config,
     domain::{User, UserQuotaReset},
@@ -301,6 +302,13 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_restart_timeout_secs: 5,
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
+        cloudflared_health_interval_secs: 5,
+        cloudflared_health_fails_before_down: 3,
+        cloudflared_restart_mode: xp::config::XrayRestartMode::None,
+        cloudflared_restart_cooldown_secs: 30,
+        cloudflared_restart_timeout_secs: 5,
+        cloudflared_systemd_unit: "cloudflared.service".to_string(),
+        cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir: leader_dir.clone(),
         admin_token_hash: test_admin_token_hash(&admin_token),
         node_name: cluster.node_name.clone(),
@@ -312,6 +320,13 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
     };
 
     let xray_health = xp::xray_supervisor::XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> = Arc::new(leader.clone());
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -325,6 +340,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         leader_store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem.clone(),

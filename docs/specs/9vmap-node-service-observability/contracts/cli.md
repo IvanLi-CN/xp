@@ -1,0 +1,16 @@
+# CLI / Env Contracts（#9vmap）
+
+新增环境变量（`xp`）：
+
+- `XP_CLOUDFLARED_HEALTH_INTERVAL_SECS`
+- `XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN`
+- `XP_CLOUDFLARED_RESTART_MODE` (`none|systemd|openrc`)
+- `XP_CLOUDFLARED_RESTART_COOLDOWN_SECS`
+- `XP_CLOUDFLARED_RESTART_TIMEOUT_SECS`
+- `XP_CLOUDFLARED_SYSTEMD_UNIT`
+- `XP_CLOUDFLARED_OPENRC_SERVICE`
+
+默认约束：
+
+- mode=`none` 时 cloudflared 视为 `disabled`。
+- mode!=`none` 时启用监控与按模式重启。

@@ -3,6 +3,12 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+	type AdminNodeRuntimeDetailResponse,
+	type NodeRuntimeEvent,
+	fetchAdminNodeRuntime,
+	startNodeRuntimeEvents,
+} from "../api/adminNodeRuntime";
+import {
 	type AdminNodePatchRequest,
 	deleteAdminNode,
 	fetchAdminNode,
@@ -26,6 +32,67 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+function summaryBadgeClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success";
+		case "degraded":
+			return "badge badge-warning";
+		case "down":
+			return "badge badge-error";
+		default:
+			return "badge badge-ghost";
+	}
+}
+
+function componentBadgeClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success badge-sm";
+		case "down":
+			return "badge badge-error badge-sm";
+		case "disabled":
+			return "badge badge-ghost badge-sm";
+		default:
+			return "badge badge-outline badge-sm";
+	}
+}
+
+function eventBadgeClass(kind: NodeRuntimeEvent["kind"]): string {
+	switch (kind) {
+		case "status_changed":
+			return "badge badge-warning badge-sm";
+		case "restart_requested":
+			return "badge badge-info badge-sm";
+		case "restart_succeeded":
+			return "badge badge-success badge-sm";
+		case "restart_failed":
+			return "badge badge-error badge-sm";
+		default:
+			return "badge badge-ghost badge-sm";
+	}
+}
+
+function historySlotClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "bg-success";
+		case "degraded":
+			return "bg-warning";
+		case "down":
+			return "bg-error";
+		default:
+			return "bg-base-300";
+	}
+}
+
+function formatTime(value: string | null | undefined): string {
+	if (!value) return "-";
+	const dt = new Date(value);
+	if (Number.isNaN(dt.getTime())) return value;
+	return dt.toLocaleString();
+}
+
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
@@ -38,6 +105,25 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
 	});
+
+	const runtimeQuery = useQuery({
+		queryKey: ["adminNodeRuntime", adminToken, nodeId],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) =>
+			fetchAdminNodeRuntime(adminToken, nodeId, { eventsLimit: 200, signal }),
+	});
+
+	const [runtimeLive, setRuntimeLive] =
+		useState<AdminNodeRuntimeDetailResponse | null>(null);
+	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
+	const [runtimeSseError, setRuntimeSseError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!nodeId) return;
+		setRuntimeLive(null);
+		setRuntimeSseError(null);
+		setRuntimeSseConnected(false);
+	}, [nodeId]);
 
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -67,6 +153,85 @@ export function NodeDetailsPage() {
 			setSaveError(null);
 		}
 	}, [nodeQuery.data]);
+
+	useEffect(() => {
+		if (runtimeQuery.data) {
+			setRuntimeLive(runtimeQuery.data);
+		}
+	}, [runtimeQuery.data]);
+
+	useEffect(() => {
+		if (adminToken.length === 0) return;
+
+		let unmounted = false;
+		const stream = startNodeRuntimeEvents({
+			adminToken,
+			nodeId,
+			onOpen: () => {
+				if (unmounted) return;
+				setRuntimeSseConnected(true);
+				setRuntimeSseError(null);
+			},
+			onClose: () => {
+				if (unmounted) return;
+				setRuntimeSseConnected(false);
+			},
+			onError: (error) => {
+				if (unmounted) return;
+				setRuntimeSseConnected(false);
+				setRuntimeSseError(formatErrorMessage(error));
+			},
+			onMessage: (message) => {
+				if (unmounted) return;
+				if (message.type === "snapshot") {
+					setRuntimeLive((prev) => {
+						if (!prev) return prev;
+						return {
+							...prev,
+							summary: message.data.summary,
+							components: message.data.components,
+							recent_slots: message.data.recent_slots,
+							events: message.data.events,
+						};
+					});
+					return;
+				}
+				if (message.type === "event") {
+					setRuntimeLive((prev) => {
+						if (!prev) return prev;
+						return {
+							...prev,
+							events: [message.data, ...prev.events].slice(0, 200),
+						};
+					});
+					void runtimeQuery.refetch();
+					return;
+				}
+				if (message.type === "node_error") {
+					setRuntimeSseError(message.data.error);
+				}
+				if (message.type === "lagged") {
+					setRuntimeSseError(
+						`SSE lagged: missed ${message.data.missed} events.`,
+					);
+					void runtimeQuery.refetch();
+				}
+			},
+		});
+
+		return () => {
+			unmounted = true;
+			stream.close();
+		};
+	}, [adminToken, nodeId, runtimeQuery.refetch]);
+
+	useEffect(() => {
+		if (adminToken.length === 0 || runtimeSseConnected) return;
+		const timer = window.setInterval(() => {
+			void runtimeQuery.refetch();
+		}, 10000);
+		return () => window.clearInterval(timer);
+	}, [adminToken, runtimeSseConnected, runtimeQuery.refetch]);
 
 	const desiredQuotaReset: NodeQuotaReset = useMemo(() => {
 		const raw = resetTzOffsetMinutes.trim();
@@ -209,9 +374,170 @@ export function NodeDetailsPage() {
 			prefs.density === "compact"
 				? "select select-bordered select-sm"
 				: "select select-bordered";
+		const runtime = runtimeLive ?? runtimeQuery.data;
 
 		return (
 			<div className="space-y-4">
+				<div className="card bg-base-100 shadow">
+					<div className="card-body space-y-4">
+						<div className="flex items-center justify-between gap-3">
+							<div>
+								<h2 className="card-title">Service runtime</h2>
+								<p className="text-sm opacity-70">
+									Live status of xp/xray/cloudflared with 7-day history and key
+									events.
+								</p>
+							</div>
+							<div className="flex items-center gap-2">
+								{runtime ? (
+									<span className={summaryBadgeClass(runtime.summary.status)}>
+										{runtime.summary.status}
+									</span>
+								) : null}
+								<span
+									className={
+										runtimeSseConnected
+											? "badge badge-success badge-outline"
+											: "badge badge-ghost"
+									}
+								>
+									{runtimeSseConnected ? "live" : "polling"}
+								</span>
+							</div>
+						</div>
+
+						{runtimeQuery.isLoading && !runtime ? (
+							<PageState
+								variant="loading"
+								title="Loading runtime"
+								description="Fetching service runtime details."
+							/>
+						) : null}
+
+						{runtimeQuery.isError && !runtime ? (
+							<PageState
+								variant="error"
+								title="Failed to load runtime"
+								description={formatErrorMessage(runtimeQuery.error)}
+								action={
+									<Button
+										variant="secondary"
+										loading={runtimeQuery.isFetching}
+										onClick={() => runtimeQuery.refetch()}
+									>
+										Retry
+									</Button>
+								}
+							/>
+						) : null}
+
+						{runtime ? (
+							<>
+								{runtimeSseError ? (
+									<div className="alert alert-warning py-2 text-sm">
+										<span>Realtime stream degraded: {runtimeSseError}</span>
+									</div>
+								) : null}
+
+								<div className="grid gap-3 lg:grid-cols-3">
+									{runtime.components.map((component) => (
+										<div
+											key={component.component}
+											className="rounded-box border border-base-300 bg-base-200 p-3 space-y-2"
+										>
+											<div className="flex items-center justify-between gap-2">
+												<p className="font-semibold">{component.component}</p>
+												<span className={componentBadgeClass(component.status)}>
+													{component.status}
+												</span>
+											</div>
+											<div className="space-y-1 text-xs font-mono opacity-80">
+												<p>last_ok: {formatTime(component.last_ok_at)}</p>
+												<p>last_fail: {formatTime(component.last_fail_at)}</p>
+												<p>down_since: {formatTime(component.down_since)}</p>
+												<p>fails: {component.consecutive_failures}</p>
+												<p>recoveries: {component.recoveries_observed}</p>
+												<p>restart_attempts: {component.restart_attempts}</p>
+												<p>
+													last_restart: {formatTime(component.last_restart_at)}
+												</p>
+											</div>
+										</div>
+									))}
+								</div>
+
+								<div>
+									<p className="text-xs uppercase tracking-wide opacity-60 mb-2">
+										7-day status indicator (30-minute slots)
+									</p>
+									<div className="flex items-end gap-px overflow-x-auto rounded-box bg-base-200 p-2">
+										{runtime.recent_slots.map((slot) => (
+											<div
+												key={slot.slot_start}
+												className={`h-5 w-[2px] shrink-0 ${historySlotClass(slot.status)}`}
+												title={`${slot.slot_start} • ${slot.status}`}
+											/>
+										))}
+									</div>
+								</div>
+
+								<div className="space-y-2">
+									<div className="flex items-center justify-between gap-2">
+										<p className="text-xs uppercase tracking-wide opacity-60">
+											Key events
+										</p>
+										<Button
+											variant="secondary"
+											loading={runtimeQuery.isFetching}
+											onClick={() => runtimeQuery.refetch()}
+										>
+											Refresh runtime
+										</Button>
+									</div>
+									<div className="rounded-box border border-base-300 bg-base-200 max-h-72 overflow-auto">
+										<table className="table table-sm">
+											<thead>
+												<tr>
+													<th>Time</th>
+													<th>Component</th>
+													<th>Kind</th>
+													<th>Message</th>
+												</tr>
+											</thead>
+											<tbody>
+												{runtime.events.length === 0 ? (
+													<tr>
+														<td colSpan={4} className="opacity-60">
+															No runtime events in window.
+														</td>
+													</tr>
+												) : (
+													runtime.events.map((event) => (
+														<tr key={event.event_id}>
+															<td className="font-mono text-xs">
+																{formatTime(event.occurred_at)}
+															</td>
+															<td className="font-mono text-xs">
+																{event.component}
+															</td>
+															<td>
+																<span className={eventBadgeClass(event.kind)}>
+																	{event.kind}
+																</span>
+															</td>
+															<td className="text-xs">{event.message}</td>
+														</tr>
+													))
+												)}
+											</tbody>
+										</table>
+									</div>
+								</div>
+							</>
+						) : null}
+					</div>
+				</div>
+
 				<div className="card bg-base-100 shadow">
 					<div className="card-body space-y-3">
 						<div>

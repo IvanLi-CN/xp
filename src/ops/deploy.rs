@@ -1815,6 +1815,13 @@ mod tests {
         assert!(env.contains("XP_XRAY_RESTART_TIMEOUT_SECS="));
         assert!(env.contains("XP_XRAY_SYSTEMD_UNIT="));
         assert!(env.contains("XP_XRAY_OPENRC_SERVICE="));
+        assert!(env.contains("XP_CLOUDFLARED_HEALTH_INTERVAL_SECS="));
+        assert!(env.contains("XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN="));
+        assert!(env.contains("XP_CLOUDFLARED_RESTART_MODE="));
+        assert!(env.contains("XP_CLOUDFLARED_RESTART_COOLDOWN_SECS="));
+        assert!(env.contains("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS="));
+        assert!(env.contains("XP_CLOUDFLARED_SYSTEMD_UNIT="));
+        assert!(env.contains("XP_CLOUDFLARED_OPENRC_SERVICE="));
     }
 
     #[test]

@@ -9,6 +9,7 @@ This directory contains sample service definitions and an environment template t
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
+- `xp` also tracks `cloudflared` (when enabled via `XP_CLOUDFLARED_RESTART_MODE!=none`) and records runtime status transitions/restart outcomes to `${XP_DATA_DIR}/service_runtime.json` for the Web runtime pages.
 
 ## Endpoint probe (ingress reachability)
 
@@ -84,6 +85,18 @@ Required (or commonly set):
   - Minimum time between restart requests (prevents restart storms).
 - `XP_XRAY_RESTART_TIMEOUT_SECS` (default: `5`, allowed range `1..=60`)
   - Timeout for the restart command invocation.
+- `XP_CLOUDFLARED_HEALTH_INTERVAL_SECS` (default: `5`, allowed range `1..=60`)
+  - Probe interval for cloudflared service status (`systemctl is-active` / `rc-service status`).
+- `XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN` (default: `3`, allowed range `1..=10`)
+  - Consecutive failures before reporting `cloudflared=down`.
+- `XP_CLOUDFLARED_RESTART_MODE` (default: `none`)
+  - `none|systemd|openrc`. `none` means cloudflared is treated as disabled in runtime pages.
+- `XP_CLOUDFLARED_RESTART_COOLDOWN_SECS` (default: `30`, allowed range `1..=3600`)
+  - Minimum time between cloudflared restart requests.
+- `XP_CLOUDFLARED_RESTART_TIMEOUT_SECS` (default: `5`, allowed range `1..=60`)
+  - Timeout for cloudflared restart command invocation.
+- `XP_CLOUDFLARED_SYSTEMD_UNIT` / `XP_CLOUDFLARED_OPENRC_SERVICE`
+  - Init-system target names for cloudflared restart/probe.
 
 Optional quota knobs:
 
@@ -114,6 +127,7 @@ ${XP_DATA_DIR}/
     snapshots/
   state.json
   usage.json
+  service_runtime.json
 ```
 
 Notes:
@@ -121,6 +135,7 @@ Notes:
 - `cluster/` holds long-lived identity and TLS assets. Treat `cluster_ca_key.pem` as sensitive (private key).
 - `raft/` holds the raft write-ahead log and snapshots.
 - `state.json` and `usage.json` are JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
+- `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
 
 ## Service examples
 

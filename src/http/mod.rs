@@ -36,6 +36,11 @@ use crate::{
         UserNodeQuota, UserQuotaReset, validate_group_name,
     },
     internal_auth,
+    node_runtime::{
+        ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
+        NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
+        RuntimeSummaryStatus,
+    },
     protocol::{RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta},
     raft::{
         app::RaftFacade,
@@ -58,6 +63,7 @@ pub struct AppState {
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
+    pub node_runtime: NodeRuntimeHandle,
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
@@ -631,6 +637,7 @@ pub fn build_router(
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
     xray_health: XrayHealthHandle,
+    node_runtime: NodeRuntimeHandle,
     endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     cluster: ClusterMetadata,
     cluster_ca_pem: String,
@@ -659,6 +666,7 @@ pub fn build_router(
         store,
         reconcile,
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
@@ -687,6 +695,12 @@ pub fn build_router(
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
         .route("/nodes", get(admin_list_nodes))
+        .route("/nodes/runtime", get(admin_list_nodes_runtime))
+        .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
+        .route(
+            "/nodes/:node_id/runtime/events",
+            get(admin_stream_node_runtime_events),
+        )
         .route(
             "/nodes/:node_id",
             get(admin_get_node)
@@ -777,6 +791,14 @@ pub fn build_router(
         .route(
             "/_internal/endpoint-probe/runs/:run_id/events",
             get(admin_internal_endpoint_probe_run_events),
+        )
+        .route(
+            "/_internal/nodes/runtime/local",
+            get(admin_internal_get_local_node_runtime),
+        )
+        .route(
+            "/_internal/nodes/runtime/local/events",
+            get(admin_internal_stream_local_node_runtime_events),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -1623,6 +1645,582 @@ async fn promote_joined_learner_to_voter(
         .map_err(|e| format!("change_membership add voter: {e}"))?;
 
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeRuntimeQuery {
+    events_limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminNodeRuntimeListItem {
+    node_id: String,
+    node_name: String,
+    api_base_url: String,
+    access_host: String,
+    summary: NodeRuntimeSummary,
+    components: Vec<ComponentRuntimeStatus>,
+    recent_slots: Vec<NodeRuntimeHistorySlot>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AdminNodesRuntimeResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    items: Vec<AdminNodeRuntimeListItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminNodeRuntimeDetailResponse {
+    node: Node,
+    summary: NodeRuntimeSummary,
+    components: Vec<ComponentRuntimeStatus>,
+    recent_slots: Vec<NodeRuntimeHistorySlot>,
+    events: Vec<NodeRuntimeEvent>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminInternalNodeRuntimeLocalResponse {
+    node_id: String,
+    summary: NodeRuntimeSummary,
+    components: Vec<ComponentRuntimeStatus>,
+    recent_slots: Vec<NodeRuntimeHistorySlot>,
+    events: Vec<NodeRuntimeEvent>,
+}
+
+impl From<LocalNodeRuntimeSnapshot> for AdminInternalNodeRuntimeLocalResponse {
+    fn from(value: LocalNodeRuntimeSnapshot) -> Self {
+        Self {
+            node_id: value.node_id,
+            summary: value.summary,
+            components: value.components,
+            recent_slots: value.recent_slots,
+            events: value.events,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeRuntimeSseHello {
+    node_id: String,
+    connected_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeRuntimeSseNodeError {
+    node_id: String,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminNodeRuntimeSseLagged {
+    node_id: String,
+    missed: u64,
+}
+
+fn runtime_event_limit(query: &NodeRuntimeQuery) -> usize {
+    query.events_limit.unwrap_or(200).clamp(0, 1000) as usize
+}
+
+fn runtime_slots_unknown() -> Vec<NodeRuntimeHistorySlot> {
+    let now = Utc::now();
+    let base = now
+        .with_minute(if now.minute() < 30 { 0 } else { 30 })
+        .and_then(|v| v.with_second(0))
+        .and_then(|v| v.with_nanosecond(0))
+        .unwrap_or(now);
+    let mut slots = Vec::with_capacity(7 * 24 * 2);
+    for i in (0..(7 * 24 * 2)).rev() {
+        let at = base - chrono::Duration::minutes((i as i64) * 30);
+        slots.push(NodeRuntimeHistorySlot {
+            slot_start: at.to_rfc3339_opts(SecondsFormat::Secs, true),
+            status: RuntimeSummaryStatus::Unknown,
+        });
+    }
+    slots
+}
+
+fn runtime_components_unknown() -> Vec<ComponentRuntimeStatus> {
+    let mut components = Vec::new();
+    for component in [
+        RuntimeComponent::Xp,
+        RuntimeComponent::Xray,
+        RuntimeComponent::Cloudflared,
+    ] {
+        components.push(ComponentRuntimeStatus {
+            component,
+            status: RuntimeStatus::Unknown,
+            last_ok_at: None,
+            last_fail_at: None,
+            down_since: None,
+            consecutive_failures: 0,
+            recoveries_observed: 0,
+            restart_attempts: 0,
+            last_restart_at: None,
+            last_restart_fail_at: None,
+        });
+    }
+    components
+}
+
+fn node_runtime_list_item_from_snapshot(
+    node: &Node,
+    snapshot: AdminInternalNodeRuntimeLocalResponse,
+) -> AdminNodeRuntimeListItem {
+    AdminNodeRuntimeListItem {
+        node_id: node.node_id.clone(),
+        node_name: node.node_name.clone(),
+        api_base_url: node.api_base_url.clone(),
+        access_host: node.access_host.clone(),
+        summary: snapshot.summary,
+        components: snapshot.components,
+        recent_slots: snapshot.recent_slots,
+    }
+}
+
+fn node_runtime_list_item_unreachable(node: &Node) -> AdminNodeRuntimeListItem {
+    AdminNodeRuntimeListItem {
+        node_id: node.node_id.clone(),
+        node_name: node.node_name.clone(),
+        api_base_url: node.api_base_url.clone(),
+        access_host: node.access_host.clone(),
+        summary: NodeRuntimeSummary {
+            status: RuntimeSummaryStatus::Unknown,
+            updated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        },
+        components: runtime_components_unknown(),
+        recent_slots: runtime_slots_unknown(),
+    }
+}
+
+fn node_runtime_detail_from_snapshot(
+    node: Node,
+    snapshot: AdminInternalNodeRuntimeLocalResponse,
+) -> AdminNodeRuntimeDetailResponse {
+    AdminNodeRuntimeDetailResponse {
+        node,
+        summary: snapshot.summary,
+        components: snapshot.components,
+        recent_slots: snapshot.recent_slots,
+        events: snapshot.events,
+    }
+}
+
+async fn admin_list_nodes_runtime(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminNodesRuntimeResponse>, ApiError> {
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+
+    let client = build_cluster_http_client(&state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri = "/_internal/nodes/runtime/local?events_limit=0"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let mut items = Vec::new();
+    let mut unreachable_nodes = Vec::new();
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            let local = state.node_runtime.snapshot(0).await;
+            items.push(node_runtime_list_item_from_snapshot(&node, local.into()));
+            continue;
+        }
+
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id.clone());
+            items.push(node_runtime_list_item_unreachable(&node));
+            continue;
+        }
+
+        let request = client
+            .get(format!(
+                "{base}/api/admin/_internal/nodes/runtime/local?events_limit=0"
+            ))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id.clone());
+                items.push(node_runtime_list_item_unreachable(&node));
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id.clone());
+            items.push(node_runtime_list_item_unreachable(&node));
+            continue;
+        }
+
+        match response
+            .json::<AdminInternalNodeRuntimeLocalResponse>()
+            .await
+        {
+            Ok(remote) => items.push(node_runtime_list_item_from_snapshot(&node, remote)),
+            Err(_) => {
+                unreachable_nodes.push(node.node_id.clone());
+                items.push(node_runtime_list_item_unreachable(&node));
+            }
+        }
+    }
+
+    items.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+
+    Ok(Json(AdminNodesRuntimeResponse {
+        partial: !unreachable_nodes.is_empty(),
+        unreachable_nodes,
+        items,
+    }))
+}
+
+async fn admin_get_node_runtime(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    Query(query): Query<NodeRuntimeQuery>,
+) -> Result<Json<AdminNodeRuntimeDetailResponse>, ApiError> {
+    let event_limit = runtime_event_limit(&query);
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    if node.node_id == state.cluster.node_id {
+        let local = state.node_runtime.snapshot(event_limit).await;
+        return Ok(Json(node_runtime_detail_from_snapshot(node, local.into())));
+    }
+
+    let base = node.api_base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err(ApiError::internal(format!(
+            "node is unreachable: {}",
+            node.node_id
+        )));
+    }
+
+    let client = build_cluster_http_client(&state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri = format!("/_internal/nodes/runtime/local?events_limit={event_limit}")
+        .parse()
+        .map_err(|_| ApiError::invalid_request("invalid events_limit"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let request = client
+        .get(format!(
+            "{base}/api/admin/_internal/nodes/runtime/local?events_limit={event_limit}"
+        ))
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send();
+    let response = tokio::time::timeout(Duration::from_secs(3), request)
+        .await
+        .map_err(|_| ApiError::internal("request timeout"))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(ApiError::internal(format!(
+            "node runtime request failed: {}",
+            response.status()
+        )));
+    }
+
+    let snapshot = response
+        .json::<AdminInternalNodeRuntimeLocalResponse>()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(node_runtime_detail_from_snapshot(node, snapshot)))
+}
+
+async fn forward_local_node_runtime_events(
+    handle: NodeRuntimeHandle,
+    node_id: String,
+    event_limit: usize,
+    tx: mpsc::Sender<Event>,
+) {
+    let snapshot = handle.snapshot(event_limit).await;
+    if tx
+        .send(sse_json_event(
+            "snapshot",
+            &AdminInternalNodeRuntimeLocalResponse::from(snapshot),
+        ))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    let mut rx = handle.subscribe();
+    loop {
+        if tx.is_closed() {
+            return;
+        }
+        match rx.recv().await {
+            Ok(event) => {
+                if tx.send(sse_json_event("event", &event)).await.is_err() {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "lagged",
+                        &AdminNodeRuntimeSseLagged {
+                            node_id: node_id.clone(),
+                            missed,
+                        },
+                    ))
+                    .await;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+async fn forward_remote_node_runtime_events(
+    client: reqwest::Client,
+    url: String,
+    sig: String,
+    node_id: String,
+    tx: mpsc::Sender<Event>,
+) {
+    let response = match client
+        .get(url)
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let _ = tx
+                .send(sse_json_event(
+                    "node_error",
+                    &AdminNodeRuntimeSseNodeError {
+                        node_id,
+                        error: err.to_string(),
+                    },
+                ))
+                .await;
+            return;
+        }
+    };
+
+    if !response.status().is_success() {
+        let _ = tx
+            .send(sse_json_event(
+                "node_error",
+                &AdminNodeRuntimeSseNodeError {
+                    node_id,
+                    error: format!("http {}", response.status()),
+                },
+            ))
+            .await;
+        return;
+    }
+
+    let mut buffer = String::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if tx.is_closed() {
+            return;
+        }
+
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let _ = tx
+                    .send(sse_json_event(
+                        "node_error",
+                        &AdminNodeRuntimeSseNodeError {
+                            node_id,
+                            error: err.to_string(),
+                        },
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        let chunk_text = String::from_utf8_lossy(bytes.as_ref()).replace("\r\n", "\n");
+        buffer.push_str(&chunk_text);
+
+        while let Some(split) = buffer.find("\n\n") {
+            let frame = buffer[..split].to_string();
+            buffer = buffer[split + 2..].to_string();
+
+            let mut event_type: Option<String> = None;
+            let mut data_lines: Vec<&str> = Vec::new();
+            for line in frame.lines() {
+                let line = line.trim_end_matches('\r');
+                if line.starts_with(':') {
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("event:") {
+                    event_type = Some(rest.trim().to_string());
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("data:") {
+                    data_lines.push(rest.trim_start());
+                }
+            }
+
+            let Some(event_type) = event_type else {
+                continue;
+            };
+            let data = data_lines.join("\n");
+            if data.is_empty() {
+                continue;
+            }
+
+            if tx
+                .send(Event::default().event(event_type).data(data))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+}
+
+async fn admin_stream_node_runtime_events(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    Query(query): Query<NodeRuntimeQuery>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    let event_limit = runtime_event_limit(&query);
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    let hello = AdminNodeRuntimeSseHello {
+        node_id: node_id.clone(),
+        connected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+    };
+
+    let mut initial_events = VecDeque::new();
+    initial_events.push_back(sse_json_event("hello", &hello));
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+    if node.node_id == state.cluster.node_id {
+        let handle = state.node_runtime.clone();
+        tokio::spawn(async move {
+            forward_local_node_runtime_events(handle, node_id, event_limit, tx).await;
+        });
+    } else {
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            initial_events.push_back(sse_json_event(
+                "node_error",
+                &AdminNodeRuntimeSseNodeError {
+                    node_id,
+                    error: "node is unreachable".to_string(),
+                },
+            ));
+        } else {
+            let client = build_cluster_http_client(&state)?;
+            let ca_key_pem = state.cluster_ca_key_pem.as_ref().as_ref().ok_or_else(|| {
+                ApiError::internal("cluster ca key is not available on this node")
+            })?;
+            let uri: axum::http::Uri = "/_internal/nodes/runtime/local/events"
+                .parse()
+                .expect("valid uri");
+            let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+                .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+            let url = format!("{base}/api/admin/_internal/nodes/runtime/local/events");
+            tokio::spawn(async move {
+                forward_remote_node_runtime_events(client, url, sig, node_id, tx).await;
+            });
+        }
+    }
+
+    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
+        if let Some(event) = initial.pop_front() {
+            return Some((Ok(event), (initial, rx)));
+        }
+        let next = rx.recv().await?;
+        Some((Ok(next), (initial, rx)))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
+}
+
+async fn admin_internal_get_local_node_runtime(
+    Extension(state): Extension<AppState>,
+    Query(query): Query<NodeRuntimeQuery>,
+) -> Result<Json<AdminInternalNodeRuntimeLocalResponse>, ApiError> {
+    let event_limit = runtime_event_limit(&query);
+    let snapshot = state.node_runtime.snapshot(event_limit).await;
+    Ok(Json(snapshot.into()))
+}
+
+async fn admin_internal_stream_local_node_runtime_events(
+    Extension(state): Extension<AppState>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    let hello = AdminNodeRuntimeSseHello {
+        node_id: state.cluster.node_id.clone(),
+        connected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+    };
+    let mut initial_events = VecDeque::new();
+    initial_events.push_back(sse_json_event("hello", &hello));
+
+    let (tx, rx) = mpsc::channel::<Event>(512);
+    let handle = state.node_runtime.clone();
+    let node_id = state.cluster.node_id.clone();
+    tokio::spawn(async move {
+        forward_local_node_runtime_events(handle, node_id, 200, tx).await;
+    });
+
+    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
+        if let Some(event) = initial.pop_front() {
+            return Some((Ok(event), (initial, rx)));
+        }
+        let next = rx.recv().await?;
+        Some((Ok(next), (initial, rx)))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
 }
 
 async fn admin_list_nodes(

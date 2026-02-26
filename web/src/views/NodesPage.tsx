@@ -3,7 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
-import { fetchAdminNodes } from "../api/adminNodes";
+import {
+	type AdminNodeRuntimeListItem,
+	fetchAdminNodesRuntime,
+} from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
@@ -22,6 +25,47 @@ function formatErrorMessage(error: unknown): string {
 		return `${error.status}${code}: ${error.message}`;
 	}
 	return String(error);
+}
+
+function summaryBadgeClass(
+	status: AdminNodeRuntimeListItem["summary"]["status"],
+): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success";
+		case "degraded":
+			return "badge badge-warning";
+		case "down":
+			return "badge badge-error";
+		default:
+			return "badge badge-ghost";
+	}
+}
+
+function componentBadgeClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success badge-sm";
+		case "down":
+			return "badge badge-error badge-sm";
+		case "disabled":
+			return "badge badge-ghost badge-sm";
+		default:
+			return "badge badge-outline badge-sm";
+	}
+}
+
+function historySlotClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "bg-success";
+		case "degraded":
+			return "bg-warning";
+		case "down":
+			return "bg-error";
+		default:
+			return "bg-base-300";
+	}
 }
 
 function highlightShell(text: string) {
@@ -71,9 +115,9 @@ export function NodesPage() {
 	});
 
 	const nodesQuery = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 
 	const joinCommand = useMemo(() => {
@@ -205,8 +249,19 @@ export function NodesPage() {
 			);
 		}
 
+		const unreachable = nodesQuery.data?.unreachable_nodes ?? [];
+		const partial = nodesQuery.data?.partial ?? false;
+
 		return (
 			<div className="space-y-3">
+				{partial ? (
+					<div className="alert alert-warning">
+						<span className="text-sm">
+							Partial result: unreachable node(s):{" "}
+							<span className="font-mono">{unreachable.join(", ") || "-"}</span>
+						</span>
+					</div>
+				) : null}
 				<div className="flex items-center justify-between gap-3">
 					<p className="text-sm opacity-70">
 						{nodes.length} node{nodes.length === 1 ? "" : "s"} total
@@ -223,6 +278,9 @@ export function NodesPage() {
 					headers={[
 						{ key: "node_id", label: "Node ID" },
 						{ key: "node_name", label: "Name" },
+						{ key: "summary", label: "Summary" },
+						{ key: "components", label: "Components" },
+						{ key: "recent_slots", label: "7d (30m)" },
 						{ key: "access_host", label: "Access host" },
 						{ key: "api_base_url", label: "API base URL" },
 					]}
@@ -246,6 +304,35 @@ export function NodesPage() {
 								>
 									{node.node_name || "(unnamed)"}
 								</Link>
+							</td>
+							<td>
+								<span className={summaryBadgeClass(node.summary.status)}>
+									{node.summary.status}
+								</span>
+							</td>
+							<td>
+								<div className="flex flex-wrap gap-1">
+									{node.components.map((component) => (
+										<span
+											key={component.component}
+											className={componentBadgeClass(component.status)}
+											title={`${component.component}: ${component.status}`}
+										>
+											{component.component}:{component.status}
+										</span>
+									))}
+								</div>
+							</td>
+							<td>
+								<div className="flex items-end gap-px min-w-56">
+									{node.recent_slots.map((slot) => (
+										<div
+											key={slot.slot_start}
+											className={`h-4 w-[1px] ${historySlotClass(slot.status)}`}
+											title={`${slot.slot_start} • ${slot.status}`}
+										/>
+									))}
+								</div>
 							</td>
 							<td className="font-mono text-sm">{node.access_host || "-"}</td>
 							<td className="font-mono text-sm">

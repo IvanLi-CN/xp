@@ -135,6 +135,74 @@ pub struct Config {
     pub xray_openrc_service: String,
 
     #[arg(
+        long = "cloudflared-health-interval-secs",
+        global = true,
+        env = "XP_CLOUDFLARED_HEALTH_INTERVAL_SECS",
+        value_name = "SECS",
+        default_value_t = 5,
+        value_parser = clap::value_parser!(u64).range(1..=60)
+    )]
+    pub cloudflared_health_interval_secs: u64,
+
+    #[arg(
+        long = "cloudflared-health-fails-before-down",
+        global = true,
+        env = "XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN",
+        value_name = "N",
+        default_value_t = 3,
+        value_parser = clap::value_parser!(u64).range(1..=10)
+    )]
+    pub cloudflared_health_fails_before_down: u64,
+
+    #[arg(
+        long = "cloudflared-restart-mode",
+        global = true,
+        env = "XP_CLOUDFLARED_RESTART_MODE",
+        value_name = "MODE",
+        default_value = "none",
+        value_enum
+    )]
+    pub cloudflared_restart_mode: XrayRestartMode,
+
+    #[arg(
+        long = "cloudflared-restart-cooldown-secs",
+        global = true,
+        env = "XP_CLOUDFLARED_RESTART_COOLDOWN_SECS",
+        value_name = "SECS",
+        default_value_t = 30,
+        value_parser = clap::value_parser!(u64).range(1..=3600)
+    )]
+    pub cloudflared_restart_cooldown_secs: u64,
+
+    #[arg(
+        long = "cloudflared-restart-timeout-secs",
+        global = true,
+        env = "XP_CLOUDFLARED_RESTART_TIMEOUT_SECS",
+        value_name = "SECS",
+        default_value_t = 5,
+        value_parser = clap::value_parser!(u64).range(1..=60)
+    )]
+    pub cloudflared_restart_timeout_secs: u64,
+
+    #[arg(
+        long = "cloudflared-systemd-unit",
+        global = true,
+        env = "XP_CLOUDFLARED_SYSTEMD_UNIT",
+        value_name = "UNIT",
+        default_value = "cloudflared.service"
+    )]
+    pub cloudflared_systemd_unit: String,
+
+    #[arg(
+        long = "cloudflared-openrc-service",
+        global = true,
+        env = "XP_CLOUDFLARED_OPENRC_SERVICE",
+        value_name = "NAME",
+        default_value = "cloudflared"
+    )]
+    pub cloudflared_openrc_service: String,
+
+    #[arg(
         long,
         global = true,
         env = "XP_DATA_DIR",
@@ -232,6 +300,13 @@ mod tests {
         assert_eq!(cli.config.xray_restart_timeout_secs, 5);
         assert_eq!(cli.config.xray_systemd_unit, "xray.service");
         assert_eq!(cli.config.xray_openrc_service, "xray");
+        assert_eq!(cli.config.cloudflared_health_interval_secs, 5);
+        assert_eq!(cli.config.cloudflared_health_fails_before_down, 3);
+        assert_eq!(cli.config.cloudflared_restart_mode, XrayRestartMode::None);
+        assert_eq!(cli.config.cloudflared_restart_cooldown_secs, 30);
+        assert_eq!(cli.config.cloudflared_restart_timeout_secs, 5);
+        assert_eq!(cli.config.cloudflared_systemd_unit, "cloudflared.service");
+        assert_eq!(cli.config.cloudflared_openrc_service, "cloudflared");
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
@@ -266,6 +341,42 @@ mod tests {
         let err = Cli::try_parse_from(["xp", "--xray-restart-timeout-secs", "0"]).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("--xray-restart-timeout-secs"));
+        assert!(msg.contains("1..=60"));
+    }
+
+    #[test]
+    fn rejects_invalid_cloudflared_health_interval_secs() {
+        let err =
+            Cli::try_parse_from(["xp", "--cloudflared-health-interval-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--cloudflared-health-interval-secs"));
+        assert!(msg.contains("1..=60"));
+    }
+
+    #[test]
+    fn rejects_invalid_cloudflared_health_fails_before_down() {
+        let err =
+            Cli::try_parse_from(["xp", "--cloudflared-health-fails-before-down", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--cloudflared-health-fails-before-down"));
+        assert!(msg.contains("1..=10"));
+    }
+
+    #[test]
+    fn rejects_invalid_cloudflared_restart_cooldown_secs() {
+        let err =
+            Cli::try_parse_from(["xp", "--cloudflared-restart-cooldown-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--cloudflared-restart-cooldown-secs"));
+        assert!(msg.contains("1..=3600"));
+    }
+
+    #[test]
+    fn rejects_invalid_cloudflared_restart_timeout_secs() {
+        let err =
+            Cli::try_parse_from(["xp", "--cloudflared-restart-timeout-secs", "0"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("--cloudflared-restart-timeout-secs"));
         assert!(msg.contains("1..=60"));
     }
 

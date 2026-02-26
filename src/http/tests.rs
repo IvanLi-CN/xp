@@ -21,6 +21,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::{
+    cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
     config::Config,
     domain::{
@@ -50,6 +51,13 @@ fn test_config(data_dir: PathBuf) -> Config {
         xray_restart_timeout_secs: 5,
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
+        cloudflared_health_interval_secs: 5,
+        cloudflared_health_fails_before_down: 3,
+        cloudflared_restart_mode: crate::config::XrayRestartMode::None,
+        cloudflared_restart_cooldown_secs: 30,
+        cloudflared_restart_timeout_secs: 5,
+        cloudflared_systemd_unit: "cloudflared.service".to_string(),
+        cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: hash,
         node_name: "node-1".to_string(),
@@ -106,6 +114,13 @@ fn app_with(
 
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -119,6 +134,7 @@ fn app_with(
         store.clone(),
         reconcile,
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -1009,6 +1025,13 @@ async fn follower_admin_write_does_not_redirect() {
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -1021,6 +1044,7 @@ async fn follower_admin_write_does_not_redirect() {
         store,
         ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -1070,6 +1094,88 @@ async fn create_user_then_list_contains_it() {
     let listed = body_json(res).await;
     let items = listed["items"].as_array().unwrap();
     assert!(items.iter().any(|u| u["user_id"] == user_id));
+}
+
+#[tokio::test]
+async fn nodes_runtime_list_marks_unreachable_remote_nodes_as_partial() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    {
+        let mut store = store.lock().await;
+        store
+            .upsert_node(Node {
+                node_id: "01J0000000000000000000000AB".to_string(),
+                node_name: "remote-a".to_string(),
+                access_host: "remote-a.example.com".to_string(),
+                api_base_url: "https://127.0.0.1:1".to_string(),
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes/runtime"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(res).await;
+    assert_eq!(body["partial"], Value::Bool(true));
+    let unreachable = body["unreachable_nodes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        unreachable
+            .iter()
+            .any(|value| { value.as_str() == Some("01J0000000000000000000000AB") })
+    );
+}
+
+#[tokio::test]
+async fn node_runtime_detail_contains_components_slots_and_events() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let listed = body_json(res).await;
+    let node_id = listed["items"][0]["node_id"]
+        .as_str()
+        .expect("node id")
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/runtime"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(res).await;
+    let components = body["components"].as_array().cloned().unwrap_or_default();
+    assert!(!components.is_empty());
+    assert!(components.iter().any(|item| item["component"] == "xp"));
+    assert!(components.iter().any(|item| item["component"] == "xray"));
+    assert!(
+        components
+            .iter()
+            .any(|item| item["component"] == "cloudflared")
+    );
+    assert_eq!(
+        body["recent_slots"].as_array().map(|x| x.len()),
+        Some(7 * 24 * 2)
+    );
+    assert!(body.get("events").is_some());
 }
 
 #[tokio::test]
@@ -2304,6 +2410,13 @@ async fn grant_usage_includes_warning_fields() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -2316,6 +2429,7 @@ async fn grant_usage_includes_warning_fields() {
         store,
         ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -2498,6 +2612,13 @@ async fn grant_usage_warns_on_quota_mismatch() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -2510,6 +2631,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -3050,6 +3172,13 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -3062,6 +3191,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster.clone(),
         cluster_ca_pem,
@@ -3097,6 +3227,13 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let store = Arc::new(Mutex::new(store));
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -3109,6 +3246,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store,
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,

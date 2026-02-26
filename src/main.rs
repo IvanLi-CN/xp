@@ -198,6 +198,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let reconcile = xp::reconcile::spawn_reconciler(config_arc.clone(), store.clone());
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
+    let (cloudflared_health, _cloudflared_supervisor_task) =
+        xp::cloudflared_supervisor::spawn_cloudflared_supervisor(config_arc.clone());
+    let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
+        config_arc.clone(),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
     let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
@@ -277,6 +285,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         store.clone(),
         reconcile,
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
