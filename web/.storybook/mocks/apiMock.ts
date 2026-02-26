@@ -17,6 +17,7 @@ import type {
 	NodeRuntimeHistorySlot,
 } from "../../src/api/adminNodeRuntime";
 import type { AdminNode } from "../../src/api/adminNodes";
+import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
@@ -827,6 +828,64 @@ async function handleRequest(
 		];
 
 		return jsonResponse(clone(next));
+	}
+
+	const quotaPolicyNodeWeightRowsMatch = path.match(
+		/^\/api\/admin\/quota-policy\/nodes\/([^/]+)\/weight-rows$/,
+	);
+	if (quotaPolicyNodeWeightRowsMatch && method === "GET") {
+		const nodeId = decodeURIComponent(quotaPolicyNodeWeightRowsMatch[1]);
+		const nodeExists = state.nodes.some((node) => node.node_id === nodeId);
+		if (!nodeExists) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+
+		const endpointNodeById = new Map(
+			state.endpoints.map((endpoint) => [
+				endpoint.endpoint_id,
+				endpoint.node_id,
+			]),
+		);
+		const endpointIdsByUser = new Map<string, Set<string>>();
+		for (const group of state.grantGroups) {
+			for (const member of group.members) {
+				const endpointNodeId = endpointNodeById.get(member.endpoint_id);
+				if (!endpointNodeId || endpointNodeId !== nodeId) {
+					continue;
+				}
+				if (!endpointIdsByUser.has(member.user_id)) {
+					endpointIdsByUser.set(member.user_id, new Set<string>());
+				}
+				endpointIdsByUser.get(member.user_id)?.add(member.endpoint_id);
+			}
+		}
+
+		const items: AdminQuotaPolicyNodeWeightRow[] = [];
+		for (const [userId, endpointIdsSet] of endpointIdsByUser.entries()) {
+			const user = state.users.find(
+				(candidate) => candidate.user_id === userId,
+			);
+			if (!user) {
+				continue;
+			}
+			const storedWeight = (state.userNodeWeights[userId] ?? []).find(
+				(entry) => entry.node_id === nodeId,
+			)?.weight;
+			items.push({
+				user_id: user.user_id,
+				display_name: user.display_name,
+				priority_tier: user.priority_tier,
+				endpoint_ids: [...endpointIdsSet].sort(),
+				stored_weight: storedWeight,
+				editor_weight: storedWeight ?? 0,
+				source: storedWeight === undefined ? "implicit_zero" : "explicit",
+			});
+		}
+		items.sort(
+			(a, b) =>
+				b.editor_weight - a.editor_weight || a.user_id.localeCompare(b.user_id),
+		);
+		return jsonResponse({ items: clone(items) });
 	}
 
 	const nodeMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);

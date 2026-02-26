@@ -1296,6 +1296,136 @@ async fn put_user_node_weight_then_list_returns_it() {
 }
 
 #[tokio::test]
+async fn quota_policy_node_weight_rows_supports_implicit_zero_and_explicit_weight() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    // Create user.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({
+              "display_name": "alice"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let user_id = created["user_id"].as_str().unwrap().to_string();
+
+    // Bootstrap node exists.
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    // Create endpoint on node.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8488
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
+
+    // Grant membership via grant group.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/grant-groups",
+            json!({
+              "group_name": "group-a",
+              "members": [{
+                "user_id": user_id,
+                "endpoint_id": endpoint_id,
+                "enabled": true,
+                "quota_limit_bytes": 1
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Missing stored weight should be surfaced as implicit_zero/editor_weight=0.
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/quota-policy/nodes/{node_id}/weight-rows"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let rows = body_json(res).await;
+    let items = rows["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["user_id"], user_id);
+    assert_eq!(items[0]["source"], "implicit_zero");
+    assert_eq!(items[0]["editor_weight"], 0);
+    assert!(items[0].get("stored_weight").is_none());
+    assert_eq!(items[0]["endpoint_ids"][0], endpoint_id);
+
+    // Persist explicit weight and ensure readback is explicit.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/node-weights/{node_id}"),
+            json!({ "weight": 4321 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/quota-policy/nodes/{node_id}/weight-rows"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let rows = body_json(res).await;
+    let items = rows["items"].as_array().unwrap();
+    assert_eq!(items[0]["source"], "explicit");
+    assert_eq!(items[0]["stored_weight"], 4321);
+    assert_eq!(items[0]["editor_weight"], 4321);
+}
+
+#[tokio::test]
+async fn quota_policy_node_weight_rows_requires_admin_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req(
+            "GET",
+            "/api/admin/quota-policy/nodes/node-1/weight-rows",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn create_endpoint_then_list_contains_it() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

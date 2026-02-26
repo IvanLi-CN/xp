@@ -11,6 +11,7 @@ import {
 } from "./adminGrantGroups";
 import { AdminJoinTokenResponseSchema } from "./adminJoinTokens";
 import { AdminNodesResponseSchema } from "./adminNodes";
+import { AdminQuotaPolicyNodeWeightRowsResponseSchema } from "./adminQuotaPolicyNodeWeightRows";
 import {
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
@@ -188,6 +189,54 @@ describe("AdminUsersResponseSchema", () => {
 						day_of_month: 1,
 						tz_offset_minutes: 480,
 					},
+				},
+			],
+		});
+	});
+});
+
+describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
+	it("accepts expected shape", () => {
+		expect(
+			AdminQuotaPolicyNodeWeightRowsResponseSchema.parse({
+				items: [
+					{
+						user_id: "user-1",
+						display_name: "alice",
+						priority_tier: "p1",
+						endpoint_ids: ["endpoint-1"],
+						stored_weight: 6000,
+						editor_weight: 6000,
+						source: "explicit",
+					},
+					{
+						user_id: "user-2",
+						display_name: "bob",
+						priority_tier: "p2",
+						endpoint_ids: ["endpoint-2"],
+						editor_weight: 0,
+						source: "implicit_zero",
+					},
+				],
+			}),
+		).toEqual({
+			items: [
+				{
+					user_id: "user-1",
+					display_name: "alice",
+					priority_tier: "p1",
+					endpoint_ids: ["endpoint-1"],
+					stored_weight: 6000,
+					editor_weight: 6000,
+					source: "explicit",
+				},
+				{
+					user_id: "user-2",
+					display_name: "bob",
+					priority_tier: "p2",
+					endpoint_ids: ["endpoint-2"],
+					editor_weight: 0,
+					source: "implicit_zero",
 				},
 			],
 		});
