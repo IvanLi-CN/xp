@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
-import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
+import {
+	type NodeRuntimeComponent,
+	fetchAdminNodesRuntime,
+} from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
@@ -80,6 +83,178 @@ function highlightShell(text: string) {
 			<span key={key}>{part}</span>
 		);
 	});
+}
+
+const BADGE_GAP_PX = 4;
+
+type ProblematicComponent = Pick<NodeRuntimeComponent, "component" | "status">;
+
+function overflowBadgeClass(problematic: ProblematicComponent[]): string {
+	return problematic.some((item) => item.status === "down")
+		? "badge badge-error badge-sm"
+		: "badge badge-warning badge-sm";
+}
+
+function ProblematicComponentsField({
+	problematic,
+}: {
+	problematic: ProblematicComponent[];
+}) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const componentBadgeRefs = useRef<Array<HTMLSpanElement | null>>([]);
+	const plusBadgeRefs = useRef<Record<number, HTMLSpanElement | null>>({});
+	const [visibleCount, setVisibleCount] = useState(problematic.length);
+
+	useEffect(() => {
+		setVisibleCount(problematic.length);
+	}, [problematic.length]);
+
+	useLayoutEffect(() => {
+		if (problematic.length <= 1) return;
+
+		let frame = 0;
+		const measure = () => {
+			const container = containerRef.current;
+			if (!container) return;
+
+			const availableWidth = Math.floor(container.clientWidth);
+			if (availableWidth <= 0) return;
+
+			const componentWidths = problematic.map((_, index) =>
+				Math.ceil(
+					componentBadgeRefs.current[index]?.getBoundingClientRect().width ?? 0,
+				),
+			);
+			if (componentWidths.some((width) => width <= 0)) {
+				frame = window.requestAnimationFrame(measure);
+				return;
+			}
+
+			const prefixWidths = new Array(problematic.length + 1).fill(0);
+			for (let i = 0; i < problematic.length; i += 1) {
+				prefixWidths[i + 1] = prefixWidths[i] + componentWidths[i];
+			}
+
+			const allVisibleWidth =
+				prefixWidths[problematic.length] +
+				BADGE_GAP_PX * Math.max(0, problematic.length - 1);
+
+			let bestVisibleCount = 0;
+			if (allVisibleWidth <= availableWidth) {
+				bestVisibleCount = problematic.length;
+			} else {
+				for (let shown = 0; shown <= problematic.length; shown += 1) {
+					const remaining = problematic.length - shown;
+					const shownWidth =
+						prefixWidths[shown] + BADGE_GAP_PX * Math.max(0, shown - 1);
+
+					if (remaining === 0) {
+						if (shownWidth <= availableWidth) {
+							bestVisibleCount = shown;
+						}
+						continue;
+					}
+
+					const plusWidth = Math.ceil(
+						plusBadgeRefs.current[remaining]?.getBoundingClientRect().width ??
+							0,
+					);
+					if (plusWidth <= 0) continue;
+
+					const combinedWidth =
+						shownWidth + (shown > 0 ? BADGE_GAP_PX : 0) + plusWidth;
+					if (combinedWidth <= availableWidth) {
+						bestVisibleCount = shown;
+					}
+				}
+			}
+
+			setVisibleCount((prev) =>
+				prev === bestVisibleCount ? prev : bestVisibleCount,
+			);
+		};
+
+		measure();
+		const observer = new ResizeObserver(() => measure());
+		if (containerRef.current) observer.observe(containerRef.current);
+
+		return () => {
+			if (frame) window.cancelAnimationFrame(frame);
+			observer.disconnect();
+		};
+	}, [problematic]);
+
+	if (problematic.length === 0) {
+		return (
+			<span
+				className="badge badge-success badge-sm"
+				title="All monitored components are healthy."
+			>
+				normal
+			</span>
+		);
+	}
+
+	const shownCount = Math.max(0, Math.min(visibleCount, problematic.length));
+	const shown = problematic.slice(0, shownCount);
+	const remaining = problematic.slice(shownCount);
+	const remainingTitle = remaining
+		.map((item) => `${item.component}:${item.status}`)
+		.join(", ");
+
+	return (
+		<div ref={containerRef} className="max-w-full overflow-hidden">
+			<div className="inline-flex items-center gap-1 whitespace-nowrap">
+				{shown.map((item, index) => (
+					<span
+						key={`${item.component}-${item.status}-${index}`}
+						className={componentBadgeClass(item.status)}
+						title={`${item.component}:${item.status}`}
+					>
+						{item.component}:{item.status}
+					</span>
+				))}
+				{remaining.length > 0 ? (
+					<span
+						className={overflowBadgeClass(remaining)}
+						title={remainingTitle}
+					>
+						+{remaining.length}
+					</span>
+				) : null}
+			</div>
+			<div
+				aria-hidden="true"
+				className="pointer-events-none fixed left-[-9999px] top-0 invisible whitespace-nowrap"
+			>
+				{problematic.map((item, index) => (
+					<span
+						key={`measure-${item.component}-${index}`}
+						ref={(el) => {
+							componentBadgeRefs.current[index] = el;
+						}}
+						className={componentBadgeClass(item.status)}
+					>
+						{item.component}:{item.status}
+					</span>
+				))}
+				{Array.from({ length: problematic.length }, (_, i) => {
+					const count = i + 1;
+					return (
+						<span
+							key={`measure-plus-${count}`}
+							ref={(el) => {
+								plusBadgeRefs.current[count] = el;
+							}}
+							className="badge badge-sm"
+						>
+							+{count}
+						</span>
+					);
+				})}
+			</div>
+		</div>
+	);
 }
 
 export function NodesPage() {
@@ -297,54 +472,13 @@ export function NodesPage() {
 								</div>
 								<div className="flex min-w-0 flex-col gap-1">
 									<div className="max-w-full truncate whitespace-nowrap">
-										{(() => {
-											const problematic = node.components.filter(
+										<ProblematicComponentsField
+											problematic={node.components.filter(
 												(component) =>
 													component.status === "down" ||
 													component.status === "unknown",
-											);
-											if (problematic.length === 0) {
-												return (
-													<span
-														className="badge badge-success badge-sm"
-														title="All monitored components are healthy."
-													>
-														normal
-													</span>
-												);
-											}
-
-											const first = problematic[0];
-											const moreCount = problematic.length - 1;
-											const moreTitle = problematic
-												.slice(1)
-												.map(
-													(component) =>
-														`${component.component}:${component.status}`,
-												)
-												.join(", ");
-											const moreBadgeClass = problematic.some(
-												(component) => component.status === "down",
-											)
-												? "badge badge-error badge-sm"
-												: "badge badge-warning badge-sm";
-
-											return (
-												<div className="inline-flex items-center gap-1 whitespace-nowrap">
-													<span
-														className={componentBadgeClass(first.status)}
-														title={`${first.component}:${first.status}`}
-													>
-														{first.component}:{first.status}
-													</span>
-													{moreCount > 0 ? (
-														<span className={moreBadgeClass} title={moreTitle}>
-															+{moreCount}
-														</span>
-													) : null}
-												</div>
-											);
-										})()}
+											)}
+										/>
 									</div>
 									<div
 										className="grid h-4 w-full grid-flow-col auto-cols-fr overflow-hidden rounded-sm"
