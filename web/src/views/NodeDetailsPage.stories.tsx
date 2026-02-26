@@ -39,6 +39,6 @@ export const Default: Story = {
 		await expect(
 			await canvas.findByRole("heading", { name: /service runtime/i }),
 		).toBeInTheDocument();
-		await expect(await canvas.findByText(/key events/i)).toBeInTheDocument();
+		await expect(await canvas.findByText(/^key events$/i)).toBeInTheDocument();
 	},
 };
