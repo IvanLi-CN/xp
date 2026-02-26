@@ -434,9 +434,9 @@ export function NodesPage() {
 				<div className="rounded-box border border-base-300 bg-base-100 shadow-sm">
 					<div className="grid grid-cols-2 gap-3 border-b border-base-200 px-4 py-3 font-semibold">
 						<div className="flex min-w-0 flex-col gap-1 leading-tight">
-							<span className="truncate whitespace-nowrap">Node ID</span>
+							<span className="truncate whitespace-nowrap">Name</span>
 							<span className="truncate whitespace-nowrap opacity-70">
-								Name
+								Node ID
 							</span>
 						</div>
 						<div className="flex min-w-0 flex-col gap-1 leading-tight">
@@ -456,18 +456,18 @@ export function NodesPage() {
 									<Link
 										to="/nodes/$nodeId"
 										params={{ nodeId: node.node_id }}
-										className="link link-primary block max-w-full truncate whitespace-nowrap font-mono text-sm"
-										title={node.node_id}
+										className="link link-primary block max-w-full truncate whitespace-nowrap"
+										title={node.node_name || "(unnamed)"}
 									>
-										{node.node_id}
+										{node.node_name || "(unnamed)"}
 									</Link>
 									<Link
 										to="/nodes/$nodeId"
 										params={{ nodeId: node.node_id }}
-										className="link link-hover block max-w-full truncate whitespace-nowrap"
-										title={node.node_name || "(unnamed)"}
+										className="link link-hover block max-w-full truncate whitespace-nowrap font-mono text-sm opacity-70"
+										title={node.node_id}
 									>
-										{node.node_name || "(unnamed)"}
+										{node.node_id}
 									</Link>
 								</div>
 								<div className="flex min-w-0 flex-col gap-1">
