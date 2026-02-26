@@ -108,6 +108,20 @@ function pieColorAt(index: number): string {
 	return PIE_COLORS[index % PIE_COLORS.length] ?? "#9ca3af";
 }
 
+function stableColorIndex(key: string): number {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < key.length; index += 1) {
+		hash ^= key.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return hash >>> 0;
+}
+
+function pieColorForKey(key: string): string {
+	if (key === "others") return "#64748b";
+	return pieColorAt(stableColorIndex(key));
+}
+
 function toRadians(angle: number): number {
 	return ((angle - 90) * Math.PI) / 180;
 }
@@ -150,20 +164,20 @@ function buildPieSegments(rows: RatioDraftRow[]): PieSegment[] {
 
 	const maxVisible = 8;
 	if (sorted.length <= maxVisible) {
-		return sorted.map((row, index) => ({
+		return sorted.map((row) => ({
 			key: row.userId,
 			label: row.displayName,
 			basisPoints: row.basisPoints,
-			color: pieColorAt(index),
+			color: pieColorForKey(row.userId),
 			userIds: [row.userId],
 		}));
 	}
 
-	const head = sorted.slice(0, maxVisible - 1).map((row, index) => ({
+	const head = sorted.slice(0, maxVisible - 1).map((row) => ({
 		key: row.userId,
 		label: row.displayName,
 		basisPoints: row.basisPoints,
-		color: pieColorAt(index),
+		color: pieColorForKey(row.userId),
 		userIds: [row.userId],
 	}));
 	const tail = sorted.slice(maxVisible - 1);
@@ -178,7 +192,7 @@ function buildPieSegments(rows: RatioDraftRow[]): PieSegment[] {
 			key: "others",
 			label: "Others",
 			basisPoints: tailPoints,
-			color: pieColorAt(maxVisible - 1),
+			color: pieColorForKey("others"),
 			userIds: tail.map((row) => row.userId),
 		},
 	];

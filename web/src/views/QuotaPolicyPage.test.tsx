@@ -63,6 +63,20 @@ function renderPage() {
 	);
 }
 
+function readLegendColors(container: HTMLElement): Record<string, string> {
+	const out: Record<string, string> = {};
+	const labels = Array.from(container.querySelectorAll("span"));
+	for (const labelNode of labels) {
+		const label = labelNode.textContent?.trim();
+		if (!label) continue;
+		const dot = labelNode.previousElementSibling;
+		if (!(dot instanceof HTMLElement)) continue;
+		if (!dot.style.backgroundColor) continue;
+		out[label] = dot.style.backgroundColor;
+	}
+	return out;
+}
+
 function setupDefaultMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
@@ -227,5 +241,32 @@ describe("<QuotaPolicyPage />", () => {
 		});
 		const thirdCall = vi.mocked(putAdminUserNodeWeight).mock.calls[2];
 		expect(thirdCall?.[1]).toBe("user-2");
+	});
+
+	it("keeps per-user legend color stable after ratio ranking changes", async () => {
+		const view = renderPage();
+
+		expect(
+			await within(view.container).findByText("Weight ratio editor (by node)"),
+		).toBeInTheDocument();
+		await within(view.container).findByLabelText("Node weight ratio pie chart");
+
+		const colorsBefore = readLegendColors(view.container);
+		expect(colorsBefore.Alice).toBeTruthy();
+		expect(colorsBefore.Bob).toBeTruthy();
+
+		const aliceInput = await within(view.container).findByLabelText(
+			"Ratio input for Alice",
+		);
+		fireEvent.change(aliceInput, { target: { value: "30" } });
+
+		await waitFor(() => {
+			expect(within(view.container).getByText("3000")).toBeInTheDocument();
+			expect(within(view.container).getByText("7000")).toBeInTheDocument();
+		});
+
+		const colorsAfter = readLegendColors(view.container);
+		expect(colorsAfter.Alice).toBe(colorsBefore.Alice);
+		expect(colorsAfter.Bob).toBe(colorsBefore.Bob);
 	});
 });
