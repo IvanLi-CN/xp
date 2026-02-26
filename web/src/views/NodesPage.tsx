@@ -3,10 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
-import {
-	type AdminNodeRuntimeListItem,
-	fetchAdminNodesRuntime,
-} from "../api/adminNodeRuntime";
+import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
@@ -25,21 +22,6 @@ function formatErrorMessage(error: unknown): string {
 		return `${error.status}${code}: ${error.message}`;
 	}
 	return String(error);
-}
-
-function summaryBadgeClass(
-	status: AdminNodeRuntimeListItem["summary"]["status"],
-): string {
-	switch (status) {
-		case "up":
-			return "badge badge-success";
-		case "degraded":
-			return "badge badge-warning";
-		case "down":
-			return "badge badge-error";
-		default:
-			return "badge badge-ghost";
-	}
 }
 
 function componentBadgeClass(status: string): string {
@@ -280,7 +262,6 @@ export function NodesPage() {
 					headers={[
 						{ key: "node_id", label: "Node ID" },
 						{ key: "node_name", label: "Name" },
-						{ key: "summary", label: "Summary" },
 						{ key: "components", label: "Components" },
 						{ key: "recent_slots", label: "7d (30m)" },
 						{ key: "access_host", label: "Access host" },
@@ -306,11 +287,6 @@ export function NodesPage() {
 								>
 									{node.node_name || "(unnamed)"}
 								</Link>
-							</td>
-							<td>
-								<span className={summaryBadgeClass(node.summary.status)}>
-									{node.summary.status}
-								</span>
 							</td>
 							<td>
 								{(() => {
