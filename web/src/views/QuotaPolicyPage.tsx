@@ -310,6 +310,7 @@ export function QuotaPolicyPage() {
 	const prefs = useUiPrefs();
 
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+	const [selectedWeightTab, setSelectedWeightTab] = useState<string>("global");
 	const [ratioRows, setRatioRows] = useState<RatioDraftRow[]>([]);
 	const [ratioError, setRatioError] = useState<string | null>(null);
 	const [isSavingRatio, setIsSavingRatio] = useState(false);
@@ -354,19 +355,36 @@ export function QuotaPolicyPage() {
 	useEffect(() => {
 		if (nodes.length === 0) {
 			setSelectedNodeId(null);
+			if (selectedWeightTab !== "global") {
+				setSelectedWeightTab("global");
+			}
 			return;
 		}
-		if (
-			!selectedNodeId ||
-			!nodes.some((node) => node.node_id === selectedNodeId)
-		) {
-			setSelectedNodeId(nodes[0]?.node_id ?? null);
+
+		if (selectedWeightTab === "global") {
+			if (selectedNodeId !== null) {
+				setSelectedNodeId(null);
+			}
+			return;
 		}
-	}, [nodes, selectedNodeId]);
+
+		if (!nodes.some((node) => node.node_id === selectedWeightTab)) {
+			setSelectedWeightTab("global");
+			setSelectedNodeId(null);
+			return;
+		}
+
+		if (selectedNodeId !== selectedWeightTab) {
+			setSelectedNodeId(selectedWeightTab);
+		}
+	}, [nodes, selectedNodeId, selectedWeightTab]);
 
 	const weightRowsQuery = useQuery({
 		queryKey: ["adminQuotaPolicyNodeWeightRows", adminToken, selectedNodeId],
-		enabled: adminToken.length > 0 && Boolean(selectedNodeId),
+		enabled:
+			adminToken.length > 0 &&
+			selectedWeightTab !== "global" &&
+			Boolean(selectedNodeId),
 		queryFn: ({ signal }) =>
 			fetchAdminQuotaPolicyNodeWeightRows(
 				adminToken,
@@ -378,7 +396,10 @@ export function QuotaPolicyPage() {
 
 	const nodePolicyQuery = useQuery({
 		queryKey: ["adminQuotaPolicyNodePolicy", adminToken, selectedNodeId],
-		enabled: adminToken.length > 0 && Boolean(selectedNodeId),
+		enabled:
+			adminToken.length > 0 &&
+			selectedWeightTab !== "global" &&
+			Boolean(selectedNodeId),
 		queryFn: ({ signal }) =>
 			fetchAdminQuotaPolicyNodePolicy(adminToken, selectedNodeId ?? "", signal),
 		refetchOnWindowFocus: false,
@@ -413,6 +434,22 @@ export function QuotaPolicyPage() {
 		if (!selectedNodeId) return null;
 		return nodes.find((node) => node.node_id === selectedNodeId) ?? null;
 	}, [nodes, selectedNodeId]);
+
+	const handleSelectWeightTab = (tabId: string) => {
+		setSelectedWeightTab(tabId);
+		setHoveredUserId(null);
+		if (tabId === "global") {
+			setSelectedNodeId(null);
+			setRatioError(null);
+			setFailedRows([]);
+			setLastSave(null);
+			return;
+		}
+		setSelectedNodeId(tabId);
+		setRatioError(null);
+		setFailedRows([]);
+		setLastSave(null);
+	};
 
 	const globalWeightByUserId = useMemo(() => {
 		const map = new Map<string, number>();
@@ -1107,246 +1144,167 @@ export function QuotaPolicyPage() {
 				</ResourceTable>
 			</div>
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
-				<div className="space-y-1">
-					<h2 className="text-lg font-semibold">
-						Global default weight ratios
-					</h2>
-					<p className="text-sm opacity-70">
-						Default allocation rule shared by nodes. New nodes inherit this rule
-						until override mode is enabled.
-					</p>
+			<div className="rounded-box border border-base-200 bg-base-100 p-4 md:p-6">
+				<div className="tabs tabs-boxed flex-wrap">
+					<button
+						type="button"
+						className={`tab ${selectedWeightTab === "global" ? "tab-active" : ""}`}
+						onClick={() => handleSelectWeightTab("global")}
+					>
+						默认
+					</button>
+					{nodes.map((node) => (
+						<button
+							key={node.node_id}
+							type="button"
+							className={`tab ${
+								selectedWeightTab === node.node_id ? "tab-active" : ""
+							}`}
+							onClick={() => handleSelectWeightTab(node.node_id)}
+						>
+							{node.node_name}
+						</button>
+					))}
 				</div>
+			</div>
 
-				{globalRatioRows.length === 0 ? (
-					<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
-						No users available.
+			{selectedWeightTab === "global" ? (
+				<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+					<div className="space-y-1">
+						<h2 className="text-lg font-semibold">
+							Global default weight ratios
+						</h2>
+						<p className="text-sm opacity-70">
+							Default allocation rule shared by nodes. New nodes inherit this
+							rule until override mode is enabled.
+						</p>
 					</div>
-				) : (
-					<>
-						<div className="flex flex-wrap items-center gap-2">
-							<span className={globalRatioStatusClass}>
-								Total {formatRatioPercent(globalTotalBasisPoints)}
-							</span>
-							<span className="badge badge-outline">
-								Users {globalRatioRows.length}
-							</span>
-							<span className="badge badge-outline">
-								Unlocked {globalUnlockedCount}
-							</span>
-							{globalTotalBasisPoints < RATIO_BASIS_POINTS ? (
-								<span className="text-sm text-warning">
-									Remaining{" "}
-									{formatRatioPercent(
-										RATIO_BASIS_POINTS - globalTotalBasisPoints,
-									)}
-								</span>
-							) : null}
+
+					{globalRatioRows.length === 0 ? (
+						<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
+							No users available.
 						</div>
+					) : (
+						<>
+							<div className="flex flex-wrap items-center gap-2">
+								<span className={globalRatioStatusClass}>
+									Total {formatRatioPercent(globalTotalBasisPoints)}
+								</span>
+								<span className="badge badge-outline">
+									Users {globalRatioRows.length}
+								</span>
+								<span className="badge badge-outline">
+									Unlocked {globalUnlockedCount}
+								</span>
+								{globalTotalBasisPoints < RATIO_BASIS_POINTS ? (
+									<span className="text-sm text-warning">
+										Remaining{" "}
+										{formatRatioPercent(
+											RATIO_BASIS_POINTS - globalTotalBasisPoints,
+										)}
+									</span>
+								) : null}
+							</div>
 
-						<div className="rounded-box border border-base-200 p-4 space-y-4">
-							{ratioEditorListLayout ? (
-								<div
-									data-testid="global-ratio-editor-list"
-									className="space-y-3"
-								>
-									{globalRatioRows.map((row, index) => {
-										const targetWeight = globalComputedWeights[index] ?? 0;
-										return (
-											<div
-												key={row.userId}
-												className="rounded-box border border-base-200 p-3 space-y-3"
-											>
-												<div className="flex items-start justify-between gap-2">
-													<div className="min-w-0 space-y-1">
-														<div className="font-semibold truncate">
-															{row.displayName}
-														</div>
-														<div className="font-mono text-xs opacity-70 break-all">
-															{row.userId}
-														</div>
-													</div>
-													<span className="badge badge-ghost uppercase shrink-0">
-														{row.priorityTier}
-													</span>
-												</div>
-
-												<div className="space-y-3">
-													<div className="space-y-1">
-														<div className="text-xs opacity-70">Slider</div>
-														<input
-															type="range"
-															className="range range-primary range-sm"
-															min={0}
-															max={100}
-															step={0.1}
-															value={row.basisPoints / 100}
-															disabled={isSavingGlobalRatio}
-															aria-label={`Global ratio slider for ${row.displayName}`}
-															onChange={(event) => {
-																applyGlobalRatioEdit(
-																	row.userId,
-																	Math.round(Number(event.target.value) * 100),
-																);
-															}}
-														/>
-														<div className="font-mono text-xs opacity-70">
-															{formatRatioPercent(row.basisPoints)}
-														</div>
-													</div>
-													<div className="space-y-1">
-														<div className="text-xs opacity-70">Input (%)</div>
-														<input
-															type="number"
-															min={0}
-															max={100}
-															step={0.01}
-															className={[inputClass, "font-mono w-full"].join(
-																" ",
-															)}
-															value={row.basisPoints / 100}
-															disabled={isSavingGlobalRatio}
-															aria-label={`Global ratio input for ${row.displayName}`}
-															onChange={(event) => {
-																const parsed = parsePercentInput(
-																	event.target.value,
-																);
-																if (!parsed.ok) {
-																	setGlobalRatioError(parsed.error);
-																	return;
-																}
-																applyGlobalRatioEdit(
-																	row.userId,
-																	parsed.basisPoints,
-																);
-															}}
-														/>
-													</div>
-												</div>
-
-												<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
-													<div className="min-w-0">
-														<div className="text-xs opacity-70">
-															Computed weight
-														</div>
-														<div className="font-mono text-sm">
-															{targetWeight}
-														</div>
-														<div className="text-xs opacity-70">
-															{row.source === "implicit_default"
-																? "implicit_default"
-																: "explicit"}
-														</div>
-													</div>
-													<label className="label cursor-pointer justify-start gap-2 py-0">
-														<input
-															type="checkbox"
-															className="checkbox checkbox-sm"
-															checked={row.locked}
-															disabled={isSavingGlobalRatio}
-															onChange={() => toggleGlobalRowLock(row.userId)}
-														/>
-														<span className="label-text text-xs">Lock</span>
-													</label>
-												</div>
-											</div>
-										);
-									})}
-								</div>
-							) : (
-								<table
-									data-testid="global-ratio-editor-table"
-									className="table table-fixed w-full"
-								>
-									<thead>
-										<tr className="bg-base-200/50">
-											<th className="w-[32%]">User</th>
-											<th className="w-[10%]">Tier</th>
-											<th className="w-[24%]">Slider</th>
-											<th className="w-[15%]">Input (%)</th>
-											<th className="w-[11%]">Computed weight</th>
-											<th className="w-[8%]">Lock</th>
-										</tr>
-									</thead>
-									<tbody>
+							<div className="rounded-box border border-base-200 p-4 space-y-4">
+								{ratioEditorListLayout ? (
+									<div
+										data-testid="global-ratio-editor-list"
+										className="space-y-3"
+									>
 										{globalRatioRows.map((row, index) => {
 											const targetWeight = globalComputedWeights[index] ?? 0;
 											return (
-												<tr key={row.userId}>
-													<td className="align-top">
-														<div className="flex flex-col gap-1 min-w-0">
-															<span className="font-semibold truncate">
+												<div
+													key={row.userId}
+													className="rounded-box border border-base-200 p-3 space-y-3"
+												>
+													<div className="flex items-start justify-between gap-2">
+														<div className="min-w-0 space-y-1">
+															<div className="font-semibold truncate">
 																{row.displayName}
-															</span>
-															<span className="font-mono text-xs opacity-70 break-all">
+															</div>
+															<div className="font-mono text-xs opacity-70 break-all">
 																{row.userId}
-															</span>
+															</div>
 														</div>
-													</td>
-													<td className="align-top">
-														<span className="badge badge-ghost uppercase">
+														<span className="badge badge-ghost uppercase shrink-0">
 															{row.priorityTier}
 														</span>
-													</td>
-													<td className="align-top">
-														<input
-															type="range"
-															className="range range-primary range-sm"
-															min={0}
-															max={100}
-															step={0.1}
-															value={row.basisPoints / 100}
-															disabled={isSavingGlobalRatio}
-															aria-label={`Global ratio slider for ${row.displayName}`}
-															onChange={(event) => {
-																applyGlobalRatioEdit(
-																	row.userId,
-																	Math.round(Number(event.target.value) * 100),
-																);
-															}}
-														/>
-														<div className="font-mono text-xs opacity-70 mt-1">
-															{formatRatioPercent(row.basisPoints)}
+													</div>
+
+													<div className="space-y-3">
+														<div className="space-y-1">
+															<div className="text-xs opacity-70">Slider</div>
+															<input
+																type="range"
+																className="range range-primary range-sm"
+																min={0}
+																max={100}
+																step={0.1}
+																value={row.basisPoints / 100}
+																disabled={isSavingGlobalRatio}
+																aria-label={`Global ratio slider for ${row.displayName}`}
+																onChange={(event) => {
+																	applyGlobalRatioEdit(
+																		row.userId,
+																		Math.round(
+																			Number(event.target.value) * 100,
+																		),
+																	);
+																}}
+															/>
+															<div className="font-mono text-xs opacity-70">
+																{formatRatioPercent(row.basisPoints)}
+															</div>
 														</div>
-													</td>
-													<td className="align-top">
-														<input
-															type="number"
-															min={0}
-															max={100}
-															step={0.01}
-															className={[inputClass, "font-mono w-full"].join(
-																" ",
-															)}
-															value={row.basisPoints / 100}
-															disabled={isSavingGlobalRatio}
-															aria-label={`Global ratio input for ${row.displayName}`}
-															onChange={(event) => {
-																const parsed = parsePercentInput(
-																	event.target.value,
-																);
-																if (!parsed.ok) {
-																	setGlobalRatioError(parsed.error);
-																	return;
-																}
-																applyGlobalRatioEdit(
-																	row.userId,
-																	parsed.basisPoints,
-																);
-															}}
-														/>
-													</td>
-													<td className="align-top">
-														<div className="font-mono text-sm">
-															{targetWeight}
+														<div className="space-y-1">
+															<div className="text-xs opacity-70">
+																Input (%)
+															</div>
+															<input
+																type="number"
+																min={0}
+																max={100}
+																step={0.01}
+																className={[
+																	inputClass,
+																	"font-mono w-full",
+																].join(" ")}
+																value={row.basisPoints / 100}
+																disabled={isSavingGlobalRatio}
+																aria-label={`Global ratio input for ${row.displayName}`}
+																onChange={(event) => {
+																	const parsed = parsePercentInput(
+																		event.target.value,
+																	);
+																	if (!parsed.ok) {
+																		setGlobalRatioError(parsed.error);
+																		return;
+																	}
+																	applyGlobalRatioEdit(
+																		row.userId,
+																		parsed.basisPoints,
+																	);
+																}}
+															/>
 														</div>
-														<div className="text-xs opacity-70">
-															{row.source === "implicit_default"
-																? "implicit_default"
-																: "explicit"}
+													</div>
+
+													<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+														<div className="min-w-0">
+															<div className="text-xs opacity-70">
+																Computed weight
+															</div>
+															<div className="font-mono text-sm">
+																{targetWeight}
+															</div>
+															<div className="text-xs opacity-70">
+																{row.source === "implicit_default"
+																	? "implicit_default"
+																	: "explicit"}
+															</div>
 														</div>
-													</td>
-													<td className="align-top">
 														<label className="label cursor-pointer justify-start gap-2 py-0">
 															<input
 																type="checkbox"
@@ -1357,76 +1315,191 @@ export function QuotaPolicyPage() {
 															/>
 															<span className="label-text text-xs">Lock</span>
 														</label>
-													</td>
-												</tr>
+													</div>
+												</div>
 											);
 										})}
-									</tbody>
-								</table>
-							)}
+									</div>
+								) : (
+									<table
+										data-testid="global-ratio-editor-table"
+										className="table table-fixed w-full"
+									>
+										<thead>
+											<tr className="bg-base-200/50">
+												<th className="w-[32%]">User</th>
+												<th className="w-[10%]">Tier</th>
+												<th className="w-[24%]">Slider</th>
+												<th className="w-[15%]">Input (%)</th>
+												<th className="w-[11%]">Computed weight</th>
+												<th className="w-[8%]">Lock</th>
+											</tr>
+										</thead>
+										<tbody>
+											{globalRatioRows.map((row, index) => {
+												const targetWeight = globalComputedWeights[index] ?? 0;
+												return (
+													<tr key={row.userId}>
+														<td className="align-top">
+															<div className="flex flex-col gap-1 min-w-0">
+																<span className="font-semibold truncate">
+																	{row.displayName}
+																</span>
+																<span className="font-mono text-xs opacity-70 break-all">
+																	{row.userId}
+																</span>
+															</div>
+														</td>
+														<td className="align-top">
+															<span className="badge badge-ghost uppercase">
+																{row.priorityTier}
+															</span>
+														</td>
+														<td className="align-top">
+															<input
+																type="range"
+																className="range range-primary range-sm"
+																min={0}
+																max={100}
+																step={0.1}
+																value={row.basisPoints / 100}
+																disabled={isSavingGlobalRatio}
+																aria-label={`Global ratio slider for ${row.displayName}`}
+																onChange={(event) => {
+																	applyGlobalRatioEdit(
+																		row.userId,
+																		Math.round(
+																			Number(event.target.value) * 100,
+																		),
+																	);
+																}}
+															/>
+															<div className="font-mono text-xs opacity-70 mt-1">
+																{formatRatioPercent(row.basisPoints)}
+															</div>
+														</td>
+														<td className="align-top">
+															<input
+																type="number"
+																min={0}
+																max={100}
+																step={0.01}
+																className={[
+																	inputClass,
+																	"font-mono w-full",
+																].join(" ")}
+																value={row.basisPoints / 100}
+																disabled={isSavingGlobalRatio}
+																aria-label={`Global ratio input for ${row.displayName}`}
+																onChange={(event) => {
+																	const parsed = parsePercentInput(
+																		event.target.value,
+																	);
+																	if (!parsed.ok) {
+																		setGlobalRatioError(parsed.error);
+																		return;
+																	}
+																	applyGlobalRatioEdit(
+																		row.userId,
+																		parsed.basisPoints,
+																	);
+																}}
+															/>
+														</td>
+														<td className="align-top">
+															<div className="font-mono text-sm">
+																{targetWeight}
+															</div>
+															<div className="text-xs opacity-70">
+																{row.source === "implicit_default"
+																	? "implicit_default"
+																	: "explicit"}
+															</div>
+														</td>
+														<td className="align-top">
+															<label className="label cursor-pointer justify-start gap-2 py-0">
+																<input
+																	type="checkbox"
+																	className="checkbox checkbox-sm"
+																	checked={row.locked}
+																	disabled={isSavingGlobalRatio}
+																	onChange={() =>
+																		toggleGlobalRowLock(row.userId)
+																	}
+																/>
+																<span className="label-text text-xs">Lock</span>
+															</label>
+														</td>
+													</tr>
+												);
+											})}
+										</tbody>
+									</table>
+								)}
 
-							{globalRatioError ? (
-								<p className="text-sm text-error">{globalRatioError}</p>
-							) : null}
-							{globalFailedRows.length > 0 ? (
-								<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
-									<p className="text-sm font-medium text-error">
-										Failed rows ({globalFailedRows.length})
-									</p>
-									<ul className="text-xs space-y-1">
-										{globalFailedRows.map((row) => (
-											<li key={row.userId} className="font-mono">
-												{row.displayName} ({row.userId}) → {row.targetWeight}:{" "}
-												{row.error}
-											</li>
-										))}
-									</ul>
+								{globalRatioError ? (
+									<p className="text-sm text-error">{globalRatioError}</p>
+								) : null}
+								{globalFailedRows.length > 0 ? (
+									<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
+										<p className="text-sm font-medium text-error">
+											Failed rows ({globalFailedRows.length})
+										</p>
+										<ul className="text-xs space-y-1">
+											{globalFailedRows.map((row) => (
+												<li key={row.userId} className="font-mono">
+													{row.displayName} ({row.userId}) → {row.targetWeight}:{" "}
+													{row.error}
+												</li>
+											))}
+										</ul>
+									</div>
+								) : null}
+
+								<div className="flex flex-wrap items-center gap-2">
+									<Button
+										variant="primary"
+										loading={isSavingGlobalRatio}
+										disabled={!canSaveGlobalRatio}
+										onClick={() => void persistGlobalRatioRows()}
+									>
+										Save global ratios
+									</Button>
+									<Button
+										variant="secondary"
+										disabled={
+											isSavingGlobalRatio || globalFailedRows.length === 0
+										}
+										onClick={() => void retryGlobalFailedRows()}
+									>
+										Retry failed rows
+									</Button>
+									<Button
+										variant="ghost"
+										disabled={isSavingGlobalRatio}
+										onClick={resetGlobalToServerValues}
+									>
+										Reset to server values
+									</Button>
+									{globalSaveBlockedReason ? (
+										<span className="text-xs opacity-70">
+											{globalSaveBlockedReason}
+										</span>
+									) : null}
 								</div>
-							) : null}
 
-							<div className="flex flex-wrap items-center gap-2">
-								<Button
-									variant="primary"
-									loading={isSavingGlobalRatio}
-									disabled={!canSaveGlobalRatio}
-									onClick={() => void persistGlobalRatioRows()}
-								>
-									Save global ratios
-								</Button>
-								<Button
-									variant="secondary"
-									disabled={
-										isSavingGlobalRatio || globalFailedRows.length === 0
-									}
-									onClick={() => void retryGlobalFailedRows()}
-								>
-									Retry failed rows
-								</Button>
-								<Button
-									variant="ghost"
-									disabled={isSavingGlobalRatio}
-									onClick={resetGlobalToServerValues}
-								>
-									Reset to server values
-								</Button>
-								{globalSaveBlockedReason ? (
-									<span className="text-xs opacity-70">
-										{globalSaveBlockedReason}
-									</span>
+								{lastGlobalSave ? (
+									<p className="text-xs opacity-70">
+										Last save ({lastGlobalSave.status}) at{" "}
+										{new Date(lastGlobalSave.at).toLocaleString()}:{" "}
+										{lastGlobalSave.message}
+									</p>
 								) : null}
 							</div>
-
-							{lastGlobalSave ? (
-								<p className="text-xs opacity-70">
-									Last save ({lastGlobalSave.status}) at{" "}
-									{new Date(lastGlobalSave.at).toLocaleString()}:{" "}
-									{lastGlobalSave.message}
-								</p>
-							) : null}
-						</div>
-					</>
-				)}
-			</div>
+						</>
+					)}
+				</div>
+			) : null}
 
 			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
 				<div className="space-y-1">
@@ -1503,474 +1576,336 @@ export function QuotaPolicyPage() {
 				</ResourceTable>
 			</div>
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
-				<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-					<div className="space-y-1">
-						<h2 className="text-lg font-semibold">Node weight ratio editor</h2>
-						<p className="text-sm opacity-70">
-							Each node can inherit global defaults or use local override
-							ratios. Top pie chart is display-only; bottom editor is the source
-							of truth.
-						</p>
-					</div>
-					<div className="w-full md:w-[22rem] space-y-3">
-						<div>
-							<label className="label pt-0" htmlFor="quota-policy-node-select">
+			{selectedWeightTab !== "global" ? (
+				<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+					<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+						<div className="space-y-1">
+							<h2 className="text-lg font-semibold">
+								Node weight ratio editor
+							</h2>
+							<p className="text-sm opacity-70">
+								Each node can inherit global defaults or use local override
+								ratios. Top pie chart is display-only; bottom editor is the
+								source of truth.
+							</p>
+						</div>
+						<div className="w-full md:w-[22rem] space-y-3">
+							<div>
 								<span className="label-text">Node</span>
+								<div className="rounded-box border border-base-200 px-3 py-2 mt-1">
+									<div className="font-semibold">
+										{selectedNode?.node_name ?? "-"}
+									</div>
+									<div className="font-mono text-xs opacity-70 break-all">
+										{selectedNode?.node_id ?? ""}
+									</div>
+								</div>
+							</div>
+							<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-2">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary"
+									checked={nodeInheritGlobal}
+									disabled={
+										!selectedNodeId ||
+										nodePolicyQuery.isLoading ||
+										isUpdatingNodePolicy
+									}
+									onChange={(event) =>
+										void updateNodeInheritGlobal(event.target.checked)
+									}
+								/>
+								<span className="label-text text-sm">
+									Inherit global default ratios
+								</span>
 							</label>
-							<select
-								id="quota-policy-node-select"
-								className={
-									prefs.density === "compact"
-										? "select select-bordered select-sm w-full"
-										: "select select-bordered w-full"
-								}
-								value={selectedNodeId ?? ""}
-								onChange={(event) => {
-									setSelectedNodeId(event.target.value || null);
-									setLastSave(null);
-									setFailedRows([]);
-									setRatioError(null);
+						</div>
+					</div>
+
+					{weightRowsQuery.isLoading || nodePolicyQuery.isLoading ? (
+						<div className="text-sm opacity-70">Loading node ratio rows...</div>
+					) : weightRowsQuery.isError || nodePolicyQuery.isError ? (
+						<div className="space-y-3">
+							<p className="text-sm text-error">
+								{weightRowsQuery.isError
+									? formatError(weightRowsQuery.error)
+									: formatError(nodePolicyQuery.error)}
+							</p>
+							<Button
+								variant="secondary"
+								onClick={() => {
+									weightRowsQuery.refetch();
+									nodePolicyQuery.refetch();
 								}}
 							>
-								{nodes.map((node) => (
-									<option key={node.node_id} value={node.node_id}>
-										{node.node_name}
-									</option>
-								))}
-							</select>
+								Retry
+							</Button>
 						</div>
-						<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-2">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary"
-								checked={nodeInheritGlobal}
-								disabled={
-									!selectedNodeId ||
-									nodePolicyQuery.isLoading ||
-									isUpdatingNodePolicy
-								}
-								onChange={(event) =>
-									void updateNodeInheritGlobal(event.target.checked)
-								}
-							/>
-							<span className="label-text text-sm">
-								Inherit global default ratios
-							</span>
-						</label>
-					</div>
-				</div>
-
-				{weightRowsQuery.isLoading || nodePolicyQuery.isLoading ? (
-					<div className="text-sm opacity-70">Loading node ratio rows...</div>
-				) : weightRowsQuery.isError || nodePolicyQuery.isError ? (
-					<div className="space-y-3">
-						<p className="text-sm text-error">
-							{weightRowsQuery.isError
-								? formatError(weightRowsQuery.error)
-								: formatError(nodePolicyQuery.error)}
-						</p>
-						<Button
-							variant="secondary"
-							onClick={() => {
-								weightRowsQuery.refetch();
-								nodePolicyQuery.refetch();
-							}}
-						>
-							Retry
-						</Button>
-					</div>
-				) : ratioRows.length === 0 ? (
-					<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
-						No allocatable users for this node.
-					</div>
-				) : (
-					<>
-						<div className="rounded-box border border-base-200 p-4 space-y-4">
-							<div className="flex flex-wrap items-center gap-2">
-								<span className={ratioStatusClass}>
-									Total {formatRatioPercent(totalBasisPoints)}
-								</span>
-								<span className="badge badge-outline">
-									Users {displayRatioRows.length}
-								</span>
-								<span className="badge badge-outline">
-									Unlocked {unlockedCount}
-								</span>
-								{selectedNode ? (
+					) : ratioRows.length === 0 ? (
+						<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
+							No allocatable users for this node.
+						</div>
+					) : (
+						<>
+							<div className="rounded-box border border-base-200 p-4 space-y-4">
+								<div className="flex flex-wrap items-center gap-2">
+									<span className={ratioStatusClass}>
+										Total {formatRatioPercent(totalBasisPoints)}
+									</span>
 									<span className="badge badge-outline">
-										{selectedNode.node_name}
+										Users {displayRatioRows.length}
 									</span>
-								) : null}
-								<span className="badge badge-outline">
-									{nodeInheritGlobal
-										? "Mode inherit_global"
-										: "Mode node_override"}
-								</span>
-								{totalBasisPoints < RATIO_BASIS_POINTS ? (
-									<span className="text-sm text-warning">
-										Remaining{" "}
-										{formatRatioPercent(RATIO_BASIS_POINTS - totalBasisPoints)}
+									<span className="badge badge-outline">
+										Unlocked {unlockedCount}
 									</span>
-								) : null}
-							</div>
+									{selectedNode ? (
+										<span className="badge badge-outline">
+											{selectedNode.node_name}
+										</span>
+									) : null}
+									<span className="badge badge-outline">
+										{nodeInheritGlobal
+											? "Mode inherit_global"
+											: "Mode node_override"}
+									</span>
+									{totalBasisPoints < RATIO_BASIS_POINTS ? (
+										<span className="text-sm text-warning">
+											Remaining{" "}
+											{formatRatioPercent(
+												RATIO_BASIS_POINTS - totalBasisPoints,
+											)}
+										</span>
+									) : null}
+								</div>
 
-							<div className="grid gap-4 md:grid-cols-[320px_1fr]">
-								<div className="flex items-center justify-center">
-									<svg
-										viewBox="0 0 220 220"
-										className="w-64 h-64"
-										role="img"
-										aria-label="Node weight ratio pie chart"
-									>
-										<circle cx="110" cy="110" r="96" fill="hsl(var(--b2))" />
-										{pieSegments.length === 1 &&
-										firstPieSegment &&
-										firstPieSegment.basisPoints === RATIO_BASIS_POINTS ? (
-											<circle
-												cx="110"
-												cy="110"
-												r="96"
-												fill={firstPieSegment.color}
-											/>
+								<div className="grid gap-4 md:grid-cols-[320px_1fr]">
+									<div className="flex items-center justify-center">
+										<svg
+											viewBox="0 0 220 220"
+											className="w-64 h-64"
+											role="img"
+											aria-label="Node weight ratio pie chart"
+										>
+											<circle cx="110" cy="110" r="96" fill="hsl(var(--b2))" />
+											{pieSegments.length === 1 &&
+											firstPieSegment &&
+											firstPieSegment.basisPoints === RATIO_BASIS_POINTS ? (
+												<circle
+													cx="110"
+													cy="110"
+													r="96"
+													fill={firstPieSegment.color}
+												/>
+											) : (
+												pieSlices.map((segment) => {
+													const isActive =
+														hoveredUserId !== null &&
+														segment.userIds.includes(hoveredUserId);
+													return (
+														<g key={`${segment.key}-${segment.index}`}>
+															<path
+																d={describeArc(
+																	110,
+																	110,
+																	96,
+																	segment.startAngle,
+																	segment.endAngle,
+																)}
+																fill={segment.color}
+																opacity={
+																	hoveredUserId === null || isActive ? 1 : 0.35
+																}
+																onMouseEnter={() => {
+																	if (segment.userIds.length === 1) {
+																		setHoveredUserId(
+																			segment.userIds[0] ?? null,
+																		);
+																	}
+																}}
+																onMouseLeave={() => setHoveredUserId(null)}
+															/>
+														</g>
+													);
+												})
+											)}
+											<circle cx="110" cy="110" r="58" fill="hsl(var(--b1))" />
+											<text
+												x="110"
+												y="104"
+												textAnchor="middle"
+												className="fill-current text-xs"
+											>
+												{displayRatioRows.length} users
+											</text>
+											<text
+												x="110"
+												y="122"
+												textAnchor="middle"
+												className="fill-current text-sm font-semibold"
+											>
+												{formatRatioPercent(totalBasisPoints)}
+											</text>
+										</svg>
+									</div>
+
+									<div data-testid="ratio-pie-legend" className="space-y-2">
+										{pieSegments.length === 0 ? (
+											<div className="text-sm opacity-70">
+												No non-zero slices yet.
+											</div>
 										) : (
-											pieSlices.map((segment) => {
-												const isActive =
+											pieSegments.map((segment) => {
+												const active =
 													hoveredUserId !== null &&
 													segment.userIds.includes(hoveredUserId);
 												return (
-													<g key={`${segment.key}-${segment.index}`}>
-														<path
-															d={describeArc(
-																110,
-																110,
-																96,
-																segment.startAngle,
-																segment.endAngle,
-															)}
-															fill={segment.color}
-															opacity={
-																hoveredUserId === null || isActive ? 1 : 0.35
-															}
-															onMouseEnter={() => {
-																if (segment.userIds.length === 1) {
-																	setHoveredUserId(segment.userIds[0] ?? null);
-																}
-															}}
-															onMouseLeave={() => setHoveredUserId(null)}
-														/>
-													</g>
+													<div
+														key={segment.key}
+														className={`flex items-center justify-between rounded-box border border-base-200 px-3 py-2 ${
+															hoveredUserId && !active ? "opacity-50" : ""
+														}`}
+													>
+														<div className="flex items-center gap-2 min-w-0">
+															<span
+																className="inline-block h-3 w-3 rounded-full"
+																style={{ backgroundColor: segment.color }}
+															/>
+															<span className="truncate text-sm">
+																{segment.label}
+															</span>
+														</div>
+														<span className="font-mono text-xs opacity-70">
+															{formatRatioPercent(segment.basisPoints)}
+														</span>
+													</div>
 												);
 											})
 										)}
-										<circle cx="110" cy="110" r="58" fill="hsl(var(--b1))" />
-										<text
-											x="110"
-											y="104"
-											textAnchor="middle"
-											className="fill-current text-xs"
-										>
-											{displayRatioRows.length} users
-										</text>
-										<text
-											x="110"
-											y="122"
-											textAnchor="middle"
-											className="fill-current text-sm font-semibold"
-										>
-											{formatRatioPercent(totalBasisPoints)}
-										</text>
-									</svg>
-								</div>
-
-								<div data-testid="ratio-pie-legend" className="space-y-2">
-									{pieSegments.length === 0 ? (
-										<div className="text-sm opacity-70">
-											No non-zero slices yet.
-										</div>
-									) : (
-										pieSegments.map((segment) => {
-											const active =
-												hoveredUserId !== null &&
-												segment.userIds.includes(hoveredUserId);
-											return (
-												<div
-													key={segment.key}
-													className={`flex items-center justify-between rounded-box border border-base-200 px-3 py-2 ${
-														hoveredUserId && !active ? "opacity-50" : ""
-													}`}
-												>
-													<div className="flex items-center gap-2 min-w-0">
-														<span
-															className="inline-block h-3 w-3 rounded-full"
-															style={{ backgroundColor: segment.color }}
-														/>
-														<span className="truncate text-sm">
-															{segment.label}
-														</span>
-													</div>
-													<span className="font-mono text-xs opacity-70">
-														{formatRatioPercent(segment.basisPoints)}
-													</span>
-												</div>
-											);
-										})
-									)}
+									</div>
 								</div>
 							</div>
-						</div>
 
-						<div className="rounded-box border border-base-200 p-4 space-y-4">
-							{ratioEditorListLayout ? (
-								<div data-testid="ratio-editor-list" className="space-y-3">
-									{displayRatioRows.map((row, index) => {
-										const targetWeight = computedWeights[index] ?? 0;
-										const isHighlighted = hoveredUserId === row.userId;
-										const rowClass = isHighlighted
-											? "border-info/50 bg-info/10"
-											: hoveredUserId
-												? "opacity-60"
-												: "";
-										return (
-											<div
-												key={row.userId}
-												className={`rounded-box border border-base-200 p-3 space-y-3 ${rowClass}`}
-												onMouseEnter={() => setHoveredUserId(row.userId)}
-												onMouseLeave={() => setHoveredUserId(null)}
-											>
-												<div className="flex items-start justify-between gap-2">
-													<div className="min-w-0 space-y-1">
-														<div className="font-semibold truncate">
-															{row.displayName}
-														</div>
-														<div className="font-mono text-xs opacity-70 break-all">
-															{row.userId}
-														</div>
-														<div className="text-xs opacity-70">
-															Endpoints {row.endpointIds.length}
-														</div>
-													</div>
-													<span className="badge badge-ghost uppercase shrink-0">
-														{row.priorityTier}
-													</span>
-												</div>
-
-												<div className="space-y-3">
-													<div className="space-y-1">
-														<div className="text-xs opacity-70">Slider</div>
-														<input
-															type="range"
-															className="range range-primary range-sm"
-															min={0}
-															max={100}
-															step={0.1}
-															value={row.basisPoints / 100}
-															disabled={
-																isSavingRatio ||
-																nodeInheritGlobal ||
-																isUpdatingNodePolicy
-															}
-															aria-label={`Ratio slider for ${row.displayName}`}
-															onFocus={() => setHoveredUserId(row.userId)}
-															onBlur={() => setHoveredUserId(null)}
-															onChange={(event) => {
-																applyRatioEdit(
-																	row.userId,
-																	Math.round(Number(event.target.value) * 100),
-																);
-															}}
-														/>
-														<div className="font-mono text-xs opacity-70">
-															{formatRatioPercent(row.basisPoints)}
-														</div>
-													</div>
-													<div className="space-y-1">
-														<div className="text-xs opacity-70">Input (%)</div>
-														<input
-															type="number"
-															min={0}
-															max={100}
-															step={0.01}
-															className={[inputClass, "font-mono w-full"].join(
-																" ",
-															)}
-															value={row.basisPoints / 100}
-															disabled={
-																isSavingRatio ||
-																nodeInheritGlobal ||
-																isUpdatingNodePolicy
-															}
-															aria-label={`Ratio input for ${row.displayName}`}
-															onFocus={() => setHoveredUserId(row.userId)}
-															onBlur={() => setHoveredUserId(null)}
-															onChange={(event) => {
-																const parsed = parsePercentInput(
-																	event.target.value,
-																);
-																if (!parsed.ok) {
-																	setRatioError(parsed.error);
-																	return;
-																}
-																applyRatioEdit(row.userId, parsed.basisPoints);
-															}}
-														/>
-													</div>
-												</div>
-
-												<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
-													<div className="min-w-0">
-														<div className="text-xs opacity-70">
-															Computed weight
-														</div>
-														<div className="font-mono text-sm">
-															{targetWeight}
-														</div>
-														<div className="text-xs opacity-70">
-															{nodeInheritGlobal
-																? "inherited_global"
-																: row.source === "implicit_zero"
-																	? "implicit_zero"
-																	: "explicit"}
-														</div>
-													</div>
-													<label className="label cursor-pointer justify-start gap-2 py-0">
-														<input
-															type="checkbox"
-															className="checkbox checkbox-sm"
-															checked={row.locked}
-															disabled={
-																isSavingRatio ||
-																nodeInheritGlobal ||
-																isUpdatingNodePolicy
-															}
-															onChange={() => toggleRowLock(row.userId)}
-														/>
-														<span className="label-text text-xs">Lock</span>
-													</label>
-												</div>
-											</div>
-										);
-									})}
-								</div>
-							) : (
-								<table
-									data-testid="ratio-editor-table"
-									className="table table-fixed w-full"
-								>
-									<thead>
-										<tr className="bg-base-200/50">
-											<th className="w-[30%]">User</th>
-											<th className="w-[10%]">Tier</th>
-											<th className="w-[24%]">Slider</th>
-											<th className="w-[16%]">Input (%)</th>
-											<th className="w-[12%]">Computed weight</th>
-											<th className="w-[8%]">Lock</th>
-										</tr>
-									</thead>
-									<tbody>
+							<div className="rounded-box border border-base-200 p-4 space-y-4">
+								{ratioEditorListLayout ? (
+									<div data-testid="ratio-editor-list" className="space-y-3">
 										{displayRatioRows.map((row, index) => {
 											const targetWeight = computedWeights[index] ?? 0;
 											const isHighlighted = hoveredUserId === row.userId;
 											const rowClass = isHighlighted
-												? "bg-info/10"
+												? "border-info/50 bg-info/10"
 												: hoveredUserId
 													? "opacity-60"
 													: "";
 											return (
-												<tr
+												<div
 													key={row.userId}
-													className={rowClass}
+													className={`rounded-box border border-base-200 p-3 space-y-3 ${rowClass}`}
 													onMouseEnter={() => setHoveredUserId(row.userId)}
 													onMouseLeave={() => setHoveredUserId(null)}
 												>
-													<td className="align-top">
-														<div className="flex flex-col gap-1 min-w-0">
-															<span className="font-semibold truncate">
+													<div className="flex items-start justify-between gap-2">
+														<div className="min-w-0 space-y-1">
+															<div className="font-semibold truncate">
 																{row.displayName}
-															</span>
-															<span className="font-mono text-xs opacity-70 break-all">
+															</div>
+															<div className="font-mono text-xs opacity-70 break-all">
 																{row.userId}
-															</span>
-															<span className="text-xs opacity-70">
+															</div>
+															<div className="text-xs opacity-70">
 																Endpoints {row.endpointIds.length}
-															</span>
+															</div>
 														</div>
-													</td>
-													<td className="align-top">
-														<span className="badge badge-ghost uppercase">
+														<span className="badge badge-ghost uppercase shrink-0">
 															{row.priorityTier}
 														</span>
-													</td>
-													<td className="align-top">
-														<input
-															type="range"
-															className="range range-primary range-sm"
-															min={0}
-															max={100}
-															step={0.1}
-															value={row.basisPoints / 100}
-															disabled={
-																isSavingRatio ||
-																nodeInheritGlobal ||
-																isUpdatingNodePolicy
-															}
-															aria-label={`Ratio slider for ${row.displayName}`}
-															onFocus={() => setHoveredUserId(row.userId)}
-															onBlur={() => setHoveredUserId(null)}
-															onChange={(event) => {
-																applyRatioEdit(
-																	row.userId,
-																	Math.round(Number(event.target.value) * 100),
-																);
-															}}
-														/>
-														<div className="font-mono text-xs opacity-70 mt-1">
-															{formatRatioPercent(row.basisPoints)}
-														</div>
-													</td>
-													<td className="align-top">
-														<input
-															type="number"
-															min={0}
-															max={100}
-															step={0.01}
-															className={[inputClass, "font-mono w-full"].join(
-																" ",
-															)}
-															value={row.basisPoints / 100}
-															disabled={
-																isSavingRatio ||
-																nodeInheritGlobal ||
-																isUpdatingNodePolicy
-															}
-															aria-label={`Ratio input for ${row.displayName}`}
-															onFocus={() => setHoveredUserId(row.userId)}
-															onBlur={() => setHoveredUserId(null)}
-															onChange={(event) => {
-																const parsed = parsePercentInput(
-																	event.target.value,
-																);
-																if (!parsed.ok) {
-																	setRatioError(parsed.error);
-																	return;
+													</div>
+
+													<div className="space-y-3">
+														<div className="space-y-1">
+															<div className="text-xs opacity-70">Slider</div>
+															<input
+																type="range"
+																className="range range-primary range-sm"
+																min={0}
+																max={100}
+																step={0.1}
+																value={row.basisPoints / 100}
+																disabled={
+																	isSavingRatio ||
+																	nodeInheritGlobal ||
+																	isUpdatingNodePolicy
 																}
-																applyRatioEdit(row.userId, parsed.basisPoints);
-															}}
-														/>
-													</td>
-													<td className="align-top">
-														<div className="font-mono text-sm">
-															{targetWeight}
+																aria-label={`Ratio slider for ${row.displayName}`}
+																onFocus={() => setHoveredUserId(row.userId)}
+																onBlur={() => setHoveredUserId(null)}
+																onChange={(event) => {
+																	applyRatioEdit(
+																		row.userId,
+																		Math.round(
+																			Number(event.target.value) * 100,
+																		),
+																	);
+																}}
+															/>
+															<div className="font-mono text-xs opacity-70">
+																{formatRatioPercent(row.basisPoints)}
+															</div>
 														</div>
-														<div className="text-xs opacity-70">
-															{nodeInheritGlobal
-																? "inherited_global"
-																: row.source === "implicit_zero"
-																	? "implicit_zero"
-																	: "explicit"}
+														<div className="space-y-1">
+															<div className="text-xs opacity-70">
+																Input (%)
+															</div>
+															<input
+																type="number"
+																min={0}
+																max={100}
+																step={0.01}
+																className={[
+																	inputClass,
+																	"font-mono w-full",
+																].join(" ")}
+																value={row.basisPoints / 100}
+																disabled={
+																	isSavingRatio ||
+																	nodeInheritGlobal ||
+																	isUpdatingNodePolicy
+																}
+																aria-label={`Ratio input for ${row.displayName}`}
+																onFocus={() => setHoveredUserId(row.userId)}
+																onBlur={() => setHoveredUserId(null)}
+																onChange={(event) => {
+																	const parsed = parsePercentInput(
+																		event.target.value,
+																	);
+																	if (!parsed.ok) {
+																		setRatioError(parsed.error);
+																		return;
+																	}
+																	applyRatioEdit(
+																		row.userId,
+																		parsed.basisPoints,
+																	);
+																}}
+															/>
 														</div>
-													</td>
-													<td className="align-top">
+													</div>
+
+													<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+														<div className="min-w-0">
+															<div className="text-xs opacity-70">
+																Computed weight
+															</div>
+															<div className="font-mono text-sm">
+																{targetWeight}
+															</div>
+															<div className="text-xs opacity-70">
+																{nodeInheritGlobal
+																	? "inherited_global"
+																	: row.source === "implicit_zero"
+																		? "implicit_zero"
+																		: "explicit"}
+															</div>
+														</div>
 														<label className="label cursor-pointer justify-start gap-2 py-0">
 															<input
 																type="checkbox"
@@ -1985,79 +1920,224 @@ export function QuotaPolicyPage() {
 															/>
 															<span className="label-text text-xs">Lock</span>
 														</label>
-													</td>
-												</tr>
+													</div>
+												</div>
 											);
 										})}
-									</tbody>
-								</table>
-							)}
+									</div>
+								) : (
+									<table
+										data-testid="ratio-editor-table"
+										className="table table-fixed w-full"
+									>
+										<thead>
+											<tr className="bg-base-200/50">
+												<th className="w-[30%]">User</th>
+												<th className="w-[10%]">Tier</th>
+												<th className="w-[24%]">Slider</th>
+												<th className="w-[16%]">Input (%)</th>
+												<th className="w-[12%]">Computed weight</th>
+												<th className="w-[8%]">Lock</th>
+											</tr>
+										</thead>
+										<tbody>
+											{displayRatioRows.map((row, index) => {
+												const targetWeight = computedWeights[index] ?? 0;
+												const isHighlighted = hoveredUserId === row.userId;
+												const rowClass = isHighlighted
+													? "bg-info/10"
+													: hoveredUserId
+														? "opacity-60"
+														: "";
+												return (
+													<tr
+														key={row.userId}
+														className={rowClass}
+														onMouseEnter={() => setHoveredUserId(row.userId)}
+														onMouseLeave={() => setHoveredUserId(null)}
+													>
+														<td className="align-top">
+															<div className="flex flex-col gap-1 min-w-0">
+																<span className="font-semibold truncate">
+																	{row.displayName}
+																</span>
+																<span className="font-mono text-xs opacity-70 break-all">
+																	{row.userId}
+																</span>
+																<span className="text-xs opacity-70">
+																	Endpoints {row.endpointIds.length}
+																</span>
+															</div>
+														</td>
+														<td className="align-top">
+															<span className="badge badge-ghost uppercase">
+																{row.priorityTier}
+															</span>
+														</td>
+														<td className="align-top">
+															<input
+																type="range"
+																className="range range-primary range-sm"
+																min={0}
+																max={100}
+																step={0.1}
+																value={row.basisPoints / 100}
+																disabled={
+																	isSavingRatio ||
+																	nodeInheritGlobal ||
+																	isUpdatingNodePolicy
+																}
+																aria-label={`Ratio slider for ${row.displayName}`}
+																onFocus={() => setHoveredUserId(row.userId)}
+																onBlur={() => setHoveredUserId(null)}
+																onChange={(event) => {
+																	applyRatioEdit(
+																		row.userId,
+																		Math.round(
+																			Number(event.target.value) * 100,
+																		),
+																	);
+																}}
+															/>
+															<div className="font-mono text-xs opacity-70 mt-1">
+																{formatRatioPercent(row.basisPoints)}
+															</div>
+														</td>
+														<td className="align-top">
+															<input
+																type="number"
+																min={0}
+																max={100}
+																step={0.01}
+																className={[
+																	inputClass,
+																	"font-mono w-full",
+																].join(" ")}
+																value={row.basisPoints / 100}
+																disabled={
+																	isSavingRatio ||
+																	nodeInheritGlobal ||
+																	isUpdatingNodePolicy
+																}
+																aria-label={`Ratio input for ${row.displayName}`}
+																onFocus={() => setHoveredUserId(row.userId)}
+																onBlur={() => setHoveredUserId(null)}
+																onChange={(event) => {
+																	const parsed = parsePercentInput(
+																		event.target.value,
+																	);
+																	if (!parsed.ok) {
+																		setRatioError(parsed.error);
+																		return;
+																	}
+																	applyRatioEdit(
+																		row.userId,
+																		parsed.basisPoints,
+																	);
+																}}
+															/>
+														</td>
+														<td className="align-top">
+															<div className="font-mono text-sm">
+																{targetWeight}
+															</div>
+															<div className="text-xs opacity-70">
+																{nodeInheritGlobal
+																	? "inherited_global"
+																	: row.source === "implicit_zero"
+																		? "implicit_zero"
+																		: "explicit"}
+															</div>
+														</td>
+														<td className="align-top">
+															<label className="label cursor-pointer justify-start gap-2 py-0">
+																<input
+																	type="checkbox"
+																	className="checkbox checkbox-sm"
+																	checked={row.locked}
+																	disabled={
+																		isSavingRatio ||
+																		nodeInheritGlobal ||
+																		isUpdatingNodePolicy
+																	}
+																	onChange={() => toggleRowLock(row.userId)}
+																/>
+																<span className="label-text text-xs">Lock</span>
+															</label>
+														</td>
+													</tr>
+												);
+											})}
+										</tbody>
+									</table>
+								)}
 
-							{ratioError ? (
-								<p className="text-sm text-error">{ratioError}</p>
-							) : null}
-							{failedRows.length > 0 ? (
-								<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
-									<p className="text-sm font-medium text-error">
-										Failed rows ({failedRows.length})
-									</p>
-									<ul className="text-xs space-y-1">
-										{failedRows.map((row) => (
-											<li key={row.userId} className="font-mono">
-												{row.displayName} ({row.userId}) → {row.targetWeight}:{" "}
-												{row.error}
-											</li>
-										))}
-									</ul>
+								{ratioError ? (
+									<p className="text-sm text-error">{ratioError}</p>
+								) : null}
+								{failedRows.length > 0 ? (
+									<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
+										<p className="text-sm font-medium text-error">
+											Failed rows ({failedRows.length})
+										</p>
+										<ul className="text-xs space-y-1">
+											{failedRows.map((row) => (
+												<li key={row.userId} className="font-mono">
+													{row.displayName} ({row.userId}) → {row.targetWeight}:{" "}
+													{row.error}
+												</li>
+											))}
+										</ul>
+									</div>
+								) : null}
+
+								<div className="flex flex-wrap items-center gap-2">
+									<Button
+										variant="primary"
+										loading={isSavingRatio}
+										disabled={!canSaveRatio}
+										onClick={() => void persistRatioRows()}
+									>
+										Save ratios
+									</Button>
+									<Button
+										variant="secondary"
+										disabled={
+											isSavingRatio ||
+											isUpdatingNodePolicy ||
+											failedRows.length === 0
+										}
+										onClick={() => void retryFailedRows()}
+									>
+										Retry failed rows
+									</Button>
+									<Button
+										variant="ghost"
+										disabled={
+											isSavingRatio || nodeInheritGlobal || isUpdatingNodePolicy
+										}
+										onClick={resetToServerValues}
+									>
+										Reset to server values
+									</Button>
+									{saveBlockedReason ? (
+										<span className="text-xs opacity-70">
+											{saveBlockedReason}
+										</span>
+									) : null}
 								</div>
-							) : null}
 
-							<div className="flex flex-wrap items-center gap-2">
-								<Button
-									variant="primary"
-									loading={isSavingRatio}
-									disabled={!canSaveRatio}
-									onClick={() => void persistRatioRows()}
-								>
-									Save ratios
-								</Button>
-								<Button
-									variant="secondary"
-									disabled={
-										isSavingRatio ||
-										isUpdatingNodePolicy ||
-										failedRows.length === 0
-									}
-									onClick={() => void retryFailedRows()}
-								>
-									Retry failed rows
-								</Button>
-								<Button
-									variant="ghost"
-									disabled={
-										isSavingRatio || nodeInheritGlobal || isUpdatingNodePolicy
-									}
-									onClick={resetToServerValues}
-								>
-									Reset to server values
-								</Button>
-								{saveBlockedReason ? (
-									<span className="text-xs opacity-70">
-										{saveBlockedReason}
-									</span>
+								{lastSave ? (
+									<p className="text-xs opacity-70">
+										Last save ({lastSave.status}) at{" "}
+										{new Date(lastSave.at).toLocaleString()}: {lastSave.message}
+									</p>
 								) : null}
 							</div>
-
-							{lastSave ? (
-								<p className="text-xs opacity-70">
-									Last save ({lastSave.status}) at{" "}
-									{new Date(lastSave.at).toLocaleString()}: {lastSave.message}
-								</p>
-							) : null}
-						</div>
-					</>
-				)}
-			</div>
+						</>
+					)}
+				</div>
+			) : null}
 		</div>
 	);
 }

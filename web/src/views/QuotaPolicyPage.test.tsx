@@ -70,6 +70,11 @@ function renderPage() {
 	);
 }
 
+async function openNodeTab(container: HTMLElement, nodeName = "tokyo-1") {
+	const tab = await within(container).findByRole("button", { name: nodeName });
+	fireEvent.click(tab);
+}
+
 function readLegendColors(container: HTMLElement): Record<string, string> {
 	const out: Record<string, string> = {};
 	const legend = within(container).getByTestId("ratio-pie-legend");
@@ -261,10 +266,7 @@ describe("<QuotaPolicyPage />", () => {
 
 	it("keeps slider/input linkage and recomputes weights", async () => {
 		const view = renderPage();
-
-		expect(
-			await within(view.container).findByText("Node weight ratio editor"),
-		).toBeInTheDocument();
+		await openNodeTab(view.container);
 
 		const aliceInput = await within(view.container).findByLabelText(
 			"Ratio input for Alice",
@@ -285,9 +287,7 @@ describe("<QuotaPolicyPage />", () => {
 			.mockResolvedValueOnce({ node_id: "node-1", weight: 4000 });
 
 		const view = renderPage();
-		expect(
-			await within(view.container).findByText("Node weight ratio editor"),
-		).toBeInTheDocument();
+		await openNodeTab(view.container);
 
 		const aliceInput = await within(view.container).findByLabelText(
 			"Ratio input for Alice",
@@ -340,9 +340,7 @@ describe("<QuotaPolicyPage />", () => {
 		});
 
 		const view = renderPage();
-		expect(
-			await within(view.container).findByText("Node weight ratio editor"),
-		).toBeInTheDocument();
+		await openNodeTab(view.container);
 
 		const aliceInput = await within(view.container).findByLabelText(
 			"Ratio input for Alice",
@@ -371,10 +369,7 @@ describe("<QuotaPolicyPage />", () => {
 
 	it("keeps pie legend and slice order stable after ratio ranking changes", async () => {
 		const view = renderPage();
-
-		expect(
-			await within(view.container).findByText("Node weight ratio editor"),
-		).toBeInTheDocument();
+		await openNodeTab(view.container);
 		await within(view.container).findByLabelText("Node weight ratio pie chart");
 
 		const colorsBefore = readLegendColors(view.container);
@@ -408,9 +403,7 @@ describe("<QuotaPolicyPage />", () => {
 		const restore = mockMatchMedia(true);
 		try {
 			const view = renderPage();
-			expect(
-				await within(view.container).findByText("Node weight ratio editor"),
-			).toBeInTheDocument();
+			await openNodeTab(view.container);
 			await within(view.container).findByLabelText("Ratio input for Alice");
 			expect(
 				within(view.container).getByTestId("ratio-editor-list"),
