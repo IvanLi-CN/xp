@@ -257,10 +257,9 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
-    let cloudflared_health =
-        xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
-            xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
-        );
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
@@ -519,10 +518,9 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
-    let cloudflared_health =
-        xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
-            xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
-        );
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
@@ -784,10 +782,9 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
-    let cloudflared_health =
-        xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
-            xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
-        );
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),

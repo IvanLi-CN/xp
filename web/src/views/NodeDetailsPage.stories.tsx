@@ -16,6 +16,7 @@ const meta = {
 						node_name: "node-a",
 						access_host: "node-a.example.invalid",
 						api_base_url: "https://node-a.example.invalid",
+						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
@@ -36,7 +37,7 @@ export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await canvas.findByText(/service runtime/i),
+			await canvas.findByRole("heading", { name: /service runtime/i }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText(/key events/i)).toBeInTheDocument();
 	},

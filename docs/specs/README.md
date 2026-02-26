@@ -61,6 +61,6 @@
 
 ## Index（固定表格）
 
-| ID   | Title | Status | Spec | Last | Notes |
-|-----:|-------|--------|------|------|-------|
+|    ID | Title              | Status | Spec                                       | Last       | Notes                               |
+| ----: | ------------------ | ------ | ------------------------------------------ | ---------- | ----------------------------------- |
 | 9vmap | 节点服务可观测升级 | 已完成 | `9vmap-node-service-observability/SPEC.md` | 2026-02-26 | local implementation + tests passed |

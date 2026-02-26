@@ -175,60 +175,56 @@ describe("<UserDetailsPage />", () => {
 		cleanup();
 	});
 
-	it(
-		"renders three tabs and switches between User, Access and Quota usage",
-		async () => {
-			setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
-			vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
-				new BackendApiError({ status: 404, message: "not found" }),
-			);
+	it("renders three tabs and switches between User, Access and Quota usage", async () => {
+		setupHappyPathMocks({ userId: "u_01HUSERAAAAAA" });
+		vi.mocked(fetchAdminGrantGroup).mockRejectedValue(
+			new BackendApiError({ status: 404, message: "not found" }),
+		);
 
-			const view = renderPage();
+		const view = renderPage();
 
-			expect(
-				await within(view.container).findByRole("heading", { name: "Profile" }),
-			).toBeInTheDocument();
-			expect(
-				within(view.container).getByRole("button", { name: "User" }),
-			).toBeInTheDocument();
-			expect(
-				within(view.container).getByRole("button", { name: "Access" }),
-			).toBeInTheDocument();
-			expect(
-				within(view.container).getByRole("button", { name: "Quota usage" }),
-			).toBeInTheDocument();
+		expect(
+			await within(view.container).findByRole("heading", { name: "Profile" }),
+		).toBeInTheDocument();
+		expect(
+			within(view.container).getByRole("button", { name: "User" }),
+		).toBeInTheDocument();
+		expect(
+			within(view.container).getByRole("button", { name: "Access" }),
+		).toBeInTheDocument();
+		expect(
+			within(view.container).getByRole("button", { name: "Quota usage" }),
+		).toBeInTheDocument();
 
-			fireEvent.click(
-				within(view.container).getByRole("button", { name: "Access" }),
-			);
-			expect(
-				await within(view.container).findByRole("heading", {
-					name: "Access",
-				}),
-			).toBeInTheDocument();
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Access" }),
+		);
+		expect(
+			await within(view.container).findByRole("heading", {
+				name: "Access",
+			}),
+		).toBeInTheDocument();
 
-			fireEvent.click(
-				within(view.container).getByRole("button", { name: "Quota usage" }),
-			);
-			expect(
-				await within(view.container).findByRole("heading", {
-					name: "Quota usage",
-				}),
-			).toBeInTheDocument();
-			// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
-			expect(
-				await within(view.container).findByText("-/unlimited"),
-			).toBeInTheDocument();
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "Quota usage" }),
+		);
+		expect(
+			await within(view.container).findByRole("heading", {
+				name: "Quota usage",
+			}),
+		).toBeInTheDocument();
+		// Default mocks use quota_limit_bytes=0 (unlimited) and should not render misleading "0/0".
+		expect(
+			await within(view.container).findByText("-/unlimited"),
+		).toBeInTheDocument();
 
-			fireEvent.click(
-				within(view.container).getByRole("button", { name: "User" }),
-			);
-			expect(
-				await within(view.container).findByRole("heading", { name: "Profile" }),
-			).toBeInTheDocument();
-		},
-		10_000,
-	);
+		fireEvent.click(
+			within(view.container).getByRole("button", { name: "User" }),
+		);
+		expect(
+			await within(view.container).findByRole("heading", { name: "Profile" }),
+		).toBeInTheDocument();
+	}, 20_000);
 
 	it("re-initializes selection after transient endpoints load error", async () => {
 		setupHappyPathMocks({

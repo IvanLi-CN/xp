@@ -84,13 +84,13 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Node runtime admin APIs | HTTP API | internal | New | ./contracts/http-apis.md | backend | web | 列表/详情/SSE |
-| Node runtime internal APIs | HTTP API | internal | New | ./contracts/http-apis.md | backend | backend | local 汇总转发 |
-| cloudflared runtime config | CLI | internal | Modify | ./contracts/cli.md | ops | xp/xp-ops | 新增 `XP_CLOUDFLARED_*` |
-| service_runtime.json | File format | internal | New | ./contracts/file-formats.md | backend | backend | 本地持久化 |
-| runtime SSE events | Events | internal | New | ./contracts/events.md | backend | web | hello/snapshot/event/node_error/lagged |
+| 接口（Name）               | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                          |
+| -------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | ------------------- | -------------------------------------- |
+| Node runtime admin APIs    | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web                 | 列表/详情/SSE                          |
+| Node runtime internal APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | backend             | local 汇总转发                         |
+| cloudflared runtime config | CLI          | internal      | Modify         | ./contracts/cli.md          | ops             | xp/xp-ops           | 新增 `XP_CLOUDFLARED_*`                |
+| service_runtime.json       | File format  | internal      | New            | ./contracts/file-formats.md | backend         | backend             | 本地持久化                             |
+| runtime SSE events         | Events       | internal      | New            | ./contracts/events.md       | backend         | web                 | hello/snapshot/event/node_error/lagged |
 
 ### 契约文档（按 Kind 拆分）
 
