@@ -235,8 +235,17 @@ fn write_systemd_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Ex
         return Ok(());
     }
 
-    let mut allowed_units = vec!["xray.service".to_string()];
+    let mut allowed_units = vec![
+        "xray.service".to_string(),
+        "cloudflared.service".to_string(),
+    ];
     if let Some(unit) = read_env_value(paths, "XP_XRAY_SYSTEMD_UNIT")
+        && !unit.trim().is_empty()
+        && !allowed_units.contains(&unit)
+    {
+        allowed_units.push(unit);
+    }
+    if let Some(unit) = read_env_value(paths, "XP_CLOUDFLARED_SYSTEMD_UNIT")
         && !unit.trim().is_empty()
         && !allowed_units.contains(&unit)
     {
@@ -246,7 +255,7 @@ fn write_systemd_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Ex
     let allowed_units_json = serde_json::to_string(&allowed_units)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
-    // Allow `xp` service user to restart specific xray unit(s) without interactive auth.
+    // Allow `xp` service user to restart specific runtime unit(s) without interactive auth.
     // This does not grant broader systemd management rights.
     let template = r#"// Managed by xp-ops (xp init)
 polkit.addRule(function(action, subject) {
@@ -285,15 +294,21 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
 
     let existing = fs::read_to_string(&p).unwrap_or_default();
 
-    let mut services = vec!["xray".to_string()];
+    let mut services = vec!["xray".to_string(), "cloudflared".to_string()];
     if let Some(name) = read_env_value(paths, "XP_XRAY_OPENRC_SERVICE")
         && !name.trim().is_empty()
         && !services.contains(&name)
     {
         services.push(name);
     }
+    if let Some(name) = read_env_value(paths, "XP_CLOUDFLARED_OPENRC_SERVICE")
+        && !name.trim().is_empty()
+        && !services.contains(&name)
+    {
+        services.push(name);
+    }
 
-    let marker = "# Managed by xp-ops: allow xp to restart xray";
+    let marker = "# Managed by xp-ops: allow xp to restart runtime services";
     let mut missing_rules: Vec<String> = Vec::new();
     for svc in &services {
         let rule = format!("permit nopass xp as root cmd /sbin/rc-service args {svc} restart");
@@ -551,6 +566,7 @@ mod tests {
         let p = paths.etc_polkit_xp_xray_restart_rule();
         let content = fs::read_to_string(p).unwrap();
         assert!(content.contains("xray.service"));
+        assert!(content.contains("cloudflared.service"));
         assert!(content.contains("custom-xray.service"));
     }
 
@@ -568,6 +584,9 @@ mod tests {
         assert!(doas.contains("permit nopass root"));
         assert!(
             doas.contains("permit nopass xp as root cmd /sbin/rc-service args my-xray restart")
+        );
+        assert!(
+            doas.contains("permit nopass xp as root cmd /sbin/rc-service args cloudflared restart")
         );
     }
 

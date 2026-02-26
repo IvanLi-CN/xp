@@ -9,6 +9,13 @@ import type {
 	AdminGrantGroupDetail,
 	AdminGrantGroupReplaceRequest,
 } from "../../src/api/adminGrantGroups";
+import type {
+	AdminNodeRuntimeDetailResponse,
+	AdminNodeRuntimeListItem,
+	NodeRuntimeComponent,
+	NodeRuntimeEvent,
+	NodeRuntimeHistorySlot,
+} from "../../src/api/adminNodeRuntime";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
@@ -138,6 +145,23 @@ function errorResponse(
 	);
 }
 
+function sseResponse(
+	events: Array<{ event: string; data: unknown }>,
+): Response {
+	const body = events
+		.map((item) => {
+			return `event: ${item.event}\ndata: ${JSON.stringify(item.data)}\n\n`;
+		})
+		.join("");
+	return new Response(body, {
+		status: 200,
+		headers: {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+		},
+	});
+}
+
 function ensureEndpointRecord(
 	seed: MockEndpointSeed,
 	counters: MockState["counters"],
@@ -169,6 +193,136 @@ function deriveGlobalServerNames(
 		out.push(trimmed);
 	}
 	return out;
+}
+
+function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
+	const now = new Date();
+	const base = new Date(now);
+	base.setSeconds(0, 0);
+	base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
+
+	const slots: NodeRuntimeHistorySlot[] = [];
+	for (let i = total - 1; i >= 0; i -= 1) {
+		const at = new Date(base.getTime() - i * 30 * 60 * 1000);
+		let status: NodeRuntimeHistorySlot["status"] = "up";
+		if (i % 37 === 0) status = "degraded";
+		if (i % 121 === 0) status = "down";
+		if (i % 79 === 0) status = "unknown";
+		slots.push({
+			slot_start: at.toISOString(),
+			status,
+		});
+	}
+	return slots;
+}
+
+function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
+	const downNode = node.node_id.endsWith("2");
+	return [
+		{
+			component: "xp",
+			status: "up",
+			last_ok_at: new Date().toISOString(),
+			last_fail_at: null,
+			down_since: null,
+			consecutive_failures: 0,
+			recoveries_observed: 0,
+			restart_attempts: 0,
+			last_restart_at: null,
+			last_restart_fail_at: null,
+		},
+		{
+			component: "xray",
+			status: downNode ? "down" : "up",
+			last_ok_at: new Date(Date.now() - 60_000).toISOString(),
+			last_fail_at: downNode
+				? new Date(Date.now() - 30_000).toISOString()
+				: null,
+			down_since: downNode ? new Date(Date.now() - 30_000).toISOString() : null,
+			consecutive_failures: downNode ? 2 : 0,
+			recoveries_observed: 1,
+			restart_attempts: downNode ? 1 : 0,
+			last_restart_at: downNode
+				? new Date(Date.now() - 20_000).toISOString()
+				: null,
+			last_restart_fail_at: null,
+		},
+		{
+			component: "cloudflared",
+			status: downNode ? "down" : "disabled",
+			last_ok_at: downNode ? new Date(Date.now() - 90_000).toISOString() : null,
+			last_fail_at: downNode
+				? new Date(Date.now() - 10_000).toISOString()
+				: null,
+			down_since: downNode ? new Date(Date.now() - 10_000).toISOString() : null,
+			consecutive_failures: downNode ? 3 : 0,
+			recoveries_observed: 0,
+			restart_attempts: downNode ? 1 : 0,
+			last_restart_at: downNode
+				? new Date(Date.now() - 10_000).toISOString()
+				: null,
+			last_restart_fail_at: downNode
+				? new Date(Date.now() - 10_000).toISOString()
+				: null,
+		},
+	];
+}
+
+function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
+	return [
+		{
+			event_id: `evt-${node.node_id}-1`,
+			occurred_at: new Date(Date.now() - 20_000).toISOString(),
+			component: "xray",
+			kind: "status_changed",
+			message: "xray status changed: up -> down",
+			from_status: "up",
+			to_status: "down",
+		},
+		{
+			event_id: `evt-${node.node_id}-2`,
+			occurred_at: new Date(Date.now() - 10_000).toISOString(),
+			component: "cloudflared",
+			kind: "restart_failed",
+			message: "cloudflared restart request failed",
+			from_status: null,
+			to_status: "down",
+		},
+	];
+}
+
+function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
+	const components = buildRuntimeComponents(node);
+	const slots = buildRuntimeSlots();
+	const summaryStatus: AdminNodeRuntimeListItem["summary"]["status"] =
+		components.some((component) => component.status === "down")
+			? "degraded"
+			: "up";
+	return {
+		node_id: node.node_id,
+		node_name: node.node_name,
+		api_base_url: node.api_base_url,
+		access_host: node.access_host,
+		summary: {
+			status: summaryStatus,
+			updated_at: new Date().toISOString(),
+		},
+		components,
+		recent_slots: slots,
+	};
+}
+
+function buildNodeRuntimeDetail(
+	node: AdminNode,
+): AdminNodeRuntimeDetailResponse {
+	const item = buildNodeRuntimeListItem(node);
+	return {
+		node: node,
+		summary: item.summary,
+		components: item.components,
+		recent_slots: item.recent_slots,
+		events: buildRuntimeEvents(node),
+	};
 }
 
 function refreshGlobalEndpointReality(state: MockState): void {
@@ -540,6 +694,58 @@ async function handleRequest(
 
 	if (path === "/api/admin/nodes" && method === "GET") {
 		return jsonResponse({ items: clone(state.nodes) });
+	}
+
+	if (path === "/api/admin/nodes/runtime" && method === "GET") {
+		const items = state.nodes.map((node) => buildNodeRuntimeListItem(node));
+		return jsonResponse({
+			partial: false,
+			unreachable_nodes: [],
+			items: clone(items),
+		});
+	}
+
+	const nodeRuntimeMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/runtime$/,
+	);
+	if (nodeRuntimeMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeRuntimeMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		return jsonResponse(clone(buildNodeRuntimeDetail(node)));
+	}
+
+	const nodeRuntimeEventsMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/runtime\/events$/,
+	);
+	if (nodeRuntimeEventsMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeRuntimeEventsMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		const detail = buildNodeRuntimeDetail(node);
+		return sseResponse([
+			{
+				event: "hello",
+				data: {
+					node_id: node.node_id,
+					connected_at: new Date().toISOString(),
+				},
+			},
+			{
+				event: "snapshot",
+				data: {
+					node_id: node.node_id,
+					summary: detail.summary,
+					components: detail.components,
+					recent_slots: detail.recent_slots,
+					events: detail.events,
+				},
+			},
+		]);
 	}
 
 	const userNodeQuotasMatch = path.match(

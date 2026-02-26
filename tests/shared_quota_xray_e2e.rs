@@ -59,6 +59,13 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         xray_restart_timeout_secs: 5,
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
+        cloudflared_health_interval_secs: 5,
+        cloudflared_health_fails_before_down: 3,
+        cloudflared_restart_mode: xp::config::XrayRestartMode::None,
+        cloudflared_restart_cooldown_secs: 30,
+        cloudflared_restart_timeout_secs: 5,
+        cloudflared_systemd_unit: "cloudflared.service".to_string(),
+        cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: test_admin_token_hash("testtoken"),
         node_name: "node-1".to_string(),
@@ -250,6 +257,15 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
+    let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
+        std::sync::Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -262,6 +278,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         store.clone(),
         reconcile.clone(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -501,6 +518,15 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
+    let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
+        std::sync::Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -513,6 +539,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         store.clone(),
         reconcile.clone(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,
@@ -755,6 +782,15 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         std::sync::Arc::new(LocalRaft::new(store.clone(), rx));
 
     let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = xp::cloudflared_supervisor::CloudflaredHealthHandle::new_with_status(
+        xp::cloudflared_supervisor::CloudflaredStatus::Disabled,
+    );
+    let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
+        std::sync::Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
         store.clone(),
@@ -767,6 +803,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         store.clone(),
         reconcile.clone(),
         xray_health,
+        node_runtime,
         endpoint_probe,
         cluster,
         cluster_ca_pem,

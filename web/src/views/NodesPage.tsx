@@ -1,17 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
-import { fetchAdminNodes } from "../api/adminNodes";
+import {
+	type NodeRuntimeComponent,
+	fetchAdminNodesRuntime,
+} from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
-import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
-import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
@@ -22,6 +23,34 @@ function formatErrorMessage(error: unknown): string {
 		return `${error.status}${code}: ${error.message}`;
 	}
 	return String(error);
+}
+
+function componentBadgeClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "badge badge-success badge-sm";
+		case "down":
+			return "badge badge-error badge-sm";
+		case "unknown":
+			return "badge badge-warning badge-sm";
+		case "disabled":
+			return "badge badge-ghost badge-sm";
+		default:
+			return "badge badge-outline badge-sm";
+	}
+}
+
+function historySlotClass(status: string): string {
+	switch (status) {
+		case "up":
+			return "bg-success";
+		case "degraded":
+			return "bg-warning";
+		case "down":
+			return "bg-error";
+		default:
+			return "bg-base-300";
+	}
 }
 
 function highlightShell(text: string) {
@@ -56,6 +85,178 @@ function highlightShell(text: string) {
 	});
 }
 
+const BADGE_GAP_PX = 4;
+
+type ProblematicComponent = Pick<NodeRuntimeComponent, "component" | "status">;
+
+function overflowBadgeClass(problematic: ProblematicComponent[]): string {
+	return problematic.some((item) => item.status === "down")
+		? "badge badge-error badge-sm"
+		: "badge badge-warning badge-sm";
+}
+
+function ProblematicComponentsField({
+	problematic,
+}: {
+	problematic: ProblematicComponent[];
+}) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const componentBadgeRefs = useRef<Array<HTMLSpanElement | null>>([]);
+	const plusBadgeRefs = useRef<Record<number, HTMLSpanElement | null>>({});
+	const [visibleCount, setVisibleCount] = useState(problematic.length);
+
+	useEffect(() => {
+		setVisibleCount(problematic.length);
+	}, [problematic.length]);
+
+	useLayoutEffect(() => {
+		if (problematic.length <= 1) return;
+
+		let frame = 0;
+		const measure = () => {
+			const container = containerRef.current;
+			if (!container) return;
+
+			const availableWidth = Math.floor(container.clientWidth);
+			if (availableWidth <= 0) return;
+
+			const componentWidths = problematic.map((_, index) =>
+				Math.ceil(
+					componentBadgeRefs.current[index]?.getBoundingClientRect().width ?? 0,
+				),
+			);
+			if (componentWidths.some((width) => width <= 0)) {
+				frame = window.requestAnimationFrame(measure);
+				return;
+			}
+
+			const prefixWidths = new Array(problematic.length + 1).fill(0);
+			for (let i = 0; i < problematic.length; i += 1) {
+				prefixWidths[i + 1] = prefixWidths[i] + componentWidths[i];
+			}
+
+			const allVisibleWidth =
+				prefixWidths[problematic.length] +
+				BADGE_GAP_PX * Math.max(0, problematic.length - 1);
+
+			let bestVisibleCount = 0;
+			if (allVisibleWidth <= availableWidth) {
+				bestVisibleCount = problematic.length;
+			} else {
+				for (let shown = 0; shown <= problematic.length; shown += 1) {
+					const remaining = problematic.length - shown;
+					const shownWidth =
+						prefixWidths[shown] + BADGE_GAP_PX * Math.max(0, shown - 1);
+
+					if (remaining === 0) {
+						if (shownWidth <= availableWidth) {
+							bestVisibleCount = shown;
+						}
+						continue;
+					}
+
+					const plusWidth = Math.ceil(
+						plusBadgeRefs.current[remaining]?.getBoundingClientRect().width ??
+							0,
+					);
+					if (plusWidth <= 0) continue;
+
+					const combinedWidth =
+						shownWidth + (shown > 0 ? BADGE_GAP_PX : 0) + plusWidth;
+					if (combinedWidth <= availableWidth) {
+						bestVisibleCount = shown;
+					}
+				}
+			}
+
+			setVisibleCount((prev) =>
+				prev === bestVisibleCount ? prev : bestVisibleCount,
+			);
+		};
+
+		measure();
+		const observer = new ResizeObserver(() => measure());
+		if (containerRef.current) observer.observe(containerRef.current);
+
+		return () => {
+			if (frame) window.cancelAnimationFrame(frame);
+			observer.disconnect();
+		};
+	}, [problematic]);
+
+	if (problematic.length === 0) {
+		return (
+			<span
+				className="badge badge-success badge-sm"
+				title="All monitored components are healthy."
+			>
+				normal
+			</span>
+		);
+	}
+
+	const shownCount = Math.max(0, Math.min(visibleCount, problematic.length));
+	const shown = problematic.slice(0, shownCount);
+	const remaining = problematic.slice(shownCount);
+	const remainingTitle = remaining
+		.map((item) => `${item.component}:${item.status}`)
+		.join(", ");
+
+	return (
+		<div ref={containerRef} className="max-w-full overflow-hidden">
+			<div className="inline-flex items-center gap-1 whitespace-nowrap">
+				{shown.map((item, index) => (
+					<span
+						key={`${item.component}-${item.status}-${index}`}
+						className={componentBadgeClass(item.status)}
+						title={`${item.component}:${item.status}`}
+					>
+						{item.component}:{item.status}
+					</span>
+				))}
+				{remaining.length > 0 ? (
+					<span
+						className={overflowBadgeClass(remaining)}
+						title={remainingTitle}
+					>
+						+{remaining.length}
+					</span>
+				) : null}
+			</div>
+			<div
+				aria-hidden="true"
+				className="pointer-events-none fixed left-[-9999px] top-0 invisible whitespace-nowrap"
+			>
+				{problematic.map((item, index) => (
+					<span
+						key={`measure-${item.component}-${index}`}
+						ref={(el) => {
+							componentBadgeRefs.current[index] = el;
+						}}
+						className={componentBadgeClass(item.status)}
+					>
+						{item.component}:{item.status}
+					</span>
+				))}
+				{Array.from({ length: problematic.length }, (_, i) => {
+					const count = i + 1;
+					return (
+						<span
+							key={`measure-plus-${count}`}
+							ref={(el) => {
+								plusBadgeRefs.current[count] = el;
+							}}
+							className="badge badge-sm"
+						>
+							+{count}
+						</span>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
@@ -71,9 +272,9 @@ export function NodesPage() {
 	});
 
 	const nodesQuery = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 
 	const joinCommand = useMemo(() => {
@@ -205,8 +406,19 @@ export function NodesPage() {
 			);
 		}
 
+		const unreachable = nodesQuery.data?.unreachable_nodes ?? [];
+		const partial = nodesQuery.data?.partial ?? false;
+
 		return (
 			<div className="space-y-3">
+				{partial ? (
+					<div className="alert alert-warning">
+						<span className="text-sm">
+							Partial result: unreachable node(s):{" "}
+							<span className="font-mono">{unreachable.join(", ") || "-"}</span>
+						</span>
+					</div>
+				) : null}
 				<div className="flex items-center justify-between gap-3">
 					<p className="text-sm opacity-70">
 						{nodes.length} node{nodes.length === 1 ? "" : "s"} total
@@ -219,57 +431,72 @@ export function NodesPage() {
 						Refresh
 					</Button>
 				</div>
-				<ResourceTable
-					headers={[
-						{ key: "node_id", label: "Node ID" },
-						{ key: "node_name", label: "Name" },
-						{ key: "access_host", label: "Access host" },
-						{ key: "api_base_url", label: "API base URL" },
-					]}
-				>
-					{nodes.map((node) => (
-						<tr key={node.node_id}>
-							<td className="font-mono text-sm">
-								<Link
-									to="/nodes/$nodeId"
-									params={{ nodeId: node.node_id }}
-									className="link link-primary"
-								>
-									{node.node_id}
-								</Link>
-							</td>
-							<td>
-								<Link
-									to="/nodes/$nodeId"
-									params={{ nodeId: node.node_id }}
-									className="link link-hover"
-								>
-									{node.node_name || "(unnamed)"}
-								</Link>
-							</td>
-							<td className="font-mono text-sm">{node.access_host || "-"}</td>
-							<td className="font-mono text-sm">
-								{node.api_base_url ? (
-									<a
-										href={node.api_base_url}
-										className="link link-primary inline-flex items-center gap-1"
+				<div className="rounded-box border border-base-300 bg-base-100 shadow-sm">
+					<div className="grid grid-cols-2 gap-3 border-b border-base-200 px-4 py-3 font-semibold">
+						<div className="flex min-w-0 flex-col gap-1 leading-tight">
+							<span className="truncate whitespace-nowrap">Name</span>
+							<span className="truncate whitespace-nowrap opacity-70">
+								Node ID
+							</span>
+						</div>
+						<div className="flex min-w-0 flex-col gap-1 leading-tight">
+							<span className="truncate whitespace-nowrap">Components</span>
+							<span className="truncate whitespace-nowrap opacity-70">
+								7d (30m)
+							</span>
+						</div>
+					</div>
+					<div className="divide-y divide-base-200">
+						{nodes.map((node) => (
+							<div
+								key={node.node_id}
+								className="grid grid-cols-2 gap-3 px-4 py-3"
+							>
+								<div className="flex min-w-0 flex-col gap-1">
+									<Link
+										to="/nodes/$nodeId"
+										params={{ nodeId: node.node_id }}
+										className="link link-primary block max-w-full truncate whitespace-nowrap"
+										title={node.node_name || "(unnamed)"}
 									>
-										<span aria-hidden="true">
-											<Icon
-												name="tabler:external-link"
-												size={16}
-												className="opacity-70"
+										{node.node_name || "(unnamed)"}
+									</Link>
+									<Link
+										to="/nodes/$nodeId"
+										params={{ nodeId: node.node_id }}
+										className="link link-hover block max-w-full truncate whitespace-nowrap font-mono text-sm opacity-70"
+										title={node.node_id}
+									>
+										{node.node_id}
+									</Link>
+								</div>
+								<div className="flex min-w-0 flex-col gap-1">
+									<div className="max-w-full truncate whitespace-nowrap">
+										<ProblematicComponentsField
+											problematic={node.components.filter(
+												(component) =>
+													component.status === "down" ||
+													component.status === "unknown",
+											)}
+										/>
+									</div>
+									<div
+										className="grid h-4 w-full grid-flow-col auto-cols-fr overflow-hidden rounded-sm"
+										title="Last 7 days status (30-minute slots)."
+									>
+										{node.recent_slots.map((slot) => (
+											<div
+												key={slot.slot_start}
+												className={`h-4 ${historySlotClass(slot.status)}`}
+												title={`${slot.slot_start} • ${slot.status}`}
 											/>
-										</span>
-										{node.api_base_url}
-									</a>
-								) : (
-									"-"
-								)}
-							</td>
-						</tr>
-					))}
-				</ResourceTable>
+										))}
+									</div>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
 			</div>
 		);
 	})();

@@ -140,7 +140,104 @@
 
 返回：Node（略，字段同上）。
 
-### 2.6 更新节点（管理员）
+### 2.6 查询节点运行态摘要列表（管理员）
+
+`GET /api/admin/nodes/runtime`
+
+返回：
+
+```json
+{
+  "partial": false,
+  "unreachable_nodes": [],
+  "items": [
+    {
+      "node_id": "01J...",
+      "node_name": "node-1",
+      "access_host": "example.com",
+      "api_base_url": "https://node-1.internal:8443",
+      "summary": {
+        "status": "up|degraded|down|unknown",
+        "updated_at": "RFC3339"
+      },
+      "components": [
+        {
+          "component": "xp|xray|cloudflared",
+          "status": "disabled|up|down|unknown",
+          "last_ok_at": "RFC3339|null",
+          "last_fail_at": "RFC3339|null",
+          "down_since": "RFC3339|null",
+          "consecutive_failures": 0,
+          "recoveries_observed": 0,
+          "restart_attempts": 0,
+          "last_restart_at": "RFC3339|null",
+          "last_restart_fail_at": "RFC3339|null"
+        }
+      ],
+      "recent_slots": [
+        {
+          "slot_start": "RFC3339",
+          "status": "up|degraded|down|unknown"
+        }
+      ]
+    }
+  ]
+}
+```
+
+> `partial=true` 表示跨节点聚合时有不可达节点，`unreachable_nodes` 给出对应 `node_id` 列表。
+
+### 2.7 查询单节点运行态详情（管理员）
+
+`GET /api/admin/nodes/{node_id}/runtime?events_limit=200`
+
+返回：
+
+```json
+{
+  "node": {
+    "node_id": "01J...",
+    "node_name": "node-1",
+    "access_host": "example.com",
+    "api_base_url": "https://node-1.internal:8443"
+  },
+  "summary": { "status": "up|degraded|down|unknown", "updated_at": "RFC3339" },
+  "components": [],
+  "recent_slots": [],
+  "events": [
+    {
+      "event_id": "01J...",
+      "occurred_at": "RFC3339",
+      "component": "xp|xray|cloudflared",
+      "kind": "status_changed|restart_requested|restart_succeeded|restart_failed",
+      "message": "string",
+      "from_status": "disabled|up|down|unknown|null",
+      "to_status": "disabled|up|down|unknown|null"
+    }
+  ]
+}
+```
+
+### 2.8 查询单节点运行态事件流（管理员，SSE）
+
+`GET /api/admin/nodes/{node_id}/runtime/events`
+
+SSE 事件类型：
+
+- `hello`：连接元信息
+- `snapshot`：当前运行态快照
+- `event`：关键事件（状态变更/重启请求结果）
+- `node_error`：跨节点代理错误
+- `lagged`：客户端消费落后
+
+### 2.9 节点运行态内部接口（internal signature）
+
+- `GET /api/admin/_internal/nodes/runtime/local?events_limit=200`
+- `GET /api/admin/_internal/nodes/runtime/local/events`（SSE）
+
+仅接受 internal signature 鉴权，用于 leader/follower 之间跨节点聚合与事件转发。
+
+### 2.10 更新节点（管理员）
 
 > 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `access_host`），**不涉及** Raft membership 变更与节点移除。
 

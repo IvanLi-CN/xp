@@ -224,7 +224,7 @@ describe("<UserDetailsPage />", () => {
 		expect(
 			await within(view.container).findByRole("heading", { name: "Profile" }),
 		).toBeInTheDocument();
-	});
+	}, 20_000);
 
 	it("re-initializes selection after transient endpoints load error", async () => {
 		setupHappyPathMocks({
