@@ -2383,7 +2383,10 @@ async fn put_user_access_updates_member_note_and_allows_clear() {
 
     let res = app
         .clone()
-        .oneshot(req_authed("GET", &format!("/api/admin/users/{user_id}/access")))
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/access"),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -3565,7 +3568,10 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{}/access", user["user_id"].as_str().unwrap()),
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
               "items": [{
                 "endpoint_id": endpoint_id,
@@ -3644,7 +3650,10 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{}/access", user["user_id"].as_str().unwrap()),
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
               "items": [{
                 "endpoint_id": endpoint_id,

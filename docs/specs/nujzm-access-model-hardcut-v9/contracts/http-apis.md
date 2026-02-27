@@ -81,4 +81,3 @@
 
 - `400 invalid_request`: endpoint 不存在、重复 endpoint、payload 结构非法。
 - `404 not_found`: user 不存在。
-

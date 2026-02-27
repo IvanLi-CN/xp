@@ -656,7 +656,10 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
 
     let res = app
         .clone()
-        .oneshot(req_authed("GET", &format!("/api/admin/users/{p2_user_id}/access")))
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{p2_user_id}/access"),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);

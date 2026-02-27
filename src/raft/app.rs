@@ -584,13 +584,7 @@ mod tests {
             )
             .unwrap();
         let grant = store
-            .create_grant(
-                                user.user_id,
-                endpoint.endpoint_id,
-                1,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
             .unwrap();
         store
             .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())

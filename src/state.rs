@@ -1836,7 +1836,10 @@ impl DesiredStateCommand {
 
                 let mut requested = BTreeMap::<String, Option<String>>::new();
                 for item in items {
-                    if requested.insert(item.endpoint_id.clone(), item.note.clone()).is_some() {
+                    if requested
+                        .insert(item.endpoint_id.clone(), item.note.clone())
+                        .is_some()
+                    {
                         return Err(DomainError::GrantPairConflict {
                             user_id: user_id.clone(),
                             endpoint_id: item.endpoint_id.clone(),
@@ -1893,7 +1896,9 @@ impl DesiredStateCommand {
                             note: note.clone(),
                             credentials: existing.credentials.clone(),
                         };
-                        state.grants.insert(updated_grant.grant_id.clone(), updated_grant);
+                        state
+                            .grants
+                            .insert(updated_grant.grant_id.clone(), updated_grant);
                         updated += 1;
                     } else {
                         let grant_id = new_ulid_string();
@@ -2672,13 +2677,7 @@ impl JsonSnapshotStore {
         enabled: bool,
         note: Option<String>,
     ) -> Result<Grant, StoreError> {
-        let grant = self.build_grant(
-            user_id,
-            endpoint_id,
-            quota_limit_bytes,
-            enabled,
-            note,
-        )?;
+        let grant = self.build_grant(user_id, endpoint_id, quota_limit_bytes, enabled, note)?;
         DesiredStateCommand::UpsertGrant {
             grant: grant.clone(),
         }
@@ -3326,13 +3325,7 @@ mod tests {
             )
             .unwrap();
         let grant_id = store
-            .create_grant(
-                user.user_id,
-                endpoint.endpoint_id,
-                1024,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1024, true, None)
             .unwrap()
             .grant_id;
         drop(store);
@@ -3376,17 +3369,13 @@ mod tests {
             )
             .unwrap();
         let grant_id = store
-            .create_grant(
-                user.user_id,
-                endpoint.endpoint_id,
-                1024,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1024, true, None)
             .unwrap()
             .grant_id;
 
-        store.set_quota_banned(&grant_id, banned_at.clone()).unwrap();
+        store
+            .set_quota_banned(&grant_id, banned_at.clone())
+            .unwrap();
         let usage = store.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at.clone()));
