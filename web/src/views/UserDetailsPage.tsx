@@ -10,10 +10,7 @@ import {
 	putAdminUserGrants,
 } from "../api/adminUserGrants";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
-import {
-	fetchAdminUserNodeQuotas,
-	putAdminUserNodeQuota,
-} from "../api/adminUserNodeQuotas";
+import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
 	deleteAdminUser,
 	fetchAdminUser,
@@ -328,9 +325,17 @@ export function UserDetailsPage() {
 	const selectedEndpointIds = useMemo(() => {
 		return Array.from(new Set(Object.values(selectedByCell)));
 	}, [selectedByCell]);
+	const isAccessDataLoading =
+		nodesQuery.isLoading || endpointsQuery.isLoading || grantsQuery.isLoading;
+	const isAccessReady =
+		accessInitForUserId === userId &&
+		!isAccessDataLoading &&
+		!nodesQuery.isError &&
+		!endpointsQuery.isError &&
+		!grantsQuery.isError;
 
 	async function applyAccessMatrix() {
-		if (!adminToken || !userId) return;
+		if (!adminToken || !userId || !isAccessReady) return;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
@@ -360,6 +365,27 @@ export function UserDetailsPage() {
 
 	async function saveUserProfile() {
 		if (!adminToken || !userId) return;
+		const normalizedDisplayName = displayName.trim();
+		if (normalizedDisplayName.length === 0) {
+			setUserSaveError("Display name is required.");
+			return;
+		}
+		if (
+			resetPolicy === "monthly" &&
+			(!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31)
+		) {
+			setUserSaveError("Day of month must be between 1 and 31.");
+			return;
+		}
+		if (
+			!Number.isInteger(resetTzOffsetMinutes) ||
+			resetTzOffsetMinutes < -720 ||
+			resetTzOffsetMinutes > 840
+		) {
+			setUserSaveError("TZ offset must be between -720 and 840 minutes.");
+			return;
+		}
+
 		setIsSavingUser(true);
 		setUserSaveError(null);
 		try {
@@ -375,7 +401,7 @@ export function UserDetailsPage() {
 							tz_offset_minutes: resetTzOffsetMinutes,
 						};
 			await patchAdminUser(adminToken, userId, {
-				display_name: displayName,
+				display_name: normalizedDisplayName,
 				quota_reset: quotaReset,
 			});
 			await userQuery.refetch();
@@ -385,13 +411,6 @@ export function UserDetailsPage() {
 		} finally {
 			setIsSavingUser(false);
 		}
-	}
-
-	async function applyNodeQuota(nodeId: string, nextBytes: number) {
-		if (!adminToken) return;
-		await putAdminUserNodeQuota(adminToken, userId, nodeId, nextBytes);
-		await nodeQuotasQuery.refetch();
-		await nodeQuotaStatusQuery.refetch();
 	}
 
 	async function confirmResetToken() {
@@ -435,6 +454,15 @@ export function UserDetailsPage() {
 
 	if (userQuery.isLoading) {
 		return <PageState variant="loading" title="Loading user" />;
+	}
+	if (adminToken.length === 0) {
+		return (
+			<PageState
+				variant="empty"
+				title="Admin token required"
+				description="Set an admin token to manage user details."
+			/>
+		);
 	}
 	if (userQuery.isError) {
 		return (
@@ -577,6 +605,9 @@ export function UserDetailsPage() {
 
 					<div className="rounded-box border border-base-300 bg-base-100 p-4 space-y-3">
 						<h3 className="font-semibold">Node quotas</h3>
+						<div className="alert py-2 text-sm">
+							Node quota editing is currently unavailable in this view.
+						</div>
 						{nodesQuery.isLoading ? (
 							<PageState variant="loading" title="Loading nodes" />
 						) : null}
@@ -602,9 +633,8 @@ export function UserDetailsPage() {
 									</div>
 									<NodeQuotaEditor
 										value={quota?.quota_limit_bytes ?? 0}
-										onApply={(nextBytes) =>
-											applyNodeQuota(node.node_id, nextBytes)
-										}
+										onApply={() => Promise.resolve()}
+										disabled
 									/>
 								</div>
 							);
@@ -619,7 +649,11 @@ export function UserDetailsPage() {
 						<div className="text-sm opacity-70">
 							Selected endpoints: {selectedEndpointIds.length}
 						</div>
-						<Button onClick={applyAccessMatrix} loading={isApplyingAccess}>
+						<Button
+							onClick={applyAccessMatrix}
+							loading={isApplyingAccess}
+							disabled={!isAccessReady}
+						>
 							Apply access
 						</Button>
 					</div>
@@ -643,11 +677,7 @@ export function UserDetailsPage() {
 							label: protocol.label,
 						}))}
 						cells={cells}
-						disabled={
-							nodesQuery.isLoading ||
-							endpointsQuery.isLoading ||
-							grantsQuery.isLoading
-						}
+						disabled={isAccessDataLoading || !isAccessReady}
 						onToggleCell={(nodeId, protocolId) =>
 							toggleCell(nodeId, protocolId as SupportedProtocolId)
 						}

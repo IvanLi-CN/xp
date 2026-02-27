@@ -53,11 +53,15 @@ vi.mock("../api/adminUserGrants");
 vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
 
+const { mockReadAdminToken } = vi.hoisted(() => ({
+	mockReadAdminToken: vi.fn(() => "admintoken"),
+}));
+
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();
 	return {
 		...actual,
-		readAdminToken: () => "admintoken",
+		readAdminToken: mockReadAdminToken,
 	};
 });
 
@@ -209,6 +213,7 @@ function setupMocks(args?: {
 describe("<UserDetailsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		mockReadAdminToken.mockReturnValue("admintoken");
 	});
 
 	afterEach(() => {
@@ -305,6 +310,15 @@ describe("<UserDetailsPage />", () => {
 			expect(patchAdminUser).toHaveBeenCalled();
 		});
 	});
+
+	it("shows token-required state when admin token is missing", async () => {
+		mockReadAdminToken.mockReturnValue("");
+		setupMocks();
+		renderPage();
+
+		expect(await screenByText("Admin token required")).toBeTruthy();
+		expect(fetchAdminUser).not.toHaveBeenCalled();
+	});
 });
 
 async function screenByRole(role: string, name: string): Promise<HTMLElement> {
@@ -315,4 +329,9 @@ async function screenByRole(role: string, name: string): Promise<HTMLElement> {
 async function screenByLabel(label: string): Promise<HTMLElement> {
 	const { findByLabelText } = await import("@testing-library/react");
 	return findByLabelText(document.body, label);
+}
+
+async function screenByText(text: string): Promise<HTMLElement> {
+	const { findByText } = await import("@testing-library/react");
+	return findByText(document.body, text);
 }

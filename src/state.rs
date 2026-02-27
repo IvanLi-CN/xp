@@ -1820,25 +1820,31 @@ impl DesiredStateCommand {
                         .or_insert_with(|| grant.clone());
                 }
 
-                let mut created = 0usize;
+                let existing_endpoint_ids = existing_by_endpoint
+                    .keys()
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                let desired_endpoint_ids =
+                    desired_by_endpoint.keys().cloned().collect::<BTreeSet<_>>();
+
+                let created = desired_endpoint_ids
+                    .difference(&existing_endpoint_ids)
+                    .count();
                 let mut updated = 0usize;
-                let mut deleted = 0usize;
+                let deleted = existing_endpoint_ids
+                    .difference(&desired_endpoint_ids)
+                    .count();
 
                 // Delete all existing grants for this user first, then materialize the desired
                 // set. This guarantees hard-cut semantics even for legacy duplicates.
                 for grant_id in user_grant_ids {
-                    if state.grants.remove(&grant_id).is_some() {
-                        deleted += 1;
-                    }
+                    let _ = state.grants.remove(&grant_id);
                 }
 
                 for (endpoint_id, mut desired) in desired_by_endpoint {
                     if let Some(existing) = existing_by_endpoint.get(&endpoint_id) {
                         desired.grant_id = existing.grant_id.clone();
                         desired.credentials = existing.credentials.clone();
-                        updated += 1;
-                    } else {
-                        created += 1;
                     }
 
                     if let Some(endpoint) = state.endpoints.get(&desired.endpoint_id)
@@ -1847,6 +1853,14 @@ impl DesiredStateCommand {
                         && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
                     {
                         desired.quota_limit_bytes = quota_limit_bytes;
+                    }
+
+                    if let Some(existing) = existing_by_endpoint.get(&endpoint_id)
+                        && (existing.enabled != desired.enabled
+                            || existing.quota_limit_bytes != desired.quota_limit_bytes
+                            || existing.note != desired.note)
+                    {
+                        updated += 1;
                     }
 
                     state.grants.insert(desired.grant_id.clone(), desired);
@@ -2168,11 +2182,13 @@ impl JsonSnapshotStore {
 
         let grant_ids = state.grants.keys().collect::<BTreeSet<_>>();
         let before_usage = usage.grants.len();
+        let mut usage_migrated = false;
         usage
             .grants
             .retain(|grant_id, _| grant_ids.contains(&grant_id));
         if usage.grants.len() != before_usage {
             migrated = true;
+            usage_migrated = true;
         }
 
         let store = Self {
@@ -2184,6 +2200,9 @@ impl JsonSnapshotStore {
 
         if is_new_state || migrated {
             store.save()?;
+        }
+        if usage_migrated {
+            store.save_usage()?;
         }
 
         Ok(store)
@@ -2943,8 +2962,8 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
-            DomainError, EndpointKind, Grant, GrantCredentials, NodeQuotaReset, UserQuotaReset,
-            validate_cycle_day_of_month, validate_port,
+            DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
+            User, UserPriorityTier, UserQuotaReset, validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
         protocol::{
@@ -3032,6 +3051,62 @@ mod tests {
     }
 
     #[test]
+    fn load_or_init_persists_pruned_usage_grants() {
+        let tmp = tempfile::tempdir().unwrap();
+        let valid_grant_id = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let node_id = store.list_nodes()[0].node_id.clone();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    31234,
+                    json!({}),
+                )
+                .unwrap();
+            let grant = store
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
+                .unwrap();
+            store
+                .apply_grant_usage_sample(
+                    &grant.grant_id,
+                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-02-01T00:00:00Z".to_string(),
+                    1,
+                    0,
+                    "2026-01-01T00:00:01Z".to_string(),
+                )
+                .unwrap();
+            store.usage.grants.insert(
+                "grant_stale".to_string(),
+                GrantUsage {
+                    cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
+                    cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                    used_bytes: 10,
+                    last_uplink_total: 10,
+                    last_downlink_total: 0,
+                    last_seen_at: "2026-01-01T00:00:10Z".to_string(),
+                    quota_banned: false,
+                    quota_banned_at: None,
+                },
+            );
+            store.save_usage().unwrap();
+            grant.grant_id
+        };
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(store.get_grant_usage("grant_stale").is_none());
+        assert!(store.get_grant_usage(&valid_grant_id).is_some());
+
+        let usage_path = tmp.path().join("usage.json");
+        let bytes = fs::read(usage_path).unwrap();
+        let usage: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
+        assert!(!usage.grants.contains_key("grant_stale"));
+        assert!(usage.grants.contains_key(&valid_grant_id));
+    }
+
+    #[test]
     fn set_grant_enabled_missing_source_defaults_manual() {
         let cmd: DesiredStateCommand = serde_json::from_value(json!({
             "type": "set_grant_enabled",
@@ -3046,6 +3121,149 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn replace_user_grants_reports_delta_counts_not_physical_rewrites() {
+        let mut state = PersistedState::empty();
+        state.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        state.nodes.insert(
+            "node_1".to_string(),
+            Node {
+                node_id: "node_1".to_string(),
+                node_name: "node-1".to_string(),
+                access_host: "localhost".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        for endpoint_id in ["endpoint_1", "endpoint_2", "endpoint_3"] {
+            state.endpoints.insert(
+                endpoint_id.to_string(),
+                Endpoint {
+                    endpoint_id: endpoint_id.to_string(),
+                    node_id: "node_1".to_string(),
+                    tag: endpoint_id.to_string(),
+                    kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    port: 10_000,
+                    meta: json!({}),
+                },
+            );
+        }
+
+        let existing_ep2 = Grant {
+            grant_id: "grant_ep2".to_string(),
+            user_id: "user_1".to_string(),
+            endpoint_id: "endpoint_2".to_string(),
+            enabled: true,
+            quota_limit_bytes: 20,
+            note: Some("stable".to_string()),
+            credentials: GrantCredentials {
+                vless: None,
+                ss2022: None,
+            },
+        };
+        state.grants.insert(
+            "grant_ep1".to_string(),
+            Grant {
+                grant_id: "grant_ep1".to_string(),
+                user_id: "user_1".to_string(),
+                endpoint_id: "endpoint_1".to_string(),
+                enabled: true,
+                quota_limit_bytes: 10,
+                note: None,
+                credentials: GrantCredentials {
+                    vless: None,
+                    ss2022: None,
+                },
+            },
+        );
+        state
+            .grants
+            .insert(existing_ep2.grant_id.clone(), existing_ep2.clone());
+        state.grants.insert(
+            "grant_ep2_duplicate".to_string(),
+            Grant {
+                grant_id: "grant_ep2_duplicate".to_string(),
+                user_id: "user_1".to_string(),
+                endpoint_id: "endpoint_2".to_string(),
+                enabled: false,
+                quota_limit_bytes: 1,
+                note: Some("duplicate".to_string()),
+                credentials: GrantCredentials {
+                    vless: None,
+                    ss2022: None,
+                },
+            },
+        );
+
+        let out = DesiredStateCommand::ReplaceUserGrants {
+            user_id: "user_1".to_string(),
+            grants: vec![
+                Grant {
+                    grant_id: "ignored_ep2".to_string(),
+                    user_id: "user_1".to_string(),
+                    endpoint_id: "endpoint_2".to_string(),
+                    enabled: true,
+                    quota_limit_bytes: 20,
+                    note: Some("stable".to_string()),
+                    credentials: GrantCredentials {
+                        vless: None,
+                        ss2022: None,
+                    },
+                },
+                Grant {
+                    grant_id: "grant_ep3".to_string(),
+                    user_id: "user_1".to_string(),
+                    endpoint_id: "endpoint_3".to_string(),
+                    enabled: true,
+                    quota_limit_bytes: 30,
+                    note: None,
+                    credentials: GrantCredentials {
+                        vless: None,
+                        ss2022: None,
+                    },
+                },
+            ],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            out,
+            DesiredStateApplyResult::UserGrantsReplaced {
+                created: 1,
+                updated: 0,
+                deleted: 1,
+            }
+        );
+
+        let grants = state
+            .grants
+            .values()
+            .filter(|grant| grant.user_id == "user_1")
+            .collect::<Vec<_>>();
+        assert_eq!(grants.len(), 2);
+        assert!(grants.iter().any(|grant| {
+            grant.endpoint_id == "endpoint_2"
+                && grant.grant_id == "grant_ep2"
+                && grant.note.as_deref() == Some("stable")
+        }));
+        assert!(
+            grants
+                .iter()
+                .any(|grant| grant.endpoint_id == "endpoint_3" && grant.grant_id == "grant_ep3")
+        );
     }
 
     #[test]
