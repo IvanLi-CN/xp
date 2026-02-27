@@ -256,3 +256,93 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+const baseMockData = (meta.parameters as { mockApi?: { data?: unknown } })
+	.mockApi?.data as Record<string, unknown>;
+
+const TEN_USERS = Array.from({ length: 10 }, (_, index) => {
+	const userId = `01JQUSER000000000000000${String(index).padStart(2, "0")}`;
+	return {
+		user_id: userId,
+		display_name: `User-${String(index + 1).padStart(2, "0")}`,
+		subscription_token: `sub_${userId}`,
+		priority_tier: (index % 3 === 0 ? "p1" : index % 3 === 1 ? "p2" : "p3") as
+			| "p1"
+			| "p2"
+			| "p3",
+		quota_reset: {
+			policy: "monthly" as const,
+			day_of_month: 1,
+			tz_offset_minutes: 480,
+		},
+	};
+});
+
+const TEN_USER_GLOBAL_WEIGHTS = Object.fromEntries(
+	TEN_USERS.map((user, index) => [user.user_id, 1000 - index * 70]),
+);
+
+const TEN_USER_NODE_WEIGHTS = Object.fromEntries(
+	TEN_USERS.map((user, index) => [
+		user.user_id,
+		[
+			{
+				node_id: "node-tokyo-a",
+				weight: 1000 - index * 70,
+			},
+		],
+	]),
+);
+
+const TEN_USER_GRANT_GROUPS = [
+	{
+		group: { group_name: "group-ratio-ten-users" },
+		members: TEN_USERS.map((user, index) => {
+			if (index % 2 === 0) {
+				return {
+					user_id: user.user_id,
+					endpoint_id: "ep-tokyo-a-vless",
+					enabled: true,
+					quota_limit_bytes: 1,
+					note: null,
+					credentials: {
+						vless: {
+							uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(
+								12,
+								"0",
+							)}`,
+							email: `grant:ten-users-${index + 1}`,
+						},
+					},
+				};
+			}
+			return {
+				user_id: user.user_id,
+				endpoint_id: "ep-tokyo-a-ss",
+				enabled: true,
+				quota_limit_bytes: 1,
+				note: null,
+				credentials: {
+					ss2022: {
+						method: "2022-blake3-aes-128-gcm",
+						password: `secret-${index + 1}`,
+					},
+				},
+			};
+		}),
+	},
+];
+
+export const TenUsers: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				...baseMockData,
+				users: TEN_USERS,
+				grantGroups: TEN_USER_GRANT_GROUPS,
+				userGlobalWeights: TEN_USER_GLOBAL_WEIGHTS,
+				userNodeWeights: TEN_USER_NODE_WEIGHTS,
+			},
+		},
+	},
+};
