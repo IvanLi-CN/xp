@@ -12,8 +12,8 @@ use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
         QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserPriorityTier,
-        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month,
-        validate_port, validate_tz_offset_minutes,
+        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month, validate_port,
+        validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
@@ -854,7 +854,6 @@ mod migrate_tests {
             "grant_1".to_string(),
             Grant {
                 grant_id: "grant_1".to_string(),
-                group_name: "test-group".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
                 enabled: true,
@@ -897,11 +896,113 @@ mod migrate_tests {
             .insert("user_1".to_string(), UserGlobalWeightConfig { weight: 135 });
 
         let v8 = migrate_v7_to_v8(v7).expect("migration should succeed");
-        assert_eq!(v8.schema_version, SCHEMA_VERSION);
+        assert_eq!(v8.schema_version, SCHEMA_VERSION_V8);
         assert_eq!(
             v8.user_global_weights.get("user_1"),
             Some(&UserGlobalWeightConfig { weight: 135 })
         );
+    }
+
+    #[test]
+    fn migrate_v8_to_v9_keeps_only_effective_unique_grants() {
+        let mut v8 = PersistedState::empty();
+        v8.schema_version = SCHEMA_VERSION_V8;
+
+        v8.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        v8.nodes.insert(
+            "node_1".to_string(),
+            Node {
+                node_id: "node_1".to_string(),
+                node_name: "node-1".to_string(),
+                access_host: "localhost".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        v8.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ep".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 12345,
+                meta: serde_json::json!({}),
+            },
+        );
+
+        let base_grant = Grant {
+            grant_id: "grant_0".to_string(),
+            user_id: "user_1".to_string(),
+            endpoint_id: "endpoint_1".to_string(),
+            enabled: true,
+            quota_limit_bytes: 1,
+            note: None,
+            credentials: GrantCredentials {
+                vless: None,
+                ss2022: None,
+            },
+        };
+        v8.grants
+            .insert(base_grant.grant_id.clone(), base_grant.clone());
+
+        let mut duplicate = base_grant.clone();
+        duplicate.grant_id = "grant_1".to_string();
+        v8.grants.insert(duplicate.grant_id.clone(), duplicate);
+
+        let mut disabled = base_grant.clone();
+        disabled.grant_id = "grant_disabled".to_string();
+        disabled.enabled = false;
+        v8.grants.insert(disabled.grant_id.clone(), disabled);
+
+        let mut orphan_user = base_grant.clone();
+        orphan_user.grant_id = "grant_orphan_user".to_string();
+        orphan_user.user_id = "user_missing".to_string();
+        v8.grants.insert(orphan_user.grant_id.clone(), orphan_user);
+
+        let mut orphan_endpoint = base_grant.clone();
+        orphan_endpoint.grant_id = "grant_orphan_endpoint".to_string();
+        orphan_endpoint.endpoint_id = "endpoint_missing".to_string();
+        v8.grants
+            .insert(orphan_endpoint.grant_id.clone(), orphan_endpoint);
+
+        v8.user_node_quotas.insert(
+            "user_1".to_string(),
+            BTreeMap::from([(
+                "node_missing".to_string(),
+                UserNodeQuotaConfig {
+                    quota_limit_bytes: Some(123),
+                    quota_reset_source: QuotaResetSource::User,
+                },
+            )]),
+        );
+        v8.user_node_quotas.insert(
+            "user_missing".to_string(),
+            BTreeMap::from([(
+                "node_1".to_string(),
+                UserNodeQuotaConfig {
+                    quota_limit_bytes: Some(321),
+                    quota_reset_source: QuotaResetSource::User,
+                },
+            )]),
+        );
+
+        let v9 = migrate_v8_to_v9(v8).expect("migration should succeed");
+        assert_eq!(v9.schema_version, SCHEMA_VERSION);
+        assert_eq!(v9.grants.len(), 1);
+        assert!(v9.grants.contains_key("grant_0"));
+        assert!(v9.user_node_quotas.is_empty());
+        assert_eq!(v9.node_user_endpoint_memberships.len(), 1);
     }
 }
 

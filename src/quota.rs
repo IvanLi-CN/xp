@@ -1989,24 +1989,10 @@ mod tests {
                 .unwrap();
 
             let _ = store
-                .create_grant(
-                    "g1".to_string(),
-                    p1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let _ = store
-                .create_grant(
-                    "g2".to_string(),
-                    p2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -2179,14 +2165,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -2282,24 +2261,10 @@ mod tests {
                 .unwrap();
 
             let _ = store
-                .create_grant(
-                    "g1".to_string(),
-                    p1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let _ = store
-                .create_grant(
-                    "g2".to_string(),
-                    p2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -2361,14 +2326,7 @@ mod tests {
                 )
                 .unwrap();
             let _ = store
-                .create_grant(
-                    "g3".to_string(),
-                    p2b.user_id.clone(),
-                    ep.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2b.user_id.clone(), ep.endpoint_id, 0, true, None)
                 .unwrap();
             store.save().unwrap();
             p2b.user_id
@@ -2531,24 +2489,10 @@ mod tests {
                 .unwrap();
 
             let g2 = store
-                .create_grant(
-                    "g2".to_string(),
-                    p2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
             let g3 = store
-                .create_grant(
-                    "g3".to_string(),
-                    p3.user_id.clone(),
-                    ep3.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -2691,14 +2635,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -2861,24 +2798,10 @@ mod tests {
                 .unwrap();
 
             let g1 = store
-                .create_grant(
-                    "g1".to_string(),
-                    u1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let _ = store
-                .create_grant(
-                    "g2".to_string(),
-                    u2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -3013,14 +2936,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -3138,24 +3054,10 @@ mod tests {
                 .unwrap();
 
             let g1 = store
-                .create_grant(
-                    "g1".to_string(),
-                    u1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let g2 = store
-                .create_grant(
-                    "g2".to_string(),
-                    u2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -3273,14 +3175,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -3408,14 +3303,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             store.save().unwrap();
 
@@ -3567,14 +3455,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             store.save().unwrap();
 
@@ -3718,24 +3599,10 @@ mod tests {
                 .unwrap();
 
             let g1 = store
-                .create_grant(
-                    "g1".to_string(),
-                    u1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let g2 = store
-                .create_grant(
-                    "g2".to_string(),
-                    u2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    false,
-                    None,
-                )
+                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, false, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -3903,34 +3770,13 @@ mod tests {
                 .unwrap();
 
             let _ = store
-                .create_grant(
-                    "g1".to_string(),
-                    p1.user_id.clone(),
-                    ep1.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
                 .unwrap();
             let _ = store
-                .create_grant(
-                    "g2".to_string(),
-                    p2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
             let g3 = store
-                .create_grant(
-                    "g3".to_string(),
-                    p3.user_id.clone(),
-                    ep3.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -4066,24 +3912,10 @@ mod tests {
                 .unwrap();
 
             let _ = store
-                .create_grant(
-                    "g2".to_string(),
-                    p2.user_id.clone(),
-                    ep2.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
                 .unwrap();
             let g3 = store
-                .create_grant(
-                    "g3".to_string(),
-                    p3.user_id.clone(),
-                    ep3.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -4207,14 +4039,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -4337,14 +4162,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -4470,14 +4288,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();
@@ -4601,14 +4412,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "g".to_string(),
-                    user.user_id.clone(),
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
                 .unwrap();
 
             store.save().unwrap();

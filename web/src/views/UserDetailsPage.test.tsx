@@ -88,6 +88,7 @@ function setupMocks(args?: {
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
 		subscription_token: "subtoken",
+		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 
@@ -98,6 +99,7 @@ function setupMocks(args?: {
 				node_name: "Tokyo",
 				api_base_url: "https://tokyo.example.com",
 				access_host: "tokyo.example.com",
+				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
 					day_of_month: 1,
@@ -195,6 +197,7 @@ function setupMocks(args?: {
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
 		subscription_token: "subtoken",
+		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);

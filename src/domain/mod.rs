@@ -61,8 +61,7 @@ impl DomainError {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
             | Self::InvalidTzOffsetMinutes { .. }
-            | Self::InvalidNodeQuotaConfig { .. }
-            | Self::InvalidTzOffsetMinutes { .. } => "invalid_request",
+            | Self::InvalidNodeQuotaConfig { .. } => "invalid_request",
             Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
                 "invalid_request"
             }
