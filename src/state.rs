@@ -12,7 +12,7 @@ use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
         QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserPriorityTier,
-        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month, validate_group_name,
+        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month,
         validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
@@ -25,7 +25,8 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
+const SCHEMA_VERSION_V8: u32 = 8;
 const SCHEMA_VERSION_V7: u32 = 7;
 const SCHEMA_VERSION_V6: u32 = 6;
 const SCHEMA_VERSION_V5: u32 = 5;
@@ -292,32 +293,6 @@ struct PersistedStateV2Like {
     user_node_quotas: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
-fn sanitize_group_name_fragment(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.chars() {
-        if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push('-');
-        }
-    }
-    out
-}
-
-fn make_legacy_group_name(user_id: &str) -> String {
-    let fragment = sanitize_group_name_fragment(user_id);
-    let mut out = format!("legacy-{fragment}");
-    if out.len() > 64 {
-        out.truncate(64);
-    }
-    if out.is_empty() {
-        out = "legacy".to_string();
-    }
-    out
-}
-
 fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, StoreError> {
     let PersistedStateV2Like {
         schema_version: _,
@@ -371,8 +346,6 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
         }
     }
 
-    let mut group_key_to_name = std::collections::BTreeMap::<String, String>::new();
-    let mut used_group_names = std::collections::BTreeSet::<String>::new();
     let mut seen_pairs = std::collections::BTreeSet::<(String, String)>::new();
     let mut node_day_by_node_id = std::collections::BTreeMap::<String, u8>::new();
 
@@ -475,52 +448,10 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
             });
         }
 
-        let group_key = grant
-            .group_name
-            .as_deref()
-            .map(|raw| format!("raw:{raw}"))
-            .unwrap_or_else(|| format!("legacy-user:{}", grant.user_id));
-        let group_name = group_key_to_name.entry(group_key).or_insert_with(|| {
-            let base = grant
-                .group_name
-                .as_deref()
-                .map(sanitize_group_name_fragment)
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| make_legacy_group_name(&grant.user_id));
-            let mut candidate = base;
-            if candidate.len() > 64 {
-                candidate.truncate(64);
-            }
-            if candidate.is_empty() {
-                candidate = make_legacy_group_name(&grant.user_id);
-            }
-            if validate_group_name(&candidate).is_err() {
-                candidate = make_legacy_group_name(&grant.user_id);
-            }
-            let base_candidate = candidate.clone();
-            if used_group_names.insert(candidate.clone()) {
-                return candidate;
-            }
-            let mut i = 2u32;
-            loop {
-                let suffix = format!("-{i}");
-                let mut with_suffix = base_candidate.clone();
-                if with_suffix.len() + suffix.len() > 64 {
-                    with_suffix.truncate(64 - suffix.len());
-                }
-                with_suffix.push_str(&suffix);
-                if used_group_names.insert(with_suffix.clone()) {
-                    return with_suffix;
-                }
-                i += 1;
-            }
-        });
-
         out.grants.insert(
             grant.grant_id.clone(),
             Grant {
                 grant_id: grant.grant_id,
-                group_name: group_name.clone(),
                 user_id: grant.user_id,
                 endpoint_id: grant.endpoint_id,
                 enabled: grant.enabled,
@@ -636,7 +567,6 @@ fn normalize_node_user_endpoint_memberships(
 fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(state);
 }
-
 fn migrate_v5_to_v6(mut input: PersistedState) -> Result<PersistedState, StoreError> {
     if input.schema_version != SCHEMA_VERSION_V5 {
         return Err(StoreError::Migration {
@@ -673,7 +603,7 @@ fn migrate_v7_to_v8(mut input: PersistedState) -> Result<PersistedState, StoreEr
             ),
         });
     }
-    input.schema_version = SCHEMA_VERSION;
+    input.schema_version = SCHEMA_VERSION_V8;
     // Backward-compat: old schema only had node-scoped weights; treat nodes with any explicit
     // per-user node weight as "node override mode".
     for node_weights in input.user_node_weights.values() {
@@ -686,6 +616,53 @@ fn migrate_v7_to_v8(mut input: PersistedState) -> Result<PersistedState, StoreEr
                 });
         }
     }
+    Ok(input)
+}
+
+fn migrate_v8_to_v9(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V8 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "unexpected schema version for v8->v9 migration: {}",
+                input.schema_version
+            ),
+        });
+    }
+
+    // v9 hard-cut semantics:
+    // - keep only effective grants (`enabled=true`)
+    // - drop orphan grants (missing user/endpoint)
+    // - dedupe by (user_id, endpoint_id) using deterministic map iteration order
+    let mut dedup = BTreeMap::<(String, String), Grant>::new();
+    for grant in input.grants.values() {
+        if !grant.enabled {
+            continue;
+        }
+        if !input.users.contains_key(&grant.user_id) {
+            continue;
+        }
+        if !input.endpoints.contains_key(&grant.endpoint_id) {
+            continue;
+        }
+        let key = (grant.user_id.clone(), grant.endpoint_id.clone());
+        dedup.entry(key).or_insert_with(|| grant.clone());
+    }
+    input.grants = dedup
+        .into_values()
+        .map(|grant| (grant.grant_id.clone(), grant))
+        .collect();
+
+    // Drop user-node quota records that reference missing users or nodes.
+    input.user_node_quotas.retain(|user_id, node_map| {
+        if !input.users.contains_key(user_id) {
+            return false;
+        }
+        node_map.retain(|node_id, _| input.nodes.contains_key(node_id));
+        !node_map.is_empty()
+    });
+
+    input.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&input);
+    input.schema_version = SCHEMA_VERSION;
     Ok(input)
 }
 
@@ -714,7 +691,6 @@ fn normalize_node_weight_policies(
     }
     out
 }
-
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
@@ -929,14 +905,6 @@ mod migrate_tests {
     }
 }
 
-fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(Some(value))
-}
-
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GrantEnabledSource {
@@ -1012,18 +980,9 @@ pub enum DesiredStateCommand {
     DeleteGrant {
         grant_id: String,
     },
-    CreateGrantGroup {
-        group_name: String,
+    ReplaceUserGrants {
+        user_id: String,
         grants: Vec<Grant>,
-    },
-    ReplaceGrantGroup {
-        group_name: String,
-        #[serde(default, deserialize_with = "deserialize_optional_string")]
-        rename_to: Option<Option<String>>,
-        grants: Vec<Grant>,
-    },
-    DeleteGrantGroup {
-        group_name: String,
     },
     SetGrantEnabled {
         grant_id: String,
@@ -1061,16 +1020,9 @@ pub enum DesiredStateApplyResult {
     GrantDeleted {
         deleted: bool,
     },
-    GrantGroupCreated {
-        created: usize,
-    },
-    GrantGroupReplaced {
-        group_name: String,
+    UserGrantsReplaced {
         created: usize,
         updated: usize,
-        deleted: usize,
-    },
-    GrantGroupDeleted {
         deleted: usize,
     },
     GrantEnabledSet {
@@ -1691,12 +1643,6 @@ impl DesiredStateCommand {
                 }
 
                 let mut grant = grant.clone();
-                if grant.group_name.is_empty() || validate_group_name(&grant.group_name).is_err() {
-                    // Backward-compat: older Raft logs allowed null/empty group_name.
-                    // Fold them into a deterministic legacy group derived from user_id.
-                    grant.group_name = make_legacy_group_name(&grant.user_id);
-                }
-                validate_group_name(&grant.group_name)?;
                 if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
                     && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
                     && let Some(cfg) = user_map.get(&endpoint.node_id)
@@ -1726,26 +1672,20 @@ impl DesiredStateCommand {
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::GrantDeleted { deleted })
             }
-            Self::CreateGrantGroup { group_name, grants } => {
-                validate_group_name(group_name)?;
-                if grants.is_empty() {
-                    return Err(DomainError::EmptyGrantGroup.into());
-                }
-
-                // group_name uniqueness.
-                if state.grants.values().any(|g| g.group_name == *group_name) {
-                    return Err(DomainError::GroupNameConflict {
-                        group_name: group_name.clone(),
+            Self::ReplaceUserGrants { user_id, grants } => {
+                if !state.users.contains_key(user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: user_id.clone(),
                     }
                     .into());
                 }
 
-                // members validation and global pair uniqueness.
-                let mut seen_pairs = std::collections::BTreeSet::<(String, String)>::new();
+                let mut desired_by_endpoint = BTreeMap::<String, Grant>::new();
                 for grant in grants {
-                    if !state.users.contains_key(&grant.user_id) {
-                        return Err(DomainError::MissingUser {
+                    if grant.user_id != *user_id {
+                        return Err(DomainError::GrantPairConflict {
                             user_id: grant.user_id.clone(),
+                            endpoint_id: grant.endpoint_id.clone(),
                         }
                         .into());
                     }
@@ -1755,205 +1695,68 @@ impl DesiredStateCommand {
                         }
                         .into());
                     }
-
-                    if grant.group_name != *group_name {
-                        return Err(DomainError::InvalidGroupName {
-                            group_name: group_name.clone(),
-                        }
-                        .into());
-                    }
-
-                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
-                    if !seen_pairs.insert(key.clone()) {
-                        return Err(DomainError::DuplicateGrantGroupMember {
-                            user_id: key.0,
-                            endpoint_id: key.1,
-                        }
-                        .into());
-                    }
-
-                    // Global uniqueness: no existing (user_id, endpoint_id).
-                    if state
-                        .grants
-                        .values()
-                        .any(|g| g.user_id == key.0 && g.endpoint_id == key.1)
+                    if desired_by_endpoint
+                        .insert(grant.endpoint_id.clone(), grant.clone())
+                        .is_some()
                     {
                         return Err(DomainError::GrantPairConflict {
-                            user_id: key.0,
-                            endpoint_id: key.1,
-                        }
-                        .into());
-                    }
-
-                    if state.grants.contains_key(&grant.grant_id) {
-                        return Err(DomainError::InvalidGroupName {
-                            group_name: group_name.clone(),
-                        }
-                        .into());
-                    }
-                }
-
-                for grant in grants {
-                    state.grants.insert(grant.grant_id.clone(), grant.clone());
-                }
-
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::GrantGroupCreated {
-                    created: seen_pairs.len(),
-                })
-            }
-            Self::ReplaceGrantGroup {
-                group_name,
-                rename_to,
-                grants,
-            } => {
-                validate_group_name(group_name)?;
-                if grants.is_empty() {
-                    return Err(DomainError::EmptyGrantGroup.into());
-                }
-
-                let rename_to = rename_to.clone().flatten();
-                if let Some(rename_to) = rename_to.as_deref() {
-                    validate_group_name(rename_to)?;
-                }
-
-                let existing_ids: Vec<String> = state
-                    .grants
-                    .values()
-                    .filter(|g| g.group_name == *group_name)
-                    .map(|g| g.grant_id.clone())
-                    .collect();
-                if existing_ids.is_empty() {
-                    return Err(DomainError::MissingGrantGroup {
-                        group_name: group_name.clone(),
-                    }
-                    .into());
-                }
-
-                let target_group_name = rename_to.clone().unwrap_or_else(|| group_name.clone());
-                if target_group_name != *group_name
-                    && state
-                        .grants
-                        .values()
-                        .any(|g| g.group_name == target_group_name)
-                {
-                    return Err(DomainError::GroupNameConflict {
-                        group_name: target_group_name,
-                    }
-                    .into());
-                }
-
-                let mut desired_pairs = std::collections::BTreeSet::<(String, String)>::new();
-                for grant in grants {
-                    if grant.group_name != *group_name {
-                        return Err(DomainError::InvalidGroupName {
-                            group_name: group_name.clone(),
-                        }
-                        .into());
-                    }
-                    if !state.users.contains_key(&grant.user_id) {
-                        return Err(DomainError::MissingUser {
-                            user_id: grant.user_id.clone(),
-                        }
-                        .into());
-                    }
-                    if !state.endpoints.contains_key(&grant.endpoint_id) {
-                        return Err(DomainError::MissingEndpoint {
+                            user_id: user_id.clone(),
                             endpoint_id: grant.endpoint_id.clone(),
                         }
                         .into());
                     }
+                }
 
-                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
-                    if !desired_pairs.insert(key.clone()) {
-                        return Err(DomainError::DuplicateGrantGroupMember {
-                            user_id: key.0,
-                            endpoint_id: key.1,
-                        }
-                        .into());
+                let mut existing_by_endpoint = BTreeMap::<String, Grant>::new();
+                let mut user_grant_ids = Vec::<String>::new();
+                for grant in state.grants.values() {
+                    if grant.user_id != *user_id {
+                        continue;
                     }
-
-                    // Global uniqueness: allow conflicts only with grants in this group.
-                    if state.grants.values().any(|g| {
-                        g.user_id == key.0 && g.endpoint_id == key.1 && g.group_name != *group_name
-                    }) {
-                        return Err(DomainError::GrantPairConflict {
-                            user_id: key.0,
-                            endpoint_id: key.1,
-                        }
-                        .into());
-                    }
+                    user_grant_ids.push(grant.grant_id.clone());
+                    existing_by_endpoint
+                        .entry(grant.endpoint_id.clone())
+                        .or_insert_with(|| grant.clone());
                 }
 
                 let mut created = 0usize;
                 let mut updated = 0usize;
                 let mut deleted = 0usize;
 
-                let mut to_delete = Vec::new();
-                for grant in state.grants.values() {
-                    if grant.group_name != *group_name {
-                        continue;
-                    }
-                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
-                    if !desired_pairs.contains(&key) {
-                        to_delete.push(grant.grant_id.clone());
-                    }
-                }
-                for grant_id in &to_delete {
-                    if state.grants.remove(grant_id).is_some() {
-                        deleted += 1;
-                    }
-                }
-
-                for mut grant in grants.clone() {
-                    grant.group_name = target_group_name.clone();
-                    if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
-                        && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
-                        && let Some(cfg) = user_map.get(&endpoint.node_id)
-                        && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
-                    {
-                        grant.quota_limit_bytes = quota_limit_bytes;
-                    }
-
-                    if state.grants.contains_key(&grant.grant_id) {
-                        state.grants.insert(grant.grant_id.clone(), grant);
-                        updated += 1;
-                    } else {
-                        state.grants.insert(grant.grant_id.clone(), grant);
-                        created += 1;
-                    }
-                }
-
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::GrantGroupReplaced {
-                    group_name: target_group_name,
-                    created,
-                    updated,
-                    deleted,
-                })
-            }
-            Self::DeleteGrantGroup { group_name } => {
-                validate_group_name(group_name)?;
-                let ids: Vec<String> = state
-                    .grants
-                    .values()
-                    .filter(|g| g.group_name == *group_name)
-                    .map(|g| g.grant_id.clone())
-                    .collect();
-                if ids.is_empty() {
-                    return Err(DomainError::MissingGrantGroup {
-                        group_name: group_name.clone(),
-                    }
-                    .into());
-                }
-                let mut deleted = 0usize;
-                for grant_id in ids {
+                // Delete all existing grants for this user first, then materialize the desired
+                // set. This guarantees hard-cut semantics even for legacy duplicates.
+                for grant_id in user_grant_ids {
                     if state.grants.remove(&grant_id).is_some() {
                         deleted += 1;
                     }
                 }
+
+                for (endpoint_id, mut desired) in desired_by_endpoint {
+                    if let Some(existing) = existing_by_endpoint.get(&endpoint_id) {
+                        desired.grant_id = existing.grant_id.clone();
+                        desired.credentials = existing.credentials.clone();
+                        updated += 1;
+                    } else {
+                        created += 1;
+                    }
+
+                    if let Some(endpoint) = state.endpoints.get(&desired.endpoint_id)
+                        && let Some(user_map) = state.user_node_quotas.get(&desired.user_id)
+                        && let Some(cfg) = user_map.get(&endpoint.node_id)
+                        && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
+                    {
+                        desired.quota_limit_bytes = quota_limit_bytes;
+                    }
+
+                    state.grants.insert(desired.grant_id.clone(), desired);
+                }
+
                 sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::GrantGroupDeleted { deleted })
+                Ok(DesiredStateApplyResult::UserGrantsReplaced {
+                    created,
+                    updated,
+                    deleted,
+                })
             }
             Self::SetGrantEnabled {
                 grant_id,
@@ -2120,24 +1923,32 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
             match schema_version {
-                8 => (serde_json::from_value(raw)?, false, false),
+                9 => (serde_json::from_value(raw)?, false, false),
+                8 => {
+                    let v8: PersistedState = serde_json::from_value(raw)?;
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
+                }
                 7 => {
                     let v7: PersistedState = serde_json::from_value(raw)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 6 => {
                     let v6: PersistedState = serde_json::from_value(raw)?;
                     let v7 = migrate_v6_to_v7(v6)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 5 => {
                     let v5: PersistedState = serde_json::from_value(raw)?;
                     let v6 = migrate_v5_to_v6(v5)?;
                     let v7 = migrate_v6_to_v7(v6)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 4 => {
                     let v4: PersistedState = serde_json::from_value(raw)?;
@@ -2145,7 +1956,8 @@ impl JsonSnapshotStore {
                     let v6 = migrate_v5_to_v6(v5)?;
                     let v7 = migrate_v6_to_v7(v6)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 3 => {
                     let v3: PersistedState = serde_json::from_value(raw)?;
@@ -2154,7 +1966,8 @@ impl JsonSnapshotStore {
                     let v6 = migrate_v5_to_v6(v5)?;
                     let v7 = migrate_v6_to_v7(v6)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 2 | 1 => {
                     let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
@@ -2163,7 +1976,8 @@ impl JsonSnapshotStore {
                     let v6 = migrate_v5_to_v6(v5)?;
                     let v7 = migrate_v6_to_v7(v6)?;
                     let v8 = migrate_v7_to_v8(v7)?;
-                    (v8, false, true)
+                    let v9 = migrate_v8_to_v9(v8)?;
+                    (v9, false, true)
                 }
                 got => {
                     return Err(StoreError::SchemaVersionMismatch {
@@ -2237,7 +2051,7 @@ impl JsonSnapshotStore {
         }
 
         let usage_path = init.data_dir.join("usage.json");
-        let usage = if usage_path.exists() {
+        let mut usage = if usage_path.exists() {
             let bytes = fs::read(&usage_path)?;
             let usage: PersistedUsage = serde_json::from_slice(&bytes)?;
             if usage.schema_version != USAGE_SCHEMA_VERSION {
@@ -2250,6 +2064,15 @@ impl JsonSnapshotStore {
         } else {
             PersistedUsage::empty()
         };
+
+        let grant_ids = state.grants.keys().collect::<BTreeSet<_>>();
+        let before_usage = usage.grants.len();
+        usage
+            .grants
+            .retain(|grant_id, _| grant_ids.contains(&grant_id));
+        if usage.grants.len() != before_usage {
+            migrated = true;
+        }
 
         let store = Self {
             state_path,
@@ -2532,14 +2355,12 @@ impl JsonSnapshotStore {
 
     pub fn build_grant(
         &self,
-        group_name: String,
         user_id: String,
         endpoint_id: String,
         quota_limit_bytes: u64,
         enabled: bool,
         note: Option<String>,
     ) -> Result<Grant, StoreError> {
-        validate_group_name(&group_name)?;
         if !self.state.users.contains_key(&user_id) {
             return Err(DomainError::MissingUser { user_id }.into());
         }
@@ -2566,7 +2387,6 @@ impl JsonSnapshotStore {
 
         Ok(Grant {
             grant_id,
-            group_name,
             user_id,
             endpoint_id,
             enabled,
@@ -2686,21 +2506,13 @@ impl JsonSnapshotStore {
 
     pub fn create_grant(
         &mut self,
-        group_name: String,
         user_id: String,
         endpoint_id: String,
         quota_limit_bytes: u64,
         enabled: bool,
         note: Option<String>,
     ) -> Result<Grant, StoreError> {
-        let grant = self.build_grant(
-            group_name,
-            user_id,
-            endpoint_id,
-            quota_limit_bytes,
-            enabled,
-            note,
-        )?;
+        let grant = self.build_grant(user_id, endpoint_id, quota_limit_bytes, enabled, note)?;
         DesiredStateCommand::UpsertGrant {
             grant: grant.clone(),
         }
@@ -3338,12 +3150,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path()).unwrap();
 
-        let grant_id = "grant_1";
+        let grant_id = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    store.list_nodes()[0].node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    443,
+                    json!({}),
+                )
+                .unwrap();
+            store
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
+                .unwrap()
+                .grant_id
+        };
         let usage_path = tmp.path().join("usage.json");
         let bytes = serde_json::to_vec_pretty(&json!({
             "schema_version": USAGE_SCHEMA_VERSION,
             "grants": {
-                grant_id: {
+                grant_id.clone(): {
                     "cycle_start_at": "2025-12-01T00:00:00Z",
                     "cycle_end_at": "2026-01-01T00:00:00Z",
                     "used_bytes": 123,
@@ -3357,7 +3184,7 @@ mod tests {
         fs::write(&usage_path, bytes).unwrap();
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let usage = store.get_grant_usage(grant_id).unwrap();
+        let usage = store.get_grant_usage(&grant_id).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
     }
@@ -3366,23 +3193,40 @@ mod tests {
     fn set_and_clear_quota_banned_persists_and_survives_reload() {
         let tmp = tempfile::tempdir().unwrap();
         let banned_at = "2025-12-18T00:00:00Z".to_string();
-        let grant_id = "grant_1";
+        let grant_id = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    store.list_nodes()[0].node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    443,
+                    json!({}),
+                )
+                .unwrap();
+            store
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
+                .unwrap()
+                .grant_id
+        };
 
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        store.set_quota_banned(grant_id, banned_at.clone()).unwrap();
-        let usage = store.get_grant_usage(grant_id).unwrap();
+        store
+            .set_quota_banned(&grant_id, banned_at.clone())
+            .unwrap();
+        let usage = store.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at.clone()));
 
-        store.clear_quota_banned(grant_id).unwrap();
-        let usage = store.get_grant_usage(grant_id).unwrap();
+        store.clear_quota_banned(&grant_id).unwrap();
+        let usage = store.get_grant_usage(&grant_id).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
 
         drop(store);
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let usage = store.get_grant_usage(grant_id).unwrap();
+        let usage = store.get_grant_usage(&grant_id).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
     }
@@ -3433,7 +3277,6 @@ mod tests {
             grant_id.to_string(),
             Grant {
                 grant_id: grant_id.to_string(),
-                group_name: "test-group".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
                 enabled: true,
@@ -3667,7 +3510,6 @@ mod tests {
 
         let grant = Grant {
             grant_id: "grant_1".to_string(),
-            group_name: "test-group".to_string(),
             user_id: "user_1".to_string(),
             endpoint_id: "endpoint_1".to_string(),
             enabled: true,
@@ -3725,52 +3567,6 @@ mod tests {
     }
 
     #[test]
-    fn desired_state_apply_upsert_grant_fills_legacy_group_name_when_empty() {
-        let mut state = PersistedState::empty();
-        state.users.insert(
-            "user_1".to_string(),
-            User {
-                user_id: "user_1".to_string(),
-                display_name: "alice".to_string(),
-                subscription_token: "sub_1".to_string(),
-                priority_tier: Default::default(),
-                quota_reset: UserQuotaReset::default(),
-            },
-        );
-        state.endpoints.insert(
-            "endpoint_1".to_string(),
-            Endpoint {
-                endpoint_id: "endpoint_1".to_string(),
-                node_id: "node_1".to_string(),
-                tag: "ss2022-endpoint_1".to_string(),
-                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                port: 443,
-                meta: json!({}),
-            },
-        );
-
-        let grant = Grant {
-            grant_id: "grant_1".to_string(),
-            group_name: "".to_string(),
-            user_id: "user_1".to_string(),
-            endpoint_id: "endpoint_1".to_string(),
-            enabled: true,
-            quota_limit_bytes: 10,
-            note: None,
-            credentials: GrantCredentials {
-                vless: None,
-                ss2022: None,
-            },
-        };
-
-        DesiredStateCommand::UpsertGrant { grant }
-            .apply(&mut state)
-            .unwrap();
-        let inserted = state.grants.get("grant_1").unwrap();
-        assert_eq!(inserted.group_name, "legacy-user_1");
-    }
-
-    #[test]
     fn json_snapshot_store_create_update_delete_grant_flow_is_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
@@ -3786,7 +3582,6 @@ mod tests {
             .unwrap();
         let grant = store
             .create_grant(
-                "test-group".to_string(),
                 user.user_id.clone(),
                 endpoint.endpoint_id.clone(),
                 1024,

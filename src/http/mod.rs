@@ -33,7 +33,7 @@ use crate::{
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
         Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
-        UserNodeQuota, UserQuotaReset, validate_group_name,
+        UserNodeQuota, UserQuotaReset,
     },
     internal_auth,
     node_runtime::{
@@ -126,11 +126,11 @@ impl From<StoreError> for ApiError {
                 crate::domain::DomainError::MissingUser { .. }
                 | crate::domain::DomainError::MissingNode { .. }
                 | crate::domain::DomainError::MissingEndpoint { .. }
-                | crate::domain::DomainError::MissingGrantGroup { .. } => {
+                | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                     ApiError::not_found(domain.to_string())
                 }
-                crate::domain::DomainError::GroupNameConflict { .. }
-                | crate::domain::DomainError::GrantPairConflict { .. }
+                crate::domain::DomainError::GrantPairConflict { .. }
+                | crate::domain::DomainError::RealityDomainNameConflict { .. }
                 | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
@@ -510,8 +510,7 @@ struct PatchUserRequest {
 }
 
 #[derive(Deserialize)]
-struct CreateGrantGroupMemberRequest {
-    user_id: String,
+struct PutUserGrantItemRequest {
     endpoint_id: String,
     enabled: bool,
     quota_limit_bytes: u64,
@@ -520,31 +519,13 @@ struct CreateGrantGroupMemberRequest {
 }
 
 #[derive(Deserialize)]
-struct CreateGrantGroupRequest {
-    group_name: String,
-    members: Vec<CreateGrantGroupMemberRequest>,
-}
-
-#[derive(Deserialize)]
-struct ReplaceGrantGroupRequest {
-    #[serde(default)]
-    rename_to: Option<String>,
-    members: Vec<CreateGrantGroupMemberRequest>,
+struct PutUserGrantsRequest {
+    items: Vec<PutUserGrantItemRequest>,
 }
 
 #[derive(Serialize)]
-struct AdminGrantGroup {
-    group_name: String,
-}
-
-#[derive(Serialize)]
-struct AdminGrantGroupSummary {
-    group_name: String,
-    member_count: usize,
-}
-
-#[derive(Serialize)]
-struct AdminGrantGroupMember {
+struct AdminUserGrantItem {
+    grant_id: String,
     user_id: String,
     endpoint_id: String,
     enabled: bool,
@@ -554,9 +535,11 @@ struct AdminGrantGroupMember {
 }
 
 #[derive(Serialize)]
-struct AdminGrantGroupDetail {
-    group: AdminGrantGroup,
-    members: Vec<AdminGrantGroupMember>,
+struct PutUserGrantsResponse {
+    created: usize,
+    updated: usize,
+    deleted: usize,
+    items: Vec<AdminUserGrantItem>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -792,14 +775,8 @@ pub fn build_router(
             put(admin_put_user_node_weight),
         )
         .route(
-            "/grant-groups",
-            get(admin_list_grant_groups).post(admin_create_grant_group),
-        )
-        .route(
-            "/grant-groups/:group_name",
-            get(admin_get_grant_group)
-                .put(admin_replace_grant_group)
-                .delete(admin_delete_grant_group),
+            "/users/:user_id/grants",
+            get(admin_list_user_grants).put(admin_put_user_grants),
         )
         .route(
             "/_internal/endpoint-probe/run",
@@ -5047,211 +5024,91 @@ async fn admin_put_user_node_quota(
     ))
 }
 
-async fn admin_list_grant_groups(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<Items<AdminGrantGroupSummary>>, ApiError> {
-    let store = state.store.lock().await;
-    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for grant in store.list_grants() {
-        *counts.entry(grant.group_name).or_default() += 1;
-    }
-    let items = counts
+fn collect_enabled_user_grants(
+    store: &JsonSnapshotStore,
+    user_id: &str,
+) -> Vec<AdminUserGrantItem> {
+    let mut items: Vec<AdminUserGrantItem> = store
+        .list_grants()
         .into_iter()
-        .map(|(group_name, member_count)| AdminGrantGroupSummary {
-            group_name,
-            member_count,
+        .filter(|grant| grant.user_id == user_id && grant.enabled)
+        .map(|grant| AdminUserGrantItem {
+            grant_id: grant.grant_id,
+            user_id: grant.user_id,
+            endpoint_id: grant.endpoint_id,
+            enabled: grant.enabled,
+            quota_limit_bytes: grant.quota_limit_bytes,
+            note: grant.note,
+            credentials: grant.credentials,
         })
         .collect();
-    Ok(Json(Items { items }))
+    items.sort_by(|a, b| {
+        a.endpoint_id
+            .cmp(&b.endpoint_id)
+            .then_with(|| a.grant_id.cmp(&b.grant_id))
+    });
+    items
 }
 
-async fn admin_create_grant_group(
+async fn admin_list_user_grants(
     Extension(state): Extension<AppState>,
-    ApiJson(req): ApiJson<CreateGrantGroupRequest>,
-) -> Result<Json<AdminGrantGroupDetail>, ApiError> {
-    let CreateGrantGroupRequest {
-        group_name,
-        members,
-    } = req;
-    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    if members.is_empty() {
-        return Err(ApiError::invalid_request(
-            "grant group must have at least 1 member",
-        ));
+    Path(user_id): Path<String>,
+) -> Result<Json<Items<AdminUserGrantItem>>, ApiError> {
+    let store = state.store.lock().await;
+    if store.get_user(&user_id).is_none() {
+        return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
+    Ok(Json(Items {
+        items: collect_enabled_user_grants(&store, &user_id),
+    }))
+}
 
-    let mut grants = Vec::with_capacity(members.len());
-    {
+async fn admin_put_user_grants(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    ApiJson(req): ApiJson<PutUserGrantsRequest>,
+) -> Result<Json<PutUserGrantsResponse>, ApiError> {
+    let grants = {
         let store = state.store.lock().await;
-        for m in members {
+        if store.get_user(&user_id).is_none() {
+            return Err(ApiError::not_found(format!("user not found: {user_id}")));
+        }
+
+        let mut seen_endpoints = BTreeSet::<String>::new();
+        let mut grants = Vec::with_capacity(req.items.len());
+        for item in req.items {
+            if !item.enabled {
+                return Err(ApiError::invalid_request(
+                    "grant item enabled must be true for user grants hard-cut",
+                ));
+            }
+            if !seen_endpoints.insert(item.endpoint_id.clone()) {
+                return Err(ApiError::conflict(format!(
+                    "grant pair already exists: user_id={} endpoint_id={}",
+                    user_id, item.endpoint_id
+                )));
+            }
             let grant = store.build_grant(
-                group_name.clone(),
-                m.user_id,
-                m.endpoint_id,
-                m.quota_limit_bytes,
-                m.enabled,
-                m.note,
+                user_id.clone(),
+                item.endpoint_id,
+                item.quota_limit_bytes,
+                true,
+                item.note,
             )?;
             grants.push(grant);
         }
-    }
-
-    let out = raft_write(
-        &state,
-        DesiredStateCommand::CreateGrantGroup {
-            group_name: group_name.clone(),
-            grants: grants.clone(),
-        },
-    )
-    .await?;
-    let crate::state::DesiredStateApplyResult::GrantGroupCreated { .. } = out else {
-        return Err(ApiError::internal("unexpected raft apply result"));
-    };
-
-    state.reconcile.request_full();
-
-    let mut members: Vec<AdminGrantGroupMember> = grants
-        .into_iter()
-        .map(|g| AdminGrantGroupMember {
-            user_id: g.user_id,
-            endpoint_id: g.endpoint_id,
-            enabled: g.enabled,
-            quota_limit_bytes: g.quota_limit_bytes,
-            note: g.note,
-            credentials: g.credentials,
-        })
-        .collect();
-    members.sort_by(|a, b| {
-        a.user_id
-            .cmp(&b.user_id)
-            .then_with(|| a.endpoint_id.cmp(&b.endpoint_id))
-    });
-
-    Ok(Json(AdminGrantGroupDetail {
-        group: AdminGrantGroup { group_name },
-        members,
-    }))
-}
-
-async fn admin_get_grant_group(
-    Extension(state): Extension<AppState>,
-    Path(group_name): Path<String>,
-) -> Result<Json<AdminGrantGroupDetail>, ApiError> {
-    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    let store = state.store.lock().await;
-    let mut members: Vec<AdminGrantGroupMember> = store
-        .list_grants()
-        .into_iter()
-        .filter(|g| g.group_name == group_name)
-        .map(|g| AdminGrantGroupMember {
-            user_id: g.user_id,
-            endpoint_id: g.endpoint_id,
-            enabled: g.enabled,
-            quota_limit_bytes: g.quota_limit_bytes,
-            note: g.note,
-            credentials: g.credentials,
-        })
-        .collect();
-
-    if members.is_empty() {
-        return Err(ApiError::not_found(format!(
-            "grant group not found: {group_name}"
-        )));
-    }
-
-    members.sort_by(|a, b| {
-        a.user_id
-            .cmp(&b.user_id)
-            .then_with(|| a.endpoint_id.cmp(&b.endpoint_id))
-    });
-
-    Ok(Json(AdminGrantGroupDetail {
-        group: AdminGrantGroup { group_name },
-        members,
-    }))
-}
-
-#[derive(Serialize)]
-struct AdminGrantGroupReplaceResponse {
-    group: AdminGrantGroup,
-    created: usize,
-    updated: usize,
-    deleted: usize,
-}
-
-async fn admin_replace_grant_group(
-    Extension(state): Extension<AppState>,
-    Path(group_name): Path<String>,
-    ApiJson(req): ApiJson<ReplaceGrantGroupRequest>,
-) -> Result<Json<AdminGrantGroupReplaceResponse>, ApiError> {
-    let ReplaceGrantGroupRequest { rename_to, members } = req;
-    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    if let Some(rename_to) = rename_to.as_deref() {
-        validate_group_name(rename_to).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    }
-    if members.is_empty() {
-        return Err(ApiError::invalid_request(
-            "grant group must have at least 1 member",
-        ));
-    }
-
-    let grants = {
-        let store = state.store.lock().await;
-        let existing: Vec<Grant> = store
-            .list_grants()
-            .into_iter()
-            .filter(|g| g.group_name == group_name)
-            .collect();
-        if existing.is_empty() {
-            return Err(ApiError::not_found(format!(
-                "grant group not found: {group_name}"
-            )));
-        }
-
-        let mut existing_by_pair = std::collections::BTreeMap::<(String, String), Grant>::new();
-        for g in existing {
-            existing_by_pair.insert((g.user_id.clone(), g.endpoint_id.clone()), g);
-        }
-
-        let mut out = Vec::with_capacity(members.len());
-        for m in members {
-            let key = (m.user_id.clone(), m.endpoint_id.clone());
-            if let Some(existing) = existing_by_pair.get(&key) {
-                out.push(Grant {
-                    grant_id: existing.grant_id.clone(),
-                    group_name: group_name.clone(),
-                    user_id: m.user_id,
-                    endpoint_id: m.endpoint_id,
-                    enabled: m.enabled,
-                    quota_limit_bytes: m.quota_limit_bytes,
-                    note: m.note,
-                    credentials: existing.credentials.clone(),
-                });
-            } else {
-                out.push(store.build_grant(
-                    group_name.clone(),
-                    m.user_id,
-                    m.endpoint_id,
-                    m.quota_limit_bytes,
-                    m.enabled,
-                    m.note,
-                )?);
-            }
-        }
-        out
+        grants
     };
 
     let out = raft_write(
         &state,
-        DesiredStateCommand::ReplaceGrantGroup {
-            group_name: group_name.clone(),
-            rename_to: rename_to.map(Some),
+        DesiredStateCommand::ReplaceUserGrants {
+            user_id: user_id.clone(),
             grants,
         },
     )
     .await?;
-    let crate::state::DesiredStateApplyResult::GrantGroupReplaced {
-        group_name,
+    let crate::state::DesiredStateApplyResult::UserGrantsReplaced {
         created,
         updated,
         deleted,
@@ -5261,36 +5118,18 @@ async fn admin_replace_grant_group(
     };
 
     state.reconcile.request_full();
-    Ok(Json(AdminGrantGroupReplaceResponse {
-        group: AdminGrantGroup { group_name },
+
+    let items = {
+        let store = state.store.lock().await;
+        collect_enabled_user_grants(&store, &user_id)
+    };
+
+    Ok(Json(PutUserGrantsResponse {
         created,
         updated,
         deleted,
+        items,
     }))
-}
-
-#[derive(Serialize)]
-struct AdminGrantGroupDeleteResponse {
-    deleted: usize,
-}
-
-async fn admin_delete_grant_group(
-    Extension(state): Extension<AppState>,
-    Path(group_name): Path<String>,
-) -> Result<Json<AdminGrantGroupDeleteResponse>, ApiError> {
-    validate_group_name(&group_name).map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    let out = raft_write(
-        &state,
-        DesiredStateCommand::DeleteGrantGroup {
-            group_name: group_name.clone(),
-        },
-    )
-    .await?;
-    let crate::state::DesiredStateApplyResult::GrantGroupDeleted { deleted } = out else {
-        return Err(ApiError::internal("unexpected raft apply result"));
-    };
-    state.reconcile.request_full();
-    Ok(Json(AdminGrantGroupDeleteResponse { deleted }))
 }
 
 #[derive(Debug, Deserialize)]

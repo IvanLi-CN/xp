@@ -373,17 +373,14 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "xray-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
                 "enabled": true,
                 "quota_limit_bytes": 0,
                 "note": null
               }, {
-                "user_id": user_id,
                 "endpoint_id": endpoint_id_vless,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -570,11 +567,9 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "quota-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
                 "enabled": true,
                 "quota_limit_bytes": quota_limit_bytes,
@@ -590,7 +585,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let ss_password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
+    let ss_password = group_detail["items"][0]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
