@@ -256,3 +256,53 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+const baseMockData = (meta.parameters as { mockApi?: { data?: unknown } })
+	.mockApi?.data as Record<string, unknown>;
+
+const TEN_USERS = Array.from({ length: 10 }, (_, index) => {
+	const userId = `01JQUSER000000000000000${String(index).padStart(2, "0")}`;
+	return {
+		user_id: userId,
+		display_name: `User-${String(index + 1).padStart(2, "0")}`,
+		subscription_token: `sub_${userId}`,
+		priority_tier: (index % 3 === 0 ? "p1" : index % 3 === 1 ? "p2" : "p3") as
+			| "p1"
+			| "p2"
+			| "p3",
+		quota_reset: {
+			policy: "monthly" as const,
+			day_of_month: 1,
+			tz_offset_minutes: 480,
+		},
+	};
+});
+
+const TEN_USER_GLOBAL_WEIGHTS = Object.fromEntries(
+	TEN_USERS.map((user, index) => [user.user_id, 1000 - index * 70]),
+);
+
+const TEN_USER_NODE_WEIGHTS = Object.fromEntries(
+	TEN_USERS.map((user, index) => [
+		user.user_id,
+		[
+			{
+				node_id: "node-tokyo-a",
+				weight: 1000 - index * 70,
+			},
+		],
+	]),
+);
+
+export const TenUsers: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				...baseMockData,
+				users: TEN_USERS,
+				userGlobalWeights: TEN_USER_GLOBAL_WEIGHTS,
+				userNodeWeights: TEN_USER_NODE_WEIGHTS,
+			},
+		},
+	},
+};

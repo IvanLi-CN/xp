@@ -25,6 +25,7 @@ export default {
 			"--color-secondary-content": "oklch(18% 0.02 45)",
 			"--color-accent": "oklch(72% 0.20 150)", // mint
 			"--color-accent-content": "oklch(18% 0.02 150)",
+			"--color-ratio-others": "oklch(66% 0.03 250)", // slate-blue for "Others"
 			"--radius-box": "0.75rem",
 			"--radius-field": "1.25rem",
 			"--depth": "0",
@@ -41,6 +42,7 @@ export default {
 			"--color-secondary-content": "oklch(16% 0.02 45)",
 			"--color-accent": "oklch(74% 0.16 150)",
 			"--color-accent-content": "oklch(16% 0.02 150)",
+			"--color-ratio-others": "oklch(72% 0.03 250)", // brighter than neutral in dark mode
 			"--radius-box": "0.75rem",
 			"--radius-field": "1.25rem",
 			"--depth": "0",

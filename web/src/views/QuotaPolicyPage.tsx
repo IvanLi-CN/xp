@@ -128,7 +128,9 @@ function stableColorIndex(key: string): number {
 }
 
 function pieColorForKey(key: string): string {
-	if (key === "others") return "var(--color-base-300)";
+	if (key === "others") {
+		return "var(--color-ratio-others, var(--color-base-300))";
+	}
 	return pieColorAt(stableColorIndex(key));
 }
 
