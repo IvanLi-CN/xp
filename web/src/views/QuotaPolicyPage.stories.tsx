@@ -294,12 +294,52 @@ const TEN_USER_NODE_WEIGHTS = Object.fromEntries(
 	]),
 );
 
+const TEN_USER_GRANT_GROUPS = [
+	{
+		group: { group_name: "group-ratio-ten-users" },
+		members: TEN_USERS.map((user, index) => {
+			if (index % 2 === 0) {
+				return {
+					user_id: user.user_id,
+					endpoint_id: "ep-tokyo-a-vless",
+					enabled: true,
+					quota_limit_bytes: 1,
+					note: null,
+					credentials: {
+						vless: {
+							uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(
+								12,
+								"0",
+							)}`,
+							email: `grant:ten-users-${index + 1}`,
+						},
+					},
+				};
+			}
+			return {
+				user_id: user.user_id,
+				endpoint_id: "ep-tokyo-a-ss",
+				enabled: true,
+				quota_limit_bytes: 1,
+				note: null,
+				credentials: {
+					ss2022: {
+						method: "2022-blake3-aes-128-gcm",
+						password: `secret-${index + 1}`,
+					},
+				},
+			};
+		}),
+	},
+];
+
 export const TenUsers: Story = {
 	parameters: {
 		mockApi: {
 			data: {
 				...baseMockData,
 				users: TEN_USERS,
+				grantGroups: TEN_USER_GRANT_GROUPS,
 				userGlobalWeights: TEN_USER_GLOBAL_WEIGHTS,
 				userNodeWeights: TEN_USER_NODE_WEIGHTS,
 			},

@@ -107,31 +107,6 @@ function readPieSliceFills(container: HTMLElement): string[] {
 		.filter(Boolean);
 }
 
-function mockMatchMedia(matches: boolean) {
-	const original = window.matchMedia;
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: vi.fn().mockImplementation((query: string) => ({
-			matches,
-			media: query,
-			onchange: null,
-			addEventListener: vi.fn(),
-			removeEventListener: vi.fn(),
-			addListener: vi.fn(),
-			removeListener: vi.fn(),
-			dispatchEvent: vi.fn(),
-		})),
-	});
-	return () => {
-		Object.defineProperty(window, "matchMedia", {
-			configurable: true,
-			writable: true,
-			value: original,
-		});
-	};
-}
-
 function setupDefaultMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
@@ -403,7 +378,12 @@ describe("<QuotaPolicyPage />", () => {
 	});
 
 	it("switches to list layout on narrow viewport instead of showing table scroll", async () => {
-		const restore = mockMatchMedia(true);
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 900,
+		});
 		try {
 			const view = renderPage();
 			await openNodeTab(view.container);
@@ -415,7 +395,59 @@ describe("<QuotaPolicyPage />", () => {
 				within(view.container).queryByTestId("ratio-editor-table"),
 			).toBeNull();
 		} finally {
-			restore();
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("switches to list layout when editor panel is narrow on desktop", async () => {
+		const originalInnerWidth = window.innerWidth;
+		const originalResizeObserver = window.ResizeObserver;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 1366,
+		});
+		Object.defineProperty(window, "ResizeObserver", {
+			configurable: true,
+			writable: true,
+			value: undefined,
+		});
+		try {
+			const view = renderPage();
+			await openNodeTab(view.container);
+
+			await within(view.container).findByTestId("ratio-editor-table");
+			const panel = within(view.container).getByTestId("ratio-editor-panel");
+			Object.defineProperty(panel, "clientWidth", {
+				configurable: true,
+				get: () => 900,
+			});
+
+			window.dispatchEvent(new Event("resize"));
+
+			await waitFor(() => {
+				expect(
+					within(view.container).getByTestId("ratio-editor-list"),
+				).toBeInTheDocument();
+			});
+			expect(
+				within(view.container).queryByTestId("ratio-editor-table"),
+			).toBeNull();
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+			Object.defineProperty(window, "ResizeObserver", {
+				configurable: true,
+				writable: true,
+				value: originalResizeObserver,
+			});
 		}
 	});
 });

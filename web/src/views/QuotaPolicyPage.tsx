@@ -262,44 +262,49 @@ function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
 
-function useRatioEditorListLayout(minTableViewport: number): boolean {
+function shouldUseRatioEditorListLayout(
+	minTableViewport: number,
+	container: HTMLElement | null,
+): boolean {
+	if (container && container.clientWidth > 0) {
+		return container.clientWidth < minTableViewport;
+	}
+	if (typeof window === "undefined") return false;
+	return window.innerWidth < minTableViewport;
+}
+
+function useRatioEditorListLayout(
+	minTableViewport: number,
+	container: HTMLElement | null,
+): boolean {
 	const [isListLayout, setIsListLayout] = useState(() => {
-		if (typeof window === "undefined") return false;
-		if (typeof window.matchMedia === "function") {
-			return window.matchMedia(
-				`(max-width: ${Math.max(0, minTableViewport - 1)}px)`,
-			).matches;
-		}
-		return window.innerWidth < minTableViewport;
+		return shouldUseRatioEditorListLayout(minTableViewport, container);
 	});
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
-		const mediaQuery = `(max-width: ${Math.max(0, minTableViewport - 1)}px)`;
 
-		if (typeof window.matchMedia === "function") {
-			const mql = window.matchMedia(mediaQuery);
-			const handleChange = (event: MediaQueryListEvent) => {
-				setIsListLayout(event.matches);
-			};
+		const updateLayout = () => {
+			setIsListLayout(
+				shouldUseRatioEditorListLayout(minTableViewport, container),
+			);
+		};
+		updateLayout();
 
-			setIsListLayout(mql.matches);
-			if (typeof mql.addEventListener === "function") {
-				mql.addEventListener("change", handleChange);
-				return () => mql.removeEventListener("change", handleChange);
-			}
+		const handleResize = () => updateLayout();
+		window.addEventListener("resize", handleResize);
 
-			mql.addListener(handleChange);
-			return () => mql.removeListener(handleChange);
+		let observer: ResizeObserver | null = null;
+		if (container && typeof ResizeObserver === "function") {
+			observer = new ResizeObserver(() => updateLayout());
+			observer.observe(container);
 		}
 
-		const handleResize = () => {
-			setIsListLayout(window.innerWidth < minTableViewport);
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			observer?.disconnect();
 		};
-		handleResize();
-		window.addEventListener("resize", handleResize);
-		return () => window.removeEventListener("resize", handleResize);
-	}, [minTableViewport]);
+	}, [container, minTableViewport]);
 
 	return isListLayout;
 }
@@ -325,8 +330,17 @@ export function QuotaPolicyPage() {
 	);
 	const [isUpdatingNodePolicy, setIsUpdatingNodePolicy] = useState(false);
 	const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
-	const ratioEditorListLayout = useRatioEditorListLayout(
+	const [globalRatioEditorContainer, setGlobalRatioEditorContainer] =
+		useState<HTMLDivElement | null>(null);
+	const [nodeRatioEditorContainer, setNodeRatioEditorContainer] =
+		useState<HTMLDivElement | null>(null);
+	const globalRatioEditorListLayout = useRatioEditorListLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
+		globalRatioEditorContainer,
+	);
+	const nodeRatioEditorListLayout = useRatioEditorListLayout(
+		RATIO_TABLE_MIN_VIEWPORT,
+		nodeRatioEditorContainer,
 	);
 
 	const nodesQuery = useQuery({
@@ -1363,8 +1377,12 @@ export function QuotaPolicyPage() {
 								</div>
 							</div>
 
-							<div className="rounded-box border border-base-200 p-4 space-y-4">
-								{ratioEditorListLayout ? (
+							<div
+								data-testid="global-ratio-editor-panel"
+								ref={setGlobalRatioEditorContainer}
+								className="rounded-box border border-base-200 p-4 space-y-4"
+							>
+								{globalRatioEditorListLayout ? (
 									<div
 										data-testid="global-ratio-editor-list"
 										className="space-y-3"
@@ -1950,8 +1968,12 @@ export function QuotaPolicyPage() {
 								</div>
 							</div>
 
-							<div className="rounded-box border border-base-200 p-4 space-y-4">
-								{ratioEditorListLayout ? (
+							<div
+								data-testid="ratio-editor-panel"
+								ref={setNodeRatioEditorContainer}
+								className="rounded-box border border-base-200 p-4 space-y-4"
+							>
+								{nodeRatioEditorListLayout ? (
 									<div data-testid="ratio-editor-list" className="space-y-3">
 										{displayRatioRows.map((row, index) => {
 											const targetWeight = computedWeights[index] ?? 0;
