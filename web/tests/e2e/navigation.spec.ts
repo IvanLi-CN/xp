@@ -2,9 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { setAdminToken, setupApiMocks } from "./helpers";
 
-test("renders nodes, endpoints, users, and grant groups pages", async ({
-	page,
-}) => {
+test("renders nodes, endpoints, and users pages", async ({ page }) => {
 	await setAdminToken(page);
 	await setupApiMocks(page);
 
@@ -21,10 +19,5 @@ test("renders nodes, endpoints, users, and grant groups pages", async ({
 	await page.goto("/users");
 	await expect(
 		page.getByRole("heading", { name: "Users", exact: true }),
-	).toBeVisible();
-
-	await page.goto("/grant-groups");
-	await expect(
-		page.getByRole("heading", { name: "Grant groups", exact: true }),
 	).toBeVisible();
 });

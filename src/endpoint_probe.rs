@@ -33,7 +33,6 @@ use crate::{
 
 const PROBE_USER_ID: &str = "user_probe";
 const PROBE_USER_DISPLAY_NAME: &str = "probe";
-const PROBE_GRANT_GROUP_NAME: &str = "probe";
 const PROBE_GRANT_NOTE: &str = "system: probe";
 
 // Large enough for tiny probe traffic; avoids quota bans interfering with probe stability.
@@ -734,7 +733,6 @@ async fn ensure_probe_user_and_grants(
         let credentials = build_probe_credentials(probe_secret, endpoint, &desired_grant_id)?;
         let grant = Grant {
             grant_id: desired_grant_id,
-            group_name: PROBE_GRANT_GROUP_NAME.to_string(),
             user_id: PROBE_USER_ID.to_string(),
             endpoint_id: endpoint.endpoint_id.clone(),
             enabled: true,

@@ -1,11 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
 
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
-import type { AdminGrantGroupDetail } from "../api/adminGrantGroups";
 import type { AdminNode } from "../api/adminNodes";
 import type { AdminRealityDomain } from "../api/adminRealityDomains";
+import type { AdminUserGrant } from "../api/adminUserGrants";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
@@ -42,18 +41,6 @@ const DESIGN_ALERTS: AlertsResponse = {
 			message: "Usage is near the quota limit.",
 			action_hint: "Consider raising the quota.",
 		},
-		{
-			type: "quota_banned",
-			grant_id: "g_01HGRANTBBBBBB",
-			endpoint_id: "ep_01HENDPTBBBBBB",
-			owner_node_id: "n2",
-			desired_enabled: true,
-			quota_banned: true,
-			quota_banned_at: null,
-			effective_enabled: true,
-			message: "Grant is temporarily banned due to quota.",
-			action_hint: "Review usage and adjust quota.",
-		},
 	],
 };
 
@@ -77,16 +64,6 @@ const DESIGN_NODES: AdminNode[] = [
 		quota_reset: {
 			policy: "monthly",
 			day_of_month: 15,
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
-	},
-	{
-		node_id: "n3",
-		node_name: "nagoya-1",
-		access_host: "nagoya.example.com",
-		api_base_url: "https://n3:62416",
-		quota_reset: {
-			policy: "unlimited",
 			tz_offset_minutes: null,
 		} satisfies NodeQuotaReset,
 	},
@@ -137,11 +114,6 @@ const DESIGN_REALITY_DOMAINS: AdminRealityDomain[] = [
 		server_name: "public.bn.files.1drv.com",
 		disabled_node_ids: ["n2"],
 	},
-	{
-		domain_id: "seed_oneclient_sfx_ms",
-		server_name: "oneclient.sfx.ms",
-		disabled_node_ids: [],
-	},
 ];
 
 const DESIGN_USERS: AdminUser[] = [
@@ -167,39 +139,40 @@ const DESIGN_USERS: AdminUser[] = [
 	},
 ];
 
-const DESIGN_GRANT_GROUPS: AdminGrantGroupDetail[] = [
-	{
-		group: { group_name: "group-20260119-demo" },
-		members: [
-			{
-				user_id: "u_01HUSERAAAAAA",
-				endpoint_id: "ep_01HENDPTAAAAAA",
-				enabled: true,
-				quota_limit_bytes: 10_000_000,
-				note: null,
-				credentials: {
-					vless: {
-						uuid: "11111111-1111-1111-1111-111111111111",
-						email: "customer-a@example.com",
-					},
+const DESIGN_USER_GRANTS: Record<string, AdminUserGrant[]> = {
+	u_01HUSERAAAAAA: [
+		{
+			grant_id: "grant_01HGRANTAAAAAA",
+			user_id: "u_01HUSERAAAAAA",
+			endpoint_id: "ep_01HENDPTAAAAAA",
+			enabled: true,
+			quota_limit_bytes: 10_000_000,
+			note: null,
+			credentials: {
+				vless: {
+					uuid: "11111111-1111-1111-1111-111111111111",
+					email: "customer-a@example.com",
 				},
 			},
-			{
-				user_id: "u_01HUSERBBBBBB",
-				endpoint_id: "ep_01HENDPTBBBBBB",
-				enabled: true,
-				quota_limit_bytes: 5_000_000,
-				note: null,
-				credentials: {
-					ss2022: {
-						method: "2022-blake3-aes-128-gcm",
-						password: "mock-password",
-					},
+		},
+	],
+	u_01HUSERBBBBBB: [
+		{
+			grant_id: "grant_01HGRANTBBBBBB",
+			user_id: "u_01HUSERBBBBBB",
+			endpoint_id: "ep_01HENDPTBBBBBB",
+			enabled: true,
+			quota_limit_bytes: 5_000_000,
+			note: null,
+			credentials: {
+				ss2022: {
+					method: "2022-blake3-aes-128-gcm",
+					password: "mock-password",
 				},
 			},
-		],
-	},
-];
+		},
+	],
+};
 
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
@@ -230,7 +203,7 @@ const DESIGN_MOCK_API = {
 		endpoints: DESIGN_ENDPOINTS,
 		realityDomains: DESIGN_REALITY_DOMAINS,
 		users: DESIGN_USERS,
-		grantGroups: DESIGN_GRANT_GROUPS,
+		userGrantsByUserId: DESIGN_USER_GRANTS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
 		alerts: DESIGN_ALERTS,
 		subscriptions: DESIGN_SUBSCRIPTIONS,
@@ -297,6 +270,7 @@ export const DashboardUpdateFailed: Story = {
 		},
 	},
 } satisfies Story;
+
 export const Nodes: Story = pageStory({ path: "/nodes" });
 export const NodeDetails: Story = pageStory({ path: "/nodes/n2" });
 export const Endpoints: Story = pageStory({ path: "/endpoints" });
@@ -308,61 +282,6 @@ export const RealityDomains: Story = pageStory({ path: "/reality-domains" });
 export const Users: Story = pageStory({ path: "/users" });
 export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });
-export const GrantGroups: Story = pageStory({ path: "/grant-groups" });
-export const GrantGroupNew: Story = pageStory({ path: "/grant-groups/new" });
-export const GrantNewMultiSelect: Story = {
-	...pageStory({ path: "/grant-groups/new" }),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(canvas.findByText("Create grant group")).resolves.toBeTruthy();
-		await canvas.findByText("Selected 0 / 2");
-
-		const toggleAll = await canvas.findByRole("checkbox", {
-			name: "Toggle all nodes and protocols",
-		});
-		await userEvent.click(toggleAll);
-		await canvas.findByText("Selected 2 / 2");
-
-		await expect(
-			await canvas.findByRole("button", { name: "Create group (2 members)" }),
-		).toBeEnabled();
-	},
-};
-
-export const GrantNewConflict: Story = {
-	...pageStory({ path: "/grant-groups/new" }),
-	parameters: {
-		router: { initialEntry: "/grant-groups/new" },
-		mockApi: {
-			...DESIGN_MOCK_API,
-			delayGrantGroupCreateMs: 200,
-			failGrantGroupCreate: true,
-		},
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await canvas.findByText("Selected 0 / 2");
-		const toggleAll = await canvas.findByRole("checkbox", {
-			name: "Toggle all nodes and protocols",
-		});
-		await userEvent.click(toggleAll);
-		await canvas.findByText("Selected 2 / 2");
-
-		const button = await canvas.findByRole("button", {
-			name: "Create group (2 members)",
-		});
-
-		await userEvent.click(button);
-		await expect(
-			await canvas.findByText("409 conflict: group_name already exists", {
-				selector: "p",
-			}),
-		).toBeInTheDocument();
-	},
-};
-export const GrantGroupDetails: Story = pageStory({
-	path: "/grant-groups/group-20260119-demo",
-});
 export const ServiceConfig: Story = pageStory({ path: "/service-config" });
 export const ServiceConfigError: Story = pageStory({
 	path: "/service-config",

@@ -495,7 +495,6 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
 
 struct SubscriptionFixtures {
     subscription_token: String,
-    group_name: String,
     grant_id: String,
     user_id: String,
     endpoint_id: String,
@@ -551,12 +550,10 @@ async fn setup_subscription_fixtures(
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id.clone(),
+              "items": [{
                 "endpoint_id": endpoint_id.clone(),
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -568,7 +565,7 @@ async fn setup_subscription_fixtures(
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let group_detail = body_json(res).await;
-    let password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
+    let password = group_detail["items"][0]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
@@ -585,7 +582,6 @@ async fn setup_subscription_fixtures(
 
     SubscriptionFixtures {
         subscription_token,
-        group_name: "test-group".to_string(),
         grant_id,
         user_id,
         endpoint_id,
@@ -1079,16 +1075,14 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
     let created_ep = body_json(res).await;
     let endpoint_id = created_ep["endpoint_id"].as_str().unwrap().to_string();
 
-    // Create grant group.
+    // Create user grants.
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id.clone(),
+              "items": [{
                 "endpoint_id": endpoint_id.clone(),
                 "enabled": true,
                 "quota_limit_bytes": 123,
@@ -1156,15 +1150,18 @@ async fn set_user_node_quota_unifies_grants_and_can_be_listed() {
             .any(|item| item["node_id"] == node_id && item["quota_limit_bytes"] == 789)
     );
 
-    // Grant group member quota should be unified.
+    // User grant quota should be unified.
     let res = app
         .clone()
-        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/grants"),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let fetched_group = body_json(res).await;
-    assert_eq!(fetched_group["members"][0]["quota_limit_bytes"], 789);
+    let fetched_grants = body_json(res).await;
+    assert_eq!(fetched_grants["items"][0]["quota_limit_bytes"], 789);
 }
 
 #[tokio::test]
@@ -1757,17 +1754,16 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
 }
 
 #[tokio::test]
-async fn create_grant_group_with_missing_resources_returns_404_not_found() {
+async fn put_user_grants_with_missing_resources_returns_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
+    let user_id = new_ulid_string();
     let create = req_authed_json(
-        "POST",
-        "/api/admin/grant-groups",
+        "PUT",
+        &format!("/api/admin/users/{user_id}/grants"),
         json!({
-          "group_name": "test-group",
-          "members": [{
-            "user_id": new_ulid_string(),
+          "items": [{
             "endpoint_id": new_ulid_string(),
             "enabled": true,
             "quota_limit_bytes": 0,
@@ -1782,7 +1778,41 @@ async fn create_grant_group_with_missing_resources_returns_404_not_found() {
 }
 
 #[tokio::test]
-async fn grant_group_replace_updates_member_note_and_allows_clear() {
+async fn legacy_grant_groups_endpoints_return_404_not_found() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let requests = vec![
+        req_authed("GET", "/api/admin/grant-groups"),
+        req_authed_json(
+            "POST",
+            "/api/admin/grant-groups",
+            json!({
+              "group_name": "legacy",
+              "members": []
+            }),
+        ),
+        req_authed("GET", "/api/admin/grant-groups/legacy"),
+        req_authed_json(
+            "PUT",
+            "/api/admin/grant-groups/legacy",
+            json!({
+              "members": []
+            }),
+        ),
+        req_authed("DELETE", "/api/admin/grant-groups/legacy"),
+    ];
+
+    for req in requests {
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        let json = body_json(res).await;
+        assert_eq!(json["error"]["code"], "not_found");
+    }
+}
+
+#[tokio::test]
+async fn put_user_grants_updates_member_note_and_allows_clear() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -1825,12 +1855,13 @@ async fn grant_group_replace_updates_member_note_and_allows_clear() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user["user_id"],
+              "items": [{
                 "endpoint_id": endpoint["endpoint_id"],
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -1846,10 +1877,12 @@ async fn grant_group_replace_updates_member_note_and_allows_clear() {
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            "/api/admin/grant-groups/test-group",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
-              "members": [{
-                "user_id": user["user_id"],
+              "items": [{
                 "endpoint_id": endpoint["endpoint_id"],
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -1863,21 +1896,29 @@ async fn grant_group_replace_updates_member_note_and_allows_clear() {
 
     let res = app
         .clone()
-        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
+        .oneshot(req_authed(
+            "GET",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().unwrap()
+            ),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
-    assert_eq!(updated["members"][0]["note"], "alice@node-1");
+    assert_eq!(updated["items"][0]["note"], "alice@node-1");
 
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            "/api/admin/grant-groups/test-group",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
-              "members": [{
-                "user_id": user["user_id"],
+              "items": [{
                 "endpoint_id": endpoint["endpoint_id"],
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -1890,12 +1931,18 @@ async fn grant_group_replace_updates_member_note_and_allows_clear() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let res = app
-        .oneshot(req_authed("GET", "/api/admin/grant-groups/test-group"))
+        .oneshot(req_authed(
+            "GET",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().unwrap()
+            ),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
-    assert!(updated["members"][0]["note"].is_null());
+    assert!(updated["items"][0]["note"].is_null());
 }
 
 #[tokio::test]
@@ -1925,7 +1972,7 @@ async fn post_admin_endpoints_schedules_full_reconcile() {
 }
 
 #[tokio::test]
-async fn post_admin_grant_groups_schedules_full_reconcile() {
+async fn put_admin_user_grants_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
@@ -1946,12 +1993,10 @@ async fn post_admin_grant_groups_schedules_full_reconcile() {
 
     let res = app
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id.clone(),
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -1970,7 +2015,7 @@ async fn post_admin_grant_groups_schedules_full_reconcile() {
 }
 
 #[tokio::test]
-async fn put_admin_grant_group_schedules_full_reconcile() {
+async fn put_admin_user_grants_twice_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
@@ -1989,16 +2034,14 @@ async fn put_admin_grant_group_schedules_full_reconcile() {
         (user.user_id, endpoint.endpoint_id)
     };
 
-    // Create group first (and drain its reconcile request).
+    // Create grants first (and drain its reconcile request).
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -2017,10 +2060,9 @@ async fn put_admin_grant_group_schedules_full_reconcile() {
     let res = app
         .oneshot(req_authed_json(
             "PUT",
-            "/api/admin/grant-groups/test-group",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -2116,7 +2158,7 @@ async fn delete_admin_endpoint_schedules_remove_inbound_then_full() {
 }
 
 #[tokio::test]
-async fn delete_admin_grant_group_schedules_full_reconcile() {
+async fn put_admin_user_grants_empty_schedules_full_reconcile() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
@@ -2138,12 +2180,10 @@ async fn delete_admin_grant_group_schedules_full_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -2160,7 +2200,11 @@ async fn delete_admin_grant_group_schedules_full_reconcile() {
     );
 
     let res = app
-        .oneshot(req_authed("DELETE", "/api/admin/grant-groups/test-group"))
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
+            json!({ "items": [] }),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -2707,24 +2751,16 @@ async fn subscription_disabled_grant_not_in_output() {
 
     let fixtures = setup_subscription_fixtures(&app, &store).await;
     let token = fixtures.subscription_token;
-    let group_name = fixtures.group_name;
     let user_id = fixtures.user_id;
-    let endpoint_id = fixtures.endpoint_id;
     let password = fixtures.ss2022_password;
 
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/grant-groups/{group_name}"),
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "members": [{
-                "user_id": user_id,
-                "endpoint_id": endpoint_id,
-                "enabled": false,
-                "quota_limit_bytes": 0,
-                "note": null
-              }]
+              "items": []
             }),
         ))
         .await
@@ -2741,12 +2777,11 @@ async fn subscription_disabled_grant_not_in_output() {
 }
 
 #[tokio::test]
-async fn grant_group_replace_clears_quota_ban_marker() {
+async fn put_user_grants_clears_quota_ban_marker() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let fixtures = setup_subscription_fixtures(&app, &store).await;
-    let group_name = fixtures.group_name;
     let grant_id = fixtures.grant_id;
     let user_id = fixtures.user_id;
     let endpoint_id = fixtures.endpoint_id;
@@ -2762,12 +2797,11 @@ async fn grant_group_replace_clears_quota_ban_marker() {
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/grant-groups/{group_name}"),
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id,
-                "enabled": false,
+                "enabled": true,
                 "quota_limit_bytes": 0,
                 "note": null
               }]
@@ -2831,12 +2865,10 @@ async fn admin_alerts_local_reports_quota_mismatch() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -2930,8 +2962,8 @@ async fn admin_delete_grant_removes_usage_entry() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let fixtures = setup_subscription_fixtures(&app, &store).await;
-    let group_name = fixtures.group_name;
     let grant_id = fixtures.grant_id;
+    let user_id = fixtures.user_id;
 
     {
         let mut store = store.lock().await;
@@ -2942,9 +2974,10 @@ async fn admin_delete_grant_removes_usage_entry() {
     }
 
     let res = app
-        .oneshot(req_authed(
-            "DELETE",
-            &format!("/api/admin/grant-groups/{group_name}"),
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
+            json!({ "items": [] }),
         ))
         .await
         .unwrap();
@@ -3151,12 +3184,13 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().expect("user_id")
+            ),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user["user_id"],
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -3168,7 +3202,7 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let group = body_json(res).await;
-    let vless = &group["members"][0]["credentials"]["vless"];
+    let vless = &group["items"][0]["credentials"]["vless"];
     let uuid = vless["uuid"].as_str().unwrap();
     assert!(Uuid::parse_str(uuid).is_ok());
     assert!(!is_ulid_string(uuid));
@@ -3234,12 +3268,13 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!(
+                "/api/admin/users/{}/grants",
+                user["user_id"].as_str().expect("user_id")
+            ),
             json!({
-              "group_name": "test-group",
-              "members": [{
-                "user_id": user["user_id"],
+              "items": [{
                 "endpoint_id": endpoint_id,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -3251,7 +3286,7 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let group = body_json(res).await;
-    let ss2022 = &group["members"][0]["credentials"]["ss2022"];
+    let ss2022 = &group["items"][0]["credentials"]["ss2022"];
     assert_eq!(ss2022["method"], "2022-blake3-aes-128-gcm");
 
     let password = ss2022["password"].as_str().unwrap();
@@ -3391,7 +3426,6 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
             "grant-1".to_string(),
             Grant {
                 grant_id: "grant-1".to_string(),
-                group_name: "group-1".to_string(),
                 user_id: "user-1".to_string(),
                 endpoint_id: "missing-endpoint".to_string(),
                 enabled: true,
@@ -3465,7 +3499,6 @@ async fn user_node_quota_status_include_grants_with_missing_endpoints_as_local()
             "grant-1".to_string(),
             Grant {
                 grant_id: "grant-1".to_string(),
-                group_name: "group-1".to_string(),
                 user_id: "user-1".to_string(),
                 endpoint_id: "missing-endpoint".to_string(),
                 enabled: true,
@@ -3530,7 +3563,6 @@ async fn user_quota_summaries_ignore_grants_for_missing_users() {
             "grant-1".to_string(),
             Grant {
                 grant_id: "grant-1".to_string(),
-                group_name: "group-1".to_string(),
                 user_id: "missing-user".to_string(),
                 endpoint_id: "missing-endpoint".to_string(),
                 enabled: true,

@@ -404,33 +404,21 @@ impl RaftFacade for LocalRaft {
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
         Box::pin(async move {
             let mut store = self.store.lock().await;
-            let (deleted_usage, clear_bans) = match &cmd {
-                DesiredStateCommand::DeleteGrantGroup { group_name } => {
-                    let ids: Vec<String> = store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.group_name == *group_name)
-                        .map(|g| g.grant_id)
-                        .collect();
-                    (ids, Vec::new())
-                }
-                DesiredStateCommand::ReplaceGrantGroup {
-                    group_name, grants, ..
-                } => {
-                    let old: std::collections::BTreeSet<String> = store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.group_name == *group_name)
-                        .map(|g| g.grant_id)
-                        .collect();
-                    let new: std::collections::BTreeSet<String> =
-                        grants.iter().map(|g| g.grant_id.clone()).collect();
-                    let deleted: Vec<String> = old.difference(&new).cloned().collect();
-                    let clear_bans: Vec<String> = new.into_iter().collect();
-                    (deleted, clear_bans)
-                }
-                _ => (Vec::new(), Vec::new()),
+            let replaced_user_id = match &cmd {
+                DesiredStateCommand::ReplaceUserGrants { user_id, .. } => Some(user_id.clone()),
+                _ => None,
             };
+            let replaced_user_grants_before: std::collections::BTreeSet<String> = replaced_user_id
+                .as_deref()
+                .map(|user_id| {
+                    store
+                        .list_grants()
+                        .into_iter()
+                        .filter(|g| g.user_id == user_id)
+                        .map(|g| g.grant_id)
+                        .collect()
+                })
+                .unwrap_or_default();
             let out = match cmd.apply(store.state_mut()) {
                 Ok(out) => out,
                 Err(err) => return Ok(map_store_error(err)),
@@ -448,22 +436,24 @@ impl RaftFacade for LocalRaft {
                             .map_err(anyhow::Error::new)?;
                     }
                 }
-                (DesiredStateCommand::ReplaceGrantGroup { .. }, _) => {
-                    for grant_id in deleted_usage.iter() {
+                (DesiredStateCommand::ReplaceUserGrants { user_id, .. }, _) => {
+                    let replaced_user_grants_after: std::collections::BTreeSet<String> = store
+                        .list_grants()
+                        .into_iter()
+                        .filter(|g| g.user_id == *user_id)
+                        .map(|g| g.grant_id)
+                        .collect();
+
+                    for grant_id in
+                        replaced_user_grants_before.difference(&replaced_user_grants_after)
+                    {
                         store
                             .clear_grant_usage(grant_id)
                             .map_err(anyhow::Error::new)?;
                     }
-                    for grant_id in clear_bans.iter() {
+                    for grant_id in replaced_user_grants_after {
                         store
-                            .clear_quota_banned(grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                }
-                (DesiredStateCommand::DeleteGrantGroup { .. }, _) => {
-                    for grant_id in deleted_usage.iter() {
-                        store
-                            .clear_grant_usage(grant_id)
+                            .clear_quota_banned(&grant_id)
                             .map_err(anyhow::Error::new)?;
                     }
                 }
@@ -530,18 +520,18 @@ fn map_store_error(err: StoreError) -> ClientResponse {
         StoreError::Domain(domain) => match domain {
             DomainError::MissingUser { .. }
             | DomainError::MissingNode { .. }
-            | DomainError::MissingEndpoint { .. } => ClientResponse::Err {
+            | DomainError::MissingEndpoint { .. }
+            | DomainError::RealityDomainNotFound { .. } => ClientResponse::Err {
                 status: 404,
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
-            DomainError::GroupNameConflict { .. } | DomainError::GrantPairConflict { .. } => {
-                ClientResponse::Err {
-                    status: 409,
-                    code: "conflict".to_string(),
-                    message: domain.to_string(),
-                }
-            }
+            DomainError::GrantPairConflict { .. }
+            | DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
+                status: 409,
+                code: "conflict".to_string(),
+                message: domain.to_string(),
+            },
             DomainError::NodeInUse { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
@@ -597,14 +587,7 @@ mod tests {
             )
             .unwrap();
         let grant = store
-            .create_grant(
-                "test-group".to_string(),
-                user.user_id,
-                endpoint.endpoint_id,
-                1,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
             .unwrap();
         store
             .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())

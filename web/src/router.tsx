@@ -15,9 +15,6 @@ import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
 import { EndpointProbeStatsPage } from "./views/EndpointProbeStatsPage";
 import { EndpointsPage } from "./views/EndpointsPage";
-import { GrantGroupDetailsPage } from "./views/GrantGroupDetailsPage";
-import { GrantGroupsPage } from "./views/GrantGroupsPage";
-import { GrantNewPage } from "./views/GrantNewPage";
 import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
@@ -115,12 +112,6 @@ const userDetailsRoute = createRoute({
 	component: UserDetailsPage,
 });
 
-const grantGroupsRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/grant-groups",
-	component: GrantGroupsPage,
-});
-
 const serviceConfigRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/service-config",
@@ -131,18 +122,6 @@ const realityDomainsRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/reality-domains",
 	component: RealityDomainsPage,
-});
-
-const grantGroupNewRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/grant-groups/new",
-	component: GrantNewPage,
-});
-
-const grantGroupDetailsRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/grant-groups/$groupName",
-	component: GrantGroupDetailsPage,
 });
 
 const appRouteTree = appRoute.addChildren([
@@ -157,9 +136,6 @@ const appRouteTree = appRoute.addChildren([
 	usersRoute,
 	userNewRoute,
 	userDetailsRoute,
-	grantGroupsRoute,
-	grantGroupNewRoute,
-	grantGroupDetailsRoute,
 	serviceConfigRoute,
 	realityDomainsRoute,
 ]);

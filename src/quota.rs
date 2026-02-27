@@ -1199,14 +1199,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             grant.grant_id
         };
@@ -1274,14 +1267,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             grant.grant_id
         };
@@ -1356,7 +1342,6 @@ mod tests {
 
             let local_grant = store
                 .create_grant(
-                    "test-group".to_string(),
                     user.user_id.clone(),
                     local_endpoint.endpoint_id,
                     0,
@@ -1365,14 +1350,7 @@ mod tests {
                 )
                 .unwrap();
             let remote_grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    remote_endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, remote_endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             (local_grant.grant_id, remote_grant.grant_id)
         };
@@ -1442,7 +1420,6 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
-                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id.clone(),
                     QUOTA_TOLERANCE_BYTES + 100,
@@ -1524,14 +1501,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
                 .unwrap();
             let (start, end) = current_cycle_window_at(
                 CycleTimeZone::FixedOffsetMinutes {
@@ -1612,14 +1582,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    1,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
                 .unwrap();
             store
                 .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
@@ -1704,14 +1667,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    1,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
                 .unwrap();
             store
                 .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Manual)
@@ -1789,7 +1745,6 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
-                    "test-group".to_string(),
                     user.user_id,
                     endpoint.endpoint_id.clone(),
                     QUOTA_TOLERANCE_BYTES + 100,
@@ -1856,14 +1811,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    1,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
                 .unwrap();
             store
                 .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
@@ -1946,14 +1894,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    1,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
                 .unwrap();
             grant.grant_id
         };
@@ -2000,14 +1941,7 @@ mod tests {
                 )
                 .unwrap();
             let grant = store
-                .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
-                    endpoint.endpoint_id,
-                    u64::MAX,
-                    true,
-                    None,
-                )
+                .create_grant(user.user_id, endpoint.endpoint_id, u64::MAX, true, None)
                 .unwrap();
             let (start, end) = current_cycle_window_at(
                 CycleTimeZone::FixedOffsetMinutes {

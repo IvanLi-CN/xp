@@ -2,14 +2,6 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.unwrap_or_default())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
     InvalidPort {
@@ -21,14 +13,6 @@ pub enum DomainError {
     InvalidTzOffsetMinutes {
         tz_offset_minutes: i16,
     },
-    InvalidGroupName {
-        group_name: String,
-    },
-    EmptyGrantGroup,
-    DuplicateGrantGroupMember {
-        user_id: String,
-        endpoint_id: String,
-    },
     MissingUser {
         user_id: String,
     },
@@ -38,15 +22,9 @@ pub enum DomainError {
     MissingEndpoint {
         endpoint_id: String,
     },
-    MissingGrantGroup {
-        group_name: String,
-    },
     NodeInUse {
         node_id: String,
         endpoint_id: String,
-    },
-    GroupNameConflict {
-        group_name: String,
     },
     GrantPairConflict {
         user_id: String,
@@ -79,18 +57,13 @@ impl DomainError {
         match self {
             Self::InvalidPort { .. }
             | Self::InvalidCycleDayOfMonth { .. }
-            | Self::InvalidTzOffsetMinutes { .. }
-            | Self::InvalidGroupName { .. }
-            | Self::EmptyGrantGroup
-            | Self::DuplicateGrantGroupMember { .. } => "invalid_request",
+            | Self::InvalidTzOffsetMinutes { .. } => "invalid_request",
             Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
                 "invalid_request"
             }
-            Self::MissingGrantGroup { .. } | Self::RealityDomainNotFound { .. } => "not_found",
+            Self::RealityDomainNotFound { .. } => "not_found",
             Self::NodeInUse { .. } => "conflict",
-            Self::GroupNameConflict { .. }
-            | Self::GrantPairConflict { .. }
-            | Self::RealityDomainNameConflict { .. } => "conflict",
+            Self::GrantPairConflict { .. } | Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
             | Self::VlessRealityServerNamesEmpty { .. }
             | Self::RealityDomainsReorderInvalid { .. }
@@ -109,21 +82,9 @@ impl std::fmt::Display for DomainError {
             Self::InvalidTzOffsetMinutes { tz_offset_minutes } => {
                 write!(f, "invalid tz_offset_minutes: {tz_offset_minutes}")
             }
-            Self::InvalidGroupName { group_name } => write!(f, "invalid group_name: {group_name}"),
-            Self::EmptyGrantGroup => write!(f, "grant group must have at least 1 member"),
-            Self::DuplicateGrantGroupMember {
-                user_id,
-                endpoint_id,
-            } => write!(
-                f,
-                "duplicate group member: user_id={user_id} endpoint_id={endpoint_id}"
-            ),
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
-            Self::MissingGrantGroup { group_name } => {
-                write!(f, "grant group not found: {group_name}")
-            }
             Self::NodeInUse {
                 node_id,
                 endpoint_id,
@@ -131,9 +92,6 @@ impl std::fmt::Display for DomainError {
                 f,
                 "node is still referenced by endpoints: node_id={node_id} endpoint_id={endpoint_id}"
             ),
-            Self::GroupNameConflict { group_name } => {
-                write!(f, "group_name already exists: {group_name}")
-            }
             Self::GrantPairConflict {
                 user_id,
                 endpoint_id,
@@ -191,35 +149,6 @@ pub fn validate_tz_offset_minutes(tz_offset_minutes: i16) -> Result<(), DomainEr
     // UTC-12 .. UTC+14
     if !(-720..=840).contains(&tz_offset_minutes) {
         return Err(DomainError::InvalidTzOffsetMinutes { tz_offset_minutes });
-    }
-    Ok(())
-}
-
-pub fn validate_group_name(group_name: &str) -> Result<(), DomainError> {
-    if group_name.is_empty() || group_name.len() > 64 {
-        return Err(DomainError::InvalidGroupName {
-            group_name: group_name.to_string(),
-        });
-    }
-    let mut chars = group_name.chars();
-    let Some(first) = chars.next() else {
-        return Err(DomainError::InvalidGroupName {
-            group_name: group_name.to_string(),
-        });
-    };
-    let is_first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
-    if !is_first_ok {
-        return Err(DomainError::InvalidGroupName {
-            group_name: group_name.to_string(),
-        });
-    }
-    for ch in chars {
-        let ok = ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_';
-        if !ok {
-            return Err(DomainError::InvalidGroupName {
-                group_name: group_name.to_string(),
-            });
-        }
     }
     Ok(())
 }
@@ -327,8 +256,6 @@ pub struct UserNodeQuota {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Grant {
     pub grant_id: String,
-    #[serde(default, deserialize_with = "deserialize_null_string")]
-    pub group_name: String,
     pub user_id: String,
     pub endpoint_id: String,
     pub enabled: bool,
@@ -370,7 +297,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grant_group_name_accepts_null() {
+    fn grant_allows_legacy_group_name_field() {
         let raw = serde_json::json!({
           "grant_id": "grant_1",
           "group_name": null,
@@ -388,6 +315,8 @@ mod tests {
         });
 
         let grant: Grant = serde_json::from_value(raw).expect("deserialize grant");
-        assert_eq!(grant.group_name, "");
+        assert_eq!(grant.grant_id, "grant_1");
+        assert_eq!(grant.user_id, "user_1");
+        assert_eq!(grant.endpoint_id, "endpoint_1");
     }
 }

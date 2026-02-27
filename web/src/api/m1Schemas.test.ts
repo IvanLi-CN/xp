@@ -5,12 +5,12 @@ import {
 	AdminEndpointSchema,
 	AdminEndpointsResponseSchema,
 } from "./adminEndpoints";
-import {
-	AdminGrantGroupDetailSchema,
-	AdminGrantGroupsResponseSchema,
-} from "./adminGrantGroups";
 import { AdminJoinTokenResponseSchema } from "./adminJoinTokens";
 import { AdminNodesResponseSchema } from "./adminNodes";
+import {
+	AdminUserGrantsResponseSchema,
+	PutAdminUserGrantsResponseSchema,
+} from "./adminUserGrants";
 import {
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
@@ -202,39 +202,17 @@ describe("AdminUserTokenResponseSchema", () => {
 	});
 });
 
-describe("AdminGrantGroupsResponseSchema", () => {
+describe("AdminUserGrantsResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
-			AdminGrantGroupsResponseSchema.parse({
+			AdminUserGrantsResponseSchema.parse({
 				items: [
 					{
-						group_name: "group-1",
-						member_count: 2,
-					},
-				],
-			}),
-		).toEqual({
-			items: [
-				{
-					group_name: "group-1",
-					member_count: 2,
-				},
-			],
-		});
-	});
-});
-
-describe("AdminGrantGroupDetailSchema", () => {
-	it("accepts expected shape", () => {
-		expect(
-			AdminGrantGroupDetailSchema.parse({
-				group: { group_name: "group-1" },
-				members: [
-					{
+						grant_id: "grant-1",
 						user_id: "user-1",
 						endpoint_id: "endpoint-1",
 						enabled: true,
-						quota_limit_bytes: 10737418240,
+						quota_limit_bytes: 2_048,
 						note: null,
 						credentials: {
 							vless: {
@@ -246,13 +224,61 @@ describe("AdminGrantGroupDetailSchema", () => {
 				],
 			}),
 		).toEqual({
-			group: { group_name: "group-1" },
-			members: [
+			items: [
 				{
+					grant_id: "grant-1",
 					user_id: "user-1",
 					endpoint_id: "endpoint-1",
 					enabled: true,
-					quota_limit_bytes: 10737418240,
+					quota_limit_bytes: 2_048,
+					note: null,
+					credentials: {
+						vless: {
+							uuid: "00000000-0000-0000-0000-000000000000",
+							email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+						},
+					},
+				},
+			],
+		});
+	});
+});
+
+describe("PutAdminUserGrantsResponseSchema", () => {
+	it("accepts expected shape", () => {
+		expect(
+			PutAdminUserGrantsResponseSchema.parse({
+				created: 1,
+				updated: 0,
+				deleted: 2,
+				items: [
+					{
+						grant_id: "grant-1",
+						user_id: "user-1",
+						endpoint_id: "endpoint-1",
+						enabled: true,
+						quota_limit_bytes: 2_048,
+						note: null,
+						credentials: {
+							vless: {
+								uuid: "00000000-0000-0000-0000-000000000000",
+								email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+							},
+						},
+					},
+				],
+			}),
+		).toEqual({
+			created: 1,
+			updated: 0,
+			deleted: 2,
+			items: [
+				{
+					grant_id: "grant-1",
+					user_id: "user-1",
+					endpoint_id: "endpoint-1",
+					enabled: true,
+					quota_limit_bytes: 2_048,
 					note: null,
 					credentials: {
 						vless: {

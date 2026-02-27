@@ -4,13 +4,12 @@ import type {
 	AdminEndpointCreateRequest,
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
-import type {
-	AdminGrantGroupCreateRequest,
-	AdminGrantGroupDetail,
-	AdminGrantGroupReplaceRequest,
-} from "../../src/api/adminGrantGroups";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
+import type {
+	AdminUserGrant,
+	PutAdminUserGrantItem,
+} from "../../src/api/adminUserGrants";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
@@ -35,8 +34,6 @@ export type StorybookApiMockConfig = {
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
 	failVersionCheck?: boolean;
-	failGrantGroupCreate?: boolean;
-	delayGrantGroupCreateMs?: number;
 };
 
 type MockEndpointSeed = AdminEndpoint & {
@@ -57,7 +54,7 @@ type MockStateSeed = {
 	endpoints: MockEndpointSeed[];
 	realityDomains: AdminRealityDomain[];
 	users: AdminUser[];
-	grantGroups: AdminGrantGroupDetail[];
+	userGrantsByUserId: Record<string, AdminUserGrant[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
@@ -68,12 +65,9 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
 	failAdminConfig: boolean;
 	failVersionCheck: boolean;
-	failGrantGroupCreate: boolean;
-	delayGrantGroupCreateMs: number;
-	grantGroupsByName: Record<string, AdminGrantGroupDetail>;
 	counters: {
 		endpoint: number;
-		grantGroup: number;
+		grant: number;
 		joinToken: number;
 		realityDomain: number;
 		shortId: number;
@@ -306,29 +300,30 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	];
 
-	const grantGroups: AdminGrantGroupDetail[] = [
-		{
-			group: { group_name: "group-demo" },
-			members: [
-				{
-					user_id: userId1,
-					endpoint_id: "endpoint-1",
-					enabled: true,
-					quota_limit_bytes: 10_000_000,
-					note: "Priority",
-					credentials: createGrantCredentials(endpoints[0], 1),
-				},
-				{
-					user_id: userId2,
-					endpoint_id: "endpoint-2",
-					enabled: true,
-					quota_limit_bytes: 5_000_000,
-					note: null,
-					credentials: createGrantCredentials(endpoints[1], 2),
-				},
-			],
-		},
-	];
+	const userGrantsByUserId: Record<string, AdminUserGrant[]> = {
+		[userId1]: [
+			{
+				grant_id: "grant-mock-1",
+				user_id: userId1,
+				endpoint_id: "endpoint-1",
+				enabled: true,
+				quota_limit_bytes: 10_000_000,
+				note: "Priority",
+				credentials: createGrantCredentials(endpoints[0], 1),
+			},
+		],
+		[userId2]: [
+			{
+				grant_id: "grant-mock-2",
+				user_id: userId2,
+				endpoint_id: "endpoint-2",
+				enabled: true,
+				quota_limit_bytes: 5_000_000,
+				note: null,
+				credentials: createGrantCredentials(endpoints[1], 2),
+			},
+		],
+	};
 
 	const alerts: AlertsResponse = {
 		partial: false,
@@ -381,7 +376,7 @@ function createDefaultSeed(): MockStateSeed {
 		endpoints,
 		realityDomains,
 		users,
-		grantGroups,
+		userGrantsByUserId,
 		nodeQuotas: [],
 		alerts,
 		subscriptions,
@@ -400,7 +395,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		realityDomains: overrides?.realityDomains ?? base.realityDomains,
 		users: overrides?.users ?? base.users,
-		grantGroups: overrides?.grantGroups ?? base.grantGroups,
+		userGrantsByUserId: {
+			...base.userGrantsByUserId,
+			...(overrides?.userGrantsByUserId ?? {}),
+		},
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
 		alerts: overrides?.alerts ?? base.alerts,
@@ -412,31 +410,28 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 
 	const counters = {
 		endpoint: 1,
-		grantGroup: 1,
+		grant: 1,
 		joinToken: 1,
 		realityDomain: 1,
 		shortId: 1,
 		subscription: 1,
 		user: 1,
 	};
+	const seededGrantCount = Object.values(merged.userGrantsByUserId).reduce(
+		(acc, grants) => acc + grants.length,
+		0,
+	);
+	counters.grant = Math.max(counters.grant, seededGrantCount + 1);
 
 	const endpoints = merged.endpoints.map((endpoint) =>
 		ensureEndpointRecord(endpoint, counters),
 	);
-
-	const grantGroupsByName: Record<string, AdminGrantGroupDetail> = {};
-	for (const group of merged.grantGroups) {
-		grantGroupsByName[group.group.group_name] = clone(group);
-	}
 
 	const state: MockState = {
 		...clone(merged),
 		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failVersionCheck: config?.failVersionCheck ?? false,
-		failGrantGroupCreate: config?.failGrantGroupCreate ?? false,
-		delayGrantGroupCreateMs: config?.delayGrantGroupCreateMs ?? 0,
-		grantGroupsByName,
 		counters,
 	};
 
@@ -480,6 +475,35 @@ async function readJson<T>(req: Request): Promise<T | undefined> {
 	} catch {
 		return undefined;
 	}
+}
+
+function ensureUserGrantsStore(
+	state: MockState,
+	userId: string,
+): AdminUserGrant[] {
+	const existing = state.userGrantsByUserId[userId];
+	if (existing) return existing;
+	const grants: AdminUserGrant[] = [];
+	state.userGrantsByUserId[userId] = grants;
+	return grants;
+}
+
+function nextGrant(
+	state: MockState,
+	userId: string,
+	endpoint: AdminEndpoint | undefined,
+	payload: PutAdminUserGrantItem,
+): AdminUserGrant {
+	const index = state.counters.grant++;
+	return {
+		grant_id: `grant-mock-${index}`,
+		user_id: userId,
+		endpoint_id: payload.endpoint_id,
+		enabled: payload.enabled,
+		quota_limit_bytes: Math.max(0, Math.floor(payload.quota_limit_bytes)),
+		note: payload.note ?? null,
+		credentials: createGrantCredentials(endpoint, index),
+	};
 }
 
 async function handleRequest(
@@ -944,6 +968,7 @@ async function handleRequest(
 				} satisfies UserQuotaReset),
 		};
 		state.users = [...state.users, user];
+		state.userGrantsByUserId[userId] = [];
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		return jsonResponse(user);
 	}
@@ -975,6 +1000,8 @@ async function handleRequest(
 		}
 		if (method === "DELETE") {
 			state.users = state.users.filter((item) => item.user_id !== userId);
+			delete state.userGrantsByUserId[userId];
+			state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
 			return new Response(null, { status: 204 });
 		}
 	}
@@ -999,6 +1026,102 @@ async function handleRequest(
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		const response: AdminUserTokenResponse = { subscription_token: token };
 		return jsonResponse(response);
+	}
+
+	const userGrantsMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/grants$/);
+	if (userGrantsMatch && method === "GET") {
+		const userId = decodeURIComponent(userGrantsMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const items = ensureUserGrantsStore(state, userId).filter((g) => g.enabled);
+		return jsonResponse({ items: clone(items) });
+	}
+
+	if (userGrantsMatch && method === "PUT") {
+		const userId = decodeURIComponent(userGrantsMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const payload = await readJson<{ items?: PutAdminUserGrantItem[] }>(req);
+		if (!payload || !Array.isArray(payload.items)) {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+
+		const endpointById = new Map(
+			state.endpoints.map(({ active_short_id, short_ids, ...rest }) => [
+				rest.endpoint_id,
+				rest,
+			]),
+		);
+		const existing = ensureUserGrantsStore(state, userId);
+		const existingByEndpoint = new Map(
+			existing.map((grant) => [grant.endpoint_id, grant]),
+		);
+		const requestByEndpoint = new Map<string, PutAdminUserGrantItem>();
+
+		for (const item of payload.items) {
+			if (
+				typeof item.endpoint_id !== "string" ||
+				item.endpoint_id.length === 0 ||
+				typeof item.enabled !== "boolean" ||
+				typeof item.quota_limit_bytes !== "number"
+			) {
+				return errorResponse(400, "invalid_request", "invalid grant item");
+			}
+			if (!endpointById.has(item.endpoint_id)) {
+				return errorResponse(404, "not_found", "endpoint not found");
+			}
+			requestByEndpoint.set(item.endpoint_id, item);
+		}
+
+		let created = 0;
+		let updated = 0;
+		let deleted = 0;
+
+		for (const endpointId of existingByEndpoint.keys()) {
+			if (!requestByEndpoint.has(endpointId)) {
+				deleted += 1;
+			}
+		}
+
+		const nextGrants: AdminUserGrant[] = [];
+		for (const [endpointId, item] of requestByEndpoint.entries()) {
+			const prev = existingByEndpoint.get(endpointId);
+			if (!prev) {
+				created += 1;
+				nextGrants.push(
+					nextGrant(state, userId, endpointById.get(endpointId), item),
+				);
+				continue;
+			}
+			const normalizedNote = item.note ?? null;
+			const normalizedQuota = Math.max(0, Math.floor(item.quota_limit_bytes));
+			if (
+				prev.enabled !== item.enabled ||
+				prev.quota_limit_bytes !== normalizedQuota ||
+				(prev.note ?? null) !== normalizedNote
+			) {
+				updated += 1;
+			}
+			nextGrants.push({
+				...prev,
+				endpoint_id: endpointId,
+				enabled: item.enabled,
+				quota_limit_bytes: normalizedQuota,
+				note: normalizedNote,
+			});
+		}
+
+		state.userGrantsByUserId[userId] = nextGrants;
+		return jsonResponse({
+			created,
+			updated,
+			deleted,
+			items: clone(nextGrants.filter((grant) => grant.enabled)),
+		});
 	}
 
 	const userNodeQuotaStatusMatch = path.match(
@@ -1031,184 +1154,6 @@ async function handleRequest(
 			items,
 		};
 		return jsonResponse(response);
-	}
-
-	if (path === "/api/admin/grant-groups" && method === "GET") {
-		const items = Object.values(state.grantGroupsByName).map((detail) => ({
-			group_name: detail.group.group_name,
-			member_count: detail.members.length,
-		}));
-		items.sort((a, b) => a.group_name.localeCompare(b.group_name));
-		return jsonResponse({ items });
-	}
-
-	if (path === "/api/admin/grant-groups" && method === "POST") {
-		if (state.delayGrantGroupCreateMs > 0) {
-			await new Promise((resolve) =>
-				setTimeout(resolve, state.delayGrantGroupCreateMs),
-			);
-		}
-
-		if (state.failGrantGroupCreate) {
-			return errorResponse(409, "conflict", "group_name already exists");
-		}
-
-		const payload = await readJson<AdminGrantGroupCreateRequest>(req);
-		if (!payload) {
-			return errorResponse(400, "invalid_request", "invalid JSON payload");
-		}
-		if (!payload.group_name) {
-			return errorResponse(400, "invalid_request", "group_name is required");
-		}
-		if (!payload.members || payload.members.length === 0) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"members must have at least 1 item",
-			);
-		}
-		if (state.grantGroupsByName[payload.group_name]) {
-			return errorResponse(409, "conflict", "group_name already exists");
-		}
-
-		const endpointsById = new Map(
-			state.endpoints.map(({ active_short_id, short_ids, ...rest }) => [
-				rest.endpoint_id,
-				rest,
-			]),
-		);
-
-		const detail: AdminGrantGroupDetail = {
-			group: { group_name: payload.group_name },
-			members: payload.members.map((m) => {
-				const endpoint = endpointsById.get(m.endpoint_id);
-				return {
-					user_id: m.user_id,
-					endpoint_id: m.endpoint_id,
-					enabled: m.enabled,
-					quota_limit_bytes: Math.floor(m.quota_limit_bytes),
-					note: m.note ?? null,
-					credentials: createGrantCredentials(
-						endpoint,
-						state.counters.grantGroup++,
-					),
-				};
-			}),
-		};
-
-		state.grantGroupsByName[payload.group_name] = clone(detail);
-		return jsonResponse(detail, { status: 201 });
-	}
-
-	const grantGroupGetMatch = path.match(
-		/^\/api\/admin\/grant-groups\/([^/]+)$/,
-	);
-	if (grantGroupGetMatch) {
-		const groupName = decodeURIComponent(grantGroupGetMatch[1]);
-		const existing = state.grantGroupsByName[groupName];
-		if (!existing) {
-			return errorResponse(404, "not_found", "grant group not found");
-		}
-		if (method === "GET") {
-			return jsonResponse(clone(existing));
-		}
-		if (method === "PUT") {
-			const payload = await readJson<AdminGrantGroupReplaceRequest>(req);
-			if (!payload) {
-				return errorResponse(400, "invalid_request", "invalid JSON payload");
-			}
-			if (!payload.members || payload.members.length === 0) {
-				return errorResponse(
-					400,
-					"invalid_request",
-					"members must have at least 1 item",
-				);
-			}
-
-			const renameTo = payload.rename_to?.trim() || undefined;
-			const nextGroupName = renameTo ?? groupName;
-			if (renameTo && state.grantGroupsByName[renameTo]) {
-				return errorResponse(409, "conflict", "group_name already exists");
-			}
-
-			const oldByKey = new Map(
-				existing.members.map((m) => [`${m.user_id}:${m.endpoint_id}`, m]),
-			);
-			const newByKey = new Map(
-				payload.members.map((m) => [`${m.user_id}:${m.endpoint_id}`, m]),
-			);
-
-			let created = 0;
-			let updated = 0;
-			let deleted = 0;
-
-			for (const key of oldByKey.keys()) {
-				if (!newByKey.has(key)) deleted += 1;
-			}
-			for (const [key, next] of newByKey.entries()) {
-				const prev = oldByKey.get(key);
-				if (!prev) {
-					created += 1;
-					continue;
-				}
-				const nextNote = Object.prototype.hasOwnProperty.call(next, "note")
-					? (next.note ?? null)
-					: prev.note;
-				if (
-					prev.enabled !== next.enabled ||
-					prev.quota_limit_bytes !== Math.floor(next.quota_limit_bytes) ||
-					prev.note !== nextNote
-				) {
-					updated += 1;
-				}
-			}
-
-			const endpointsById = new Map(
-				state.endpoints.map(({ active_short_id, short_ids, ...rest }) => [
-					rest.endpoint_id,
-					rest,
-				]),
-			);
-
-			const nextDetail: AdminGrantGroupDetail = {
-				group: { group_name: nextGroupName },
-				members: payload.members.map((m) => {
-					const key = `${m.user_id}:${m.endpoint_id}`;
-					const prev = oldByKey.get(key);
-					const endpoint = endpointsById.get(m.endpoint_id);
-					const note = Object.prototype.hasOwnProperty.call(m, "note")
-						? (m.note ?? null)
-						: (prev?.note ?? null);
-					return {
-						user_id: m.user_id,
-						endpoint_id: m.endpoint_id,
-						enabled: m.enabled,
-						quota_limit_bytes: Math.floor(m.quota_limit_bytes),
-						note,
-						credentials:
-							prev?.credentials ??
-							createGrantCredentials(endpoint, state.counters.grantGroup++),
-					};
-				}),
-			};
-
-			if (nextGroupName !== groupName) {
-				delete state.grantGroupsByName[groupName];
-			}
-			state.grantGroupsByName[nextGroupName] = clone(nextDetail);
-
-			return jsonResponse({
-				group: { group_name: nextGroupName },
-				created,
-				updated,
-				deleted,
-			});
-		}
-		if (method === "DELETE") {
-			const memberCount = existing.members.length;
-			delete state.grantGroupsByName[groupName];
-			return jsonResponse({ deleted: memberCount });
-		}
 	}
 
 	if (path === "/api/admin/alerts" && method === "GET") {
