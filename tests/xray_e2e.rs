@@ -87,14 +87,18 @@ fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     }
 }
 
-fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
+fn req_authed_json_with_method(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> {
     Request::builder()
-        .method("POST")
+        .method(method)
         .uri(uri)
         .header(axum::http::header::AUTHORIZATION, "Bearer testtoken")
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&value).unwrap()))
         .unwrap()
+}
+
+fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
+    req_authed_json_with_method("POST", uri, value)
 }
 
 async fn wait_for_remove_user(client: &mut xray::XrayClient, tag: &str, email: &str) {
@@ -372,7 +376,8 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
 
     let res = app
         .clone()
-        .oneshot(req_authed_json(
+        .oneshot(req_authed_json_with_method(
+            "PUT",
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
@@ -561,7 +566,8 @@ async fn xray_e2e_quota_enforcement_ss2022() {
 
     let res = app
         .clone()
-        .oneshot(req_authed_json(
+        .oneshot(req_authed_json_with_method(
+            "PUT",
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
