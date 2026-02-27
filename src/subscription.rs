@@ -591,7 +591,6 @@ mod tests {
     ) -> Grant {
         Grant {
             grant_id: grant_id.to_string(),
-            group_name: "test-group".to_string(),
             user_id: user_id.to_string(),
             endpoint_id: endpoint_id.to_string(),
             enabled,
@@ -617,7 +616,6 @@ mod tests {
     ) -> Grant {
         Grant {
             grant_id: grant_id.to_string(),
-            group_name: "test-group".to_string(),
             user_id: user_id.to_string(),
             endpoint_id: endpoint_id.to_string(),
             enabled,

@@ -21,9 +21,6 @@ import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
 import { EndpointsPage } from "../src/views/EndpointsPage";
-import { GrantGroupDetailsPage } from "../src/views/GrantGroupDetailsPage";
-import { GrantGroupsPage } from "../src/views/GrantGroupsPage";
-import { GrantNewPage } from "../src/views/GrantNewPage";
 import { HomePage } from "../src/views/HomePage";
 import { LoginPage } from "../src/views/LoginPage";
 import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
@@ -195,18 +192,11 @@ const preview: Preview = {
 				component: UserDetailsPage,
 			});
 
-			const grantGroupsRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/grant-groups",
-				component: GrantGroupsPage,
-			});
-
 			const quotaPolicyRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/quota-policy",
 				component: QuotaPolicyPage,
 			});
-
 			const serviceConfigRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/service-config",
@@ -219,18 +209,6 @@ const preview: Preview = {
 				component: RealityDomainsPage,
 			});
 
-			const grantGroupNewRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/grant-groups/new",
-				component: GrantNewPage,
-			});
-
-			const grantGroupDetailsRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/grant-groups/$groupName",
-				component: GrantGroupDetailsPage,
-			});
-
 			const appRouteTree = appRoute.addChildren([
 				dashboardRoute,
 				nodesRoute,
@@ -241,10 +219,7 @@ const preview: Preview = {
 				usersRoute,
 				userNewRoute,
 				userDetailsRoute,
-				grantGroupsRoute,
 				quotaPolicyRoute,
-				grantGroupNewRoute,
-				grantGroupDetailsRoute,
 				serviceConfigRoute,
 				realityDomainsRoute,
 			]);

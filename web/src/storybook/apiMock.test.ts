@@ -69,7 +69,7 @@ describe("storybook api mock", () => {
 		expect(listDataAfter.items.length).toBe(initialCount);
 	});
 
-	it("supports grant group CRUD", async () => {
+	it("supports user grants hard-cut replace", async () => {
 		const mock = createMockApi();
 
 		const usersRes = await mock.handle(
@@ -83,23 +83,22 @@ describe("storybook api mock", () => {
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups", { method: "GET" }),
+			jsonRequest(`/api/admin/users/${userId}/grants`, { method: "GET" }),
 		);
 		expect(listRes.ok).toBe(true);
 		const listData = (await listRes.json()) as {
-			items: Array<{ group_name: string; member_count: number }>;
+			items: Array<{ endpoint_id: string; enabled: boolean }>;
 		};
 		expect(listData.items.length).toBeGreaterThan(0);
+		expect(listData.items.every((item) => item.enabled)).toBe(true);
 
-		const createRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups", {
-				method: "POST",
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
+				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					group_name: "group-mock-new",
-					members: [
+					items: [
 						{
-							user_id: userId,
 							endpoint_id: "endpoint-1",
 							enabled: true,
 							quota_limit_bytes: 123,
@@ -109,64 +108,133 @@ describe("storybook api mock", () => {
 				}),
 			}),
 		);
-		expect(createRes.status).toBe(201);
-		const created = (await createRes.json()) as {
-			group: { group_name: string };
-			members: Array<{ user_id: string; endpoint_id: string }>;
+		expect(replaceRes.ok).toBe(true);
+		const replaced = (await replaceRes.json()) as {
+			created: number;
+			updated: number;
+			deleted: number;
+			items: Array<{ endpoint_id: string; note: string | null }>;
 		};
-		expect(created.group.group_name).toBe("group-mock-new");
-		expect(created.members.length).toBe(1);
+		expect(replaced.created + replaced.updated).toBeGreaterThan(0);
+		expect(replaced.items).toHaveLength(1);
+		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
+		expect(replaced.items[0]?.note).toBe("hello");
 
-		const replaceRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups/group-mock-new", {
+		const clearRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					rename_to: "group-mock-renamed",
-					members: [
-						{
-							user_id: userId,
-							endpoint_id: "endpoint-1",
-							enabled: false,
-							quota_limit_bytes: 456,
-						},
-					],
+					items: [],
 				}),
 			}),
 		);
-		expect(replaceRes.ok).toBe(true);
-		const replaceData = (await replaceRes.json()) as {
-			group: { group_name: string };
+		expect(clearRes.ok).toBe(true);
+		const clearData = (await clearRes.json()) as {
+			deleted: number;
+			items: Array<unknown>;
 		};
-		expect(replaceData.group.group_name).toBe("group-mock-renamed");
+		expect(clearData.deleted).toBeGreaterThanOrEqual(1);
+		expect(clearData.items).toHaveLength(0);
 
 		const detailsRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups/group-mock-renamed", {
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
 				method: "GET",
 			}),
 		);
 		expect(detailsRes.ok).toBe(true);
 		const detailsData = (await detailsRes.json()) as {
-			group: { group_name: string };
-			members: Array<{
-				enabled: boolean;
-				quota_limit_bytes: number;
-				note: string | null;
-			}>;
+			items: Array<unknown>;
 		};
-		expect(detailsData.group.group_name).toBe("group-mock-renamed");
-		expect(detailsData.members[0]?.enabled).toBe(false);
-		expect(detailsData.members[0]?.quota_limit_bytes).toBe(456);
-		expect(detailsData.members[0]?.note).toBe("hello");
+		expect(detailsData.items).toHaveLength(0);
+	});
 
-		const deleteRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups/group-mock-renamed", {
-				method: "DELETE",
+	it("rejects disabled items in user grants hard-cut replace", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+							enabled: false,
+							quota_limit_bytes: 123,
+							note: null,
+						},
+					],
+				}),
 			}),
 		);
-		expect(deleteRes.ok).toBe(true);
-		const deleteData = (await deleteRes.json()) as { deleted: number };
-		expect(deleteData.deleted).toBe(1);
+		expect(replaceRes.status).toBe(400);
+		const payload = (await replaceRes.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("invalid_request");
+	});
+
+	it("rejects duplicate endpoint items in user grants hard-cut replace", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+							enabled: true,
+							quota_limit_bytes: 123,
+							note: null,
+						},
+						{
+							endpoint_id: "endpoint-1",
+							enabled: true,
+							quota_limit_bytes: 456,
+							note: "duplicate",
+						},
+					],
+				}),
+			}),
+		);
+		expect(replaceRes.status).toBe(409);
+		const payload = (await replaceRes.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("conflict");
+	});
+
+	it("returns not_found for retired grant-groups routes", async () => {
+		const mock = createMockApi();
+		const res = await mock.handle(
+			jsonRequest("/api/admin/grant-groups", { method: "GET" }),
+		);
+		expect(res.status).toBe(404);
+		const payload = (await res.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("not_found");
 	});
 
 	it("returns subscription text response", async () => {

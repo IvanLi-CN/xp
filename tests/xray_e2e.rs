@@ -87,9 +87,9 @@ fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     }
 }
 
-fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
+fn req_authed_json(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> {
     Request::builder()
-        .method("POST")
+        .method(method)
         .uri(uri)
         .header(axum::http::header::AUTHORIZATION, "Bearer testtoken")
         .header(axum::http::header::CONTENT_TYPE, "application/json")
@@ -302,6 +302,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/users",
             json!({
               "display_name": "alice",
@@ -325,6 +326,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": node_id,
@@ -346,6 +348,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": endpoint_ss["node_id"],
@@ -373,17 +376,15 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "xray-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
                 "enabled": true,
                 "quota_limit_bytes": 0,
                 "note": null
               }, {
-                "user_id": user_id,
                 "endpoint_id": endpoint_id_vless,
                 "enabled": true,
                 "quota_limit_bytes": 0,
@@ -525,6 +526,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/users",
             json!({
               "display_name": "quota-e2e",
@@ -548,6 +550,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": node_id,
@@ -570,11 +573,10 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{user_id}/grants"),
             json!({
-              "group_name": "quota-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
                 "enabled": true,
                 "quota_limit_bytes": quota_limit_bytes,
@@ -590,7 +592,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let ss_password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
+    let ss_password = group_detail["items"][0]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();

@@ -109,10 +109,16 @@ impl FileLogStore {
             .ensure_dirs()
             .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Write, e))?;
 
-        let wal = read_json::<PersistedWal>(&paths.wal_json)
+        let sm_meta = read_json::<PersistedStateMachineMeta>(&paths.sm_meta_json)
             .await
-            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Read, e))?
-            .unwrap_or_else(PersistedWal::empty);
+            .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
+        let last_applied_index = sm_meta
+            .as_ref()
+            .and_then(|meta| meta.last_applied.as_ref().map(|log_id| log_id.index));
+
+        let (wal, wal_rewritten) = read_wal_with_compat(&paths.wal_json, last_applied_index)
+            .await
+            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Read, e))?;
         let vote = read_json::<Vote<NodeId>>(&paths.vote_json)
             .await
             .map_err(|e| io_err(ErrorSubject::Vote, ErrorVerb::Read, e))?;
@@ -125,6 +131,18 @@ impl FileLogStore {
             .into_iter()
             .map(|ent| (ent.log_id.index, ent))
             .collect::<BTreeMap<_, _>>();
+
+        if wal_rewritten {
+            write_json(
+                &paths.wal_json,
+                &PersistedWal {
+                    last_purged_log_id: wal.last_purged_log_id,
+                    entries: entries.values().cloned().collect(),
+                },
+            )
+            .await
+            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Write, e))?;
+        }
 
         Ok(Self {
             paths,
@@ -453,32 +471,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             .map(|_| endpoint.endpoint_id.clone()),
                         _ => None,
                     };
-                    let (deleted_usage, clear_bans) = match &cmd {
-                        DesiredStateCommand::DeleteGrantGroup { group_name } => {
-                            let ids: Vec<String> = store
-                                .list_grants()
-                                .into_iter()
-                                .filter(|g| g.group_name == *group_name)
-                                .map(|g| g.grant_id)
-                                .collect();
-                            (ids, Vec::new())
-                        }
-                        DesiredStateCommand::ReplaceGrantGroup {
-                            group_name, grants, ..
-                        } => {
-                            let old: std::collections::BTreeSet<String> = store
-                                .list_grants()
-                                .into_iter()
-                                .filter(|g| g.group_name == *group_name)
-                                .map(|g| g.grant_id)
-                                .collect();
-                            let new: std::collections::BTreeSet<String> =
-                                grants.iter().map(|g| g.grant_id.clone()).collect();
-                            let deleted: Vec<String> = old.difference(&new).cloned().collect();
-                            let clear_bans: Vec<String> = new.into_iter().collect();
-                            (deleted, clear_bans)
-                        }
-                        _ => (Vec::new(), Vec::new()),
+                    let replaced_user_grants_before: std::collections::BTreeSet<String> = match &cmd
+                    {
+                        DesiredStateCommand::ReplaceUserGrants { user_id, .. } => store
+                            .list_grants()
+                            .into_iter()
+                            .filter(|g| g.user_id == *user_id)
+                            .map(|g| g.grant_id)
+                            .collect(),
+                        _ => std::collections::BTreeSet::new(),
                     };
                     match cmd.apply(store.state_mut()) {
                         Ok(apply_result) => {
@@ -508,8 +509,18 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                         })?;
                                     }
                                 }
-                                (DesiredStateCommand::ReplaceGrantGroup { .. }, _) => {
-                                    for grant_id in deleted_usage.iter() {
+                                (DesiredStateCommand::ReplaceUserGrants { user_id, .. }, _) => {
+                                    let replaced_user_grants_after: std::collections::BTreeSet<
+                                        String,
+                                    > = store
+                                        .list_grants()
+                                        .into_iter()
+                                        .filter(|g| g.user_id == *user_id)
+                                        .map(|g| g.grant_id)
+                                        .collect();
+                                    for grant_id in replaced_user_grants_before
+                                        .difference(&replaced_user_grants_after)
+                                    {
                                         store.clear_grant_usage(grant_id).map_err(|e| {
                                             io_err(
                                                 ErrorSubject::StateMachine,
@@ -518,19 +529,8 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                             )
                                         })?;
                                     }
-                                    for grant_id in clear_bans.iter() {
-                                        store.clear_quota_banned(grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                }
-                                (DesiredStateCommand::DeleteGrantGroup { .. }, _) => {
-                                    for grant_id in deleted_usage.iter() {
-                                        store.clear_grant_usage(grant_id).map_err(|e| {
+                                    for grant_id in replaced_user_grants_after {
+                                        store.clear_quota_banned(&grant_id).map_err(|e| {
                                             io_err(
                                                 ErrorSubject::StateMachine,
                                                 ErrorVerb::Write,
@@ -594,12 +594,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 crate::domain::DomainError::MissingUser { .. }
                                 | crate::domain::DomainError::MissingNode { .. }
                                 | crate::domain::DomainError::MissingEndpoint { .. }
-                                | crate::domain::DomainError::MissingGrantGroup { .. }
                                 | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                                     (404, "not_found")
                                 }
-                                crate::domain::DomainError::GroupNameConflict { .. }
-                                | crate::domain::DomainError::GrantPairConflict { .. }
+                                crate::domain::DomainError::GrantPairConflict { .. }
                                 | crate::domain::DomainError::RealityDomainNameConflict {
                                     ..
                                 } => (409, "conflict"),
@@ -750,6 +748,141 @@ async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     .expect("spawn_blocking read_json")
 }
 
+async fn read_wal_with_compat(
+    path: &Path,
+    last_applied_index: Option<u64>,
+) -> Result<(PersistedWal, bool), std::io::Error> {
+    let Some(raw_wal) = read_json::<serde_json::Value>(path).await? else {
+        return Ok((PersistedWal::empty(), false));
+    };
+
+    let mut rewritten = false;
+    let last_purged_log_id: Option<LogId<NodeId>> = raw_wal
+        .get("last_purged_log_id")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(std::io::Error::other)?
+        .unwrap_or(None);
+    let last_purged_index = last_purged_log_id
+        .as_ref()
+        .map(|log_id| log_id.index)
+        .unwrap_or(0);
+
+    let mut entries = Vec::new();
+    if let Some(raw_entries_value) = raw_wal.get("entries") {
+        let Some(raw_entries) = raw_entries_value.as_array() else {
+            return Err(std::io::Error::other(
+                "invalid wal format: `entries` must be an array",
+            ));
+        };
+        for raw_entry in raw_entries {
+            match serde_json::from_value::<openraft::impls::Entry<TypeConfig>>(raw_entry.clone()) {
+                Ok(entry) => entries.push(entry),
+                Err(parse_err) => {
+                    let Some(cmd_type) = extract_entry_command_type(raw_entry) else {
+                        return Err(std::io::Error::other(parse_err));
+                    };
+                    if !is_retired_grant_group_command(&cmd_type) {
+                        return Err(std::io::Error::other(parse_err));
+                    }
+
+                    let entry_index = extract_entry_log_index(raw_entry).ok_or_else(|| {
+                        std::io::Error::other(format!(
+                            "failed to read wal entry index for retired command: type={cmd_type}"
+                        ))
+                    })?;
+                    let last_applied = last_applied_index.unwrap_or(0);
+                    if entry_index > last_applied {
+                        return Err(std::io::Error::other(format!(
+                            "retired wal command is not applied yet (entry_index={entry_index}, last_applied={last_applied}); start old version to apply/snapshot first, then upgrade"
+                        )));
+                    }
+                    if entry_index > last_purged_index {
+                        return Err(std::io::Error::other(format!(
+                            "retired wal command is still in active log range (entry_index={entry_index}, last_purged={last_purged_index}); start old version to snapshot/purge logs first, then upgrade"
+                        )));
+                    }
+
+                    let mut blank_entry = raw_entry.clone();
+                    rewrite_entry_payload_to_blank(&mut blank_entry)?;
+                    let parsed =
+                        serde_json::from_value::<openraft::impls::Entry<TypeConfig>>(blank_entry)
+                            .map_err(std::io::Error::other)?;
+                    entries.push(parsed);
+                    rewritten = true;
+                }
+            }
+        }
+    }
+
+    Ok((
+        PersistedWal {
+            last_purged_log_id,
+            entries,
+        },
+        rewritten,
+    ))
+}
+
+fn extract_entry_log_index(entry: &serde_json::Value) -> Option<u64> {
+    entry
+        .pointer("/log_id/index")
+        .and_then(|value| value.as_u64())
+        .or_else(|| {
+            entry
+                .get("log_id")
+                .and_then(|log_id| log_id.get("index"))
+                .and_then(|value| value.as_u64())
+        })
+}
+
+fn extract_entry_command_type(entry: &serde_json::Value) -> Option<String> {
+    fn find_type(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cmd_type)) = map.get("type") {
+                    return Some(cmd_type.clone());
+                }
+                for child in map.values() {
+                    if let Some(cmd_type) = find_type(child) {
+                        return Some(cmd_type);
+                    }
+                }
+                None
+            }
+            serde_json::Value::Array(items) => {
+                for child in items {
+                    if let Some(cmd_type) = find_type(child) {
+                        return Some(cmd_type);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    entry.get("payload").and_then(find_type)
+}
+
+fn is_retired_grant_group_command(cmd_type: &str) -> bool {
+    matches!(
+        cmd_type,
+        "create_grant_group" | "replace_grant_group" | "delete_grant_group"
+    )
+}
+
+fn rewrite_entry_payload_to_blank(entry: &mut serde_json::Value) -> Result<(), std::io::Error> {
+    let blank_payload =
+        serde_json::to_value(EntryPayload::<TypeConfig>::Blank).map_err(std::io::Error::other)?;
+    let Some(entry_obj) = entry.as_object_mut() else {
+        return Err(std::io::Error::other("wal entry is not an object"));
+    };
+    entry_obj.insert("payload".to_string(), blank_payload);
+    Ok(())
+}
+
 async fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), std::io::Error> {
     let path = path.to_path_buf();
     let bytes = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
@@ -816,14 +949,7 @@ mod tests {
             )
             .unwrap();
         let grant = store
-            .create_grant(
-                "test-group".to_string(),
-                user.user_id,
-                endpoint.endpoint_id,
-                1,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
             .unwrap();
         store
             .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
@@ -837,6 +963,21 @@ mod tests {
             log_id,
             payload: EntryPayload::Normal(cmd),
         }
+    }
+
+    fn build_retired_grant_group_raw_entry(index: u64, cmd_type: &str) -> serde_json::Value {
+        let log_id = LogId::new(openraft::CommittedLeaderId::new(1, 1), index);
+        let mut raw_entry = serde_json::to_value(openraft::impls::Entry::<TypeConfig> {
+            log_id,
+            payload: EntryPayload::Blank,
+        })
+        .unwrap();
+        raw_entry["payload"] = json!({
+            "normal": {
+                "type": cmd_type,
+            }
+        });
+        raw_entry
     }
 
     #[tokio::test]
@@ -931,5 +1072,79 @@ mod tests {
 
         let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_non_array_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": null,
+            "entries": {
+                "unexpected": true
+            }
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(0)).await.unwrap_err();
+        assert!(err.to_string().contains("entries"));
+        assert!(err.to_string().contains("array"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unapplied_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "create_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(4)).await.unwrap_err();
+        assert!(err.to_string().contains("not applied yet"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unpurged_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "replace_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 4)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(10)).await.unwrap_err();
+        assert!(err.to_string().contains("active log range"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rewrites_purged_retired_entry_to_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "delete_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let (wal, rewritten) = read_wal_with_compat(&wal_path, Some(10)).await.unwrap();
+        assert!(rewritten);
+        assert_eq!(wal.entries.len(), 1);
+        assert!(matches!(wal.entries[0].payload, EntryPayload::Blank));
     }
 }

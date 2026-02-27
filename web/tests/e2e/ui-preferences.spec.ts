@@ -20,7 +20,7 @@ test("theme preference persists after reload", async ({ page }) => {
 
 	await page.getByRole("link", { name: "user-1" }).click();
 	await expect(
-		page.getByRole("heading", { name: "User", exact: true }),
+		page.getByRole("heading", { name: "Demo user", exact: true }),
 	).toBeVisible();
 
 	await page.getByRole("button", { name: "Open settings" }).click();
