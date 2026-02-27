@@ -520,6 +520,23 @@ async fn xray_e2e_quota_enforcement_ss2022() {
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
 
+    // Hard-cut access keeps grants desired-enabled; quota enforcement is driven by
+    // shared node budget + usage pacing. Configure a tiny shared budget so the
+    // 1MiB transfer below deterministically exceeds today's allowance.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json_with_method(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_limit_bytes": 257 * 1024 * 1024,
+              "quota_reset": { "policy": "monthly", "day_of_month": 1, "tz_offset_minutes": 0 }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -624,7 +641,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let store = store.lock().await;
         let grant = store.get_grant(&grant_id_ss).unwrap();
         let usage = store.get_grant_usage(&grant_id_ss).unwrap();
-        assert_eq!(grant.enabled, false);
+        assert_eq!(grant.enabled, true);
         assert_eq!(usage.quota_banned, true);
     }
 
