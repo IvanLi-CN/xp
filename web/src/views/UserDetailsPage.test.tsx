@@ -356,6 +356,30 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("shows partial quota status warning with unreachable nodes", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValueOnce({
+			partial: true,
+			unreachable_nodes: ["node-osaka"],
+			items: [
+				{
+					user_id: "u_01HUSERAAAAAA",
+					node_id: "node-tokyo",
+					quota_limit_bytes: 1024,
+					used_bytes: 0,
+					remaining_bytes: 1024,
+					cycle_end_at: null,
+					quota_reset_source: "user",
+				},
+			],
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Quota status"));
+		expect(await screenByText("Quota status is partial.")).toBeTruthy();
+		expect(await screenByText("Unreachable nodes: node-osaka")).toBeTruthy();
+	});
+
 	it("shows token-required state when admin token is missing", async () => {
 		mockReadAdminToken.mockReturnValue("");
 		setupMocks();

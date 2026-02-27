@@ -666,6 +666,103 @@ fn migrate_v8_to_v9(mut input: PersistedState) -> Result<PersistedState, StoreEr
     Ok(input)
 }
 
+fn collect_disabled_grant_ids_from_raw_state(raw: &serde_json::Value) -> BTreeSet<String> {
+    let user_ids = raw
+        .get("users")
+        .and_then(|value| value.as_object())
+        .map(|users| users.keys().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+    let endpoint_ids = raw
+        .get("endpoints")
+        .and_then(|value| value.as_object())
+        .map(|endpoints| endpoints.keys().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+
+    let mut disabled = BTreeSet::new();
+    let Some(grants) = raw.get("grants").and_then(|value| value.as_object()) else {
+        return disabled;
+    };
+
+    for (grant_key, grant_value) in grants {
+        let Some(grant_obj) = grant_value.as_object() else {
+            continue;
+        };
+        if grant_obj.get("enabled").and_then(|value| value.as_bool()) != Some(false) {
+            continue;
+        }
+
+        let Some(user_id) = grant_obj.get("user_id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(endpoint_id) = grant_obj
+            .get("endpoint_id")
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        if !user_ids.contains(user_id) || !endpoint_ids.contains(endpoint_id) {
+            continue;
+        }
+
+        disabled.insert(
+            grant_obj
+                .get("grant_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or(grant_key)
+                .to_string(),
+        );
+    }
+
+    disabled
+}
+
+fn guard_quota_banned_disabled_grants_migration(
+    raw_state: &serde_json::Value,
+    usage_path: &Path,
+) -> Result<(), StoreError> {
+    let disabled_grant_ids = collect_disabled_grant_ids_from_raw_state(raw_state);
+    if disabled_grant_ids.is_empty() || !usage_path.exists() {
+        return Ok(());
+    }
+
+    let usage_bytes = fs::read(usage_path)?;
+    let usage: PersistedUsage = serde_json::from_slice(&usage_bytes)?;
+    if usage.schema_version != USAGE_SCHEMA_VERSION {
+        return Err(StoreError::SchemaVersionMismatch {
+            expected: USAGE_SCHEMA_VERSION,
+            got: usage.schema_version,
+        });
+    }
+
+    let affected = disabled_grant_ids
+        .into_iter()
+        .filter(|grant_id| {
+            usage
+                .grants
+                .get(grant_id)
+                .is_some_and(|grant_usage| grant_usage.quota_banned)
+        })
+        .collect::<Vec<_>>();
+
+    if affected.is_empty() {
+        return Ok(());
+    }
+
+    let sample = affected
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let suffix = if affected.len() > 3 { ", ..." } else { "" };
+    Err(StoreError::Migration {
+        message: format!(
+            "found {} disabled quota-banned grants ({sample}{suffix}); start old version and clear quota bans (or wait for auto-unban) before upgrading",
+            affected.len()
+        ),
+    })
+}
+
 fn normalize_user_global_weights(
     state: &PersistedState,
     global_weights: BTreeMap<String, UserGlobalWeightConfig>,
@@ -2030,6 +2127,7 @@ impl JsonSnapshotStore {
         fs::create_dir_all(&init.data_dir)?;
 
         let state_path = init.data_dir.join("state.json");
+        let usage_path = init.data_dir.join("usage.json");
         let (mut state, is_new_state, mut migrated) = if state_path.exists() {
             let bytes = fs::read(&state_path)?;
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
@@ -2037,6 +2135,9 @@ impl JsonSnapshotStore {
                 .get("schema_version")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
+            if schema_version < SCHEMA_VERSION {
+                guard_quota_banned_disabled_grants_migration(&raw, &usage_path)?;
+            }
             match schema_version {
                 9 => (serde_json::from_value(raw)?, false, false),
                 8 => {
@@ -2165,7 +2266,6 @@ impl JsonSnapshotStore {
             migrated = true;
         }
 
-        let usage_path = init.data_dir.join("usage.json");
         let mut usage = if usage_path.exists() {
             let bytes = fs::read(&usage_path)?;
             let usage: PersistedUsage = serde_json::from_slice(&bytes)?;
@@ -3104,6 +3204,89 @@ mod tests {
         let usage: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
         assert!(!usage.grants.contains_key("grant_stale"));
         assert!(usage.grants.contains_key(&valid_grant_id));
+    }
+
+    #[test]
+    fn load_or_init_rejects_disabled_quota_banned_grants_during_v8_migration() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let mut v8 = PersistedState::empty();
+        v8.schema_version = SCHEMA_VERSION_V8;
+        v8.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        v8.nodes.insert(
+            "node_1".to_string(),
+            Node {
+                node_id: "node_1".to_string(),
+                node_name: "node-1".to_string(),
+                access_host: "localhost".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        v8.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "edge-1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 8388,
+                meta: json!({}),
+            },
+        );
+        let disabled_grant = Grant {
+            grant_id: "grant_disabled".to_string(),
+            user_id: "user_1".to_string(),
+            endpoint_id: "endpoint_1".to_string(),
+            enabled: false,
+            quota_limit_bytes: 0,
+            note: None,
+            credentials: GrantCredentials {
+                vless: None,
+                ss2022: None,
+            },
+        };
+        v8.grants
+            .insert(disabled_grant.grant_id.clone(), disabled_grant.clone());
+        fs::write(
+            tmp.path().join("state.json"),
+            serde_json::to_vec_pretty(&v8).unwrap(),
+        )
+        .unwrap();
+
+        let mut usage = PersistedUsage::empty();
+        usage.grants.insert(
+            disabled_grant.grant_id.clone(),
+            GrantUsage {
+                cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
+                cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                used_bytes: 1,
+                last_uplink_total: 1,
+                last_downlink_total: 0,
+                last_seen_at: "2026-01-01T00:00:01Z".to_string(),
+                quota_banned: true,
+                quota_banned_at: Some("2026-01-01T00:00:01Z".to_string()),
+            },
+        );
+        fs::write(
+            tmp.path().join("usage.json"),
+            serde_json::to_vec_pretty(&usage).unwrap(),
+        )
+        .unwrap();
+
+        let err = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap_err();
+        assert!(matches!(err, StoreError::Migration { .. }));
+        assert!(err.to_string().contains("disabled quota-banned grants"));
     }
 
     #[test]

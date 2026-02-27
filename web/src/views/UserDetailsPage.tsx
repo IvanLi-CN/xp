@@ -832,6 +832,17 @@ export function UserDetailsPage() {
 							description={formatError(nodeQuotaStatusQuery.error)}
 						/>
 					) : null}
+					{nodeQuotaStatusQuery.data?.partial ? (
+						<div className="alert alert-warning py-2 text-sm">
+							<div className="space-y-1">
+								<div>Quota status is partial.</div>
+								<div className="font-mono text-xs">
+									Unreachable nodes:{" "}
+									{nodeQuotaStatusQuery.data.unreachable_nodes.join(", ")}
+								</div>
+							</div>
+						</div>
+					) : null}
 					{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => {
 						const isUnlimited = item.quota_limit_bytes === 0;
 						const quotaLimitText = isUnlimited
