@@ -81,10 +81,10 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| AdminGrantGroups APIs | HTTP API | internal | Delete | ./contracts/http-apis.md | backend | web/admin | `/api/admin/grant-groups*` 下线 |
-| AdminUserGrants APIs | HTTP API | internal | New | ./contracts/http-apis.md | backend | web/admin | `GET/PUT /api/admin/users/:user_id/grants` |
+| 接口（Name）          | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                              |
+| --------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ------------------------------------------ |
+| AdminGrantGroups APIs | HTTP API     | internal      | Delete         | ./contracts/http-apis.md | backend         | web/admin           | `/api/admin/grant-groups*` 下线            |
+| AdminUserGrants APIs  | HTTP API     | internal      | New            | ./contracts/http-apis.md | backend         | web/admin           | `GET/PUT /api/admin/users/:user_id/grants` |
 
 ### 契约文档（按 Kind 拆分）
 
