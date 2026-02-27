@@ -101,21 +101,21 @@ type PieSegment = {
 };
 
 const PIE_COLORS = [
-	"oklch(var(--p))",
-	"oklch(var(--s))",
-	"oklch(var(--a))",
-	"oklch(var(--in))",
-	"oklch(var(--su))",
-	"oklch(var(--wa))",
-	"oklch(var(--er))",
-	"oklch(var(--n))",
+	"var(--color-primary)",
+	"var(--color-secondary)",
+	"var(--color-accent)",
+	"var(--color-info)",
+	"var(--color-success)",
+	"var(--color-warning)",
+	"var(--color-error)",
+	"var(--color-neutral)",
 ] as const;
 
 const RATIO_TABLE_MIN_VIEWPORT = 1024;
 const DEFAULT_GLOBAL_WEIGHT = 100;
 
 function pieColorAt(index: number): string {
-	return PIE_COLORS[index % PIE_COLORS.length] ?? "oklch(var(--b3))";
+	return PIE_COLORS[index % PIE_COLORS.length] ?? "var(--color-base-300)";
 }
 
 function stableColorIndex(key: string): number {
@@ -128,7 +128,7 @@ function stableColorIndex(key: string): number {
 }
 
 function pieColorForKey(key: string): string {
-	if (key === "others") return "oklch(var(--b3))";
+	if (key === "others") return "var(--color-base-300)";
 	return pieColorAt(stableColorIndex(key));
 }
 
@@ -1252,7 +1252,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="96"
-												fill="oklch(var(--b2))"
+												fill="var(--color-base-200)"
 											/>
 											{globalPieSegments.length === 1 &&
 											firstGlobalPieSegment &&
@@ -1300,7 +1300,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="58"
-												fill="oklch(var(--b1))"
+												fill="var(--color-base-100)"
 											/>
 											<text
 												x="110"
@@ -1483,14 +1483,16 @@ export function QuotaPolicyPage() {
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[31%]">User</th>
+													<th className="w-[30%]">User</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[22%]">Slider</th>
+													<th className="w-[21%]">Slider</th>
 													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[12%] whitespace-nowrap">
+													<th className="w-[14%] whitespace-nowrap pr-4">
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap">Lock</th>
+													<th className="w-[9%] whitespace-nowrap pl-4">
+														Lock
+													</th>
 												</tr>
 											</thead>
 											<tbody>
@@ -1565,7 +1567,7 @@ export function QuotaPolicyPage() {
 																	}}
 																/>
 															</td>
-															<td className="align-top whitespace-nowrap">
+															<td className="align-top whitespace-nowrap pr-4">
 																<div className="font-mono text-sm">
 																	{targetWeight}
 																</div>
@@ -1575,7 +1577,7 @@ export function QuotaPolicyPage() {
 																		: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap">
+															<td className="align-top whitespace-nowrap pl-4">
 																<label className="label cursor-pointer justify-start gap-2 py-0">
 																	<input
 																		type="checkbox"
@@ -1841,7 +1843,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="96"
-												fill="oklch(var(--b2))"
+												fill="var(--color-base-200)"
 											/>
 											{pieSegments.length === 1 &&
 											firstPieSegment &&
@@ -1888,7 +1890,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="58"
-												fill="oklch(var(--b1))"
+												fill="var(--color-base-100)"
 											/>
 											<text
 												x="110"
@@ -2094,14 +2096,16 @@ export function QuotaPolicyPage() {
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[29%]">User</th>
+													<th className="w-[28%]">User</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[24%]">Slider</th>
+													<th className="w-[23%]">Slider</th>
 													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[12%] whitespace-nowrap">
+													<th className="w-[14%] whitespace-nowrap pr-4">
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap">Lock</th>
+													<th className="w-[9%] whitespace-nowrap pl-4">
+														Lock
+													</th>
 												</tr>
 											</thead>
 											<tbody>
@@ -2201,7 +2205,7 @@ export function QuotaPolicyPage() {
 																	}}
 																/>
 															</td>
-															<td className="align-top whitespace-nowrap">
+															<td className="align-top whitespace-nowrap pr-4">
 																<div className="font-mono text-sm">
 																	{targetWeight}
 																</div>
@@ -2213,7 +2217,7 @@ export function QuotaPolicyPage() {
 																			: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap">
+															<td className="align-top whitespace-nowrap pl-4">
 																<label className="label cursor-pointer justify-start gap-2 py-0">
 																	<input
 																		type="checkbox"
