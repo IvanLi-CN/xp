@@ -61,6 +61,7 @@
 
 ## Index（固定表格）
 
-|    ID | Title              | Status | Spec                                       | Last       | Notes                               |
-| ----: | ------------------ | ------ | ------------------------------------------ | ---------- | ----------------------------------- |
-| 9vmap | 节点服务可观测升级 | 已完成 | `9vmap-node-service-observability/SPEC.md` | 2026-02-26 | local implementation + tests passed |
+|    ID | Title                                      | Status | Spec                                           | Last       | Notes                               |
+| ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ----------------------------------- |
+| s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成 | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-02-26 | PR #81                              |
+| 9vmap | 节点服务可观测升级                         | 已完成 | `9vmap-node-service-observability/SPEC.md`     | 2026-02-26 | local implementation + tests passed |

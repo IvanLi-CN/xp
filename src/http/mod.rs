@@ -749,6 +749,22 @@ pub fn build_router(
             get(admin_list_user_quota_summaries),
         )
         .route(
+            "/quota-policy/nodes/:node_id/weight-rows",
+            get(admin_list_quota_policy_node_weight_rows),
+        )
+        .route(
+            "/quota-policy/global-weight-rows",
+            get(admin_list_quota_policy_global_weight_rows),
+        )
+        .route(
+            "/quota-policy/global-weight-rows/:user_id",
+            put(admin_put_quota_policy_global_weight_row),
+        )
+        .route(
+            "/quota-policy/nodes/:node_id/policy",
+            get(admin_get_quota_policy_node_policy).put(admin_put_quota_policy_node_policy),
+        )
+        .route(
             "/users/:user_id",
             get(admin_get_user)
                 .delete(admin_delete_user)
@@ -4005,6 +4021,232 @@ struct AdminUserNodeWeightItem {
     weight: u16,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AdminQuotaPolicyWeightRowSource {
+    Explicit,
+    ImplicitZero,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AdminQuotaPolicyGlobalWeightRowSource {
+    Explicit,
+    ImplicitDefault,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminQuotaPolicyNodeWeightRow {
+    user_id: String,
+    display_name: String,
+    priority_tier: crate::domain::UserPriorityTier,
+    endpoint_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stored_weight: Option<u16>,
+    editor_weight: u16,
+    source: AdminQuotaPolicyWeightRowSource,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminQuotaPolicyGlobalWeightRow {
+    user_id: String,
+    display_name: String,
+    priority_tier: crate::domain::UserPriorityTier,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stored_weight: Option<u16>,
+    editor_weight: u16,
+    source: AdminQuotaPolicyGlobalWeightRowSource,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminQuotaPolicyNodePolicy {
+    node_id: String,
+    inherit_global: bool,
+}
+
+async fn admin_list_quota_policy_node_weight_rows(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<Items<AdminQuotaPolicyNodeWeightRow>>, ApiError> {
+    let store = state.store.lock().await;
+    if store.get_node(&node_id).is_none() {
+        return Err(ApiError::not_found(format!("node not found: {node_id}")));
+    }
+
+    let mut rows: Vec<AdminQuotaPolicyNodeWeightRow> = Vec::new();
+    for (user_id, endpoint_ids) in store.list_node_users_with_endpoint_ids(&node_id) {
+        let Some(user) = store.get_user(&user_id) else {
+            continue;
+        };
+        let stored_weight = store.get_user_node_weight(&user_id, &node_id);
+        rows.push(AdminQuotaPolicyNodeWeightRow {
+            user_id,
+            display_name: user.display_name,
+            priority_tier: user.priority_tier,
+            endpoint_ids,
+            stored_weight,
+            editor_weight: stored_weight.unwrap_or(0),
+            source: if stored_weight.is_some() {
+                AdminQuotaPolicyWeightRowSource::Explicit
+            } else {
+                AdminQuotaPolicyWeightRowSource::ImplicitZero
+            },
+        });
+    }
+    rows.sort_by(|a, b| {
+        b.editor_weight
+            .cmp(&a.editor_weight)
+            .then_with(|| a.user_id.cmp(&b.user_id))
+    });
+    Ok(Json(Items { items: rows }))
+}
+
+async fn admin_list_quota_policy_global_weight_rows(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<Items<AdminQuotaPolicyGlobalWeightRow>>, ApiError> {
+    let store = state.store.lock().await;
+    let mut rows: Vec<AdminQuotaPolicyGlobalWeightRow> = store
+        .list_users()
+        .into_iter()
+        .map(|user| {
+            let stored_weight = store.get_user_global_weight(&user.user_id);
+            AdminQuotaPolicyGlobalWeightRow {
+                user_id: user.user_id,
+                display_name: user.display_name,
+                priority_tier: user.priority_tier,
+                stored_weight,
+                editor_weight: stored_weight
+                    .unwrap_or(crate::quota_policy::DEFAULT_USER_NODE_WEIGHT),
+                source: if stored_weight.is_some() {
+                    AdminQuotaPolicyGlobalWeightRowSource::Explicit
+                } else {
+                    AdminQuotaPolicyGlobalWeightRowSource::ImplicitDefault
+                },
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.editor_weight
+            .cmp(&a.editor_weight)
+            .then_with(|| a.user_id.cmp(&b.user_id))
+    });
+    Ok(Json(Items { items: rows }))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminQuotaPolicyGlobalWeightRowWriteResponse {
+    user_id: String,
+    weight: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct PutQuotaPolicyGlobalWeightRowRequest {
+    weight: u16,
+}
+
+async fn admin_put_quota_policy_global_weight_row(
+    Extension(state): Extension<AppState>,
+    maybe_internal: Option<Extension<InternalSignatureAuth>>,
+    Path(user_id): Path<String>,
+    ApiJson(req): ApiJson<PutQuotaPolicyGlobalWeightRowRequest>,
+) -> Result<Json<AdminQuotaPolicyGlobalWeightRowWriteResponse>, ApiError> {
+    let old_weight = {
+        let store = state.store.lock().await;
+        store.get_user_global_weight(&user_id)
+    };
+
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetUserGlobalWeight {
+            user_id: user_id.clone(),
+            weight: req.weight,
+        },
+    )
+    .await?;
+
+    tracing::info!(
+        event = "admin_set_user_global_weight",
+        actor = if maybe_internal.is_some() {
+            "internal_signature"
+        } else {
+            "admin_token"
+        },
+        user_id = %user_id,
+        old_weight = ?old_weight,
+        new_weight = req.weight,
+        changed = old_weight != Some(req.weight),
+        at = %Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    );
+
+    Ok(Json(AdminQuotaPolicyGlobalWeightRowWriteResponse {
+        user_id,
+        weight: req.weight,
+    }))
+}
+
+async fn admin_get_quota_policy_node_policy(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminQuotaPolicyNodePolicy>, ApiError> {
+    let store = state.store.lock().await;
+    if store.get_node(&node_id).is_none() {
+        return Err(ApiError::not_found(format!("node not found: {node_id}")));
+    }
+    let policy = store.node_weight_policy_config(&node_id);
+    Ok(Json(AdminQuotaPolicyNodePolicy {
+        node_id,
+        inherit_global: policy.inherit_global,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct PutQuotaPolicyNodePolicyRequest {
+    inherit_global: bool,
+}
+
+async fn admin_put_quota_policy_node_policy(
+    Extension(state): Extension<AppState>,
+    maybe_internal: Option<Extension<InternalSignatureAuth>>,
+    Path(node_id): Path<String>,
+    ApiJson(req): ApiJson<PutQuotaPolicyNodePolicyRequest>,
+) -> Result<Json<AdminQuotaPolicyNodePolicy>, ApiError> {
+    let old_inherit_global = {
+        let store = state.store.lock().await;
+        if store.get_node(&node_id).is_none() {
+            return Err(ApiError::not_found(format!("node not found: {node_id}")));
+        }
+        store.is_node_weight_inherit_global(&node_id)
+    };
+
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetNodeWeightPolicy {
+            node_id: node_id.clone(),
+            inherit_global: req.inherit_global,
+        },
+    )
+    .await?;
+
+    tracing::info!(
+        event = "admin_set_node_weight_policy",
+        actor = if maybe_internal.is_some() {
+            "internal_signature"
+        } else {
+            "admin_token"
+        },
+        node_id = %node_id,
+        old_inherit_global = old_inherit_global,
+        new_inherit_global = req.inherit_global,
+        changed = old_inherit_global != req.inherit_global,
+        at = %Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    );
+
+    Ok(Json(AdminQuotaPolicyNodePolicy {
+        node_id,
+        inherit_global: req.inherit_global,
+    }))
+}
+
 async fn admin_list_user_node_weights(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
@@ -4025,9 +4267,15 @@ struct PutUserNodeWeightRequest {
 
 async fn admin_put_user_node_weight(
     Extension(state): Extension<AppState>,
+    maybe_internal: Option<Extension<InternalSignatureAuth>>,
     Path((user_id, node_id)): Path<(String, String)>,
     ApiJson(req): ApiJson<PutUserNodeWeightRequest>,
 ) -> Result<Json<AdminUserNodeWeightItem>, ApiError> {
+    let old_weight = {
+        let store = state.store.lock().await;
+        store.get_user_node_weight(&user_id, &node_id)
+    };
+
     let _ = raft_write(
         &state,
         DesiredStateCommand::SetUserNodeWeight {
@@ -4037,6 +4285,22 @@ async fn admin_put_user_node_weight(
         },
     )
     .await?;
+
+    tracing::info!(
+        event = "admin_set_user_node_weight",
+        actor = if maybe_internal.is_some() {
+            "internal_signature"
+        } else {
+            "admin_token"
+        },
+        user_id = %user_id,
+        node_id = %node_id,
+        old_weight = ?old_weight,
+        new_weight = req.weight,
+        changed = old_weight != Some(req.weight),
+        at = %Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    );
+
     Ok(Json(AdminUserNodeWeightItem {
         node_id,
         weight: req.weight,

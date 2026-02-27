@@ -248,4 +248,137 @@ describe("storybook api mock", () => {
 			),
 		).toBe(true);
 	});
+
+	it("supports quota policy node weight rows", async () => {
+		const mock = createMockApi();
+
+		const listNodes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		expect(listNodes.ok).toBe(true);
+		const nodesData = (await listNodes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+
+		const rowsRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/weight-rows`, {
+				method: "GET",
+			}),
+		);
+		expect(rowsRes.ok).toBe(true);
+		const rowsData = (await rowsRes.json()) as {
+			items: Array<{
+				user_id: string;
+				editor_weight: number;
+				source: "explicit" | "implicit_zero";
+				endpoint_ids: string[];
+			}>;
+		};
+		expect(rowsData.items.length).toBeGreaterThan(0);
+		expect(rowsData.items[0]?.endpoint_ids.length).toBeGreaterThan(0);
+
+		const row = rowsData.items[0];
+		if (!row) {
+			throw new Error("expected at least one row");
+		}
+		await mock.handle(
+			jsonRequest(`/api/admin/users/${row.user_id}/node-weights/${nodeId}`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ weight: 321 }),
+			}),
+		);
+
+		const rowsAfterRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/weight-rows`, {
+				method: "GET",
+			}),
+		);
+		expect(rowsAfterRes.ok).toBe(true);
+		const rowsAfter = (await rowsAfterRes.json()) as typeof rowsData;
+		expect(rowsAfter.items.some((item) => item.editor_weight === 321)).toBe(
+			true,
+		);
+	});
+
+	it("supports quota policy global weight rows and node inherit policy", async () => {
+		const mock = createMockApi();
+
+		const globalRowsRes = await mock.handle(
+			jsonRequest("/api/admin/quota-policy/global-weight-rows", {
+				method: "GET",
+			}),
+		);
+		expect(globalRowsRes.ok).toBe(true);
+		const globalRows = (await globalRowsRes.json()) as {
+			items: Array<{ user_id: string; editor_weight: number }>;
+		};
+		const firstUserId = globalRows.items[0]?.user_id;
+		expect(firstUserId).toBeTruthy();
+		if (!firstUserId) {
+			throw new Error("expected at least one global weight row");
+		}
+
+		const putGlobalRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/global-weight-rows/${firstUserId}`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ weight: 777 }),
+			}),
+		);
+		expect(putGlobalRes.ok).toBe(true);
+
+		const globalRowsAfterRes = await mock.handle(
+			jsonRequest("/api/admin/quota-policy/global-weight-rows", {
+				method: "GET",
+			}),
+		);
+		expect(globalRowsAfterRes.ok).toBe(true);
+		const globalRowsAfter =
+			(await globalRowsAfterRes.json()) as typeof globalRows;
+		expect(
+			globalRowsAfter.items.some(
+				(item) => item.user_id === firstUserId && item.editor_weight === 777,
+			),
+		).toBe(true);
+
+		const listNodes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		expect(listNodes.ok).toBe(true);
+		const nodesData = (await listNodes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+
+		const policyRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/policy`, {
+				method: "GET",
+			}),
+		);
+		expect(policyRes.ok).toBe(true);
+		const policy = (await policyRes.json()) as { inherit_global: boolean };
+		expect(typeof policy.inherit_global).toBe("boolean");
+
+		const putPolicyRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/policy`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ inherit_global: false }),
+			}),
+		);
+		expect(putPolicyRes.ok).toBe(true);
+
+		const policyAfterRes = await mock.handle(
+			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/policy`, {
+				method: "GET",
+			}),
+		);
+		expect(policyAfterRes.ok).toBe(true);
+		const policyAfter = (await policyAfterRes.json()) as {
+			inherit_global: boolean;
+		};
+		expect(policyAfter.inherit_global).toBe(false);
+	});
 });
