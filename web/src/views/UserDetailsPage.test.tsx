@@ -19,6 +19,7 @@ import {
 	patchAdminUser,
 	resetAdminUserToken,
 } from "../api/adminUsers";
+import { fetchSubscription } from "../api/subscription";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -52,6 +53,7 @@ vi.mock("../api/adminEndpoints");
 vi.mock("../api/adminUserGrants");
 vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
+vi.mock("../api/subscription");
 
 const { mockReadAdminToken } = vi.hoisted(() => ({
 	mockReadAdminToken: vi.fn(() => "admintoken"),
@@ -208,6 +210,9 @@ function setupMocks(args?: {
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
 		subscription_token: "sub_new",
 	});
+	vi.mocked(fetchSubscription).mockResolvedValue(
+		"vless://example-host?encryption=none",
+	);
 }
 
 describe("<UserDetailsPage />", () => {
@@ -308,6 +313,46 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(patchAdminUser).toHaveBeenCalled();
+		});
+	});
+
+	it("loads subscription preview from user tab", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Fetch"));
+
+		await waitFor(() => {
+			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "raw");
+		});
+		expect(await screenByText("Subscription preview")).toBeTruthy();
+	});
+
+	it("shows node quota loading error instead of defaulting to zero", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminUserNodeQuotas).mockRejectedValueOnce(
+			new Error("node quotas unavailable"),
+		);
+		renderPage();
+
+		expect(await screenByText("Failed to load node quotas")).toBeTruthy();
+		expect(await screenByText("node quotas unavailable")).toBeTruthy();
+	});
+
+	it("shows access data error with retry action", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminEndpoints).mockRejectedValue(
+			new Error("endpoint load failed"),
+		);
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		expect(await screenByText("Failed to load access matrix")).toBeTruthy();
+		const retryButton = await screenByRole("button", "Retry access data");
+		fireEvent.click(retryButton);
+
+		await waitFor(() => {
+			expect(fetchAdminEndpoints).toHaveBeenCalledTimes(2);
 		});
 	});
 

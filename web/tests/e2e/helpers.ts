@@ -449,7 +449,23 @@ export async function setupApiMocks(
 			for (const item of items) {
 				const endpointId =
 					typeof item.endpoint_id === "string" ? item.endpoint_id : "";
-				const enabled = Boolean(item.enabled);
+				if (item.enabled !== true) {
+					errorResponse(
+						route,
+						"grant item enabled must be true for user grants hard-cut",
+						400,
+					);
+					return;
+				}
+				if (nextByEndpoint.has(endpointId)) {
+					errorResponse(
+						route,
+						`grant pair already exists: user_id=${userId} endpoint_id=${endpointId}`,
+						409,
+					);
+					return;
+				}
+				const enabled = true;
 				const quotaLimitBytes = Math.max(
 					0,
 					Math.floor(Number(item.quota_limit_bytes ?? 0)),

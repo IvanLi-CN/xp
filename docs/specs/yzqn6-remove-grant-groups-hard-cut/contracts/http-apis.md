@@ -60,7 +60,31 @@ Request:
 }
 ```
 
-Response `200`: same shape as GET.
+Response `200`:
+
+```json
+{
+  "created": 0,
+  "updated": 1,
+  "deleted": 0,
+  "items": [
+    {
+      "grant_id": "grant_...",
+      "user_id": "user_...",
+      "endpoint_id": "endpoint_...",
+      "enabled": true,
+      "quota_limit_bytes": 0,
+      "note": null,
+      "credentials": {
+        "vless": {
+          "uuid": "...",
+          "email": "grant:..."
+        }
+      }
+    }
+  ]
+}
+```
 
 Behavior:
 

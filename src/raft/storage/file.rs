@@ -757,16 +757,25 @@ async fn read_wal_with_compat(
     };
 
     let mut rewritten = false;
-    let last_purged_log_id = raw_wal
+    let last_purged_log_id: Option<LogId<NodeId>> = raw_wal
         .get("last_purged_log_id")
         .cloned()
         .map(serde_json::from_value)
         .transpose()
         .map_err(std::io::Error::other)?
         .unwrap_or(None);
+    let last_purged_index = last_purged_log_id
+        .as_ref()
+        .map(|log_id| log_id.index)
+        .unwrap_or(0);
 
     let mut entries = Vec::new();
-    if let Some(raw_entries) = raw_wal.get("entries").and_then(|value| value.as_array()) {
+    if let Some(raw_entries_value) = raw_wal.get("entries") {
+        let Some(raw_entries) = raw_entries_value.as_array() else {
+            return Err(std::io::Error::other(
+                "invalid wal format: `entries` must be an array",
+            ));
+        };
         for raw_entry in raw_entries {
             match serde_json::from_value::<openraft::impls::Entry<TypeConfig>>(raw_entry.clone()) {
                 Ok(entry) => entries.push(entry),
@@ -787,6 +796,11 @@ async fn read_wal_with_compat(
                     if entry_index > last_applied {
                         return Err(std::io::Error::other(format!(
                             "retired wal command is not applied yet (entry_index={entry_index}, last_applied={last_applied}); start old version to apply/snapshot first, then upgrade"
+                        )));
+                    }
+                    if entry_index > last_purged_index {
+                        return Err(std::io::Error::other(format!(
+                            "retired wal command is still in active log range (entry_index={entry_index}, last_purged={last_purged_index}); start old version to snapshot/purge logs first, then upgrade"
                         )));
                     }
 
@@ -951,6 +965,21 @@ mod tests {
         }
     }
 
+    fn build_retired_grant_group_raw_entry(index: u64, cmd_type: &str) -> serde_json::Value {
+        let log_id = LogId::new(openraft::CommittedLeaderId::new(1, 1), index);
+        let mut raw_entry = serde_json::to_value(openraft::impls::Entry::<TypeConfig> {
+            log_id,
+            payload: EntryPayload::Blank,
+        })
+        .unwrap();
+        raw_entry["payload"] = json!({
+            "normal": {
+                "type": cmd_type,
+            }
+        });
+        raw_entry
+    }
+
     #[tokio::test]
     async fn upsert_endpoint_change_requests_rebuild_inbound() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1043,5 +1072,79 @@ mod tests {
 
         let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
         assert!(usage.quota_banned);
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_non_array_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": null,
+            "entries": {
+                "unexpected": true
+            }
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(0)).await.unwrap_err();
+        assert!(err.to_string().contains("entries"));
+        assert!(err.to_string().contains("array"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unapplied_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "create_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(4)).await.unwrap_err();
+        assert!(err.to_string().contains("not applied yet"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unpurged_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "replace_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 4)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(10)).await.unwrap_err();
+        assert!(err.to_string().contains("active log range"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rewrites_purged_retired_entry_to_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "delete_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let (wal, rewritten) = read_wal_with_compat(&wal_path, Some(10)).await.unwrap();
+        assert!(rewritten);
+        assert_eq!(wal.entries.len(), 1);
+        assert!(matches!(wal.entries[0].payload, EntryPayload::Blank));
     }
 }

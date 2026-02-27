@@ -1480,8 +1480,22 @@ async function handleRequest(
 			) {
 				return errorResponse(400, "invalid_request", "invalid grant item");
 			}
+			if (!item.enabled) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"grant item enabled must be true for user grants hard-cut",
+				);
+			}
 			if (!endpointById.has(item.endpoint_id)) {
 				return errorResponse(404, "not_found", "endpoint not found");
+			}
+			if (requestByEndpoint.has(item.endpoint_id)) {
+				return errorResponse(
+					409,
+					"conflict",
+					`grant pair already exists: user_id=${userId} endpoint_id=${item.endpoint_id}`,
+				);
 			}
 			requestByEndpoint.set(item.endpoint_id, item);
 		}

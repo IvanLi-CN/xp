@@ -31,22 +31,28 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 		page.getByRole("heading", { name: "Test User", exact: true }),
 	).toBeVisible();
 
-	const rawSubscription = await page.evaluate(async () => {
-		const response = await fetch("/api/sub/sub-user-1?format=raw");
-		return await response.text();
-	});
-	expect(rawSubscription).toBe(
-		"vless://example-host?encryption=none\nvless://second-host?encryption=none\n",
+	await page.getByTestId("subscription-fetch").click();
+	const rawDialog = page.getByRole("dialog");
+	await expect(rawDialog).toBeVisible();
+	await expect(rawDialog.getByText("Subscription preview")).toBeVisible();
+	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
+		"vless://example-host?encryption=none",
 	);
+	await rawDialog.locator("[data-sub-preview-close]").click();
 
-	const clashSubscription = await page.evaluate(async () => {
-		const response = await fetch("/api/sub/sub-user-1?format=clash");
-		return await response.text();
-	});
-	expect(clashSubscription).toContain("reality-opts:");
-	expect(clashSubscription).toContain(
+	await page.getByTestId("subscription-format").selectOption("clash");
+	await page.getByTestId("subscription-fetch").click();
+	const clashDialog = page.getByRole("dialog");
+	await expect(clashDialog).toBeVisible();
+	await expect(
+		clashDialog.getByTestId("subscription-code-scroll"),
+	).toContainText("reality-opts:");
+	await expect(
+		clashDialog.getByTestId("subscription-code-scroll"),
+	).toContainText(
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	);
+	await clashDialog.locator("[data-sub-preview-close]").click();
 
 	await page.getByRole("button", { name: "Delete user" }).click();
 	const confirm = page.locator("dialog[open]");

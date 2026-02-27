@@ -19,8 +19,13 @@ import {
 } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
+import {
+	type SubscriptionFormat,
+	fetchSubscription,
+} from "../api/subscription";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CopyButton } from "../components/CopyButton";
 import {
 	GrantAccessMatrix,
 	type GrantAccessMatrixCellState,
@@ -28,6 +33,7 @@ import {
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 import { formatQuotaBytesHuman } from "../utils/quota";
@@ -77,6 +83,11 @@ export function UserDetailsPage() {
 	const [accessError, setAccessError] = useState<string | null>(null);
 	const [resetTokenOpen, setResetTokenOpen] = useState(false);
 	const [isResettingToken, setIsResettingToken] = useState(false);
+	const [subFormat, setSubFormat] = useState<SubscriptionFormat>("raw");
+	const [subOpen, setSubOpen] = useState(false);
+	const [subLoading, setSubLoading] = useState(false);
+	const [subText, setSubText] = useState("");
+	const [subError, setSubError] = useState<string | null>(null);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
@@ -119,6 +130,18 @@ export function UserDetailsPage() {
 	});
 
 	const user = userQuery.data;
+	const subscriptionToken = user?.subscription_token ?? "";
+	const subscriptionUrl = useMemo(() => {
+		if (!subscriptionToken) return "";
+		const path = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+		if (typeof window === "undefined") {
+			return `${path}?format=${encodeURIComponent(subFormat)}`;
+		}
+		const url = new URL(path, window.location.origin);
+		url.searchParams.set("format", subFormat);
+		return url.toString();
+	}, [subFormat, subscriptionToken]);
+
 	useEffect(() => {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -219,6 +242,8 @@ export function UserDetailsPage() {
 					meta: {
 						endpointId: selected?.endpointId,
 						selectedEndpointId,
+						tag: selected?.tag,
+						port: selected?.port,
 						options: options.map((option) => ({
 							endpointId: option.endpointId,
 							tag: option.tag,
@@ -327,6 +352,13 @@ export function UserDetailsPage() {
 	}, [selectedByCell]);
 	const isAccessDataLoading =
 		nodesQuery.isLoading || endpointsQuery.isLoading || grantsQuery.isLoading;
+	const accessDataError = nodesQuery.isError
+		? `Nodes: ${formatError(nodesQuery.error)}`
+		: endpointsQuery.isError
+			? `Endpoints: ${formatError(endpointsQuery.error)}`
+			: grantsQuery.isError
+				? `Grants: ${formatError(grantsQuery.error)}`
+				: null;
 	const isAccessReady =
 		accessInitForUserId === userId &&
 		!isAccessDataLoading &&
@@ -361,6 +393,29 @@ export function UserDetailsPage() {
 		} finally {
 			setIsApplyingAccess(false);
 		}
+	}
+
+	async function loadSubscriptionPreview() {
+		if (!subscriptionToken) return;
+		setSubLoading(true);
+		setSubError(null);
+		try {
+			const text = await fetchSubscription(subscriptionToken, subFormat);
+			setSubText(text);
+		} catch (error) {
+			setSubError(formatError(error));
+			setSubText("");
+		} finally {
+			setSubLoading(false);
+		}
+	}
+
+	async function retryAccessData() {
+		await Promise.all([
+			nodesQuery.refetch(),
+			endpointsQuery.refetch(),
+			grantsQuery.refetch(),
+		]);
 	}
 
 	async function saveUserProfile() {
@@ -590,6 +645,45 @@ export function UserDetailsPage() {
 								{user.subscription_token}
 							</span>
 						</div>
+						<div className="rounded-box border border-base-200 p-3 space-y-3">
+							<div className="flex flex-wrap items-end gap-3">
+								<label className="form-control gap-2">
+									<span className="label-text">Subscription format</span>
+									<select
+										className="select select-bordered"
+										data-testid="subscription-format"
+										value={subFormat}
+										onChange={(event) =>
+											setSubFormat(event.target.value as SubscriptionFormat)
+										}
+									>
+										<option value="raw">raw</option>
+										<option value="clash">clash</option>
+									</select>
+								</label>
+								<CopyButton
+									text={subscriptionUrl}
+									label="Copy URL"
+									ariaLabel="Copy subscription URL"
+									className="self-end"
+								/>
+								<Button
+									className="self-end"
+									data-testid="subscription-fetch"
+									loading={subLoading}
+									onClick={async () => {
+										setSubOpen(true);
+										await loadSubscriptionPreview();
+									}}
+								>
+									Fetch
+								</Button>
+							</div>
+							<div className="text-xs opacity-70">
+								Preview opens in a modal and keeps subscription formatting
+								unchanged.
+							</div>
+						</div>
 
 						{userSaveError ? (
 							<div className="alert alert-error py-2 text-sm">
@@ -618,27 +712,39 @@ export function UserDetailsPage() {
 								description={formatError(nodesQuery.error)}
 							/>
 						) : null}
-						{nodeCards.map((node) => {
-							const quota = nodeQuotasByNodeId.get(node.node_id);
-							return (
-								<div
-									key={node.node_id}
-									className="flex items-center justify-between rounded-box border border-base-200 p-3"
-								>
-									<div>
-										<div className="font-medium">{node.node_name}</div>
-										<div className="text-xs opacity-70 font-mono">
-											{node.node_id}
+						{nodeQuotasQuery.isLoading ? (
+							<PageState variant="loading" title="Loading node quotas" />
+						) : null}
+						{nodeQuotasQuery.isError ? (
+							<PageState
+								variant="error"
+								title="Failed to load node quotas"
+								description={formatError(nodeQuotasQuery.error)}
+							/>
+						) : null}
+						{!nodeQuotasQuery.isLoading && !nodeQuotasQuery.isError
+							? nodeCards.map((node) => {
+									const quota = nodeQuotasByNodeId.get(node.node_id);
+									return (
+										<div
+											key={node.node_id}
+											className="flex items-center justify-between rounded-box border border-base-200 p-3"
+										>
+											<div>
+												<div className="font-medium">{node.node_name}</div>
+												<div className="text-xs opacity-70 font-mono">
+													{node.node_id}
+												</div>
+											</div>
+											<NodeQuotaEditor
+												value={quota?.quota_limit_bytes ?? 0}
+												onApply={() => Promise.resolve()}
+												disabled
+											/>
 										</div>
-									</div>
-									<NodeQuotaEditor
-										value={quota?.quota_limit_bytes ?? 0}
-										onApply={() => Promise.resolve()}
-										disabled
-									/>
-								</div>
-							);
-						})}
+									);
+								})
+							: null}
 					</div>
 				</div>
 			) : null}
@@ -661,39 +767,56 @@ export function UserDetailsPage() {
 					{accessError ? (
 						<div className="alert alert-error py-2 text-sm">{accessError}</div>
 					) : null}
+					{isAccessDataLoading ? (
+						<PageState variant="loading" title="Loading access matrix" />
+					) : null}
+					{accessDataError ? (
+						<div className="space-y-3">
+							<PageState
+								variant="error"
+								title="Failed to load access matrix"
+								description={accessDataError}
+							/>
+							<Button variant="ghost" onClick={() => void retryAccessData()}>
+								Retry access data
+							</Button>
+						</div>
+					) : null}
 
-					<GrantAccessMatrix
-						nodes={(nodesQuery.data?.items ?? []).map((node) => ({
-							nodeId: node.node_id,
-							label: node.node_name,
-							details: (
-								<span className="text-xs opacity-60 font-mono">
-									{node.node_id}
-								</span>
-							),
-						}))}
-						protocols={PROTOCOLS.map((protocol) => ({
-							protocolId: protocol.protocolId,
-							label: protocol.label,
-						}))}
-						cells={cells}
-						disabled={isAccessDataLoading || !isAccessReady}
-						onToggleCell={(nodeId, protocolId) =>
-							toggleCell(nodeId, protocolId as SupportedProtocolId)
-						}
-						onToggleRow={toggleRow}
-						onToggleColumn={(protocolId) =>
-							toggleColumn(protocolId as SupportedProtocolId)
-						}
-						onToggleAll={toggleAll}
-						onSelectCellEndpoint={(nodeId, protocolId, endpointId) =>
-							setCellEndpoint(
-								nodeId,
-								protocolId as SupportedProtocolId,
-								endpointId,
-							)
-						}
-					/>
+					{!isAccessDataLoading && !accessDataError ? (
+						<GrantAccessMatrix
+							nodes={(nodesQuery.data?.items ?? []).map((node) => ({
+								nodeId: node.node_id,
+								label: node.node_name,
+								details: (
+									<span className="text-xs opacity-60 font-mono">
+										{node.node_id}
+									</span>
+								),
+							}))}
+							protocols={PROTOCOLS.map((protocol) => ({
+								protocolId: protocol.protocolId,
+								label: protocol.label,
+							}))}
+							cells={cells}
+							disabled={isAccessDataLoading || !isAccessReady}
+							onToggleCell={(nodeId, protocolId) =>
+								toggleCell(nodeId, protocolId as SupportedProtocolId)
+							}
+							onToggleRow={toggleRow}
+							onToggleColumn={(protocolId) =>
+								toggleColumn(protocolId as SupportedProtocolId)
+							}
+							onToggleAll={toggleAll}
+							onSelectCellEndpoint={(nodeId, protocolId, endpointId) =>
+								setCellEndpoint(
+									nodeId,
+									protocolId as SupportedProtocolId,
+									endpointId,
+								)
+							}
+						/>
+					) : null}
 				</div>
 			) : null}
 
@@ -709,23 +832,42 @@ export function UserDetailsPage() {
 							description={formatError(nodeQuotaStatusQuery.error)}
 						/>
 					) : null}
-					{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => (
-						<div
-							key={`${item.node_id}::${item.user_id}`}
-							className="rounded-box border border-base-200 p-3 space-y-1"
-						>
-							<div className="font-medium">{item.node_id}</div>
-							<div className="text-sm">
-								Used {formatQuotaBytesHuman(item.used_bytes)} /{" "}
-								{formatQuotaBytesHuman(item.quota_limit_bytes)}
+					{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => {
+						const isUnlimited = item.quota_limit_bytes === 0;
+						const quotaLimitText = isUnlimited
+							? "unlimited"
+							: formatQuotaBytesHuman(item.quota_limit_bytes);
+						const remainingText = isUnlimited
+							? "unlimited"
+							: formatQuotaBytesHuman(item.remaining_bytes);
+						return (
+							<div
+								key={`${item.node_id}::${item.user_id}`}
+								className="rounded-box border border-base-200 p-3 space-y-1"
+							>
+								<div className="font-medium">{item.node_id}</div>
+								<div className="text-sm">
+									Used {formatQuotaBytesHuman(item.used_bytes)} /{" "}
+									{quotaLimitText}
+								</div>
+								<div className="text-sm opacity-70">
+									Remaining: {remainingText}
+								</div>
 							</div>
-							<div className="text-sm opacity-70">
-								Remaining: {formatQuotaBytesHuman(item.remaining_bytes)}
-							</div>
-						</div>
-					))}
+						);
+					})}
 				</div>
 			) : null}
+
+			<SubscriptionPreviewDialog
+				open={subOpen}
+				onClose={() => setSubOpen(false)}
+				subscriptionUrl={subscriptionUrl}
+				format={subFormat}
+				loading={subLoading}
+				content={subText}
+				error={subError}
+			/>
 
 			<ConfirmDialog
 				open={resetTokenOpen}

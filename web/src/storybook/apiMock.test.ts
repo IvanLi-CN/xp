@@ -149,6 +149,82 @@ describe("storybook api mock", () => {
 		expect(detailsData.items).toHaveLength(0);
 	});
 
+	it("rejects disabled items in user grants hard-cut replace", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+							enabled: false,
+							quota_limit_bytes: 123,
+							note: null,
+						},
+					],
+				}),
+			}),
+		);
+		expect(replaceRes.status).toBe(400);
+		const payload = (await replaceRes.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("invalid_request");
+	});
+
+	it("rejects duplicate endpoint items in user grants hard-cut replace", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/grants`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+							enabled: true,
+							quota_limit_bytes: 123,
+							note: null,
+						},
+						{
+							endpoint_id: "endpoint-1",
+							enabled: true,
+							quota_limit_bytes: 456,
+							note: "duplicate",
+						},
+					],
+				}),
+			}),
+		);
+		expect(replaceRes.status).toBe(409);
+		const payload = (await replaceRes.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("conflict");
+	});
+
 	it("returns not_found for retired grant-groups routes", async () => {
 		const mock = createMockApi();
 		const res = await mock.handle(

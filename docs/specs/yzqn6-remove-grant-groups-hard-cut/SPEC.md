@@ -156,11 +156,11 @@
 
 - 用用户维度 hard cut 接口替代 group 级接口，避免隐藏状态与跨 group 副作用。
 - 迁移阶段清理无效数据并用确定性规则处理冲突，保证升级幂等与可回放。
-- WAL 兼容以“已应用命令可 Blank 化、未应用命令 fail-fast”确保安全升级。
+- WAL 兼容以“仅已快照/已 purge 范围内的退役命令可 Blank 化，活跃日志中的退役命令 fail-fast”确保安全升级。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：存在未应用旧 grant-group WAL 命令时需人工先完成旧版本 apply/snapshot。
+- 风险：存在未应用或未 purge 的旧 grant-group WAL 命令时需人工先在旧版本完成 apply/snapshot/purge。
 - 开放问题：无。
 - 假设：外部调用方已切换，不再依赖 grant-groups admin API。
 
