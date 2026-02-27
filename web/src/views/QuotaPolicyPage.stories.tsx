@@ -131,13 +131,16 @@ const meta = {
 						},
 					},
 				],
-				grantGroups: [
-					{
-						group: { group_name: "group-ratio-demo" },
-						members: [
-							{
+				userAccessByUser: {
+					[userIdA]: [
+						{
+							membership: {
 								user_id: userIdA,
+								node_id: "node-tokyo-a",
 								endpoint_id: "ep-tokyo-a-vless",
+							},
+							grant: {
+								grant_id: "grant-demo-a1",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -148,22 +151,15 @@ const meta = {
 									},
 								},
 							},
-							{
-								user_id: userIdB,
-								endpoint_id: "ep-tokyo-a-ss",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									ss2022: {
-										method: "2022-blake3-aes-128-gcm",
-										password: "secret",
-									},
-								},
-							},
-							{
+						},
+						{
+							membership: {
 								user_id: userIdA,
+								node_id: "node-frankfurt-b",
 								endpoint_id: "ep-frankfurt-b-vless",
+							},
+							grant: {
+								grant_id: "grant-demo-a2",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -174,22 +170,15 @@ const meta = {
 									},
 								},
 							},
-							{
-								user_id: userIdB,
-								endpoint_id: "ep-frankfurt-b-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "00000000-0000-0000-0000-00000000000b",
-										email: "grant:demo-b-2",
-									},
-								},
-							},
-							{
+						},
+						{
+							membership: {
 								user_id: userIdA,
+								node_id: "node-sydney-c",
 								endpoint_id: "ep-sydney-c-vless",
+							},
+							grant: {
+								grant_id: "grant-demo-a3",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -200,9 +189,17 @@ const meta = {
 									},
 								},
 							},
-							{
+						},
+					],
+					[userIdB]: [
+						{
+							membership: {
 								user_id: userIdB,
-								endpoint_id: "ep-sydney-c-vless",
+								node_id: "node-tokyo-a",
+								endpoint_id: "ep-tokyo-a-ss",
+							},
+							grant: {
+								grant_id: "grant-demo-b1",
 								enabled: true,
 								quota_limit_bytes: 1,
 								note: null,
@@ -213,9 +210,47 @@ const meta = {
 									},
 								},
 							},
-						],
-					},
-				],
+						},
+						{
+							membership: {
+								user_id: userIdB,
+								node_id: "node-frankfurt-b",
+								endpoint_id: "ep-frankfurt-b-vless",
+							},
+							grant: {
+								grant_id: "grant-demo-b2",
+								enabled: true,
+								quota_limit_bytes: 1,
+								note: null,
+								credentials: {
+									vless: {
+										uuid: "00000000-0000-0000-0000-00000000000b",
+										email: "grant:demo-b-2",
+									},
+								},
+							},
+						},
+						{
+							membership: {
+								user_id: userIdB,
+								node_id: "node-sydney-c",
+								endpoint_id: "ep-sydney-c-vless",
+							},
+							grant: {
+								grant_id: "grant-demo-b3",
+								enabled: true,
+								quota_limit_bytes: 1,
+								note: null,
+								credentials: {
+									ss2022: {
+										method: "2022-blake3-aes-128-gcm",
+										password: "secret",
+									},
+								},
+							},
+						},
+					],
+				},
 				userNodeWeights: {
 					[userIdA]: [
 						{ node_id: "node-tokyo-a", weight: 6500 },
@@ -294,18 +329,12 @@ const TEN_USER_NODE_WEIGHTS = Object.fromEntries(
 	]),
 );
 
-const TEN_USER_GRANT_GROUPS = [
-	{
-		group: { group_name: "group-ratio-ten-users" },
-		members: TEN_USERS.map((user, index) => {
-			if (index % 2 === 0) {
-				return {
-					user_id: user.user_id,
-					endpoint_id: "ep-tokyo-a-vless",
-					enabled: true,
-					quota_limit_bytes: 1,
-					note: null,
-					credentials: {
+const TEN_USER_ACCESS_BY_USER = Object.fromEntries(
+	TEN_USERS.map((user, index) => {
+		const endpointId = index % 2 === 0 ? "ep-tokyo-a-vless" : "ep-tokyo-a-ss";
+		const credentials =
+			index % 2 === 0
+				? {
 						vless: {
 							uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(
 								12,
@@ -313,25 +342,34 @@ const TEN_USER_GRANT_GROUPS = [
 							)}`,
 							email: `grant:ten-users-${index + 1}`,
 						},
+					}
+				: {
+						ss2022: {
+							method: "2022-blake3-aes-128-gcm",
+							password: `secret-${index + 1}`,
+						},
+					};
+		return [
+			user.user_id,
+			[
+				{
+					membership: {
+						user_id: user.user_id,
+						node_id: "node-tokyo-a",
+						endpoint_id: endpointId,
 					},
-				};
-			}
-			return {
-				user_id: user.user_id,
-				endpoint_id: "ep-tokyo-a-ss",
-				enabled: true,
-				quota_limit_bytes: 1,
-				note: null,
-				credentials: {
-					ss2022: {
-						method: "2022-blake3-aes-128-gcm",
-						password: `secret-${index + 1}`,
+					grant: {
+						grant_id: `grant-ten-${index + 1}`,
+						enabled: true,
+						quota_limit_bytes: 1,
+						note: null,
+						credentials,
 					},
 				},
-			};
-		}),
-	},
-];
+			],
+		];
+	}),
+);
 
 export const TenUsers: Story = {
 	parameters: {
@@ -339,7 +377,7 @@ export const TenUsers: Story = {
 			data: {
 				...baseMockData,
 				users: TEN_USERS,
-				grantGroups: TEN_USER_GRANT_GROUPS,
+				userAccessByUser: TEN_USER_ACCESS_BY_USER,
 				userGlobalWeights: TEN_USER_GLOBAL_WEIGHTS,
 				userNodeWeights: TEN_USER_NODE_WEIGHTS,
 			},

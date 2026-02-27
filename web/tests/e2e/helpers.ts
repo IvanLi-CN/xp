@@ -56,16 +56,14 @@ type AdminUserNodeWeightItem = {
 	weight: number;
 };
 
-type AdminGrantGroupSummary = {
-	group_name: string;
-	member_count: number;
-};
-
-type AdminGrantGroupDetail = {
-	group: { group_name: string };
-	members: Array<{
+type AdminUserAccessItem = {
+	membership: {
 		user_id: string;
+		node_id: string;
 		endpoint_id: string;
+	};
+	grant: {
+		grant_id: string;
 		enabled: boolean;
 		quota_limit_bytes: number;
 		note: string | null;
@@ -73,7 +71,7 @@ type AdminGrantGroupDetail = {
 			vless?: { uuid: string; email: string };
 			ss2022?: { method: string; password: string };
 		};
-	}>;
+	};
 };
 
 type ClusterInfo = {
@@ -107,7 +105,7 @@ type MockApiOptions = {
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
 	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
-	grantGroups?: AdminGrantGroupDetail[];
+	userAccessByUser?: Record<string, AdminUserAccessItem[]>;
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
 	healthStatus?: "ok" | "error";
@@ -121,7 +119,7 @@ type MockState = {
 	endpoints: AdminEndpoint[];
 	nodeQuotas: AdminUserNodeQuota[];
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
-	grantGroups: AdminGrantGroupDetail[];
+	userAccessByUser: Record<string, AdminUserAccessItem[]>;
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
 	healthStatus: "ok" | "error";
@@ -169,13 +167,16 @@ const defaultUsers: AdminUser[] = [
 	},
 ];
 
-const defaultGrantGroups: AdminGrantGroupDetail[] = [
-	{
-		group: { group_name: "group-demo" },
-		members: [
-			{
+const defaultUserAccessByUser: Record<string, AdminUserAccessItem[]> = {
+	"user-1": [
+		{
+			membership: {
 				user_id: "user-1",
+				node_id: "node-1",
 				endpoint_id: "endpoint-1",
+			},
+			grant: {
+				grant_id: "grant-1",
 				enabled: true,
 				quota_limit_bytes: 1_048_576,
 				note: null,
@@ -186,9 +187,9 @@ const defaultGrantGroups: AdminGrantGroupDetail[] = [
 					},
 				},
 			},
-		],
-	},
-];
+		},
+	],
+};
 
 const defaultClusterInfo: ClusterInfo = {
 	cluster_id: "cluster-1",
@@ -257,15 +258,6 @@ function parseJsonBody(request: { postData(): string | null }): Record<
 	}
 }
 
-function summarizeGrantGroups(
-	groups: AdminGrantGroupDetail[],
-): AdminGrantGroupSummary[] {
-	return groups.map((g) => ({
-		group_name: g.group.group_name,
-		member_count: g.members.length,
-	}));
-}
-
 export async function setupApiMocks(
 	page: Page,
 	options: MockApiOptions = {},
@@ -285,9 +277,19 @@ export async function setupApiMocks(
 					]),
 				)
 			: {},
-		grantGroups: options.grantGroups
-			? [...options.grantGroups]
-			: [...defaultGrantGroups],
+		userAccessByUser: options.userAccessByUser
+			? Object.fromEntries(
+					Object.entries(options.userAccessByUser).map(([userId, items]) => [
+						userId,
+						[...items],
+					]),
+				)
+			: Object.fromEntries(
+					Object.entries(defaultUserAccessByUser).map(([userId, items]) => [
+						userId,
+						[...items],
+					]),
+				),
 		clusterInfo: options.clusterInfo ?? { ...defaultClusterInfo },
 		alerts: options.alerts ?? { ...defaultAlerts },
 		healthStatus: options.healthStatus ?? "ok",
@@ -366,52 +368,11 @@ export async function setupApiMocks(
 			return;
 		}
 
-		if (path === "/api/admin/grant-groups" && method === "GET") {
-			jsonResponse(route, { items: summarizeGrantGroups(state.grantGroups) });
-			return;
-		}
-
-		if (path === "/api/admin/grant-groups" && method === "POST") {
-			const payload = parseJsonBody(request);
-			const groupName =
-				typeof payload.group_name === "string" ? payload.group_name : "";
-			const members = Array.isArray(payload.members) ? payload.members : [];
-			if (!groupName || members.length === 0) {
-				errorResponse(route, "invalid grant group payload", 400);
-				return;
-			}
-
-			const detail: AdminGrantGroupDetail = {
-				group: { group_name: groupName },
-				members: members.map((m) => ({
-					user_id: String(m.user_id ?? ""),
-					endpoint_id: String(m.endpoint_id ?? ""),
-					enabled: Boolean(m.enabled ?? true),
-					quota_limit_bytes: Number(m.quota_limit_bytes ?? 0),
-					note: (m.note as string | null | undefined) ?? null,
-					credentials: {
-						vless: {
-							uuid: "22222222-2222-2222-2222-222222222222",
-							email: "mock@example.com",
-						},
-					},
-				})),
-			};
-			state.grantGroups.push(detail);
-			jsonResponse(route, detail, 201);
-			return;
-		}
-
-		if (path.startsWith("/api/admin/grant-groups/") && method === "GET") {
-			const groupName = decodeURIComponent(path.split("/")[4] ?? "");
-			const group = state.grantGroups.find(
-				(g) => g.group.group_name === groupName,
-			);
-			if (!group) {
-				errorResponse(route, `grant group not found: ${groupName}`, 404);
-				return;
-			}
-			jsonResponse(route, group);
+		if (
+			path.startsWith("/api/admin/grant-groups/") ||
+			path === "/api/admin/grant-groups"
+		) {
+			errorResponse(route, "grant groups route removed", 404);
 			return;
 		}
 
@@ -486,6 +447,7 @@ export async function setupApiMocks(
 			const userId = decodeURIComponent(segments[4] ?? "");
 			const isResetToken = segments[5] === "reset-token";
 			const isNodeWeights = segments[5] === "node-weights";
+			const isUserAccess = segments[5] === "access";
 
 			if (isNodeWeights && method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
@@ -494,6 +456,69 @@ export async function setupApiMocks(
 					return;
 				}
 				jsonResponse(route, { items: state.userNodeWeights[userId] ?? [] });
+				return;
+			}
+
+			if (isUserAccess && method === "GET") {
+				jsonResponse(route, { items: state.userAccessByUser[userId] ?? [] });
+				return;
+			}
+
+			if (isUserAccess && method === "PUT") {
+				const payload = parseJsonBody(request);
+				const rawItems = Array.isArray(payload.items) ? payload.items : [];
+				const endpointsById = new Map(
+					state.endpoints.map((endpoint) => [endpoint.endpoint_id, endpoint]),
+				);
+				const existingByEndpoint = new Map(
+					(state.userAccessByUser[userId] ?? []).map((item) => [
+						item.membership.endpoint_id,
+						item,
+					]),
+				);
+				const seen = new Set<string>();
+				const nextItems: AdminUserAccessItem[] = [];
+
+				for (const item of rawItems) {
+					const endpointId = String(item.endpoint_id ?? "").trim();
+					if (!endpointId) {
+						errorResponse(route, "endpoint_id is required", 400);
+						return;
+					}
+					if (seen.has(endpointId)) {
+						errorResponse(route, "duplicate endpoint_id", 400);
+						return;
+					}
+					seen.add(endpointId);
+					const endpoint = endpointsById.get(endpointId);
+					if (!endpoint) {
+						errorResponse(route, `endpoint not found: ${endpointId}`, 400);
+						return;
+					}
+					const previous = existingByEndpoint.get(endpointId);
+					nextItems.push({
+						membership: {
+							user_id: userId,
+							node_id: endpoint.node_id,
+							endpoint_id: endpointId,
+						},
+						grant: {
+							grant_id: previous?.grant.grant_id ?? `grant-${endpointId}`,
+							enabled: true,
+							quota_limit_bytes: previous?.grant.quota_limit_bytes ?? 0,
+							note: (item.note as string | null | undefined) ?? null,
+							credentials: previous?.grant.credentials ?? {
+								vless: {
+									uuid: "22222222-2222-2222-2222-222222222222",
+									email: "mock@example.com",
+								},
+							},
+						},
+					});
+				}
+
+				state.userAccessByUser[userId] = nextItems;
+				jsonResponse(route, { items: nextItems });
 				return;
 			}
 
@@ -594,6 +619,7 @@ export async function setupApiMocks(
 			if (method === "DELETE") {
 				state.users = state.users.filter((item) => item.user_id !== userId);
 				state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
+				delete state.userAccessByUser[userId];
 				void route.fulfill({ status: 204, body: "" });
 				return;
 			}

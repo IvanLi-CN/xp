@@ -4,14 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
-import {
-	createAdminGrantGroup,
-	deleteAdminGrantGroup,
-	fetchAdminGrantGroup,
-	fetchAdminGrantGroups,
-	replaceAdminGrantGroup,
-} from "../api/adminGrantGroups";
 import { fetchAdminNodes } from "../api/adminNodes";
+import {
+	fetchAdminUserAccess,
+	replaceAdminUserAccess,
+} from "../api/adminUserAccess";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import {
 	deleteAdminUser,
@@ -134,41 +131,10 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
-	const managedGroupName = useMemo(() => {
-		// Keep in sync with src/state.rs:sanitize_group_name_fragment.
-		const sanitizeGroupNameFragment = (input: string): string => {
-			let out = "";
-			for (const ch of input) {
-				const isLower = ch >= "a" && ch <= "z";
-				const isUpper = ch >= "A" && ch <= "Z";
-				const isDigit = ch >= "0" && ch <= "9";
-				if (isLower || isDigit || ch === "-" || ch === "_") {
-					out += ch;
-				} else if (isUpper || isLower || isDigit) {
-					out += ch.toLowerCase();
-				} else {
-					out += "-";
-				}
-			}
-			return out;
-		};
-
-		let out = `managed-${sanitizeGroupNameFragment(userId)}`;
-		if (out.length > 64) out = out.slice(0, 64);
-		return out;
-	}, [userId]);
-
-	const grantGroupQuery = useQuery({
-		queryKey: ["adminGrantGroup", adminToken, managedGroupName],
-		enabled: adminToken.length > 0 && managedGroupName.length > 0,
-		queryFn: async ({ signal }) => {
-			try {
-				return await fetchAdminGrantGroup(adminToken, managedGroupName, signal);
-			} catch (err) {
-				if (isBackendApiError(err) && err.status === 404) return null;
-				throw err;
-			}
-		},
+	const userAccessQuery = useQuery({
+		queryKey: ["adminUserAccess", adminToken, userId],
+		enabled: adminToken.length > 0 && userId.length > 0,
+		queryFn: ({ signal }) => fetchAdminUserAccess(adminToken, userId, signal),
 	});
 
 	const [displayName, setDisplayName] = useState("");
@@ -220,26 +186,24 @@ export function UserDetailsPage() {
 	}, [user]);
 
 	useEffect(() => {
-		// Initialize matrix selection from the managed group once per userId.
+		// Initialize matrix selection from current user access once per userId.
 		if (!userId) return;
 		if (accessInitForUserId === userId) return;
-		if (endpointsQuery.isLoading || grantGroupQuery.isLoading) return;
-		if (endpointsQuery.isError || grantGroupQuery.isError) return;
+		if (endpointsQuery.isLoading || userAccessQuery.isLoading) return;
+		if (endpointsQuery.isError || userAccessQuery.isError) return;
 		if (!endpointsQuery.data) return;
 
 		const endpoints = endpointsQuery.data.items ?? [];
-		const group = grantGroupQuery.data;
+		const access = userAccessQuery.data;
 		const supported = new Set(PROTOCOLS.map((p) => p.protocolId));
 		const next: Record<string, string> = {};
 
-		if (group) {
-			for (const m of group.members) {
-				if (!m.enabled) continue;
-				const ep = endpoints.find((e) => e.endpoint_id === m.endpoint_id);
-				if (!ep) continue;
-				if (!supported.has(ep.kind)) continue;
-				next[`${ep.node_id}::${ep.kind}`] = ep.endpoint_id;
-			}
+		for (const item of access?.items ?? []) {
+			const endpointId = item.membership.endpoint_id;
+			const ep = endpoints.find((e) => e.endpoint_id === endpointId);
+			if (!ep) continue;
+			if (!supported.has(ep.kind)) continue;
+			next[`${ep.node_id}::${ep.kind}`] = endpointId;
 		}
 
 		setSelectedByCell(next);
@@ -251,9 +215,9 @@ export function UserDetailsPage() {
 		endpointsQuery.data,
 		endpointsQuery.isError,
 		endpointsQuery.isLoading,
-		grantGroupQuery.data,
-		grantGroupQuery.isError,
-		grantGroupQuery.isLoading,
+		userAccessQuery.data,
+		userAccessQuery.isError,
+		userAccessQuery.isLoading,
 		userId,
 	]);
 
@@ -409,7 +373,7 @@ export function UserDetailsPage() {
 		if (
 			nodesQuery.isLoading ||
 			endpointsQuery.isLoading ||
-			grantGroupQuery.isLoading
+			userAccessQuery.isLoading
 		) {
 			return (
 				<PageState
@@ -423,14 +387,14 @@ export function UserDetailsPage() {
 		if (
 			nodesQuery.isError ||
 			endpointsQuery.isError ||
-			grantGroupQuery.isError
+			userAccessQuery.isError
 		) {
 			const message = nodesQuery.isError
 				? formatError(nodesQuery.error)
 				: endpointsQuery.isError
 					? formatError(endpointsQuery.error)
-					: grantGroupQuery.isError
-						? formatError(grantGroupQuery.error)
+					: userAccessQuery.isError
+						? formatError(userAccessQuery.error)
 						: "Unknown error";
 			return (
 				<PageState
@@ -443,7 +407,7 @@ export function UserDetailsPage() {
 							onClick={() => {
 								nodesQuery.refetch();
 								endpointsQuery.refetch();
-								grantGroupQuery.refetch();
+								userAccessQuery.refetch();
 							}}
 						>
 							Retry
@@ -523,118 +487,6 @@ export function UserDetailsPage() {
 			0,
 			selectedEndpointIds.length - visibleSelectedCount,
 		);
-
-		const buildMembers = (args: {
-			selectedEndpointIds: string[];
-		}) => {
-			return args.selectedEndpointIds.map((endpointId) => {
-				const endpoint = endpoints.find((ep) => ep.endpoint_id === endpointId);
-				if (!endpoint) {
-					throw new Error(`endpoint not found: ${endpointId}`);
-				}
-				return {
-					user_id: user.user_id,
-					endpoint_id: endpointId,
-					enabled: true,
-					// Shared node quota policy does not use static per-member quotas.
-					quota_limit_bytes: 0,
-					note: null,
-				};
-			});
-		};
-
-		type GrantGroupMemberPayload = {
-			user_id: string;
-			endpoint_id: string;
-			enabled: boolean;
-			quota_limit_bytes: number;
-			note: string | null;
-		};
-
-		type GrantGroupPurgePlanItem = {
-			groupName: string;
-			originalMembers: GrantGroupMemberPayload[];
-			remainingMembers: GrantGroupMemberPayload[];
-			action: "delete" | "replace";
-		};
-
-		const toMemberPayload = (m: {
-			user_id: string;
-			endpoint_id: string;
-			enabled: boolean;
-			quota_limit_bytes: number;
-			note: string | null;
-		}): GrantGroupMemberPayload => {
-			return {
-				user_id: m.user_id,
-				endpoint_id: m.endpoint_id,
-				enabled: m.enabled,
-				quota_limit_bytes: m.quota_limit_bytes,
-				note: m.note ?? null,
-			};
-		};
-
-		const buildPurgePlanForUserInOtherGrantGroups = async (): Promise<
-			GrantGroupPurgePlanItem[]
-		> => {
-			const list = await fetchAdminGrantGroups(adminToken);
-			const plan: GrantGroupPurgePlanItem[] = [];
-
-			for (const g of list.items) {
-				const groupName = g.group_name;
-				if (groupName === managedGroupName) continue;
-
-				let detail: Awaited<ReturnType<typeof fetchAdminGrantGroup>> | null =
-					null;
-				try {
-					detail = await fetchAdminGrantGroup(adminToken, groupName);
-				} catch (err) {
-					if (isBackendApiError(err) && err.status === 404) continue;
-					throw err;
-				}
-				if (!detail) continue;
-
-				const hasUser = detail.members.some((m) => m.user_id === user.user_id);
-				if (!hasUser) continue;
-
-				const originalMembers = detail.members.map(toMemberPayload);
-				const remainingMembers = detail.members
-					.filter((m) => m.user_id !== user.user_id)
-					.map(toMemberPayload);
-
-				plan.push({
-					groupName,
-					originalMembers,
-					remainingMembers,
-					action: remainingMembers.length === 0 ? "delete" : "replace",
-				});
-			}
-
-			return plan;
-		};
-
-		const rollbackPurgePlan = async (plan: GrantGroupPurgePlanItem[]) => {
-			const errors: string[] = [];
-
-			for (const item of [...plan].reverse()) {
-				try {
-					if (item.action === "delete") {
-						await createAdminGrantGroup(adminToken, {
-							group_name: item.groupName,
-							members: item.originalMembers,
-						});
-					} else {
-						await replaceAdminGrantGroup(adminToken, item.groupName, {
-							members: item.originalMembers,
-						});
-					}
-				} catch (err) {
-					errors.push(formatError(err));
-				}
-			}
-
-			return errors;
-		};
 
 		const cells: Record<
 			string,
@@ -774,75 +626,17 @@ export function UserDetailsPage() {
 		const applyChanges = async () => {
 			setAccessError(null);
 			setIsApplyingAccess(true);
-			let appliedPurgePlan: GrantGroupPurgePlanItem[] = [];
 			try {
-				const purgePlan = await buildPurgePlanForUserInOtherGrantGroups();
-
-				// Hard cut: this UI is authoritative. Remove this user from any existing
-				// grant-groups so we can safely move everything into the per-user managed
-				// group (backend enforces uniqueness of (user_id, endpoint_id) globally).
-				appliedPurgePlan = [];
-				for (const item of purgePlan) {
-					if (item.action === "delete") {
-						try {
-							await deleteAdminGrantGroup(adminToken, item.groupName);
-						} catch (err) {
-							if (!(isBackendApiError(err) && err.status === 404)) {
-								throw err;
-							}
-						}
-					} else {
-						await replaceAdminGrantGroup(adminToken, item.groupName, {
-							members: item.remainingMembers,
-						});
-					}
-					appliedPurgePlan.push(item);
-				}
-
-				try {
-					if (selectedEndpointIds.length === 0) {
-						try {
-							await deleteAdminGrantGroup(adminToken, managedGroupName);
-						} catch (err) {
-							if (!(isBackendApiError(err) && err.status === 404)) {
-								throw err;
-							}
-						}
-					} else {
-						const members = buildMembers({ selectedEndpointIds });
-
-						if (grantGroupQuery.data) {
-							await replaceAdminGrantGroup(adminToken, managedGroupName, {
-								members,
-							});
-						} else {
-							await createAdminGrantGroup(adminToken, {
-								group_name: managedGroupName,
-								members,
-							});
-						}
-					}
-				} catch (err) {
-					// Best-effort rollback: avoid dropping user access if managed group
-					// operation fails after we already removed membership from other groups.
-					const rollbackErrors = await rollbackPurgePlan(appliedPurgePlan);
-					appliedPurgePlan = [];
-					const message = formatError(err);
-					const rollbackSuffix =
-						rollbackErrors.length > 0
-							? ` (rollback errors: ${rollbackErrors.join("; ")})`
-							: " (rolled back)";
-					throw new Error(`${message}${rollbackSuffix}`);
-				}
-
-				await grantGroupQuery.refetch();
+				const payloadItems = selectedEndpointIds.map((endpointId) => ({
+					endpoint_id: endpointId,
+					note: null as string | null,
+				}));
+				await replaceAdminUserAccess(adminToken, user.user_id, {
+					items: payloadItems,
+				});
+				await userAccessQuery.refetch();
 				pushToast({ variant: "success", message: "Access updated." });
 			} catch (err) {
-				// If purge partially succeeded but we failed before applying the managed
-				// group update, restore whatever we already changed.
-				if (appliedPurgePlan.length > 0) {
-					await rollbackPurgePlan(appliedPurgePlan);
-				}
 				const message = formatError(err);
 				setAccessError(message);
 				pushToast({

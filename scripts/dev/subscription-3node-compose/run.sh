@@ -467,43 +467,22 @@ print("")
   v5="$(find_endpoint_id "$node3_id" 32085 "$vless_kind")"
   if [ -z "$v5" ]; then v5="$(create_vless_endpoint "$node3_id" 32085 | json_get endpoint_id)"; fi
 
-  group_name="apxdg"
-  if compose exec -T xp1-app curl -fsS \
+  compose exec -T xp1-app curl -fsS \
     --cacert /data/cluster/cluster_ca.pem \
     -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
-    "https://xp1:6443/api/admin/grant-groups/${group_name}" >/dev/null 2>&1; then
-    compose exec -T xp1-app curl -fsS \
-      --cacert /data/cluster/cluster_ca.pem \
-      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -X PUT \
-      -d "{
-        \"members\":[
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e1}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e2}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e3}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e4}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"}
-        ]
-      }" \
-      "https://xp1:6443/api/admin/grant-groups/${group_name}" >/dev/null
-  else
-    compose exec -T xp1-app curl -fsS \
-      --cacert /data/cluster/cluster_ca.pem \
-      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -d "{
-        \"group_name\":\"${group_name}\",
-        \"members\":[
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e1}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e2}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e3}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"},
-          {\"user_id\":\"${user_id}\",\"endpoint_id\":\"${e4}\",\"enabled\":true,\"quota_limit_bytes\":0,\"note\":\"same\"}
-        ]
-      }" \
-      https://xp1:6443/api/admin/grant-groups >/dev/null
-  fi
+    -H "Content-Type: application/json" \
+    -X PUT \
+    -d "{
+      \"items\":[
+        {\"endpoint_id\":\"${e1}\",\"note\":\"same\"},
+        {\"endpoint_id\":\"${e2}\",\"note\":\"same\"},
+        {\"endpoint_id\":\"${e3}\",\"note\":\"same\"},
+        {\"endpoint_id\":\"${e4}\",\"note\":\"same\"}
+      ]
+    }" \
+    "https://xp1:6443/api/admin/users/${user_id}/access" >/dev/null
 
-  echo "seed ok (user=alice, 4 subscription endpoints + 4 grants in group=\"${group_name}\"; extra endpoints added for probe kinds)"
+  echo "seed ok (user=alice, 4 subscription endpoints + 4 access grants; extra endpoints added for probe kinds)"
 }
 
 meta_sync() {

@@ -1054,8 +1054,7 @@ mod tests {
                 .unwrap();
             let _grant = store
                 .create_grant(
-                    "test-group".to_string(),
-                    _user.user_id.clone(),
+                                        _user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
                     true,
@@ -1129,8 +1128,7 @@ mod tests {
 
             let _ = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id.clone(),
+                                        user.user_id.clone(),
                     local_endpoint.endpoint_id.clone(),
                     1,
                     true,
@@ -1139,8 +1137,7 @@ mod tests {
                 .unwrap();
             let _ = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
+                                        user.user_id,
                     remote_endpoint.endpoint_id.clone(),
                     1,
                     true,
@@ -1225,8 +1222,7 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id.clone(),
+                                        user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
                     false,
@@ -1278,8 +1274,7 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id.clone(),
+                                        user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
                     true,
@@ -1336,8 +1331,7 @@ mod tests {
                 .unwrap();
             let _grant = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id.clone(),
+                                        user.user_id.clone(),
                     endpoint.endpoint_id.clone(),
                     1,
                     true,
@@ -1539,8 +1533,7 @@ mod tests {
                 .unwrap();
             let grant = store
                 .create_grant(
-                    "test-group".to_string(),
-                    user.user_id,
+                                        user.user_id,
                     endpoint.endpoint_id.clone(),
                     1,
                     true,

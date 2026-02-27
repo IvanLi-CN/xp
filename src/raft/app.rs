@@ -404,32 +404,23 @@ impl RaftFacade for LocalRaft {
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
         Box::pin(async move {
             let mut store = self.store.lock().await;
-            let (deleted_usage, clear_bans) = match &cmd {
-                DesiredStateCommand::DeleteGrantGroup { group_name } => {
-                    let ids: Vec<String> = store
+            let deleted_usage = match &cmd {
+                DesiredStateCommand::ReplaceUserAccess { user_id, items } => {
+                    let desired_endpoint_ids: std::collections::BTreeSet<String> =
+                        items.iter().map(|item| item.endpoint_id.clone()).collect();
+                    let old: Vec<crate::domain::Grant> = store
                         .list_grants()
                         .into_iter()
-                        .filter(|g| g.group_name == *group_name)
-                        .map(|g| g.grant_id)
+                        .filter(|g| g.user_id == *user_id)
                         .collect();
-                    (ids, Vec::new())
-                }
-                DesiredStateCommand::ReplaceGrantGroup {
-                    group_name, grants, ..
-                } => {
-                    let old: std::collections::BTreeSet<String> = store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.group_name == *group_name)
-                        .map(|g| g.grant_id)
+                    let deleted: Vec<String> = old
+                        .iter()
+                        .filter(|g| !desired_endpoint_ids.contains(&g.endpoint_id))
+                        .map(|g| g.grant_id.clone())
                         .collect();
-                    let new: std::collections::BTreeSet<String> =
-                        grants.iter().map(|g| g.grant_id.clone()).collect();
-                    let deleted: Vec<String> = old.difference(&new).cloned().collect();
-                    let clear_bans: Vec<String> = new.into_iter().collect();
-                    (deleted, clear_bans)
+                    deleted
                 }
-                _ => (Vec::new(), Vec::new()),
+                _ => Vec::new(),
             };
             let out = match cmd.apply(store.state_mut()) {
                 Ok(out) => out,
@@ -448,22 +439,20 @@ impl RaftFacade for LocalRaft {
                             .map_err(anyhow::Error::new)?;
                     }
                 }
-                (DesiredStateCommand::ReplaceGrantGroup { .. }, _) => {
+                (DesiredStateCommand::ReplaceUserAccess { user_id, .. }, _) => {
                     for grant_id in deleted_usage.iter() {
                         store
                             .clear_grant_usage(grant_id)
                             .map_err(anyhow::Error::new)?;
                     }
-                    for grant_id in clear_bans.iter() {
+                    for grant_id in store
+                        .list_grants()
+                        .into_iter()
+                        .filter(|g| g.user_id == *user_id)
+                        .map(|g| g.grant_id)
+                    {
                         store
-                            .clear_quota_banned(grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                }
-                (DesiredStateCommand::DeleteGrantGroup { .. }, _) => {
-                    for grant_id in deleted_usage.iter() {
-                        store
-                            .clear_grant_usage(grant_id)
+                            .clear_quota_banned(&grant_id)
                             .map_err(anyhow::Error::new)?;
                     }
                 }
@@ -535,13 +524,11 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
-            DomainError::GroupNameConflict { .. } | DomainError::GrantPairConflict { .. } => {
-                ClientResponse::Err {
-                    status: 409,
-                    code: "conflict".to_string(),
-                    message: domain.to_string(),
-                }
-            }
+            DomainError::GrantPairConflict { .. } => ClientResponse::Err {
+                status: 409,
+                code: "conflict".to_string(),
+                message: domain.to_string(),
+            },
             DomainError::NodeInUse { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
@@ -598,8 +585,7 @@ mod tests {
             .unwrap();
         let grant = store
             .create_grant(
-                "test-group".to_string(),
-                user.user_id,
+                                user.user_id,
                 endpoint.endpoint_id,
                 1,
                 true,
