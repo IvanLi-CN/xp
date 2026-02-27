@@ -101,23 +101,21 @@ type PieSegment = {
 };
 
 const PIE_COLORS = [
-	"#0ea5e9",
-	"#10b981",
-	"#f59e0b",
-	"#ef4444",
-	"#6366f1",
-	"#14b8a6",
-	"#f97316",
-	"#a855f7",
-	"#84cc16",
-	"#ec4899",
+	"oklch(var(--p))",
+	"oklch(var(--s))",
+	"oklch(var(--a))",
+	"oklch(var(--in))",
+	"oklch(var(--su))",
+	"oklch(var(--wa))",
+	"oklch(var(--er))",
+	"oklch(var(--n))",
 ] as const;
 
 const RATIO_TABLE_MIN_VIEWPORT = 1024;
 const DEFAULT_GLOBAL_WEIGHT = 100;
 
 function pieColorAt(index: number): string {
-	return PIE_COLORS[index % PIE_COLORS.length] ?? "#9ca3af";
+	return PIE_COLORS[index % PIE_COLORS.length] ?? "oklch(var(--b3))";
 }
 
 function stableColorIndex(key: string): number {
@@ -130,7 +128,7 @@ function stableColorIndex(key: string): number {
 }
 
 function pieColorForKey(key: string): string {
-	if (key === "others") return "#64748b";
+	if (key === "others") return "oklch(var(--b3))";
 	return pieColorAt(stableColorIndex(key));
 }
 
@@ -1250,7 +1248,12 @@ export function QuotaPolicyPage() {
 											role="img"
 											aria-label="Global weight ratio pie chart"
 										>
-											<circle cx="110" cy="110" r="96" fill="hsl(var(--b2))" />
+											<circle
+												cx="110"
+												cy="110"
+												r="96"
+												fill="oklch(var(--b2))"
+											/>
 											{globalPieSegments.length === 1 &&
 											firstGlobalPieSegment &&
 											firstGlobalPieSegment.basisPoints ===
@@ -1293,7 +1296,12 @@ export function QuotaPolicyPage() {
 													);
 												})
 											)}
-											<circle cx="110" cy="110" r="58" fill="hsl(var(--b1))" />
+											<circle
+												cx="110"
+												cy="110"
+												r="58"
+												fill="oklch(var(--b1))"
+											/>
 											<text
 												x="110"
 												y="104"
@@ -1468,120 +1476,127 @@ export function QuotaPolicyPage() {
 										})}
 									</div>
 								) : (
-									<table
-										data-testid="global-ratio-editor-table"
-										className="table table-fixed w-full"
-									>
-										<thead>
-											<tr className="bg-base-200/50">
-												<th className="w-[32%]">User</th>
-												<th className="w-[10%]">Tier</th>
-												<th className="w-[24%]">Slider</th>
-												<th className="w-[15%]">Input (%)</th>
-												<th className="w-[11%]">Computed weight</th>
-												<th className="w-[8%]">Lock</th>
-											</tr>
-										</thead>
-										<tbody>
-											{globalRatioRows.map((row, index) => {
-												const targetWeight = globalComputedWeights[index] ?? 0;
-												return (
-													<tr key={row.userId}>
-														<td className="align-top">
-															<div className="flex flex-col gap-1 min-w-0">
-																<span className="font-semibold truncate">
-																	{row.displayName}
+									<div className="overflow-x-auto">
+										<table
+											data-testid="global-ratio-editor-table"
+											className="table table-fixed w-full min-w-[980px]"
+										>
+											<thead>
+												<tr className="bg-base-200/50">
+													<th className="w-[31%]">User</th>
+													<th className="w-[10%]">Tier</th>
+													<th className="w-[22%]">Slider</th>
+													<th className="w-[16%]">Input (%)</th>
+													<th className="w-[12%] whitespace-nowrap">
+														Computed weight
+													</th>
+													<th className="w-[9%] whitespace-nowrap">Lock</th>
+												</tr>
+											</thead>
+											<tbody>
+												{globalRatioRows.map((row, index) => {
+													const targetWeight =
+														globalComputedWeights[index] ?? 0;
+													return (
+														<tr key={row.userId}>
+															<td className="align-top">
+																<div className="flex flex-col gap-1 min-w-0">
+																	<span className="font-semibold truncate">
+																		{row.displayName}
+																	</span>
+																	<span className="font-mono text-xs opacity-70 break-all">
+																		{row.userId}
+																	</span>
+																</div>
+															</td>
+															<td className="align-top">
+																<span className="badge badge-ghost uppercase">
+																	{row.priorityTier}
 																</span>
-																<span className="font-mono text-xs opacity-70 break-all">
-																	{row.userId}
-																</span>
-															</div>
-														</td>
-														<td className="align-top">
-															<span className="badge badge-ghost uppercase">
-																{row.priorityTier}
-															</span>
-														</td>
-														<td className="align-top">
-															<input
-																type="range"
-																className="range range-primary range-sm"
-																min={0}
-																max={100}
-																step={0.1}
-																value={row.basisPoints / 100}
-																disabled={isSavingGlobalRatio}
-																aria-label={`Global ratio slider for ${row.displayName}`}
-																onChange={(event) => {
-																	applyGlobalRatioEdit(
-																		row.userId,
-																		Math.round(
-																			Number(event.target.value) * 100,
-																		),
-																	);
-																}}
-															/>
-															<div className="font-mono text-xs opacity-70 mt-1">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
-														</td>
-														<td className="align-top">
-															<input
-																type="number"
-																min={0}
-																max={100}
-																step={0.01}
-																className={[
-																	inputClass,
-																	"font-mono w-full",
-																].join(" ")}
-																value={row.basisPoints / 100}
-																disabled={isSavingGlobalRatio}
-																aria-label={`Global ratio input for ${row.displayName}`}
-																onChange={(event) => {
-																	const parsed = parsePercentInput(
-																		event.target.value,
-																	);
-																	if (!parsed.ok) {
-																		setGlobalRatioError(parsed.error);
-																		return;
-																	}
-																	applyGlobalRatioEdit(
-																		row.userId,
-																		parsed.basisPoints,
-																	);
-																}}
-															/>
-														</td>
-														<td className="align-top">
-															<div className="font-mono text-sm">
-																{targetWeight}
-															</div>
-															<div className="text-xs opacity-70">
-																{row.source === "implicit_default"
-																	? "implicit_default"
-																	: "explicit"}
-															</div>
-														</td>
-														<td className="align-top">
-															<label className="label cursor-pointer justify-start gap-2 py-0">
+															</td>
+															<td className="align-top">
 																<input
-																	type="checkbox"
-																	className="checkbox checkbox-sm"
-																	checked={row.locked}
+																	type="range"
+																	className="range range-primary range-sm"
+																	min={0}
+																	max={100}
+																	step={0.1}
+																	value={row.basisPoints / 100}
 																	disabled={isSavingGlobalRatio}
-																	onChange={() =>
-																		toggleGlobalRowLock(row.userId)
-																	}
+																	aria-label={`Global ratio slider for ${row.displayName}`}
+																	onChange={(event) => {
+																		applyGlobalRatioEdit(
+																			row.userId,
+																			Math.round(
+																				Number(event.target.value) * 100,
+																			),
+																		);
+																	}}
 																/>
-																<span className="label-text text-xs">Lock</span>
-															</label>
-														</td>
-													</tr>
-												);
-											})}
-										</tbody>
-									</table>
+																<div className="font-mono text-xs opacity-70 mt-1">
+																	{formatRatioPercent(row.basisPoints)}
+																</div>
+															</td>
+															<td className="align-top">
+																<input
+																	type="number"
+																	min={0}
+																	max={100}
+																	step={0.01}
+																	className={[
+																		inputClass,
+																		"font-mono w-full",
+																	].join(" ")}
+																	value={row.basisPoints / 100}
+																	disabled={isSavingGlobalRatio}
+																	aria-label={`Global ratio input for ${row.displayName}`}
+																	onChange={(event) => {
+																		const parsed = parsePercentInput(
+																			event.target.value,
+																		);
+																		if (!parsed.ok) {
+																			setGlobalRatioError(parsed.error);
+																			return;
+																		}
+																		applyGlobalRatioEdit(
+																			row.userId,
+																			parsed.basisPoints,
+																		);
+																	}}
+																/>
+															</td>
+															<td className="align-top whitespace-nowrap">
+																<div className="font-mono text-sm">
+																	{targetWeight}
+																</div>
+																<div className="text-xs opacity-70 whitespace-normal break-words">
+																	{row.source === "implicit_default"
+																		? "implicit_default"
+																		: "explicit"}
+																</div>
+															</td>
+															<td className="align-top whitespace-nowrap">
+																<label className="label cursor-pointer justify-start gap-2 py-0">
+																	<input
+																		type="checkbox"
+																		className="checkbox checkbox-sm"
+																		checked={row.locked}
+																		disabled={isSavingGlobalRatio}
+																		onChange={() =>
+																			toggleGlobalRowLock(row.userId)
+																		}
+																	/>
+																	<span className="label-text text-xs">
+																		Lock
+																	</span>
+																</label>
+															</td>
+														</tr>
+													);
+												})}
+											</tbody>
+										</table>
+									</div>
 								)}
 
 								{globalRatioError ? (
@@ -1822,7 +1837,12 @@ export function QuotaPolicyPage() {
 											role="img"
 											aria-label="Node weight ratio pie chart"
 										>
-											<circle cx="110" cy="110" r="96" fill="hsl(var(--b2))" />
+											<circle
+												cx="110"
+												cy="110"
+												r="96"
+												fill="oklch(var(--b2))"
+											/>
 											{pieSegments.length === 1 &&
 											firstPieSegment &&
 											firstPieSegment.basisPoints === RATIO_BASIS_POINTS ? (
@@ -1864,7 +1884,12 @@ export function QuotaPolicyPage() {
 													);
 												})
 											)}
-											<circle cx="110" cy="110" r="58" fill="hsl(var(--b1))" />
+											<circle
+												cx="110"
+												cy="110"
+												r="58"
+												fill="oklch(var(--b1))"
+											/>
 											<text
 												x="110"
 												y="104"
@@ -2062,150 +2087,156 @@ export function QuotaPolicyPage() {
 										})}
 									</div>
 								) : (
-									<table
-										data-testid="ratio-editor-table"
-										className="table table-fixed w-full"
-									>
-										<thead>
-											<tr className="bg-base-200/50">
-												<th className="w-[30%]">User</th>
-												<th className="w-[10%]">Tier</th>
-												<th className="w-[24%]">Slider</th>
-												<th className="w-[16%]">Input (%)</th>
-												<th className="w-[12%]">Computed weight</th>
-												<th className="w-[8%]">Lock</th>
-											</tr>
-										</thead>
-										<tbody>
-											{displayRatioRows.map((row, index) => {
-												const targetWeight = computedWeights[index] ?? 0;
-												const isHighlighted = hoveredUserId === row.userId;
-												const rowClass = isHighlighted
-													? "bg-info/10"
-													: hoveredUserId
-														? "opacity-60"
-														: "";
-												return (
-													<tr
-														key={row.userId}
-														className={rowClass}
-														onMouseEnter={() => setHoveredUserId(row.userId)}
-														onMouseLeave={() => setHoveredUserId(null)}
-													>
-														<td className="align-top">
-															<div className="flex flex-col gap-1 min-w-0">
-																<span className="font-semibold truncate">
-																	{row.displayName}
+									<div className="overflow-x-auto">
+										<table
+											data-testid="ratio-editor-table"
+											className="table table-fixed w-full min-w-[980px]"
+										>
+											<thead>
+												<tr className="bg-base-200/50">
+													<th className="w-[29%]">User</th>
+													<th className="w-[10%]">Tier</th>
+													<th className="w-[24%]">Slider</th>
+													<th className="w-[16%]">Input (%)</th>
+													<th className="w-[12%] whitespace-nowrap">
+														Computed weight
+													</th>
+													<th className="w-[9%] whitespace-nowrap">Lock</th>
+												</tr>
+											</thead>
+											<tbody>
+												{displayRatioRows.map((row, index) => {
+													const targetWeight = computedWeights[index] ?? 0;
+													const isHighlighted = hoveredUserId === row.userId;
+													const rowClass = isHighlighted
+														? "bg-info/10"
+														: hoveredUserId
+															? "opacity-60"
+															: "";
+													return (
+														<tr
+															key={row.userId}
+															className={rowClass}
+															onMouseEnter={() => setHoveredUserId(row.userId)}
+															onMouseLeave={() => setHoveredUserId(null)}
+														>
+															<td className="align-top">
+																<div className="flex flex-col gap-1 min-w-0">
+																	<span className="font-semibold truncate">
+																		{row.displayName}
+																	</span>
+																	<span className="font-mono text-xs opacity-70 break-all">
+																		{row.userId}
+																	</span>
+																	<span className="text-xs opacity-70">
+																		Endpoints {row.endpointIds.length}
+																	</span>
+																</div>
+															</td>
+															<td className="align-top">
+																<span className="badge badge-ghost uppercase">
+																	{row.priorityTier}
 																</span>
-																<span className="font-mono text-xs opacity-70 break-all">
-																	{row.userId}
-																</span>
-																<span className="text-xs opacity-70">
-																	Endpoints {row.endpointIds.length}
-																</span>
-															</div>
-														</td>
-														<td className="align-top">
-															<span className="badge badge-ghost uppercase">
-																{row.priorityTier}
-															</span>
-														</td>
-														<td className="align-top">
-															<input
-																type="range"
-																className="range range-primary range-sm"
-																min={0}
-																max={100}
-																step={0.1}
-																value={row.basisPoints / 100}
-																disabled={
-																	isSavingRatio ||
-																	nodeInheritGlobal ||
-																	isUpdatingNodePolicy
-																}
-																aria-label={`Ratio slider for ${row.displayName}`}
-																onFocus={() => setHoveredUserId(row.userId)}
-																onBlur={() => setHoveredUserId(null)}
-																onChange={(event) => {
-																	applyRatioEdit(
-																		row.userId,
-																		Math.round(
-																			Number(event.target.value) * 100,
-																		),
-																	);
-																}}
-															/>
-															<div className="font-mono text-xs opacity-70 mt-1">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
-														</td>
-														<td className="align-top">
-															<input
-																type="number"
-																min={0}
-																max={100}
-																step={0.01}
-																className={[
-																	inputClass,
-																	"font-mono w-full",
-																].join(" ")}
-																value={row.basisPoints / 100}
-																disabled={
-																	isSavingRatio ||
-																	nodeInheritGlobal ||
-																	isUpdatingNodePolicy
-																}
-																aria-label={`Ratio input for ${row.displayName}`}
-																onFocus={() => setHoveredUserId(row.userId)}
-																onBlur={() => setHoveredUserId(null)}
-																onChange={(event) => {
-																	const parsed = parsePercentInput(
-																		event.target.value,
-																	);
-																	if (!parsed.ok) {
-																		setRatioError(parsed.error);
-																		return;
-																	}
-																	applyRatioEdit(
-																		row.userId,
-																		parsed.basisPoints,
-																	);
-																}}
-															/>
-														</td>
-														<td className="align-top">
-															<div className="font-mono text-sm">
-																{targetWeight}
-															</div>
-															<div className="text-xs opacity-70">
-																{nodeInheritGlobal
-																	? "inherited_global"
-																	: row.source === "implicit_zero"
-																		? "implicit_zero"
-																		: "explicit"}
-															</div>
-														</td>
-														<td className="align-top">
-															<label className="label cursor-pointer justify-start gap-2 py-0">
+															</td>
+															<td className="align-top">
 																<input
-																	type="checkbox"
-																	className="checkbox checkbox-sm"
-																	checked={row.locked}
+																	type="range"
+																	className="range range-primary range-sm"
+																	min={0}
+																	max={100}
+																	step={0.1}
+																	value={row.basisPoints / 100}
 																	disabled={
 																		isSavingRatio ||
 																		nodeInheritGlobal ||
 																		isUpdatingNodePolicy
 																	}
-																	onChange={() => toggleRowLock(row.userId)}
+																	aria-label={`Ratio slider for ${row.displayName}`}
+																	onFocus={() => setHoveredUserId(row.userId)}
+																	onBlur={() => setHoveredUserId(null)}
+																	onChange={(event) => {
+																		applyRatioEdit(
+																			row.userId,
+																			Math.round(
+																				Number(event.target.value) * 100,
+																			),
+																		);
+																	}}
 																/>
-																<span className="label-text text-xs">Lock</span>
-															</label>
-														</td>
-													</tr>
-												);
-											})}
-										</tbody>
-									</table>
+																<div className="font-mono text-xs opacity-70 mt-1">
+																	{formatRatioPercent(row.basisPoints)}
+																</div>
+															</td>
+															<td className="align-top">
+																<input
+																	type="number"
+																	min={0}
+																	max={100}
+																	step={0.01}
+																	className={[
+																		inputClass,
+																		"font-mono w-full",
+																	].join(" ")}
+																	value={row.basisPoints / 100}
+																	disabled={
+																		isSavingRatio ||
+																		nodeInheritGlobal ||
+																		isUpdatingNodePolicy
+																	}
+																	aria-label={`Ratio input for ${row.displayName}`}
+																	onFocus={() => setHoveredUserId(row.userId)}
+																	onBlur={() => setHoveredUserId(null)}
+																	onChange={(event) => {
+																		const parsed = parsePercentInput(
+																			event.target.value,
+																		);
+																		if (!parsed.ok) {
+																			setRatioError(parsed.error);
+																			return;
+																		}
+																		applyRatioEdit(
+																			row.userId,
+																			parsed.basisPoints,
+																		);
+																	}}
+																/>
+															</td>
+															<td className="align-top whitespace-nowrap">
+																<div className="font-mono text-sm">
+																	{targetWeight}
+																</div>
+																<div className="text-xs opacity-70 whitespace-normal break-words">
+																	{nodeInheritGlobal
+																		? "inherited_global"
+																		: row.source === "implicit_zero"
+																			? "implicit_zero"
+																			: "explicit"}
+																</div>
+															</td>
+															<td className="align-top whitespace-nowrap">
+																<label className="label cursor-pointer justify-start gap-2 py-0">
+																	<input
+																		type="checkbox"
+																		className="checkbox checkbox-sm"
+																		checked={row.locked}
+																		disabled={
+																			isSavingRatio ||
+																			nodeInheritGlobal ||
+																			isUpdatingNodePolicy
+																		}
+																		onChange={() => toggleRowLock(row.userId)}
+																	/>
+																	<span className="label-text text-xs">
+																		Lock
+																	</span>
+																</label>
+															</td>
+														</tr>
+													);
+												})}
+											</tbody>
+										</table>
+									</div>
 								)}
 
 								{ratioError ? (
