@@ -559,7 +559,6 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g1".to_string(),
-            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e1".to_string(),
             enabled: true,
@@ -604,7 +603,6 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g2".to_string(),
-            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e2".to_string(),
             enabled: true,
@@ -735,7 +733,6 @@ mod tests {
 
         let grant = Grant {
             grant_id: "g2".to_string(),
-            group_name: "test-group".to_string(),
             user_id: "u1".to_string(),
             endpoint_id: "e2".to_string(),
             enabled: true,

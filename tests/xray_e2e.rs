@@ -87,14 +87,18 @@ fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     }
 }
 
-fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
+fn req_authed_json_with_method(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> {
     Request::builder()
-        .method("POST")
+        .method(method)
         .uri(uri)
         .header(axum::http::header::AUTHORIZATION, "Bearer testtoken")
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&value).unwrap()))
         .unwrap()
+}
+
+fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
+    req_authed_json_with_method("POST", uri, value)
 }
 
 async fn wait_for_remove_user(client: &mut xray::XrayClient, tag: &str, email: &str) {
@@ -372,21 +376,15 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
 
     let res = app
         .clone()
-        .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+        .oneshot(req_authed_json_with_method(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
             json!({
-              "group_name": "xray-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
-                "enabled": true,
-                "quota_limit_bytes": 0,
                 "note": null
               }, {
-                "user_id": user_id,
                 "endpoint_id": endpoint_id_vless,
-                "enabled": true,
-                "quota_limit_bytes": 0,
                 "note": null
               }]
             }),
@@ -394,7 +392,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let _group_detail: serde_json::Value = {
+    let _access_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
@@ -522,6 +520,23 @@ async fn xray_e2e_quota_enforcement_ss2022() {
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
 
+    // Hard-cut access keeps grants desired-enabled; quota enforcement is driven by
+    // shared node budget + usage pacing. Configure a tiny shared budget so the
+    // 1MiB transfer below deterministically exceeds today's allowance.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json_with_method(
+            "PATCH",
+            &format!("/api/admin/nodes/{node_id}"),
+            json!({
+              "quota_limit_bytes": 257 * 1024 * 1024,
+              "quota_reset": { "policy": "monthly", "day_of_month": 1, "tz_offset_minutes": 0 }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -566,18 +581,14 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
 
-    let quota_limit_bytes: u64 = 12 * 1024 * 1024;
     let res = app
         .clone()
-        .oneshot(req_authed_json(
-            "/api/admin/grant-groups",
+        .oneshot(req_authed_json_with_method(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
             json!({
-              "group_name": "quota-e2e-group",
-              "members": [{
-                "user_id": user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
-                "enabled": true,
-                "quota_limit_bytes": quota_limit_bytes,
                 "note": null
               }]
             }),
@@ -585,12 +596,12 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let group_detail: serde_json::Value = {
+    let access_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let ss_password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
+    let ss_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
@@ -630,7 +641,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let store = store.lock().await;
         let grant = store.get_grant(&grant_id_ss).unwrap();
         let usage = store.get_grant_usage(&grant_id_ss).unwrap();
-        assert_eq!(grant.enabled, false);
+        assert_eq!(grant.enabled, true);
         assert_eq!(usage.quota_banned, true);
     }
 

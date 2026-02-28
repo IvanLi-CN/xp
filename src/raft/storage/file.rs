@@ -453,32 +453,23 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             .map(|_| endpoint.endpoint_id.clone()),
                         _ => None,
                     };
-                    let (deleted_usage, clear_bans) = match &cmd {
-                        DesiredStateCommand::DeleteGrantGroup { group_name } => {
-                            let ids: Vec<String> = store
+                    let deleted_usage = match &cmd {
+                        DesiredStateCommand::ReplaceUserAccess { user_id, items } => {
+                            let desired_endpoint_ids: std::collections::BTreeSet<String> =
+                                items.iter().map(|item| item.endpoint_id.clone()).collect();
+                            let old: Vec<crate::domain::Grant> = store
                                 .list_grants()
                                 .into_iter()
-                                .filter(|g| g.group_name == *group_name)
-                                .map(|g| g.grant_id)
+                                .filter(|g| g.user_id == *user_id)
                                 .collect();
-                            (ids, Vec::new())
-                        }
-                        DesiredStateCommand::ReplaceGrantGroup {
-                            group_name, grants, ..
-                        } => {
-                            let old: std::collections::BTreeSet<String> = store
-                                .list_grants()
-                                .into_iter()
-                                .filter(|g| g.group_name == *group_name)
-                                .map(|g| g.grant_id)
+                            let deleted: Vec<String> = old
+                                .iter()
+                                .filter(|g| !desired_endpoint_ids.contains(&g.endpoint_id))
+                                .map(|g| g.grant_id.clone())
                                 .collect();
-                            let new: std::collections::BTreeSet<String> =
-                                grants.iter().map(|g| g.grant_id.clone()).collect();
-                            let deleted: Vec<String> = old.difference(&new).cloned().collect();
-                            let clear_bans: Vec<String> = new.into_iter().collect();
-                            (deleted, clear_bans)
+                            deleted
                         }
-                        _ => (Vec::new(), Vec::new()),
+                        _ => Vec::new(),
                     };
                     match cmd.apply(store.state_mut()) {
                         Ok(apply_result) => {
@@ -508,7 +499,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                         })?;
                                     }
                                 }
-                                (DesiredStateCommand::ReplaceGrantGroup { .. }, _) => {
+                                (DesiredStateCommand::ReplaceUserAccess { user_id, .. }, _) => {
                                     for grant_id in deleted_usage.iter() {
                                         store.clear_grant_usage(grant_id).map_err(|e| {
                                             io_err(
@@ -518,19 +509,13 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                             )
                                         })?;
                                     }
-                                    for grant_id in clear_bans.iter() {
-                                        store.clear_quota_banned(grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                }
-                                (DesiredStateCommand::DeleteGrantGroup { .. }, _) => {
-                                    for grant_id in deleted_usage.iter() {
-                                        store.clear_grant_usage(grant_id).map_err(|e| {
+                                    for grant_id in store
+                                        .list_grants()
+                                        .into_iter()
+                                        .filter(|g| g.user_id == *user_id)
+                                        .map(|g| g.grant_id)
+                                    {
+                                        store.clear_quota_banned(&grant_id).map_err(|e| {
                                             io_err(
                                                 ErrorSubject::StateMachine,
                                                 ErrorVerb::Write,
@@ -594,12 +579,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 crate::domain::DomainError::MissingUser { .. }
                                 | crate::domain::DomainError::MissingNode { .. }
                                 | crate::domain::DomainError::MissingEndpoint { .. }
-                                | crate::domain::DomainError::MissingGrantGroup { .. }
                                 | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                                     (404, "not_found")
                                 }
-                                crate::domain::DomainError::GroupNameConflict { .. }
-                                | crate::domain::DomainError::GrantPairConflict { .. }
+                                crate::domain::DomainError::GrantPairConflict { .. }
                                 | crate::domain::DomainError::RealityDomainNameConflict {
                                     ..
                                 } => (409, "conflict"),
@@ -816,14 +799,7 @@ mod tests {
             )
             .unwrap();
         let grant = store
-            .create_grant(
-                "test-group".to_string(),
-                user.user_id,
-                endpoint.endpoint_id,
-                1,
-                true,
-                None,
-            )
+            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
             .unwrap();
         store
             .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())

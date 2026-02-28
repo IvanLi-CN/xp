@@ -5,13 +5,10 @@ import {
 	AdminEndpointSchema,
 	AdminEndpointsResponseSchema,
 } from "./adminEndpoints";
-import {
-	AdminGrantGroupDetailSchema,
-	AdminGrantGroupsResponseSchema,
-} from "./adminGrantGroups";
 import { AdminJoinTokenResponseSchema } from "./adminJoinTokens";
 import { AdminNodesResponseSchema } from "./adminNodes";
 import { AdminQuotaPolicyNodeWeightRowsResponseSchema } from "./adminQuotaPolicyNodeWeightRows";
+import { AdminUserAccessResponseSchema } from "./adminUserAccess";
 import {
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
@@ -255,37 +252,42 @@ describe("AdminUserTokenResponseSchema", () => {
 	});
 });
 
-describe("AdminGrantGroupsResponseSchema", () => {
+describe("AdminUserAccessResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
-			AdminGrantGroupsResponseSchema.parse({
+			AdminUserAccessResponseSchema.parse({
 				items: [
 					{
-						group_name: "group-1",
-						member_count: 2,
+						membership: {
+							user_id: "user-1",
+							node_id: "node-1",
+							endpoint_id: "endpoint-1",
+						},
+						grant: {
+							grant_id: "grant-1",
+							enabled: true,
+							quota_limit_bytes: 10737418240,
+							note: null,
+							credentials: {
+								vless: {
+									uuid: "00000000-0000-0000-0000-000000000000",
+									email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+								},
+							},
+						},
 					},
 				],
 			}),
 		).toEqual({
 			items: [
 				{
-					group_name: "group-1",
-					member_count: 2,
-				},
-			],
-		});
-	});
-});
-
-describe("AdminGrantGroupDetailSchema", () => {
-	it("accepts expected shape", () => {
-		expect(
-			AdminGrantGroupDetailSchema.parse({
-				group: { group_name: "group-1" },
-				members: [
-					{
+					membership: {
 						user_id: "user-1",
+						node_id: "node-1",
 						endpoint_id: "endpoint-1",
+					},
+					grant: {
+						grant_id: "grant-1",
 						enabled: true,
 						quota_limit_bytes: 10737418240,
 						note: null,
@@ -294,23 +296,6 @@ describe("AdminGrantGroupDetailSchema", () => {
 								uuid: "00000000-0000-0000-0000-000000000000",
 								email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 							},
-						},
-					},
-				],
-			}),
-		).toEqual({
-			group: { group_name: "group-1" },
-			members: [
-				{
-					user_id: "user-1",
-					endpoint_id: "endpoint-1",
-					enabled: true,
-					quota_limit_bytes: 10737418240,
-					note: null,
-					credentials: {
-						vless: {
-							uuid: "00000000-0000-0000-0000-000000000000",
-							email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 						},
 					},
 				},

@@ -3,7 +3,6 @@ import { expect, userEvent, within } from "@storybook/test";
 
 const USER_ID_1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
 const USER_ID_2 = "01HF7YAT01YVKWQ847J5T9EY84";
-const MANAGED_GROUP_1 = `managed-${USER_ID_1.toLowerCase()}`;
 
 const meta = {
 	title: "Pages/UserDetailsPage",
@@ -14,13 +13,16 @@ const meta = {
 		},
 		mockApi: {
 			data: {
-				grantGroups: [
-					{
-						group: { group_name: MANAGED_GROUP_1 },
-						members: [
-							{
+				userAccessByUser: {
+					[USER_ID_1]: [
+						{
+							membership: {
 								user_id: USER_ID_1,
+								node_id: "node-1",
 								endpoint_id: "endpoint-1",
+							},
+							grant: {
+								grant_id: "grant-mock-user1-vless",
 								enabled: true,
 								quota_limit_bytes: 10 * 2 ** 30,
 								note: null,
@@ -31,9 +33,15 @@ const meta = {
 									},
 								},
 							},
-							{
+						},
+						{
+							membership: {
 								user_id: USER_ID_1,
+								node_id: "node-2",
 								endpoint_id: "endpoint-2",
+							},
+							grant: {
+								grant_id: "grant-mock-user1-ss",
 								enabled: true,
 								quota_limit_bytes: 5 * 2 ** 30,
 								note: null,
@@ -44,9 +52,9 @@ const meta = {
 									},
 								},
 							},
-						],
-					},
-				],
+						},
+					],
+				},
 				nodeQuotas: [
 					{
 						user_id: USER_ID_1,

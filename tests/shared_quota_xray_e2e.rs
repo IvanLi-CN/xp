@@ -97,6 +97,15 @@ fn req_authed_json(method: &str, uri: &str, value: serde_json::Value) -> Request
         .unwrap()
 }
 
+fn req_authed(method: &str, uri: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(axum::http::header::AUTHORIZATION, "Bearer testtoken")
+        .body(Body::empty())
+        .unwrap()
+}
+
 async fn spawn_echo_server() -> (u16, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -199,6 +208,35 @@ async fn wait_for_ss_fail(ss_port: u16, password: &str, dest_port: u16) {
                 sleep(Duration::from_millis(200)).await;
             }
             Err(_) => return,
+        }
+    }
+}
+
+async fn send_ss_payload_with_retry(
+    ss_port: u16,
+    password: &str,
+    dest_port: u16,
+    total_payload_len: usize,
+) {
+    // In CI/testbox environments, very large single SS writes can intermittently fail with
+    // BrokenPipe across host<->container forwarding. Send traffic in smaller round-trips so we
+    // can burn enough quota without relying on one long-lived stream.
+    let mut sent = 0usize;
+    // Timeout is progress-based: keep retrying while bytes are still being burned.
+    let mut deadline = Instant::now() + Duration::from_secs(12);
+    while sent < total_payload_len {
+        let chunk = (total_payload_len - sent).min(256 * 1024);
+        match ss_roundtrip_echo(ss_port, password, dest_port, chunk).await {
+            Ok(()) => {
+                sent += chunk;
+                deadline = Instant::now() + Duration::from_secs(12);
+            }
+            Err(err) => {
+                if Instant::now() >= deadline {
+                    panic!("timeout sending ss payload for quota burn, sent={sent}, err={err}");
+                }
+                sleep(Duration::from_millis(150)).await;
+            }
         }
     }
 }
@@ -379,43 +417,30 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
 
-    // Create a grant group: P1/P2/P3 all enabled.
-    let members = [p1_user_id.clone(), p2_user_id.clone(), p3_user_id.clone()]
-        .into_iter()
-        .map(|user_id| {
-            json!({
-              "user_id": user_id,
-              "endpoint_id": endpoint_id_ss,
-              "enabled": true,
-              "quota_limit_bytes": 0,
-              "note": null
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
-            json!({
-              "group_name": "shared-quota-e2e-group",
-              "members": members
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let group_detail: serde_json::Value = {
-        use http_body_util::BodyExt as _;
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
-    };
-
+    // Grant user access: P1/P2/P3 all enabled.
     let mut ss_password_by_user_id = BTreeMap::<String, String>::new();
-    for member in group_detail["members"].as_array().unwrap() {
-        let user_id = member["user_id"].as_str().unwrap().to_string();
-        let password = member["credentials"]["ss2022"]["password"]
+    for user_id in [p1_user_id.clone(), p2_user_id.clone(), p3_user_id.clone()] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/access"),
+                json!({
+                  "items": [{
+                    "endpoint_id": endpoint_id_ss,
+                    "note": null
+                  }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+        let access_detail: serde_json::Value = {
+            use http_body_util::BodyExt as _;
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice(&bytes).unwrap()
+        };
+        let password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
             .as_str()
             .unwrap()
             .to_string();
@@ -639,50 +664,43 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
 
-    // Grant group.
+    // Grant user access to both users.
+    for user_id in [p1_user_id.clone(), p2_user_id.clone()] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/access"),
+                json!({
+                  "items": [{
+                    "endpoint_id": endpoint_id_ss,
+                    "note": null
+                  }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
     let res = app
         .clone()
-        .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
-            json!({
-              "group_name": "shared-quota-weight-drop",
-              "members": [{
-                "user_id": p1_user_id.clone(),
-                "endpoint_id": endpoint_id_ss,
-                "enabled": true,
-                "quota_limit_bytes": 0,
-                "note": null
-              }, {
-                "user_id": p2_user_id.clone(),
-                "endpoint_id": endpoint_id_ss,
-                "enabled": true,
-                "quota_limit_bytes": 0,
-                "note": null
-              }]
-            }),
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{p2_user_id}/access"),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let group_detail: serde_json::Value = {
+    let access_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-
-    let mut p2_password = None;
-    for member in group_detail["members"].as_array().unwrap() {
-        if member["user_id"].as_str().unwrap() == p2_user_id {
-            p2_password = Some(
-                member["credentials"]["ss2022"]["password"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-    }
-    let p2_password = p2_password.expect("expected p2 password");
+    let p2_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let (dest_port, echo_task) = spawn_echo_server().await;
 
@@ -881,19 +899,15 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
 
-    // Grant group (single member).
+    // Grant access (single member).
     let res = app
         .clone()
         .oneshot(req_authed_json(
-            "POST",
-            "/api/admin/grant-groups",
+            "PUT",
+            &format!("/api/admin/users/{p2_user_id}/access"),
             json!({
-              "group_name": "shared-quota-rollover",
-              "members": [{
-                "user_id": p2_user_id,
+              "items": [{
                 "endpoint_id": endpoint_id_ss,
-                "enabled": true,
-                "quota_limit_bytes": 0,
                 "note": null
               }]
             }),
@@ -901,12 +915,12 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let group_detail: serde_json::Value = {
+    let access_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let p2_password = group_detail["members"][0]["credentials"]["ss2022"]["password"]
+    let p2_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
         .as_str()
         .unwrap()
         .to_string();
@@ -916,9 +930,8 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     // Wait until SS is ready, then send enough traffic to exceed the initial day0 bank.
     wait_for_ss_ok(ss_port, &p2_password, dest_port, 256).await;
     // Force a ban: exceed the initial day0 bank. Payload is counted in both uplink + downlink.
-    ss_roundtrip_echo(ss_port, &p2_password, dest_port, 4 * 1024 * 1024)
-        .await
-        .unwrap();
+    // 4MiB payload => ~8MiB traffic after echo, keeping a comfortable margin above day0 cap.
+    send_ss_payload_with_retry(ss_port, &p2_password, dest_port, 4 * 1024 * 1024).await;
 
     let now0 = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
         .unwrap()
