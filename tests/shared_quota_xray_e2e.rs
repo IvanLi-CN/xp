@@ -219,14 +219,18 @@ async fn send_ss_payload_with_retry(
     total_payload_len: usize,
 ) {
     // In CI/testbox environments, very large single SS writes can intermittently fail with
-    // BrokenPipe across host<->container forwarding. Send traffic in smaller round-trips so the
-    // quota usage still accumulates deterministically without relying on one long-lived stream.
+    // BrokenPipe across host<->container forwarding. Send traffic in smaller round-trips so we
+    // can burn enough quota without relying on one long-lived stream.
     let mut sent = 0usize;
-    let deadline = Instant::now() + Duration::from_secs(12);
+    // Timeout is progress-based: keep retrying while bytes are still being burned.
+    let mut deadline = Instant::now() + Duration::from_secs(12);
     while sent < total_payload_len {
         let chunk = (total_payload_len - sent).min(256 * 1024);
         match ss_roundtrip_echo(ss_port, password, dest_port, chunk).await {
-            Ok(()) => sent += chunk,
+            Ok(()) => {
+                sent += chunk;
+                deadline = Instant::now() + Duration::from_secs(12);
+            }
             Err(err) => {
                 if Instant::now() >= deadline {
                     panic!("timeout sending ss payload for quota burn, sent={sent}, err={err}");
@@ -926,8 +930,8 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     // Wait until SS is ready, then send enough traffic to exceed the initial day0 bank.
     wait_for_ss_ok(ss_port, &p2_password, dest_port, 256).await;
     // Force a ban: exceed the initial day0 bank. Payload is counted in both uplink + downlink.
-    // 2MiB payload => ~4MiB traffic after echo, which is above this scenario's day0 cap.
-    send_ss_payload_with_retry(ss_port, &p2_password, dest_port, 2 * 1024 * 1024).await;
+    // 4MiB payload => ~8MiB traffic after echo, keeping a comfortable margin above day0 cap.
+    send_ss_payload_with_retry(ss_port, &p2_password, dest_port, 4 * 1024 * 1024).await;
 
     let now0 = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
         .unwrap()
