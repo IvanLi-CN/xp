@@ -89,3 +89,4 @@
 ## Change log
 
 - 2026-03-01: added icon-only node panel links for Nodes and Dashboard lists, with tests and storybook guard.
+- 2026-03-01: opened PR #87.
