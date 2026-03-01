@@ -127,7 +127,7 @@ describe("<NodesPage />", () => {
 				},
 				{
 					node_id: "node-2",
-					node_name: "osaka-1",
+					node_name: "",
 					api_base_url: "https://node-2.example.com",
 					access_host: "node-2.example.com",
 					summary: {
@@ -169,9 +169,12 @@ describe("<NodesPage />", () => {
 		});
 		expect(links).toHaveLength(2);
 		expect(links[0]).toHaveAttribute("href", "/nodes/node-1");
+		expect(links[0]).toHaveAttribute("aria-label", "Open node panel: tokyo-1");
 		expect(links[1]).toHaveAttribute("href", "/nodes/node-2");
+		expect(links[1]).toHaveAttribute("aria-label", "Open node panel: node-2");
 
 		expect(screen.getByText("tokyo-1").closest("a")).toBeNull();
+		expect(screen.getByText("(unnamed)").closest("a")).toBeNull();
 		expect(screen.getByText("node-1").closest("a")).toBeNull();
 	});
 });

@@ -450,7 +450,8 @@ export function NodesPage() {
 					<div className="divide-y divide-base-200">
 						{nodes.map((node) => {
 							const nodeLabel = node.node_name || "(unnamed)";
-							const openNodePanelLabel = `Open node panel: ${nodeLabel}`;
+							const accessibleNodeLabel = node.node_name || node.node_id;
+							const openNodePanelLabel = `Open node panel: ${accessibleNodeLabel}`;
 
 							return (
 								<div
