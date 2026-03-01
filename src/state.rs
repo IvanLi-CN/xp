@@ -1432,6 +1432,13 @@ struct LegacyGrantCompat {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct UserAccessItemCompat {
+    endpoint_id: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum DesiredStateCommandCompat {
     UpsertNode {
@@ -1495,7 +1502,12 @@ enum DesiredStateCommandCompat {
 
     ReplaceUserAccess {
         user_id: String,
+        // New shape (schema v10+): membership-only endpoint list.
+        #[serde(default)]
         endpoint_ids: Vec<String>,
+        // Legacy shape (schema v9): `items: [{ endpoint_id, note? }]`.
+        #[serde(default)]
+        items: Vec<UserAccessItemCompat>,
     },
     EnsureMembership {
         user_id: String,
@@ -1614,10 +1626,16 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
-            } => Self::ReplaceUserAccess {
-                user_id,
-                endpoint_ids,
-            },
+                items,
+            } => {
+                // Support both v9 `items` and v10+ `endpoint_ids` WAL shapes.
+                let mut merged: BTreeSet<String> = endpoint_ids.into_iter().collect();
+                merged.extend(items.into_iter().map(|i| i.endpoint_id));
+                Self::ReplaceUserAccess {
+                    user_id,
+                    endpoint_ids: merged.into_iter().collect(),
+                }
+            }
             DesiredStateCommandCompat::EnsureMembership {
                 user_id,
                 endpoint_id,
@@ -3711,6 +3729,31 @@ mod tests {
         match cmd {
             DesiredStateCommand::CompatNoop { note } => {
                 assert!(note.contains("legacy set_grant_enabled ignored"))
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_replace_user_access_items_deserializes_to_endpoint_ids() {
+        let cmd: DesiredStateCommand = serde_json::from_value(json!({
+            "type": "replace_user_access",
+            "user_id": "user_1",
+            "items": [
+                { "endpoint_id": "endpoint_2", "note": "legacy note" },
+                { "endpoint_id": "endpoint_1" }
+            ]
+        }))
+        .unwrap();
+
+        match cmd {
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id,
+                endpoint_ids,
+            } => {
+                assert_eq!(user_id, "user_1");
+                // Compat mapping is allowed to sort/dedup.
+                assert_eq!(endpoint_ids, vec!["endpoint_1", "endpoint_2"]);
             }
             other => panic!("unexpected command: {other:?}"),
         }

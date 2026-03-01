@@ -4992,7 +4992,7 @@ async fn admin_put_user_access(
         &state,
         DesiredStateCommand::ReplaceUserAccess {
             user_id: user_id.clone(),
-            endpoint_ids: endpoint_ids.clone(),
+            endpoint_ids,
         },
     )
     .await?;
@@ -5002,21 +5002,7 @@ async fn admin_put_user_access(
 
     let items = {
         let store = state.store.lock().await;
-        endpoint_ids
-            .into_iter()
-            .map(|endpoint_id| {
-                let endpoint = store.get_endpoint(&endpoint_id).ok_or_else(|| {
-                    ApiError::internal(format!(
-                        "endpoint not found after access apply: endpoint_id={endpoint_id}"
-                    ))
-                })?;
-                Ok(crate::state::NodeUserEndpointMembership {
-                    user_id: user_id.clone(),
-                    node_id: endpoint.node_id,
-                    endpoint_id,
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?
+        store.list_user_access(&user_id).map_err(ApiError::from)?
     };
 
     // Access changes should take effect immediately on the data plane.
