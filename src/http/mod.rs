@@ -130,6 +130,11 @@ impl From<StoreError> for ApiError {
                     ApiError::not_found(domain.to_string())
                 }
                 crate::domain::DomainError::RealityDomainNameConflict { .. }
+                | crate::domain::DomainError::MissingEndpoint { .. }
+                | crate::domain::DomainError::RealityDomainNotFound { .. } => {
+                    ApiError::not_found(domain.to_string())
+                }
+                crate::domain::DomainError::RealityDomainNameConflict { .. }
                 | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
