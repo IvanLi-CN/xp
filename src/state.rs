@@ -2712,33 +2712,45 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
 
-            match usage_schema_version {
-                USAGE_SCHEMA_VERSION => serde_json::from_value(raw)?,
-                USAGE_SCHEMA_VERSION_V1 => {
-                    let v1: PersistedUsageV1Compat = serde_json::from_value(raw)?;
-                    let mapping = grant_id_to_membership_key.as_ref().ok_or_else(|| {
-                        StoreError::Migration {
-                            message: "usage schema_version=1 requires legacy grant mapping; cannot migrate"
-                                .to_string(),
+                match usage_schema_version {
+                    USAGE_SCHEMA_VERSION => serde_json::from_value(raw)?,
+                    USAGE_SCHEMA_VERSION_V1 => {
+                        match grant_id_to_membership_key.as_ref() {
+                            Some(mapping) => {
+                                let v1: PersistedUsageV1Compat = serde_json::from_value(raw)?;
+                                let (v2, stats) =
+                                    migrate_usage_v1_to_v2(v1, mapping, &allowed_membership_keys);
+                                tracing::info!(
+                                    grants_total = stats.grants_total,
+                                    grants_mapped = stats.grants_mapped,
+                                    grants_dropped_no_mapping = stats.grants_dropped_no_mapping,
+                                    memberships_created = stats.memberships_created,
+                                    memberships_dropped_not_in_state =
+                                        stats.memberships_dropped_not_in_state,
+                                    "usage migration: v1(grants)->v2(memberships)"
+                                );
+                                migrated = true;
+                                usage_migrated = true;
+                                v2
+                            }
+                            None => {
+                                // Recovery path: it's possible to end up with a v10 state and a v1
+                                // usage file if the process crashes between saving them during an
+                                // upgrade. In that case, the legacy grant mapping is no longer
+                                // available, so we cannot safely migrate usage. Prefer booting with
+                                // an empty v2 usage file over refusing to start.
+                                tracing::warn!(
+                                    "usage migration: legacy grant mapping is missing; discarding v1 usage and resetting to v2 empty"
+                                );
+                                migrated = true;
+                                usage_migrated = true;
+                                PersistedUsage::empty()
+                            }
                         }
-                    })?;
-
-                    let (v2, stats) = migrate_usage_v1_to_v2(v1, mapping, &allowed_membership_keys);
-                    tracing::info!(
-                        grants_total = stats.grants_total,
-                        grants_mapped = stats.grants_mapped,
-                        grants_dropped_no_mapping = stats.grants_dropped_no_mapping,
-                        memberships_created = stats.memberships_created,
-                        memberships_dropped_not_in_state = stats.memberships_dropped_not_in_state,
-                        "usage migration: v1(grants)->v2(memberships)"
-                    );
-                    migrated = true;
-                    usage_migrated = true;
-                    v2
-                }
-                got => {
-                    return Err(StoreError::SchemaVersionMismatch {
-                        expected: USAGE_SCHEMA_VERSION,
+                    }
+                    got => {
+                        return Err(StoreError::SchemaVersionMismatch {
+                            expected: USAGE_SCHEMA_VERSION,
                         got,
                     });
                 }
@@ -3597,6 +3609,94 @@ mod tests {
         let usage: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
         assert!(!usage.memberships.contains_key("stale_user::stale_endpoint"));
         assert!(usage.memberships.contains_key(&valid_membership_key));
+    }
+
+    #[test]
+    fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+
+        // Simulate an interrupted upgrade: state.json is already v10 (no grants), but usage.json
+        // is still the legacy v1 grants map (cannot be migrated without a grant mapping).
+        let node_id = "node_1".to_string();
+        let endpoint_id = "endpoint_1".to_string();
+        let user_id = "user_1".to_string();
+
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            node_id.clone(),
+            Node {
+                node_id: node_id.clone(),
+                node_name: "node-1".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            endpoint_id.clone(),
+            Endpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id: node_id.clone(),
+                tag: "e1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 31234,
+                meta: json!({}),
+            },
+        );
+        state.users.insert(
+            user_id.clone(),
+            User {
+                user_id: user_id.clone(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        state
+            .node_user_endpoint_memberships
+            .insert(NodeUserEndpointMembership {
+                user_id: user_id.clone(),
+                node_id: node_id.clone(),
+                endpoint_id: endpoint_id.clone(),
+            });
+
+        let state_path = data_dir.join("state.json");
+        fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+
+        let usage_path = data_dir.join("usage.json");
+        fs::write(
+            &usage_path,
+            serde_json::to_vec_pretty(&json!({
+              "schema_version": 1,
+              "grants": {
+                "grant_1": {
+                  "cycle_start_at": "2026-01-01T00:00:00Z",
+                  "cycle_end_at": "2026-02-01T00:00:00Z",
+                  "used_bytes": 123,
+                  "last_uplink_total": 123,
+                  "last_downlink_total": 0,
+                  "last_seen_at": "2026-01-01T00:00:01Z",
+                  "quota_banned": false,
+                  "quota_banned_at": null
+                }
+              }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(data_dir)).unwrap();
+        assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+        assert_eq!(store.usage.schema_version, USAGE_SCHEMA_VERSION);
+        assert!(store.usage.memberships.is_empty());
+
+        let bytes = fs::read(&usage_path).unwrap();
+        let saved: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved.schema_version, USAGE_SCHEMA_VERSION);
     }
 
     #[test]

@@ -4748,11 +4748,13 @@ fn build_local_user_node_quota_status(
         .get_node(local_node_id)
         .map(|n| n.quota_limit_bytes)
         .unwrap_or(0);
-    let (_policy, tz, day_of_month) = resolve_node_quota_reset_for_status(store, local_node_id)?;
-    let (cycle_start_at, cycle_end_at) = {
+    let (policy, tz, day_of_month) = resolve_node_quota_reset_for_status(store, local_node_id)?;
+    let (cycle_start_at, cycle_end_at) = if policy == QuotaResetPolicy::Monthly {
         let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
             .map_err(|e| ApiError::internal(e.to_string()))?;
-        (cycle_start.to_rfc3339(), cycle_end.to_rfc3339())
+        (Some(cycle_start.to_rfc3339()), Some(cycle_end.to_rfc3339()))
+    } else {
+        (None, None)
     };
 
     let endpoints_by_id = store
@@ -4828,7 +4830,9 @@ fn build_local_user_node_quota_status(
         let Some(usage) = store.get_membership_usage(key) else {
             return acc;
         };
-        if usage.cycle_start_at != cycle_start_at || usage.cycle_end_at != cycle_end_at {
+        if let (Some(expected_start), Some(expected_end)) = (&cycle_start_at, &cycle_end_at)
+            && (usage.cycle_start_at != *expected_start || usage.cycle_end_at != *expected_end)
+        {
             return acc;
         }
         acc.saturating_add(usage.used_bytes)
@@ -4844,7 +4848,7 @@ fn build_local_user_node_quota_status(
         quota_limit_bytes,
         used_bytes,
         remaining_bytes,
-        cycle_end_at: Some(cycle_end_at),
+        cycle_end_at,
         quota_reset_source: QuotaResetSource::Node,
     }])
 }

@@ -4067,6 +4067,79 @@ async fn user_node_quota_status_includes_membership_usage() {
 }
 
 #[tokio::test]
+async fn user_node_quota_status_includes_usage_when_node_reset_is_unlimited() {
+    let tmp = TempDir::new().unwrap();
+    let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let local_node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node_id")
+    };
+
+    let user_id = {
+        let mut store = store.lock().await;
+        let node = store.get_node(&local_node_id).unwrap();
+        let _ = store
+            .upsert_node(Node {
+                quota_reset: NodeQuotaReset::Unlimited {
+                    tz_offset_minutes: Some(0),
+                },
+                ..node
+            })
+            .unwrap();
+
+        let user = store.create_user("User".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let key = membership_key(&user.user_id, &endpoint.endpoint_id);
+        store
+            .apply_membership_usage_sample(
+                &key,
+                "1970-01-01T00:00:00Z".to_string(),
+                "9999-12-31T23:59:59Z".to_string(),
+                600,
+                100,
+                "seen".to_string(),
+            )
+            .unwrap();
+        store.save().unwrap();
+        user.user_id
+    };
+
+    let items = {
+        let store = store.lock().await;
+        super::build_local_user_node_quota_status(&store, &local_node_id, &user_id).unwrap()
+    };
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    assert_eq!(item.user_id, user_id);
+    assert_eq!(item.node_id, local_node_id);
+    assert_eq!(item.used_bytes, 700);
+    assert_eq!(item.remaining_bytes, 0);
+    assert_eq!(item.quota_reset_source, QuotaResetSource::Node);
+    assert!(item.cycle_end_at.is_none());
+}
+
+#[tokio::test]
 async fn user_quota_summaries_ignore_memberships_for_missing_users() {
     let tmp = TempDir::new().unwrap();
     let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
