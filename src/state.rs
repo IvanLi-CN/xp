@@ -2712,45 +2712,45 @@ impl JsonSnapshotStore {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
 
-                match usage_schema_version {
-                    USAGE_SCHEMA_VERSION => serde_json::from_value(raw)?,
-                    USAGE_SCHEMA_VERSION_V1 => {
-                        match grant_id_to_membership_key.as_ref() {
-                            Some(mapping) => {
-                                let v1: PersistedUsageV1Compat = serde_json::from_value(raw)?;
-                                let (v2, stats) =
-                                    migrate_usage_v1_to_v2(v1, mapping, &allowed_membership_keys);
-                                tracing::info!(
-                                    grants_total = stats.grants_total,
-                                    grants_mapped = stats.grants_mapped,
-                                    grants_dropped_no_mapping = stats.grants_dropped_no_mapping,
-                                    memberships_created = stats.memberships_created,
-                                    memberships_dropped_not_in_state =
-                                        stats.memberships_dropped_not_in_state,
-                                    "usage migration: v1(grants)->v2(memberships)"
-                                );
-                                migrated = true;
-                                usage_migrated = true;
-                                v2
-                            }
-                            None => {
-                                // Recovery path: it's possible to end up with a v10 state and a v1
-                                // usage file if the process crashes between saving them during an
-                                // upgrade. In that case, the legacy grant mapping is no longer
-                                // available, so we cannot safely migrate usage. Prefer booting with
-                                // an empty v2 usage file over refusing to start.
-                                tracing::warn!(
-                                    "usage migration: legacy grant mapping is missing; discarding v1 usage and resetting to v2 empty"
-                                );
-                                migrated = true;
-                                usage_migrated = true;
-                                PersistedUsage::empty()
-                            }
+            match usage_schema_version {
+                USAGE_SCHEMA_VERSION => serde_json::from_value(raw)?,
+                USAGE_SCHEMA_VERSION_V1 => {
+                    match grant_id_to_membership_key.as_ref() {
+                        Some(mapping) => {
+                            let v1: PersistedUsageV1Compat = serde_json::from_value(raw)?;
+                            let (v2, stats) =
+                                migrate_usage_v1_to_v2(v1, mapping, &allowed_membership_keys);
+                            tracing::info!(
+                                grants_total = stats.grants_total,
+                                grants_mapped = stats.grants_mapped,
+                                grants_dropped_no_mapping = stats.grants_dropped_no_mapping,
+                                memberships_created = stats.memberships_created,
+                                memberships_dropped_not_in_state =
+                                    stats.memberships_dropped_not_in_state,
+                                "usage migration: v1(grants)->v2(memberships)"
+                            );
+                            migrated = true;
+                            usage_migrated = true;
+                            v2
+                        }
+                        None => {
+                            // Recovery path: it's possible to end up with a v10 state and a v1
+                            // usage file if the process crashes between saving them during an
+                            // upgrade. In that case, the legacy grant mapping is no longer
+                            // available, so we cannot safely migrate usage. Prefer booting with
+                            // an empty v2 usage file over refusing to start.
+                            tracing::warn!(
+                                "usage migration: legacy grant mapping is missing; discarding v1 usage and resetting to v2 empty"
+                            );
+                            migrated = true;
+                            usage_migrated = true;
+                            PersistedUsage::empty()
                         }
                     }
-                    got => {
-                        return Err(StoreError::SchemaVersionMismatch {
-                            expected: USAGE_SCHEMA_VERSION,
+                }
+                got => {
+                    return Err(StoreError::SchemaVersionMismatch {
+                        expected: USAGE_SCHEMA_VERSION,
                         got,
                     });
                 }
