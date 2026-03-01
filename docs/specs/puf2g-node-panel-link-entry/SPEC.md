@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-01
-- Last: 2026-03-01
+- Last: 2026-03-02
 
 ## Background
 
@@ -44,15 +44,15 @@
 
 - 入口 icon：
   - Icon: `tabler:external-link`
-  - Size: `16`
-  - Class: `btn btn-ghost btn-xs btn-square shrink-0`
+  - Size: `32`
+  - Class: `btn btn-ghost btn-lg btn-square shrink-0 -ml-[1.25em]`
 - 文案：
   - `title` / `aria-label`: `Open node panel: <node_name_or_node_id>`
 - 跳转目标：
   - `to="/nodes/$nodeId"`
   - `params={{ nodeId }}`
 - 布局：
-  - 名称 + icon 同行：`flex items-center gap-2 min-w-0`
+  - 名称 + icon 同行：`flex items-center gap-[1em] min-w-0`
   - 名称文本保留截断，icon 不允许被挤压。
 
 ## Acceptance criteria
@@ -90,3 +90,4 @@
 
 - 2026-03-01: added icon-only node panel links for Nodes and Dashboard lists, with tests and storybook guard.
 - 2026-03-01: opened PR #87.
+- 2026-03-02: synced UI contract to final merged style after visual tuning (larger icon with tighter name spacing).
