@@ -11,6 +11,7 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
@@ -447,54 +448,66 @@ export function NodesPage() {
 						</div>
 					</div>
 					<div className="divide-y divide-base-200">
-						{nodes.map((node) => (
-							<div
-								key={node.node_id}
-								className="grid grid-cols-2 gap-3 px-4 py-3"
-							>
-								<div className="flex min-w-0 flex-col gap-1">
-									<Link
-										to="/nodes/$nodeId"
-										params={{ nodeId: node.node_id }}
-										className="link link-primary block max-w-full truncate whitespace-nowrap"
-										title={node.node_name || "(unnamed)"}
-									>
-										{node.node_name || "(unnamed)"}
-									</Link>
-									<Link
-										to="/nodes/$nodeId"
-										params={{ nodeId: node.node_id }}
-										className="link link-hover block max-w-full truncate whitespace-nowrap font-mono text-sm opacity-70"
-										title={node.node_id}
-									>
-										{node.node_id}
-									</Link>
-								</div>
-								<div className="flex min-w-0 flex-col gap-1">
-									<div className="max-w-full truncate whitespace-nowrap">
-										<ProblematicComponentsField
-											problematic={node.components.filter(
-												(component) =>
-													component.status === "down" ||
-													component.status === "unknown",
-											)}
-										/>
+						{nodes.map((node) => {
+							const nodeLabel = node.node_name || "(unnamed)";
+							const openNodePanelLabel = `Open node panel: ${nodeLabel}`;
+
+							return (
+								<div
+									key={node.node_id}
+									className="grid grid-cols-2 gap-3 px-4 py-3"
+								>
+									<div className="flex min-w-0 flex-col gap-1">
+										<div className="flex min-w-0 items-center gap-2">
+											<span
+												className="block max-w-full truncate whitespace-nowrap"
+												title={nodeLabel}
+											>
+												{nodeLabel}
+											</span>
+											<Link
+												to="/nodes/$nodeId"
+												params={{ nodeId: node.node_id }}
+												className="btn btn-ghost btn-xs btn-square shrink-0"
+												title={openNodePanelLabel}
+												aria-label={openNodePanelLabel}
+											>
+												<Icon name="tabler:external-link" size={16} />
+											</Link>
+										</div>
+										<span
+											className="block max-w-full truncate whitespace-nowrap font-mono text-sm opacity-70"
+											title={node.node_id}
+										>
+											{node.node_id}
+										</span>
 									</div>
-									<div
-										className="grid h-4 w-full grid-flow-col auto-cols-fr overflow-hidden rounded-sm"
-										title="Last 7 days status (30-minute slots)."
-									>
-										{node.recent_slots.map((slot) => (
-											<div
-												key={slot.slot_start}
-												className={`h-4 ${historySlotClass(slot.status)}`}
-												title={`${slot.slot_start} • ${slot.status}`}
+									<div className="flex min-w-0 flex-col gap-1">
+										<div className="max-w-full truncate whitespace-nowrap">
+											<ProblematicComponentsField
+												problematic={node.components.filter(
+													(component) =>
+														component.status === "down" ||
+														component.status === "unknown",
+												)}
 											/>
-										))}
+										</div>
+										<div
+											className="grid h-4 w-full grid-flow-col auto-cols-fr overflow-hidden rounded-sm"
+											title="Last 7 days status (30-minute slots)."
+										>
+											{node.recent_slots.map((slot) => (
+												<div
+													key={slot.slot_start}
+													className={`h-4 ${historySlotClass(slot.status)}`}
+													title={`${slot.slot_start} • ${slot.status}`}
+												/>
+											))}
+										</div>
 									</div>
 								</div>
-							</div>
-						))}
+							);
+						})}
 					</div>
 				</div>
 			</div>

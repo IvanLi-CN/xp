@@ -50,6 +50,10 @@ export const Default: Story = {};
 export const WithJoinToken: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const openLinks = await canvas.findAllByRole("link", {
+			name: /open node panel:/i,
+		});
+		await expect(openLinks).toHaveLength(2);
 		await userEvent.click(
 			canvas.getByRole("button", { name: /create token/i }),
 		);
