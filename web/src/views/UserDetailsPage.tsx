@@ -366,6 +366,8 @@ export function UserDetailsPage() {
 			}));
 			const res = await putAdminUserAccess(adminToken, userId, { items });
 			await accessQuery.refetch();
+			// Refresh local matrix from server response (unless the user edits again).
+			setAccessInitForUserId(null);
 			pushToast({
 				variant: "success",
 				message: `Access updated (+${res.created} -${res.deleted})`,
