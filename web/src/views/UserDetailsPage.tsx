@@ -5,16 +5,16 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import {
-	type PutAdminUserGrantItem,
-	fetchAdminUserGrants,
-	putAdminUserGrants,
-} from "../api/adminUserGrants";
+	fetchAdminUserAccess,
+	putAdminUserAccess,
+} from "../api/adminUserAccess";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
 	deleteAdminUser,
 	fetchAdminUser,
 	patchAdminUser,
+	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
@@ -23,13 +23,13 @@ import {
 	type SubscriptionFormat,
 	fetchSubscription,
 } from "../api/subscription";
+import {
+	AccessMatrix,
+	type AccessMatrixCellState,
+} from "../components/AccessMatrix";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
-import {
-	GrantAccessMatrix,
-	type GrantAccessMatrixCellState,
-} from "../components/GrantAccessMatrix";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -83,6 +83,8 @@ export function UserDetailsPage() {
 	const [accessError, setAccessError] = useState<string | null>(null);
 	const [resetTokenOpen, setResetTokenOpen] = useState(false);
 	const [isResettingToken, setIsResettingToken] = useState(false);
+	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
+	const [isResettingCredentials, setIsResettingCredentials] = useState(false);
 	const [subFormat, setSubFormat] = useState<SubscriptionFormat>("raw");
 	const [subOpen, setSubOpen] = useState(false);
 	const [subLoading, setSubLoading] = useState(false);
@@ -109,10 +111,10 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
-	const grantsQuery = useQuery({
-		queryKey: ["adminUserGrants", adminToken, userId],
+	const accessQuery = useQuery({
+		queryKey: ["adminUserAccess", adminToken, userId],
 		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminUserGrants(adminToken, userId, signal),
+		queryFn: ({ signal }) => fetchAdminUserAccess(adminToken, userId, signal),
 	});
 
 	const nodeQuotasQuery = useQuery({
@@ -158,7 +160,7 @@ export function UserDetailsPage() {
 	}, [user]);
 
 	const endpoints = endpointsQuery.data?.items ?? [];
-	const grants = grantsQuery.data?.items ?? [];
+	const access = accessQuery.data?.items ?? [];
 
 	const endpointById = useMemo(() => {
 		const map = new Map<string, (typeof endpoints)[number]>();
@@ -189,13 +191,12 @@ export function UserDetailsPage() {
 
 	useEffect(() => {
 		if (!userId || accessInitForUserId === userId) return;
-		if (endpointsQuery.isLoading || grantsQuery.isLoading) return;
-		if (endpointsQuery.isError || grantsQuery.isError) return;
+		if (endpointsQuery.isLoading || accessQuery.isLoading) return;
+		if (endpointsQuery.isError || accessQuery.isError) return;
 
 		const next: Record<string, string> = {};
-		for (const grant of grants) {
-			if (!grant.enabled) continue;
-			const endpoint = endpointById.get(grant.endpoint_id);
+		for (const item of access) {
+			const endpoint = endpointById.get(item.endpoint_id);
 			if (!endpoint) continue;
 			next[buildCellKey(endpoint.node_id, endpoint.kind)] =
 				endpoint.endpoint_id;
@@ -208,20 +209,17 @@ export function UserDetailsPage() {
 		endpointById,
 		endpointsQuery.isError,
 		endpointsQuery.isLoading,
-		grants,
-		grantsQuery.isError,
-		grantsQuery.isLoading,
+		access,
+		accessQuery.isError,
+		accessQuery.isLoading,
 		userId,
 	]);
 
 	const cells = useMemo(() => {
-		const byNode: Record<
-			string,
-			Record<string, GrantAccessMatrixCellState>
-		> = {};
+		const byNode: Record<string, Record<string, AccessMatrixCellState>> = {};
 		const nodeList = nodesQuery.data?.items ?? [];
 		for (const node of nodeList) {
-			const row: Record<string, GrantAccessMatrixCellState> = {};
+			const row: Record<string, AccessMatrixCellState> = {};
 			for (const protocol of PROTOCOLS) {
 				const key = buildCellKey(node.node_id, protocol.protocolId);
 				const options = optionsByCell.get(key) ?? [];
@@ -339,54 +337,38 @@ export function UserDetailsPage() {
 		});
 	}
 
-	const grantByEndpoint = useMemo(() => {
-		const map = new Map<string, (typeof grants)[number]>();
-		for (const grant of grants) {
-			map.set(grant.endpoint_id, grant);
-		}
-		return map;
-	}, [grants]);
-
 	const selectedEndpointIds = useMemo(() => {
 		return Array.from(new Set(Object.values(selectedByCell)));
 	}, [selectedByCell]);
 	const isAccessDataLoading =
-		nodesQuery.isLoading || endpointsQuery.isLoading || grantsQuery.isLoading;
+		nodesQuery.isLoading || endpointsQuery.isLoading || accessQuery.isLoading;
 	const accessDataError = nodesQuery.isError
 		? `Nodes: ${formatError(nodesQuery.error)}`
 		: endpointsQuery.isError
 			? `Endpoints: ${formatError(endpointsQuery.error)}`
-			: grantsQuery.isError
-				? `Grants: ${formatError(grantsQuery.error)}`
+			: accessQuery.isError
+				? `Access: ${formatError(accessQuery.error)}`
 				: null;
 	const isAccessReady =
 		accessInitForUserId === userId &&
 		!isAccessDataLoading &&
 		!nodesQuery.isError &&
 		!endpointsQuery.isError &&
-		!grantsQuery.isError;
+		!accessQuery.isError;
 
 	async function applyAccessMatrix() {
 		if (!adminToken || !userId || !isAccessReady) return;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
-			const items: PutAdminUserGrantItem[] = selectedEndpointIds.map(
-				(endpointId) => {
-					const existing = grantByEndpoint.get(endpointId);
-					return {
-						endpoint_id: endpointId,
-						enabled: true,
-						quota_limit_bytes: existing?.quota_limit_bytes ?? 0,
-						note: existing?.note ?? null,
-					};
-				},
-			);
-			await putAdminUserGrants(adminToken, userId, { items });
-			await grantsQuery.refetch();
+			const items = selectedEndpointIds.map((endpointId) => ({
+				endpoint_id: endpointId,
+			}));
+			const res = await putAdminUserAccess(adminToken, userId, { items });
+			await accessQuery.refetch();
 			pushToast({
 				variant: "success",
-				message: `Access updated (${items.length} endpoint${items.length === 1 ? "" : "s"})`,
+				message: `Access updated (+${res.created} -${res.deleted})`,
 			});
 		} catch (error) {
 			setAccessError(formatError(error));
@@ -414,7 +396,7 @@ export function UserDetailsPage() {
 		await Promise.all([
 			nodesQuery.refetch(),
 			endpointsQuery.refetch(),
-			grantsQuery.refetch(),
+			accessQuery.refetch(),
 		]);
 	}
 
@@ -489,6 +471,27 @@ export function UserDetailsPage() {
 		}
 	}
 
+	async function confirmResetCredentials() {
+		if (!adminToken || !userId) return;
+		setIsResettingCredentials(true);
+		try {
+			const result = await resetAdminUserCredentials(adminToken, userId);
+			await userQuery.refetch();
+			pushToast({
+				variant: "success",
+				message: `Credentials reset: epoch=${result.credential_epoch}`,
+			});
+			setResetCredentialsOpen(false);
+		} catch (error) {
+			pushToast({
+				variant: "error",
+				message: `Failed to reset credentials: ${formatError(error)}`,
+			});
+		} finally {
+			setIsResettingCredentials(false);
+		}
+	}
+
 	async function confirmDeleteUser() {
 		if (!adminToken || !userId) return;
 		setIsDeleting(true);
@@ -541,11 +544,17 @@ export function UserDetailsPage() {
 		<div className="space-y-6">
 			<PageHeader
 				title={user.display_name}
-				description="Manage profile, grants, and quota status"
+				description="Manage profile, access, and quota status"
 				actions={
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" onClick={() => setResetTokenOpen(true)}>
 							Reset token
+						</Button>
+						<Button
+							variant="ghost"
+							onClick={() => setResetCredentialsOpen(true)}
+						>
+							Reset credentials
 						</Button>
 						<Button variant="danger" onClick={() => setDeleteOpen(true)}>
 							Delete user
@@ -784,7 +793,7 @@ export function UserDetailsPage() {
 					) : null}
 
 					{!isAccessDataLoading && !accessDataError ? (
-						<GrantAccessMatrix
+						<AccessMatrix
 							nodes={(nodesQuery.data?.items ?? []).map((node) => ({
 								nodeId: node.node_id,
 								label: node.node_name,
@@ -888,6 +897,16 @@ export function UserDetailsPage() {
 				cancelLabel="Cancel"
 				onCancel={() => setResetTokenOpen(false)}
 				onConfirm={confirmResetToken}
+			/>
+
+			<ConfirmDialog
+				open={resetCredentialsOpen}
+				title="Reset credentials"
+				description="This rotates derived credentials for the user (VLESS UUID / SS2022 user PSK)."
+				confirmLabel={isResettingCredentials ? "Resetting..." : "Reset"}
+				cancelLabel="Cancel"
+				onCancel={() => setResetCredentialsOpen(false)}
+				onConfirm={confirmResetCredentials}
 			/>
 
 			<ConfirmDialog

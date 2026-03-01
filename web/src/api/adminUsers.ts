@@ -7,6 +7,7 @@ export const AdminUserSchema = z.object({
 	user_id: z.string(),
 	display_name: z.string(),
 	subscription_token: z.string(),
+	credential_epoch: z.number().int().nonnegative(),
 	priority_tier: z.enum(["p1", "p2", "p3"]),
 	quota_reset: UserQuotaResetSchema,
 });
@@ -25,6 +26,15 @@ export const AdminUserTokenResponseSchema = z.object({
 
 export type AdminUserTokenResponse = z.infer<
 	typeof AdminUserTokenResponseSchema
+>;
+
+export const ResetAdminUserCredentialsResponseSchema = z.object({
+	user_id: z.string(),
+	credential_epoch: z.number().int().nonnegative(),
+});
+
+export type ResetAdminUserCredentialsResponse = z.infer<
+	typeof ResetAdminUserCredentialsResponseSchema
 >;
 
 export type AdminUserCreateRequest = {
@@ -157,4 +167,24 @@ export async function resetAdminUserToken(
 
 	const json: unknown = await res.json();
 	return AdminUserTokenResponseSchema.parse(json);
+}
+
+export async function resetAdminUserCredentials(
+	adminToken: string,
+	userId: string,
+	signal?: AbortSignal,
+): Promise<ResetAdminUserCredentialsResponse> {
+	const res = await fetch(`/api/admin/users/${userId}/reset-credentials`, {
+		method: "POST",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+		},
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return ResetAdminUserCredentialsResponseSchema.parse(json);
 }

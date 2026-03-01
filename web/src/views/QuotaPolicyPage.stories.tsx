@@ -112,6 +112,7 @@ const meta = {
 						user_id: userIdA,
 						display_name: "Ivan",
 						subscription_token: `sub_${userIdA}`,
+						credential_epoch: 0,
 						priority_tier: "p1",
 						quota_reset: {
 							policy: "monthly",
@@ -123,97 +124,13 @@ const meta = {
 						user_id: userIdB,
 						display_name: "Koha",
 						subscription_token: `sub_${userIdB}`,
+						credential_epoch: 0,
 						priority_tier: "p2",
 						quota_reset: {
 							policy: "monthly",
 							day_of_month: 1,
 							tz_offset_minutes: 480,
 						},
-					},
-				],
-				grantGroups: [
-					{
-						group: { group_name: "group-ratio-demo" },
-						members: [
-							{
-								user_id: userIdA,
-								endpoint_id: "ep-tokyo-a-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "00000000-0000-0000-0000-000000000001",
-										email: "grant:demo-1",
-									},
-								},
-							},
-							{
-								user_id: userIdB,
-								endpoint_id: "ep-tokyo-a-ss",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									ss2022: {
-										method: "2022-blake3-aes-128-gcm",
-										password: "secret",
-									},
-								},
-							},
-							{
-								user_id: userIdA,
-								endpoint_id: "ep-frankfurt-b-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "00000000-0000-0000-0000-00000000000a",
-										email: "grant:demo-b-1",
-									},
-								},
-							},
-							{
-								user_id: userIdB,
-								endpoint_id: "ep-frankfurt-b-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "00000000-0000-0000-0000-00000000000b",
-										email: "grant:demo-b-2",
-									},
-								},
-							},
-							{
-								user_id: userIdA,
-								endpoint_id: "ep-sydney-c-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "00000000-0000-0000-0000-00000000000c",
-										email: "grant:demo-c-1",
-									},
-								},
-							},
-							{
-								user_id: userIdB,
-								endpoint_id: "ep-sydney-c-vless",
-								enabled: true,
-								quota_limit_bytes: 1,
-								note: null,
-								credentials: {
-									ss2022: {
-										method: "2022-blake3-aes-128-gcm",
-										password: "secret",
-									},
-								},
-							},
-						],
 					},
 				],
 				userNodeWeights: {

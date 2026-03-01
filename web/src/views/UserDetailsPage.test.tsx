@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import {
-	fetchAdminUserGrants,
-	putAdminUserGrants,
-} from "../api/adminUserGrants";
+	fetchAdminUserAccess,
+	putAdminUserAccess,
+} from "../api/adminUserAccess";
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import {
 	fetchAdminUserNodeQuotas,
@@ -17,6 +17,7 @@ import {
 	deleteAdminUser,
 	fetchAdminUser,
 	patchAdminUser,
+	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
 import { fetchSubscription } from "../api/subscription";
@@ -50,7 +51,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminUsers");
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminEndpoints");
-vi.mock("../api/adminUserGrants");
+vi.mock("../api/adminUserAccess");
 vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
 vi.mock("../api/subscription");
@@ -81,19 +82,17 @@ function renderPage() {
 }
 
 function setupMocks(args?: {
-	grants?: Array<{
-		grant_id: string;
+	access?: Array<{
 		user_id: string;
 		endpoint_id: string;
-		enabled: boolean;
-		quota_limit_bytes: number;
-		note?: string | null;
+		node_id: string;
 	}>;
 }) {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
 		subscription_token: "subtoken",
+		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
@@ -136,28 +135,8 @@ function setupMocks(args?: {
 		],
 	});
 
-	vi.mocked(fetchAdminUserGrants).mockResolvedValue({
-		items:
-			args?.grants?.map((grant) => ({
-				...grant,
-				note: grant.note ?? null,
-				credentials: {
-					vless:
-						grant.endpoint_id === "ep-vless"
-							? {
-									uuid: "00000000-0000-0000-0000-000000000001",
-									email: `grant:${grant.grant_id}`,
-								}
-							: undefined,
-					ss2022:
-						grant.endpoint_id === "ep-ss"
-							? {
-									method: "2022-blake3-aes-128-gcm",
-									password: "server:user",
-								}
-							: undefined,
-				},
-			})) ?? [],
+	vi.mocked(fetchAdminUserAccess).mockResolvedValue({
+		items: args?.access ?? [],
 	});
 
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
@@ -187,9 +166,8 @@ function setupMocks(args?: {
 		],
 	});
 
-	vi.mocked(putAdminUserGrants).mockResolvedValue({
+	vi.mocked(putAdminUserAccess).mockResolvedValue({
 		created: 0,
-		updated: 0,
 		deleted: 0,
 		items: [],
 	});
@@ -203,12 +181,17 @@ function setupMocks(args?: {
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
 		subscription_token: "subtoken",
+		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
 		subscription_token: "sub_new",
+	});
+	vi.mocked(resetAdminUserCredentials).mockResolvedValue({
+		user_id: "u_01HUSERAAAAAA",
+		credential_epoch: 1,
 	});
 	vi.mocked(fetchSubscription).mockResolvedValue(
 		"vless://example-host?encryption=none",
@@ -225,22 +208,20 @@ describe("<UserDetailsPage />", () => {
 		cleanup();
 	});
 
-	it("initializes access matrix from existing user grants", async () => {
+	it("initializes access matrix from existing user access", async () => {
 		setupMocks({
-			grants: [
+			access: [
 				{
-					grant_id: "grant-1",
 					user_id: "u_01HUSERAAAAAA",
 					endpoint_id: "ep-vless",
-					enabled: true,
-					quota_limit_bytes: 0,
+					node_id: "node-tokyo",
 				},
 			],
 		});
 		renderPage();
 
 		await waitFor(() => {
-			expect(fetchAdminUserGrants).toHaveBeenCalled();
+			expect(fetchAdminUserAccess).toHaveBeenCalled();
 		});
 
 		const accessTab = await screenByRole("button", "Access");
@@ -250,7 +231,7 @@ describe("<UserDetailsPage />", () => {
 		expect((checkbox as HTMLInputElement).checked).toBe(true);
 	});
 
-	it("applies selected endpoints via putAdminUserGrants", async () => {
+	it("applies selected endpoints via putAdminUserAccess", async () => {
 		setupMocks();
 		renderPage();
 
@@ -259,16 +240,13 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
-			expect(putAdminUserGrants).toHaveBeenCalledWith(
+			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
 				"u_01HUSERAAAAAA",
 				{
 					items: [
 						{
 							endpoint_id: "ep-vless",
-							enabled: true,
-							quota_limit_bytes: 0,
-							note: null,
 						},
 					],
 				},
@@ -278,13 +256,11 @@ describe("<UserDetailsPage />", () => {
 
 	it("submits empty items when all access is cleared", async () => {
 		setupMocks({
-			grants: [
+			access: [
 				{
-					grant_id: "grant-1",
 					user_id: "u_01HUSERAAAAAA",
 					endpoint_id: "ep-vless",
-					enabled: true,
-					quota_limit_bytes: 0,
+					node_id: "node-tokyo",
 				},
 			],
 		});
@@ -295,7 +271,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
-			expect(putAdminUserGrants).toHaveBeenCalledWith(
+			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
 				"u_01HUSERAAAAAA",
 				{ items: [] },

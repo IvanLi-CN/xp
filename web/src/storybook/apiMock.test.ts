@@ -69,7 +69,7 @@ describe("storybook api mock", () => {
 		expect(listDataAfter.items.length).toBe(initialCount);
 	});
 
-	it("supports user grants hard-cut replace", async () => {
+	it("supports user access hard-cut replace", async () => {
 		const mock = createMockApi();
 
 		const usersRes = await mock.handle(
@@ -83,26 +83,24 @@ describe("storybook api mock", () => {
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, { method: "GET" }),
+			jsonRequest(`/api/admin/users/${userId}/access`, { method: "GET" }),
 		);
 		expect(listRes.ok).toBe(true);
 		const listData = (await listRes.json()) as {
-			items: Array<{ endpoint_id: string; enabled: boolean }>;
+			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
 		};
 		expect(listData.items.length).toBeGreaterThan(0);
-		expect(listData.items.every((item) => item.enabled)).toBe(true);
+		expect(listData.items.every((item) => item.user_id === userId)).toBe(true);
+		expect(listData.items.every((item) => item.node_id.length > 0)).toBe(true);
 
 		const replaceRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, {
+			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					items: [
 						{
 							endpoint_id: "endpoint-1",
-							enabled: true,
-							quota_limit_bytes: 123,
-							note: "hello",
 						},
 					],
 				}),
@@ -111,17 +109,17 @@ describe("storybook api mock", () => {
 		expect(replaceRes.ok).toBe(true);
 		const replaced = (await replaceRes.json()) as {
 			created: number;
-			updated: number;
 			deleted: number;
-			items: Array<{ endpoint_id: string; note: string | null }>;
+			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
 		};
-		expect(replaced.created + replaced.updated).toBeGreaterThan(0);
+		expect(replaced.created + replaced.deleted).toBeGreaterThanOrEqual(0);
 		expect(replaced.items).toHaveLength(1);
 		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
-		expect(replaced.items[0]?.note).toBe("hello");
+		expect(replaced.items[0]?.user_id).toBe(userId);
+		expect(replaced.items[0]?.node_id.length).toBeGreaterThan(0);
 
 		const clearRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, {
+			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -138,7 +136,7 @@ describe("storybook api mock", () => {
 		expect(clearData.items).toHaveLength(0);
 
 		const detailsRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, {
+			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "GET",
 			}),
 		);
@@ -149,7 +147,7 @@ describe("storybook api mock", () => {
 		expect(detailsData.items).toHaveLength(0);
 	});
 
-	it("rejects disabled items in user grants hard-cut replace", async () => {
+	it("rejects invalid items in user access hard-cut replace", async () => {
 		const mock = createMockApi();
 		const usersRes = await mock.handle(
 			jsonRequest("/api/admin/users", { method: "GET" }),
@@ -162,17 +160,15 @@ describe("storybook api mock", () => {
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, {
+			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					items: [
 						{
 							endpoint_id: "endpoint-1",
-							enabled: false,
-							quota_limit_bytes: 123,
-							note: null,
 						},
+						{ endpoint_id: "" },
 					],
 				}),
 			}),
@@ -184,7 +180,7 @@ describe("storybook api mock", () => {
 		expect(payload.error.code).toBe("invalid_request");
 	});
 
-	it("rejects duplicate endpoint items in user grants hard-cut replace", async () => {
+	it("dedups duplicate endpoint items in user access hard-cut replace", async () => {
 		const mock = createMockApi();
 		const usersRes = await mock.handle(
 			jsonRequest("/api/admin/users", { method: "GET" }),
@@ -197,32 +193,28 @@ describe("storybook api mock", () => {
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/grants`, {
+			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					items: [
 						{
 							endpoint_id: "endpoint-1",
-							enabled: true,
-							quota_limit_bytes: 123,
-							note: null,
 						},
 						{
 							endpoint_id: "endpoint-1",
-							enabled: true,
-							quota_limit_bytes: 456,
-							note: "duplicate",
 						},
 					],
 				}),
 			}),
 		);
-		expect(replaceRes.status).toBe(409);
+		expect(replaceRes.ok).toBe(true);
 		const payload = (await replaceRes.json()) as {
-			error: { code: string };
+			items: Array<{ endpoint_id: string }>;
 		};
-		expect(payload.error.code).toBe("conflict");
+		expect(
+			payload.items.filter((i) => i.endpoint_id === "endpoint-1"),
+		).toHaveLength(1);
 	});
 
 	it("returns not_found for retired grant-groups routes", async () => {

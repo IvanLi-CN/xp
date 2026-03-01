@@ -13,35 +13,17 @@ const meta = {
 		},
 		mockApi: {
 			data: {
-				userGrantsByUserId: {
+				userAccessByUserId: {
 					[USER_ID_1]: [
 						{
-							grant_id: "grant-mock-1",
 							user_id: USER_ID_1,
 							endpoint_id: "endpoint-1",
-							enabled: true,
-							quota_limit_bytes: 10 * 2 ** 30,
-							note: null,
-							credentials: {
-								vless: {
-									uuid: "22222222-2222-2222-2222-000000000001",
-									email: "user1@example.com",
-								},
-							},
+							node_id: "node-1",
 						},
 						{
-							grant_id: "grant-mock-2",
 							user_id: USER_ID_1,
 							endpoint_id: "endpoint-2",
-							enabled: true,
-							quota_limit_bytes: 5 * 2 ** 30,
-							note: null,
-							credentials: {
-								ss2022: {
-									method: "2022-blake3-aes-128-gcm",
-									password: "mock-password-2",
-								},
-							},
+							node_id: "node-2",
 						},
 					],
 				},

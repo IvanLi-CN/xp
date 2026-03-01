@@ -16,15 +16,17 @@ use tracing::{debug, warn};
 
 use crate::{
     config::Config,
-    domain::{Endpoint, EndpointKind, Grant},
+    credentials,
+    domain::{Endpoint, EndpointKind, User},
     protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
-    state::JsonSnapshotStore,
+    state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
     xray,
     xray::builder,
 };
 
 const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
 const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
+const MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10: &str = "migrations/remove_grants_hard_cut_v10";
 
 pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
     let nodes = store.list_nodes();
@@ -212,19 +214,32 @@ impl Default for ReconcilerOptions<StdRng> {
 pub fn spawn_reconciler(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
+    cluster_ca_key_pem: String,
 ) -> ReconcileHandle {
-    spawn_reconciler_with_options(config, store, ReconcilerOptions::default())
+    spawn_reconciler_with_options(
+        config,
+        store,
+        cluster_ca_key_pem,
+        ReconcilerOptions::default(),
+    )
 }
 
 fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
+    cluster_ca_key_pem: String,
     options: ReconcilerOptions<R>,
 ) -> ReconcileHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let handle = ReconcileHandle { tx: Some(tx) };
 
-    tokio::spawn(reconciler_task(config, store, rx, options));
+    tokio::spawn(reconciler_task(
+        config,
+        store,
+        cluster_ca_key_pem,
+        rx,
+        options,
+    ));
 
     handle
 }
@@ -232,6 +247,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
 async fn reconciler_task<R: RngCore>(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
+    cluster_ca_key_pem: String,
     mut rx: mpsc::UnboundedReceiver<ReconcileRequest>,
     options: ReconcilerOptions<R>,
 ) {
@@ -285,6 +301,7 @@ async fn reconciler_task<R: RngCore>(
                     &store,
                     &pending,
                     &mut last_applied_hash_by_endpoint_id,
+                    &cluster_ca_key_pem,
                 )
                 .await
                 {
@@ -305,13 +322,21 @@ async fn reconciler_task<R: RngCore>(
 #[derive(Debug)]
 struct Snapshot {
     endpoints: Vec<Endpoint>,
-    grants: Vec<Grant>,
-    quota_banned_by_grant: BTreeMap<String, bool>,
+    memberships: Vec<NodeUserEndpointMembership>,
+    users_by_id: BTreeMap<String, User>,
+    quota_banned_membership_keys: BTreeSet<String>,
+    endpoint_users_applied: BTreeMap<String, BTreeSet<String>>,
+    /// Users whose `credential_epoch` differs from the locally applied epoch.
+    ///
+    /// Keyed by `user_id`, value is the target epoch.
+    users_needing_credential_refresh: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Default)]
 struct ReconcileOutcome {
     rebuilt_inbounds: BTreeSet<String>,
+    credential_epochs_applied: BTreeMap<String, u32>,
+    endpoint_users_applied: BTreeMap<String, BTreeSet<String>>,
 }
 
 fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
@@ -355,8 +380,15 @@ async fn reconcile_once(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     pending: &PendingBatch,
     last_applied_hash_by_endpoint_id: &mut BTreeMap<String, String>,
+    cluster_ca_key_pem: &str,
 ) -> Result<(), xray::XrayError> {
-    let (local_node_id, snapshot, local_vless_endpoint_ids, desired_hash_by_endpoint_id) = {
+    let (
+        local_node_id,
+        local_endpoint_ids,
+        snapshot,
+        local_vless_endpoint_ids,
+        desired_hash_by_endpoint_id,
+    ) = {
         let store = store.lock().await;
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
@@ -367,7 +399,6 @@ async fn reconcile_once(
             return Ok(());
         };
         let endpoints = store.list_endpoints();
-        let grants = store.list_grants();
         let local_endpoint_ids = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -378,18 +409,50 @@ async fn reconcile_once(
             .filter(|e| e.node_id == local_node_id && e.kind == EndpointKind::VlessRealityVisionTcp)
             .map(|e| e.endpoint_id.clone())
             .collect::<BTreeSet<_>>();
-        let mut quota_banned_by_grant = BTreeMap::new();
-        for grant in grants.iter() {
-            if !local_endpoint_ids.contains(&grant.endpoint_id) {
+
+        let memberships: Vec<NodeUserEndpointMembership> = store
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.node_id == local_node_id)
+            .cloned()
+            .collect();
+
+        let mut users_by_id = BTreeMap::<String, User>::new();
+        for membership in memberships.iter() {
+            let Some(user) = store.get_user(&membership.user_id) else {
                 continue;
-            }
-            let banned = store
-                .get_grant_usage(&grant.grant_id)
-                .is_some_and(|u| u.quota_banned);
-            if banned {
-                quota_banned_by_grant.insert(grant.grant_id.clone(), true);
+            };
+            users_by_id.insert(user.user_id.clone(), user);
+        }
+
+        let mut quota_banned_membership_keys = BTreeSet::<String>::new();
+        for membership in memberships.iter() {
+            let key = membership_key(&membership.user_id, &membership.endpoint_id);
+            if store
+                .get_membership_usage(&key)
+                .is_some_and(|u| u.quota_banned)
+            {
+                quota_banned_membership_keys.insert(key);
             }
         }
+
+        let mut users_needing_credential_refresh = BTreeMap::<String, u32>::new();
+        for (user_id, user) in users_by_id.iter() {
+            let applied = store.get_user_credential_epoch_applied(user_id);
+            if applied != user.credential_epoch {
+                users_needing_credential_refresh.insert(user_id.clone(), user.credential_epoch);
+            }
+        }
+
+        let mut endpoint_users_applied = BTreeMap::<String, BTreeSet<String>>::new();
+        for endpoint_id in local_endpoint_ids.iter() {
+            let users = store.get_endpoint_users_applied(endpoint_id);
+            if !users.is_empty() {
+                endpoint_users_applied.insert(endpoint_id.clone(), users);
+            }
+        }
+
         let desired_hash_by_endpoint_id = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -397,10 +460,14 @@ async fn reconcile_once(
             .collect::<BTreeMap<_, _>>();
         (
             local_node_id,
+            local_endpoint_ids,
             Snapshot {
                 endpoints,
-                grants,
-                quota_banned_by_grant,
+                memberships,
+                users_by_id,
+                quota_banned_membership_keys,
+                endpoint_users_applied,
+                users_needing_credential_refresh,
             },
             local_vless_endpoint_ids,
             desired_hash_by_endpoint_id,
@@ -413,9 +480,14 @@ async fn reconcile_once(
     let migration_marker_reality_type_path = config
         .data_dir
         .join(MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP);
+    let migration_marker_remove_grants_path = config
+        .data_dir
+        .join(MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10);
     let should_force_rebuild_vless_inbounds = !local_vless_endpoint_ids.is_empty()
         && (!migration_marker_user_encryption_path.exists()
             || !migration_marker_reality_type_path.exists());
+    let should_force_rebuild_remove_grants =
+        !local_endpoint_ids.is_empty() && !migration_marker_remove_grants_path.exists();
 
     let mut forced_rebuild_inbounds = BTreeSet::new();
     for (endpoint_id, desired_hash) in desired_hash_by_endpoint_id.iter() {
@@ -430,9 +502,13 @@ async fn reconcile_once(
     if should_force_rebuild_vless_inbounds {
         forced_rebuild_inbounds.extend(local_vless_endpoint_ids.clone());
     }
+    if should_force_rebuild_remove_grants {
+        forced_rebuild_inbounds.extend(local_endpoint_ids.clone());
+    }
 
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
+        cluster_ca_key_pem,
         &local_node_id,
         snapshot,
         pending,
@@ -450,6 +526,69 @@ async fn reconcile_once(
                 last_applied_hash_by_endpoint_id.insert(endpoint_id.clone(), hash.clone());
             }
         }
+
+        if !outcome.credential_epochs_applied.is_empty()
+            || !outcome.endpoint_users_applied.is_empty()
+        {
+            let mut store = store.lock().await;
+
+            let mut changed = false;
+            for (user_id, epoch) in outcome.credential_epochs_applied.iter() {
+                if store.get_user_credential_epoch_applied(user_id) != *epoch {
+                    changed = true;
+                    break;
+                }
+            }
+            if !changed {
+                for (endpoint_id, users) in outcome.endpoint_users_applied.iter() {
+                    if store.get_endpoint_users_applied(endpoint_id) != *users {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if changed {
+                let credential_updates = outcome.credential_epochs_applied.clone();
+                let endpoint_updates = outcome.endpoint_users_applied.clone();
+                if let Err(err) = store.update_usage(|usage| {
+                    for (user_id, epoch) in credential_updates.iter() {
+                        usage
+                            .user_credential_epochs_applied
+                            .insert(user_id.clone(), *epoch);
+                    }
+                    for (endpoint_id, users) in endpoint_updates.iter() {
+                        if users.is_empty() {
+                            usage.endpoint_users_applied.remove(endpoint_id);
+                        } else {
+                            usage
+                                .endpoint_users_applied
+                                .insert(endpoint_id.clone(), users.clone());
+                        }
+                    }
+                }) {
+                    warn!(%err, "failed to persist reconcile local usage state");
+                }
+            }
+        }
+    }
+
+    fn best_effort_write_marker(marker_path: &std::path::Path) {
+        if marker_path.exists() {
+            return;
+        }
+        if let Some(parent) = marker_path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            warn!(
+                path = %parent.display(),
+                error = %e,
+                "failed to create migration dir"
+            );
+        }
+        if let Err(e) = fs::write(marker_path, b"") {
+            warn!(path = %marker_path.display(), error = %e, "failed to write migration marker");
+        }
     }
 
     if outcome.is_ok()
@@ -465,19 +604,17 @@ async fn reconcile_once(
             if marker_path.exists() {
                 continue;
             }
-            if let Some(parent) = marker_path.parent()
-                && let Err(e) = fs::create_dir_all(parent)
-            {
-                warn!(
-                    path = %parent.display(),
-                    error = %e,
-                    "failed to create migration dir"
-                );
-            }
-            if let Err(e) = fs::write(marker_path, b"") {
-                warn!(path = %marker_path.display(), error = %e, "failed to write migration marker");
-            }
+            best_effort_write_marker(marker_path);
         }
+    }
+
+    if outcome.is_ok()
+        && should_force_rebuild_remove_grants
+        && outcome
+            .as_ref()
+            .is_ok_and(|o| local_endpoint_ids.is_subset(&o.rebuilt_inbounds))
+    {
+        best_effort_write_marker(&migration_marker_remove_grants_path);
     }
 
     outcome.map(|_o| ())
@@ -485,6 +622,7 @@ async fn reconcile_once(
 
 async fn reconcile_snapshot(
     xray_api_addr: SocketAddr,
+    cluster_ca_key_pem: &str,
     local_node_id: &str,
     snapshot: Snapshot,
     pending: &PendingBatch,
@@ -496,8 +634,11 @@ async fn reconcile_snapshot(
 
     let Snapshot {
         endpoints,
-        grants,
-        quota_banned_by_grant,
+        memberships,
+        users_by_id,
+        quota_banned_membership_keys,
+        endpoint_users_applied,
+        users_needing_credential_refresh,
     } = snapshot;
 
     let endpoints_by_id: BTreeMap<String, Endpoint> = endpoints
@@ -510,20 +651,20 @@ async fn reconcile_snapshot(
         .map(|e| (e.tag.clone(), e.clone()))
         .collect();
 
-    let mut grants_by_endpoint: BTreeMap<String, Vec<Grant>> = BTreeMap::new();
-    for grant in grants.into_iter() {
-        grants_by_endpoint
-            .entry(grant.endpoint_id.clone())
+    let mut memberships_by_endpoint: BTreeMap<String, Vec<NodeUserEndpointMembership>> =
+        BTreeMap::new();
+    for membership in memberships.into_iter() {
+        memberships_by_endpoint
+            .entry(membership.endpoint_id.clone())
             .or_default()
-            .push(grant);
+            .push(membership);
     }
 
-    let is_effective_enabled = |grant: &Grant| {
-        grant.enabled
-            && !quota_banned_by_grant
-                .get(&grant.grant_id)
-                .copied()
-                .unwrap_or(false)
+    let is_effective_enabled = |membership: &NodeUserEndpointMembership| {
+        !quota_banned_membership_keys.contains(&membership_key(
+            &membership.user_id,
+            &membership.endpoint_id,
+        ))
     };
 
     let has_local_endpoints = endpoints_by_id.values().any(|e| e.node_id == local_node_id);
@@ -556,6 +697,11 @@ async fn reconcile_snapshot(
     }
 
     let mut client = xray::connect(xray_api_addr).await?;
+
+    let mut refresh_user_ok: BTreeMap<String, bool> = users_needing_credential_refresh
+        .keys()
+        .map(|user_id| (user_id.clone(), true))
+        .collect();
 
     // 1) Explicit requests first.
     for (tag, email) in pending.remove_users.iter() {
@@ -635,9 +781,25 @@ async fn reconcile_snapshot(
             }
         }
 
-        if let Some(grants) = grants_by_endpoint.get(endpoint_id) {
-            for grant in grants.iter().filter(|g| is_effective_enabled(g)) {
-                apply_grant_enabled(&mut client, endpoint, grant).await;
+        if let Some(memberships) = memberships_by_endpoint.get(endpoint_id) {
+            for membership in memberships.iter().filter(|m| is_effective_enabled(m)) {
+                let Some(user) = users_by_id.get(&membership.user_id) else {
+                    continue;
+                };
+                let needs_refresh =
+                    users_needing_credential_refresh.contains_key(&membership.user_id);
+                let ok = apply_membership_enabled(
+                    &mut client,
+                    endpoint,
+                    cluster_ca_key_pem,
+                    user,
+                    membership,
+                    needs_refresh,
+                )
+                .await;
+                if needs_refresh && !ok {
+                    refresh_user_ok.insert(membership.user_id.clone(), false);
+                }
             }
         }
 
@@ -646,7 +808,18 @@ async fn reconcile_snapshot(
         }
     }
 
-    // 2) Desired state apply.
+    // 2) Desired state apply (exact membership set).
+    let mut desired_users_by_endpoint = BTreeMap::<String, BTreeSet<String>>::new();
+    for (endpoint_id, memberships) in memberships_by_endpoint.iter() {
+        let mut desired_users = BTreeSet::<String>::new();
+        for membership in memberships.iter().filter(|m| is_effective_enabled(m)) {
+            desired_users.insert(membership.user_id.clone());
+        }
+        desired_users_by_endpoint.insert(endpoint_id.clone(), desired_users);
+    }
+
+    let mut next_endpoint_users_applied = BTreeMap::<String, BTreeSet<String>>::new();
+
     for endpoint in endpoints_by_id
         .values()
         .filter(|e| e.node_id == local_node_id)
@@ -663,54 +836,158 @@ async fn reconcile_snapshot(
                 "failed to build add_inbound request"
             ),
         }
-    }
 
-    for (endpoint_id, grants) in grants_by_endpoint.iter() {
-        let Some(endpoint) = endpoints_by_id.get(endpoint_id) else {
-            warn!(endpoint_id, "grant references missing endpoint; skipping");
-            continue;
-        };
-        if endpoint.node_id != local_node_id {
-            continue;
+        let desired_users = desired_users_by_endpoint
+            .get(&endpoint.endpoint_id)
+            .cloned()
+            .unwrap_or_default();
+        let prev_users = endpoint_users_applied
+            .get(&endpoint.endpoint_id)
+            .cloned()
+            .unwrap_or_default();
+
+        for removed_user_id in prev_users.difference(&desired_users) {
+            let email = membership_xray_email(removed_user_id, &endpoint.endpoint_id);
+            let op = builder::build_remove_user_operation(&email);
+            let req = AlterInboundRequest {
+                tag: endpoint.tag.clone(),
+                operation: Some(op),
+            };
+            match client.alter_inbound(req).await {
+                Ok(_) => {}
+                Err(status) if xray::is_not_found(&status) => {}
+                Err(status) => warn!(
+                    tag = endpoint.tag,
+                    user_id = removed_user_id,
+                    endpoint_id = endpoint.endpoint_id,
+                    %status,
+                    "xray alter_inbound remove_user failed"
+                ),
+            }
         }
 
-        for grant in grants.iter() {
-            if is_effective_enabled(grant) {
-                apply_grant_enabled(&mut client, endpoint, grant).await;
-            } else {
-                let email = format!("grant:{}", grant.grant_id);
-                let op = builder::build_remove_user_operation(&email);
-                let req = AlterInboundRequest {
-                    tag: endpoint.tag.clone(),
-                    operation: Some(op),
-                };
-                match client.alter_inbound(req).await {
-                    Ok(_) => {}
-                    Err(status) if xray::is_not_found(&status) => {}
-                    Err(status) => warn!(
-                        tag = endpoint.tag,
-                        grant_id = grant.grant_id,
-                        %status,
-                        "xray alter_inbound remove_user failed"
-                    ),
+        if let Some(memberships) = memberships_by_endpoint.get(&endpoint.endpoint_id) {
+            for membership in memberships.iter() {
+                let email = membership_xray_email(&membership.user_id, &membership.endpoint_id);
+                if is_effective_enabled(membership) {
+                    let Some(user) = users_by_id.get(&membership.user_id) else {
+                        continue;
+                    };
+                    let needs_refresh =
+                        users_needing_credential_refresh.contains_key(&membership.user_id);
+                    let ok = apply_membership_enabled(
+                        &mut client,
+                        endpoint,
+                        cluster_ca_key_pem,
+                        user,
+                        membership,
+                        needs_refresh,
+                    )
+                    .await;
+                    if needs_refresh && !ok {
+                        refresh_user_ok.insert(membership.user_id.clone(), false);
+                    }
+                } else {
+                    let op = builder::build_remove_user_operation(&email);
+                    let req = AlterInboundRequest {
+                        tag: endpoint.tag.clone(),
+                        operation: Some(op),
+                    };
+                    match client.alter_inbound(req).await {
+                        Ok(_) => {}
+                        Err(status) if xray::is_not_found(&status) => {}
+                        Err(status) => warn!(
+                            tag = endpoint.tag,
+                            membership_key = %membership_key(&membership.user_id, &membership.endpoint_id),
+                            %status,
+                            "xray alter_inbound remove_user failed"
+                        ),
+                    }
                 }
             }
         }
+
+        next_endpoint_users_applied.insert(endpoint.endpoint_id.clone(), desired_users);
     }
+
+    let credential_epochs_applied = users_needing_credential_refresh
+        .into_iter()
+        .filter(|(user_id, _epoch)| refresh_user_ok.get(user_id).copied().unwrap_or(true))
+        .collect::<BTreeMap<_, _>>();
 
     Ok(ReconcileOutcome {
         rebuilt_inbounds: rebuilt_ok,
+        credential_epochs_applied,
+        endpoint_users_applied: next_endpoint_users_applied,
     })
 }
 
-async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint, grant: &Grant) {
+async fn apply_membership_enabled(
+    client: &mut xray::XrayClient,
+    endpoint: &Endpoint,
+    cluster_ca_key_pem: &str,
+    user: &User,
+    membership: &NodeUserEndpointMembership,
+    needs_refresh: bool,
+) -> bool {
     use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
 
-    let op = match builder::build_add_user_operation(endpoint, grant) {
+    let email = membership_xray_email(&membership.user_id, &membership.endpoint_id);
+
+    if needs_refresh {
+        let op = builder::build_remove_user_operation(&email);
+        let req = AlterInboundRequest {
+            tag: endpoint.tag.clone(),
+            operation: Some(op),
+        };
+        match client.alter_inbound(req).await {
+            Ok(_) => {}
+            Err(status) if xray::is_not_found(&status) => {}
+            Err(status) => warn!(
+                tag = endpoint.tag,
+                user_id = membership.user_id,
+                endpoint_id = membership.endpoint_id,
+                %status,
+                "xray alter_inbound remove_user (refresh) failed"
+            ),
+        }
+    }
+
+    let (vless_uuid, ss2022_user_psk_b64) = match endpoint.kind {
+        EndpointKind::VlessRealityVisionTcp => match credentials::derive_vless_uuid(
+            cluster_ca_key_pem,
+            &user.user_id,
+            user.credential_epoch,
+        ) {
+            Ok(uuid) => (Some(uuid), None),
+            Err(e) => {
+                warn!(user_id = user.user_id, error = %e, "failed to derive vless uuid");
+                return false;
+            }
+        },
+        EndpointKind::Ss2022_2022Blake3Aes128Gcm => match credentials::derive_ss2022_user_psk_b64(
+            cluster_ca_key_pem,
+            &user.user_id,
+            user.credential_epoch,
+        ) {
+            Ok(psk) => (None, Some(psk)),
+            Err(e) => {
+                warn!(user_id = user.user_id, error = %e, "failed to derive ss2022 user psk");
+                return false;
+            }
+        },
+    };
+
+    let op = match builder::build_add_user_operation(
+        endpoint,
+        &email,
+        vless_uuid.as_deref(),
+        ss2022_user_psk_b64.as_deref(),
+    ) {
         Ok(op) => op,
         Err(e) => {
-            warn!(grant_id = grant.grant_id, error = %e, "failed to build add_user operation");
-            return;
+            warn!(user_id = user.user_id, error = %e, "failed to build add_user operation");
+            return false;
         }
     };
 
@@ -719,8 +996,23 @@ async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint,
         operation: Some(op),
     };
     match client.alter_inbound(req).await {
-        Ok(_) => {}
-        Err(status) if xray::is_already_exists(&status) => {}
+        Ok(_) => true,
+        Err(status) if xray::is_already_exists(&status) => {
+            if needs_refresh {
+                // For credential rotation we must be sure the new credentials are applied.
+                // "already exists" likely means the old user wasn't removed (or Xray didn't
+                // accept the update), so keep retrying until we observe a successful add.
+                warn!(
+                    tag = endpoint.tag,
+                    user_id = user.user_id,
+                    endpoint_id = endpoint.endpoint_id,
+                    "xray alter_inbound add_user returned already_exists during credential refresh; will retry"
+                );
+                false
+            } else {
+                true
+            }
+        }
         Err(status) if xray::is_not_found(&status) => {
             match builder::build_add_inbound_request(endpoint) {
                 Ok(req) => match client.add_inbound(req).await {
@@ -735,11 +1027,16 @@ async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint,
                 }
             }
 
-            let op = match builder::build_add_user_operation(endpoint, grant) {
+            let op = match builder::build_add_user_operation(
+                endpoint,
+                &email,
+                vless_uuid.as_deref(),
+                ss2022_user_psk_b64.as_deref(),
+            ) {
                 Ok(op) => op,
                 Err(e) => {
-                    warn!(grant_id = grant.grant_id, error = %e, "failed to build add_user operation (retry)");
-                    return;
+                    warn!(user_id = user.user_id, error = %e, "failed to build add_user operation (retry)");
+                    return false;
                 }
             };
             let req = AlterInboundRequest {
@@ -747,22 +1044,42 @@ async fn apply_grant_enabled(client: &mut xray::XrayClient, endpoint: &Endpoint,
                 operation: Some(op),
             };
             match client.alter_inbound(req).await {
-                Ok(_) => {}
-                Err(status) if xray::is_already_exists(&status) => {}
-                Err(status) => warn!(
-                    tag = endpoint.tag,
-                    grant_id = grant.grant_id,
-                    %status,
-                    "xray alter_inbound add_user retry failed"
-                ),
+                Ok(_) => true,
+                Err(status) if xray::is_already_exists(&status) => {
+                    if needs_refresh {
+                        warn!(
+                            tag = endpoint.tag,
+                            user_id = user.user_id,
+                            endpoint_id = endpoint.endpoint_id,
+                            "xray alter_inbound add_user retry returned already_exists during credential refresh; will retry"
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                }
+                Err(status) => {
+                    warn!(
+                        tag = endpoint.tag,
+                        user_id = user.user_id,
+                        endpoint_id = endpoint.endpoint_id,
+                        %status,
+                        "xray alter_inbound add_user retry failed"
+                    );
+                    false
+                }
             }
         }
-        Err(status) => warn!(
-            tag = endpoint.tag,
-            grant_id = grant.grant_id,
-            %status,
-            "xray alter_inbound add_user failed"
-        ),
+        Err(status) => {
+            warn!(
+                tag = endpoint.tag,
+                user_id = user.user_id,
+                endpoint_id = endpoint.endpoint_id,
+                %status,
+                "xray alter_inbound add_user failed"
+            );
+            false
+        }
     }
 }
 
@@ -777,7 +1094,7 @@ mod tests {
     use super::*;
     use crate::{
         domain::{EndpointKind, Node, NodeQuotaReset},
-        state::StoreInit,
+        state::{DesiredStateCommand, StoreInit},
         xray::proto::xray::app::proxyman::command::handler_service_server::{
             HandlerService, HandlerServiceServer,
         },
@@ -790,6 +1107,8 @@ mod tests {
             RemoveOutboundResponse,
         },
     };
+
+    const TEST_CLUSTER_CA_KEY_PEM: &str = "xp-test-cluster-ca-key";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
@@ -1043,7 +1362,7 @@ mod tests {
         {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
-            let _user = store.create_user("alice".to_string(), None).unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
                     local_node_id,
@@ -1052,15 +1371,13 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let _grant = store
-                .create_grant(
-                    _user.user_id.clone(),
-                    endpoint.endpoint_id.clone(),
-                    1,
-                    true,
-                    None,
-                )
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![endpoint.endpoint_id],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
         }
 
         let pending = PendingBatch {
@@ -1073,6 +1390,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1126,24 +1444,16 @@ mod tests {
                 )
                 .unwrap();
 
-            let _ = store
-                .create_grant(
-                    user.user_id.clone(),
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![
                     local_endpoint.endpoint_id.clone(),
-                    1,
-                    true,
-                    None,
-                )
-                .unwrap();
-            let _ = store
-                .create_grant(
-                    user.user_id,
                     remote_endpoint.endpoint_id.clone(),
-                    1,
-                    true,
-                    None,
-                )
-                .unwrap();
+                ],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
 
             (local_endpoint.tag, remote_endpoint.tag)
         };
@@ -1158,6 +1468,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1187,6 +1498,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1201,14 +1513,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_grant_triggers_remove_user_operation() {
+    async fn quota_banned_membership_removes_user_and_does_not_add() {
         let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
         let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr);
 
-        let (endpoint_tag, grant_id) = {
+        let (endpoint_tag, email) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store.create_user("alice".to_string(), None).unwrap();
@@ -1220,71 +1532,21 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(
-                    user.user_id.clone(),
-                    endpoint.endpoint_id.clone(),
-                    1,
-                    false,
-                    None,
-                )
-                .unwrap();
-            (endpoint.tag, grant.grant_id)
-        };
-
-        let pending = PendingBatch {
-            full: true,
-            ..Default::default()
-        };
-        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
-        reconcile_once(
-            &config,
-            &store,
-            &pending,
-            &mut last_applied_hash_by_endpoint_id,
-        )
-        .await
-        .unwrap();
-
-        let calls = calls.lock().await.clone();
-        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == &format!("grant:{grant_id}"))));
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn quota_banned_enabled_grant_removes_user_and_does_not_add() {
-        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
-        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr);
-
-        let (endpoint_tag, grant_id) = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(
-                    user.user_id.clone(),
-                    endpoint.endpoint_id.clone(),
-                    1,
-                    true,
-                    None,
-                )
-                .unwrap();
+            let membership_key = membership_key(&user.user_id, &endpoint.endpoint_id);
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
             store
-                .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+                .set_quota_banned(&membership_key, "2025-12-18T00:00:00Z".to_string())
                 .unwrap();
-            (endpoint.tag, grant.grant_id)
+            (
+                endpoint.tag,
+                membership_xray_email(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
         let pending = PendingBatch {
@@ -1297,11 +1559,11 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
 
-        let email = format!("grant:{grant_id}");
         let calls = calls.lock().await.clone();
         assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email: e } if tag == &endpoint_tag && op_type == "xray.app.proxyman.command.RemoveUserOperation" && e == &email)));
         assert!(!calls.iter().any(|c| matches!(c, Call::AlterInbound { op_type, email: e, .. } if op_type == "xray.app.proxyman.command.AddUserOperation" && e == &email)));
@@ -1329,15 +1591,13 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let _grant = store
-                .create_grant(
-                    user.user_id.clone(),
-                    endpoint.endpoint_id.clone(),
-                    1,
-                    true,
-                    None,
-                )
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
             (endpoint.endpoint_id, endpoint.tag)
         };
 
@@ -1351,6 +1611,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1410,6 +1671,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1436,6 +1698,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1480,7 +1743,7 @@ mod tests {
         });
         pending.add(ReconcileRequest::RemoveUser {
             tag: "missing-inbound".to_string(),
-            email: "grant:missing".to_string(),
+            email: "m:missing::missing".to_string(),
         });
 
         let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
@@ -1489,6 +1752,7 @@ mod tests {
             &store,
             &pending,
             &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
         )
         .await
         .unwrap();
@@ -1499,7 +1763,7 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == "missing-inbound"))
         );
-        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "grant:missing")));
+        assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "m:missing::missing")));
 
         let _ = shutdown.send(());
     }
@@ -1519,7 +1783,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (_config, store) = test_store_init(tmp.path(), addr);
 
-        let (endpoint, grant) = {
+        let (user, endpoint, membership) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store.create_user("alice".to_string(), None).unwrap();
@@ -1531,19 +1795,31 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id.clone(), 1, true, None)
-                .unwrap();
-            (endpoint, grant)
+            let membership = NodeUserEndpointMembership {
+                user_id: user.user_id.clone(),
+                node_id: endpoint.node_id.clone(),
+                endpoint_id: endpoint.endpoint_id.clone(),
+            };
+            (user, endpoint, membership)
         };
 
         let mut client = crate::xray::connect(addr).await.unwrap();
-        apply_grant_enabled(&mut client, &endpoint, &grant).await;
+        let ok = apply_membership_enabled(
+            &mut client,
+            &endpoint,
+            TEST_CLUSTER_CA_KEY_PEM,
+            &user,
+            &membership,
+            false,
+        )
+        .await;
+        assert!(ok);
 
         let calls = calls.lock().await.clone();
         assert_eq!(calls.len(), 3);
+        let email = membership_xray_email(&user.user_id, &endpoint.endpoint_id);
         assert!(
-            matches!(&calls[0], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+            matches!(&calls[0], Call::AlterInbound { tag, op_type, email: e } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && e == &email)
         );
         assert_eq!(
             calls[1],
@@ -1552,7 +1828,7 @@ mod tests {
             }
         );
         assert!(
-            matches!(&calls[2], Call::AlterInbound { tag, op_type, email } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && email == &format!("grant:{}", grant.grant_id))
+            matches!(&calls[2], Call::AlterInbound { tag, op_type, email: e } if tag == &endpoint.tag && op_type == "xray.app.proxyman.command.AddUserOperation" && e == &email)
         );
 
         let _ = shutdown.send(());

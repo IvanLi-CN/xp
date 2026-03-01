@@ -279,7 +279,7 @@ export function HomePage() {
 											<thead>
 												<tr>
 													<th>type</th>
-													<th>grant_id</th>
+													<th>membership_key</th>
 													<th>message</th>
 													<th>action_hint</th>
 												</tr>
@@ -287,10 +287,10 @@ export function HomePage() {
 											<tbody>
 												{adminAlerts.data.items.map((item) => (
 													<tr
-														key={`${item.type}-${item.grant_id}-${item.endpoint_id}-${item.owner_node_id}`}
+														key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
 													>
 														<td>{item.type}</td>
-														<td className="font-mono">{item.grant_id}</td>
+														<td className="font-mono">{item.membership_key}</td>
 														<td>{item.message}</td>
 														<td>{item.action_hint}</td>
 													</tr>

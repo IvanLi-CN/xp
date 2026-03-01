@@ -10,7 +10,7 @@ use crate::{
     raft::types::ClientResponse,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     state::StoreError,
-    state::{DesiredStateApplyResult, DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
+    state::{DesiredStateCommand, JsonSnapshotStore},
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -404,95 +404,60 @@ impl RaftFacade for LocalRaft {
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
         Box::pin(async move {
             let mut store = self.store.lock().await;
-            let replaced_user_id = match &cmd {
-                DesiredStateCommand::ReplaceUserGrants { user_id, .. } => Some(user_id.clone()),
+            // Local-only cleanup: usage keys for removed memberships should be deleted to keep
+            // the local usage file compact (hard-cut behavior).
+            let membership_keys_before: Option<std::collections::BTreeSet<String>> = match &cmd {
+                DesiredStateCommand::ReplaceUserAccess { user_id, .. }
+                | DesiredStateCommand::DeleteUser { user_id } => Some(
+                    store
+                        .state()
+                        .node_user_endpoint_memberships
+                        .iter()
+                        .filter(|m| m.user_id == *user_id)
+                        .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+                        .collect(),
+                ),
+                DesiredStateCommand::DeleteEndpoint { endpoint_id } => Some(
+                    store
+                        .state()
+                        .node_user_endpoint_memberships
+                        .iter()
+                        .filter(|m| m.endpoint_id == *endpoint_id)
+                        .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+                        .collect(),
+                ),
                 _ => None,
             };
-            let replaced_user_grants_before: std::collections::BTreeSet<String> = replaced_user_id
-                .as_deref()
-                .map(|user_id| {
-                    store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.user_id == user_id)
-                        .map(|g| g.grant_id)
-                        .collect()
-                })
-                .unwrap_or_default();
             let out = match cmd.apply(store.state_mut()) {
                 Ok(out) => out,
                 Err(err) => return Ok(map_store_error(err)),
             };
             store.save().map_err(anyhow::Error::new)?;
-            // Keep quota/usage non-Raft, but clearing bans on grant edits is a deterministic local side effect.
-            match (&cmd, &out) {
-                (
-                    DesiredStateCommand::DeleteGrant { grant_id },
-                    DesiredStateApplyResult::GrantDeleted { deleted },
-                ) => {
-                    if *deleted {
-                        store
-                            .clear_grant_usage(grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                }
-                (DesiredStateCommand::ReplaceUserGrants { user_id, .. }, _) => {
-                    let replaced_user_grants_after: std::collections::BTreeSet<String> = store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.user_id == *user_id)
-                        .map(|g| g.grant_id)
-                        .collect();
 
-                    for grant_id in
-                        replaced_user_grants_before.difference(&replaced_user_grants_after)
-                    {
-                        store
-                            .clear_grant_usage(grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                    for grant_id in replaced_user_grants_after {
-                        store
-                            .clear_quota_banned(&grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                }
-                (
-                    DesiredStateCommand::SetUserNodeQuota {
-                        user_id, node_id, ..
-                    },
-                    _,
-                ) => {
-                    let affected: Vec<String> = store
-                        .list_grants()
-                        .into_iter()
-                        .filter(|g| g.user_id == *user_id)
-                        .filter(|g| {
-                            store
-                                .get_endpoint(&g.endpoint_id)
-                                .is_some_and(|ep| ep.node_id == *node_id)
-                        })
-                        .map(|g| g.grant_id)
-                        .collect();
-                    for grant_id in affected {
-                        store
-                            .clear_quota_banned(&grant_id)
-                            .map_err(anyhow::Error::new)?;
-                    }
-                }
-                (
-                    DesiredStateCommand::SetGrantEnabled {
-                        grant_id,
-                        source: GrantEnabledSource::Manual,
-                        ..
-                    },
-                    _,
-                ) => {
+            if let Some(before) = membership_keys_before {
+                let after: std::collections::BTreeSet<String> = match &cmd {
+                    DesiredStateCommand::ReplaceUserAccess { user_id, .. }
+                    | DesiredStateCommand::DeleteUser { user_id } => store
+                        .state()
+                        .node_user_endpoint_memberships
+                        .iter()
+                        .filter(|m| m.user_id == *user_id)
+                        .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+                        .collect(),
+                    DesiredStateCommand::DeleteEndpoint { endpoint_id } => store
+                        .state()
+                        .node_user_endpoint_memberships
+                        .iter()
+                        .filter(|m| m.endpoint_id == *endpoint_id)
+                        .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+                        .collect(),
+                    _ => std::collections::BTreeSet::new(),
+                };
+                for membership_key in before.difference(&after) {
                     store
-                        .clear_quota_banned(grant_id)
+                        .clear_membership_usage(membership_key)
                         .map_err(anyhow::Error::new)?;
                 }
-                _ => {}
             }
             Ok(ClientResponse::Ok { result: out })
         })
@@ -526,8 +491,7 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
-            DomainError::GrantPairConflict { .. }
-            | DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
+            DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
                 message: domain.to_string(),
@@ -561,7 +525,7 @@ mod tests {
     use super::*;
     use crate::{
         domain::EndpointKind,
-        state::{GrantEnabledSource, JsonSnapshotStore, StoreInit},
+        state::{JsonSnapshotStore, StoreInit, membership_key},
     };
 
     fn test_store_init(tmp_dir: &Path) -> StoreInit {
@@ -574,8 +538,10 @@ mod tests {
         }
     }
 
-    fn store_with_banned_grant(tmp_dir: &Path) -> (Arc<Mutex<JsonSnapshotStore>>, String) {
-        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp_dir)).unwrap();
+    #[tokio::test]
+    async fn replace_user_access_clears_usage_for_removed_memberships_local_raft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
         let node_id = store.list_nodes()[0].node_id.clone();
         let user = store.create_user("alice".to_string(), None).unwrap();
         let endpoint = store
@@ -586,48 +552,38 @@ mod tests {
                 json!({}),
             )
             .unwrap();
-        let grant = store
-            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-            .unwrap();
+        let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        store.save().unwrap();
+
         store
-            .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
+            .set_quota_banned(&membership, "2025-12-18T00:00:00Z".to_string())
             .unwrap();
-        (Arc::new(Mutex::new(store)), grant.grant_id)
-    }
+        assert!(store.get_membership_usage(&membership).is_some());
 
-    #[tokio::test]
-    async fn set_grant_enabled_manual_clears_quota_banned_local_raft() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (store, grant_id) = store_with_banned_grant(tmp.path());
+        let store = Arc::new(Mutex::new(store));
         let (_tx, metrics) = watch::channel(openraft::RaftMetrics::new_initial(0));
         let raft = LocalRaft::new(store.clone(), metrics);
 
-        let cmd = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.clone(),
-            enabled: false,
-            source: GrantEnabledSource::Manual,
-        };
-        raft.client_write(cmd).await.unwrap();
+        raft.client_write(DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: Vec::new(),
+        })
+        .await
+        .unwrap();
 
-        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
-        assert!(!usage.quota_banned);
-    }
-
-    #[tokio::test]
-    async fn set_grant_enabled_quota_keeps_quota_banned_local_raft() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (store, grant_id) = store_with_banned_grant(tmp.path());
-        let (_tx, metrics) = watch::channel(openraft::RaftMetrics::new_initial(0));
-        let raft = LocalRaft::new(store.clone(), metrics);
-
-        let cmd = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.clone(),
-            enabled: false,
-            source: GrantEnabledSource::Quota,
-        };
-        raft.client_write(cmd).await.unwrap();
-
-        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
+        assert!(
+            store
+                .lock()
+                .await
+                .get_membership_usage(&membership)
+                .is_none()
+        );
     }
 }

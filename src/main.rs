@@ -181,7 +181,9 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
 async fn run_server(config: xp::config::Config) -> Result<()> {
     let cluster = xp::cluster_metadata::ClusterMetadata::load(&config.data_dir)?;
     let cluster_ca_pem = cluster.read_cluster_ca_pem(&config.data_dir)?;
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(&config.data_dir)?;
+    let cluster_ca_key_pem_required = cluster
+        .read_cluster_ca_key_pem(&config.data_dir)?
+        .ok_or_else(|| anyhow::anyhow!("cluster ca key is not available on this node"))?;
     let node_cert_pem = cluster.read_node_cert_pem(&config.data_dir)?;
     let node_key_pem = cluster.read_node_key_pem(&config.data_dir)?;
 
@@ -195,7 +197,11 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     })?;
     let store = Arc::new(Mutex::new(store));
 
-    let reconcile = xp::reconcile::spawn_reconciler(config_arc.clone(), store.clone());
+    let reconcile = xp::reconcile::spawn_reconciler(
+        config_arc.clone(),
+        store.clone(),
+        cluster_ca_key_pem_required.clone(),
+    );
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
     let (cloudflared_health, _cloudflared_supervisor_task) =
@@ -256,23 +262,15 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
-            cluster_ca_key_pem
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("cluster ca key is not available on this node"))?,
+            cluster_ca_key_pem_required.clone(),
             &cluster_ca_pem,
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    let _quota = xp::quota::spawn_quota_worker(
-        config_arc.clone(),
-        store.clone(),
-        reconcile.clone(),
-        raft_facade.clone(),
-    );
+    let _quota =
+        xp::quota::spawn_quota_worker(config_arc.clone(), store.clone(), reconcile.clone());
 
-    let probe_secret = cluster_ca_key_pem
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("cluster ca key is not available on this node"))?;
+    let probe_secret = cluster_ca_key_pem_required.clone();
     let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(
         cluster.node_id.clone(),
         store.clone(),
@@ -290,7 +288,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem_required),
         raft_facade,
         Some(raft.raft()),
     )

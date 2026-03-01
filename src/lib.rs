@@ -3,6 +3,7 @@ pub mod cloudflared_supervisor;
 pub mod cluster_identity;
 pub mod cluster_metadata;
 pub mod config;
+pub mod credentials;
 pub mod cycle;
 pub mod domain;
 pub mod endpoint_probe;

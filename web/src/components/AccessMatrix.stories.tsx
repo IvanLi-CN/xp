@@ -1,10 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useMemo, useState } from "react";
 
-import {
-	GrantAccessMatrix,
-	type GrantAccessMatrixCellState,
-} from "./GrantAccessMatrix";
+import { AccessMatrix, type AccessMatrixCellState } from "./AccessMatrix";
 import { NodeQuotaEditor, type NodeQuotaEditorValue } from "./NodeQuotaEditor";
 
 function HifiDemo() {
@@ -27,32 +24,32 @@ function HifiDemo() {
 	);
 
 	const [cells, setCells] = useState<
-		Record<string, Record<string, GrantAccessMatrixCellState>>
+		Record<string, Record<string, AccessMatrixCellState>>
 	>(() => ({
 		n_01HnodeA: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, grantId: "g-01" },
+				meta: { port: 443, tag: "node-a-vless" },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443 },
+				meta: { port: 8443, tag: "node-a-ss" },
 			},
 		},
 		n_01HnodeB: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, grantId: "g-02" },
+				meta: { port: 443, tag: "node-b-vless" },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "on",
-				meta: { port: 8443, grantId: "g-03" },
+				meta: { port: 8443, tag: "node-b-ss" },
 			},
 		},
 		n_01HnodeC: {
 			vless_reality_vision_tcp: {
 				value: "off",
-				meta: { port: 443 },
+				meta: { port: 443, tag: "node-c-vless" },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
@@ -71,7 +68,7 @@ function HifiDemo() {
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443 },
+				meta: { port: 8443, tag: "node-d-ss" },
 			},
 		},
 	}));
@@ -85,7 +82,7 @@ function HifiDemo() {
 		n_01HnodeD: 512 * 2 ** 20,
 	}));
 
-	function ensureSelectedOption(nextCell: GrantAccessMatrixCellState) {
+	function ensureSelectedOption(nextCell: AccessMatrixCellState) {
 		if (nextCell.value !== "on") return nextCell;
 		const meta = nextCell.meta;
 		if (!meta?.options || meta.options.length <= 1) return nextCell;
@@ -106,7 +103,7 @@ function HifiDemo() {
 			const next = structuredClone(prev);
 			const cell = next[nodeId]?.[protocolId];
 			if (!cell || cell.value === "disabled") return prev;
-			const updated: GrantAccessMatrixCellState = {
+			const updated: AccessMatrixCellState = {
 				...cell,
 				value: cell.value === "on" ? "off" : "on",
 			};
@@ -135,7 +132,7 @@ function HifiDemo() {
 
 	function toggleColumn(protocolId: string) {
 		setCells((prev) => {
-			const editable: GrantAccessMatrixCellState[] = [];
+			const editable: AccessMatrixCellState[] = [];
 			for (const nodeId of Object.keys(prev)) {
 				const cell = prev[nodeId]?.[protocolId];
 				if (!cell || cell.value === "disabled") continue;
@@ -157,7 +154,7 @@ function HifiDemo() {
 
 	function toggleAll() {
 		setCells((prev) => {
-			const editable: GrantAccessMatrixCellState[] = [];
+			const editable: AccessMatrixCellState[] = [];
 			for (const nodeId of Object.keys(prev)) {
 				for (const cell of Object.values(prev[nodeId] ?? {})) {
 					if (cell.value === "disabled") continue;
@@ -213,7 +210,7 @@ function HifiDemo() {
 						Batch rule: if any selected, clear; else select all (no invert)
 					</span>
 				</div>
-				<GrantAccessMatrix
+				<AccessMatrix
 					nodes={nodes.map((n) => ({
 						...n,
 						details: (
@@ -243,7 +240,7 @@ function HifiDemo() {
 }
 
 const meta: Meta<typeof HifiDemo> = {
-	title: "Design/Components/GrantAccessMatrix",
+	title: "Design/Components/AccessMatrix",
 	component: HifiDemo,
 	parameters: {
 		layout: "fullscreen",

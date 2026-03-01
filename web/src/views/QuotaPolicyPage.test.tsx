@@ -156,6 +156,7 @@ function setupDefaultMocks() {
 				user_id: "user-1",
 				display_name: "Alice",
 				subscription_token: "sub-1",
+				credential_epoch: 0,
 				priority_tier: "p1",
 				quota_reset: {
 					policy: "monthly",
@@ -167,6 +168,7 @@ function setupDefaultMocks() {
 				user_id: "user-2",
 				display_name: "Bob",
 				subscription_token: "sub-2",
+				credential_epoch: 0,
 				priority_tier: "p2",
 				quota_reset: {
 					policy: "monthly",
@@ -248,6 +250,7 @@ function setupDefaultMocks() {
 		user_id: "user-1",
 		display_name: "Alice",
 		subscription_token: "sub-1",
+		credential_epoch: 0,
 		priority_tier: "p1",
 		quota_reset: {
 			policy: "monthly",

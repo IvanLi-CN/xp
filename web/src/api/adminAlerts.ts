@@ -4,13 +4,12 @@ import { throwIfNotOk } from "./backendError";
 
 export const AlertItemSchema = z.object({
 	type: z.string(),
-	grant_id: z.string(),
+	membership_key: z.string(),
+	user_id: z.string(),
 	endpoint_id: z.string(),
 	owner_node_id: z.string(),
-	desired_enabled: z.boolean(),
 	quota_banned: z.boolean(),
 	quota_banned_at: z.string().nullable(),
-	effective_enabled: z.boolean(),
 	message: z.string(),
 	action_hint: z.string(),
 });

@@ -32,7 +32,7 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
-        Endpoint, EndpointKind, Grant, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
+        Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
         UserNodeQuota, UserQuotaReset,
     },
     internal_auth,
@@ -129,8 +129,7 @@ impl From<StoreError> for ApiError {
                 | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                     ApiError::not_found(domain.to_string())
                 }
-                crate::domain::DomainError::GrantPairConflict { .. }
-                | crate::domain::DomainError::RealityDomainNameConflict { .. }
+                crate::domain::DomainError::RealityDomainNameConflict { .. }
                 | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
@@ -510,36 +509,31 @@ struct PatchUserRequest {
 }
 
 #[derive(Deserialize)]
-struct PutUserGrantItemRequest {
+struct PutUserAccessItemRequest {
     endpoint_id: String,
-    enabled: bool,
-    quota_limit_bytes: u64,
-    #[serde(default)]
-    note: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct PutUserGrantsRequest {
-    items: Vec<PutUserGrantItemRequest>,
+struct PutUserAccessRequest {
+    items: Vec<PutUserAccessItemRequest>,
 }
 
 #[derive(Serialize)]
-struct AdminUserGrantItem {
-    grant_id: String,
-    user_id: String,
-    endpoint_id: String,
-    enabled: bool,
-    quota_limit_bytes: u64,
-    note: Option<String>,
-    credentials: crate::domain::GrantCredentials,
-}
-
-#[derive(Serialize)]
-struct PutUserGrantsResponse {
+struct PutUserAccessResponse {
     created: usize,
-    updated: usize,
     deleted: usize,
-    items: Vec<AdminUserGrantItem>,
+    items: Vec<crate::state::NodeUserEndpointMembership>,
+}
+
+#[derive(Serialize)]
+struct GetUserAccessResponse {
+    items: Vec<crate::state::NodeUserEndpointMembership>,
+}
+
+#[derive(Serialize)]
+struct ResetUserCredentialsResponse {
+    user_id: String,
+    credential_epoch: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -775,8 +769,12 @@ pub fn build_router(
             put(admin_put_user_node_weight),
         )
         .route(
-            "/users/:user_id/grants",
-            get(admin_list_user_grants).put(admin_put_user_grants),
+            "/users/:user_id/access",
+            get(admin_get_user_access).put(admin_put_user_access),
+        )
+        .route(
+            "/users/:user_id/reset-credentials",
+            post(admin_reset_user_credentials),
         )
         .route(
             "/_internal/endpoint-probe/run",
@@ -4295,77 +4293,6 @@ enum QuotaResetPolicy {
     Unlimited,
 }
 
-fn resolve_user_node_quota_reset_for_status(
-    store: &JsonSnapshotStore,
-    user_id: &str,
-    node_id: &str,
-) -> Result<(QuotaResetSource, QuotaResetPolicy, CycleTimeZone, u8), ApiError> {
-    let source = store
-        .get_user_node_quota_reset_source(user_id, node_id)
-        .unwrap_or_default();
-
-    let (policy, day_of_month, tz) = match source {
-        QuotaResetSource::User => {
-            let user = store
-                .get_user(user_id)
-                .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
-            match user.quota_reset {
-                UserQuotaReset::Unlimited { tz_offset_minutes } => (
-                    QuotaResetPolicy::Unlimited,
-                    1,
-                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
-                ),
-                UserQuotaReset::Monthly {
-                    day_of_month,
-                    tz_offset_minutes,
-                } => (
-                    QuotaResetPolicy::Monthly,
-                    day_of_month,
-                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
-                ),
-            }
-        }
-        QuotaResetSource::Node => {
-            let node = store
-                .get_node(node_id)
-                .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
-            match node.quota_reset {
-                NodeQuotaReset::Unlimited { tz_offset_minutes } => (
-                    QuotaResetPolicy::Unlimited,
-                    1,
-                    match tz_offset_minutes {
-                        Some(tz_offset_minutes) => {
-                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
-                        }
-                        None => CycleTimeZone::Local,
-                    },
-                ),
-                NodeQuotaReset::Monthly {
-                    day_of_month,
-                    tz_offset_minutes,
-                } => (
-                    QuotaResetPolicy::Monthly,
-                    day_of_month,
-                    match tz_offset_minutes {
-                        Some(tz_offset_minutes) => {
-                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
-                        }
-                        None => CycleTimeZone::Local,
-                    },
-                ),
-            }
-        }
-    };
-
-    if !(1..=31).contains(&day_of_month) {
-        return Err(ApiError::internal(format!(
-            "invalid day_of_month: {day_of_month}"
-        )));
-    }
-
-    Ok((source, policy, tz, day_of_month))
-}
-
 fn resolve_node_quota_reset_for_status(
     store: &JsonSnapshotStore,
     node_id: &str,
@@ -4496,21 +4423,24 @@ fn build_local_user_quota_summaries(
         .map(|e| (e.endpoint_id.clone(), e))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    // Group grants by (user_id, node_id=local) to match quota enforcement behavior.
-    let mut grants_by_user: std::collections::BTreeMap<String, Vec<Grant>> =
+    // Group memberships by user_id for this node to match quota enforcement behavior.
+    let mut memberships_by_user: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    for grant in store.list_grants() {
-        // Keep behavior consistent with quota enforcement: if an endpoint is missing (e.g. deleted
-        // while grants still exist), treat the grant as belonging to the local node.
-        if let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id)
-            && endpoint.node_id != local_node_id
-        {
+    for membership in store.state().node_user_endpoint_memberships.iter() {
+        let endpoint = match endpoints_by_id.get(&membership.endpoint_id) {
+            Some(endpoint) => endpoint,
+            None => continue,
+        };
+        if endpoint.node_id != local_node_id {
             continue;
         }
-        grants_by_user
-            .entry(grant.user_id.clone())
+        memberships_by_user
+            .entry(membership.user_id.clone())
             .or_default()
-            .push(grant);
+            .push(crate::state::membership_key(
+                &membership.user_id,
+                &membership.endpoint_id,
+            ));
     }
 
     // In shared-quota mode, the per-user "limit" is derived from the node budget and the user's
@@ -4523,13 +4453,10 @@ fn build_local_user_quota_summaries(
         shared_cycle = Some((policy, tz, day_of_month));
 
         if policy != QuotaResetPolicy::Unlimited {
-            // Only allocate base quota among enabled P1/P2 users (matching enforcement behavior).
+            // Only allocate base quota among P1/P2 users (matching enforcement behavior).
             let mut items: Vec<(String, u16)> = Vec::new();
-            for (user_id, grants) in grants_by_user.iter() {
+            for user_id in memberships_by_user.keys() {
                 if user_id == crate::endpoint_probe::PROBE_USER_ID {
-                    continue;
-                }
-                if !grants.iter().any(|g| g.enabled) {
                     continue;
                 }
                 let tier = store
@@ -4558,13 +4485,13 @@ fn build_local_user_quota_summaries(
     let mut items = Vec::new();
     for user in store.list_users() {
         let user_id = user.user_id;
-        let grants = grants_by_user.remove(&user_id).unwrap_or_default();
+        let membership_keys = memberships_by_user.remove(&user_id).unwrap_or_default();
 
         // Under the shared node quota policy, per-user quota summaries are derived from the
         // node's quota budget + quota_reset (not from per-grant/static quotas).
         let (quota_limit_kind, quota_limit_bytes, policy, tz, day_of_month) =
             if shared_quota_enabled {
-                if grants.is_empty() {
+                if membership_keys.is_empty() {
                     continue;
                 }
                 let (policy, tz, day_of_month) = shared_cycle
@@ -4606,41 +4533,17 @@ fn build_local_user_quota_summaries(
                     }
                 }
             } else {
-                let explicit = store.get_user_node_quota_limit_bytes(&user_id, local_node_id);
-                let uniform_grant_quota = {
-                    let first = grants.first().map(|g| g.quota_limit_bytes);
-                    if let Some(first) = first
-                        && grants.iter().all(|g| g.quota_limit_bytes == first)
-                    {
-                        Some(first)
-                    } else {
-                        None
-                    }
-                };
-                let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
+                // No fixed quota in membership-only mode. Still include users that have access
+                // so the admin UI can show current usage under an unlimited budget.
+                if membership_keys.is_empty() {
                     continue;
                 };
-
-                let (_source, policy, tz, day_of_month) =
-                    resolve_user_node_quota_reset_for_status(store, &user_id, local_node_id)?;
-
-                let quota_limit_kind =
-                    if policy == QuotaResetPolicy::Unlimited || quota_limit_bytes == 0 {
-                        AdminUserQuotaLimitKind::Unlimited
-                    } else {
-                        AdminUserQuotaLimitKind::Fixed
-                    };
-                let quota_limit_bytes = if quota_limit_kind == AdminUserQuotaLimitKind::Unlimited {
-                    0
-                } else {
-                    quota_limit_bytes
-                };
                 (
-                    quota_limit_kind,
-                    quota_limit_bytes,
-                    policy,
-                    tz,
-                    day_of_month,
+                    AdminUserQuotaLimitKind::Unlimited,
+                    0,
+                    QuotaResetPolicy::Unlimited,
+                    CycleTimeZone::Local,
+                    1,
                 )
             };
 
@@ -4652,8 +4555,8 @@ fn build_local_user_quota_summaries(
             (None, None)
         };
 
-        let used_bytes = grants.iter().fold(0u64, |acc, g| {
-            let usage = store.get_grant_usage(&g.grant_id);
+        let used_bytes = membership_keys.into_iter().fold(0u64, |acc, key| {
+            let usage = store.get_membership_usage(&key);
             let Some(usage) = usage else {
                 return acc;
             };
@@ -4841,74 +4744,108 @@ fn build_local_user_node_quota_status(
     user_id: &str,
 ) -> Result<Vec<AdminUserNodeQuotaStatusItem>, ApiError> {
     let now = Utc::now();
+    let node_quota_limit_bytes = store
+        .get_node(local_node_id)
+        .map(|n| n.quota_limit_bytes)
+        .unwrap_or(0);
+    let (_policy, tz, day_of_month) = resolve_node_quota_reset_for_status(store, local_node_id)?;
+    let (cycle_start_at, cycle_end_at) = {
+        let (cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        (cycle_start.to_rfc3339(), cycle_end.to_rfc3339())
+    };
+
     let endpoints_by_id = store
         .list_endpoints()
         .into_iter()
         .map(|e| (e.endpoint_id.clone(), e))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    let mut grants = Vec::new();
-    for grant in store.list_grants() {
-        if grant.user_id != user_id {
-            continue;
-        }
-        // Keep behavior consistent with quota enforcement: if an endpoint is missing (e.g. deleted
-        // while grants still exist), treat the grant as belonging to the local node.
-        if let Some(endpoint) = endpoints_by_id.get(&grant.endpoint_id)
-            && endpoint.node_id != local_node_id
-        {
-            continue;
-        }
-        grants.push(grant);
+    let membership_keys: Vec<String> = store
+        .state()
+        .node_user_endpoint_memberships
+        .iter()
+        .filter(|m| m.user_id == user_id)
+        .filter(|m| {
+            endpoints_by_id
+                .get(&m.endpoint_id)
+                .is_some_and(|ep| ep.node_id == local_node_id)
+        })
+        .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+        .collect();
+
+    if membership_keys.is_empty() {
+        return Ok(Vec::new());
     }
 
-    let explicit = store.get_user_node_quota_limit_bytes(user_id, local_node_id);
-    let uniform_grant_quota = {
-        let first = grants.first().map(|g| g.quota_limit_bytes);
-        if let Some(first) = first
-            && grants.iter().all(|g| g.quota_limit_bytes == first)
-        {
-            Some(first)
+    let tier = store
+        .get_user(user_id)
+        .map(|u| u.priority_tier)
+        .unwrap_or_default();
+
+    let quota_limit_bytes =
+        if node_quota_limit_bytes == 0 || tier == crate::domain::UserPriorityTier::P3 {
+            0
         } else {
-            None
-        }
-    };
-    let Some(quota_limit_bytes) = explicit.or(uniform_grant_quota) else {
-        return Ok(Vec::new());
-    };
+            // Compute the user's base share of the node budget (P1/P2 only).
+            let mut items: Vec<(String, u16)> = Vec::new();
+            let mut node_user_ids = BTreeSet::<String>::new();
+            for m in store.state().node_user_endpoint_memberships.iter() {
+                if endpoints_by_id
+                    .get(&m.endpoint_id)
+                    .is_some_and(|ep| ep.node_id == local_node_id)
+                {
+                    node_user_ids.insert(m.user_id.clone());
+                }
+            }
 
-    let (quota_reset_source, policy, tz, day_of_month) =
-        resolve_user_node_quota_reset_for_status(store, user_id, local_node_id)?;
-    let cycle_end_at = if policy == QuotaResetPolicy::Monthly {
-        let (_cycle_start, cycle_end) = current_cycle_window_at(tz, day_of_month, now)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        Some(cycle_end.to_rfc3339())
-    } else {
-        None
-    };
+            for uid in node_user_ids {
+                if uid == crate::endpoint_probe::PROBE_USER_ID {
+                    continue;
+                }
+                let tier = store
+                    .get_user(&uid)
+                    .map(|u| u.priority_tier)
+                    .unwrap_or_default();
+                if tier == crate::domain::UserPriorityTier::P3 {
+                    continue;
+                }
+                let weight = store.resolve_user_node_weight(&uid, local_node_id);
+                items.push((uid, weight));
+            }
+            items.sort_by(|a, b| a.0.cmp(&b.0));
+            items.dedup_by(|a, b| a.0 == b.0);
 
-    let used_bytes = grants.iter().fold(0u64, |acc, g| {
-        let usage = store.get_grant_usage(&g.grant_id);
-        let Some(usage) = usage else {
+            let distributable = crate::quota_policy::distributable_bytes(node_quota_limit_bytes);
+            let base_by_user = crate::quota_policy::allocate_total_by_weight(distributable, &items);
+            base_by_user
+                .into_iter()
+                .find_map(|(uid, base)| (uid == user_id).then_some(base))
+                .unwrap_or(0)
+        };
+
+    let used_bytes = membership_keys.iter().fold(0u64, |acc, key| {
+        let Some(usage) = store.get_membership_usage(key) else {
             return acc;
         };
-        if let Some(expected_end) = &cycle_end_at
-            && usage.cycle_end_at != *expected_end
-        {
+        if usage.cycle_start_at != cycle_start_at || usage.cycle_end_at != cycle_end_at {
             return acc;
         }
         acc.saturating_add(usage.used_bytes)
     });
 
-    let remaining_bytes = quota_limit_bytes.saturating_sub(used_bytes);
+    let remaining_bytes = match quota_limit_bytes {
+        0 => 0,
+        _ => quota_limit_bytes.saturating_sub(used_bytes),
+    };
     Ok(vec![AdminUserNodeQuotaStatusItem {
         user_id: user_id.to_string(),
         node_id: local_node_id.to_string(),
         quota_limit_bytes,
         used_bytes,
         remaining_bytes,
-        cycle_end_at,
-        quota_reset_source,
+        cycle_end_at: Some(cycle_end_at),
+        quota_reset_source: QuotaResetSource::Node,
     }])
 }
 
@@ -5024,111 +4961,95 @@ async fn admin_put_user_node_quota(
     ))
 }
 
-fn collect_enabled_user_grants(
-    store: &JsonSnapshotStore,
-    user_id: &str,
-) -> Vec<AdminUserGrantItem> {
-    let mut items: Vec<AdminUserGrantItem> = store
-        .list_grants()
-        .into_iter()
-        .filter(|grant| grant.user_id == user_id && grant.enabled)
-        .map(|grant| AdminUserGrantItem {
-            grant_id: grant.grant_id,
-            user_id: grant.user_id,
-            endpoint_id: grant.endpoint_id,
-            enabled: grant.enabled,
-            quota_limit_bytes: grant.quota_limit_bytes,
-            note: grant.note,
-            credentials: grant.credentials,
-        })
-        .collect();
-    items.sort_by(|a, b| {
-        a.endpoint_id
-            .cmp(&b.endpoint_id)
-            .then_with(|| a.grant_id.cmp(&b.grant_id))
-    });
-    items
-}
-
-async fn admin_list_user_grants(
+async fn admin_get_user_access(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
-) -> Result<Json<Items<AdminUserGrantItem>>, ApiError> {
+) -> Result<Json<GetUserAccessResponse>, ApiError> {
     let store = state.store.lock().await;
-    if store.get_user(&user_id).is_none() {
-        return Err(ApiError::not_found(format!("user not found: {user_id}")));
-    }
-    Ok(Json(Items {
-        items: collect_enabled_user_grants(&store, &user_id),
-    }))
+    let items = store.list_user_access(&user_id).map_err(ApiError::from)?;
+    Ok(Json(GetUserAccessResponse { items }))
 }
 
-async fn admin_put_user_grants(
+async fn admin_put_user_access(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
-    ApiJson(req): ApiJson<PutUserGrantsRequest>,
-) -> Result<Json<PutUserGrantsResponse>, ApiError> {
-    let grants = {
-        let store = state.store.lock().await;
-        if store.get_user(&user_id).is_none() {
-            return Err(ApiError::not_found(format!("user not found: {user_id}")));
-        }
-
-        let mut seen_endpoints = BTreeSet::<String>::new();
-        let mut grants = Vec::with_capacity(req.items.len());
-        for item in req.items {
-            if !item.enabled {
-                return Err(ApiError::invalid_request(
-                    "grant item enabled must be true for user grants hard-cut",
-                ));
-            }
-            if !seen_endpoints.insert(item.endpoint_id.clone()) {
-                return Err(ApiError::conflict(format!(
-                    "grant pair already exists: user_id={} endpoint_id={}",
-                    user_id, item.endpoint_id
-                )));
-            }
-            let grant = store.build_grant(
-                user_id.clone(),
-                item.endpoint_id,
-                item.quota_limit_bytes,
-                true,
-                item.note,
-            )?;
-            grants.push(grant);
-        }
-        grants
-    };
+    ApiJson(req): ApiJson<PutUserAccessRequest>,
+) -> Result<Json<PutUserAccessResponse>, ApiError> {
+    // Dedup by endpoint_id (hard-cut semantics).
+    let endpoint_ids = req
+        .items
+        .into_iter()
+        .map(|i| i.endpoint_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     let out = raft_write(
         &state,
-        DesiredStateCommand::ReplaceUserGrants {
+        DesiredStateCommand::ReplaceUserAccess {
             user_id: user_id.clone(),
-            grants,
+            endpoint_ids: endpoint_ids.clone(),
         },
     )
     .await?;
-    let crate::state::DesiredStateApplyResult::UserGrantsReplaced {
+    let crate::state::DesiredStateApplyResult::UserAccessReplaced { created, deleted } = out else {
+        return Err(ApiError::internal("unexpected raft apply result"));
+    };
+
+    let items = {
+        let store = state.store.lock().await;
+        endpoint_ids
+            .into_iter()
+            .map(|endpoint_id| {
+                let endpoint = store.get_endpoint(&endpoint_id).ok_or_else(|| {
+                    ApiError::internal(format!(
+                        "endpoint not found after access apply: endpoint_id={endpoint_id}"
+                    ))
+                })?;
+                Ok(crate::state::NodeUserEndpointMembership {
+                    user_id: user_id.clone(),
+                    node_id: endpoint.node_id,
+                    endpoint_id,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?
+    };
+
+    // Access changes should take effect immediately on the data plane.
+    state.reconcile.request_full();
+
+    Ok(Json(PutUserAccessResponse {
         created,
-        updated,
         deleted,
+        items,
+    }))
+}
+
+async fn admin_reset_user_credentials(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<ResetUserCredentialsResponse>, ApiError> {
+    let out = raft_write(
+        &state,
+        DesiredStateCommand::BumpUserCredentialEpoch {
+            user_id: user_id.clone(),
+        },
+    )
+    .await?;
+    let crate::state::DesiredStateApplyResult::UserCredentialEpochBumped {
+        user_id,
+        credential_epoch,
     } = out
     else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
 
+    // Credential rotation should take effect immediately on the data plane.
     state.reconcile.request_full();
 
-    let items = {
-        let store = state.store.lock().await;
-        collect_enabled_user_grants(&store, &user_id)
-    };
-
-    Ok(Json(PutUserGrantsResponse {
-        created,
-        updated,
-        deleted,
-        items,
+    Ok(Json(ResetUserCredentialsResponse {
+        user_id,
+        credential_epoch,
     }))
 }
 
@@ -5141,13 +5062,12 @@ struct AlertsQuery {
 struct AlertItem {
     #[serde(rename = "type")]
     alert_type: String,
-    grant_id: String,
+    membership_key: String,
+    user_id: String,
     endpoint_id: String,
     owner_node_id: String,
-    desired_enabled: bool,
     quota_banned: bool,
     quota_banned_at: Option<String>,
-    effective_enabled: bool,
     message: String,
     action_hint: String,
 }
@@ -5159,40 +5079,47 @@ struct AlertsResponse {
     items: Vec<AlertItem>,
 }
 
-const ALERT_TYPE_QUOTA_ENFORCED: &str = "quota_enforced_but_desired_enabled";
-const ALERT_MESSAGE_QUOTA_ENFORCED: &str =
-    "quota enforced on owner node but desired state is still enabled";
-const ALERT_ACTION_HINT_QUOTA_ENFORCED: &str = "check raft leader/quorum and retry status";
+const ALERT_TYPE_QUOTA_BANNED: &str = "quota_banned_membership";
+const ALERT_MESSAGE_QUOTA_BANNED: &str = "quota enforced on owner node (membership is blocked)";
+const ALERT_ACTION_HINT_QUOTA_BANNED: &str = "wait for rollover/unban or adjust quota policy";
 
 fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<AlertItem> {
     let mut items = Vec::new();
-    for grant in store.list_grants() {
-        let endpoint = match store.get_endpoint(&grant.endpoint_id) {
+    let endpoints_by_id = store
+        .list_endpoints()
+        .into_iter()
+        .map(|e| (e.endpoint_id.clone(), e))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    for membership in store.state().node_user_endpoint_memberships.iter() {
+        let endpoint = match endpoints_by_id.get(&membership.endpoint_id) {
             Some(endpoint) => endpoint,
             None => continue,
         };
         if endpoint.node_id != local_node_id {
             continue;
         }
-        let usage = match store.get_grant_usage(&grant.grant_id) {
+
+        let membership_key =
+            crate::state::membership_key(&membership.user_id, &membership.endpoint_id);
+        let usage = match store.get_membership_usage(&membership_key) {
             Some(usage) => usage,
             None => continue,
         };
-        if !grant.enabled || !usage.quota_banned {
+        if !usage.quota_banned {
             continue;
         }
-        let effective_enabled = grant.enabled && !usage.quota_banned;
+
         items.push(AlertItem {
-            alert_type: ALERT_TYPE_QUOTA_ENFORCED.to_string(),
-            grant_id: grant.grant_id.clone(),
-            endpoint_id: endpoint.endpoint_id,
-            owner_node_id: endpoint.node_id,
-            desired_enabled: grant.enabled,
+            alert_type: ALERT_TYPE_QUOTA_BANNED.to_string(),
+            membership_key,
+            user_id: membership.user_id.clone(),
+            endpoint_id: endpoint.endpoint_id.clone(),
+            owner_node_id: endpoint.node_id.clone(),
             quota_banned: usage.quota_banned,
-            quota_banned_at: usage.quota_banned_at,
-            effective_enabled,
-            message: ALERT_MESSAGE_QUOTA_ENFORCED.to_string(),
-            action_hint: ALERT_ACTION_HINT_QUOTA_ENFORCED.to_string(),
+            quota_banned_at: usage.quota_banned_at.clone(),
+            message: ALERT_MESSAGE_QUOTA_BANNED.to_string(),
+            action_hint: ALERT_ACTION_HINT_QUOTA_BANNED.to_string(),
         });
     }
     items
@@ -5445,33 +5372,37 @@ async fn get_subscription(
         }
     };
 
-    let (user, grants, endpoints, nodes) = {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+
+    let (user, memberships, endpoints, nodes) = {
         let store = state.store.lock().await;
         let user = store
             .get_user_by_subscription_token(&subscription_token)
             .ok_or_else(|| ApiError::not_found("not found"))?;
-        let grants: Vec<Grant> = store
-            .state()
-            .grants
-            .values()
-            .filter(|g| g.user_id == user.user_id)
-            .cloned()
-            .collect();
+        let memberships = store
+            .list_user_access(&user.user_id)
+            .map_err(ApiError::from)?;
         let endpoints = store.list_endpoints();
         let nodes = store.list_nodes();
-        (user, grants, endpoints, nodes)
+        (user, memberships, endpoints, nodes)
     };
 
     match format {
-        "raw" => subscription::build_raw_text(&user, &grants, &endpoints, &nodes)
+        "raw" => subscription::build_raw_text(ca_key_pem, &user, &memberships, &endpoints, &nodes)
             .map(text_plain_utf8)
             .map_err(|_e| ApiError::internal("failed to build subscription")),
-        "base64" => subscription::build_base64(&user, &grants, &endpoints, &nodes)
+        "base64" => subscription::build_base64(ca_key_pem, &user, &memberships, &endpoints, &nodes)
             .map(text_plain_utf8)
             .map_err(|_e| ApiError::internal("failed to build subscription")),
-        "clash" => subscription::build_clash_yaml(&user, &grants, &endpoints, &nodes)
-            .map(text_yaml_utf8)
-            .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "clash" => {
+            subscription::build_clash_yaml(ca_key_pem, &user, &memberships, &endpoints, &nodes)
+                .map(text_yaml_utf8)
+                .map_err(|_e| ApiError::internal("failed to build subscription"))
+        }
         _ => Err(ApiError::internal("unreachable subscription format")),
     }
 }

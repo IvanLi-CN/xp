@@ -22,6 +22,7 @@ type AdminUser = {
 	user_id: string;
 	display_name: string;
 	subscription_token: string;
+	credential_epoch: number;
 	priority_tier: "p1" | "p2" | "p3";
 	quota_reset: UserQuotaReset;
 };
@@ -56,17 +57,10 @@ type AdminUserNodeWeightItem = {
 	weight: number;
 };
 
-type AdminUserGrant = {
-	grant_id: string;
+type AdminUserAccessItem = {
 	user_id: string;
 	endpoint_id: string;
-	enabled: boolean;
-	quota_limit_bytes: number;
-	note: string | null;
-	credentials: {
-		vless?: { uuid: string; email: string };
-		ss2022?: { method: string; password: string };
-	};
+	node_id: string;
 };
 
 type ClusterInfo = {
@@ -82,13 +76,12 @@ type AlertsResponse = {
 	unreachable_nodes: string[];
 	items: Array<{
 		type: string;
-		grant_id: string;
+		membership_key: string;
+		user_id: string;
 		endpoint_id: string;
 		owner_node_id: string;
-		desired_enabled: boolean;
 		quota_banned: boolean;
 		quota_banned_at: string | null;
-		effective_enabled: boolean;
 		message: string;
 		action_hint: string;
 	}>;
@@ -100,7 +93,7 @@ type MockApiOptions = {
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
 	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
-	userGrantsByUserId?: Record<string, AdminUserGrant[]>;
+	userAccessByUserId?: Record<string, AdminUserAccessItem[]>;
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
 	healthStatus?: "ok" | "error";
@@ -114,7 +107,7 @@ type MockState = {
 	endpoints: AdminEndpoint[];
 	nodeQuotas: AdminUserNodeQuota[];
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
-	userGrantsByUserId: Record<string, AdminUserGrant[]>;
+	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
 	healthStatus: "ok" | "error";
@@ -153,6 +146,7 @@ const defaultUsers: AdminUser[] = [
 		user_id: "user-1",
 		display_name: "Demo user",
 		subscription_token: "sub-user-1",
+		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
@@ -162,22 +156,9 @@ const defaultUsers: AdminUser[] = [
 	},
 ];
 
-const defaultUserGrantsByUserId: Record<string, AdminUserGrant[]> = {
+const defaultUserAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 	"user-1": [
-		{
-			grant_id: "grant-1",
-			user_id: "user-1",
-			endpoint_id: "endpoint-1",
-			enabled: true,
-			quota_limit_bytes: 1_048_576,
-			note: null,
-			credentials: {
-				vless: {
-					uuid: "11111111-1111-1111-1111-111111111111",
-					email: "demo@example.com",
-				},
-			},
-		},
+		{ user_id: "user-1", endpoint_id: "endpoint-1", node_id: "node-1" },
 	],
 };
 
@@ -267,17 +248,17 @@ export async function setupApiMocks(
 					]),
 				)
 			: {},
-		userGrantsByUserId: options.userGrantsByUserId
+		userAccessByUserId: options.userAccessByUserId
 			? Object.fromEntries(
-					Object.entries(options.userGrantsByUserId).map(([userId, grants]) => [
+					Object.entries(options.userAccessByUserId).map(([userId, items]) => [
 						userId,
-						[...grants],
+						[...items],
 					]),
 				)
 			: Object.fromEntries(
-					Object.entries(defaultUserGrantsByUserId).map(([userId, grants]) => [
+					Object.entries(defaultUserAccessByUserId).map(([userId, items]) => [
 						userId,
-						[...grants],
+						[...items],
 					]),
 				),
 		clusterInfo: options.clusterInfo ?? { ...defaultClusterInfo },
@@ -390,6 +371,7 @@ export async function setupApiMocks(
 				user_id: userId,
 				display_name: displayName,
 				subscription_token: `sub-${userId}`,
+				credential_epoch: 0,
 				priority_tier: "p3",
 				quota_reset:
 					quotaReset ??
@@ -400,30 +382,27 @@ export async function setupApiMocks(
 					} satisfies UserQuotaReset),
 			};
 			state.users.push(newUser);
-			state.userGrantsByUserId[userId] = [];
+			state.userAccessByUserId[userId] = [];
 			jsonResponse(route, newUser, 201);
 			return;
 		}
 
-		const userGrantsMatch = path.match(
-			/^\/api\/admin\/users\/([^/]+)\/grants$/,
+		const userAccessMatch = path.match(
+			/^\/api\/admin\/users\/([^/]+)\/access$/,
 		);
-		if (userGrantsMatch && method === "GET") {
-			const userId = decodeURIComponent(userGrantsMatch[1]);
+		if (userAccessMatch && method === "GET") {
+			const userId = decodeURIComponent(userAccessMatch[1]);
 			const user = state.users.find((item) => item.user_id === userId);
 			if (!user) {
 				errorResponse(route, `User not found: ${userId}`, 404);
 				return;
 			}
-			const grants = (state.userGrantsByUserId[userId] ?? []).filter(
-				(grant) => grant.enabled,
-			);
-			jsonResponse(route, { items: grants });
+			jsonResponse(route, { items: state.userAccessByUserId[userId] ?? [] });
 			return;
 		}
 
-		if (userGrantsMatch && method === "PUT") {
-			const userId = decodeURIComponent(userGrantsMatch[1]);
+		if (userAccessMatch && method === "PUT") {
+			const userId = decodeURIComponent(userAccessMatch[1]);
 			const user = state.users.find((item) => item.user_id === userId);
 			if (!user) {
 				errorResponse(route, `User not found: ${userId}`, 404);
@@ -433,49 +412,18 @@ export async function setupApiMocks(
 			const payload = parseJsonBody(request);
 			const items = Array.isArray(payload.items) ? payload.items : null;
 			if (!items) {
-				errorResponse(route, "invalid grants payload", 400);
+				errorResponse(route, "invalid access payload", 400);
 				return;
 			}
 
 			const endpointById = new Map(
 				state.endpoints.map((endpoint) => [endpoint.endpoint_id, endpoint]),
 			);
-			const existing = state.userGrantsByUserId[userId] ?? [];
-			const existingByEndpoint = new Map(
-				existing.map((grant) => [grant.endpoint_id, grant]),
-			);
-			const nextByEndpoint = new Map<string, AdminUserGrant>();
 
+			const desired = new Set<string>();
 			for (const item of items) {
 				const endpointId =
 					typeof item.endpoint_id === "string" ? item.endpoint_id : "";
-				if (item.enabled !== true) {
-					errorResponse(
-						route,
-						"grant item enabled must be true for user grants hard-cut",
-						400,
-					);
-					return;
-				}
-				if (nextByEndpoint.has(endpointId)) {
-					errorResponse(
-						route,
-						`grant pair already exists: user_id=${userId} endpoint_id=${endpointId}`,
-						409,
-					);
-					return;
-				}
-				const enabled = true;
-				const quotaLimitBytes = Math.max(
-					0,
-					Math.floor(Number(item.quota_limit_bytes ?? 0)),
-				);
-				const note =
-					typeof item.note === "string"
-						? item.note
-						: item.note === null
-							? null
-							: null;
 				if (!endpointId) {
 					errorResponse(route, "invalid endpoint_id", 400);
 					return;
@@ -485,58 +433,31 @@ export async function setupApiMocks(
 					errorResponse(route, `endpoint not found: ${endpointId}`, 404);
 					return;
 				}
-
-				const prev = existingByEndpoint.get(endpointId);
-				const grantIndex = tokenSeq++;
-				nextByEndpoint.set(endpointId, {
-					grant_id: prev?.grant_id ?? `grant-${grantIndex}-${endpointId}`,
-					user_id: userId,
-					endpoint_id: endpointId,
-					enabled,
-					quota_limit_bytes: quotaLimitBytes,
-					note,
-					credentials:
-						prev?.credentials ??
-						(endpoint.kind === "ss2022_2022_blake3_aes_128_gcm"
-							? {
-									ss2022: {
-										method: "2022-blake3-aes-128-gcm",
-										password: `mock-password-${grantIndex}`,
-									},
-								}
-							: {
-									vless: {
-										uuid: "22222222-2222-2222-2222-222222222222",
-										email: "mock@example.com",
-									},
-								}),
-				});
+				desired.add(endpointId);
 			}
 
-			const next = Array.from(nextByEndpoint.values());
-			const created = next.filter(
-				(grant) => !existingByEndpoint.has(grant.endpoint_id),
-			).length;
-			const deleted = existing.filter(
-				(grant) => !nextByEndpoint.has(grant.endpoint_id),
-			).length;
-			const updated = next.filter((grant) => {
-				const prev = existingByEndpoint.get(grant.endpoint_id);
-				if (!prev) return false;
-				return (
-					prev.enabled !== grant.enabled ||
-					prev.quota_limit_bytes !== grant.quota_limit_bytes ||
-					(prev.note ?? null) !== (grant.note ?? null)
-				);
-			}).length;
-			state.userGrantsByUserId[userId] = next;
+			const existing = state.userAccessByUserId[userId] ?? [];
+			const existingIds = new Set(existing.map((i) => i.endpoint_id));
 
-			jsonResponse(route, {
-				created,
-				updated,
-				deleted,
-				items: next.filter((grant) => grant.enabled),
-			});
+			let created = 0;
+			let deleted = 0;
+			for (const id of desired) {
+				if (!existingIds.has(id)) created += 1;
+			}
+			for (const id of existingIds) {
+				if (!desired.has(id)) deleted += 1;
+			}
+
+			const nextItems: AdminUserAccessItem[] = [...desired]
+				.sort()
+				.map((endpointId) => ({
+					user_id: userId,
+					endpoint_id: endpointId,
+					node_id: endpointById.get(endpointId)?.node_id ?? "",
+				}));
+			state.userAccessByUserId[userId] = nextItems;
+
+			jsonResponse(route, { created, deleted, items: nextItems });
 			return;
 		}
 
@@ -564,6 +485,7 @@ export async function setupApiMocks(
 			const segments = path.split("/");
 			const userId = decodeURIComponent(segments[4] ?? "");
 			const isResetToken = segments[5] === "reset-token";
+			const isResetCredentials = segments[5] === "reset-credentials";
 			const isNodeWeights = segments[5] === "node-weights";
 
 			if (isNodeWeights && method === "GET") {
@@ -636,6 +558,20 @@ export async function setupApiMocks(
 				return;
 			}
 
+			if (isResetCredentials && method === "POST") {
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				user.credential_epoch += 1;
+				jsonResponse(route, {
+					user_id: user.user_id,
+					credential_epoch: user.credential_epoch,
+				});
+				return;
+			}
+
 			if (method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
 				if (!user) {
@@ -673,7 +609,7 @@ export async function setupApiMocks(
 			if (method === "DELETE") {
 				state.users = state.users.filter((item) => item.user_id !== userId);
 				state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
-				delete state.userGrantsByUserId[userId];
+				delete state.userAccessByUserId[userId];
 				void route.fulfill({ status: 204, body: "" });
 				return;
 			}

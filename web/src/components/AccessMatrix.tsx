@@ -1,19 +1,18 @@
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 
-export type GrantAccessMatrixNode = {
+export type AccessMatrixNode = {
 	nodeId: string;
 	label: string;
 	details?: ReactNode;
 };
 
-export type GrantAccessMatrixProtocol = {
+export type AccessMatrixProtocol = {
 	protocolId: string;
 	label: string;
 };
 
-export type GrantAccessMatrixCellMeta = {
+export type AccessMatrixCellMeta = {
 	endpointId?: string;
-	grantId?: string;
 	tag?: string;
 	port?: number;
 	options?: Array<{
@@ -24,10 +23,10 @@ export type GrantAccessMatrixCellMeta = {
 	selectedEndpointId?: string;
 };
 
-export type GrantAccessMatrixCellState = {
+export type AccessMatrixCellState = {
 	value: "on" | "off" | "disabled";
 	reason?: string;
-	meta?: GrantAccessMatrixCellMeta;
+	meta?: AccessMatrixCellMeta;
 };
 
 type CheckboxState = {
@@ -76,12 +75,12 @@ function IndeterminateCheckbox(props: {
 	);
 }
 
-export type GrantAccessMatrixProps = {
-	nodes: GrantAccessMatrixNode[];
-	protocols: GrantAccessMatrixProtocol[];
+export type AccessMatrixProps = {
+	nodes: AccessMatrixNode[];
+	protocols: AccessMatrixProtocol[];
 	disabled?: boolean;
 	// nodeId -> protocolId -> state
-	cells: Record<string, Record<string, GrantAccessMatrixCellState>>;
+	cells: Record<string, Record<string, AccessMatrixCellState>>;
 	onToggleCell?: (nodeId: string, protocolId: string) => void;
 	onToggleRow?: (nodeId: string) => void;
 	onToggleColumn?: (protocolId: string) => void;
@@ -93,7 +92,7 @@ export type GrantAccessMatrixProps = {
 	) => void;
 };
 
-export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
+export function AccessMatrix(props: AccessMatrixProps) {
 	const {
 		nodes,
 		protocols,
@@ -118,49 +117,44 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 	const allState = useCheckboxState(allValues);
 
 	const columnStates = useMemo(() => {
-		const map = new Map<string, CheckboxState>();
+		const out = new Map<string, CheckboxState>();
 		for (const protocol of protocols) {
 			const values: Array<"on" | "off" | "disabled"> = [];
 			for (const node of nodes) {
 				values.push(cells[node.nodeId]?.[protocol.protocolId]?.value ?? "off");
 			}
-			map.set(protocol.protocolId, useCheckboxState(values));
+			out.set(protocol.protocolId, useCheckboxState(values));
 		}
-		return map;
+		return out;
 	}, [cells, nodes, protocols]);
 
 	const rowStates = useMemo(() => {
-		const map = new Map<string, CheckboxState>();
+		const out = new Map<string, CheckboxState>();
 		for (const node of nodes) {
 			const values: Array<"on" | "off" | "disabled"> = [];
 			for (const protocol of protocols) {
 				values.push(cells[node.nodeId]?.[protocol.protocolId]?.value ?? "off");
 			}
-			map.set(node.nodeId, useCheckboxState(values));
+			out.set(node.nodeId, useCheckboxState(values));
 		}
-		return map;
+		return out;
 	}, [cells, nodes, protocols]);
 
 	return (
-		<div className="overflow-auto rounded-box border border-base-200">
-			<table className="table table-fixed">
+		<div className="overflow-x-auto">
+			<table className="table table-zebra table-sm w-full">
 				<thead>
-					<tr className="bg-base-200/50">
-						<th className="sticky left-0 top-0 z-20 bg-base-200/50 w-56">
-							<div className="flex items-center gap-3">
-								<IndeterminateCheckbox
-									checked={allState.checked}
-									indeterminate={allState.indeterminate}
-									disabled={Boolean(disabled) || allState.disabled}
-									ariaLabel="Toggle all nodes and protocols"
-									onChange={() => {
-										if (disabled) return;
-										onToggleAll?.();
-									}}
-								/>
-								<span className="font-medium">All nodes</span>
-							</div>
+					<tr>
+						<th className="w-8">
+							<IndeterminateCheckbox
+								checked={allState.checked}
+								indeterminate={allState.indeterminate}
+								disabled={disabled || allState.disabled}
+								ariaLabel="Toggle all"
+								onChange={() => onToggleAll?.()}
+							/>
 						</th>
+						<th>Node</th>
 						{protocols.map((protocol) => {
 							const state = columnStates.get(protocol.protocolId) ?? {
 								checked: false,
@@ -168,29 +162,16 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 								disabled: true,
 							};
 							return (
-								<th
-									key={protocol.protocolId}
-									className="sticky top-0 z-10 bg-base-200/50"
-								>
-									<div className="flex items-center gap-3">
+								<th key={protocol.protocolId} className="min-w-[180px]">
+									<div className="flex items-center gap-2">
 										<IndeterminateCheckbox
 											checked={state.checked}
 											indeterminate={state.indeterminate}
-											disabled={Boolean(disabled) || state.disabled}
-											ariaLabel={`Toggle protocol ${protocol.label}`}
-											onChange={() => {
-												if (disabled) return;
-												onToggleColumn?.(protocol.protocolId);
-											}}
+											disabled={disabled || state.disabled}
+											ariaLabel={`Toggle ${protocol.label}`}
+											onChange={() => onToggleColumn?.(protocol.protocolId)}
 										/>
-										<div className="min-w-0">
-											<div className="flex items-baseline gap-2 min-w-0">
-												<span className="font-medium">{protocol.label}</span>
-												<span className="font-mono text-xs opacity-60 truncate block">
-													{protocol.protocolId}
-												</span>
-											</div>
-										</div>
+										<span>{protocol.label}</span>
 									</div>
 								</th>
 							);
@@ -198,74 +179,62 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 					</tr>
 				</thead>
 				<tbody>
-					{nodes.map((node, idx) => {
+					{nodes.map((node) => {
 						const rowState = rowStates.get(node.nodeId) ?? {
 							checked: false,
 							indeterminate: false,
 							disabled: true,
 						};
-						const zebra = idx % 2 === 1 ? "bg-base-200/15" : "";
 						return (
-							<tr key={node.nodeId} className={zebra}>
-								<th className="sticky left-0 z-10 bg-base-100 w-56">
-									<div className="flex items-center gap-3">
-										<IndeterminateCheckbox
-											checked={rowState.checked}
-											indeterminate={rowState.indeterminate}
-											disabled={Boolean(disabled) || rowState.disabled}
-											ariaLabel={`Toggle node ${node.label}`}
-											onChange={() => {
-												if (disabled) return;
-												onToggleRow?.(node.nodeId);
-											}}
-										/>
-										<div className="min-w-0">
-											<div className="font-medium">{node.label}</div>
-											<div className="font-mono text-xs opacity-60 truncate">
-												{node.nodeId}
-											</div>
-											{node.details ? (
-												<div className="min-w-0">{node.details}</div>
-											) : null}
-										</div>
-									</div>
-								</th>
+							<tr key={node.nodeId}>
+								<td className="w-8">
+									<IndeterminateCheckbox
+										checked={rowState.checked}
+										indeterminate={rowState.indeterminate}
+										disabled={disabled || rowState.disabled}
+										ariaLabel={`Toggle row ${node.label}`}
+										onChange={() => onToggleRow?.(node.nodeId)}
+									/>
+								</td>
+								<td className="space-y-0.5">
+									<div className="font-medium">{node.label}</div>
+									{node.details ? node.details : null}
+								</td>
 								{protocols.map((protocol) => {
-									const cell =
-										cells[node.nodeId]?.[protocol.protocolId] ??
-										({ value: "off" } as const);
-									const ariaLabel = `Toggle ${node.label} ${protocol.label}`;
+									const cell = cells[node.nodeId]?.[protocol.protocolId] ?? {
+										value: "off",
+									};
 									return (
-										<td key={protocol.protocolId}>
-											<div
-												className={[
-													"flex items-center gap-3 rounded-box py-2",
-													cell.value === "disabled"
-														? "bg-base-200/35 opacity-70"
-														: "hover:bg-base-200/25",
-												].join(" ")}
-											>
-												<input
-													type="checkbox"
-													className="checkbox checkbox-xs checkbox-primary rounded"
-													checked={cell.value === "on"}
-													disabled={
-														Boolean(disabled) || cell.value === "disabled"
-													}
-													aria-label={ariaLabel}
-													onChange={() => {
-														if (disabled) return;
-														onToggleCell?.(node.nodeId, protocol.protocolId);
-													}}
-												/>
+										<td key={`${node.nodeId}::${protocol.protocolId}`}>
+											<div className="flex items-center justify-between gap-2">
 												<div className="min-w-0 flex-1">
-													<CellContent
-														cell={cell}
-														nodeId={node.nodeId}
-														protocolId={protocol.protocolId}
-														disabled={disabled}
-														onSelectCellEndpoint={onSelectCellEndpoint}
-													/>
+													<div className="flex items-center gap-2">
+														<input
+															type="checkbox"
+															className="checkbox checkbox-xs checkbox-primary rounded"
+															checked={cell.value === "on"}
+															disabled={disabled || cell.value === "disabled"}
+															aria-label={`Toggle ${node.label} ${protocol.label}`}
+															onChange={() =>
+																onToggleCell?.(node.nodeId, protocol.protocolId)
+															}
+														/>
+														<div className="min-w-0 flex-1">
+															{cell.value === "disabled" ? (
+																<span className="text-xs opacity-60">
+																	{cell.reason ?? "Disabled"}
+																</span>
+															) : (
+																<AccessMatrixCellLabel
+																	nodeId={node.nodeId}
+																	protocolId={protocol.protocolId}
+																	cell={cell}
+																	disabled={disabled}
+																	onSelectCellEndpoint={onSelectCellEndpoint}
+																/>
+															)}
+														</div>
+													</div>
 												</div>
 											</div>
 										</td>
@@ -280,15 +249,14 @@ export function GrantAccessMatrix(props: GrantAccessMatrixProps) {
 	);
 }
 
-function shortId(value: string): string {
-	if (value.length <= 10) return value;
-	return `${value.slice(0, 4)}...${value.slice(-4)}`;
+function shortId(id: string): string {
+	return id.length <= 8 ? id : `${id.slice(0, 4)}..${id.slice(-4)}`;
 }
 
-function CellContent(props: {
-	cell: GrantAccessMatrixCellState;
+function AccessMatrixCellLabel(props: {
 	nodeId: string;
 	protocolId: string;
+	cell: AccessMatrixCellState;
 	disabled?: boolean;
 	onSelectCellEndpoint?: (
 		nodeId: string,
@@ -296,27 +264,15 @@ function CellContent(props: {
 		endpointId: string,
 	) => void;
 }) {
-	const { cell, nodeId, protocolId, disabled, onSelectCellEndpoint } = props;
+	const { nodeId, protocolId, cell, disabled, onSelectCellEndpoint } = props;
+	const meta = cell.meta;
+	if (!meta) return null;
 
-	if (cell.value === "disabled") {
-		return (
-			<div className="flex items-center justify-between gap-3 min-w-0">
-				<span className="text-sm opacity-70 truncate block">
-					{cell.reason ?? "Unavailable"}
-				</span>
-				<span className="font-mono text-xs opacity-50">(disabled)</span>
-			</div>
-		);
-	}
-
-	const meta = cell.meta ?? {};
 	const options = meta.options ?? [];
-	const showChooser = options.length > 1 && onSelectCellEndpoint;
-
-	if (showChooser) {
+	if (options.length > 1) {
 		return (
-			<div className="flex items-center justify-between gap-3 min-w-0">
-				<div className="min-w-0">
+			<div className="flex items-center justify-between gap-2">
+				<div className="min-w-0 flex-1">
 					{meta.selectedEndpointId ? (
 						<span className="font-mono text-sm opacity-70 truncate block">
 							port {meta.port ?? "?"} - endpoint{" "}
@@ -365,7 +321,6 @@ function CellContent(props: {
 
 	const bits: string[] = [];
 	if (meta.port !== undefined) bits.push(`port ${meta.port}`);
-	if (meta.grantId) bits.push(`grant ${meta.grantId}`);
 	else if (meta.tag) bits.push(meta.tag);
 	else if (meta.endpointId) bits.push(`endpoint ${shortId(meta.endpointId)}`);
 
