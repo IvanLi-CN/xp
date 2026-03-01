@@ -46,6 +46,11 @@ vi.mock("../api/adminAuth");
 vi.mock("../api/adminNodes");
 vi.mock("../api/clusterInfo");
 vi.mock("../api/health");
+vi.mock("../components/Icon", () => ({
+	Icon: ({ ariaLabel }: { ariaLabel?: string }) => (
+		<span aria-hidden={ariaLabel ? undefined : "true"} aria-label={ariaLabel} />
+	),
+}));
 
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();

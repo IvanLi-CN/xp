@@ -43,6 +43,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminJoinTokens");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/clusterInfo");
+vi.mock("../components/Icon", () => ({
+	Icon: ({ ariaLabel }: { ariaLabel?: string }) => (
+		<span aria-hidden={ariaLabel ? undefined : "true"} aria-label={ariaLabel} />
+	),
+}));
 
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();
