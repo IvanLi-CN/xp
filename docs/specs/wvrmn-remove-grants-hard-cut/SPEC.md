@@ -145,4 +145,4 @@
 
 ## Change log
 
-- 2026-03-01: created and frozen from implementation plan (fast-track)
+- 2026-03-01: implemented (PR #86)
