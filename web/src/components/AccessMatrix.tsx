@@ -37,16 +37,63 @@ type CheckboxState = {
 	disabled: boolean;
 };
 
-function useCheckboxState(
-	values: Array<"on" | "off" | "disabled">,
-): CheckboxState {
-	const editable = values.filter((v) => v !== "disabled");
-	const onCount = editable.filter((v) => v === "on").length;
+type CellSelectionState = {
+	checked: boolean;
+	indeterminate: boolean;
+	disabled: boolean;
+};
+
+function collectSelectedEndpointIds(meta?: AccessMatrixCellMeta): string[] {
+	if (!meta) return [];
+	return [
+		...(meta.selectedEndpointIds ?? []),
+		...(meta.selectedEndpointId ? [meta.selectedEndpointId] : []),
+	].filter((endpointId, index, array) => array.indexOf(endpointId) === index);
+}
+
+function getCellSelectionState(
+	cell: AccessMatrixCellState,
+): CellSelectionState {
+	if (cell.value === "disabled") {
+		return {
+			checked: false,
+			indeterminate: false,
+			disabled: true,
+		};
+	}
+
+	const options = cell.meta?.options ?? [];
+	if (options.length > 1) {
+		const optionIds = new Set(options.map((option) => option.endpointId));
+		const selectedCount = collectSelectedEndpointIds(cell.meta).filter(
+			(endpointId) => optionIds.has(endpointId),
+		).length;
+		return {
+			checked: selectedCount === options.length,
+			indeterminate: selectedCount > 0 && selectedCount < options.length,
+			disabled: false,
+		};
+	}
+
+	return {
+		checked:
+			cell.value === "on" || collectSelectedEndpointIds(cell.meta).length > 0,
+		indeterminate: false,
+		disabled: false,
+	};
+}
+
+function aggregateCheckboxState(states: CellSelectionState[]): CheckboxState {
+	const editable = states.filter((state) => !state.disabled);
 	const total = editable.length;
+	const checkedCount = editable.filter((state) => state.checked).length;
+	const hasIndeterminate = editable.some((state) => state.indeterminate);
+	const checked = total > 0 && checkedCount === total;
 	return {
 		disabled: total === 0,
-		checked: total > 0 && onCount === total,
-		indeterminate: total > 0 && onCount > 0 && onCount < total,
+		checked,
+		indeterminate:
+			total > 0 && !checked && (checkedCount > 0 || hasIndeterminate),
 	};
 }
 
@@ -108,25 +155,30 @@ export function AccessMatrix(props: AccessMatrixProps) {
 		onToggleCellEndpoint,
 	} = props;
 
-	const allValues = useMemo(() => {
-		const values: Array<"on" | "off" | "disabled"> = [];
+	const allState = useMemo(() => {
+		const states: CellSelectionState[] = [];
 		for (const node of nodes) {
 			for (const protocol of protocols) {
-				values.push(cells[node.nodeId]?.[protocol.protocolId]?.value ?? "off");
+				const cell = cells[node.nodeId]?.[protocol.protocolId] ?? {
+					value: "off",
+				};
+				states.push(getCellSelectionState(cell));
 			}
 		}
-		return values;
+		return aggregateCheckboxState(states);
 	}, [cells, nodes, protocols]);
-	const allState = useCheckboxState(allValues);
 
 	const columnStates = useMemo(() => {
 		const out = new Map<string, CheckboxState>();
 		for (const protocol of protocols) {
-			const values: Array<"on" | "off" | "disabled"> = [];
+			const states: CellSelectionState[] = [];
 			for (const node of nodes) {
-				values.push(cells[node.nodeId]?.[protocol.protocolId]?.value ?? "off");
+				const cell = cells[node.nodeId]?.[protocol.protocolId] ?? {
+					value: "off",
+				};
+				states.push(getCellSelectionState(cell));
 			}
-			out.set(protocol.protocolId, useCheckboxState(values));
+			out.set(protocol.protocolId, aggregateCheckboxState(states));
 		}
 		return out;
 	}, [cells, nodes, protocols]);
@@ -134,11 +186,14 @@ export function AccessMatrix(props: AccessMatrixProps) {
 	const rowStates = useMemo(() => {
 		const out = new Map<string, CheckboxState>();
 		for (const node of nodes) {
-			const values: Array<"on" | "off" | "disabled"> = [];
+			const states: CellSelectionState[] = [];
 			for (const protocol of protocols) {
-				values.push(cells[node.nodeId]?.[protocol.protocolId]?.value ?? "off");
+				const cell = cells[node.nodeId]?.[protocol.protocolId] ?? {
+					value: "off",
+				};
+				states.push(getCellSelectionState(cell));
 			}
-			out.set(node.nodeId, useCheckboxState(values));
+			out.set(node.nodeId, aggregateCheckboxState(states));
 		}
 		return out;
 	}, [cells, nodes, protocols]);
@@ -294,10 +349,10 @@ function AccessMatrixCellLabel(props: {
 
 	const options = meta.options ?? [];
 	if (options.length > 1) {
-		const selectedEndpointIds = [
-			...(meta.selectedEndpointIds ?? []),
-			...(meta.selectedEndpointId ? [meta.selectedEndpointId] : []),
-		].filter((endpointId, index, array) => array.indexOf(endpointId) === index);
+		const optionIds = new Set(options.map((option) => option.endpointId));
+		const selectedEndpointIds = collectSelectedEndpointIds(meta).filter(
+			(endpointId) => optionIds.has(endpointId),
+		);
 		const selectedCount = selectedEndpointIds.length;
 		const allSelected = selectedCount === options.length;
 		const partiallySelected =
@@ -448,10 +503,7 @@ function AccessMatrixCellLabel(props: {
 		);
 	}
 
-	const selectedEndpointIds = [
-		...(meta.selectedEndpointIds ?? []),
-		...(meta.selectedEndpointId ? [meta.selectedEndpointId] : []),
-	].filter((endpointId, index, array) => array.indexOf(endpointId) === index);
+	const selectedEndpointIds = collectSelectedEndpointIds(meta);
 	const selected = cell.value === "on" || selectedEndpointIds.length > 0;
 
 	return (

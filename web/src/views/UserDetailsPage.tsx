@@ -241,14 +241,15 @@ export function UserDetailsPage() {
 					selectedEndpointIds.includes(option.endpointId),
 				);
 				const selected = selectedEndpoints[0];
+				const display = selected ?? options[0];
 				row[protocol.protocolId] = {
 					value: selectedEndpointIds.length > 0 ? "on" : "off",
 					meta: {
-						endpointId: selected?.endpointId,
+						endpointId: display?.endpointId,
 						selectedEndpointId: selected?.endpointId,
 						selectedEndpointIds,
-						tag: selected?.tag,
-						port: selected?.port,
+						tag: display?.tag,
+						port: display?.port,
 						options: options.map((option) => ({
 							endpointId: option.endpointId,
 							tag: option.tag,

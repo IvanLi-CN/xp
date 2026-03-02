@@ -298,6 +298,16 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("shows single endpoint metadata when unchecked", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+
+		expect(await screenByText("port 443")).toBeTruthy();
+		expect(await queryByText("port ?")).toBeNull();
+	});
+
 	it("supports multi-select endpoint leaves in access tree", async () => {
 		setupMocks();
 		renderPage();
@@ -327,6 +337,33 @@ describe("<UserDetailsPage />", () => {
 				},
 			);
 		});
+	});
+
+	it("shows partial state in row and column toggles for tree leaf selection", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(
+			await screenByLabel(
+				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+
+		const allToggle = (await screenByLabel("Toggle all")) as HTMLInputElement;
+		const rowToggle = (await screenByLabel(
+			"Toggle row Tokyo",
+		)) as HTMLInputElement;
+		const columnToggle = (await screenByLabel(
+			"Toggle SS2022",
+		)) as HTMLInputElement;
+
+		expect(allToggle.checked).toBe(false);
+		expect(allToggle.indeterminate).toBe(true);
+		expect(rowToggle.checked).toBe(false);
+		expect(rowToggle.indeterminate).toBe(true);
+		expect(columnToggle.checked).toBe(false);
+		expect(columnToggle.indeterminate).toBe(true);
 	});
 
 	it("does not render legacy outer checkbox for multi-endpoint cell", async () => {
