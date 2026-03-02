@@ -12,7 +12,7 @@ use crate::{
     raft::types::ClientResponse,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
+    state::{DesiredStateCommand, JsonSnapshotStore},
 };
 
 use openraft::entry::RaftPayload as _;
@@ -109,10 +109,16 @@ impl FileLogStore {
             .ensure_dirs()
             .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Write, e))?;
 
-        let wal = read_json::<PersistedWal>(&paths.wal_json)
+        let sm_meta = read_json::<PersistedStateMachineMeta>(&paths.sm_meta_json)
             .await
-            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Read, e))?
-            .unwrap_or_else(PersistedWal::empty);
+            .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
+        let last_applied_index = sm_meta
+            .as_ref()
+            .and_then(|meta| meta.last_applied.as_ref().map(|log_id| log_id.index));
+
+        let (wal, wal_rewritten) = read_wal_with_compat(&paths.wal_json, last_applied_index)
+            .await
+            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Read, e))?;
         let vote = read_json::<Vote<NodeId>>(&paths.vote_json)
             .await
             .map_err(|e| io_err(ErrorSubject::Vote, ErrorVerb::Read, e))?;
@@ -125,6 +131,18 @@ impl FileLogStore {
             .into_iter()
             .map(|ent| (ent.log_id.index, ent))
             .collect::<BTreeMap<_, _>>();
+
+        if wal_rewritten {
+            write_json(
+                &paths.wal_json,
+                &PersistedWal {
+                    last_purged_log_id: wal.last_purged_log_id,
+                    entries: entries.values().cloned().collect(),
+                },
+            )
+            .await
+            .map_err(|e| io_err(ErrorSubject::Logs, ErrorVerb::Write, e))?;
+        }
 
         Ok(Self {
             paths,
@@ -453,24 +471,33 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             .map(|_| endpoint.endpoint_id.clone()),
                         _ => None,
                     };
-                    let deleted_usage = match &cmd {
-                        DesiredStateCommand::ReplaceUserAccess { user_id, items } => {
-                            let desired_endpoint_ids: std::collections::BTreeSet<String> =
-                                items.iter().map(|item| item.endpoint_id.clone()).collect();
-                            let old: Vec<crate::domain::Grant> = store
-                                .list_grants()
-                                .into_iter()
-                                .filter(|g| g.user_id == *user_id)
-                                .collect();
-                            let deleted: Vec<String> = old
-                                .iter()
-                                .filter(|g| !desired_endpoint_ids.contains(&g.endpoint_id))
-                                .map(|g| g.grant_id.clone())
-                                .collect();
-                            deleted
-                        }
-                        _ => Vec::new(),
-                    };
+                    let membership_keys_before: Option<std::collections::BTreeSet<String>> =
+                        match &cmd {
+                            DesiredStateCommand::ReplaceUserAccess { user_id, .. }
+                            | DesiredStateCommand::DeleteUser { user_id } => Some(
+                                store
+                                    .state()
+                                    .node_user_endpoint_memberships
+                                    .iter()
+                                    .filter(|m| m.user_id == *user_id)
+                                    .map(|m| {
+                                        crate::state::membership_key(&m.user_id, &m.endpoint_id)
+                                    })
+                                    .collect(),
+                            ),
+                            DesiredStateCommand::DeleteEndpoint { endpoint_id } => Some(
+                                store
+                                    .state()
+                                    .node_user_endpoint_memberships
+                                    .iter()
+                                    .filter(|m| m.endpoint_id == *endpoint_id)
+                                    .map(|m| {
+                                        crate::state::membership_key(&m.user_id, &m.endpoint_id)
+                                    })
+                                    .collect(),
+                            ),
+                            _ => None,
+                        };
                     match cmd.apply(store.state_mut()) {
                         Ok(apply_result) => {
                             store.save().map_err(|e| {
@@ -484,82 +511,32 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
                             }
 
-                            match (&cmd, &apply_result) {
-                                (
-                                    DesiredStateCommand::DeleteGrant { grant_id },
-                                    crate::state::DesiredStateApplyResult::GrantDeleted { deleted },
-                                ) => {
-                                    if *deleted {
-                                        store.clear_grant_usage(grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                }
-                                (DesiredStateCommand::ReplaceUserAccess { user_id, .. }, _) => {
-                                    for grant_id in deleted_usage.iter() {
-                                        store.clear_grant_usage(grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                    for grant_id in store
-                                        .list_grants()
-                                        .into_iter()
-                                        .filter(|g| g.user_id == *user_id)
-                                        .map(|g| g.grant_id)
-                                    {
-                                        store.clear_quota_banned(&grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                }
-                                (
-                                    DesiredStateCommand::SetUserNodeQuota {
-                                        user_id, node_id, ..
-                                    },
-                                    _,
-                                ) => {
-                                    let affected: Vec<String> = store
-                                        .list_grants()
-                                        .into_iter()
-                                        .filter(|g| g.user_id == *user_id)
-                                        .filter(|g| {
-                                            store
-                                                .get_endpoint(&g.endpoint_id)
-                                                .is_some_and(|ep| ep.node_id == *node_id)
+                            if let Some(before) = membership_keys_before {
+                                let after: std::collections::BTreeSet<String> = match &cmd {
+                                    DesiredStateCommand::ReplaceUserAccess { user_id, .. }
+                                    | DesiredStateCommand::DeleteUser { user_id } => store
+                                        .state()
+                                        .node_user_endpoint_memberships
+                                        .iter()
+                                        .filter(|m| m.user_id == *user_id)
+                                        .map(|m| {
+                                            crate::state::membership_key(&m.user_id, &m.endpoint_id)
                                         })
-                                        .map(|g| g.grant_id)
-                                        .collect();
-                                    for grant_id in affected {
-                                        store.clear_quota_banned(&grant_id).map_err(|e| {
-                                            io_err(
-                                                ErrorSubject::StateMachine,
-                                                ErrorVerb::Write,
-                                                std::io::Error::other(e.to_string()),
-                                            )
-                                        })?;
-                                    }
-                                }
-                                (
-                                    DesiredStateCommand::SetGrantEnabled {
-                                        grant_id,
-                                        source: GrantEnabledSource::Manual,
-                                        ..
-                                    },
-                                    _,
-                                ) => {
-                                    store.clear_quota_banned(grant_id).map_err(|e| {
+                                        .collect(),
+                                    DesiredStateCommand::DeleteEndpoint { endpoint_id } => store
+                                        .state()
+                                        .node_user_endpoint_memberships
+                                        .iter()
+                                        .filter(|m| m.endpoint_id == *endpoint_id)
+                                        .map(|m| {
+                                            crate::state::membership_key(&m.user_id, &m.endpoint_id)
+                                        })
+                                        .collect(),
+                                    _ => std::collections::BTreeSet::new(),
+                                };
+
+                                for membership_key in before.difference(&after) {
+                                    store.clear_membership_usage(membership_key).map_err(|e| {
                                         io_err(
                                             ErrorSubject::StateMachine,
                                             ErrorVerb::Write,
@@ -567,7 +544,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                         )
                                     })?;
                                 }
-                                _ => {}
                             }
 
                             ClientResponse::Ok {
@@ -575,19 +551,11 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             }
                         }
                         Err(crate::state::StoreError::Domain(domain)) => {
-                            let (status, code) = match domain {
-                                crate::domain::DomainError::MissingUser { .. }
-                                | crate::domain::DomainError::MissingNode { .. }
-                                | crate::domain::DomainError::MissingEndpoint { .. }
-                                | crate::domain::DomainError::RealityDomainNotFound { .. } => {
-                                    (404, "not_found")
-                                }
-                                crate::domain::DomainError::GrantPairConflict { .. }
-                                | crate::domain::DomainError::RealityDomainNameConflict {
-                                    ..
-                                } => (409, "conflict"),
-                                crate::domain::DomainError::NodeInUse { .. } => (409, "conflict"),
-                                _ => (400, "invalid_request"),
+                            let code = domain.code();
+                            let status = match code {
+                                "not_found" => 404,
+                                "conflict" => 409,
+                                _ => 400,
                             };
                             ClientResponse::Err {
                                 status,
@@ -653,17 +621,31 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
 
-        let payload: SnapshotPayload = serde_json::from_slice(&buf).map_err(|e| {
+        let raw_payload: serde_json::Value = serde_json::from_slice(&buf).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
                 ErrorVerb::Read,
                 std::io::Error::other(e),
             )
         })?;
+        let raw_state = raw_payload.get("state").cloned().ok_or_else(|| {
+            io_err(
+                ErrorSubject::Snapshot(None),
+                ErrorVerb::Read,
+                std::io::Error::other("invalid snapshot payload: missing `state` field"),
+            )
+        })?;
+        let state = crate::state::migrate_state_value_to_latest(raw_state).map_err(|e| {
+            io_err(
+                ErrorSubject::Snapshot(None),
+                ErrorVerb::Read,
+                std::io::Error::other(e.to_string()),
+            )
+        })?;
 
         {
             let mut store = self.store.lock().await;
-            *store.state_mut() = payload.state;
+            *store.state_mut() = state;
             store.save().map_err(|e| {
                 io_err(
                     ErrorSubject::StateMachine,
@@ -671,6 +653,20 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     std::io::Error::other(e.to_string()),
                 )
             })?;
+
+            // Snapshot install replaces the entire state; keep local usage bounded to the
+            // current memberships set to avoid stale grant/membership usage lingering.
+            let allowed_membership_keys = store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
+                .collect::<std::collections::BTreeSet<_>>();
+            let _ = store.update_usage(|usage| {
+                usage
+                    .memberships
+                    .retain(|key, _| allowed_membership_keys.contains(key));
+            });
         }
 
         {
@@ -733,6 +729,141 @@ async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     .expect("spawn_blocking read_json")
 }
 
+async fn read_wal_with_compat(
+    path: &Path,
+    last_applied_index: Option<u64>,
+) -> Result<(PersistedWal, bool), std::io::Error> {
+    let Some(raw_wal) = read_json::<serde_json::Value>(path).await? else {
+        return Ok((PersistedWal::empty(), false));
+    };
+
+    let mut rewritten = false;
+    let last_purged_log_id: Option<LogId<NodeId>> = raw_wal
+        .get("last_purged_log_id")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(std::io::Error::other)?
+        .unwrap_or(None);
+    let last_purged_index = last_purged_log_id
+        .as_ref()
+        .map(|log_id| log_id.index)
+        .unwrap_or(0);
+
+    let mut entries = Vec::new();
+    if let Some(raw_entries_value) = raw_wal.get("entries") {
+        let Some(raw_entries) = raw_entries_value.as_array() else {
+            return Err(std::io::Error::other(
+                "invalid wal format: `entries` must be an array",
+            ));
+        };
+        for raw_entry in raw_entries {
+            match serde_json::from_value::<openraft::impls::Entry<TypeConfig>>(raw_entry.clone()) {
+                Ok(entry) => entries.push(entry),
+                Err(parse_err) => {
+                    let Some(cmd_type) = extract_entry_command_type(raw_entry) else {
+                        return Err(std::io::Error::other(parse_err));
+                    };
+                    if !is_retired_grant_group_command(&cmd_type) {
+                        return Err(std::io::Error::other(parse_err));
+                    }
+
+                    let entry_index = extract_entry_log_index(raw_entry).ok_or_else(|| {
+                        std::io::Error::other(format!(
+                            "failed to read wal entry index for retired command: type={cmd_type}"
+                        ))
+                    })?;
+                    let last_applied = last_applied_index.unwrap_or(0);
+                    if entry_index > last_applied {
+                        return Err(std::io::Error::other(format!(
+                            "retired wal command is not applied yet (entry_index={entry_index}, last_applied={last_applied}); start old version to apply/snapshot first, then upgrade"
+                        )));
+                    }
+                    if entry_index > last_purged_index {
+                        return Err(std::io::Error::other(format!(
+                            "retired wal command is still in active log range (entry_index={entry_index}, last_purged={last_purged_index}); start old version to snapshot/purge logs first, then upgrade"
+                        )));
+                    }
+
+                    let mut blank_entry = raw_entry.clone();
+                    rewrite_entry_payload_to_blank(&mut blank_entry)?;
+                    let parsed =
+                        serde_json::from_value::<openraft::impls::Entry<TypeConfig>>(blank_entry)
+                            .map_err(std::io::Error::other)?;
+                    entries.push(parsed);
+                    rewritten = true;
+                }
+            }
+        }
+    }
+
+    Ok((
+        PersistedWal {
+            last_purged_log_id,
+            entries,
+        },
+        rewritten,
+    ))
+}
+
+fn extract_entry_log_index(entry: &serde_json::Value) -> Option<u64> {
+    entry
+        .pointer("/log_id/index")
+        .and_then(|value| value.as_u64())
+        .or_else(|| {
+            entry
+                .get("log_id")
+                .and_then(|log_id| log_id.get("index"))
+                .and_then(|value| value.as_u64())
+        })
+}
+
+fn extract_entry_command_type(entry: &serde_json::Value) -> Option<String> {
+    fn find_type(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cmd_type)) = map.get("type") {
+                    return Some(cmd_type.clone());
+                }
+                for child in map.values() {
+                    if let Some(cmd_type) = find_type(child) {
+                        return Some(cmd_type);
+                    }
+                }
+                None
+            }
+            serde_json::Value::Array(items) => {
+                for child in items {
+                    if let Some(cmd_type) = find_type(child) {
+                        return Some(cmd_type);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    entry.get("payload").and_then(find_type)
+}
+
+fn is_retired_grant_group_command(cmd_type: &str) -> bool {
+    matches!(
+        cmd_type,
+        "create_grant_group" | "replace_grant_group" | "delete_grant_group"
+    )
+}
+
+fn rewrite_entry_payload_to_blank(entry: &mut serde_json::Value) -> Result<(), std::io::Error> {
+    let blank_payload =
+        serde_json::to_value(EntryPayload::<TypeConfig>::Blank).map_err(std::io::Error::other)?;
+    let Some(entry_obj) = entry.as_object_mut() else {
+        return Err(std::io::Error::other("wal entry is not an object"));
+    };
+    entry_obj.insert("payload".to_string(), blank_payload);
+    Ok(())
+}
+
 async fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), std::io::Error> {
     let path = path.to_path_buf();
     let bytes = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
@@ -771,9 +902,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::EndpointKind,
+        domain::{
+            Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, User, UserQuotaReset,
+        },
         reconcile::ReconcileRequest,
-        state::{GrantEnabledSource, JsonSnapshotStore, StoreInit},
+        state::{JsonSnapshotStore, StoreInit, UserNodeQuotaConfig},
     };
 
     fn test_store_init(tmp_dir: &Path) -> StoreInit {
@@ -786,33 +919,27 @@ mod tests {
         }
     }
 
-    fn store_with_banned_grant(tmp_dir: &Path) -> (Arc<Mutex<JsonSnapshotStore>>, String) {
-        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp_dir)).unwrap();
-        let node_id = store.list_nodes()[0].node_id.clone();
-        let user = store.create_user("alice".to_string(), None).unwrap();
-        let endpoint = store
-            .create_endpoint(
-                node_id,
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                8388,
-                json!({}),
-            )
-            .unwrap();
-        let grant = store
-            .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-            .unwrap();
-        store
-            .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
-            .unwrap();
-        (Arc::new(Mutex::new(store)), grant.grant_id)
-    }
-
     fn build_entry(cmd: DesiredStateCommand, index: u64) -> openraft::impls::Entry<TypeConfig> {
         let log_id = LogId::new(openraft::CommittedLeaderId::new(1, 1), index);
         openraft::impls::Entry {
             log_id,
             payload: EntryPayload::Normal(cmd),
         }
+    }
+
+    fn build_retired_grant_group_raw_entry(index: u64, cmd_type: &str) -> serde_json::Value {
+        let log_id = LogId::new(openraft::CommittedLeaderId::new(1, 1), index);
+        let mut raw_entry = serde_json::to_value(openraft::impls::Entry::<TypeConfig> {
+            log_id,
+            payload: EntryPayload::Blank,
+        })
+        .unwrap();
+        raw_entry["payload"] = json!({
+            "normal": {
+                "type": cmd_type,
+            }
+        });
+        raw_entry
     }
 
     #[tokio::test]
@@ -868,44 +995,168 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_grant_enabled_manual_clears_quota_banned_state_machine() {
+    async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
         let tmp = tempfile::tempdir().unwrap();
-        let (store, grant_id) = store_with_banned_grant(tmp.path());
         let reconcile = ReconcileHandle::noop();
+        let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+        let store = Arc::new(Mutex::new(store));
         let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
             .await
             .unwrap();
 
-        let cmd = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.clone(),
-            enabled: false,
-            source: GrantEnabledSource::Manual,
+        let node = Node {
+            node_id: "node_1".to_string(),
+            node_name: "node-1".to_string(),
+            access_host: "example.com".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
         };
-        let entry = build_entry(cmd, 1);
-        state_machine.apply(vec![entry]).await.unwrap();
+        let endpoint = Endpoint {
+            endpoint_id: "endpoint_1".to_string(),
+            node_id: node.node_id.clone(),
+            tag: "ss".to_string(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 8388,
+            meta: json!({}),
+        };
+        let user = User {
+            user_id: "user_1".to_string(),
+            display_name: "alice".to_string(),
+            subscription_token: "sub_1".to_string(),
+            credential_epoch: 0,
+            priority_tier: Default::default(),
+            quota_reset: UserQuotaReset::default(),
+        };
 
-        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
-        assert!(!usage.quota_banned);
+        let legacy_snapshot = json!({
+            "state": {
+                "schema_version": 9,
+                "nodes": {
+                    node.node_id.clone(): node,
+                },
+                "endpoints": {
+                    endpoint.endpoint_id.clone(): endpoint,
+                },
+                "users": {
+                    user.user_id.clone(): user,
+                },
+                "grants": {
+                    "grant_1": {
+                        "grant_id": "grant_1",
+                        "user_id": "user_1",
+                        "endpoint_id": "endpoint_1",
+                        "enabled": true,
+                    },
+                },
+                "user_node_quotas": {
+                    "user_1": {
+                        "node_1": UserNodeQuotaConfig {
+                            quota_limit_bytes: Some(100 * 1024 * 1024 * 1024),
+                            quota_reset_source: QuotaResetSource::User,
+                        }
+                    }
+                }
+            }
+        });
+
+        let bytes = serde_json::to_vec_pretty(&legacy_snapshot).unwrap();
+        let meta = SnapshotMeta {
+            last_log_id: None,
+            last_membership: StoredMembership::default(),
+            snapshot_id: "snapshot-test".to_string(),
+        };
+
+        state_machine
+            .install_snapshot(&meta, Box::new(std::io::Cursor::new(bytes)))
+            .await
+            .unwrap();
+
+        let store = store.lock().await;
+        assert_eq!(store.state().schema_version, crate::state::SCHEMA_VERSION);
+        assert!(store.state().user_node_quotas.is_empty());
+        assert!(
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .any(|m| m.user_id == "user_1"
+                    && m.endpoint_id == "endpoint_1"
+                    && m.node_id == "node_1")
+        );
     }
 
     #[tokio::test]
-    async fn set_grant_enabled_quota_keeps_quota_banned_state_machine() {
+    async fn read_wal_with_compat_rejects_non_array_entries() {
         let tmp = tempfile::tempdir().unwrap();
-        let (store, grant_id) = store_with_banned_grant(tmp.path());
-        let reconcile = ReconcileHandle::noop();
-        let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
-            .await
-            .unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": null,
+            "entries": {
+                "unexpected": true
+            }
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
 
-        let cmd = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.clone(),
-            enabled: false,
-            source: GrantEnabledSource::Quota,
-        };
-        let entry = build_entry(cmd, 1);
-        state_machine.apply(vec![entry]).await.unwrap();
+        let err = read_wal_with_compat(&wal_path, Some(0)).await.unwrap_err();
+        assert!(err.to_string().contains("entries"));
+        assert!(err.to_string().contains("array"));
+    }
 
-        let usage = store.lock().await.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unapplied_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "create_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(4)).await.unwrap_err();
+        assert!(err.to_string().contains("not applied yet"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rejects_unpurged_retired_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "replace_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 4)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let err = read_wal_with_compat(&wal_path, Some(10)).await.unwrap_err();
+        assert!(err.to_string().contains("active log range"));
+    }
+
+    #[tokio::test]
+    async fn read_wal_with_compat_rewrites_purged_retired_entry_to_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wal_path = tmp.path().join("wal.json");
+        let raw_entry = build_retired_grant_group_raw_entry(5, "delete_grant_group");
+        let last_purged_log_id =
+            serde_json::to_value(LogId::new(openraft::CommittedLeaderId::new(1, 1), 5)).unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "last_purged_log_id": last_purged_log_id,
+            "entries": [raw_entry]
+        }))
+        .unwrap();
+        std::fs::write(&wal_path, raw).unwrap();
+
+        let (wal, rewritten) = read_wal_with_compat(&wal_path, Some(10)).await.unwrap();
+        assert!(rewritten);
+        assert_eq!(wal.entries.len(), 1);
+        assert!(matches!(wal.entries[0].payload, EntryPayload::Blank));
     }
 }

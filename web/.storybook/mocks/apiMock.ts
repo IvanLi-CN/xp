@@ -16,10 +16,7 @@ import type { AdminQuotaPolicyGlobalWeightRow } from "../../src/api/adminQuotaPo
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
-import type {
-	AdminUserAccessItem,
-	AdminUserAccessReplaceRequest,
-} from "../../src/api/adminUserAccess";
+import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
@@ -31,7 +28,6 @@ import type {
 	AdminUserTokenResponse,
 } from "../../src/api/adminUsers";
 import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
-import type { GrantCredentials } from "../../src/api/grantCredentials";
 import type { HealthResponse } from "../../src/api/health";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import type { VersionCheckResponse } from "../../src/api/versionCheck";
@@ -61,7 +57,7 @@ type MockStateSeed = {
 	endpoints: MockEndpointSeed[];
 	realityDomains: AdminRealityDomain[];
 	users: AdminUser[];
-	userAccessByUser: Record<string, AdminUserAccessItem[]>;
+	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
@@ -77,7 +73,6 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failVersionCheck: boolean;
 	counters: {
 		endpoint: number;
-		grant: number;
 		joinToken: number;
 		realityDomain: number;
 		shortId: number;
@@ -450,6 +445,7 @@ function createDefaultSeed(): MockStateSeed {
 			user_id: userId1,
 			display_name: "Alice",
 			subscription_token: subToken1,
+			credential_epoch: 0,
 			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(1),
 		},
@@ -457,6 +453,7 @@ function createDefaultSeed(): MockStateSeed {
 			user_id: userId2,
 			display_name: "Bob",
 			subscription_token: subToken2,
+			credential_epoch: 0,
 			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(15),
 		},
@@ -474,38 +471,19 @@ function createDefaultSeed(): MockStateSeed {
 		"node-1": { node_id: "node-1", inherit_global: true },
 		"node-2": { node_id: "node-2", inherit_global: true },
 	};
-
-	const userAccessByUser: Record<string, AdminUserAccessItem[]> = {
+	const userAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 		[userId1]: [
 			{
-				membership: {
-					user_id: userId1,
-					node_id: "node-1",
-					endpoint_id: "endpoint-1",
-				},
-				grant: {
-					grant_id: "grant-mock-1",
-					enabled: true,
-					quota_limit_bytes: 10_000_000,
-					note: "Priority",
-					credentials: createGrantCredentials(endpoints[0], 1),
-				},
+				user_id: userId1,
+				endpoint_id: "endpoint-1",
+				node_id: "node-1",
 			},
 		],
 		[userId2]: [
 			{
-				membership: {
-					user_id: userId2,
-					node_id: "node-2",
-					endpoint_id: "endpoint-2",
-				},
-				grant: {
-					grant_id: "grant-mock-2",
-					enabled: true,
-					quota_limit_bytes: 5_000_000,
-					note: null,
-					credentials: createGrantCredentials(endpoints[1], 2),
-				},
+				user_id: userId2,
+				endpoint_id: "endpoint-2",
+				node_id: "node-2",
 			},
 		],
 	};
@@ -515,16 +493,15 @@ function createDefaultSeed(): MockStateSeed {
 		unreachable_nodes: [],
 		items: [
 			{
-				type: "quota_warning",
-				grant_id: "grant-1",
+				type: "quota_banned_membership",
+				membership_key: `${userId1}::endpoint-1`,
+				user_id: userId1,
 				endpoint_id: "endpoint-1",
 				owner_node_id: "node-1",
-				desired_enabled: true,
-				quota_banned: false,
+				quota_banned: true,
 				quota_banned_at: null,
-				effective_enabled: true,
-				message: "Usage is near the quota limit.",
-				action_hint: "Consider raising the quota.",
+				message: "Quota enforced on owner node (membership is blocked).",
+				action_hint: "Wait for rollover/unban or adjust quota policy.",
 			},
 		],
 	};
@@ -561,7 +538,7 @@ function createDefaultSeed(): MockStateSeed {
 		endpoints,
 		realityDomains,
 		users,
-		userAccessByUser,
+		userAccessByUserId,
 		nodeQuotas: [],
 		userNodeWeights,
 		userGlobalWeights,
@@ -583,7 +560,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		realityDomains: overrides?.realityDomains ?? base.realityDomains,
 		users: overrides?.users ?? base.users,
-		userAccessByUser: overrides?.userAccessByUser ?? base.userAccessByUser,
+		userAccessByUserId: {
+			...base.userAccessByUserId,
+			...(overrides?.userAccessByUserId ?? {}),
+		},
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
 		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
@@ -599,7 +579,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 
 	const counters = {
 		endpoint: 1,
-		grant: 1,
 		joinToken: 1,
 		realityDomain: 1,
 		shortId: 1,
@@ -623,27 +602,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	return state;
 }
 
-function createGrantCredentials(
-	endpoint: AdminEndpoint | undefined,
-	counter: number,
-): GrantCredentials {
-	if (!endpoint || endpoint.kind === "vless_reality_vision_tcp") {
-		return {
-			vless: {
-				uuid: `22222222-2222-2222-2222-${String(counter).padStart(12, "0")}`,
-				email: `user${counter}@example.com`,
-			},
-		};
-	}
-
-	return {
-		ss2022: {
-			method: "2022-blake3-aes-128-gcm",
-			password: `mock-password-${counter}`,
-		},
-	};
-}
-
 function buildSubscriptionText(token: string, format: string | null): string {
 	if (format === "clash") {
 		return `# clash subscription for ${token}\nproxy: mock-${token}`;
@@ -659,6 +617,17 @@ async function readJson<T>(req: Request): Promise<T | undefined> {
 	} catch {
 		return undefined;
 	}
+}
+
+function ensureUserAccessStore(
+	state: MockState,
+	userId: string,
+): AdminUserAccessItem[] {
+	const existing = state.userAccessByUserId[userId];
+	if (existing) return existing;
+	const items: AdminUserAccessItem[] = [];
+	state.userAccessByUserId[userId] = items;
+	return items;
 }
 
 async function handleRequest(
@@ -950,18 +919,16 @@ async function handleRequest(
 			]),
 		);
 		const endpointIdsByUser = new Map<string, Set<string>>();
-		for (const items of Object.values(state.userAccessByUser)) {
-			for (const item of items) {
-				if (!item.grant.enabled) continue;
-				const endpointNodeId = endpointNodeById.get(
-					item.membership.endpoint_id,
-				);
-				if (!endpointNodeId || endpointNodeId !== nodeId) continue;
-				const userId = item.membership.user_id;
+		for (const [userId, access] of Object.entries(state.userAccessByUserId)) {
+			for (const membership of access) {
+				const endpointNodeId = endpointNodeById.get(membership.endpoint_id);
+				if (!endpointNodeId || endpointNodeId !== nodeId) {
+					continue;
+				}
 				if (!endpointIdsByUser.has(userId)) {
 					endpointIdsByUser.set(userId, new Set<string>());
 				}
-				endpointIdsByUser.get(userId)?.add(item.membership.endpoint_id);
+				endpointIdsByUser.get(userId)?.add(membership.endpoint_id);
 			}
 		}
 
@@ -1342,6 +1309,7 @@ async function handleRequest(
 			user_id: userId,
 			display_name: payload.display_name,
 			subscription_token: token,
+			credential_epoch: 0,
 			priority_tier: "p2",
 			quota_reset:
 				payload.quota_reset ??
@@ -1352,6 +1320,7 @@ async function handleRequest(
 				} satisfies UserQuotaReset),
 		};
 		state.users = [...state.users, user];
+		state.userAccessByUserId[userId] = [];
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		return jsonResponse(user);
 	}
@@ -1384,7 +1353,8 @@ async function handleRequest(
 		}
 		if (method === "DELETE") {
 			state.users = state.users.filter((item) => item.user_id !== userId);
-			delete state.userAccessByUser[userId];
+			delete state.userAccessByUserId[userId];
+			state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
 			return new Response(null, { status: 204 });
 		}
 	}
@@ -1409,6 +1379,79 @@ async function handleRequest(
 		state.subscriptions[token] = buildSubscriptionText(token, null);
 		const response: AdminUserTokenResponse = { subscription_token: token };
 		return jsonResponse(response);
+	}
+
+	const userAccessMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/access$/);
+	if (userAccessMatch && method === "GET") {
+		const userId = decodeURIComponent(userAccessMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const items = ensureUserAccessStore(state, userId);
+		return jsonResponse({ items: clone(items) });
+	}
+
+	if (userAccessMatch && method === "PUT") {
+		const userId = decodeURIComponent(userAccessMatch[1]);
+		const userExists = state.users.some((u) => u.user_id === userId);
+		if (!userExists) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const payload = await readJson<{
+			items?: Array<{ endpoint_id?: unknown }>;
+		}>(req);
+		if (!payload || !Array.isArray(payload.items)) {
+			return errorResponse(400, "invalid_request", "invalid JSON payload");
+		}
+
+		const endpointById = new Map(
+			state.endpoints.map((endpoint) => [endpoint.endpoint_id, endpoint]),
+		);
+
+		const desiredEndpointIds = new Set<string>();
+		for (const item of payload.items) {
+			if (
+				typeof item.endpoint_id !== "string" ||
+				item.endpoint_id.length === 0
+			) {
+				return errorResponse(400, "invalid_request", "invalid access item");
+			}
+			if (!endpointById.has(item.endpoint_id)) {
+				return errorResponse(404, "not_found", "endpoint not found");
+			}
+			desiredEndpointIds.add(item.endpoint_id);
+		}
+
+		const existing = ensureUserAccessStore(state, userId);
+		const existingEndpointIds = new Set(existing.map((i) => i.endpoint_id));
+
+		let created = 0;
+		let deleted = 0;
+		for (const id of desiredEndpointIds) {
+			if (!existingEndpointIds.has(id)) created += 1;
+		}
+		for (const id of existingEndpointIds) {
+			if (!desiredEndpointIds.has(id)) deleted += 1;
+		}
+
+		const nextItems: AdminUserAccessItem[] = [...desiredEndpointIds]
+			.sort()
+			.map((endpointId) => {
+				const endpoint = endpointById.get(endpointId);
+				return {
+					user_id: userId,
+					endpoint_id: endpointId,
+					node_id: endpoint?.node_id ?? "",
+				};
+			});
+
+		state.userAccessByUserId[userId] = nextItems;
+		return jsonResponse({
+			created,
+			deleted,
+			items: clone(nextItems),
+		});
 	}
 
 	const userNodeQuotaStatusMatch = path.match(
@@ -1441,100 +1484,6 @@ async function handleRequest(
 			items,
 		};
 		return jsonResponse(response);
-	}
-
-	const userAccessMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/access$/);
-	if (userAccessMatch) {
-		const userId = decodeURIComponent(userAccessMatch[1]);
-		const userExists = state.users.some((user) => user.user_id === userId);
-		if (!userExists) {
-			return errorResponse(404, "not_found", "user not found");
-		}
-
-		if (method === "GET") {
-			const items = clone(state.userAccessByUser[userId] ?? []);
-			items.sort(
-				(a, b) =>
-					a.membership.node_id.localeCompare(b.membership.node_id) ||
-					a.membership.endpoint_id.localeCompare(b.membership.endpoint_id) ||
-					a.grant.grant_id.localeCompare(b.grant.grant_id),
-			);
-			return jsonResponse({ items });
-		}
-
-		if (method === "PUT") {
-			const payload = await readJson<AdminUserAccessReplaceRequest>(req);
-			if (!payload || !Array.isArray(payload.items)) {
-				return errorResponse(400, "invalid_request", "invalid JSON payload");
-			}
-
-			const endpointsById = new Map(
-				state.endpoints.map(({ active_short_id, short_ids, ...rest }) => [
-					rest.endpoint_id,
-					rest,
-				]),
-			);
-			const existingByEndpoint = new Map(
-				(state.userAccessByUser[userId] ?? []).map((item) => [
-					item.membership.endpoint_id,
-					item,
-				]),
-			);
-			const seenEndpointIds = new Set<string>();
-			const nextItems: AdminUserAccessItem[] = [];
-
-			for (const item of payload.items) {
-				const endpointId = String(item.endpoint_id ?? "").trim();
-				if (!endpointId) {
-					return errorResponse(
-						400,
-						"invalid_request",
-						"endpoint_id is required",
-					);
-				}
-				if (seenEndpointIds.has(endpointId)) {
-					return errorResponse(
-						400,
-						"invalid_request",
-						`duplicate endpoint_id in access payload: ${endpointId}`,
-					);
-				}
-				seenEndpointIds.add(endpointId);
-
-				const endpoint = endpointsById.get(endpointId);
-				if (!endpoint) {
-					return errorResponse(400, "invalid_request", "endpoint not found");
-				}
-				const previous = existingByEndpoint.get(endpointId);
-				const grantCounter = state.counters.grant++;
-
-				nextItems.push({
-					membership: {
-						user_id: userId,
-						node_id: endpoint.node_id,
-						endpoint_id: endpointId,
-					},
-					grant: {
-						grant_id: previous?.grant.grant_id ?? `grant-mock-${grantCounter}`,
-						enabled: true,
-						quota_limit_bytes: previous?.grant.quota_limit_bytes ?? 0,
-						note: item.note ?? null,
-						credentials:
-							previous?.grant.credentials ??
-							createGrantCredentials(endpoint, grantCounter),
-					},
-				});
-			}
-
-			nextItems.sort(
-				(a, b) =>
-					a.membership.node_id.localeCompare(b.membership.node_id) ||
-					a.membership.endpoint_id.localeCompare(b.membership.endpoint_id) ||
-					a.grant.grant_id.localeCompare(b.grant.grant_id),
-			);
-			state.userAccessByUser[userId] = nextItems;
-			return jsonResponse({ items: clone(nextItems) });
-		}
 	}
 
 	if (path === "/api/admin/alerts" && method === "GET") {

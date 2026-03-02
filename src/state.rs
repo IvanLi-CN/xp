@@ -6,32 +6,128 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::{
     domain::{
-        DomainError, Endpoint, EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset,
-        QuotaResetSource, RealityDomain, Ss2022Credentials, User, UserNodeQuota, UserPriorityTier,
-        UserQuotaReset, VlessCredentials, validate_cycle_day_of_month, validate_port,
-        validate_tz_offset_minutes,
+        DomainError, Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain,
+        User, UserNodeQuota, UserPriorityTier, UserQuotaReset, validate_cycle_day_of_month,
+        validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
-        generate_ss2022_psk_b64, rotate_short_ids_in_place, ss2022_password,
-        validate_reality_server_name,
+        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_reality_server_name,
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
+const SCHEMA_VERSION_V9: u32 = 9;
 const SCHEMA_VERSION_V8: u32 = 8;
 const SCHEMA_VERSION_V7: u32 = 7;
 const SCHEMA_VERSION_V6: u32 = 6;
 const SCHEMA_VERSION_V5: u32 = 5;
 const SCHEMA_VERSION_V4: u32 = 4;
-pub const USAGE_SCHEMA_VERSION: u32 = 1;
+pub const USAGE_SCHEMA_VERSION: u32 = 2;
+const USAGE_SCHEMA_VERSION_V1: u32 = 1;
+
+/// Migrate any historical state payload into the latest schema (v10).
+///
+/// This is used by Raft snapshot installation to support upgrades without requiring operators
+/// to start an older binary for snapshot/purge first.
+pub(crate) fn migrate_state_value_to_latest(
+    raw: serde_json::Value,
+) -> Result<PersistedState, StoreError> {
+    let schema_version = raw
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let mut state = match schema_version {
+        SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
+        SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7 | SCHEMA_VERSION_V6
+        | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
+            let mut legacy: PersistedStateV9Compat = serde_json::from_value(raw)?;
+            let migrated = legacy.schema_version != schema_version;
+            let _ = migrated;
+
+            legacy = match schema_version {
+                3 => migrate_v3_to_v4(legacy)?,
+                _ => legacy,
+            };
+            legacy = if legacy.schema_version == SCHEMA_VERSION_V4 {
+                migrate_v4_to_v5(legacy)?
+            } else {
+                legacy
+            };
+            legacy = if legacy.schema_version == SCHEMA_VERSION_V5 {
+                migrate_v5_to_v6(legacy)?
+            } else {
+                legacy
+            };
+            legacy = if legacy.schema_version == SCHEMA_VERSION_V6 {
+                migrate_v6_to_v7(legacy)?
+            } else {
+                legacy
+            };
+            legacy = if legacy.schema_version == SCHEMA_VERSION_V7 {
+                migrate_v7_to_v8(legacy)?
+            } else {
+                legacy
+            };
+
+            let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(legacy)?;
+            v10
+        }
+        2 | 1 => {
+            let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
+            let v4 = migrate_v2_like_to_v3(v2)?;
+            let v5 = migrate_v4_to_v5(v4)?;
+            let v6 = migrate_v5_to_v6(v5)?;
+            let v7 = migrate_v6_to_v7(v6)?;
+            let v8 = migrate_v7_to_v8(v7)?;
+
+            let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(v8)?;
+            v10
+        }
+        got => {
+            return Err(StoreError::SchemaVersionMismatch {
+                expected: SCHEMA_VERSION,
+                got,
+            });
+        }
+    };
+
+    if state.schema_version != SCHEMA_VERSION {
+        return Err(StoreError::SchemaVersionMismatch {
+            expected: SCHEMA_VERSION,
+            got: state.schema_version,
+        });
+    }
+
+    // Keep the same invariant cleanups as `load_or_init()` so snapshot installs don't
+    // resurrect deprecated/invalid indexes.
+    for endpoint in state.endpoints.values_mut() {
+        if endpoint.kind == EndpointKind::VlessRealityVisionTcp
+            && let Some(meta) = endpoint.meta.as_object_mut()
+        {
+            let _ = meta.remove("public_domain");
+        }
+    }
+
+    state.user_global_weights =
+        normalize_user_global_weights(&state, state.user_global_weights.clone());
+    state.node_weight_policies =
+        normalize_node_weight_policies(&state, state.node_weight_policies.clone());
+    state.node_user_endpoint_memberships = normalize_node_user_endpoint_memberships(
+        &state,
+        state.node_user_endpoint_memberships.clone(),
+    );
+    state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&state);
+
+    Ok(state)
+}
 
 #[derive(Debug, Clone)]
 pub struct StoreInit {
@@ -110,8 +206,6 @@ pub struct PersistedState {
     #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
-    pub grants: BTreeMap<String, Grant>,
-    #[serde(default)]
     pub reality_domains: Vec<RealityDomain>,
     #[serde(default)]
     pub user_node_quotas: BTreeMap<String, BTreeMap<String, UserNodeQuotaConfig>>,
@@ -129,6 +223,58 @@ impl PersistedState {
     pub fn empty() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            nodes: BTreeMap::new(),
+            endpoints: BTreeMap::new(),
+            endpoint_probe_history: BTreeMap::new(),
+            users: BTreeMap::new(),
+            reality_domains: Vec::new(),
+            user_node_quotas: BTreeMap::new(),
+            user_node_weights: BTreeMap::new(),
+            user_global_weights: BTreeMap::new(),
+            node_weight_policies: BTreeMap::new(),
+            node_user_endpoint_memberships: BTreeSet::new(),
+        }
+    }
+}
+
+/// Legacy persisted state (schema_version <= 9) that still includes `grants`.
+///
+/// This exists to support state.json + snapshot upgrades without requiring operators to
+/// boot an old binary for cleanup.
+///
+/// TODO(remove-compat): remove once all clusters have upgraded to schema v10 and completed
+/// at least one snapshot/purge cycle, then bump schema again (v11).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct PersistedStateV9Compat {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub nodes: BTreeMap<String, Node>,
+    #[serde(default)]
+    pub endpoints: BTreeMap<String, Endpoint>,
+    #[serde(default)]
+    pub endpoint_probe_history: BTreeMap<String, EndpointProbeHistory>,
+    #[serde(default)]
+    pub users: BTreeMap<String, User>,
+    #[serde(default)]
+    pub grants: BTreeMap<String, LegacyGrantCompat>,
+    #[serde(default)]
+    pub reality_domains: Vec<RealityDomain>,
+    #[serde(default)]
+    pub user_node_quotas: BTreeMap<String, BTreeMap<String, UserNodeQuotaConfig>>,
+    #[serde(default)]
+    pub user_node_weights: BTreeMap<String, BTreeMap<String, UserNodeWeightConfig>>,
+    #[serde(default)]
+    pub user_global_weights: BTreeMap<String, UserGlobalWeightConfig>,
+    #[serde(default)]
+    pub node_weight_policies: BTreeMap<String, NodeWeightPolicyConfig>,
+    #[serde(default)]
+    pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
+}
+
+impl PersistedStateV9Compat {
+    fn empty_with_version(schema_version: u32) -> Self {
+        Self {
+            schema_version,
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
@@ -239,6 +385,14 @@ pub struct NodeUserEndpointMembership {
     pub endpoint_id: String,
 }
 
+pub fn membership_key(user_id: &str, endpoint_id: &str) -> String {
+    format!("{user_id}::{endpoint_id}")
+}
+
+pub fn membership_xray_email(user_id: &str, endpoint_id: &str) -> String {
+    format!("m:{}", membership_key(user_id, endpoint_id))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum CyclePolicyDefaultV2 {
@@ -275,7 +429,8 @@ struct GrantV2 {
     cycle_policy: CyclePolicyV2,
     cycle_day_of_month: Option<u8>,
     note: Option<String>,
-    credentials: GrantCredentials,
+    #[serde(default)]
+    credentials: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -293,7 +448,9 @@ struct PersistedStateV2Like {
     user_node_quotas: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
-fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, StoreError> {
+fn migrate_v2_like_to_v3(
+    input: PersistedStateV2Like,
+) -> Result<PersistedStateV9Compat, StoreError> {
     let PersistedStateV2Like {
         schema_version: _,
         nodes,
@@ -305,8 +462,7 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
 
     let users_v2 = users;
 
-    let mut out = PersistedState::empty();
-    out.schema_version = SCHEMA_VERSION_V4;
+    let mut out = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V4);
     out.nodes = nodes;
     out.endpoints = endpoints;
 
@@ -319,6 +475,7 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
                 user_id: user.user_id.clone(),
                 display_name: user.display_name.clone(),
                 subscription_token: user.subscription_token.clone(),
+                credential_epoch: 0,
                 priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::Monthly {
                     day_of_month: user.cycle_day_of_month_default,
@@ -450,14 +607,11 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
 
         out.grants.insert(
             grant.grant_id.clone(),
-            Grant {
+            LegacyGrantCompat {
                 grant_id: grant.grant_id,
                 user_id: grant.user_id,
                 endpoint_id: grant.endpoint_id,
                 enabled: grant.enabled,
-                quota_limit_bytes: grant.quota_limit_bytes,
-                note: grant.note,
-                credentials: grant.credentials,
             },
         );
     }
@@ -473,7 +627,9 @@ fn migrate_v2_like_to_v3(input: PersistedStateV2Like) -> Result<PersistedState, 
     Ok(out)
 }
 
-fn migrate_v3_to_v4(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+fn migrate_v3_to_v4(
+    mut input: PersistedStateV9Compat,
+) -> Result<PersistedStateV9Compat, StoreError> {
     if input.schema_version != 3 {
         return Err(StoreError::Migration {
             message: format!(
@@ -507,7 +663,9 @@ fn default_seed_reality_domains() -> Vec<RealityDomain> {
     ]
 }
 
-fn migrate_v4_to_v5(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+fn migrate_v4_to_v5(
+    mut input: PersistedStateV9Compat,
+) -> Result<PersistedStateV9Compat, StoreError> {
     if input.schema_version != SCHEMA_VERSION_V4 {
         return Err(StoreError::Migration {
             message: format!(
@@ -526,22 +684,7 @@ fn migrate_v4_to_v5(mut input: PersistedState) -> Result<PersistedState, StoreEr
 fn build_node_user_endpoint_memberships(
     state: &PersistedState,
 ) -> BTreeSet<NodeUserEndpointMembership> {
-    let mut out = BTreeSet::new();
-    for grant in state.grants.values() {
-        // Endpoint can be concurrently deleted while grant still exists in legacy data.
-        let Some(endpoint) = state.endpoints.get(&grant.endpoint_id) else {
-            continue;
-        };
-        if !state.users.contains_key(&grant.user_id) {
-            continue;
-        }
-        out.insert(NodeUserEndpointMembership {
-            user_id: grant.user_id.clone(),
-            node_id: endpoint.node_id.clone(),
-            endpoint_id: endpoint.endpoint_id.clone(),
-        });
-    }
-    out
+    normalize_node_user_endpoint_memberships(state, state.node_user_endpoint_memberships.clone())
 }
 
 fn normalize_node_user_endpoint_memberships(
@@ -556,10 +699,12 @@ fn normalize_node_user_endpoint_memberships(
         let Some(endpoint) = state.endpoints.get(&membership.endpoint_id) else {
             continue;
         };
-        if endpoint.node_id != membership.node_id {
-            continue;
-        }
-        out.insert(membership);
+        // `node_id` is a redundant index; it must always follow the endpoint's node_id.
+        out.insert(NodeUserEndpointMembership {
+            user_id: membership.user_id,
+            node_id: endpoint.node_id.clone(),
+            endpoint_id: membership.endpoint_id,
+        });
     }
     out
 }
@@ -568,7 +713,28 @@ fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(state);
 }
 
-fn migrate_v5_to_v6(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+fn build_node_user_endpoint_memberships_from_legacy_grants(
+    state: &PersistedStateV9Compat,
+) -> BTreeSet<NodeUserEndpointMembership> {
+    let mut out = BTreeSet::new();
+    for grant in state.grants.values() {
+        let Some(endpoint) = state.endpoints.get(&grant.endpoint_id) else {
+            continue;
+        };
+        if !state.users.contains_key(&grant.user_id) {
+            continue;
+        }
+        out.insert(NodeUserEndpointMembership {
+            user_id: grant.user_id.clone(),
+            node_id: endpoint.node_id.clone(),
+            endpoint_id: endpoint.endpoint_id.clone(),
+        });
+    }
+    out
+}
+fn migrate_v5_to_v6(
+    mut input: PersistedStateV9Compat,
+) -> Result<PersistedStateV9Compat, StoreError> {
     if input.schema_version != SCHEMA_VERSION_V5 {
         return Err(StoreError::Migration {
             message: format!(
@@ -581,7 +747,9 @@ fn migrate_v5_to_v6(mut input: PersistedState) -> Result<PersistedState, StoreEr
     Ok(input)
 }
 
-fn migrate_v6_to_v7(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+fn migrate_v6_to_v7(
+    mut input: PersistedStateV9Compat,
+) -> Result<PersistedStateV9Compat, StoreError> {
     if input.schema_version != SCHEMA_VERSION_V6 {
         return Err(StoreError::Migration {
             message: format!(
@@ -591,11 +759,14 @@ fn migrate_v6_to_v7(mut input: PersistedState) -> Result<PersistedState, StoreEr
         });
     }
     input.schema_version = SCHEMA_VERSION_V7;
-    input.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&input);
+    input.node_user_endpoint_memberships =
+        build_node_user_endpoint_memberships_from_legacy_grants(&input);
     Ok(input)
 }
 
-fn migrate_v7_to_v8(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+fn migrate_v7_to_v8(
+    mut input: PersistedStateV9Compat,
+) -> Result<PersistedStateV9Compat, StoreError> {
     if input.schema_version != SCHEMA_VERSION_V7 {
         return Err(StoreError::Migration {
             message: format!(
@@ -620,34 +791,187 @@ fn migrate_v7_to_v8(mut input: PersistedState) -> Result<PersistedState, StoreEr
     Ok(input)
 }
 
-fn migrate_v8_to_v9(mut input: PersistedState) -> Result<PersistedState, StoreError> {
-    if input.schema_version != SCHEMA_VERSION_V8 {
-        return Err(StoreError::Migration {
-            message: format!(
-                "unexpected schema version for v8->v9 migration: {}",
-                input.schema_version
-            ),
-        });
-    }
-    input.schema_version = SCHEMA_VERSION;
+#[derive(Debug, Default, Clone)]
+struct MigrateV9ToV10Stats {
+    grants_total: usize,
+    grants_orphan_dropped: usize,
+    memberships_created: usize,
+    memberships_deduped: usize,
+    user_node_quotas_cleared: usize,
+}
 
-    // Hard-cut access model: only keep enabled grants and normalize duplicate
-    // (user_id, endpoint_id) pairs deterministically.
-    let mut seen_pairs = BTreeSet::<(String, String)>::new();
-    let mut grants = BTreeMap::new();
+fn migrate_v9_compat_to_v10(
+    input: PersistedStateV9Compat,
+) -> Result<
+    (
+        PersistedState,
+        BTreeMap<String, String>,
+        MigrateV9ToV10Stats,
+    ),
+    StoreError,
+> {
+    let mut stats = MigrateV9ToV10Stats {
+        grants_total: input.grants.len(),
+        user_node_quotas_cleared: input.user_node_quotas.values().map(|m| m.len()).sum(),
+        ..Default::default()
+    };
+
+    let mut out = PersistedState::empty();
+    out.schema_version = SCHEMA_VERSION;
+    out.nodes = input.nodes;
+    out.endpoints = input.endpoints;
+    out.endpoint_probe_history = input.endpoint_probe_history;
+    out.users = input.users;
+    out.reality_domains = input.reality_domains;
+    // Hard cut: disable historical static overrides.
+    out.user_node_quotas = BTreeMap::new();
+    out.user_node_weights = input.user_node_weights;
+    out.user_global_weights = input.user_global_weights;
+    out.node_weight_policies = input.node_weight_policies;
+
+    let mut grant_id_to_membership_key = BTreeMap::<String, String>::new();
+    let mut membership_by_pair = BTreeMap::<(String, String), NodeUserEndpointMembership>::new();
+
     for (grant_id, grant) in input.grants {
-        if !grant.enabled {
+        if !out.users.contains_key(&grant.user_id) {
+            stats.grants_orphan_dropped += 1;
             continue;
         }
-        let pair = (grant.user_id.clone(), grant.endpoint_id.clone());
-        if !seen_pairs.insert(pair) {
+        let Some(endpoint) = out.endpoints.get(&grant.endpoint_id) else {
+            stats.grants_orphan_dropped += 1;
             continue;
+        };
+
+        grant_id_to_membership_key
+            .insert(grant_id, membership_key(&grant.user_id, &grant.endpoint_id));
+
+        let pair_key = (grant.user_id.clone(), grant.endpoint_id.clone());
+        let existed = membership_by_pair.contains_key(&pair_key);
+        membership_by_pair
+            .entry(pair_key)
+            .or_insert_with(|| NodeUserEndpointMembership {
+                user_id: grant.user_id.clone(),
+                node_id: endpoint.node_id.clone(),
+                endpoint_id: grant.endpoint_id.clone(),
+            });
+        if existed {
+            stats.memberships_deduped += 1;
         }
-        grants.insert(grant_id, grant);
     }
-    input.grants = grants;
-    input.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&input);
-    Ok(input)
+
+    out.node_user_endpoint_memberships = membership_by_pair.into_values().collect();
+    stats.memberships_created = out.node_user_endpoint_memberships.len();
+
+    // Normalize node_id indexes to match endpoints.
+    sync_node_user_endpoint_memberships(&mut out);
+
+    Ok((out, grant_id_to_membership_key, stats))
+}
+
+#[derive(Debug, Default, Clone)]
+struct MigrateUsageV1ToV2Stats {
+    grants_total: usize,
+    grants_mapped: usize,
+    grants_dropped_no_mapping: usize,
+    memberships_created: usize,
+    memberships_dropped_not_in_state: usize,
+}
+
+fn migrate_usage_v1_to_v2(
+    input: PersistedUsageV1Compat,
+    grant_id_to_membership_key: &BTreeMap<String, String>,
+    allowed_membership_keys: &BTreeSet<String>,
+) -> (PersistedUsage, MigrateUsageV1ToV2Stats) {
+    let mut stats = MigrateUsageV1ToV2Stats {
+        grants_total: input.grants.len(),
+        ..Default::default()
+    };
+
+    let mut grouped = BTreeMap::<String, Vec<GrantUsageV1Compat>>::new();
+    for (grant_id, usage) in input.grants {
+        let Some(membership_key) = grant_id_to_membership_key.get(&grant_id) else {
+            stats.grants_dropped_no_mapping += 1;
+            continue;
+        };
+        stats.grants_mapped += 1;
+        grouped
+            .entry(membership_key.clone())
+            .or_default()
+            .push(usage);
+    }
+
+    let mut out = PersistedUsage {
+        schema_version: USAGE_SCHEMA_VERSION,
+        memberships: BTreeMap::new(),
+        user_node_pacing: input.user_node_pacing,
+        node_pacing: input.node_pacing,
+        user_credential_epochs_applied: BTreeMap::new(),
+        endpoint_users_applied: BTreeMap::new(),
+    };
+
+    for (membership_key, entries) in grouped {
+        if !allowed_membership_keys.contains(&membership_key) {
+            stats.memberships_dropped_not_in_state += 1;
+            continue;
+        }
+
+        // Effective window is picked from the entry with max last_seen_at.
+        let mut effective_start = String::new();
+        let mut effective_end = String::new();
+        let mut max_seen = None::<String>;
+        for e in entries.iter() {
+            if max_seen
+                .as_deref()
+                .is_none_or(|prev| e.last_seen_at.as_str() > prev)
+            {
+                max_seen = Some(e.last_seen_at.clone());
+                effective_start = e.cycle_start_at.clone();
+                effective_end = e.cycle_end_at.clone();
+            }
+        }
+
+        let mut used_bytes = 0u64;
+        let mut quota_banned = false;
+        let mut quota_banned_at = None::<String>;
+        let mut last_seen_at = String::new();
+
+        for e in entries.iter() {
+            if e.last_seen_at > last_seen_at {
+                last_seen_at = e.last_seen_at.clone();
+            }
+            if e.cycle_start_at != effective_start || e.cycle_end_at != effective_end {
+                continue;
+            }
+
+            used_bytes = used_bytes.saturating_add(e.used_bytes);
+            quota_banned = quota_banned || e.quota_banned;
+            if let Some(at) = &e.quota_banned_at
+                && quota_banned_at
+                    .as_deref()
+                    .is_none_or(|prev| at.as_str() > prev)
+            {
+                quota_banned_at = Some(at.clone());
+            }
+        }
+
+        out.memberships.insert(
+            membership_key,
+            MembershipUsage {
+                cycle_start_at: effective_start,
+                cycle_end_at: effective_end,
+                used_bytes,
+                // Force a baseline rebuild on the new email key to avoid negative deltas.
+                last_uplink_total: 0,
+                last_downlink_total: 0,
+                last_seen_at,
+                quota_banned,
+                quota_banned_at,
+            },
+        );
+    }
+
+    stats.memberships_created = out.memberships.len();
+    (out, stats)
 }
 
 fn normalize_user_global_weights(
@@ -675,7 +999,6 @@ fn normalize_node_weight_policies(
     }
     out
 }
-
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
@@ -738,10 +1061,7 @@ mod migrate_tests {
                 cycle_policy: CyclePolicyV2::ByNode,
                 cycle_day_of_month: Some(1),
                 note: None,
-                credentials: GrantCredentials {
-                    vless: None,
-                    ss2022: None,
-                },
+                credentials: serde_json::json!({}),
             },
         );
 
@@ -773,8 +1093,7 @@ mod migrate_tests {
 
     #[test]
     fn migrate_v4_to_v5_seeds_reality_domains_when_empty() {
-        let mut v4 = PersistedState::empty();
-        v4.schema_version = SCHEMA_VERSION_V4;
+        let mut v4 = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V4);
         v4.reality_domains = Vec::new();
 
         let v5 = migrate_v4_to_v5(v4).expect("migration should succeed");
@@ -784,8 +1103,7 @@ mod migrate_tests {
 
     #[test]
     fn migrate_v4_to_v5_does_not_override_existing_reality_domains() {
-        let mut v4 = PersistedState::empty();
-        v4.schema_version = SCHEMA_VERSION_V4;
+        let mut v4 = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V4);
         v4.reality_domains = vec![RealityDomain {
             domain_id: "custom_1".to_string(),
             server_name: "example.com".to_string(),
@@ -801,14 +1119,14 @@ mod migrate_tests {
 
     #[test]
     fn migrate_v6_to_v7_seeds_node_user_endpoint_memberships_from_grants() {
-        let mut v6 = PersistedState::empty();
-        v6.schema_version = SCHEMA_VERSION_V6;
+        let mut v6 = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V6);
         v6.users.insert(
             "user_1".to_string(),
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
             },
@@ -837,17 +1155,11 @@ mod migrate_tests {
         );
         v6.grants.insert(
             "grant_1".to_string(),
-            Grant {
+            LegacyGrantCompat {
                 grant_id: "grant_1".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
                 enabled: true,
-                quota_limit_bytes: 1,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: None,
-                    ss2022: None,
-                },
             },
         );
 
@@ -865,14 +1177,14 @@ mod migrate_tests {
 
     #[test]
     fn migrate_v7_to_v8_keeps_existing_weights_and_sets_latest_schema() {
-        let mut v7 = PersistedState::empty();
-        v7.schema_version = SCHEMA_VERSION_V7;
+        let mut v7 = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V7);
         v7.users.insert(
             "user_1".to_string(),
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
             },
@@ -889,20 +1201,21 @@ mod migrate_tests {
     }
 
     #[test]
-    fn migrate_v8_to_v9_drops_disabled_grants_and_sets_latest_schema() {
-        let mut v8 = PersistedState::empty();
-        v8.schema_version = SCHEMA_VERSION_V8;
-        v8.users.insert(
+    fn migrate_v9_compat_to_v10_extracts_memberships_and_clears_user_node_quotas() {
+        let mut v9 = PersistedStateV9Compat::empty_with_version(SCHEMA_VERSION_V9);
+
+        v9.users.insert(
             "user_1".to_string(),
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
             },
         );
-        v8.nodes.insert(
+        v9.nodes.insert(
             "node_1".to_string(),
             Node {
                 node_id: "node_1".to_string(),
@@ -913,7 +1226,7 @@ mod migrate_tests {
                 quota_reset: NodeQuotaReset::default(),
             },
         );
-        v8.endpoints.insert(
+        v9.endpoints.insert(
             "endpoint_1".to_string(),
             Endpoint {
                 endpoint_id: "endpoint_1".to_string(),
@@ -924,60 +1237,88 @@ mod migrate_tests {
                 meta: serde_json::json!({}),
             },
         );
-        v8.grants.insert(
-            "grant_enabled".to_string(),
-            Grant {
-                grant_id: "grant_enabled".to_string(),
+
+        v9.grants.insert(
+            "grant_0".to_string(),
+            LegacyGrantCompat {
+                grant_id: "grant_0".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
                 enabled: true,
-                quota_limit_bytes: 1,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: None,
-                    ss2022: None,
-                },
             },
         );
-        v8.grants.insert(
-            "grant_disabled".to_string(),
-            Grant {
-                grant_id: "grant_disabled".to_string(),
+        v9.grants.insert(
+            "grant_1".to_string(),
+            LegacyGrantCompat {
+                grant_id: "grant_1".to_string(),
                 user_id: "user_1".to_string(),
                 endpoint_id: "endpoint_1".to_string(),
                 enabled: false,
-                quota_limit_bytes: 1,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: None,
-                    ss2022: None,
-                },
+            },
+        );
+        v9.grants.insert(
+            "grant_orphan_user".to_string(),
+            LegacyGrantCompat {
+                grant_id: "grant_orphan_user".to_string(),
+                user_id: "user_missing".to_string(),
+                endpoint_id: "endpoint_1".to_string(),
+                enabled: true,
+            },
+        );
+        v9.grants.insert(
+            "grant_orphan_endpoint".to_string(),
+            LegacyGrantCompat {
+                grant_id: "grant_orphan_endpoint".to_string(),
+                user_id: "user_1".to_string(),
+                endpoint_id: "endpoint_missing".to_string(),
+                enabled: true,
             },
         );
 
-        let v9 = migrate_v8_to_v9(v8).expect("migration should succeed");
-        assert_eq!(v9.schema_version, SCHEMA_VERSION);
-        assert!(v9.grants.contains_key("grant_enabled"));
-        assert!(!v9.grants.contains_key("grant_disabled"));
+        v9.user_node_quotas.insert(
+            "user_1".to_string(),
+            BTreeMap::from([(
+                "node_missing".to_string(),
+                UserNodeQuotaConfig {
+                    quota_limit_bytes: Some(123),
+                    quota_reset_source: QuotaResetSource::User,
+                },
+            )]),
+        );
+        v9.user_node_quotas.insert(
+            "user_missing".to_string(),
+            BTreeMap::from([(
+                "node_1".to_string(),
+                UserNodeQuotaConfig {
+                    quota_limit_bytes: Some(321),
+                    quota_reset_source: QuotaResetSource::User,
+                },
+            )]),
+        );
+
+        let (v10, mapping, stats) = migrate_v9_compat_to_v10(v9).expect("migration should succeed");
+        assert_eq!(v10.schema_version, SCHEMA_VERSION);
+        assert!(v10.user_node_quotas.is_empty());
+        assert_eq!(v10.node_user_endpoint_memberships.len(), 1);
+        assert_eq!(
+            mapping.get("grant_0"),
+            Some(&"user_1::endpoint_1".to_string())
+        );
+        assert_eq!(
+            mapping.get("grant_1"),
+            Some(&"user_1::endpoint_1".to_string())
+        );
+        assert!(mapping.get("grant_orphan_user").is_none());
+        assert!(mapping.get("grant_orphan_endpoint").is_none());
+        assert_eq!(stats.grants_total, 4);
+        assert_eq!(stats.grants_orphan_dropped, 2);
+        assert_eq!(stats.memberships_created, 1);
+        assert_eq!(stats.memberships_deduped, 1);
+        assert_eq!(stats.user_node_quotas_cleared, 2);
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GrantEnabledSource {
-    #[default]
-    Manual,
-    Quota,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UserAccessItem {
-    pub endpoint_id: String,
-    #[serde(default)]
-    pub note: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateCommand {
     UpsertNode {
@@ -1038,35 +1379,23 @@ pub enum DesiredStateCommand {
         node_id: String,
         inherit_global: bool,
     },
-    UpsertGrant {
-        grant: Grant,
-    },
-    DeleteGrant {
-        grant_id: String,
-    },
-    /// Legacy WAL compatibility only. Not exposed by HTTP APIs.
-    CreateGrantGroup {
-        group_name: String,
-        grants: Vec<Grant>,
-    },
-    /// Legacy WAL compatibility only. Not exposed by HTTP APIs.
-    ReplaceGrantGroup {
-        group_name: String,
-        grants: Vec<Grant>,
-    },
-    /// Legacy WAL compatibility only. Not exposed by HTTP APIs.
-    DeleteGrantGroup {
-        group_name: String,
-    },
+    /// Replace the user's access set (membership-only hard cut).
     ReplaceUserAccess {
         user_id: String,
-        items: Vec<UserAccessItem>,
+        endpoint_ids: Vec<String>,
     },
-    SetGrantEnabled {
-        grant_id: String,
-        enabled: bool,
-        #[serde(default)]
-        source: GrantEnabledSource,
+    /// Ensure an access membership exists (idempotent; internal use).
+    EnsureMembership {
+        user_id: String,
+        endpoint_id: String,
+    },
+    /// Bump `user.credential_epoch` to rotate derived credentials.
+    BumpUserCredentialEpoch {
+        user_id: String,
+    },
+    /// Legacy/WAL compatibility no-op.
+    CompatNoop {
+        note: String,
     },
     AppendEndpointProbeSamples {
         /// Hour bucket key like `2026-02-07T12:00:00Z`.
@@ -1074,6 +1403,286 @@ pub enum DesiredStateCommand {
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
+}
+
+// ---- WAL backward compatibility ----
+//
+// We keep legacy grants commands parseable so a node can upgrade and replay old WAL entries
+// without requiring operators to boot an old binary for snapshot/purge.
+//
+// TODO(remove-compat): remove this shim after all clusters have upgraded to schema v10 and have
+// completed at least one snapshot/purge cycle, then bump schema again (v11).
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum GrantEnabledSourceCompat {
+    #[default]
+    Manual,
+    Quota,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct LegacyGrantCompat {
+    #[serde(default)]
+    grant_id: String,
+    user_id: String,
+    endpoint_id: String,
+    #[serde(default)]
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct UserAccessItemCompat {
+    endpoint_id: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum DesiredStateCommandCompat {
+    UpsertNode {
+        node: Node,
+    },
+    DeleteNode {
+        node_id: String,
+    },
+    UpsertEndpoint {
+        endpoint: Endpoint,
+    },
+    DeleteEndpoint {
+        endpoint_id: String,
+    },
+    CreateRealityDomain {
+        domain: RealityDomain,
+    },
+    PatchRealityDomain {
+        domain_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        server_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disabled_node_ids: Option<BTreeSet<String>>,
+    },
+    DeleteRealityDomain {
+        domain_id: String,
+    },
+    ReorderRealityDomains {
+        domain_ids: Vec<String>,
+    },
+    UpsertUser {
+        user: User,
+    },
+    DeleteUser {
+        user_id: String,
+    },
+    ResetUserSubscriptionToken {
+        user_id: String,
+        subscription_token: String,
+    },
+    SetUserNodeQuota {
+        user_id: String,
+        node_id: String,
+        quota_limit_bytes: u64,
+        #[serde(default)]
+        quota_reset_source: QuotaResetSource,
+    },
+    SetUserNodeWeight {
+        user_id: String,
+        node_id: String,
+        weight: u16,
+    },
+    SetUserGlobalWeight {
+        user_id: String,
+        weight: u16,
+    },
+    SetNodeWeightPolicy {
+        node_id: String,
+        inherit_global: bool,
+    },
+
+    ReplaceUserAccess {
+        user_id: String,
+        // New shape (schema v10+): membership-only endpoint list.
+        #[serde(default)]
+        endpoint_ids: Vec<String>,
+        // Legacy shape (schema v9): `items: [{ endpoint_id, note? }]`.
+        #[serde(default)]
+        items: Vec<UserAccessItemCompat>,
+    },
+    EnsureMembership {
+        user_id: String,
+        endpoint_id: String,
+    },
+    BumpUserCredentialEpoch {
+        user_id: String,
+    },
+    CompatNoop {
+        note: String,
+    },
+
+    AppendEndpointProbeSamples {
+        hour: String,
+        from_node_id: String,
+        samples: Vec<EndpointProbeAppendSample>,
+    },
+
+    // Legacy grants commands (schema <= 9).
+    ReplaceUserGrants {
+        user_id: String,
+        grants: Vec<LegacyGrantCompat>,
+    },
+    UpsertGrant {
+        grant: LegacyGrantCompat,
+    },
+    DeleteGrant {
+        grant_id: String,
+    },
+    SetGrantEnabled {
+        grant_id: String,
+        enabled: bool,
+        #[serde(default)]
+        source: GrantEnabledSourceCompat,
+    },
+}
+
+impl<'de> Deserialize<'de> for DesiredStateCommand {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let compat = DesiredStateCommandCompat::deserialize(deserializer)?;
+        Ok(compat.into())
+    }
+}
+
+impl From<DesiredStateCommandCompat> for DesiredStateCommand {
+    fn from(value: DesiredStateCommandCompat) -> Self {
+        match value {
+            DesiredStateCommandCompat::UpsertNode { node } => Self::UpsertNode { node },
+            DesiredStateCommandCompat::DeleteNode { node_id } => Self::DeleteNode { node_id },
+            DesiredStateCommandCompat::UpsertEndpoint { endpoint } => {
+                Self::UpsertEndpoint { endpoint }
+            }
+            DesiredStateCommandCompat::DeleteEndpoint { endpoint_id } => {
+                Self::DeleteEndpoint { endpoint_id }
+            }
+            DesiredStateCommandCompat::CreateRealityDomain { domain } => {
+                Self::CreateRealityDomain { domain }
+            }
+            DesiredStateCommandCompat::PatchRealityDomain {
+                domain_id,
+                server_name,
+                disabled_node_ids,
+            } => Self::PatchRealityDomain {
+                domain_id,
+                server_name,
+                disabled_node_ids,
+            },
+            DesiredStateCommandCompat::DeleteRealityDomain { domain_id } => {
+                Self::DeleteRealityDomain { domain_id }
+            }
+            DesiredStateCommandCompat::ReorderRealityDomains { domain_ids } => {
+                Self::ReorderRealityDomains { domain_ids }
+            }
+            DesiredStateCommandCompat::UpsertUser { user } => Self::UpsertUser { user },
+            DesiredStateCommandCompat::DeleteUser { user_id } => Self::DeleteUser { user_id },
+            DesiredStateCommandCompat::ResetUserSubscriptionToken {
+                user_id,
+                subscription_token,
+            } => Self::ResetUserSubscriptionToken {
+                user_id,
+                subscription_token,
+            },
+            DesiredStateCommandCompat::SetUserNodeQuota {
+                user_id,
+                node_id,
+                quota_limit_bytes,
+                quota_reset_source,
+            } => Self::SetUserNodeQuota {
+                user_id,
+                node_id,
+                quota_limit_bytes,
+                quota_reset_source,
+            },
+            DesiredStateCommandCompat::SetUserNodeWeight {
+                user_id,
+                node_id,
+                weight,
+            } => Self::SetUserNodeWeight {
+                user_id,
+                node_id,
+                weight,
+            },
+            DesiredStateCommandCompat::SetUserGlobalWeight { user_id, weight } => {
+                Self::SetUserGlobalWeight { user_id, weight }
+            }
+            DesiredStateCommandCompat::SetNodeWeightPolicy {
+                node_id,
+                inherit_global,
+            } => Self::SetNodeWeightPolicy {
+                node_id,
+                inherit_global,
+            },
+            DesiredStateCommandCompat::ReplaceUserAccess {
+                user_id,
+                endpoint_ids,
+                items,
+            } => {
+                // Support both v9 `items` and v10+ `endpoint_ids` WAL shapes.
+                let mut merged: BTreeSet<String> = endpoint_ids.into_iter().collect();
+                merged.extend(items.into_iter().map(|i| i.endpoint_id));
+                Self::ReplaceUserAccess {
+                    user_id,
+                    endpoint_ids: merged.into_iter().collect(),
+                }
+            }
+            DesiredStateCommandCompat::EnsureMembership {
+                user_id,
+                endpoint_id,
+            } => Self::EnsureMembership {
+                user_id,
+                endpoint_id,
+            },
+            DesiredStateCommandCompat::BumpUserCredentialEpoch { user_id } => {
+                Self::BumpUserCredentialEpoch { user_id }
+            }
+            DesiredStateCommandCompat::CompatNoop { note } => Self::CompatNoop { note },
+            DesiredStateCommandCompat::AppendEndpointProbeSamples {
+                hour,
+                from_node_id,
+                samples,
+            } => Self::AppendEndpointProbeSamples {
+                hour,
+                from_node_id,
+                samples,
+            },
+
+            DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
+                // Map legacy grants hard-cut to membership-only access list.
+                let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
+                Self::ReplaceUserAccess {
+                    user_id,
+                    endpoint_ids,
+                }
+            }
+            DesiredStateCommandCompat::UpsertGrant { grant } => Self::EnsureMembership {
+                user_id: grant.user_id,
+                endpoint_id: grant.endpoint_id,
+            },
+            DesiredStateCommandCompat::DeleteGrant { grant_id } => Self::CompatNoop {
+                note: format!("legacy delete_grant ignored: {grant_id}"),
+            },
+            DesiredStateCommandCompat::SetGrantEnabled {
+                grant_id,
+                enabled,
+                source: _,
+            } => Self::CompatNoop {
+                note: format!(
+                    "legacy set_grant_enabled ignored: grant_id={grant_id} enabled={enabled}"
+                ),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1095,17 +1704,13 @@ pub enum DesiredStateApplyResult {
     UserNodeQuotaSet {
         quota: UserNodeQuota,
     },
-    GrantDeleted {
-        deleted: bool,
-    },
     UserAccessReplaced {
         created: usize,
-        updated: usize,
         deleted: usize,
     },
-    GrantEnabledSet {
-        grant: Option<Grant>,
-        changed: bool,
+    UserCredentialEpochBumped {
+        user_id: String,
+        credential_epoch: u32,
     },
 }
 
@@ -1619,19 +2224,6 @@ impl DesiredStateCommand {
                         },
                     );
 
-                // Best-effort: unify existing grants on that node to keep legacy API behavior consistent.
-                for grant in state.grants.values_mut() {
-                    if grant.user_id != *user_id {
-                        continue;
-                    }
-                    let Some(endpoint) = state.endpoints.get(&grant.endpoint_id) else {
-                        continue;
-                    };
-                    if endpoint.node_id == *node_id {
-                        grant.quota_limit_bytes = *quota_limit_bytes;
-                    }
-                }
-
                 Ok(DesiredStateApplyResult::UserNodeQuotaSet {
                     quota: UserNodeQuota {
                         user_id: user_id.clone(),
@@ -1706,127 +2298,10 @@ impl DesiredStateCommand {
 
                 Ok(DesiredStateApplyResult::Applied)
             }
-            Self::UpsertGrant { grant } => {
-                if !state.users.contains_key(&grant.user_id) {
-                    return Err(DomainError::MissingUser {
-                        user_id: grant.user_id.clone(),
-                    }
-                    .into());
-                }
-                if !state.endpoints.contains_key(&grant.endpoint_id) {
-                    return Err(DomainError::MissingEndpoint {
-                        endpoint_id: grant.endpoint_id.clone(),
-                    }
-                    .into());
-                }
-
-                let mut grant = grant.clone();
-                if let Some(endpoint) = state.endpoints.get(&grant.endpoint_id)
-                    && let Some(user_map) = state.user_node_quotas.get(&grant.user_id)
-                    && let Some(cfg) = user_map.get(&endpoint.node_id)
-                    && let Some(quota_limit_bytes) = cfg.quota_limit_bytes
-                {
-                    grant.quota_limit_bytes = quota_limit_bytes;
-                }
-
-                if state.grants.values().any(|g| {
-                    g.grant_id != grant.grant_id
-                        && g.user_id == grant.user_id
-                        && g.endpoint_id == grant.endpoint_id
-                }) {
-                    return Err(DomainError::GrantPairConflict {
-                        user_id: grant.user_id.clone(),
-                        endpoint_id: grant.endpoint_id.clone(),
-                    }
-                    .into());
-                }
-
-                state.grants.insert(grant.grant_id.clone(), grant.clone());
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::Applied)
-            }
-            Self::DeleteGrant { grant_id } => {
-                let deleted = state.grants.remove(grant_id).is_some();
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::GrantDeleted { deleted })
-            }
-            Self::CreateGrantGroup { grants, .. } => {
-                let mut seen_pairs = BTreeSet::<(String, String)>::new();
-                for grant in grants.iter() {
-                    if !state.users.contains_key(&grant.user_id) {
-                        return Err(DomainError::MissingUser {
-                            user_id: grant.user_id.clone(),
-                        }
-                        .into());
-                    }
-                    if !state.endpoints.contains_key(&grant.endpoint_id) {
-                        return Err(DomainError::MissingEndpoint {
-                            endpoint_id: grant.endpoint_id.clone(),
-                        }
-                        .into());
-                    }
-                    let key = (grant.user_id.clone(), grant.endpoint_id.clone());
-                    if !seen_pairs.insert(key.clone()) {
-                        return Err(DomainError::GrantPairConflict {
-                            user_id: key.0,
-                            endpoint_id: key.1,
-                        }
-                        .into());
-                    }
-                    if state.grants.values().any(|g| {
-                        g.grant_id != grant.grant_id
-                            && g.user_id == grant.user_id
-                            && g.endpoint_id == grant.endpoint_id
-                    }) {
-                        return Err(DomainError::GrantPairConflict {
-                            user_id: grant.user_id.clone(),
-                            endpoint_id: grant.endpoint_id.clone(),
-                        }
-                        .into());
-                    }
-                }
-
-                for grant in grants.iter() {
-                    state.grants.insert(grant.grant_id.clone(), grant.clone());
-                }
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::Applied)
-            }
-            Self::ReplaceGrantGroup { grants, .. } => {
-                for grant in grants.iter() {
-                    if !state.users.contains_key(&grant.user_id) {
-                        return Err(DomainError::MissingUser {
-                            user_id: grant.user_id.clone(),
-                        }
-                        .into());
-                    }
-                    if !state.endpoints.contains_key(&grant.endpoint_id) {
-                        return Err(DomainError::MissingEndpoint {
-                            endpoint_id: grant.endpoint_id.clone(),
-                        }
-                        .into());
-                    }
-                    if state.grants.values().any(|g| {
-                        g.grant_id != grant.grant_id
-                            && g.user_id == grant.user_id
-                            && g.endpoint_id == grant.endpoint_id
-                    }) {
-                        return Err(DomainError::GrantPairConflict {
-                            user_id: grant.user_id.clone(),
-                            endpoint_id: grant.endpoint_id.clone(),
-                        }
-                        .into());
-                    }
-                }
-
-                for grant in grants.iter() {
-                    state.grants.insert(grant.grant_id.clone(), grant.clone());
-                }
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::Applied)
-            }
-            Self::DeleteGrantGroup { .. } => Ok(DesiredStateApplyResult::Applied),
-            Self::ReplaceUserAccess { user_id, items } => {
+            Self::ReplaceUserAccess {
+                user_id,
+                endpoint_ids,
+            } => {
                 if !state.users.contains_key(user_id) {
                     return Err(DomainError::MissingUser {
                         user_id: user_id.clone(),
@@ -1834,124 +2309,91 @@ impl DesiredStateCommand {
                     .into());
                 }
 
-                let mut requested = BTreeMap::<String, Option<String>>::new();
-                for item in items {
-                    if requested
-                        .insert(item.endpoint_id.clone(), item.note.clone())
-                        .is_some()
-                    {
-                        return Err(DomainError::GrantPairConflict {
-                            user_id: user_id.clone(),
-                            endpoint_id: item.endpoint_id.clone(),
-                        }
-                        .into());
-                    }
-                    if !state.endpoints.contains_key(&item.endpoint_id) {
+                let desired_endpoint_ids: BTreeSet<String> = endpoint_ids.iter().cloned().collect();
+                for endpoint_id in desired_endpoint_ids.iter() {
+                    if !state.endpoints.contains_key(endpoint_id) {
                         return Err(DomainError::MissingEndpoint {
-                            endpoint_id: item.endpoint_id.clone(),
+                            endpoint_id: endpoint_id.clone(),
                         }
                         .into());
                     }
                 }
 
-                let mut existing_by_endpoint = BTreeMap::<String, Grant>::new();
-                let mut to_delete = Vec::<String>::new();
-                for grant in state.grants.values() {
-                    if grant.user_id != *user_id {
-                        continue;
-                    }
-                    if requested.contains_key(&grant.endpoint_id) {
-                        existing_by_endpoint.insert(grant.endpoint_id.clone(), grant.clone());
-                    } else {
-                        to_delete.push(grant.grant_id.clone());
-                    }
-                }
+                let existing_endpoint_ids: BTreeSet<String> = state
+                    .node_user_endpoint_memberships
+                    .iter()
+                    .filter(|m| m.user_id == *user_id)
+                    .map(|m| m.endpoint_id.clone())
+                    .collect();
 
-                for grant_id in to_delete.iter() {
-                    state.grants.remove(grant_id);
-                }
+                let created = desired_endpoint_ids
+                    .difference(&existing_endpoint_ids)
+                    .count();
+                let deleted = existing_endpoint_ids
+                    .difference(&desired_endpoint_ids)
+                    .count();
 
-                let mut created = 0usize;
-                let mut updated = 0usize;
-                for (endpoint_id, note) in requested {
-                    let endpoint = state.endpoints.get(&endpoint_id).ok_or_else(|| {
-                        DomainError::MissingEndpoint {
-                            endpoint_id: endpoint_id.clone(),
-                        }
-                    })?;
-                    let quota_limit_bytes = state
-                        .user_node_quotas
-                        .get(user_id)
-                        .and_then(|m| m.get(&endpoint.node_id))
-                        .and_then(|cfg| cfg.quota_limit_bytes)
-                        .unwrap_or(0);
+                // Hard-cut semantics: the resulting memberships set for the user must be exactly
+                // equal to the desired endpoint list.
+                state
+                    .node_user_endpoint_memberships
+                    .retain(|m| m.user_id != *user_id);
 
-                    if let Some(existing) = existing_by_endpoint.remove(&endpoint_id) {
-                        let updated_grant = Grant {
-                            grant_id: existing.grant_id.clone(),
+                for endpoint_id in desired_endpoint_ids {
+                    let endpoint = state
+                        .endpoints
+                        .get(&endpoint_id)
+                        .expect("validated endpoint exists");
+                    state
+                        .node_user_endpoint_memberships
+                        .insert(NodeUserEndpointMembership {
                             user_id: user_id.clone(),
-                            endpoint_id: endpoint_id.clone(),
-                            enabled: true,
-                            quota_limit_bytes,
-                            note: note.clone(),
-                            credentials: existing.credentials.clone(),
-                        };
-                        state
-                            .grants
-                            .insert(updated_grant.grant_id.clone(), updated_grant);
-                        updated += 1;
-                    } else {
-                        let grant_id = new_ulid_string();
-                        let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
-                        let created_grant = Grant {
-                            grant_id: grant_id.clone(),
-                            user_id: user_id.clone(),
-                            endpoint_id: endpoint_id.clone(),
-                            enabled: true,
-                            quota_limit_bytes,
-                            note: note.clone(),
-                            credentials,
-                        };
-                        state.grants.insert(grant_id, created_grant);
-                        created += 1;
-                    }
+                            node_id: endpoint.node_id.clone(),
+                            endpoint_id: endpoint.endpoint_id.clone(),
+                        });
                 }
 
                 sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::UserAccessReplaced {
-                    created,
-                    updated,
-                    deleted: to_delete.len(),
-                })
+                Ok(DesiredStateApplyResult::UserAccessReplaced { created, deleted })
             }
-            Self::SetGrantEnabled {
-                grant_id,
-                enabled,
-                source: _,
+            Self::EnsureMembership {
+                user_id,
+                endpoint_id,
             } => {
-                let grant = match state.grants.get_mut(grant_id) {
-                    Some(grant) => grant,
-                    None => {
-                        return Ok(DesiredStateApplyResult::GrantEnabledSet {
-                            grant: None,
-                            changed: false,
-                        });
+                if !state.users.contains_key(user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: user_id.clone(),
                     }
-                };
-
-                if grant.enabled == *enabled {
-                    return Ok(DesiredStateApplyResult::GrantEnabledSet {
-                        grant: Some(grant.clone()),
-                        changed: false,
-                    });
+                    .into());
                 }
-
-                grant.enabled = *enabled;
-                Ok(DesiredStateApplyResult::GrantEnabledSet {
-                    grant: Some(grant.clone()),
-                    changed: true,
+                let endpoint = state.endpoints.get(endpoint_id).ok_or_else(|| {
+                    StoreError::Domain(DomainError::MissingEndpoint {
+                        endpoint_id: endpoint_id.clone(),
+                    })
+                })?;
+                state
+                    .node_user_endpoint_memberships
+                    .insert(NodeUserEndpointMembership {
+                        user_id: user_id.clone(),
+                        node_id: endpoint.node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    });
+                sync_node_user_endpoint_memberships(state);
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::BumpUserCredentialEpoch { user_id } => {
+                let user = state.users.get_mut(user_id).ok_or_else(|| {
+                    StoreError::Domain(DomainError::MissingUser {
+                        user_id: user_id.clone(),
+                    })
+                })?;
+                user.credential_epoch = user.credential_epoch.saturating_add(1);
+                Ok(DesiredStateApplyResult::UserCredentialEpochBumped {
+                    user_id: user_id.clone(),
+                    credential_epoch: user.credential_epoch,
                 })
             }
+            Self::CompatNoop { note: _ } => Ok(DesiredStateApplyResult::Applied),
             Self::AppendEndpointProbeSamples {
                 hour,
                 from_node_id,
@@ -2002,7 +2444,7 @@ impl DesiredStateCommand {
 pub struct PersistedUsage {
     pub schema_version: u32,
     #[serde(default)]
-    pub grants: BTreeMap<String, GrantUsage>,
+    pub memberships: BTreeMap<String, MembershipUsage>,
     /// Local-only pacing state for shared node quota enforcement.
     ///
     /// Keyed by `(user_id, node_id)`.
@@ -2011,15 +2453,25 @@ pub struct PersistedUsage {
     /// Local-only pacing state keyed by `node_id`.
     #[serde(default)]
     pub node_pacing: BTreeMap<String, NodePacing>,
+    /// Local-only marker: last applied credential_epoch per user on this node.
+    #[serde(default)]
+    pub user_credential_epochs_applied: BTreeMap<String, u32>,
+    /// Local-only cache: last applied desired users per endpoint on this node.
+    ///
+    /// Keyed by `endpoint_id`, values are `user_id` sets (excluding quota-banned memberships).
+    #[serde(default)]
+    pub endpoint_users_applied: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl PersistedUsage {
     pub fn empty() -> Self {
         Self {
             schema_version: USAGE_SCHEMA_VERSION,
-            grants: BTreeMap::new(),
+            memberships: BTreeMap::new(),
             user_node_pacing: BTreeMap::new(),
             node_pacing: BTreeMap::new(),
+            user_credential_epochs_applied: BTreeMap::new(),
+            endpoint_users_applied: BTreeMap::new(),
         }
     }
 }
@@ -2048,7 +2500,32 @@ pub struct NodePacing {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GrantUsage {
+pub struct MembershipUsage {
+    pub cycle_start_at: String,
+    pub cycle_end_at: String,
+    pub used_bytes: u64,
+    pub last_uplink_total: u64,
+    pub last_downlink_total: u64,
+    pub last_seen_at: String,
+    #[serde(default)]
+    pub quota_banned: bool,
+    #[serde(default)]
+    pub quota_banned_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct PersistedUsageV1Compat {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub grants: BTreeMap<String, GrantUsageV1Compat>,
+    #[serde(default)]
+    pub user_node_pacing: BTreeMap<String, BTreeMap<String, UserNodePacing>>,
+    #[serde(default)]
+    pub node_pacing: BTreeMap<String, NodePacing>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct GrantUsageV1Compat {
     pub cycle_start_at: String,
     pub cycle_end_at: String,
     pub used_bytes: u64,
@@ -2081,93 +2558,115 @@ impl JsonSnapshotStore {
         fs::create_dir_all(&init.data_dir)?;
 
         let state_path = init.data_dir.join("state.json");
-        let (mut state, is_new_state, mut migrated) = if state_path.exists() {
-            let bytes = fs::read(&state_path)?;
-            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let schema_version = raw
-                .get("schema_version")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            match schema_version {
-                9 => (serde_json::from_value(raw)?, false, false),
-                8 => {
-                    let v8: PersistedState = serde_json::from_value(raw)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                7 => {
-                    let v7: PersistedState = serde_json::from_value(raw)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                6 => {
-                    let v6: PersistedState = serde_json::from_value(raw)?;
-                    let v7 = migrate_v6_to_v7(v6)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                5 => {
-                    let v5: PersistedState = serde_json::from_value(raw)?;
-                    let v6 = migrate_v5_to_v6(v5)?;
-                    let v7 = migrate_v6_to_v7(v6)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                4 => {
-                    let v4: PersistedState = serde_json::from_value(raw)?;
-                    let v5 = migrate_v4_to_v5(v4)?;
-                    let v6 = migrate_v5_to_v6(v5)?;
-                    let v7 = migrate_v6_to_v7(v6)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                3 => {
-                    let v3: PersistedState = serde_json::from_value(raw)?;
-                    let v4 = migrate_v3_to_v4(v3)?;
-                    let v5 = migrate_v4_to_v5(v4)?;
-                    let v6 = migrate_v5_to_v6(v5)?;
-                    let v7 = migrate_v6_to_v7(v6)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                2 | 1 => {
-                    let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
-                    let v4 = migrate_v2_like_to_v3(v2)?;
-                    let v5 = migrate_v4_to_v5(v4)?;
-                    let v6 = migrate_v5_to_v6(v5)?;
-                    let v7 = migrate_v6_to_v7(v6)?;
-                    let v8 = migrate_v7_to_v8(v7)?;
-                    let v9 = migrate_v8_to_v9(v8)?;
-                    (v9, false, true)
-                }
-                got => {
-                    return Err(StoreError::SchemaVersionMismatch {
-                        expected: SCHEMA_VERSION,
-                        got,
-                    });
-                }
-            }
-        } else {
-            let node_id = init.bootstrap_node_id.unwrap_or_else(new_ulid_string);
-            let node = Node {
-                node_id: node_id.clone(),
-                node_name: init.bootstrap_node_name,
-                access_host: init.bootstrap_access_host,
-                api_base_url: init.bootstrap_api_base_url,
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            };
+        let usage_path = init.data_dir.join("usage.json");
+        let (mut state, grant_id_to_membership_key, is_new_state, mut migrated) =
+            if state_path.exists() {
+                let bytes = fs::read(&state_path)?;
+                let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+                let schema_version = raw
+                    .get("schema_version")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
 
-            let mut state = PersistedState::empty();
-            state.nodes.insert(node_id, node);
-            state.reality_domains = default_seed_reality_domains();
-            (state, true, false)
-        };
+                match schema_version {
+                    SCHEMA_VERSION => {
+                        let v10: PersistedState = serde_json::from_value(raw)?;
+                        (v10, None, false, false)
+                    }
+                    SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7
+                    | SCHEMA_VERSION_V6 | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
+                        let mut legacy: PersistedStateV9Compat = serde_json::from_value(raw)?;
+                        let mut migrated = false;
+
+                        legacy = match schema_version {
+                            3 => {
+                                migrated = true;
+                                migrate_v3_to_v4(legacy)?
+                            }
+                            _ => legacy,
+                        };
+                        legacy = if legacy.schema_version == SCHEMA_VERSION_V4 {
+                            // v4 may have empty reality domains (seeded in v5).
+                            migrated = true;
+                            migrate_v4_to_v5(legacy)?
+                        } else {
+                            legacy
+                        };
+                        legacy = if legacy.schema_version == SCHEMA_VERSION_V5 {
+                            migrated = true;
+                            migrate_v5_to_v6(legacy)?
+                        } else {
+                            legacy
+                        };
+                        legacy = if legacy.schema_version == SCHEMA_VERSION_V6 {
+                            migrated = true;
+                            migrate_v6_to_v7(legacy)?
+                        } else {
+                            legacy
+                        };
+                        legacy = if legacy.schema_version == SCHEMA_VERSION_V7 {
+                            migrated = true;
+                            migrate_v7_to_v8(legacy)?
+                        } else {
+                            legacy
+                        };
+
+                        let (v10, mapping, stats) = migrate_v9_compat_to_v10(legacy)?;
+                        // Best-effort migration stats (logs are useful in production upgrades).
+                        tracing::info!(
+                            grants_total = stats.grants_total,
+                            grants_orphan_dropped = stats.grants_orphan_dropped,
+                            memberships_created = stats.memberships_created,
+                            memberships_deduped = stats.memberships_deduped,
+                            user_node_quotas_cleared = stats.user_node_quotas_cleared,
+                            "state migration: legacy->v10 (remove grants hard cut)"
+                        );
+
+                        let _ = migrated;
+                        (v10, Some(mapping), false, true)
+                    }
+                    2 | 1 => {
+                        let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
+                        let v4 = migrate_v2_like_to_v3(v2)?;
+                        let v5 = migrate_v4_to_v5(v4)?;
+                        let v6 = migrate_v5_to_v6(v5)?;
+                        let v7 = migrate_v6_to_v7(v6)?;
+                        let v8 = migrate_v7_to_v8(v7)?;
+
+                        let (v10, mapping, stats) = migrate_v9_compat_to_v10(v8)?;
+                        tracing::info!(
+                            grants_total = stats.grants_total,
+                            grants_orphan_dropped = stats.grants_orphan_dropped,
+                            memberships_created = stats.memberships_created,
+                            memberships_deduped = stats.memberships_deduped,
+                            user_node_quotas_cleared = stats.user_node_quotas_cleared,
+                            "state migration: v2like->v10 (remove grants hard cut)"
+                        );
+                        (v10, Some(mapping), false, true)
+                    }
+                    got => {
+                        return Err(StoreError::SchemaVersionMismatch {
+                            expected: SCHEMA_VERSION,
+                            got,
+                        });
+                    }
+                }
+            } else {
+                let node_id = init.bootstrap_node_id.unwrap_or_else(new_ulid_string);
+                let node = Node {
+                    node_id: node_id.clone(),
+                    node_name: init.bootstrap_node_name,
+                    access_host: init.bootstrap_access_host,
+                    api_base_url: init.bootstrap_api_base_url,
+                    quota_limit_bytes: 0,
+                    quota_reset: NodeQuotaReset::default(),
+                };
+
+                let mut state = PersistedState::empty();
+                state.nodes.insert(node_id, node);
+                state.reality_domains = default_seed_reality_domains();
+                (state, None, true, false)
+            };
 
         if state.schema_version != SCHEMA_VERSION {
             return Err(StoreError::SchemaVersionMismatch {
@@ -2216,27 +2715,76 @@ impl JsonSnapshotStore {
             migrated = true;
         }
 
-        let usage_path = init.data_dir.join("usage.json");
+        let allowed_membership_keys = state
+            .node_user_endpoint_memberships
+            .iter()
+            .map(|m| membership_key(&m.user_id, &m.endpoint_id))
+            .collect::<BTreeSet<_>>();
+
+        let mut usage_migrated = false;
         let mut usage = if usage_path.exists() {
             let bytes = fs::read(&usage_path)?;
-            let usage: PersistedUsage = serde_json::from_slice(&bytes)?;
-            if usage.schema_version != USAGE_SCHEMA_VERSION {
-                return Err(StoreError::SchemaVersionMismatch {
-                    expected: USAGE_SCHEMA_VERSION,
-                    got: usage.schema_version,
-                });
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let usage_schema_version = raw
+                .get("schema_version")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+
+            match usage_schema_version {
+                USAGE_SCHEMA_VERSION => serde_json::from_value(raw)?,
+                USAGE_SCHEMA_VERSION_V1 => {
+                    match grant_id_to_membership_key.as_ref() {
+                        Some(mapping) => {
+                            let v1: PersistedUsageV1Compat = serde_json::from_value(raw)?;
+                            let (v2, stats) =
+                                migrate_usage_v1_to_v2(v1, mapping, &allowed_membership_keys);
+                            tracing::info!(
+                                grants_total = stats.grants_total,
+                                grants_mapped = stats.grants_mapped,
+                                grants_dropped_no_mapping = stats.grants_dropped_no_mapping,
+                                memberships_created = stats.memberships_created,
+                                memberships_dropped_not_in_state =
+                                    stats.memberships_dropped_not_in_state,
+                                "usage migration: v1(grants)->v2(memberships)"
+                            );
+                            migrated = true;
+                            usage_migrated = true;
+                            v2
+                        }
+                        None => {
+                            // Recovery path: it's possible to end up with a v10 state and a v1
+                            // usage file if the process crashes between saving them during an
+                            // upgrade. In that case, the legacy grant mapping is no longer
+                            // available, so we cannot safely migrate usage. Prefer booting with
+                            // an empty v2 usage file over refusing to start.
+                            tracing::warn!(
+                                "usage migration: legacy grant mapping is missing; discarding v1 usage and resetting to v2 empty"
+                            );
+                            migrated = true;
+                            usage_migrated = true;
+                            PersistedUsage::empty()
+                        }
+                    }
+                }
+                got => {
+                    return Err(StoreError::SchemaVersionMismatch {
+                        expected: USAGE_SCHEMA_VERSION,
+                        got,
+                    });
+                }
             }
-            usage
         } else {
             PersistedUsage::empty()
         };
 
-        let usage_before = usage.grants.len();
+        // Always retain usage only for currently active memberships, even when usage is already v2.
+        let before_usage = usage.memberships.len();
         usage
-            .grants
-            .retain(|grant_id, _| state.grants.contains_key(grant_id));
-        if usage.grants.len() != usage_before {
+            .memberships
+            .retain(|membership_key, _| allowed_membership_keys.contains(membership_key));
+        if usage.memberships.len() != before_usage {
             migrated = true;
+            usage_migrated = true;
         }
 
         let store = Self {
@@ -2248,6 +2796,9 @@ impl JsonSnapshotStore {
 
         if is_new_state || migrated {
             store.save()?;
+        }
+        if usage_migrated {
+            store.save_usage()?;
         }
 
         Ok(store)
@@ -2282,12 +2833,12 @@ impl JsonSnapshotStore {
         Ok(out)
     }
 
-    pub fn get_grant_usage(&self, grant_id: &str) -> Option<GrantUsage> {
-        self.usage.grants.get(grant_id).cloned()
+    pub fn get_membership_usage(&self, membership_key: &str) -> Option<MembershipUsage> {
+        self.usage.memberships.get(membership_key).cloned()
     }
 
-    pub fn clear_grant_usage(&mut self, grant_id: &str) -> Result<(), StoreError> {
-        if self.usage.grants.remove(grant_id).is_some() {
+    pub fn clear_membership_usage(&mut self, membership_key: &str) -> Result<(), StoreError> {
+        if self.usage.memberships.remove(membership_key).is_some() {
             self.save_usage()?;
         }
         Ok(())
@@ -2295,14 +2846,14 @@ impl JsonSnapshotStore {
 
     pub fn set_quota_banned(
         &mut self,
-        grant_id: &str,
+        membership_key: &str,
         banned_at: String,
     ) -> Result<(), StoreError> {
         let entry = self
             .usage
-            .grants
-            .entry(grant_id.to_string())
-            .or_insert_with(|| GrantUsage {
+            .memberships
+            .entry(membership_key.to_string())
+            .or_insert_with(|| MembershipUsage {
                 cycle_start_at: banned_at.clone(),
                 cycle_end_at: banned_at.clone(),
                 used_bytes: 0,
@@ -2319,13 +2870,41 @@ impl JsonSnapshotStore {
         Ok(())
     }
 
-    pub fn clear_quota_banned(&mut self, grant_id: &str) -> Result<(), StoreError> {
-        if let Some(entry) = self.usage.grants.get_mut(grant_id) {
+    pub fn clear_quota_banned(&mut self, membership_key: &str) -> Result<(), StoreError> {
+        if let Some(entry) = self.usage.memberships.get_mut(membership_key) {
             entry.quota_banned = false;
             entry.quota_banned_at = None;
             self.save_usage()?;
         }
         Ok(())
+    }
+
+    pub fn get_user_credential_epoch_applied(&self, user_id: &str) -> u32 {
+        self.usage
+            .user_credential_epochs_applied
+            .get(user_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn set_user_credential_epoch_applied(
+        &mut self,
+        user_id: &str,
+        credential_epoch: u32,
+    ) -> Result<(), StoreError> {
+        self.usage
+            .user_credential_epochs_applied
+            .insert(user_id.to_string(), credential_epoch);
+        self.save_usage()?;
+        Ok(())
+    }
+
+    pub fn get_endpoint_users_applied(&self, endpoint_id: &str) -> BTreeSet<String> {
+        self.usage
+            .endpoint_users_applied
+            .get(endpoint_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn get_node_pacing(&self, node_id: &str) -> Option<NodePacing> {
@@ -2388,9 +2967,9 @@ impl JsonSnapshotStore {
         Ok(())
     }
 
-    pub fn apply_grant_usage_sample(
+    pub fn apply_membership_usage_sample(
         &mut self,
-        grant_id: &str,
+        membership_key: &str,
         cycle_start_at: String,
         cycle_end_at: String,
         uplink_total: u64,
@@ -2400,9 +2979,9 @@ impl JsonSnapshotStore {
         let used_bytes = {
             let entry = self
                 .usage
-                .grants
-                .entry(grant_id.to_string())
-                .or_insert_with(|| GrantUsage {
+                .memberships
+                .entry(membership_key.to_string())
+                .or_insert_with(|| MembershipUsage {
                     cycle_start_at: cycle_start_at.clone(),
                     cycle_end_at: cycle_end_at.clone(),
                     used_bytes: uplink_total.saturating_add(downlink_total),
@@ -2502,6 +3081,7 @@ impl JsonSnapshotStore {
             user_id,
             display_name,
             subscription_token,
+            credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset,
         })
@@ -2516,49 +3096,6 @@ impl JsonSnapshotStore {
         DesiredStateCommand::UpsertUser { user: user.clone() }.apply(&mut self.state)?;
         self.save()?;
         Ok(user)
-    }
-
-    pub fn build_grant(
-        &self,
-        user_id: String,
-        endpoint_id: String,
-        quota_limit_bytes: u64,
-        enabled: bool,
-        note: Option<String>,
-    ) -> Result<Grant, StoreError> {
-        if !self.state.users.contains_key(&user_id) {
-            return Err(DomainError::MissingUser { user_id }.into());
-        }
-        let endpoint =
-            self.state
-                .endpoints
-                .get(&endpoint_id)
-                .ok_or_else(|| DomainError::MissingEndpoint {
-                    endpoint_id: endpoint_id.clone(),
-                })?;
-
-        let quota_limit_bytes = self
-            .state
-            .user_node_quotas
-            .get(&user_id)
-            .and_then(|m| {
-                m.get(&endpoint.node_id)
-                    .and_then(|cfg| cfg.quota_limit_bytes)
-            })
-            .unwrap_or(quota_limit_bytes);
-
-        let grant_id = new_ulid_string();
-        let credentials = credentials_for_endpoint(endpoint, &grant_id)?;
-
-        Ok(Grant {
-            grant_id,
-            user_id,
-            endpoint_id,
-            enabled,
-            quota_limit_bytes,
-            note,
-            credentials,
-        })
     }
 
     pub fn get_user_node_quota_limit_bytes(&self, user_id: &str, node_id: &str) -> Option<u64> {
@@ -2667,23 +3204,6 @@ impl JsonSnapshotStore {
             }
         }
         Ok(out)
-    }
-
-    pub fn create_grant(
-        &mut self,
-        user_id: String,
-        endpoint_id: String,
-        quota_limit_bytes: u64,
-        enabled: bool,
-        note: Option<String>,
-    ) -> Result<Grant, StoreError> {
-        let grant = self.build_grant(user_id, endpoint_id, quota_limit_bytes, enabled, note)?;
-        DesiredStateCommand::UpsertGrant {
-            grant: grant.clone(),
-        }
-        .apply(&mut self.state)?;
-        self.save()?;
-        Ok(grant)
     }
 
     pub fn list_nodes(&self) -> Vec<Node> {
@@ -2849,49 +3369,25 @@ impl JsonSnapshotStore {
         }
     }
 
-    pub fn list_grants(&self) -> Vec<Grant> {
-        self.state.grants.values().cloned().collect()
-    }
-
-    pub fn get_grant(&self, grant_id: &str) -> Option<Grant> {
-        self.state.grants.get(grant_id).cloned()
-    }
-
-    pub fn delete_grant(&mut self, grant_id: &str) -> Result<bool, StoreError> {
-        let out = DesiredStateCommand::DeleteGrant {
-            grant_id: grant_id.to_string(),
+    pub fn list_user_access(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<NodeUserEndpointMembership>, StoreError> {
+        if !self.state.users.contains_key(user_id) {
+            return Err(DomainError::MissingUser {
+                user_id: user_id.to_string(),
+            }
+            .into());
         }
-        .apply(&mut self.state)?;
-        let DesiredStateApplyResult::GrantDeleted { deleted } = out else {
-            unreachable!("delete grant must return GrantDeleted");
-        };
-        if deleted {
-            self.usage.grants.remove(grant_id);
-            self.save()?;
-            self.save_usage()?;
-        }
-        Ok(deleted)
-    }
-
-    pub fn set_grant_enabled(
-        &mut self,
-        grant_id: &str,
-        enabled: bool,
-        source: GrantEnabledSource,
-    ) -> Result<Option<Grant>, StoreError> {
-        let out = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.to_string(),
-            enabled,
-            source,
-        }
-        .apply(&mut self.state)?;
-        let DesiredStateApplyResult::GrantEnabledSet { grant, changed } = out else {
-            unreachable!("set grant enabled must return GrantEnabledSet");
-        };
-        if changed {
-            self.save()?;
-        }
-        Ok(grant)
+        let mut items: Vec<NodeUserEndpointMembership> = self
+            .state
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.user_id == user_id)
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| a.endpoint_id.cmp(&b.endpoint_id));
+        Ok(items)
     }
 }
 
@@ -2930,34 +3426,6 @@ fn build_endpoint_meta(
                 method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
                 server_psk_b64,
             })?)
-        }
-    }
-}
-
-fn credentials_for_endpoint(
-    endpoint: &Endpoint,
-    grant_id: &str,
-) -> Result<GrantCredentials, StoreError> {
-    let mut rng = rand::rngs::OsRng;
-
-    match endpoint.kind.clone() {
-        EndpointKind::VlessRealityVisionTcp => Ok(GrantCredentials {
-            vless: Some(VlessCredentials {
-                uuid: Uuid::new_v4().to_string(),
-                email: format!("grant:{grant_id}"),
-            }),
-            ss2022: None,
-        }),
-        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            let meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())?;
-            let user_psk_b64 = generate_ss2022_psk_b64(&mut rng);
-            Ok(GrantCredentials {
-                vless: None,
-                ss2022: Some(Ss2022Credentials {
-                    method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-                    password: ss2022_password(&meta.server_psk_b64, &user_psk_b64),
-                }),
-            })
         }
     }
 }
@@ -3007,8 +3475,8 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
-            DomainError, EndpointKind, Grant, GrantCredentials, NodeQuotaReset, UserQuotaReset,
-            validate_cycle_day_of_month, validate_port,
+            DomainError, Endpoint, EndpointKind, Node, NodeQuotaReset, User, UserPriorityTier,
+            UserQuotaReset, validate_cycle_day_of_month, validate_port,
         },
         id::is_ulid_string,
         protocol::{
@@ -3042,7 +3510,7 @@ mod tests {
         assert_eq!(state.nodes.len(), 1);
         assert_eq!(state.endpoints.len(), 0);
         assert_eq!(state.users.len(), 0);
-        assert_eq!(state.grants.len(), 0);
+        assert!(state.node_user_endpoint_memberships.is_empty());
 
         let (node_id, node) = state.nodes.iter().next().unwrap();
         assert_eq!(node_id, &node.node_id);
@@ -3096,7 +3564,161 @@ mod tests {
     }
 
     #[test]
-    fn set_grant_enabled_missing_source_defaults_manual() {
+    fn load_or_init_persists_pruned_usage_memberships() {
+        let tmp = tempfile::tempdir().unwrap();
+        let valid_membership_key = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let node_id = store.list_nodes()[0].node_id.clone();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    31234,
+                    json!({}),
+                )
+                .unwrap();
+            let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
+
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![endpoint.endpoint_id],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            store
+                .apply_membership_usage_sample(
+                    &membership,
+                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-02-01T00:00:00Z".to_string(),
+                    1,
+                    0,
+                    "2026-01-01T00:00:01Z".to_string(),
+                )
+                .unwrap();
+            store.usage.memberships.insert(
+                "stale_user::stale_endpoint".to_string(),
+                MembershipUsage {
+                    cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
+                    cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                    used_bytes: 10,
+                    last_uplink_total: 10,
+                    last_downlink_total: 0,
+                    last_seen_at: "2026-01-01T00:00:10Z".to_string(),
+                    quota_banned: false,
+                    quota_banned_at: None,
+                },
+            );
+            store.save_usage().unwrap();
+            membership
+        };
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(
+            store
+                .get_membership_usage("stale_user::stale_endpoint")
+                .is_none()
+        );
+        assert!(store.get_membership_usage(&valid_membership_key).is_some());
+
+        let usage_path = tmp.path().join("usage.json");
+        let bytes = fs::read(usage_path).unwrap();
+        let usage: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
+        assert!(!usage.memberships.contains_key("stale_user::stale_endpoint"));
+        assert!(usage.memberships.contains_key(&valid_membership_key));
+    }
+
+    #[test]
+    fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+
+        // Simulate an interrupted upgrade: state.json is already v10 (no grants), but usage.json
+        // is still the legacy v1 grants map (cannot be migrated without a grant mapping).
+        let node_id = "node_1".to_string();
+        let endpoint_id = "endpoint_1".to_string();
+        let user_id = "user_1".to_string();
+
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            node_id.clone(),
+            Node {
+                node_id: node_id.clone(),
+                node_name: "node-1".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            endpoint_id.clone(),
+            Endpoint {
+                endpoint_id: endpoint_id.clone(),
+                node_id: node_id.clone(),
+                tag: "e1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 31234,
+                meta: json!({}),
+            },
+        );
+        state.users.insert(
+            user_id.clone(),
+            User {
+                user_id: user_id.clone(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        state
+            .node_user_endpoint_memberships
+            .insert(NodeUserEndpointMembership {
+                user_id: user_id.clone(),
+                node_id: node_id.clone(),
+                endpoint_id: endpoint_id.clone(),
+            });
+
+        let state_path = data_dir.join("state.json");
+        fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+
+        let usage_path = data_dir.join("usage.json");
+        fs::write(
+            &usage_path,
+            serde_json::to_vec_pretty(&json!({
+              "schema_version": 1,
+              "grants": {
+                "grant_1": {
+                  "cycle_start_at": "2026-01-01T00:00:00Z",
+                  "cycle_end_at": "2026-02-01T00:00:00Z",
+                  "used_bytes": 123,
+                  "last_uplink_total": 123,
+                  "last_downlink_total": 0,
+                  "last_seen_at": "2026-01-01T00:00:01Z",
+                  "quota_banned": false,
+                  "quota_banned_at": null
+                }
+              }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(data_dir)).unwrap();
+        assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+        assert_eq!(store.usage.schema_version, USAGE_SCHEMA_VERSION);
+        assert!(store.usage.memberships.is_empty());
+
+        let bytes = fs::read(&usage_path).unwrap();
+        let saved: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved.schema_version, USAGE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_set_grant_enabled_missing_source_deserializes_as_noop() {
         let cmd: DesiredStateCommand = serde_json::from_value(json!({
             "type": "set_grant_enabled",
             "grant_id": "grant_1",
@@ -3105,11 +3727,111 @@ mod tests {
         .unwrap();
 
         match cmd {
-            DesiredStateCommand::SetGrantEnabled { source, .. } => {
-                assert_eq!(source, GrantEnabledSource::Manual);
+            DesiredStateCommand::CompatNoop { note } => {
+                assert!(note.contains("legacy set_grant_enabled ignored"))
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn legacy_replace_user_access_items_deserializes_to_endpoint_ids() {
+        let cmd: DesiredStateCommand = serde_json::from_value(json!({
+            "type": "replace_user_access",
+            "user_id": "user_1",
+            "items": [
+                { "endpoint_id": "endpoint_2", "note": "legacy note" },
+                { "endpoint_id": "endpoint_1" }
+            ]
+        }))
+        .unwrap();
+
+        match cmd {
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id,
+                endpoint_ids,
+            } => {
+                assert_eq!(user_id, "user_1");
+                // Compat mapping is allowed to sort/dedup.
+                assert_eq!(endpoint_ids, vec!["endpoint_1", "endpoint_2"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replace_user_access_reports_delta_counts_not_physical_rewrites() {
+        let mut state = PersistedState::empty();
+        state.users.insert(
+            "user_1".to_string(),
+            User {
+                user_id: "user_1".to_string(),
+                display_name: "alice".to_string(),
+                subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
+                priority_tier: UserPriorityTier::P2,
+                quota_reset: UserQuotaReset::default(),
+            },
+        );
+        state.nodes.insert(
+            "node_1".to_string(),
+            Node {
+                node_id: "node_1".to_string(),
+                node_name: "node-1".to_string(),
+                access_host: "localhost".to_string(),
+                api_base_url: "https://127.0.0.1:62416".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        for endpoint_id in ["endpoint_1", "endpoint_2", "endpoint_3"] {
+            state.endpoints.insert(
+                endpoint_id.to_string(),
+                Endpoint {
+                    endpoint_id: endpoint_id.to_string(),
+                    node_id: "node_1".to_string(),
+                    tag: endpoint_id.to_string(),
+                    kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    port: 10_000,
+                    meta: json!({}),
+                },
+            );
+        }
+
+        // Seed initial access: endpoint_1 + endpoint_2.
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["endpoint_1".to_string(), "endpoint_2".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        // Replace: drop endpoint_1, keep endpoint_2, add endpoint_3.
+        let out = DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["endpoint_2".to_string(), "endpoint_3".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert!(
+            matches!(
+                out,
+                DesiredStateApplyResult::UserAccessReplaced {
+                    created: 1,
+                    deleted: 1
+                }
+            ),
+            "unexpected apply result: {out:?}"
+        );
+
+        let endpoints = state
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.user_id == "user_1")
+            .map(|m| m.endpoint_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(endpoints, BTreeSet::from(["endpoint_2", "endpoint_3"]));
     }
 
     #[test]
@@ -3314,27 +4036,33 @@ mod tests {
     fn load_usage_json_missing_quota_fields_is_backward_compatible() {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path()).unwrap();
-        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let user = store.create_user("alice".to_string(), None).unwrap();
-        let endpoint = store
-            .create_endpoint(
-                store.list_nodes()[0].node_id.clone(),
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                443,
-                json!({}),
-            )
-            .unwrap();
-        let grant_id = store
-            .create_grant(user.user_id, endpoint.endpoint_id, 1024, true, None)
-            .unwrap()
-            .grant_id;
-        drop(store);
 
+        let membership = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    store.list_nodes()[0].node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    443,
+                    json!({}),
+                )
+                .unwrap();
+            let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![endpoint.endpoint_id],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            membership
+        };
         let usage_path = tmp.path().join("usage.json");
         let bytes = serde_json::to_vec_pretty(&json!({
             "schema_version": USAGE_SCHEMA_VERSION,
-            "grants": {
-                (grant_id.clone()): {
+            "memberships": {
+                membership.clone(): {
                     "cycle_start_at": "2025-12-01T00:00:00Z",
                     "cycle_end_at": "2026-01-01T00:00:00Z",
                     "used_bytes": 123,
@@ -3348,7 +4076,7 @@ mod tests {
         fs::write(&usage_path, bytes).unwrap();
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let usage = store.get_grant_usage(&grant_id).unwrap();
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
     }
@@ -3357,52 +4085,59 @@ mod tests {
     fn set_and_clear_quota_banned_persists_and_survives_reload() {
         let tmp = tempfile::tempdir().unwrap();
         let banned_at = "2025-12-18T00:00:00Z".to_string();
+        let membership = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    store.list_nodes()[0].node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    443,
+                    json!({}),
+                )
+                .unwrap();
+            let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id,
+                endpoint_ids: vec![endpoint.endpoint_id],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            membership
+        };
 
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let user = store.create_user("alice".to_string(), None).unwrap();
-        let endpoint = store
-            .create_endpoint(
-                store.list_nodes()[0].node_id.clone(),
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                443,
-                json!({}),
-            )
-            .unwrap();
-        let grant_id = store
-            .create_grant(user.user_id, endpoint.endpoint_id, 1024, true, None)
-            .unwrap()
-            .grant_id;
-
         store
-            .set_quota_banned(&grant_id, banned_at.clone())
+            .set_quota_banned(&membership, banned_at.clone())
             .unwrap();
-        let usage = store.get_grant_usage(&grant_id).unwrap();
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at.clone()));
 
-        store.clear_quota_banned(&grant_id).unwrap();
-        let usage = store.get_grant_usage(&grant_id).unwrap();
+        store.clear_quota_banned(&membership).unwrap();
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
 
         drop(store);
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        let usage = store.get_grant_usage(&grant_id).unwrap();
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert!(!usage.quota_banned);
         assert_eq!(usage.quota_banned_at, None);
     }
 
     #[test]
-    fn apply_grant_usage_sample_keeps_quota_markers_on_cycle_change() {
+    fn apply_membership_usage_sample_keeps_quota_markers_on_cycle_change() {
         let tmp = tempfile::tempdir().unwrap();
-        let grant_id = "grant_1";
+        let membership_key = "user_1::endpoint_1";
         let banned_at = "2025-12-18T00:00:00Z".to_string();
 
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         store
-            .apply_grant_usage_sample(
-                grant_id,
+            .apply_membership_usage_sample(
+                membership_key,
                 "2025-12-01T00:00:00Z".to_string(),
                 "2026-01-01T00:00:00Z".to_string(),
                 10,
@@ -3410,11 +4145,13 @@ mod tests {
                 "2025-12-18T00:00:00Z".to_string(),
             )
             .unwrap();
-        store.set_quota_banned(grant_id, banned_at.clone()).unwrap();
+        store
+            .set_quota_banned(membership_key, banned_at.clone())
+            .unwrap();
 
         store
-            .apply_grant_usage_sample(
-                grant_id,
+            .apply_membership_usage_sample(
+                membership_key,
                 "2026-01-01T00:00:00Z".to_string(),
                 "2026-02-01T00:00:00Z".to_string(),
                 0,
@@ -3423,46 +4160,29 @@ mod tests {
             )
             .unwrap();
 
-        let usage = store.get_grant_usage(grant_id).unwrap();
+        let usage = store.get_membership_usage(membership_key).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at));
     }
 
     #[test]
-    fn deleting_grant_removes_usage_entry() {
+    fn clear_membership_usage_removes_usage_entry() {
         let tmp = tempfile::tempdir().unwrap();
-        let grant_id = "grant_1";
+        let membership_key = "user_1::endpoint_1";
 
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-
-        store.state_mut().grants.insert(
-            grant_id.to_string(),
-            Grant {
-                grant_id: grant_id.to_string(),
-                user_id: "user_1".to_string(),
-                endpoint_id: "endpoint_1".to_string(),
-                enabled: true,
-                quota_limit_bytes: 0,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: None,
-                    ss2022: None,
-                },
-            },
-        );
-
         store
-            .set_quota_banned(grant_id, "2025-12-18T00:00:00Z".to_string())
+            .set_quota_banned(membership_key, "2025-12-18T00:00:00Z".to_string())
             .unwrap();
-        assert!(store.get_grant_usage(grant_id).is_some());
+        assert!(store.get_membership_usage(membership_key).is_some());
 
-        assert!(store.delete_grant(grant_id).unwrap());
-        assert!(store.get_grant_usage(grant_id).is_none());
+        store.clear_membership_usage(membership_key).unwrap();
+        assert!(store.get_membership_usage(membership_key).is_none());
 
         drop(store);
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        assert!(store.get_grant_usage(grant_id).is_none());
+        assert!(store.get_membership_usage(membership_key).is_none());
     }
 
     #[test]
@@ -3544,6 +4264,7 @@ mod tests {
             user_id: "user_1".to_string(),
             display_name: "alice".to_string(),
             subscription_token: "sub_1".to_string(),
+            credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset: UserQuotaReset::default(),
         };
@@ -3646,7 +4367,7 @@ mod tests {
     }
 
     #[test]
-    fn desired_state_apply_grant_create_update_delete_are_deterministic() {
+    fn desired_state_apply_ensure_membership_is_idempotent() {
         let mut state = PersistedState::empty();
         state.users.insert(
             "user_1".to_string(),
@@ -3654,6 +4375,7 @@ mod tests {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
                 subscription_token: "sub_1".to_string(),
+                credential_epoch: 0,
                 priority_tier: Default::default(),
                 quota_reset: UserQuotaReset::default(),
             },
@@ -3670,102 +4392,42 @@ mod tests {
             },
         );
 
-        let grant = Grant {
-            grant_id: "grant_1".to_string(),
+        let out = DesiredStateCommand::EnsureMembership {
             user_id: "user_1".to_string(),
             endpoint_id: "endpoint_1".to_string(),
-            enabled: true,
-            quota_limit_bytes: 10,
-            note: None,
-            credentials: GrantCredentials {
-                vless: None,
-                ss2022: None,
-            },
         };
-
-        DesiredStateCommand::UpsertGrant {
-            grant: grant.clone(),
-        }
-        .apply(&mut state)
-        .unwrap();
-        assert_eq!(state.grants.get(&grant.grant_id), Some(&grant));
-        assert!(
-            state
-                .node_user_endpoint_memberships
-                .contains(&NodeUserEndpointMembership {
-                    user_id: "user_1".to_string(),
-                    node_id: "node_1".to_string(),
-                    endpoint_id: "endpoint_1".to_string(),
-                })
+        assert_eq!(
+            out.apply(&mut state).unwrap(),
+            DesiredStateApplyResult::Applied
         );
-
-        let out = DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant.grant_id.clone(),
-            enabled: false,
-            source: GrantEnabledSource::Manual,
-        }
-        .apply(&mut state)
-        .unwrap();
-        let DesiredStateApplyResult::GrantEnabledSet {
-            grant: updated,
-            changed,
-        } = out
-        else {
-            panic!("expected GrantEnabledSet");
-        };
-        assert!(changed);
-        let updated = updated.unwrap();
-        assert!(!updated.enabled);
-        assert_eq!(updated.quota_limit_bytes, 10);
-
-        let out = DesiredStateCommand::DeleteGrant {
-            grant_id: grant.grant_id.clone(),
-        }
-        .apply(&mut state)
-        .unwrap();
-        assert_eq!(out, DesiredStateApplyResult::GrantDeleted { deleted: true });
-        assert!(!state.grants.contains_key(&grant.grant_id));
-        assert!(state.node_user_endpoint_memberships.is_empty());
+        assert_eq!(
+            out.apply(&mut state).unwrap(),
+            DesiredStateApplyResult::Applied
+        );
+        assert_eq!(state.node_user_endpoint_memberships.len(), 1);
     }
 
     #[test]
-    fn json_snapshot_store_create_update_delete_grant_flow_is_unchanged() {
+    fn desired_state_apply_bump_user_credential_epoch_increments_and_returns_epoch() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-
         let user = store.create_user("alice".to_string(), None).unwrap();
-        let endpoint = store
-            .create_endpoint(
-                store.list_nodes()[0].node_id.clone(),
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                443,
-                json!({}),
-            )
-            .unwrap();
-        let grant = store
-            .create_grant(
-                user.user_id.clone(),
-                endpoint.endpoint_id.clone(),
-                1024,
-                true,
-                None,
-            )
-            .unwrap();
+        assert_eq!(store.get_user(&user.user_id).unwrap().credential_epoch, 0);
 
-        store
-            .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
-            .unwrap();
-        assert!(store.get_grant_usage(&grant.grant_id).is_some());
-
-        assert!(store.delete_grant(&grant.grant_id).unwrap());
-        assert!(store.get_grant_usage(&grant.grant_id).is_none());
-
-        drop(store);
-
-        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-        assert!(store.get_grant(&grant.grant_id).is_none());
-        assert!(store.get_grant_usage(&grant.grant_id).is_none());
-        assert!(store.get_user(&user.user_id).is_some());
-        assert!(store.get_endpoint(&endpoint.endpoint_id).is_some());
+        let out = DesiredStateCommand::BumpUserCredentialEpoch {
+            user_id: user.user_id.clone(),
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        let DesiredStateApplyResult::UserCredentialEpochBumped {
+            user_id: out_user_id,
+            credential_epoch,
+        } = out
+        else {
+            panic!("expected UserCredentialEpochBumped");
+        };
+        assert_eq!(out_user_id, user.user_id);
+        assert_eq!(credential_epoch, 1);
+        assert_eq!(store.get_user(&user.user_id).unwrap().credential_epoch, 1);
     }
 }

@@ -24,18 +24,16 @@ use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
     config::Config,
-    domain::{
-        EndpointKind, Grant, GrantCredentials, Node, NodeQuotaReset, QuotaResetSource, User,
-        UserQuotaReset, VlessCredentials,
-    },
+    domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
+    protocol::{Ss2022EndpointMeta, ss2022_password},
     raft::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
     },
     reconcile::{ReconcileHandle, ReconcileRequest},
-    state::{JsonSnapshotStore, StoreInit},
+    state::{JsonSnapshotStore, StoreInit, membership_key},
     xray_supervisor::XrayHealthHandle,
 };
 
@@ -552,16 +550,18 @@ async fn ui_serves_favicon_and_manifest() {
 
 struct SubscriptionFixtures {
     subscription_token: String,
-    grant_id: String,
+    membership_key: String,
     user_id: String,
-    endpoint_id: String,
     ss2022_password: String,
 }
 
-async fn setup_subscription_fixtures(
-    app: &axum::Router,
-    store: &Arc<Mutex<JsonSnapshotStore>>,
-) -> SubscriptionFixtures {
+async fn setup_subscription_fixtures(tmp: &TempDir, app: &axum::Router) -> SubscriptionFixtures {
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
+
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -577,6 +577,10 @@ async fn setup_subscription_fixtures(
     let user = body_json(res).await;
     let user_id = user["user_id"].as_str().unwrap().to_string();
     let subscription_token = user["subscription_token"].as_str().unwrap().to_string();
+    let credential_epoch = user
+        .get("credential_epoch")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
 
     let res = app
         .clone()
@@ -604,6 +608,9 @@ async fn setup_subscription_fixtures(
     let endpoint = body_json(res).await;
     let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
 
+    let meta: Ss2022EndpointMeta =
+        serde_json::from_value(endpoint["meta"].clone()).expect("ss2022 endpoint meta");
+
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -611,35 +618,30 @@ async fn setup_subscription_fixtures(
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id.clone(),
-                "note": null
+                "endpoint_id": endpoint_id.clone()
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let access_detail = body_json(res).await;
-    let password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    drop(res);
 
-    let grant_id = {
-        let store = store.lock().await;
-        store
-            .list_grants()
-            .into_iter()
-            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id)
-            .map(|g| g.grant_id)
-            .expect("expected grant to exist for subscription fixtures")
-    };
+    // Derive SS password deterministically (per-user secret, per-endpoint full string).
+    let user_psk_b64 = crate::credentials::derive_ss2022_user_psk_b64(
+        &cluster_ca_key_pem,
+        &user_id,
+        credential_epoch,
+    )
+    .expect("derive ss2022 user_psk");
+    let password = ss2022_password(&meta.server_psk_b64, &user_psk_b64);
+
+    let membership_key = membership_key(&user_id, &endpoint_id);
 
     SubscriptionFixtures {
         subscription_token,
-        grant_id,
+        membership_key,
         user_id,
-        endpoint_id,
         ss2022_password: password,
     }
 }
@@ -1338,7 +1340,7 @@ async fn quota_policy_node_weight_rows_supports_implicit_zero_and_explicit_weigh
     let endpoint = body_json(res).await;
     let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
 
-    // Grant membership via user access hard-cut API.
+    // Grant access (membership-only hard cut).
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -1346,8 +1348,7 @@ async fn quota_policy_node_weight_rows_supports_implicit_zero_and_explicit_weigh
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
+                "endpoint_id": endpoint_id.clone()
               }]
             }),
         ))
@@ -2251,30 +2252,78 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
 }
 
 #[tokio::test]
-async fn removed_grant_groups_routes_return_404_not_found() {
+async fn put_user_access_with_missing_resources_returns_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
-    let cases = vec![
+    // Missing user.
+    let missing_user_id = new_ulid_string();
+    let create = req_authed_json(
+        "PUT",
+        &format!("/api/admin/users/{missing_user_id}/access"),
+        json!({ "items": [] }),
+    );
+    let res = app.clone().oneshot(create).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+
+    // Missing endpoint.
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({ "display_name": "alice" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let user = body_json(res).await;
+    let user_id = user["user_id"].as_str().unwrap();
+
+    let create = req_authed_json(
+        "PUT",
+        &format!("/api/admin/users/{user_id}/access"),
+        json!({
+          "items": [{
+            "endpoint_id": new_ulid_string()
+          }]
+        }),
+    );
+    let res = app.oneshot(create).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn legacy_grant_groups_endpoints_return_404_not_found() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let requests = vec![
         req_authed("GET", "/api/admin/grant-groups"),
         req_authed_json(
             "POST",
             "/api/admin/grant-groups",
             json!({
-              "group_name": "test-group",
+              "group_name": "legacy",
               "members": []
             }),
         ),
-        req_authed("GET", "/api/admin/grant-groups/test-group"),
+        req_authed("GET", "/api/admin/grant-groups/legacy"),
         req_authed_json(
             "PUT",
-            "/api/admin/grant-groups/test-group",
-            json!({ "members": [] }),
+            "/api/admin/grant-groups/legacy",
+            json!({
+              "members": []
+            }),
         ),
-        req_authed("DELETE", "/api/admin/grant-groups/test-group"),
+        req_authed("DELETE", "/api/admin/grant-groups/legacy"),
     ];
 
-    for req in cases {
+    for req in requests {
         let res = app.clone().oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
         let json = body_json(res).await;
@@ -2283,7 +2332,7 @@ async fn removed_grant_groups_routes_return_404_not_found() {
 }
 
 #[tokio::test]
-async fn put_user_access_with_missing_endpoint_returns_400_invalid_request() {
+async fn grants_endpoints_return_404_not_found() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -2292,9 +2341,7 @@ async fn put_user_access_with_missing_endpoint_returns_400_invalid_request() {
         .oneshot(req_authed_json(
             "POST",
             "/api/admin/users",
-            json!({
-              "display_name": "alice"
-            }),
+            json!({ "display_name": "alice" }),
         ))
         .await
         .unwrap();
@@ -2302,26 +2349,29 @@ async fn put_user_access_with_missing_endpoint_returns_400_invalid_request() {
     let user = body_json(res).await;
     let user_id = user["user_id"].as_str().unwrap();
 
-    let res = app
-        .oneshot(req_authed_json(
+    let requests = vec![
+        req_authed("GET", "/api/admin/grants"),
+        req_authed_json("POST", "/api/admin/grants", json!({})),
+        req_authed("GET", "/api/admin/grants/grant_legacy"),
+        req_authed("DELETE", "/api/admin/grants/grant_legacy"),
+        req_authed("GET", &format!("/api/admin/users/{user_id}/grants")),
+        req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{user_id}/access"),
-            json!({
-              "items": [{
-                "endpoint_id": new_ulid_string(),
-                "note": null
-              }]
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(res).await;
-    assert_eq!(json["error"]["code"], "invalid_request");
+            &format!("/api/admin/users/{user_id}/grants"),
+            json!({ "items": [] }),
+        ),
+    ];
+
+    for req in requests {
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        let json = body_json(res).await;
+        assert_eq!(json["error"]["code"], "not_found");
+    }
 }
 
 #[tokio::test]
-async fn put_user_access_updates_member_note_and_allows_clear() {
+async fn put_user_access_dedups_and_allows_clear() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -2337,7 +2387,6 @@ async fn put_user_access_updates_member_note_and_allows_clear() {
         .await
         .unwrap();
     let user = body_json(res).await;
-    let user_id = user["user_id"].as_str().unwrap();
 
     let res = app
         .clone()
@@ -2367,61 +2416,71 @@ async fn put_user_access_updates_member_note_and_allows_clear() {
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{user_id}/access"),
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id,
-                "note": "alice@node-1"
+                "endpoint_id": endpoint_id
+              }, {
+                "endpoint_id": endpoint_id
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let updated = body_json(res).await;
-    assert_eq!(updated["items"][0]["grant"]["note"], "alice@node-1");
+    let put = body_json(res).await;
+    assert_eq!(put["created"], 1);
+    assert_eq!(put["deleted"], 0);
+    assert_eq!(put["items"].as_array().unwrap().len(), 1);
+    assert_eq!(put["items"][0]["endpoint_id"], endpoint_id);
 
     let res = app
         .clone()
         .oneshot(req_authed(
             "GET",
-            &format!("/api/admin/users/{user_id}/access"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let listed = body_json(res).await;
-    assert_eq!(listed["items"][0]["grant"]["note"], "alice@node-1");
-
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PUT",
-            &format!("/api/admin/users/{user_id}/access"),
-            json!({
-              "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
-              }]
-            }),
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
-    assert!(updated["items"][0]["grant"]["note"].is_null());
+    assert_eq!(updated["items"].as_array().unwrap().len(), 1);
+    assert_eq!(updated["items"][0]["endpoint_id"], endpoint_id);
+    assert_eq!(updated["items"][0]["node_id"], node_id);
 
     let res = app
+        .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{user_id}/access"),
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
             json!({ "items": [] }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let cleared = body_json(res).await;
-    assert_eq!(cleared["items"], json!([]));
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!(
+                "/api/admin/users/{}/access",
+                user["user_id"].as_str().unwrap()
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["items"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -2476,8 +2535,67 @@ async fn put_admin_user_access_schedules_full_reconcile() {
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
+                "endpoint_id": endpoint_id
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+}
+
+#[tokio::test]
+async fn put_admin_user_access_twice_schedules_full_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let (user_id, endpoint_id) = {
+        let mut store = store.lock().await;
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        (user.user_id, endpoint.endpoint_id)
+    };
+
+    // First apply (and drain its reconcile request).
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({
+              "items": [{
+                "endpoint_id": endpoint_id
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({
+              "items": [{
+                "endpoint_id": endpoint_id
               }]
             }),
         ))
@@ -2565,6 +2683,61 @@ async fn delete_admin_endpoint_schedules_remove_inbound_then_full() {
             ReconcileRequest::RemoveInbound { tag },
             ReconcileRequest::Full
         ]
+    );
+}
+
+#[tokio::test]
+async fn put_admin_user_access_empty_schedules_full_reconcile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let (user_id, endpoint_id) = {
+        let mut store = store.lock().await;
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                "node-1".to_string(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        (user.user_id, endpoint.endpoint_id)
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({
+              "items": [{
+                "endpoint_id": endpoint_id
+              }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
+    );
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({ "items": [] }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![ReconcileRequest::Full]
     );
 }
 
@@ -2980,7 +3153,7 @@ async fn subscription_endpoint_does_not_require_auth() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let token = setup_subscription_fixtures(&app, &store)
+    let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
 
@@ -3001,7 +3174,7 @@ async fn subscription_default_base64_decodes_to_subscription_text_and_content_ty
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let token = setup_subscription_fixtures(&app, &store)
+    let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
 
@@ -3050,7 +3223,7 @@ async fn subscription_format_clash_returns_yaml_with_proxies() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let token = setup_subscription_fixtures(&app, &store)
+    let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
 
@@ -3084,7 +3257,7 @@ async fn subscription_token_reset_invalidates_old_token() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let old_token = fixtures.subscription_token;
     let user_id = fixtures.user_id;
 
@@ -3115,21 +3288,24 @@ async fn subscription_token_reset_invalidates_old_token() {
 }
 
 #[tokio::test]
-async fn subscription_disabled_grant_not_in_output() {
+async fn subscription_removed_access_not_in_output() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let token = fixtures.subscription_token;
+    let user_id = fixtures.user_id;
     let password = fixtures.ss2022_password;
 
     let res = app
         .clone()
         .oneshot(req_authed_json(
             "PUT",
-            &format!("/api/admin/users/{}/access", fixtures.user_id),
-            json!({ "items": [] }),
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({
+              "items": []
+            }),
         ))
         .await
         .unwrap();
@@ -3145,20 +3321,24 @@ async fn subscription_disabled_grant_not_in_output() {
 }
 
 #[tokio::test]
-async fn put_user_access_clears_quota_ban_marker() {
+async fn put_user_access_empty_removes_usage_entry() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
-    let fixtures = setup_subscription_fixtures(&app, &store).await;
-    let grant_id = fixtures.grant_id;
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let membership_key = fixtures.membership_key.clone();
     let user_id = fixtures.user_id;
-    let endpoint_id = fixtures.endpoint_id;
     let banned_at = "2025-12-18T00:00:00Z".to_string();
 
     {
         let mut store = store.lock().await;
-        store.set_quota_banned(&grant_id, banned_at).unwrap();
-        assert!(store.get_grant_usage(&grant_id).unwrap().quota_banned);
+        store.set_quota_banned(&membership_key, banned_at).unwrap();
+        assert!(
+            store
+                .get_membership_usage(&membership_key)
+                .unwrap()
+                .quota_banned
+        );
     }
 
     let res = app
@@ -3166,25 +3346,18 @@ async fn put_user_access_clears_quota_ban_marker() {
         .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/access"),
-            json!({
-              "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
-              }]
-            }),
+            json!({ "items": [] }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
     let store = store.lock().await;
-    let usage = store.get_grant_usage(&grant_id).unwrap();
-    assert!(!usage.quota_banned);
-    assert_eq!(usage.quota_banned_at, None);
+    assert!(store.get_membership_usage(&membership_key).is_none());
 }
 
 #[tokio::test]
-async fn admin_alerts_local_reports_quota_mismatch() {
+async fn admin_alerts_local_reports_quota_banned_membership() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -3235,29 +3408,21 @@ async fn admin_alerts_local_reports_quota_mismatch() {
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
+                "endpoint_id": endpoint_id
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let grant_id = {
-        let store = store.lock().await;
-        store
-            .list_grants()
-            .into_iter()
-            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id)
-            .map(|g| g.grant_id)
-            .expect("expected grant to exist for alert fixture")
-    };
+    drop(res);
+    let membership_key = membership_key(&user_id, &endpoint_id);
 
     let banned_at = "2025-12-18T00:00:00Z".to_string();
     {
         let mut store = store.lock().await;
         store
-            .set_quota_banned(&grant_id, banned_at.clone())
+            .set_quota_banned(&membership_key, banned_at.clone())
             .unwrap();
     }
 
@@ -3273,21 +3438,20 @@ async fn admin_alerts_local_reports_quota_mismatch() {
     let items = json["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     let item = &items[0];
-    assert_eq!(item["type"], "quota_enforced_but_desired_enabled");
-    assert_eq!(item["grant_id"], grant_id);
+    assert_eq!(item["type"], "quota_banned_membership");
+    assert_eq!(item["membership_key"], membership_key);
+    assert_eq!(item["user_id"], user_id);
     assert_eq!(item["endpoint_id"], endpoint_id);
     assert_eq!(item["owner_node_id"], node_id);
-    assert_eq!(item["desired_enabled"], true);
     assert_eq!(item["quota_banned"], true);
     assert_eq!(item["quota_banned_at"], banned_at);
-    assert_eq!(item["effective_enabled"], false);
     assert_eq!(
         item["message"],
-        "quota enforced on owner node but desired state is still enabled"
+        "quota enforced on owner node (membership is blocked)"
     );
     assert_eq!(
         item["action_hint"],
-        "check raft leader/quorum and retry status"
+        "wait for rollover/unban or adjust quota policy"
     );
 }
 
@@ -3322,34 +3486,30 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
 }
 
 #[tokio::test]
-async fn admin_delete_grant_removes_usage_entry() {
+async fn admin_delete_user_removes_usage_entry() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
-    let fixtures = setup_subscription_fixtures(&app, &store).await;
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let membership_key = fixtures.membership_key;
     let user_id = fixtures.user_id;
-    let grant_id = fixtures.grant_id;
 
     {
         let mut store = store.lock().await;
         store
-            .set_quota_banned(&grant_id, "2025-12-18T00:00:00Z".to_string())
+            .set_quota_banned(&membership_key, "2025-12-18T00:00:00Z".to_string())
             .unwrap();
-        assert!(store.get_grant_usage(&grant_id).is_some());
+        assert!(store.get_membership_usage(&membership_key).is_some());
     }
 
     let res = app
-        .oneshot(req_authed_json(
-            "PUT",
-            &format!("/api/admin/users/{user_id}/access"),
-            json!({ "items": [] }),
-        ))
+        .oneshot(req_authed("DELETE", &format!("/api/admin/users/{user_id}")))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
     let store = store.lock().await;
-    assert!(store.get_grant_usage(&grant_id).is_none());
+    assert!(store.get_membership_usage(&membership_key).is_none());
 }
 
 #[tokio::test]
@@ -3358,7 +3518,7 @@ async fn subscription_invalid_format_returns_400_invalid_request() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
-    let token = setup_subscription_fixtures(&app, &store)
+    let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
 
@@ -3498,7 +3658,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
 }
 
 #[tokio::test]
-async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uuidv4() {
+async fn vless_endpoint_creation_persists_reality_materials_and_derived_uuid_is_uuidv4() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -3563,41 +3723,31 @@ async fn vless_endpoint_creation_persists_reality_materials_and_grant_uuid_is_uu
         .await
         .unwrap();
     let user = body_json(res).await;
+    let user_id = user["user_id"].as_str().unwrap();
+    let credential_epoch = user
+        .get("credential_epoch")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
 
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PUT",
-            &format!(
-                "/api/admin/users/{}/access",
-                user["user_id"].as_str().unwrap()
-            ),
-            json!({
-              "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
-              }]
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let access = body_json(res).await;
-    let vless = &access["items"][0]["grant"]["credentials"]["vless"];
-    let uuid = vless["uuid"].as_str().unwrap();
-    assert!(Uuid::parse_str(uuid).is_ok());
-    assert!(!is_ulid_string(uuid));
-    let email = vless["email"].as_str().unwrap();
-    let Some((prefix, id)) = email.split_once(':') else {
-        panic!("expected email to be in grant:<id> format, got {email}");
-    };
-    assert_eq!(prefix, "grant");
-    assert!(is_ulid_string(id));
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
+
+    let uuid =
+        crate::credentials::derive_vless_uuid(&cluster_ca_key_pem, user_id, credential_epoch)
+            .expect("derive vless uuid");
+    assert!(Uuid::parse_str(&uuid).is_ok());
+    assert_eq!(uuid.chars().nth(14).unwrap(), '4');
+    assert!(!is_ulid_string(&uuid));
+
+    let email = crate::state::membership_xray_email(user_id, endpoint_id);
+    assert_eq!(email, format!("m:{user_id}::{endpoint_id}"));
 }
 
 #[tokio::test]
-async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_server_and_user_psk()
-{
+async fn ss2022_endpoint_creation_persists_server_psk_and_password_uses_server_and_user_psk() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -3624,7 +3774,7 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let endpoint = body_json(res).await;
-    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap();
+    let _endpoint_id = endpoint["endpoint_id"].as_str().unwrap();
 
     assert_eq!(endpoint["meta"]["method"], "2022-blake3-aes-128-gcm");
     let server_psk_b64 = endpoint["meta"]["server_psk_b64"].as_str().unwrap();
@@ -3645,32 +3795,28 @@ async fn ss2022_endpoint_creation_persists_server_psk_and_grant_password_uses_se
         .await
         .unwrap();
     let user = body_json(res).await;
+    let user_id = user["user_id"].as_str().unwrap();
+    let credential_epoch = user
+        .get("credential_epoch")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
 
-    let res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PUT",
-            &format!(
-                "/api/admin/users/{}/access",
-                user["user_id"].as_str().unwrap()
-            ),
-            json!({
-              "items": [{
-                "endpoint_id": endpoint_id,
-                "note": null
-              }]
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let access = body_json(res).await;
-    let ss2022 = &access["items"][0]["grant"]["credentials"]["ss2022"];
-    assert_eq!(ss2022["method"], "2022-blake3-aes-128-gcm");
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
-    let password = ss2022["password"].as_str().unwrap();
+    let user_psk_b64 = crate::credentials::derive_ss2022_user_psk_b64(
+        &cluster_ca_key_pem,
+        user_id,
+        credential_epoch,
+    )
+    .expect("derive ss2022 user_psk");
+    let password = ss2022_password(server_psk_b64, &user_psk_b64);
     let (server_part, user_part) = password.split_once(':').unwrap();
     assert_eq!(server_part, server_psk_b64);
+    assert_eq!(user_part, user_psk_b64);
     let user_psk = base64::engine::general_purpose::STANDARD
         .decode(user_part)
         .unwrap();
@@ -3773,7 +3919,7 @@ async fn rotate_shortid_updates_persisted_meta_and_rejects_non_vless_endpoints()
 }
 
 #[tokio::test]
-async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
+async fn user_quota_summaries_include_membership_usage() {
     let tmp = TempDir::new().unwrap();
     let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -3788,41 +3934,27 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
             .expect("bootstrap node_id")
     };
 
-    {
+    let user_id = {
         let mut store = store.lock().await;
-        store.state_mut().users.insert(
-            "user-1".to_string(),
-            User {
-                user_id: "user-1".to_string(),
-                display_name: "User".to_string(),
-                subscription_token: "sub-1".to_string(),
-                priority_tier: Default::default(),
-                quota_reset: UserQuotaReset::Unlimited {
-                    tz_offset_minutes: 0,
-                },
-            },
-        );
-        store.state_mut().grants.insert(
-            "grant-1".to_string(),
-            Grant {
-                grant_id: "grant-1".to_string(),
-                user_id: "user-1".to_string(),
-                endpoint_id: "missing-endpoint".to_string(),
-                enabled: true,
-                quota_limit_bytes: 1000,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: Some(VlessCredentials {
-                        uuid: "00000000-0000-0000-0000-000000000001".to_string(),
-                        email: "grant:grant-1".to_string(),
-                    }),
-                    ss2022: None,
-                },
-            },
-        );
+        let user = store.create_user("User".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        let key = membership_key(&user.user_id, &endpoint.endpoint_id);
         store
-            .apply_grant_usage_sample(
-                "grant-1",
+            .apply_membership_usage_sample(
+                &key,
                 "cycle-start".to_string(),
                 "cycle-end".to_string(),
                 600,
@@ -3831,7 +3963,8 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
             )
             .unwrap();
         store.save().unwrap();
-    }
+        user.user_id
+    };
 
     let items = {
         let store = store.lock().await;
@@ -3839,7 +3972,7 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
     };
     let user = items
         .iter()
-        .find(|i| i.user_id == "user-1")
+        .find(|i| i.user_id == user_id)
         .expect("missing user summary");
     assert_eq!(
         user.quota_limit_kind,
@@ -3851,7 +3984,7 @@ async fn user_quota_summaries_include_grants_with_missing_endpoints_as_local() {
 }
 
 #[tokio::test]
-async fn user_node_quota_status_include_grants_with_missing_endpoints_as_local() {
+async fn user_node_quota_status_includes_membership_usage() {
     let tmp = TempDir::new().unwrap();
     let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -3866,68 +3999,148 @@ async fn user_node_quota_status_include_grants_with_missing_endpoints_as_local()
             .expect("bootstrap node_id")
     };
 
-    {
+    let user_id = {
         let mut store = store.lock().await;
-        store.state_mut().users.insert(
-            "user-1".to_string(),
-            User {
-                user_id: "user-1".to_string(),
-                display_name: "User".to_string(),
-                subscription_token: "sub-1".to_string(),
-                priority_tier: Default::default(),
-                quota_reset: UserQuotaReset::Unlimited {
-                    tz_offset_minutes: 0,
+        // Force a deterministic UTC cycle window for stable tests.
+        let node = store.get_node(&local_node_id).unwrap();
+        let _ = store
+            .upsert_node(Node {
+                quota_reset: NodeQuotaReset::Monthly {
+                    day_of_month: 1,
+                    tz_offset_minutes: Some(0),
                 },
+                ..node
+            })
+            .unwrap();
+
+        let user = store.create_user("User".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let (cycle_start, cycle_end) = crate::cycle::current_cycle_window_at(
+            crate::cycle::CycleTimeZone::FixedOffsetMinutes {
+                tz_offset_minutes: 0,
             },
-        );
-        store.state_mut().grants.insert(
-            "grant-1".to_string(),
-            Grant {
-                grant_id: "grant-1".to_string(),
-                user_id: "user-1".to_string(),
-                endpoint_id: "missing-endpoint".to_string(),
-                enabled: true,
-                quota_limit_bytes: 1000,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: Some(VlessCredentials {
-                        uuid: "00000000-0000-0000-0000-000000000001".to_string(),
-                        email: "grant:grant-1".to_string(),
-                    }),
-                    ss2022: None,
-                },
-            },
-        );
+            1,
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        let key = membership_key(&user.user_id, &endpoint.endpoint_id);
         store
-            .apply_grant_usage_sample(
-                "grant-1",
-                "cycle-start".to_string(),
-                "cycle-end".to_string(),
+            .apply_membership_usage_sample(
+                &key,
+                cycle_start.to_rfc3339(),
+                cycle_end.to_rfc3339(),
                 600,
                 100,
                 "seen".to_string(),
             )
             .unwrap();
         store.save().unwrap();
-    }
+        user.user_id
+    };
 
     let items = {
         let store = store.lock().await;
-        super::build_local_user_node_quota_status(&store, &local_node_id, "user-1").unwrap()
+        super::build_local_user_node_quota_status(&store, &local_node_id, &user_id).unwrap()
     };
     assert_eq!(items.len(), 1);
     let item = &items[0];
-    assert_eq!(item.user_id, "user-1");
+    assert_eq!(item.user_id, user_id);
     assert_eq!(item.node_id, local_node_id);
-    assert_eq!(item.quota_limit_bytes, 1000);
     assert_eq!(item.used_bytes, 700);
-    assert_eq!(item.remaining_bytes, 300);
-    assert_eq!(item.quota_reset_source, QuotaResetSource::User);
-    assert_eq!(item.cycle_end_at, None);
+    assert_eq!(item.remaining_bytes, 0);
+    assert_eq!(item.quota_reset_source, QuotaResetSource::Node);
+    assert!(item.cycle_end_at.is_some());
 }
 
 #[tokio::test]
-async fn user_quota_summaries_ignore_grants_for_missing_users() {
+async fn user_node_quota_status_includes_usage_when_node_reset_is_unlimited() {
+    let tmp = TempDir::new().unwrap();
+    let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let local_node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node_id")
+    };
+
+    let user_id = {
+        let mut store = store.lock().await;
+        let node = store.get_node(&local_node_id).unwrap();
+        let _ = store
+            .upsert_node(Node {
+                quota_reset: NodeQuotaReset::Unlimited {
+                    tz_offset_minutes: Some(0),
+                },
+                ..node
+            })
+            .unwrap();
+
+        let user = store.create_user("User".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let key = membership_key(&user.user_id, &endpoint.endpoint_id);
+        store
+            .apply_membership_usage_sample(
+                &key,
+                "1970-01-01T00:00:00Z".to_string(),
+                "9999-12-31T23:59:59Z".to_string(),
+                600,
+                100,
+                "seen".to_string(),
+            )
+            .unwrap();
+        store.save().unwrap();
+        user.user_id
+    };
+
+    let items = {
+        let store = store.lock().await;
+        super::build_local_user_node_quota_status(&store, &local_node_id, &user_id).unwrap()
+    };
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    assert_eq!(item.user_id, user_id);
+    assert_eq!(item.node_id, local_node_id);
+    assert_eq!(item.used_bytes, 700);
+    assert_eq!(item.remaining_bytes, 0);
+    assert_eq!(item.quota_reset_source, QuotaResetSource::Node);
+    assert!(item.cycle_end_at.is_none());
+}
+
+#[tokio::test]
+async fn user_quota_summaries_ignore_memberships_for_missing_users() {
     let tmp = TempDir::new().unwrap();
     let (_app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -3944,27 +4157,25 @@ async fn user_quota_summaries_ignore_grants_for_missing_users() {
 
     {
         let mut store = store.lock().await;
-        store.state_mut().grants.insert(
-            "grant-1".to_string(),
-            Grant {
-                grant_id: "grant-1".to_string(),
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        store.state_mut().node_user_endpoint_memberships.insert(
+            crate::state::NodeUserEndpointMembership {
                 user_id: "missing-user".to_string(),
-                endpoint_id: "missing-endpoint".to_string(),
-                enabled: true,
-                quota_limit_bytes: 1000,
-                note: None,
-                credentials: GrantCredentials {
-                    vless: Some(VlessCredentials {
-                        uuid: "00000000-0000-0000-0000-000000000001".to_string(),
-                        email: "grant:grant-1".to_string(),
-                    }),
-                    ss2022: None,
-                },
+                node_id: local_node_id.clone(),
+                endpoint_id: endpoint.endpoint_id.clone(),
             },
         );
+        let key = membership_key("missing-user", &endpoint.endpoint_id);
         store
-            .apply_grant_usage_sample(
-                "grant-1",
+            .apply_membership_usage_sample(
+                &key,
                 "cycle-start".to_string(),
                 "cycle-end".to_string(),
                 600,

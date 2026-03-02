@@ -97,15 +97,6 @@ fn req_authed_json(method: &str, uri: &str, value: serde_json::Value) -> Request
         .unwrap()
 }
 
-fn req_authed(method: &str, uri: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(axum::http::header::AUTHORIZATION, "Bearer testtoken")
-        .body(Body::empty())
-        .unwrap()
-}
-
 async fn spawn_echo_server() -> (u16, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -212,35 +203,6 @@ async fn wait_for_ss_fail(ss_port: u16, password: &str, dest_port: u16) {
     }
 }
 
-async fn send_ss_payload_with_retry(
-    ss_port: u16,
-    password: &str,
-    dest_port: u16,
-    total_payload_len: usize,
-) {
-    // In CI/testbox environments, very large single SS writes can intermittently fail with
-    // BrokenPipe across host<->container forwarding. Send traffic in smaller round-trips so we
-    // can burn enough quota without relying on one long-lived stream.
-    let mut sent = 0usize;
-    // Timeout is progress-based: keep retrying while bytes are still being burned.
-    let mut deadline = Instant::now() + Duration::from_secs(12);
-    while sent < total_payload_len {
-        let chunk = (total_payload_len - sent).min(256 * 1024);
-        match ss_roundtrip_echo(ss_port, password, dest_port, chunk).await {
-            Ok(()) => {
-                sent += chunk;
-                deadline = Instant::now() + Duration::from_secs(12);
-            }
-            Err(err) => {
-                if Instant::now() >= deadline {
-                    panic!("timeout sending ss payload for quota burn, sent={sent}, err={err}");
-                }
-                sleep(Duration::from_millis(150)).await;
-            }
-        }
-    }
-}
-
 #[tokio::test]
 #[ignore]
 async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overflow() {
@@ -262,7 +224,10 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     )
     .unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
     let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
         &config,
@@ -270,7 +235,11 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     ))
     .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
-    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let reconcile = spawn_reconciler(
+        std::sync::Arc::new(config.clone()),
+        store.clone(),
+        cluster_ca_key_pem.clone(),
+    );
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -320,7 +289,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
     );
@@ -416,8 +385,12 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
+    let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // Grant user access: P1/P2/P3 all enabled.
+    // Grant access (membership-only hard cut): P1/P2/P3 all enabled.
     let mut ss_password_by_user_id = BTreeMap::<String, String>::new();
     for user_id in [p1_user_id.clone(), p2_user_id.clone(), p3_user_id.clone()] {
         let res = app
@@ -427,23 +400,19 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
                 &format!("/api/admin/users/{user_id}/access"),
                 json!({
                   "items": [{
-                    "endpoint_id": endpoint_id_ss,
-                    "note": null
+                    "endpoint_id": endpoint_id_ss.clone()
                   }]
                 }),
             ))
             .await
             .unwrap();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
-        let access_detail: serde_json::Value = {
-            use http_body_util::BodyExt as _;
-            let bytes = res.into_body().collect().await.unwrap().to_bytes();
-            serde_json::from_slice(&bytes).unwrap()
-        };
-        let password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        drop(res);
+
+        let user_psk_b64 =
+            xp::credentials::derive_ss2022_user_psk_b64(&cluster_ca_key_pem, &user_id, 0)
+                .expect("derive ss2022 user psk");
+        let password = xp::protocol::ss2022_password(&server_psk_b64, &user_psk_b64);
         ss_password_by_user_id.insert(user_id, password);
     }
 
@@ -459,7 +428,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     let now0 = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -471,7 +440,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     let now2 = chrono::DateTime::parse_from_rfc3339("2026-02-03T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    xp::quota::run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now2, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -510,7 +479,10 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     )
     .unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
     let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
         &config,
@@ -518,7 +490,11 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     ))
     .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
-    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let reconcile = spawn_reconciler(
+        std::sync::Arc::new(config.clone()),
+        store.clone(),
+        cluster_ca_key_pem.clone(),
+    );
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -568,7 +544,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
     );
@@ -663,8 +639,13 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
+    let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // Grant user access to both users.
+    // Grant memberships directly by user (membership-only hard cut).
+    let mut ss_password_by_user_id = BTreeMap::<String, String>::new();
     for user_id in [p1_user_id.clone(), p2_user_id.clone()] {
         let res = app
             .clone()
@@ -673,34 +654,25 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
                 &format!("/api/admin/users/{user_id}/access"),
                 json!({
                   "items": [{
-                    "endpoint_id": endpoint_id_ss,
-                    "note": null
+                    "endpoint_id": endpoint_id_ss.clone()
                   }]
                 }),
             ))
             .await
             .unwrap();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
-    }
+        drop(res);
 
-    let res = app
-        .clone()
-        .oneshot(req_authed(
-            "GET",
-            &format!("/api/admin/users/{p2_user_id}/access"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let access_detail: serde_json::Value = {
-        use http_body_util::BodyExt as _;
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
-    };
-    let p2_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
-        .as_str()
-        .unwrap()
-        .to_string();
+        let user_psk_b64 =
+            xp::credentials::derive_ss2022_user_psk_b64(&cluster_ca_key_pem, &user_id, 0)
+                .expect("derive ss2022 user psk");
+        let password = xp::protocol::ss2022_password(&server_psk_b64, &user_psk_b64);
+        ss_password_by_user_id.insert(user_id, password);
+    }
+    let p2_password = ss_password_by_user_id
+        .get(&p2_user_id)
+        .expect("expected p2 password")
+        .clone();
 
     let (dest_port, echo_task) = spawn_echo_server().await;
 
@@ -710,7 +682,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     let now0 = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -728,7 +700,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     assert_eq!(res.status(), axum::http::StatusCode::OK);
 
     let now0_later = now0 + chrono::Duration::hours(1);
-    xp::quota::run_quota_tick_at(now0_later, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now0_later, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -767,7 +739,10 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     )
     .unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
     let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
         &config,
@@ -775,7 +750,11 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     ))
     .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
-    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let reconcile = spawn_reconciler(
+        std::sync::Arc::new(config.clone()),
+        store.clone(),
+        cluster_ca_key_pem.clone(),
+    );
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -825,7 +804,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
     );
@@ -898,8 +877,12 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
+    let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // Grant access (single member).
+    // Grant membership (single user) via user access API (membership-only hard cut).
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -907,36 +890,33 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
             &format!("/api/admin/users/{p2_user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id_ss,
-                "note": null
+                "endpoint_id": endpoint_id_ss.clone()
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let access_detail: serde_json::Value = {
-        use http_body_util::BodyExt as _;
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
-    };
-    let p2_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    drop(res);
+
+    let user_psk_b64 =
+        xp::credentials::derive_ss2022_user_psk_b64(&cluster_ca_key_pem, &p2_user_id, 0)
+            .expect("derive ss2022 user psk");
+    let p2_password = xp::protocol::ss2022_password(&server_psk_b64, &user_psk_b64);
 
     let (dest_port, echo_task) = spawn_echo_server().await;
 
     // Wait until SS is ready, then send enough traffic to exceed the initial day0 bank.
     wait_for_ss_ok(ss_port, &p2_password, dest_port, 256).await;
     // Force a ban: exceed the initial day0 bank. Payload is counted in both uplink + downlink.
-    // 4MiB payload => ~8MiB traffic after echo, keeping a comfortable margin above day0 cap.
-    send_ss_payload_with_retry(ss_port, &p2_password, dest_port, 4 * 1024 * 1024).await;
+    ss_roundtrip_echo(ss_port, &p2_password, dest_port, 4 * 1024 * 1024)
+        .await
+        .unwrap();
 
     let now0 = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now0, &config, &store, &reconcile)
         .await
         .unwrap();
 
@@ -944,7 +924,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
 
     // Jump to the next cycle: bans should be cleared and pacing reset, restoring connectivity.
     let now_future = now0 + chrono::Duration::days(40);
-    xp::quota::run_quota_tick_at(now_future, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now_future, &config, &store, &reconcile)
         .await
         .unwrap();
 

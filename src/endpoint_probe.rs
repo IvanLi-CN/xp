@@ -1,7 +1,13 @@
-use std::{collections::BTreeMap, net::IpAddr, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::future::join_all;
 use hmac::{Hmac, Mac as _};
@@ -16,13 +22,11 @@ use tokio::{
 use tracing::{debug, warn};
 
 use crate::{
-    domain::{
-        Endpoint, EndpointKind, Grant, GrantCredentials, Ss2022Credentials, User, UserQuotaReset,
-        VlessCredentials,
-    },
+    credentials::{derive_ss2022_user_psk_b64, derive_vless_uuid},
+    domain::{Endpoint, EndpointKind, User, UserQuotaReset},
     id::new_ulid_string,
     protocol::{
-        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, SS2022_PSK_LEN_BYTES_AES_128, Ss2022EndpointMeta,
+        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, ss2022_password,
     },
     raft::app::RaftFacade,
@@ -33,10 +37,6 @@ use crate::{
 
 pub const PROBE_USER_ID: &str = "user_probe";
 const PROBE_USER_DISPLAY_NAME: &str = "probe";
-const PROBE_GRANT_NOTE: &str = "system: probe";
-
-// Large enough for tiny probe traffic; avoids quota bans interfering with probe stability.
-const PROBE_GRANT_QUOTA_LIMIT_BYTES: u64 = 1_u64 << 40; // 1 TiB
 
 // Limit concurrent endpoint probes per node to avoid spawning too many Xray processes at once.
 const DEFAULT_CONCURRENCY: usize = 4;
@@ -221,6 +221,7 @@ pub enum EndpointProbeError {
     XrayNotFound,
     XrayFailed { message: String },
     Reqwest { message: String },
+    Credentials { message: String },
     Store { message: String },
     Raft { message: String },
     AlreadyRunning,
@@ -238,6 +239,7 @@ impl std::fmt::Display for EndpointProbeError {
             Self::XrayNotFound => write!(f, "xray binary not found"),
             Self::XrayFailed { message } => write!(f, "xray failed: {message}"),
             Self::Reqwest { message } => write!(f, "http request failed: {message}"),
+            Self::Credentials { message } => write!(f, "credential error: {message}"),
             Self::Store { message } => write!(f, "store error: {message}"),
             Self::Raft { message } => write!(f, "raft error: {message}"),
             Self::AlreadyRunning => write!(f, "probe run already in progress"),
@@ -318,29 +320,10 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     out
 }
 
-fn derive_probe_subscription_token(probe_secret: &[u8]) -> String {
+fn derive_probe_subscription_token(probe_secret: &str) -> String {
     // Needs to be unguessable because /api/sub/:token is intentionally unauthenticated.
-    let digest = hmac_sha256(probe_secret, b"xp:probe-user:subscription-token");
+    let digest = hmac_sha256(probe_secret.as_bytes(), b"xp:probe-user:subscription-token");
     format!("sub_probe_{}", URL_SAFE_NO_PAD.encode(digest))
-}
-
-fn derive_probe_vless_uuid(probe_secret: &[u8], endpoint_id: &str) -> String {
-    let msg = format!("xp:probe-grant:vless-uuid:{endpoint_id}");
-    let digest = hmac_sha256(probe_secret, msg.as_bytes());
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    // RFC4122 v4 + variant bits (we only need a stable UUID string, not a specific version).
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    uuid::Uuid::from_bytes(bytes).to_string()
-}
-
-fn derive_probe_ss2022_user_psk_b64(probe_secret: &[u8], endpoint_id: &str) -> String {
-    let msg = format!("xp:probe-grant:ss2022-user-psk:{endpoint_id}");
-    let digest = hmac_sha256(probe_secret, msg.as_bytes());
-    let mut key = [0u8; SS2022_PSK_LEN_BYTES_AES_128];
-    key.copy_from_slice(&digest[..SS2022_PSK_LEN_BYTES_AES_128]);
-    STANDARD.encode(key)
 }
 
 #[derive(Clone)]
@@ -366,7 +349,7 @@ struct EndpointProbeInner {
     raft: Arc<dyn RaftFacade>,
     run_gate: Arc<Semaphore>,
     runs: Arc<Mutex<EndpointProbeRuns>>,
-    probe_secret: Arc<[u8]>,
+    probe_secret: Arc<String>,
     events: broadcast::Sender<EndpointProbeEvent>,
 }
 
@@ -430,7 +413,7 @@ pub fn new_endpoint_probe_handle(
             raft,
             run_gate: Arc::new(Semaphore::new(1)),
             runs: Arc::new(Mutex::new(EndpointProbeRuns::default())),
-            probe_secret: Arc::from(probe_secret.into_bytes()),
+            probe_secret: Arc::new(probe_secret),
             events,
         }),
     }
@@ -566,22 +549,29 @@ async fn run_probe_once_inner(
         });
     }
 
-    // Snapshot endpoints/nodes/grants without holding the lock across Raft writes.
-    let (endpoints, nodes, grants) = {
+    // Snapshot endpoints/nodes/memberships without holding the lock across Raft writes.
+    let (endpoints, nodes, probe_endpoint_ids) = {
         let store = inner.store.lock().await;
+        let probe_endpoint_ids = store
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.user_id == PROBE_USER_ID)
+            .map(|m| m.endpoint_id.clone())
+            .collect::<BTreeSet<_>>();
         (
             store.list_endpoints(),
             store.list_nodes(),
-            store.list_grants(),
+            probe_endpoint_ids,
         )
     };
 
-    ensure_probe_user_and_grants(
+    ensure_probe_user_and_access(
         &inner.raft,
-        inner.probe_secret.as_ref(),
+        inner.probe_secret.as_str(),
         &endpoints,
         &nodes,
-        &grants,
+        &probe_endpoint_ids,
     )
     .await?;
 
@@ -751,18 +741,19 @@ async fn raft_write_best_effort(
     }
 }
 
-async fn ensure_probe_user_and_grants(
+async fn ensure_probe_user_and_access(
     raft: &Arc<dyn RaftFacade>,
-    probe_secret: &[u8],
+    probe_secret: &str,
     endpoints: &[Endpoint],
     nodes: &[crate::domain::Node],
-    grants: &[Grant],
+    existing_endpoint_ids: &BTreeSet<String>,
 ) -> Result<(), EndpointProbeError> {
     // Ensure the probe user exists (idempotent).
     let user = User {
         user_id: PROBE_USER_ID.to_string(),
         display_name: PROBE_USER_DISPLAY_NAME.to_string(),
         subscription_token: derive_probe_subscription_token(probe_secret),
+        credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Unlimited {
             tz_offset_minutes: 0,
@@ -773,79 +764,34 @@ async fn ensure_probe_user_and_grants(
     let node_ids: std::collections::BTreeSet<&str> =
         nodes.iter().map(|n| n.node_id.as_str()).collect();
 
-    // Ensure per-endpoint probe grants exist.
+    // Ensure the probe user can access every endpoint, so probe traffic is attributable to a
+    // stable membership email and uses the membership-only credential derivation logic.
     for endpoint in endpoints {
         // Skip endpoints on unknown nodes (shouldn't happen, but keeps this resilient).
         if !node_ids.contains(endpoint.node_id.as_str()) {
             continue;
         }
-
-        let desired_grant_id = format!("probe_{}", endpoint.endpoint_id);
-
-        let has_grant = grants.iter().any(|g| {
-            (g.grant_id == desired_grant_id)
-                || (g.user_id == PROBE_USER_ID && g.endpoint_id == endpoint.endpoint_id)
-        });
-        if has_grant {
+        if existing_endpoint_ids.contains(&endpoint.endpoint_id) {
             continue;
         }
-
-        let credentials = build_probe_credentials(probe_secret, endpoint, &desired_grant_id)?;
-        let grant = Grant {
-            grant_id: desired_grant_id,
-            user_id: PROBE_USER_ID.to_string(),
-            endpoint_id: endpoint.endpoint_id.clone(),
-            enabled: true,
-            quota_limit_bytes: PROBE_GRANT_QUOTA_LIMIT_BYTES,
-            note: Some(PROBE_GRANT_NOTE.to_string()),
-            credentials,
-        };
-
-        // Conflicts are expected if multiple nodes bootstrap at once.
-        raft_write_best_effort(raft, DesiredStateCommand::UpsertGrant { grant }).await?;
+        raft_write_best_effort(
+            raft,
+            DesiredStateCommand::EnsureMembership {
+                user_id: PROBE_USER_ID.to_string(),
+                endpoint_id: endpoint.endpoint_id.clone(),
+            },
+        )
+        .await?;
     }
 
     Ok(())
-}
-
-fn build_probe_credentials(
-    probe_secret: &[u8],
-    endpoint: &Endpoint,
-    grant_id: &str,
-) -> Result<GrantCredentials, EndpointProbeError> {
-    match endpoint.kind {
-        EndpointKind::VlessRealityVisionTcp => Ok(GrantCredentials {
-            vless: Some(VlessCredentials {
-                uuid: derive_probe_vless_uuid(probe_secret, &endpoint.endpoint_id),
-                email: format!("grant:{grant_id}"),
-            }),
-            ss2022: None,
-        }),
-        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            let meta: Ss2022EndpointMeta =
-                serde_json::from_value(endpoint.meta.clone()).map_err(|e| {
-                    EndpointProbeError::Store {
-                        message: e.to_string(),
-                    }
-                })?;
-            let user_psk_b64 =
-                derive_probe_ss2022_user_psk_b64(probe_secret, &endpoint.endpoint_id);
-            Ok(GrantCredentials {
-                vless: None,
-                ss2022: Some(Ss2022Credentials {
-                    method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-                    password: ss2022_password(&meta.server_psk_b64, &user_psk_b64),
-                }),
-            })
-        }
-    }
 }
 
 async fn probe_one_endpoint(
     run_id: &str,
     config_hash: &str,
     endpoint: Endpoint,
-    probe_secret: &[u8],
+    probe_secret: &str,
     nodes_by_id: &BTreeMap<String, crate::domain::Node>,
 ) -> EndpointProbeAppendSample {
     let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -924,11 +870,15 @@ struct ProbeOk {
 
 async fn probe_vless_reality(
     run_id: &str,
-    probe_secret: &[u8],
+    probe_secret: &str,
     node: &crate::domain::Node,
     endpoint: &Endpoint,
 ) -> Result<ProbeOk, EndpointProbeError> {
-    let uuid = derive_probe_vless_uuid(probe_secret, &endpoint.endpoint_id);
+    let uuid = derive_vless_uuid(probe_secret, PROBE_USER_ID, 0).map_err(|e| {
+        EndpointProbeError::Credentials {
+            message: e.to_string(),
+        }
+    })?;
 
     let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta.clone())
         .map_err(|e| EndpointProbeError::Store {
@@ -982,7 +932,7 @@ async fn probe_vless_reality(
 
 async fn probe_ss2022(
     run_id: &str,
-    probe_secret: &[u8],
+    probe_secret: &str,
     node: &crate::domain::Node,
     endpoint: &Endpoint,
 ) -> Result<ProbeOk, EndpointProbeError> {
@@ -990,7 +940,19 @@ async fn probe_ss2022(
         serde_json::from_value(endpoint.meta.clone()).map_err(|e| EndpointProbeError::Store {
             message: e.to_string(),
         })?;
-    let user_psk_b64 = derive_probe_ss2022_user_psk_b64(probe_secret, &endpoint.endpoint_id);
+    if meta.method != SS2022_METHOD_2022_BLAKE3_AES_128_GCM {
+        return Err(EndpointProbeError::Store {
+            message: format!(
+                "invalid ss2022 meta method: expected {SS2022_METHOD_2022_BLAKE3_AES_128_GCM}, got {}",
+                meta.method
+            ),
+        });
+    }
+    let user_psk_b64 = derive_ss2022_user_psk_b64(probe_secret, PROBE_USER_ID, 0).map_err(|e| {
+        EndpointProbeError::Credentials {
+            message: e.to_string(),
+        }
+    })?;
     let password = ss2022_password(&meta.server_psk_b64, &user_psk_b64);
 
     let outbound = serde_json::json!({

@@ -13,45 +13,17 @@ const meta = {
 		},
 		mockApi: {
 			data: {
-				userAccessByUser: {
+				userAccessByUserId: {
 					[USER_ID_1]: [
 						{
-							membership: {
-								user_id: USER_ID_1,
-								node_id: "node-1",
-								endpoint_id: "endpoint-1",
-							},
-							grant: {
-								grant_id: "grant-mock-user1-vless",
-								enabled: true,
-								quota_limit_bytes: 10 * 2 ** 30,
-								note: null,
-								credentials: {
-									vless: {
-										uuid: "22222222-2222-2222-2222-000000000001",
-										email: "user1@example.com",
-									},
-								},
-							},
+							user_id: USER_ID_1,
+							endpoint_id: "endpoint-1",
+							node_id: "node-1",
 						},
 						{
-							membership: {
-								user_id: USER_ID_1,
-								node_id: "node-2",
-								endpoint_id: "endpoint-2",
-							},
-							grant: {
-								grant_id: "grant-mock-user1-ss",
-								enabled: true,
-								quota_limit_bytes: 5 * 2 ** 30,
-								note: null,
-								credentials: {
-									ss2022: {
-										method: "2022-blake3-aes-128-gcm",
-										password: "mock-password-2",
-									},
-								},
-							},
+							user_id: USER_ID_1,
+							endpoint_id: "endpoint-2",
+							node_id: "node-2",
 						},
 					],
 				},
@@ -95,20 +67,16 @@ export const AccessTab: Story = {
 			await canvas.findByRole("button", { name: "Access" }),
 		);
 		await expect(
-			await canvas.findByRole("heading", { name: "Access" }),
+			await canvas.findByText("Selected endpoints: 2"),
 		).toBeInTheDocument();
 	},
 };
 
-export const QuotaUsageTab: Story = {
+export const QuotaStatusTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Quota usage" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Quota usage" }),
-		).toBeInTheDocument();
-		await expect(await canvas.findByText("Next reset")).toBeInTheDocument();
+		const tab = await canvas.findByRole("button", { name: "Quota status" });
+		await userEvent.click(tab);
+		await expect(tab).toHaveClass("tab-active");
 	},
 };

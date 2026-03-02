@@ -118,7 +118,6 @@ const quotaPolicyRoute = createRoute({
 	path: "/quota-policy",
 	component: QuotaPolicyPage,
 });
-
 const serviceConfigRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/service-config",

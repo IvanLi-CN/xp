@@ -29,10 +29,6 @@ pub enum DomainError {
         node_id: String,
         endpoint_id: String,
     },
-    GrantPairConflict {
-        user_id: String,
-        endpoint_id: String,
-    },
     InvalidRealityServerName {
         server_name: String,
         reason: String,
@@ -67,7 +63,7 @@ impl DomainError {
             }
             Self::RealityDomainNotFound { .. } => "not_found",
             Self::NodeInUse { .. } => "conflict",
-            Self::GrantPairConflict { .. } | Self::RealityDomainNameConflict { .. } => "conflict",
+            Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
             | Self::VlessRealityServerNamesEmpty { .. }
             | Self::RealityDomainsReorderInvalid { .. }
@@ -98,13 +94,6 @@ impl std::fmt::Display for DomainError {
             } => write!(
                 f,
                 "node is still referenced by endpoints: node_id={node_id} endpoint_id={endpoint_id}"
-            ),
-            Self::GrantPairConflict {
-                user_id,
-                endpoint_id,
-            } => write!(
-                f,
-                "grant pair already exists: user_id={user_id} endpoint_id={endpoint_id}"
             ),
             Self::InvalidRealityServerName {
                 server_name,
@@ -254,6 +243,8 @@ pub struct User {
     pub display_name: String,
     pub subscription_token: String,
     #[serde(default)]
+    pub credential_epoch: u32,
+    #[serde(default)]
     pub priority_tier: UserPriorityTier,
     #[serde(default)]
     pub quota_reset: UserQuotaReset,
@@ -275,37 +266,6 @@ pub struct UserNodeQuota {
     pub quota_limit_bytes: u64,
     #[serde(default)]
     pub quota_reset_source: QuotaResetSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Grant {
-    pub grant_id: String,
-    pub user_id: String,
-    pub endpoint_id: String,
-    pub enabled: bool,
-    pub quota_limit_bytes: u64,
-    pub note: Option<String>,
-    pub credentials: GrantCredentials,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GrantCredentials {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vless: Option<VlessCredentials>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ss2022: Option<Ss2022Credentials>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct VlessCredentials {
-    pub uuid: String,
-    pub email: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Ss2022Credentials {
-    pub method: String,
-    pub password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

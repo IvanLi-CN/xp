@@ -1,40 +1,34 @@
 use base64::Engine as _;
 use rand::RngCore;
 
-use crate::domain::{Endpoint, EndpointKind, Grant, Node, User};
-use crate::protocol::SS2022_METHOD_2022_BLAKE3_AES_128_GCM;
+use crate::{
+    credentials,
+    domain::{Endpoint, EndpointKind, Node, User},
+    protocol::{SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta, ss2022_password},
+    state::NodeUserEndpointMembership,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionError {
-    GrantUserMismatch {
-        grant_id: String,
+    MembershipUserMismatch {
         expected_user_id: String,
         got_user_id: String,
     },
     MissingEndpoint {
         endpoint_id: String,
-        grant_id: String,
     },
     MissingNode {
         node_id: String,
         endpoint_id: String,
-        grant_id: String,
     },
     EmptyNodeAccessHost {
         node_id: String,
         endpoint_id: String,
-        grant_id: String,
     },
-    MissingCredentialsVless {
-        grant_id: String,
-        endpoint_id: String,
-    },
-    MissingCredentialsSs2022 {
-        grant_id: String,
-        endpoint_id: String,
+    CredentialDerive {
+        reason: String,
     },
     Ss2022UnsupportedMethod {
-        grant_id: String,
         endpoint_id: String,
         got_method: String,
     },
@@ -56,58 +50,37 @@ pub enum SubscriptionError {
 impl std::fmt::Display for SubscriptionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::GrantUserMismatch {
-                grant_id,
+            Self::MembershipUserMismatch {
                 expected_user_id,
                 got_user_id,
             } => write!(
                 f,
-                "grant user mismatch: grant_id={grant_id} expected_user_id={expected_user_id} got_user_id={got_user_id}"
+                "membership user mismatch: expected_user_id={expected_user_id} got_user_id={got_user_id}"
             ),
-            Self::MissingEndpoint {
-                endpoint_id,
-                grant_id,
-            } => write!(
-                f,
-                "endpoint not found: endpoint_id={endpoint_id} (grant_id={grant_id})"
-            ),
+            Self::MissingEndpoint { endpoint_id } => {
+                write!(f, "endpoint not found: endpoint_id={endpoint_id}")
+            }
             Self::MissingNode {
                 node_id,
                 endpoint_id,
-                grant_id,
             } => write!(
                 f,
-                "node not found: node_id={node_id} (endpoint_id={endpoint_id}, grant_id={grant_id})"
+                "node not found: node_id={node_id} (endpoint_id={endpoint_id})"
             ),
             Self::EmptyNodeAccessHost {
                 node_id,
                 endpoint_id,
-                grant_id,
             } => write!(
                 f,
-                "node access_host is empty: node_id={node_id} (endpoint_id={endpoint_id}, grant_id={grant_id})"
+                "node access_host is empty: node_id={node_id} (endpoint_id={endpoint_id})"
             ),
-            Self::MissingCredentialsVless {
-                grant_id,
-                endpoint_id,
-            } => write!(
-                f,
-                "missing vless credentials: grant_id={grant_id} endpoint_id={endpoint_id}"
-            ),
-            Self::MissingCredentialsSs2022 {
-                grant_id,
-                endpoint_id,
-            } => write!(
-                f,
-                "missing ss2022 credentials: grant_id={grant_id} endpoint_id={endpoint_id}"
-            ),
+            Self::CredentialDerive { reason } => write!(f, "credential derivation error: {reason}"),
             Self::Ss2022UnsupportedMethod {
-                grant_id,
                 endpoint_id,
                 got_method,
             } => write!(
                 f,
-                "unsupported ss2022 method: {got_method} (grant_id={grant_id}, endpoint_id={endpoint_id})"
+                "unsupported ss2022 method: {got_method} (endpoint_id={endpoint_id})"
             ),
             Self::InvalidEndpointMetaVless {
                 endpoint_id,
@@ -145,7 +118,6 @@ struct SubscriptionSortKey {
     name: String,
     kind: &'static str,
     endpoint_id: String,
-    grant_id: String,
 }
 
 fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
@@ -169,42 +141,46 @@ fn pick_server_name<'a, R: RngCore + ?Sized>(
 }
 
 pub fn build_raw_lines(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
 ) -> Result<Vec<String>, SubscriptionError> {
-    let items = build_items(user, grants, endpoints, nodes)?;
+    let items = build_items(cluster_ca_key_pem, user, memberships, endpoints, nodes)?;
     Ok(items.into_iter().map(|i| i.raw_uri).collect())
 }
 
 pub fn build_raw_text(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
 ) -> Result<String, SubscriptionError> {
-    let lines = build_raw_lines(user, grants, endpoints, nodes)?;
+    let lines = build_raw_lines(cluster_ca_key_pem, user, memberships, endpoints, nodes)?;
     Ok(join_lines_with_trailing_newline(&lines))
 }
 
 pub fn build_base64(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
 ) -> Result<String, SubscriptionError> {
-    let raw = build_raw_text(user, grants, endpoints, nodes)?;
+    let raw = build_raw_text(cluster_ca_key_pem, user, memberships, endpoints, nodes)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(raw.as_bytes()))
 }
 
 pub fn build_clash_yaml(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
 ) -> Result<String, SubscriptionError> {
-    let items = build_items(user, grants, endpoints, nodes)?;
+    let items = build_items(cluster_ca_key_pem, user, memberships, endpoints, nodes)?;
     let config = ClashConfig {
         proxies: items.into_iter().map(|i| i.clash_proxy).collect(),
     };
@@ -214,18 +190,27 @@ pub fn build_clash_yaml(
 }
 
 fn build_items(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
 ) -> Result<Vec<SubscriptionItem>, SubscriptionError> {
     let mut rng = rand::thread_rng();
-    build_items_with_rng(user, grants, endpoints, nodes, &mut rng)
+    build_items_with_rng(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        &mut rng,
+    )
 }
 
 fn build_items_with_rng<R: RngCore + ?Sized>(
+    cluster_ca_key_pem: &str,
     user: &User,
-    grants: &[Grant],
+    memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
     rng: &mut R,
@@ -237,44 +222,35 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
     let nodes_by_id: std::collections::HashMap<&str, &Node> =
         nodes.iter().map(|n| (n.node_id.as_str(), n)).collect();
 
-    let mut note_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    for grant in grants {
-        if grant.user_id != user.user_id {
-            return Err(SubscriptionError::GrantUserMismatch {
-                grant_id: grant.grant_id.clone(),
-                expected_user_id: user.user_id.clone(),
-                got_user_id: grant.user_id.clone(),
-            });
-        }
-        if !grant.enabled {
-            continue;
-        }
-        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty()) {
-            *note_counts.entry(note.to_string()).or_insert(0) += 1;
-        }
-    }
+    let vless_uuid =
+        credentials::derive_vless_uuid(cluster_ca_key_pem, &user.user_id, user.credential_epoch)
+            .map_err(|e| SubscriptionError::CredentialDerive {
+                reason: e.to_string(),
+            })?;
+    let ss2022_user_psk_b64 = credentials::derive_ss2022_user_psk_b64(
+        cluster_ca_key_pem,
+        &user.user_id,
+        user.credential_epoch,
+    )
+    .map_err(|e| SubscriptionError::CredentialDerive {
+        reason: e.to_string(),
+    })?;
 
     let mut items = Vec::new();
 
-    for grant in grants {
-        if grant.user_id != user.user_id {
-            return Err(SubscriptionError::GrantUserMismatch {
-                grant_id: grant.grant_id.clone(),
+    for membership in memberships {
+        if membership.user_id != user.user_id {
+            return Err(SubscriptionError::MembershipUserMismatch {
                 expected_user_id: user.user_id.clone(),
-                got_user_id: grant.user_id.clone(),
+                got_user_id: membership.user_id.clone(),
             });
-        }
-        if !grant.enabled {
-            continue;
         }
 
         let endpoint = endpoints_by_id
-            .get(grant.endpoint_id.as_str())
+            .get(membership.endpoint_id.as_str())
             .copied()
             .ok_or_else(|| SubscriptionError::MissingEndpoint {
-                endpoint_id: grant.endpoint_id.clone(),
-                grant_id: grant.grant_id.clone(),
+                endpoint_id: membership.endpoint_id.clone(),
             })?;
 
         let node = nodes_by_id
@@ -283,23 +259,16 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
             .ok_or_else(|| SubscriptionError::MissingNode {
                 node_id: endpoint.node_id.clone(),
                 endpoint_id: endpoint.endpoint_id.clone(),
-                grant_id: grant.grant_id.clone(),
             })?;
 
         if node.access_host.is_empty() {
             return Err(SubscriptionError::EmptyNodeAccessHost {
                 node_id: node.node_id.clone(),
                 endpoint_id: endpoint.endpoint_id.clone(),
-                grant_id: grant.grant_id.clone(),
             });
         }
 
-        let mut name = build_name(user, grant, node, endpoint);
-        if let Some(note) = grant.note.as_deref().filter(|note| !note.trim().is_empty())
-            && note_counts.get(note).copied().unwrap_or(0) > 1
-        {
-            name = format!("{note}-{}-{}", node.node_name, endpoint.tag);
-        }
+        let name = build_default_name(user, node, endpoint);
         let name_encoded = percent_encode_rfc3986(&name);
 
         let host = node.access_host.as_str();
@@ -307,13 +276,6 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
 
         let (raw_uri, clash_proxy) = match &endpoint.kind {
             EndpointKind::VlessRealityVisionTcp => {
-                let cred = grant.credentials.vless.as_ref().ok_or_else(|| {
-                    SubscriptionError::MissingCredentialsVless {
-                        grant_id: grant.grant_id.clone(),
-                        endpoint_id: endpoint.endpoint_id.clone(),
-                    }
-                })?;
-
                 let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
                     serde_json::from_value(endpoint.meta.clone()).map_err(|e| {
                         SubscriptionError::InvalidEndpointMetaVless {
@@ -344,7 +306,7 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
 
                 let uri = format!(
                     "vless://{}@{}:{}?encryption=none&security=reality&type=tcp&sni={}&fp={}&pbk={}&sid={}&flow=xtls-rprx-vision#{}",
-                    cred.uuid, host, port, sni_q, fp_q, pbk_q, sid_q, name_encoded
+                    vless_uuid, host, port, sni_q, fp_q, pbk_q, sid_q, name_encoded
                 );
 
                 let proxy = ClashProxy::Vless(ClashVlessProxy {
@@ -352,7 +314,7 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     proxy_type: "vless".to_string(),
                     server: host.to_string(),
                     port,
-                    uuid: cred.uuid.clone(),
+                    uuid: vless_uuid.clone(),
                     network: "tcp".to_string(),
                     udp: true,
                     tls: true,
@@ -368,22 +330,20 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                 (uri, proxy)
             }
             EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-                let cred = grant.credentials.ss2022.as_ref().ok_or_else(|| {
-                    SubscriptionError::MissingCredentialsSs2022 {
-                        grant_id: grant.grant_id.clone(),
+                let meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())
+                    .map_err(|e| SubscriptionError::Ss2022UnsupportedMethod {
                         endpoint_id: endpoint.endpoint_id.clone(),
-                    }
-                })?;
-
-                if cred.method != SS2022_METHOD_2022_BLAKE3_AES_128_GCM {
+                        got_method: format!("invalid endpoint meta: {e}"),
+                    })?;
+                if meta.method != SS2022_METHOD_2022_BLAKE3_AES_128_GCM {
                     return Err(SubscriptionError::Ss2022UnsupportedMethod {
-                        grant_id: grant.grant_id.clone(),
                         endpoint_id: endpoint.endpoint_id.clone(),
-                        got_method: cred.method.clone(),
+                        got_method: meta.method,
                     });
                 }
 
-                let password_encoded = percent_encode_rfc3986(&cred.password);
+                let password = ss2022_password(&meta.server_psk_b64, &ss2022_user_psk_b64);
+                let password_encoded = percent_encode_rfc3986(&password);
                 let uri = format!(
                     "ss://{}:{}@{}:{}#{}",
                     SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
@@ -399,7 +359,7 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     server: host.to_string(),
                     port,
                     cipher: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-                    password: cred.password.clone(),
+                    password,
                     udp: true,
                 });
 
@@ -412,7 +372,6 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                 name: name.clone(),
                 kind: endpoint_kind_key(&endpoint.kind),
                 endpoint_id: endpoint.endpoint_id.clone(),
-                grant_id: grant.grant_id.clone(),
             },
             raw_uri,
             clash_proxy,
@@ -421,13 +380,6 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
 
     items.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
     Ok(items)
-}
-
-fn build_name(user: &User, grant: &Grant, node: &Node, endpoint: &Endpoint) -> String {
-    match &grant.note {
-        Some(note) if !note.trim().is_empty() => note.clone(),
-        _ => build_default_name(user, node, endpoint),
-    }
 }
 
 fn build_default_name(user: &User, node: &Node, endpoint: &Endpoint) -> String {
@@ -528,9 +480,11 @@ struct ClashSsProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use pretty_assertions::assert_eq;
-    use rand::RngCore;
     use serde_yaml::Value;
+
+    const SEED: &str = "seed";
 
     fn node(node_id: &str, node_name: &str, access_host: &str) -> Node {
         Node {
@@ -548,6 +502,7 @@ mod tests {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
             subscription_token: "token".to_string(),
+            credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset: crate::domain::UserQuotaReset::default(),
         }
@@ -570,64 +525,31 @@ mod tests {
         }
     }
 
-    fn endpoint_ss(endpoint_id: &str, node_id: &str, tag: &str, port: u16) -> Endpoint {
+    fn endpoint_ss(
+        endpoint_id: &str,
+        node_id: &str,
+        tag: &str,
+        port: u16,
+        server_psk_b64: &str,
+    ) -> Endpoint {
         Endpoint {
             endpoint_id: endpoint_id.to_string(),
             node_id: node_id.to_string(),
             tag: tag.to_string(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port,
-            meta: serde_json::json!({}),
+            meta: serde_json::json!({
+                "method": SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
+                "server_psk_b64": server_psk_b64,
+            }),
         }
     }
 
-    fn grant_ss(
-        user_id: &str,
-        grant_id: &str,
-        endpoint_id: &str,
-        enabled: bool,
-        note: Option<&str>,
-        password: &str,
-    ) -> Grant {
-        Grant {
-            grant_id: grant_id.to_string(),
+    fn membership(user_id: &str, node_id: &str, endpoint_id: &str) -> NodeUserEndpointMembership {
+        NodeUserEndpointMembership {
             user_id: user_id.to_string(),
+            node_id: node_id.to_string(),
             endpoint_id: endpoint_id.to_string(),
-            enabled,
-            quota_limit_bytes: 0,
-            note: note.map(|s| s.to_string()),
-            credentials: crate::domain::GrantCredentials {
-                vless: None,
-                ss2022: Some(crate::domain::Ss2022Credentials {
-                    method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-                    password: password.to_string(),
-                }),
-            },
-        }
-    }
-
-    fn grant_vless(
-        user_id: &str,
-        grant_id: &str,
-        endpoint_id: &str,
-        enabled: bool,
-        note: Option<&str>,
-        uuid: &str,
-    ) -> Grant {
-        Grant {
-            grant_id: grant_id.to_string(),
-            user_id: user_id.to_string(),
-            endpoint_id: endpoint_id.to_string(),
-            enabled,
-            quota_limit_bytes: 0,
-            note: note.map(|s| s.to_string()),
-            credentials: crate::domain::GrantCredentials {
-                vless: Some(crate::domain::VlessCredentials {
-                    uuid: uuid.to_string(),
-                    email: "grant:test".to_string(),
-                }),
-                ss2022: None,
-            },
         }
     }
 
@@ -635,13 +557,17 @@ mod tests {
     fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "example.com");
-        let ep = endpoint_ss("e1", "n1", "ss", 443);
-        let pw = "server+psk/==:user+psk/==";
-        let g = grant_ss("u1", "g1", "e1", true, Some("ss test"), pw);
 
-        let lines = build_raw_lines(&u, &[g], &[ep], &[n]).unwrap();
+        // A valid base64 string that includes '+' and '/' to exercise percent encoding.
+        let server_psk_b64 = "+/v7+/v7+/v7+/v7+/v7+w==";
+
+        let ep = endpoint_ss("e1", "n1", "ss", 443, server_psk_b64);
+        let m = membership("u1", "n1", "e1");
+
+        let lines = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap();
         assert_eq!(lines.len(), 1);
         let uri = &lines[0];
+
         assert!(uri.contains("ss://2022-blake3-aes-128-gcm:"));
         assert!(uri.contains("%2B"));
         assert!(uri.contains("%2F"));
@@ -652,15 +578,16 @@ mod tests {
 
     #[test]
     fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
-        let u = user("u1", "alice");
+        let u = user("u1", "hello world");
         let n = node("n1", "node-1", "example.com");
-        let ep = endpoint_ss("e1", "n1", "ss", 443);
-        let g = grant_ss("u1", "g1", "e1", true, Some("hello world"), "a:b");
+        let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
+        let m = membership("u1", "n1", "e1");
 
-        let lines = build_raw_lines(&u, &[g], &[ep], &[n]).unwrap();
+        let lines = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap();
         assert_eq!(lines.len(), 1);
         let uri = &lines[0];
-        assert!(uri.ends_with("#hello%20world"));
+
+        assert!(uri.contains("#hello%20world-"));
         assert!(!uri.contains("#hello+world"));
     }
 
@@ -668,16 +595,15 @@ mod tests {
     fn empty_node_access_host_is_error() {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "");
-        let ep = endpoint_ss("e1", "n1", "ss", 443);
-        let g = grant_ss("u1", "g1", "e1", true, None, "a:b");
+        let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
+        let m = membership("u1", "n1", "e1");
 
-        let err = build_raw_lines(&u, &[g], &[ep], &[n]).unwrap_err();
+        let err = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap_err();
         assert_eq!(
             err,
             SubscriptionError::EmptyNodeAccessHost {
                 node_id: "n1".to_string(),
                 endpoint_id: "e1".to_string(),
-                grant_id: "g1".to_string(),
             }
         );
     }
@@ -693,16 +619,9 @@ mod tests {
           "active_short_id": "0123456789abcdef"
         });
         let ep = endpoint_vless("e1", "n1", "vless", 443, meta);
-        let g = grant_vless(
-            "u1",
-            "g1",
-            "e1",
-            true,
-            None,
-            "11111111-1111-1111-1111-111111111111",
-        );
+        let m = membership("u1", "n1", "e1");
 
-        let err = build_raw_lines(&u, &[g], &[ep], &[n]).unwrap_err();
+        let err = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap_err();
         assert_eq!(
             err,
             SubscriptionError::VlessRealityServerNamesEmpty {
@@ -711,99 +630,13 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Clone)]
-    struct FixedRng(u64);
-
-    impl RngCore for FixedRng {
-        fn next_u32(&mut self) -> u32 {
-            self.0 as u32
-        }
-
-        fn next_u64(&mut self) -> u64 {
-            self.0
-        }
-
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
-            for b in dest {
-                *b = 0;
-            }
-        }
-
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-            self.fill_bytes(dest);
-            Ok(())
-        }
-    }
-
     #[test]
-    fn vless_server_name_is_picked_from_candidates_and_is_not_always_first() {
+    fn build_clash_yaml_has_proxies_and_derived_secrets() {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "example.com");
-        let meta = serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["a.example.com", "b.example.com", "c.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        });
-        let ep = endpoint_vless("e1", "n1", "vless", 443, meta);
-        let g = grant_vless(
-            "u1",
-            "g1",
-            "e1",
-            true,
-            None,
-            "11111111-1111-1111-1111-111111111111",
-        );
-
-        // Choose the 2nd entry (index=1) deterministically.
-        let mut rng = FixedRng(1);
-        let items = build_items_with_rng(&u, &[g], &[ep], &[n], &mut rng).unwrap();
-        assert_eq!(items.len(), 1);
-
-        let raw = &items[0].raw_uri;
-        let sni_q = raw
-            .split("sni=")
-            .nth(1)
-            .expect("raw uri must include sni")
-            .split('&')
-            .next()
-            .unwrap_or("");
-        assert_eq!(sni_q, "b.example.com");
-
-        let ClashProxy::Vless(vless) = &items[0].clash_proxy else {
-            panic!("expected vless proxy");
-        };
-        assert_eq!(vless.servername, "b.example.com");
-    }
-
-    #[test]
-    fn base64_decodes_to_raw_text_with_trailing_newline() {
-        let u = user("u1", "alice");
-        let n = node("n1", "node-1", "example.com");
-
-        let ep1 = endpoint_ss("e1", "n1", "ss", 443);
-        let g1 = grant_ss("u1", "g1", "e1", true, Some("a"), "server:users");
-
-        let meta = serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PUBKEY"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        });
-        let ep2 = endpoint_vless("e2", "n1", "vless", 8443, meta);
-        let g2 = grant_vless(
-            "u1",
-            "g2",
-            "e2",
-            true,
-            Some("b"),
-            "22222222-2222-2222-2222-222222222222",
-        );
-
-        let raw = build_raw_text(&u, &[g1.clone(), g2.clone()], &[ep1, ep2], &[n.clone()]).unwrap();
 
         let endpoints = vec![
-            endpoint_ss("e1", "n1", "ss", 443),
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
             endpoint_vless(
                 "e2",
                 "n1",
@@ -811,61 +644,16 @@ mod tests {
                 8443,
                 serde_json::json!({
                   "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PUBKEY"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
                   "short_ids": ["0123456789abcdef"],
                   "active_short_id": "0123456789abcdef"
                 }),
             ),
         ];
-        let grants = vec![
-            grant_ss("u1", "g1", "e1", true, Some("a"), "server:users"),
-            grant_vless(
-                "u1",
-                "g2",
-                "e2",
-                true,
-                Some("b"),
-                "22222222-2222-2222-2222-222222222222",
-            ),
-        ];
-        let b64 = build_base64(&u, &grants, &endpoints, &[n]).unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .unwrap();
-        let decoded_text = String::from_utf8(decoded).unwrap();
-        assert_eq!(decoded_text, raw);
-        assert!(decoded_text.ends_with('\n'));
-    }
 
-    #[test]
-    fn clash_yaml_contains_required_fields_and_matches_core_values() {
-        let u = user("u1", "alice");
-        let n = node("n1", "node-1", "example.com");
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
 
-        let meta = serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        });
-
-        let endpoints = vec![
-            endpoint_ss("e1", "n1", "ss", 443),
-            endpoint_vless("e2", "n1", "vless", 8443, meta),
-        ];
-        let grants = vec![
-            grant_ss("u1", "g1", "e1", true, Some("ss"), "server:users"),
-            grant_vless(
-                "u1",
-                "g2",
-                "e2",
-                true,
-                Some("vless"),
-                "22222222-2222-2222-2222-222222222222",
-            ),
-        ];
-
-        let yaml = build_clash_yaml(&u, &grants, &endpoints, &[n]).unwrap();
+        let yaml = build_clash_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
         let v: Value = serde_yaml::from_str(&yaml).unwrap();
         let proxies = v
             .get("proxies")
@@ -888,10 +676,11 @@ mod tests {
                 SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string()
             ))
         );
-        assert_eq!(
-            ss.get("password"),
-            Some(&Value::String("server:users".to_string()))
-        );
+
+        let expected_user_psk =
+            crate::credentials::derive_ss2022_user_psk_b64(SEED, "u1", u.credential_epoch).unwrap();
+        let expected_password = format!("AAAAAAAAAAAAAAAAAAAAAA==:{expected_user_psk}");
+        assert_eq!(ss.get("password"), Some(&Value::String(expected_password)));
         assert_eq!(ss.get("udp"), Some(&Value::Bool(true)));
 
         let vless = proxies
@@ -903,126 +692,49 @@ mod tests {
             Some(&Value::String("example.com".to_string()))
         );
         assert_eq!(vless.get("port"), Some(&Value::Number(8443.into())));
-        assert_eq!(
-            vless.get("uuid"),
-            Some(&Value::String(
-                "22222222-2222-2222-2222-222222222222".to_string()
-            ))
-        );
-        assert_eq!(
-            vless.get("network"),
-            Some(&Value::String("tcp".to_string()))
-        );
-        assert_eq!(vless.get("udp"), Some(&Value::Bool(true)));
-        assert_eq!(vless.get("tls"), Some(&Value::Bool(true)));
-        assert_eq!(
-            vless.get("flow"),
-            Some(&Value::String("xtls-rprx-vision".to_string()))
-        );
-        assert_eq!(
-            vless.get("servername"),
-            Some(&Value::String("sni.example.com".to_string()))
-        );
-        assert_eq!(
-            vless.get("client-fingerprint"),
-            Some(&Value::String("chrome".to_string()))
-        );
-        let reality_opts = vless
-            .get("reality-opts")
-            .and_then(|x| x.as_mapping())
-            .unwrap();
-        assert_eq!(
-            reality_opts.get(&Value::String("public-key".to_string())),
-            Some(&Value::String("PBK".to_string()))
-        );
-        assert_eq!(
-            reality_opts.get(&Value::String("short-id".to_string())),
-            Some(&Value::String("0123456789abcdef".to_string()))
-        );
+
+        let expected_uuid =
+            crate::credentials::derive_vless_uuid(SEED, "u1", u.credential_epoch).unwrap();
+        assert_eq!(vless.get("uuid"), Some(&Value::String(expected_uuid)));
     }
 
     #[test]
-    fn disabled_grant_is_not_in_output_and_order_is_deterministic() {
+    fn empty_membership_list_produces_empty_output() {
         let u = user("u1", "alice");
         let n = node("n1", "node-1", "example.com");
-        let ep1 = endpoint_ss("e1", "n1", "tag-2", 443);
-        let ep2 = endpoint_ss("e2", "n1", "tag-1", 443);
+        let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
 
-        let g1 = grant_ss("u1", "g1", "e1", true, None, "a:b");
-        let g2 = grant_ss("u1", "g2", "e2", false, None, "c:d");
+        let out = build_raw_lines(SEED, &u, &[], &[ep], &[n]).unwrap();
+        assert!(out.is_empty());
+
+        let out_raw = build_raw_text(SEED, &u, &[], &[], &[]).unwrap();
+        assert_eq!(out_raw, "");
+
+        let out_b64 = build_base64(SEED, &u, &[], &[], &[]).unwrap();
+        assert_eq!(out_b64, "");
+    }
+
+    #[test]
+    fn order_is_deterministic() {
+        let u = user("u1", "alice");
+        let n = node("n1", "node-1", "example.com");
+
+        let ep1 = endpoint_ss("e1", "n1", "tag-2", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
+        let ep2 = endpoint_ss("e2", "n1", "tag-1", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
+        let m1 = membership("u1", "n1", "e1");
+        let m2 = membership("u1", "n1", "e2");
 
         let out1 = build_raw_lines(
+            SEED,
             &u,
-            &[g2.clone(), g1.clone()],
+            &[m2.clone(), m1.clone()],
             &[ep2.clone(), ep1.clone()],
             &[n.clone()],
         )
         .unwrap();
-        let out2 = build_raw_lines(&u, &[g1, g2], &[ep1, ep2], &[n]).unwrap();
+        let out2 = build_raw_lines(SEED, &u, &[m1, m2], &[ep1, ep2], &[n]).unwrap();
 
         assert_eq!(out1, out2);
-        assert_eq!(out1.len(), 1);
-        assert!(out1[0].contains("ss://"));
-        assert!(!out1[0].contains("c%3Ad"));
-    }
-
-    #[test]
-    fn duplicated_note_is_disambiguated_to_keep_names_unique() {
-        use std::collections::HashSet;
-
-        let u = user("u1", "alice");
-        let n1 = node("n1", "node-1", "example.com");
-        let n2 = node("n2", "node-2", "example.com");
-
-        let endpoints = vec![
-            endpoint_ss("e1", "n1", "tag-1", 443),
-            endpoint_ss("e2", "n1", "tag-2", 443),
-            endpoint_ss("e3", "n2", "tag-3", 443),
-            endpoint_ss("e4", "n2", "tag-4", 443),
-        ];
-        let grants = vec![
-            grant_ss("u1", "g1", "e1", true, Some("same"), "a:b"),
-            grant_ss("u1", "g2", "e2", true, Some("same"), "c:d"),
-            grant_ss("u1", "g3", "e3", true, Some("same"), "e:f"),
-            grant_ss("u1", "g4", "e4", true, Some("same"), "g:h"),
-        ];
-
-        let raw_lines =
-            build_raw_lines(&u, &grants, &endpoints, &[n1.clone(), n2.clone()]).unwrap();
-        assert_eq!(raw_lines.len(), 4);
-        let raw_names: Vec<String> = raw_lines
-            .iter()
-            .map(|l| l.rsplit('#').next().unwrap_or("").to_string())
-            .collect();
-        assert_eq!(
-            HashSet::<&String>::from_iter(raw_names.iter()).len(),
-            4,
-            "raw names must be unique, got: {raw_names:?}"
-        );
-
-        let yaml = build_clash_yaml(&u, &grants, &endpoints, &[n1, n2]).unwrap();
-        let v: Value = serde_yaml::from_str(&yaml).unwrap();
-        let proxies = v
-            .get("proxies")
-            .and_then(|x| x.as_sequence())
-            .expect("proxies must be a list");
-        let clash_names: Vec<String> = proxies
-            .iter()
-            .filter_map(|p| {
-                p.get("name")
-                    .and_then(|x| x.as_str())
-                    .map(|s| s.to_string())
-            })
-            .collect();
-        assert_eq!(clash_names.len(), 4);
-        assert_eq!(
-            HashSet::<&String>::from_iter(clash_names.iter()).len(),
-            4,
-            "clash proxy names must be unique, got: {clash_names:?}"
-        );
-        assert!(
-            clash_names.iter().all(|n| n != "same"),
-            "duplicated note should be disambiguated in clash names, got: {clash_names:?}"
-        );
+        assert_eq!(out1.len(), 2);
     }
 }

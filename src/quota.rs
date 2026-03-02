@@ -2,20 +2,18 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::{
     config::Config,
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
-    domain::{NodeQuotaReset, QuotaResetSource, UserPriorityTier, UserQuotaReset},
+    domain::{NodeQuotaReset, UserPriorityTier},
     quota_policy,
-    raft::app::RaftFacade,
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, GrantEnabledSource, JsonSnapshotStore},
+    state::{JsonSnapshotStore, membership_key, membership_xray_email},
     xray,
 };
 
-const QUOTA_TOLERANCE_BYTES: u64 = 10 * 1024 * 1024;
 const P1_CARRY_DAYS: u32 = 7;
 const P2_CARRY_DAYS: u32 = 2;
 
@@ -37,7 +35,6 @@ pub fn spawn_quota_worker(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
-    raft: Arc<dyn RaftFacade>,
 ) -> QuotaHandle {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = QuotaHandle {
@@ -51,7 +48,7 @@ pub fn spawn_quota_worker(
             tokio::select! {
                 _ = interval.tick() => {
                     let now = Utc::now();
-                    if let Err(err) = run_quota_tick_at(now, &config, &store, &reconcile, &raft).await {
+                    if let Err(err) = run_quota_tick_at(now, &config, &store, &reconcile).await {
                         warn!(%err, "quota tick failed");
                     }
                 }
@@ -64,19 +61,16 @@ pub fn spawn_quota_worker(
 }
 
 #[derive(Debug, Clone)]
-struct GrantQuotaSnapshot {
-    grant_id: String,
+struct MembershipQuotaSnapshot {
+    membership_key: String,
     user_id: String,
+    endpoint_id: String,
     node_id: String,
     endpoint_tag: Option<String>,
     node_quota_limit_bytes: u64,
-    quota_limit_bytes: u64,
-    user_node_quota_limit_bytes: Option<u64>,
     quota_reset_policy: QuotaResetPolicy,
     cycle_tz: CycleTimeZone,
     cycle_day_of_month: u8,
-    prev_cycle_start_at: Option<String>,
-    prev_cycle_end_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,16 +80,13 @@ enum QuotaResetPolicy {
 }
 
 #[derive(Debug, Clone)]
-struct GrantUsageTick {
-    snapshot: GrantQuotaSnapshot,
+struct MembershipUsageTick {
+    snapshot: MembershipQuotaSnapshot,
     used_bytes: u64,
-    window_changed: bool,
-    quota_banned: bool,
-    grant_enabled: bool,
 }
 
-fn map_cycle_error(grant_id: &str, err: CycleWindowError) -> anyhow::Error {
-    anyhow::anyhow!("grant_id={grant_id} cycle window error: {err}")
+fn map_cycle_error(subject: &str, err: CycleWindowError) -> anyhow::Error {
+    anyhow::anyhow!("{subject} cycle window error: {err}")
 }
 
 fn resolve_node_quota_reset(
@@ -135,107 +126,13 @@ fn resolve_node_quota_reset(
     Ok((policy, tz, day_of_month))
 }
 
-fn resolve_user_node_quota_reset(
-    store: &JsonSnapshotStore,
-    user_id: &str,
-    node_id: &str,
-) -> anyhow::Result<(QuotaResetSource, QuotaResetPolicy, CycleTimeZone, u8)> {
-    let source = store
-        .get_user_node_quota_reset_source(user_id, node_id)
-        .unwrap_or_default();
-
-    let (policy, day_of_month, tz) = match source {
-        QuotaResetSource::User => {
-            let user = store
-                .get_user(user_id)
-                .ok_or_else(|| anyhow::anyhow!("user not found: {user_id}"))?;
-            match user.quota_reset {
-                UserQuotaReset::Unlimited { tz_offset_minutes } => (
-                    QuotaResetPolicy::Unlimited,
-                    1,
-                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
-                ),
-                UserQuotaReset::Monthly {
-                    day_of_month,
-                    tz_offset_minutes,
-                } => (
-                    QuotaResetPolicy::Monthly,
-                    day_of_month,
-                    CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes },
-                ),
-            }
-        }
-        QuotaResetSource::Node => {
-            let node = store
-                .get_node(node_id)
-                .ok_or_else(|| anyhow::anyhow!("node not found: {node_id}"))?;
-            match node.quota_reset {
-                NodeQuotaReset::Unlimited { tz_offset_minutes } => (
-                    QuotaResetPolicy::Unlimited,
-                    1,
-                    match tz_offset_minutes {
-                        Some(tz_offset_minutes) => {
-                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
-                        }
-                        None => CycleTimeZone::Local,
-                    },
-                ),
-                NodeQuotaReset::Monthly {
-                    day_of_month,
-                    tz_offset_minutes,
-                } => (
-                    QuotaResetPolicy::Monthly,
-                    day_of_month,
-                    match tz_offset_minutes {
-                        Some(tz_offset_minutes) => {
-                            CycleTimeZone::FixedOffsetMinutes { tz_offset_minutes }
-                        }
-                        None => CycleTimeZone::Local,
-                    },
-                ),
-            }
-        }
-    };
-
-    if !(1..=31).contains(&day_of_month) {
-        return Err(anyhow::anyhow!("invalid day_of_month: {day_of_month}"));
-    }
-
-    Ok((source, policy, tz, day_of_month))
-}
-
-async fn set_grant_enabled_via_raft(
-    raft: &Arc<dyn RaftFacade>,
-    grant_id: &str,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    let resp = raft
-        .client_write(DesiredStateCommand::SetGrantEnabled {
-            grant_id: grant_id.to_string(),
-            enabled,
-            source: GrantEnabledSource::Quota,
-        })
-        .await?;
-    match resp {
-        crate::raft::types::ClientResponse::Ok { .. } => Ok(()),
-        crate::raft::types::ClientResponse::Err {
-            status,
-            code,
-            message,
-        } => Err(anyhow::anyhow!(
-            "raft client_write failed: status={status} code={code} message={message}"
-        )),
-    }
-}
-
 pub async fn run_quota_tick_at(
     now: DateTime<Utc>,
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
 ) -> anyhow::Result<()> {
-    let snapshots = {
+    let snapshots: Vec<MembershipQuotaSnapshot> = {
         let store = store.lock().await;
         let Some(local_node_id) = crate::reconcile::resolve_local_node_id(config, &store) else {
             warn!(
@@ -252,71 +149,52 @@ pub async fn run_quota_tick_at(
             .map(|e| (e.endpoint_id.clone(), e))
             .collect::<std::collections::BTreeMap<_, _>>();
 
-        let mut out = Vec::new();
-        for grant in store.list_grants() {
-            let endpoint = endpoints_by_id.get(&grant.endpoint_id);
-            if let Some(endpoint) = endpoint
-                && endpoint.node_id != local_node_id
-            {
-                continue;
-            }
-            let node_id = endpoint
-                .as_ref()
-                .map(|e| e.node_id.clone())
-                .unwrap_or_else(|| local_node_id.clone());
+        let node_quota_limit_bytes = store
+            .get_node(&local_node_id)
+            .map(|n| n.quota_limit_bytes)
+            .unwrap_or(0);
 
-            let node_quota_limit_bytes = store
-                .get_node(&node_id)
-                .map(|n| n.quota_limit_bytes)
-                .unwrap_or(0);
-
-            let (quota_reset_policy, cycle_tz, cycle_day_of_month) = if node_quota_limit_bytes > 0 {
-                match resolve_node_quota_reset(&store, &node_id) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        warn!(
-                            grant_id = grant.grant_id,
-                            %err,
-                            "quota tick skip grant: node quota reset resolution failed"
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                match resolve_user_node_quota_reset(&store, &grant.user_id, &node_id) {
-                    Ok((_source, policy, tz, day)) => (policy, tz, day),
-                    Err(err) => {
-                        warn!(
-                            grant_id = grant.grant_id,
-                            %err,
-                            "quota tick skip grant: quota reset resolution failed"
-                        );
-                        continue;
-                    }
+        let (quota_reset_policy, cycle_tz, cycle_day_of_month) =
+            match resolve_node_quota_reset(&store, &local_node_id) {
+                Ok(v) => v,
+                Err(err) => {
+                    warn!(
+                        node_id = local_node_id,
+                        %err,
+                        "quota tick skip: node quota reset resolution failed"
+                    );
+                    return Ok(());
                 }
             };
 
-            let usage = store.get_grant_usage(&grant.grant_id);
-            let user_node_quota_limit_bytes =
-                store.get_user_node_quota_limit_bytes(&grant.user_id, &node_id);
-            out.push(GrantQuotaSnapshot {
-                grant_id: grant.grant_id,
-                user_id: grant.user_id,
-                node_id,
-                endpoint_tag: endpoint.map(|e| e.tag.clone()),
+        let mut out = Vec::new();
+        for membership in store
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.node_id == local_node_id)
+        {
+            if membership.user_id == crate::endpoint_probe::PROBE_USER_ID {
+                continue;
+            }
+            let Some(endpoint) = endpoints_by_id.get(&membership.endpoint_id) else {
+                continue;
+            };
+            out.push(MembershipQuotaSnapshot {
+                membership_key: membership_key(&membership.user_id, &membership.endpoint_id),
+                user_id: membership.user_id.clone(),
+                endpoint_id: membership.endpoint_id.clone(),
+                node_id: local_node_id.clone(),
+                endpoint_tag: Some(endpoint.tag.clone()),
                 node_quota_limit_bytes,
-                quota_limit_bytes: grant.quota_limit_bytes,
-                user_node_quota_limit_bytes,
                 quota_reset_policy,
                 cycle_tz,
                 cycle_day_of_month,
-                prev_cycle_start_at: usage.as_ref().map(|u| u.cycle_start_at.clone()),
-                prev_cycle_end_at: usage.as_ref().map(|u| u.cycle_end_at.clone()),
             });
         }
+
         out
     };
-
     if snapshots.is_empty() {
         return Ok(());
     }
@@ -331,207 +209,100 @@ pub async fn run_quota_tick_at(
 
     let mut ticks = Vec::new();
     for snapshot in snapshots {
-        match update_grant_usage_once(now, store, &mut client, snapshot).await {
+        match update_membership_usage_once(now, store, &mut client, snapshot).await {
             Ok(tick) => ticks.push(tick),
-            Err(err) => warn!(%err, "quota tick: grant processing failed"),
+            Err(err) => warn!(%err, "quota tick: membership processing failed"),
         }
     }
 
-    let mut by_node: std::collections::BTreeMap<
-        String,
-        std::collections::BTreeMap<String, Vec<GrantUsageTick>>,
-    > = std::collections::BTreeMap::new();
+    let mut by_user: std::collections::BTreeMap<String, Vec<MembershipUsageTick>> =
+        std::collections::BTreeMap::new();
     for tick in ticks {
-        by_node
-            .entry(tick.snapshot.node_id.clone())
-            .or_default()
+        by_user
             .entry(tick.snapshot.user_id.clone())
             .or_default()
             .push(tick);
     }
 
-    for (node_id, mut by_user) in by_node {
-        // When `node.quota_limit_bytes > 0`, use the shared quota policy for this node.
-        let node_quota_limit_bytes = by_user
-            .values()
-            .next()
-            .and_then(|g| g.first())
-            .map(|t| t.snapshot.node_quota_limit_bytes)
-            .unwrap_or(0);
+    let Some(node_id) = by_user
+        .values()
+        .next()
+        .and_then(|g| g.first())
+        .map(|t| t.snapshot.node_id.clone())
+    else {
+        return Ok(());
+    };
 
-        if node_quota_limit_bytes > 0 {
-            if let Err(err) = enforce_shared_node_quota_node(
-                now,
-                store,
-                reconcile,
-                &mut client,
-                &node_id,
-                &by_user,
-            )
-            .await
-            {
-                warn!(%err, "quota tick: shared node quota enforcement failed");
-            }
-            continue;
-        }
-
-        // If shared quota was previously enabled on this node (pacing state exists) but is now
-        // disabled (quota_limit_bytes == 0), clear the shared-policy bans/pacing first. Otherwise,
-        // legacy enforcement can interpret stale `quota_banned` flags as requiring raft disables.
-        let had_shared_pacing = {
-            let store = store.lock().await;
-            store.get_node_pacing(&node_id).is_some()
-        };
-        if had_shared_pacing {
-            if let Err(err) = enforce_shared_node_quota_node(
-                now,
-                store,
-                reconcile,
-                &mut client,
-                &node_id,
-                &by_user,
-            )
-            .await
-            {
-                warn!(%err, "quota tick: shared node quota cleanup failed");
-            } else {
-                // Ensure legacy enforcement below doesn't act on stale in-memory tick flags.
-                for group in by_user.values_mut() {
-                    for tick in group.iter_mut() {
-                        tick.quota_banned = false;
-                    }
-                }
-            }
-        }
-
-        // Legacy enforcement path (static per-user node quota or per-grant quota).
-        for (_user_id, group) in by_user {
-            if group.is_empty() {
-                continue;
-            }
-
-            let explicit = group
-                .iter()
-                .find_map(|g| g.snapshot.user_node_quota_limit_bytes);
-            let uniform_grant_quota = {
-                let first = group[0].snapshot.quota_limit_bytes;
-                if group.iter().all(|g| g.snapshot.quota_limit_bytes == first) {
-                    Some(first)
-                } else {
-                    None
-                }
-            };
-            let node_quota_limit_bytes = explicit.or(uniform_grant_quota);
-
-            if let Some(limit) = node_quota_limit_bytes {
-                if let Err(err) = enforce_node_quota_group(
-                    now,
-                    config,
-                    store,
-                    reconcile,
-                    raft,
-                    &mut client,
-                    &group,
-                    limit,
-                )
-                .await
-                {
-                    warn!(%err, "quota tick: node quota enforcement failed");
-                }
-            } else {
-                for tick in group {
-                    if let Err(err) = enforce_grant_quota_legacy(
-                        now,
-                        config,
-                        store,
-                        reconcile,
-                        raft,
-                        &mut client,
-                        tick,
-                    )
-                    .await
-                    {
-                        warn!(%err, "quota tick: grant quota enforcement failed");
-                    }
-                }
-            }
-        }
+    if let Err(err) = enforce_shared_node_quota_node(
+        now,
+        store,
+        reconcile,
+        &mut client,
+        config.quota_auto_unban,
+        &node_id,
+        &by_user,
+    )
+    .await
+    {
+        warn!(%err, "quota tick: shared node quota enforcement failed");
     }
 
     Ok(())
 }
 
-async fn update_grant_usage_once(
+async fn update_membership_usage_once(
     now: DateTime<Utc>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     client: &mut xray::XrayClient,
-    snapshot: GrantQuotaSnapshot,
-) -> anyhow::Result<GrantUsageTick> {
-    let (cycle_start, cycle_end) =
-        current_cycle_window_at(snapshot.cycle_tz, snapshot.cycle_day_of_month, now)
-            .map_err(|err| map_cycle_error(&snapshot.grant_id, err))?;
-    let cycle_start_at = cycle_start.to_rfc3339();
-    let cycle_end_at = cycle_end.to_rfc3339();
+    snapshot: MembershipQuotaSnapshot,
+) -> anyhow::Result<MembershipUsageTick> {
+    let (cycle_start_at, cycle_end_at) = match snapshot.quota_reset_policy {
+        QuotaResetPolicy::Monthly => {
+            let (cycle_start, cycle_end) =
+                current_cycle_window_at(snapshot.cycle_tz, snapshot.cycle_day_of_month, now)
+                    .map_err(|err| map_cycle_error(&snapshot.membership_key, err))?;
+            (cycle_start.to_rfc3339(), cycle_end.to_rfc3339())
+        }
+        QuotaResetPolicy::Unlimited => (
+            "1970-01-01T00:00:00Z".to_string(),
+            "9999-12-31T23:59:59Z".to_string(),
+        ),
+    };
 
-    let email = format!("grant:{}", snapshot.grant_id);
+    let email = membership_xray_email(&snapshot.user_id, &snapshot.endpoint_id);
     let (uplink_total, downlink_total) = match client.get_user_traffic_totals(&email).await {
         Ok(v) => v,
         Err(status) => {
             warn!(
-                grant_id = snapshot.grant_id,
+                membership_key = snapshot.membership_key,
                 %status,
                 "quota tick: xray get_user_traffic_totals failed"
             );
             return Err(anyhow::anyhow!(
-                "xray get_user_traffic_totals failed for grant_id={}: {status}",
-                snapshot.grant_id
+                "xray get_user_traffic_totals failed for membership_key={}: {status}",
+                snapshot.membership_key
             ));
         }
     };
 
     let seen_at = now.to_rfc3339();
 
-    let (used_bytes, window_changed, quota_banned, grant_enabled) = {
+    let used_bytes = {
         let mut store = store.lock().await;
-        let snapshot_usage = store.apply_grant_usage_sample(
-            &snapshot.grant_id,
+        let snapshot_usage = store.apply_membership_usage_sample(
+            &snapshot.membership_key,
             cycle_start_at.clone(),
             cycle_end_at.clone(),
             uplink_total,
             downlink_total,
             seen_at,
         )?;
-
-        let window_changed = match (
-            snapshot.prev_cycle_start_at.as_deref(),
-            snapshot.prev_cycle_end_at.as_deref(),
-        ) {
-            (Some(prev_start), Some(prev_end)) => {
-                prev_start != cycle_start_at || prev_end != cycle_end_at
-            }
-            _ => true,
-        };
-
-        let usage_after = store.get_grant_usage(&snapshot.grant_id);
-        let quota_banned = usage_after.as_ref().is_some_and(|u| u.quota_banned);
-        let grant_enabled = store
-            .get_grant(&snapshot.grant_id)
-            .is_some_and(|g| g.enabled);
-
-        (
-            snapshot_usage.used_bytes,
-            window_changed,
-            quota_banned,
-            grant_enabled,
-        )
+        snapshot_usage.used_bytes
     };
 
-    Ok(GrantUsageTick {
+    Ok(MembershipUsageTick {
         snapshot,
         used_bytes,
-        window_changed,
-        quota_banned,
-        grant_enabled,
     })
 }
 
@@ -540,8 +311,9 @@ async fn enforce_shared_node_quota_node(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
     client: &mut xray::XrayClient,
+    quota_auto_unban: bool,
     node_id: &str,
-    by_user: &std::collections::BTreeMap<String, Vec<GrantUsageTick>>,
+    by_user: &std::collections::BTreeMap<String, Vec<MembershipUsageTick>>,
 ) -> anyhow::Result<()> {
     let Some(first) = by_user.values().next().and_then(|g| g.first()) else {
         return Ok(());
@@ -560,7 +332,7 @@ async fn enforce_shared_node_quota_node(
                 let mut changed = false;
                 for group in by_user.values() {
                     for tick in group {
-                        if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
+                        if let Some(u) = usage.memberships.get_mut(&tick.snapshot.membership_key)
                             && u.quota_banned
                         {
                             u.quota_banned = false;
@@ -650,10 +422,7 @@ async fn enforce_shared_node_quota_node(
         std::collections::BTreeMap::new();
     {
         let store = store.lock().await;
-        for (user_id, group) in by_user {
-            if !group.iter().any(|t| t.grant_enabled) {
-                continue;
-            }
+        for user_id in by_user.keys() {
             if user_id == crate::endpoint_probe::PROBE_USER_ID {
                 continue;
             }
@@ -727,14 +496,17 @@ async fn enforce_shared_node_quota_node(
                     .retain(|_user_id, nodes| !nodes.is_empty());
 
                 // Auto-unban on cycle rollover.
-                for group in by_user.values() {
-                    for tick in group {
-                        if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
-                            && u.quota_banned
-                        {
-                            u.quota_banned = false;
-                            u.quota_banned_at = None;
-                            changed = true;
+                if quota_auto_unban {
+                    for group in by_user.values() {
+                        for tick in group {
+                            if let Some(u) =
+                                usage.memberships.get_mut(&tick.snapshot.membership_key)
+                                && u.quota_banned
+                            {
+                                u.quota_banned = false;
+                                u.quota_banned_at = None;
+                                changed = true;
+                            }
                         }
                     }
                 }
@@ -1027,18 +799,30 @@ async fn enforce_shared_node_quota_node(
                     banned_this_tick = true;
 
                     for tick in group {
-                        if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
-                            && !u.quota_banned
-                        {
+                        let u = usage
+                            .memberships
+                            .entry(tick.snapshot.membership_key.clone())
+                            .or_insert(crate::state::MembershipUsage {
+                                cycle_start_at: cycle_start_at.clone(),
+                                cycle_end_at: cycle_end_at.clone(),
+                                used_bytes: 0,
+                                last_uplink_total: 0,
+                                last_downlink_total: 0,
+                                last_seen_at: now_rfc3339.clone(),
+                                quota_banned: false,
+                                quota_banned_at: None,
+                            });
+                        if !u.quota_banned {
                             u.quota_banned = true;
                             u.quota_banned_at = Some(now_rfc3339.clone());
                             changed = true;
                         }
 
-                        if tick.grant_enabled
-                            && let Some(tag) = tick.snapshot.endpoint_tag.as_deref()
-                        {
-                            let email = format!("grant:{}", tick.snapshot.grant_id);
+                        if let Some(tag) = tick.snapshot.endpoint_tag.as_deref() {
+                            let email = membership_xray_email(
+                                &tick.snapshot.user_id,
+                                &tick.snapshot.endpoint_id,
+                            );
                             remove_ops.push((tag.to_string(), email));
                         }
                     }
@@ -1047,16 +831,17 @@ async fn enforce_shared_node_quota_node(
                 }
 
                 // Auto-unban once the user has positive bank again.
-                if !banned_this_tick && entry.bank_bytes > 0 {
+                if quota_auto_unban && !banned_this_tick && entry.bank_bytes > 0 {
                     let any_banned = group.iter().any(|tick| {
                         usage
-                            .grants
-                            .get(&tick.snapshot.grant_id)
+                            .memberships
+                            .get(&tick.snapshot.membership_key)
                             .is_some_and(|u| u.quota_banned)
                     });
                     if any_banned {
                         for tick in group {
-                            if let Some(u) = usage.grants.get_mut(&tick.snapshot.grant_id)
+                            if let Some(u) =
+                                usage.memberships.get_mut(&tick.snapshot.membership_key)
                                 && u.quota_banned
                             {
                                 u.quota_banned = false;
@@ -1099,276 +884,6 @@ async fn enforce_shared_node_quota_node(
     Ok(())
 }
 
-async fn enforce_grant_quota_legacy(
-    now: DateTime<Utc>,
-    config: &Config,
-    store: &Arc<Mutex<JsonSnapshotStore>>,
-    reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
-    client: &mut xray::XrayClient,
-    tick: GrantUsageTick,
-) -> anyhow::Result<()> {
-    let snapshot = tick.snapshot;
-    let grant_id = snapshot.grant_id.clone();
-    let email = format!("grant:{grant_id}");
-
-    if snapshot.quota_reset_policy == QuotaResetPolicy::Unlimited {
-        if tick.quota_banned {
-            if tick.grant_enabled {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-            } else {
-                let _ = set_grant_enabled_via_raft(raft, &grant_id, true).await;
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-            }
-            reconcile.request_full();
-        }
-        return Ok(());
-    }
-
-    if tick.window_changed && config.quota_auto_unban && tick.quota_banned {
-        debug!(
-            grant_id = grant_id,
-            "quota tick: cycle rollover detected, auto-unbanning"
-        );
-        if tick.grant_enabled {
-            let mut store = store.lock().await;
-            store.clear_quota_banned(&grant_id)?;
-            reconcile.request_full();
-            return Ok(());
-        }
-
-        match set_grant_enabled_via_raft(raft, &grant_id, true).await {
-            Ok(_) => {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(&grant_id)?;
-                reconcile.request_full();
-            }
-            Err(err) => {
-                warn!(
-                    grant_id = grant_id,
-                    %err,
-                    "quota tick: auto-unban enable via raft failed"
-                );
-            }
-        }
-        return Ok(());
-    }
-
-    if tick.quota_banned && tick.grant_enabled {
-        if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
-            debug!(
-                grant_id = grant_id,
-                %err,
-                "quota tick: raft disable retry failed"
-            );
-        }
-        return Ok(());
-    }
-
-    if snapshot.quota_limit_bytes == 0 {
-        return Ok(());
-    }
-
-    let threshold_reached =
-        tick.used_bytes.saturating_add(QUOTA_TOLERANCE_BYTES) >= snapshot.quota_limit_bytes;
-    if !threshold_reached || !tick.grant_enabled {
-        return Ok(());
-    }
-
-    {
-        let mut store = store.lock().await;
-        if !tick.quota_banned {
-            store.set_quota_banned(&grant_id, now.to_rfc3339())?;
-        }
-    }
-    reconcile.request_full();
-
-    if let Some(tag) = snapshot.endpoint_tag.as_deref() {
-        use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
-        let op = crate::xray::builder::build_remove_user_operation(&email);
-        let req = AlterInboundRequest {
-            tag: tag.to_string(),
-            operation: Some(op),
-        };
-        match client.alter_inbound(req).await {
-            Ok(_) => {}
-            Err(status) if xray::is_not_found(&status) => {}
-            Err(status) => warn!(
-                grant_id = grant_id,
-                endpoint_tag = tag,
-                %status,
-                "quota tick: xray alter_inbound remove_user failed"
-            ),
-        }
-    } else {
-        warn!(
-            grant_id = grant_id,
-            "quota tick: missing endpoint tag, skipping xray remove_user"
-        );
-    }
-
-    if let Err(err) = set_grant_enabled_via_raft(raft, &grant_id, false).await {
-        warn!(
-            grant_id = grant_id,
-            %err,
-            "quota tick: raft disable failed"
-        );
-    }
-
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn enforce_node_quota_group(
-    now: DateTime<Utc>,
-    config: &Config,
-    store: &Arc<Mutex<JsonSnapshotStore>>,
-    reconcile: &ReconcileHandle,
-    raft: &Arc<dyn RaftFacade>,
-    client: &mut xray::XrayClient,
-    group: &[GrantUsageTick],
-    quota_limit_bytes: u64,
-) -> anyhow::Result<()> {
-    let any_window_changed = group.iter().any(|g| g.window_changed);
-    let any_quota_banned = group.iter().any(|g| g.quota_banned);
-    let policy = group
-        .first()
-        .map(|g| g.snapshot.quota_reset_policy)
-        .unwrap_or(QuotaResetPolicy::Monthly);
-
-    if policy == QuotaResetPolicy::Unlimited {
-        if any_quota_banned {
-            debug!("quota tick: quota reset is unlimited, clearing quota bans");
-            for g in group {
-                let grant_id = &g.snapshot.grant_id;
-                if g.grant_enabled {
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                } else {
-                    let _ = set_grant_enabled_via_raft(raft, grant_id, true).await;
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                }
-            }
-            reconcile.request_full();
-        }
-        return Ok(());
-    }
-
-    if any_window_changed && config.quota_auto_unban && any_quota_banned {
-        debug!("quota tick: node cycle rollover detected, auto-unbanning");
-        for g in group {
-            let grant_id = &g.snapshot.grant_id;
-            if g.grant_enabled {
-                let mut store = store.lock().await;
-                store.clear_quota_banned(grant_id)?;
-                continue;
-            }
-            match set_grant_enabled_via_raft(raft, grant_id, true).await {
-                Ok(_) => {
-                    let mut store = store.lock().await;
-                    store.clear_quota_banned(grant_id)?;
-                }
-                Err(err) => warn!(
-                    grant_id = grant_id,
-                    %err,
-                    "quota tick: auto-unban enable via raft failed"
-                ),
-            }
-        }
-        reconcile.request_full();
-        return Ok(());
-    }
-
-    for g in group {
-        if g.quota_banned
-            && g.grant_enabled
-            && let Err(err) = set_grant_enabled_via_raft(raft, &g.snapshot.grant_id, false).await
-        {
-            debug!(
-                grant_id = g.snapshot.grant_id,
-                %err,
-                "quota tick: raft disable retry failed"
-            );
-        }
-    }
-    if group.iter().any(|g| g.quota_banned && g.grant_enabled) {
-        return Ok(());
-    }
-
-    if quota_limit_bytes == 0 {
-        return Ok(());
-    }
-
-    let total_used = group
-        .iter()
-        .fold(0u64, |acc, g| acc.saturating_add(g.used_bytes));
-    let threshold_reached = total_used.saturating_add(QUOTA_TOLERANCE_BYTES) >= quota_limit_bytes;
-    if !threshold_reached {
-        return Ok(());
-    }
-
-    let enabled: Vec<&GrantUsageTick> = group.iter().filter(|g| g.grant_enabled).collect();
-    if enabled.is_empty() {
-        return Ok(());
-    }
-
-    let banned_at = now.to_rfc3339();
-    let mut ban_set = false;
-    {
-        let mut store = store.lock().await;
-        for g in &enabled {
-            if !g.quota_banned {
-                store.set_quota_banned(&g.snapshot.grant_id, banned_at.clone())?;
-                ban_set = true;
-            }
-        }
-    }
-    if ban_set {
-        reconcile.request_full();
-    }
-
-    for g in enabled {
-        let grant_id = &g.snapshot.grant_id;
-        let email = format!("grant:{grant_id}");
-        if let Some(tag) = g.snapshot.endpoint_tag.as_deref() {
-            use crate::xray::proto::xray::app::proxyman::command::AlterInboundRequest;
-            let op = crate::xray::builder::build_remove_user_operation(&email);
-            let req = AlterInboundRequest {
-                tag: tag.to_string(),
-                operation: Some(op),
-            };
-            match client.alter_inbound(req).await {
-                Ok(_) => {}
-                Err(status) if xray::is_not_found(&status) => {}
-                Err(status) => warn!(
-                    grant_id = grant_id,
-                    endpoint_tag = tag,
-                    %status,
-                    "quota tick: xray alter_inbound remove_user failed"
-                ),
-            }
-        } else {
-            warn!(
-                grant_id = grant_id,
-                "quota tick: missing endpoint tag, skipping xray remove_user"
-            );
-        }
-
-        if let Err(err) = set_grant_enabled_via_raft(raft, grant_id, false).await {
-            warn!(
-                grant_id = grant_id,
-                %err,
-                "quota tick: raft disable failed"
-            );
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1376,11 +891,10 @@ mod tests {
     use std::{collections::BTreeMap, net::SocketAddr};
 
     use pretty_assertions::assert_eq;
-    use tokio::sync::{Mutex, oneshot, watch};
+    use tokio::sync::{Mutex, oneshot};
 
     use crate::{
         domain::{EndpointKind, Node, NodeQuotaReset},
-        raft::app::{LocalRaft, RaftFacade},
         state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
         xray::proto::xray::{
             app::{
@@ -1719,156 +1233,6 @@ mod tests {
         format!("user>>>{email}>>>traffic>>>{direction}")
     }
 
-    fn test_raft(store: Arc<Mutex<JsonSnapshotStore>>) -> Arc<dyn RaftFacade> {
-        let (_tx, metrics) = watch::channel(openraft::RaftMetrics::<
-            crate::raft::types::NodeId,
-            crate::raft::types::NodeMeta,
-        >::new_initial(0));
-        Arc::new(LocalRaft::new(store, metrics))
-    }
-
-    #[derive(Clone)]
-    struct RecordingRaft {
-        inner: Arc<dyn RaftFacade>,
-        calls: Arc<Mutex<Vec<DesiredStateCommand>>>,
-    }
-
-    impl RaftFacade for RecordingRaft {
-        fn metrics(
-            &self,
-        ) -> watch::Receiver<
-            openraft::RaftMetrics<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
-        > {
-            self.inner.metrics()
-        }
-
-        fn client_write(
-            &self,
-            cmd: DesiredStateCommand,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>>
-        {
-            let inner = self.inner.clone();
-            let calls = self.calls.clone();
-            Box::pin(async move {
-                calls.lock().await.push(cmd.clone());
-                inner.client_write(cmd).await
-            })
-        }
-
-        fn add_learner(
-            &self,
-            node_id: crate::raft::types::NodeId,
-            node: crate::raft::types::NodeMeta,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_learner(node_id, node)
-        }
-
-        fn add_voters(
-            &self,
-            node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_voters(node_ids)
-        }
-
-        fn change_membership(
-            &self,
-            changes: openraft::ChangeMembers<
-                crate::raft::types::NodeId,
-                crate::raft::types::NodeMeta,
-            >,
-            retain: bool,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.change_membership(changes, retain)
-        }
-    }
-
-    fn recording_raft(
-        store: Arc<Mutex<JsonSnapshotStore>>,
-    ) -> (Arc<dyn RaftFacade>, Arc<Mutex<Vec<DesiredStateCommand>>>) {
-        let inner = test_raft(store);
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let raft = RecordingRaft {
-            inner,
-            calls: calls.clone(),
-        };
-        (Arc::new(raft), calls)
-    }
-
-    #[derive(Clone)]
-    struct FailOnceRaft {
-        inner: Arc<dyn RaftFacade>,
-        failed: Arc<Mutex<bool>>,
-    }
-
-    impl RaftFacade for FailOnceRaft {
-        fn metrics(
-            &self,
-        ) -> watch::Receiver<
-            openraft::RaftMetrics<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
-        > {
-            self.inner.metrics()
-        }
-
-        fn client_write(
-            &self,
-            cmd: DesiredStateCommand,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>>
-        {
-            let inner = self.inner.clone();
-            let failed = self.failed.clone();
-            Box::pin(async move {
-                if matches!(
-                    cmd,
-                    DesiredStateCommand::SetGrantEnabled {
-                        enabled: false,
-                        source: GrantEnabledSource::Quota,
-                        ..
-                    }
-                ) {
-                    let mut failed = failed.lock().await;
-                    if !*failed {
-                        *failed = true;
-                        return Err(anyhow::anyhow!("injected raft failure"));
-                    }
-                }
-                inner.client_write(cmd).await
-            })
-        }
-
-        fn add_learner(
-            &self,
-            node_id: crate::raft::types::NodeId,
-            node: crate::raft::types::NodeMeta,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_learner(node_id, node)
-        }
-
-        fn add_voters(
-            &self,
-            node_ids: std::collections::BTreeSet<crate::raft::types::NodeId>,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.add_voters(node_ids)
-        }
-
-        fn change_membership(
-            &self,
-            changes: openraft::ChangeMembers<
-                crate::raft::types::NodeId,
-                crate::raft::types::NodeMeta,
-            >,
-            retain: bool,
-        ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
-            self.inner.change_membership(changes, retain)
-        }
-    }
-
-    fn fail_once_raft(store: Arc<Mutex<JsonSnapshotStore>>) -> Arc<dyn RaftFacade> {
-        Arc::new(FailOnceRaft {
-            inner: test_raft(store),
-            failed: Arc::new(Mutex::new(false)),
-        })
-    }
-
     #[tokio::test]
     async fn poll_updates_usage() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
@@ -1876,27 +1240,32 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let grant_id = {
+        let (membership_key, email) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
-                    local_node_id,
+                    local_node_id.clone(),
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
-                .unwrap();
-            grant.grant_id
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            (
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                membership_xray_email(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
-        let email = format!("grant:{grant_id}");
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 100);
@@ -1907,7 +1276,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -1916,12 +1285,12 @@ mod tests {
             st.stats.insert(stat_name(&email, "uplink"), 150);
             st.stats.insert(stat_name(&email, "downlink"), 250);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store = store.lock().await;
-        let usage = store.get_grant_usage(&grant_id).unwrap();
+        let usage = store.get_membership_usage(&membership_key).unwrap();
         assert_eq!(usage.used_bytes, 400);
 
         let _ = shutdown.send(());
@@ -1934,7 +1303,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (node_id, p1_id, p2_id) = {
             let mut store = store.lock().await;
@@ -1988,23 +1356,34 @@ mod tests {
                 )
                 .unwrap();
 
-            let _ = store
-                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let _ = store
-                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
             (node_id, p1.user_id, p2.user_id)
         };
 
         // No traffic yet.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -2015,7 +1394,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2079,7 +1458,7 @@ mod tests {
             store.save().unwrap();
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2130,9 +1509,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, endpoint_id) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -2154,7 +1532,6 @@ mod tests {
                 .unwrap();
 
             let user = store.create_user("p2".to_string(), None).unwrap();
-            store.save().unwrap();
 
             let endpoint = store
                 .create_endpoint(
@@ -2164,15 +1541,18 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (node_id, user.user_id, endpoint.endpoint_id)
         };
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
@@ -2183,7 +1563,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2206,7 +1586,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (node_id, p1_id, p2_id) = {
             let mut store = store.lock().await;
@@ -2260,23 +1639,34 @@ mod tests {
                 )
                 .unwrap();
 
-            let _ = store
-                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let _ = store
-                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
             (node_id, p1.user_id, p2.user_id)
         };
 
         // No traffic yet.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -2288,7 +1678,7 @@ mod tests {
             .with_timezone(&Utc);
 
         // Initialize pacing.
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2325,24 +1715,32 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let _ = store
-                .create_grant(p2b.user_id.clone(), ep.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2b.user_id.clone(),
+                endpoint_ids: vec![ep.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
             store.save().unwrap();
             p2b.user_id
         };
-        // Ensure stats exist for the new grant (still no traffic).
-        for grant in {
+        // Ensure stats exist for the new memberships (still no traffic).
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.entry(stat_name(&email, "uplink")).or_insert(0);
             st.stats.entry(stat_name(&email, "downlink")).or_insert(0);
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2434,10 +1832,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, p2_id, p3_id, p2_grant_id, p3_grant_id) = {
+        let (node_id, p2_id, p3_id, p2_membership, p3_membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -2488,23 +1885,40 @@ mod tests {
                 )
                 .unwrap();
 
-            let g2 = store
-                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
-            let g3 = store
-                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p3.user_id.clone(),
+                endpoint_ids: vec![ep3.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, p2.user_id, p3.user_id, g2.grant_id, g3.grant_id)
+            (
+                node_id,
+                p2.user_id.clone(),
+                p3.user_id.clone(),
+                membership_key(&p2.user_id, &ep2.endpoint_id),
+                membership_key(&p3.user_id, &ep3.endpoint_id),
+            )
         };
 
         // No traffic.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -2515,14 +1929,19 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         // P3 starts banned (no overflow).
         {
             let store = store.lock().await;
-            assert!(store.get_grant_usage(&p3_grant_id).unwrap().quota_banned);
+            assert!(
+                store
+                    .get_membership_usage(&p3_membership)
+                    .unwrap()
+                    .quota_banned
+            );
         }
 
         // Promote P3 -> P2 mid-day and expect immediate unban + bank allocation.
@@ -2537,7 +1956,7 @@ mod tests {
             store.save().unwrap();
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2567,7 +1986,10 @@ mod tests {
 
         let store = store.lock().await;
         assert!(
-            !store.get_grant_usage(&p3_grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&p3_membership)
+                .unwrap()
+                .quota_banned,
             "expected immediate unban after tier change to P2"
         );
         assert_eq!(
@@ -2586,7 +2008,7 @@ mod tests {
         );
 
         // Sanity: the original P2 grant remains enabled and tracked.
-        assert!(store.get_grant_usage(&p2_grant_id).is_some());
+        assert!(store.get_membership_usage(&p2_membership).is_some());
 
         let _ = shutdown.send(());
     }
@@ -2598,9 +2020,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, endpoint_id, membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -2634,12 +2055,20 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -2649,12 +2078,12 @@ mod tests {
 
         // Initialize pacing and compute day-0 cap.
         {
-            let email = format!("grant:{grant_id}");
+            let email = membership_xray_email(&user_id, &endpoint_id);
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2668,18 +2097,23 @@ mod tests {
 
         // Overuse by 1 byte to trigger a ban.
         {
-            let email = format!("grant:{grant_id}");
+            let email = membership_xray_email(&user_id, &endpoint_id);
             let mut st = state.lock().await;
             st.stats
                 .insert(stat_name(&email, "uplink"), (cap_day0 + 1) as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
-            assert!(store.get_grant_usage(&grant_id).unwrap().quota_banned);
+            assert!(
+                store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned
+            );
         }
 
         // Increase node quota budget drastically. No new traffic is reported (delta==0), but
@@ -2701,13 +2135,16 @@ mod tests {
                 .unwrap();
             store.save().unwrap();
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store = store.lock().await;
         assert!(
-            !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected immediate unban after quota increase"
         );
         assert!(
@@ -2729,9 +2166,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, u1_id, _u2_id, g1_id, endpoint_tag) = {
+        let (node_id, u1_id, _u2_id, u1_endpoint_id, endpoint_tag) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -2797,15 +2233,21 @@ mod tests {
                 )
                 .unwrap();
 
-            let g1 = store
-                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let _ = store
-                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, u1.user_id, u2.user_id, g1.grant_id, ep1.tag)
+            (node_id, u1.user_id, u2.user_id, ep1.endpoint_id, ep1.tag)
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -2814,16 +2256,21 @@ mod tests {
             .with_timezone(&Utc);
 
         // Initialize with no traffic.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2836,18 +2283,22 @@ mod tests {
                 .bank_bytes
         };
         {
-            let email = format!("grant:{g1_id}");
+            let email = membership_xray_email(&u1_id, &u1_endpoint_id);
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), bank_u1 as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
+            let membership = membership_key(&u1_id, &u1_endpoint_id);
             assert!(
-                !store.get_grant_usage(&g1_id).unwrap().quota_banned,
+                !store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected no ban when spending within old cap"
             );
             assert_eq!(
@@ -2872,19 +2323,27 @@ mod tests {
             .unwrap();
             store.save().unwrap();
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        assert!(store_guard.get_grant_usage(&g1_id).unwrap().quota_banned);
+        let membership = membership_key(&u1_id, &u1_endpoint_id);
+        assert!(
+            store_guard
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned
+        );
         drop(store_guard);
 
         let st = state.lock().await;
+        let email = membership_xray_email(&u1_id, &u1_endpoint_id);
         assert!(
-            st.calls
-                .iter()
-                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &format!("grant:{g1_id}"))),
+            st.calls.iter().any(|c| matches!(
+                c,
+                Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email
+            )),
             "expected xray remove_user to be issued on immediate ban"
         );
 
@@ -2898,10 +2357,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (_node_id, user_id, grant_id, endpoint_tag) = {
+        let (_node_id, user_id, endpoint_id, endpoint_tag) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -2935,16 +2393,20 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id, endpoint.tag)
+            (node_id, user.user_id, endpoint.endpoint_id, endpoint.tag)
         };
 
         // No traffic.
-        let email = format!("grant:{grant_id}");
+        let membership = membership_key(&user_id, &endpoint_id);
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
@@ -2956,7 +2418,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -2972,13 +2434,16 @@ mod tests {
             store.save().unwrap();
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
         assert!(
-            store_guard.get_grant_usage(&grant_id).unwrap().quota_banned,
+            store_guard
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected immediate ban after demotion to P3"
         );
         drop(store_guard);
@@ -2995,15 +2460,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shared_quota_disable_grant_updates_bank_immediately_same_day() {
+    async fn shared_quota_remove_user_access_updates_bank_immediately_same_day() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, u1_id, u2_grant_id, u1_grant_id) = {
+        let (node_id, u1_id, u2_id, u1_endpoint_id) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3053,23 +2517,34 @@ mod tests {
                 )
                 .unwrap();
 
-            let g1 = store
-                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let g2 = store
-                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, u1.user_id, g2.grant_id, g1.grant_id)
+            (node_id, u1.user_id, u2.user_id, ep1.endpoint_id)
         };
 
         // No traffic.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -3080,7 +2555,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -3092,21 +2567,20 @@ mod tests {
                 .bank_bytes
         };
 
-        // Disable u2's only grant; u1 should immediately receive the full distributable share
+        // Remove u2's only membership; u1 should immediately receive the full distributable share
         // on the next tick (same day).
         {
             let mut store = store.lock().await;
-            DesiredStateCommand::SetGrantEnabled {
-                grant_id: u2_grant_id.clone(),
-                enabled: false,
-                source: GrantEnabledSource::Manual,
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u2_id.clone(),
+                endpoint_ids: Vec::new(),
             }
             .apply(store.state_mut())
             .unwrap();
             store.save().unwrap();
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -3122,10 +2596,11 @@ mod tests {
             "expected bank to increase after removing an enabled user from allocation"
         );
 
-        // Sanity: u1 grant is still present and enabled.
+        // Sanity: u1 membership usage is still present.
         {
             let store = store.lock().await;
-            assert!(store.get_grant_usage(&u1_grant_id).is_some());
+            let membership = membership_key(&u1_id, &u1_endpoint_id);
+            assert!(store.get_membership_usage(&membership).is_some());
         }
 
         let _ = shutdown.send(());
@@ -3138,9 +2613,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, endpoint_id, membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3174,12 +2648,20 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -3189,12 +2671,12 @@ mod tests {
 
         // Initialize pacing and compute day-0 cap.
         {
-            let email = format!("grant:{grant_id}");
+            let email = membership_xray_email(&user_id, &endpoint_id);
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -3208,18 +2690,23 @@ mod tests {
 
         // Trigger a shared-policy ban.
         {
-            let email = format!("grant:{grant_id}");
+            let email = membership_xray_email(&user_id, &endpoint_id);
             let mut st = state.lock().await;
             st.stats
                 .insert(stat_name(&email, "uplink"), (cap_day0 + 1) as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
-            assert!(store.get_grant_usage(&grant_id).unwrap().quota_banned);
+            assert!(
+                store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned
+            );
             assert!(store.get_node_pacing(&node_id).is_some());
             assert!(store.get_user_node_pacing(&user_id, &node_id).is_some());
         }
@@ -3237,13 +2724,16 @@ mod tests {
                 .unwrap();
             store.save().unwrap();
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store = store.lock().await;
         assert!(
-            !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected shared-policy ban to be cleared after disabling shared quota"
         );
         assert!(
@@ -3265,10 +2755,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, user_id, grant_id, endpoint_tag) = {
+        let (node_id, user_id, endpoint_id, membership, endpoint_tag) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3302,12 +2791,21 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
             store.save().unwrap();
 
-            (node_id, user.user_id, grant.grant_id, endpoint.tag)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                endpoint.tag,
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -3333,7 +2831,7 @@ mod tests {
         let cap_p1_day2 = quota_policy::cap_bytes_for_day(base, cycle_days, 2, P1_CARRY_DAYS);
         assert!(cap_p1_day2 > cap_p2_day2);
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
@@ -3342,13 +2840,16 @@ mod tests {
 
         // Initialize pacing on day 2 first, so the subsequent overuse happens without any
         // day rollover and therefore cannot be "replayed" into earlier days.
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
             assert!(
-                !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+                !store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected no ban during initialization without traffic"
             );
         }
@@ -3358,13 +2859,16 @@ mod tests {
             st.stats
                 .insert(stat_name(&email, "uplink"), (cap_p2_day2 + 1) as i64);
         }
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
             assert!(
-                store.get_grant_usage(&grant_id).unwrap().quota_banned,
+                store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected P2 ban when usage exceeds P2 cap"
             );
         }
@@ -3391,13 +2895,16 @@ mod tests {
                 .priority_tier = crate::domain::UserPriorityTier::P1;
             store.save().unwrap();
         }
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store = store.lock().await;
         assert!(
-            !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected immediate unban after promotion to P1"
         );
         let bank = store
@@ -3417,10 +2924,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (_node_id, user_id, grant_id, endpoint_tag) = {
+        let (_node_id, user_id, endpoint_id, membership, endpoint_tag) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3454,12 +2960,21 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
             store.save().unwrap();
 
-            (node_id, user.user_id, grant.grant_id, endpoint.tag)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                endpoint.tag,
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -3487,19 +3002,22 @@ mod tests {
         let used = cap_p2_day2 + 1;
         assert!(used <= cap_p1_day2);
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), used as i64);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
             assert!(
-                !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+                !store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected no ban under P1 cap before demotion"
             );
         }
@@ -3516,13 +3034,16 @@ mod tests {
                 .priority_tier = crate::domain::UserPriorityTier::P2;
             store.save().unwrap();
         }
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
         assert!(
-            store_guard.get_grant_usage(&grant_id).unwrap().quota_banned,
+            store_guard
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected immediate ban after demotion to P2"
         );
         drop(store_guard);
@@ -3545,10 +3066,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, u1_id, u1_grant_id, u1_tag, u2_grant_id) = {
+        let (node_id, u1_id, u1_endpoint_id, u1_tag, u2_id, u2_endpoint_id) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3598,15 +3118,23 @@ mod tests {
                 )
                 .unwrap();
 
-            let g1 = store
-                .create_grant(u1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let g2 = store
-                .create_grant(u2.user_id.clone(), ep2.endpoint_id, 0, false, None)
-                .unwrap();
+            // Only u1 has access initially; u2 will be added mid-day.
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, u1.user_id, g1.grant_id, ep1.tag, g2.grant_id)
+            (
+                node_id,
+                u1.user_id,
+                ep1.endpoint_id,
+                ep1.tag,
+                u2.user_id,
+                ep2.endpoint_id,
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -3615,18 +3143,15 @@ mod tests {
             .with_timezone(&Utc);
 
         // No traffic.
-        for grant in {
-            let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+        let u1_email = membership_xray_email(&u1_id, &u1_endpoint_id);
+        {
             let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 0);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
+            st.stats.insert(stat_name(&u1_email, "uplink"), 0);
+            st.stats.insert(stat_name(&u1_email, "downlink"), 0);
         }
 
         // Tick 1: initialize pacing.
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
         let cap_u1_day0 = {
@@ -3638,44 +3163,56 @@ mod tests {
         };
 
         // Tick 2: u1 consumes exactly its current cap (no ban, bank becomes 0).
-        let u1_email = format!("grant:{u1_grant_id}");
         {
             let mut st = state.lock().await;
             st.stats
                 .insert(stat_name(&u1_email, "uplink"), cap_u1_day0 as i64);
         }
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
+            let membership = membership_key(&u1_id, &u1_endpoint_id);
             assert!(
-                !store.get_grant_usage(&u1_grant_id).unwrap().quota_banned,
+                !store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected no ban when spending within old cap"
             );
         }
 
-        // Enable u2 mid-day. This reduces u1's base share. Since u1 already consumed more than
+        // Add u2 mid-day. This reduces u1's base share. Since u1 already consumed more than
         // its new cap, the next tick should ban u1 immediately even with delta==0.
         {
             let mut store = store.lock().await;
-            DesiredStateCommand::SetGrantEnabled {
-                grant_id: u2_grant_id.clone(),
-                enabled: true,
-                source: GrantEnabledSource::Manual,
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: u2_id.clone(),
+                endpoint_ids: vec![u2_endpoint_id.clone()],
             }
             .apply(store.state_mut())
             .unwrap();
             store.save().unwrap();
         }
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        // Ensure stats exist for the newly-added membership.
+        let u2_email = membership_xray_email(&u2_id, &u2_endpoint_id);
+        {
+            let mut st = state.lock().await;
+            st.stats.entry(stat_name(&u2_email, "uplink")).or_insert(0);
+            st.stats
+                .entry(stat_name(&u2_email, "downlink"))
+                .or_insert(0);
+        }
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
+        let membership = membership_key(&u1_id, &u1_endpoint_id);
         assert!(
             store_guard
-                .get_grant_usage(&u1_grant_id)
+                .get_membership_usage(&membership)
                 .unwrap()
                 .quota_banned,
             "expected immediate ban after enabling a new user reduces cap below consumed usage"
@@ -3700,10 +3237,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, p1_id, p2_id, p3_id, p3_grant_id) = {
+        let (node_id, p1_id, p2_id, p3_id, p3_membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3769,26 +3305,46 @@ mod tests {
                 )
                 .unwrap();
 
-            let _ = store
-                .create_grant(p1.user_id.clone(), ep1.endpoint_id, 0, true, None)
-                .unwrap();
-            let _ = store
-                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
-            let g3 = store
-                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p1.user_id.clone(),
+                endpoint_ids: vec![ep1.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p3.user_id.clone(),
+                endpoint_ids: vec![ep3.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, p1.user_id, p2.user_id, p3.user_id, g3.grant_id)
+            (
+                node_id,
+                p1.user_id.clone(),
+                p2.user_id.clone(),
+                p3.user_id.clone(),
+                membership_key(&p3.user_id, &ep3.endpoint_id),
+            )
         };
 
         // No traffic.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -3798,14 +3354,14 @@ mod tests {
         let now0 = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
 
         // P3 should be banned immediately when it has no overflow tokens.
         {
             let store = store.lock().await;
-            let usage = store.get_grant_usage(&p3_grant_id).unwrap();
+            let usage = store.get_membership_usage(&p3_membership).unwrap();
             assert!(usage.quota_banned);
         }
 
@@ -3814,7 +3370,7 @@ mod tests {
         let now2 = DateTime::parse_from_rfc3339("2026-02-03T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -3843,7 +3399,10 @@ mod tests {
         let pacing = store.get_user_node_pacing(&p3_id, &node_id).unwrap();
         assert_eq!(pacing.bank_bytes, expected_p3_bank);
         assert!(
-            !store.get_grant_usage(&p3_grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&p3_membership)
+                .unwrap()
+                .quota_banned,
             "expected P3 to be unbanned once overflow tokens are available"
         );
 
@@ -3857,10 +3416,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, p2_id, p3_id, p3_grant_id) = {
+        let (node_id, p2_id, p3_id, p3_membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -3911,23 +3469,39 @@ mod tests {
                 )
                 .unwrap();
 
-            let _ = store
-                .create_grant(p2.user_id.clone(), ep2.endpoint_id, 0, true, None)
-                .unwrap();
-            let g3 = store
-                .create_grant(p3.user_id.clone(), ep3.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p2.user_id.clone(),
+                endpoint_ids: vec![ep2.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: p3.user_id.clone(),
+                endpoint_ids: vec![ep3.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, p2.user_id, p3.user_id, g3.grant_id)
+            (
+                node_id,
+                p2.user_id.clone(),
+                p3.user_id.clone(),
+                membership_key(&p3.user_id, &ep3.endpoint_id),
+            )
         };
 
         // No traffic.
-        for grant in {
+        let emails = {
             let store = store.lock().await;
-            store.list_grants()
-        } {
-            let email = format!("grant:{}", grant.grant_id);
+            store
+                .state()
+                .node_user_endpoint_memberships
+                .iter()
+                .map(|m| membership_xray_email(&m.user_id, &m.endpoint_id))
+                .collect::<Vec<_>>()
+        };
+        for email in emails {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
@@ -3937,20 +3511,25 @@ mod tests {
         let now0 = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
 
         // P3 starts banned (no overflow yet).
         {
             let store = store.lock().await;
-            assert!(store.get_grant_usage(&p3_grant_id).unwrap().quota_banned);
+            assert!(
+                store
+                    .get_membership_usage(&p3_membership)
+                    .unwrap()
+                    .quota_banned
+            );
         }
 
         let now2 = DateTime::parse_from_rfc3339("2026-02-03T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -3988,7 +3567,10 @@ mod tests {
             expected_p3_bank
         );
         assert!(
-            !store.get_grant_usage(&p3_grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&p3_membership)
+                .unwrap()
+                .quota_banned,
             "expected P3 to be unbanned once P2 overflow is available (even without P1 users)"
         );
 
@@ -4002,9 +3584,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, _user_id, grant_id, endpoint_tag) = {
+        let (node_id, user_id, endpoint_id, membership, endpoint_tag) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -4038,15 +3619,24 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id, endpoint.tag)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                endpoint.tag,
+            )
         };
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
@@ -4059,7 +3649,7 @@ mod tests {
             .with_timezone(&Utc);
 
         // Tick 1: initialize shared quota pacing (no traffic).
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4072,7 +3662,7 @@ mod tests {
                 .insert(stat_name(&email, "uplink"), 50 * 1024 * 1024);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4097,12 +3687,12 @@ mod tests {
 
         // Tick 3: no new traffic (delta==0), but the user should be banned immediately if the
         // new cap is lower than already-consumed bytes.
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        let usage = store_guard.get_membership_usage(&membership).unwrap();
         assert!(usage.quota_banned);
         drop(store_guard);
 
@@ -4124,10 +3714,9 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 1024; // distributable=1024
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, endpoint_id, membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -4161,12 +3750,20 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -4189,7 +3786,7 @@ mod tests {
         let base = distributable; // only one P2 user
         let cap_day0 = quota_policy::cap_bytes_for_day(base, cycle_days, 0, P2_CARRY_DAYS);
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats
@@ -4197,13 +3794,16 @@ mod tests {
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
 
-        run_quota_tick_at(now_feb, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now_feb, &config, &store, &reconcile)
             .await
             .unwrap();
         {
             let store = store.lock().await;
             assert!(
-                store.get_grant_usage(&grant_id).unwrap().quota_banned,
+                store
+                    .get_membership_usage(&membership)
+                    .unwrap()
+                    .quota_banned,
                 "expected ban in Feb cycle"
             );
         }
@@ -4213,7 +3813,7 @@ mod tests {
         let now_mar = DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now_mar, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now_mar, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4230,7 +3830,10 @@ mod tests {
 
         let store = store.lock().await;
         assert!(
-            !store.get_grant_usage(&grant_id).unwrap().quota_banned,
+            !store
+                .get_membership_usage(&membership)
+                .unwrap()
+                .quota_banned,
             "expected unban on cycle rollover"
         );
         assert_eq!(
@@ -4251,9 +3854,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, _endpoint_id, membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -4287,12 +3889,20 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -4301,7 +3911,7 @@ mod tests {
             .with_timezone(&Utc);
 
         // Day 0 tick: initialize shared quota pacing (no traffic).
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4327,12 +3937,12 @@ mod tests {
         let now1 = DateTime::parse_from_rfc3339("2026-02-02T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now1, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now1, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        let usage = store_guard.get_membership_usage(&membership).unwrap();
         assert!(
             !usage.quota_banned,
             "expected no ban when quota decreases across day rollover without traffic"
@@ -4372,9 +3982,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (node_id, user_id, grant_id) = {
+        let (node_id, user_id, endpoint_id, membership) = {
             let mut store = store.lock().await;
             let node_id = store.list_nodes()[0].node_id.clone();
 
@@ -4411,15 +4020,23 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id.clone(), endpoint.endpoint_id, 0, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
 
             store.save().unwrap();
-            (node_id, user.user_id, grant.grant_id)
+            (
+                node_id,
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
@@ -4432,7 +4049,7 @@ mod tests {
         let now0 = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now0, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now0, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4472,12 +4089,12 @@ mod tests {
         let now2 = DateTime::parse_from_rfc3339("2026-01-03T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now2, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now2, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        let usage = store_guard.get_membership_usage(&membership).unwrap();
         assert!(
             !usage.quota_banned,
             "expected no ban for feasible day1 usage"
@@ -4502,15 +4119,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_grant_does_not_call_xray_or_create_usage() {
+    async fn remote_membership_does_not_call_xray_or_create_usage() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let grant_id = {
+        let (user_id, endpoint_id, membership) = {
             let mut store = store.lock().await;
             let remote_node_id = "node-remote".to_string();
             let _ = store
@@ -4533,13 +4149,21 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
-                .unwrap();
-            grant.grant_id
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            (
+                user.user_id.clone(),
+                endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+            )
         };
 
-        let email = format!("grant:{grant_id}");
+        let email = membership_xray_email(&user_id, &endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 100);
@@ -4550,7 +4174,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4560,21 +4184,20 @@ mod tests {
         drop(st);
 
         let store_guard = store.lock().await;
-        assert_eq!(store_guard.get_grant_usage(&grant_id), None);
+        assert_eq!(store_guard.get_membership_usage(&membership), None);
 
         let _ = shutdown.send(());
     }
 
     #[tokio::test]
-    async fn remote_grant_is_ignored_when_local_grant_exists() {
+    async fn remote_membership_is_ignored_when_local_membership_exists() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let (local_grant_id, remote_grant_id) = {
+        let (user_id, local_endpoint_id, remote_endpoint_id, local_membership, remote_membership) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let remote_node_id = "node-remote".to_string();
@@ -4608,23 +4231,27 @@ mod tests {
                 )
                 .unwrap();
 
-            let local_grant = store
-                .create_grant(
-                    user.user_id.clone(),
-                    local_endpoint.endpoint_id,
-                    0,
-                    true,
-                    None,
-                )
-                .unwrap();
-            let remote_grant = store
-                .create_grant(user.user_id, remote_endpoint.endpoint_id, 0, true, None)
-                .unwrap();
-            (local_grant.grant_id, remote_grant.grant_id)
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![
+                    local_endpoint.endpoint_id.clone(),
+                    remote_endpoint.endpoint_id.clone(),
+                ],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            (
+                user.user_id.clone(),
+                local_endpoint.endpoint_id.clone(),
+                remote_endpoint.endpoint_id.clone(),
+                membership_key(&user.user_id, &local_endpoint.endpoint_id),
+                membership_key(&user.user_id, &remote_endpoint.endpoint_id),
+            )
         };
 
-        let local_email = format!("grant:{local_grant_id}");
-        let remote_email = format!("grant:{remote_grant_id}");
+        let local_email = membership_xray_email(&user_id, &local_endpoint_id);
+        let remote_email = membership_xray_email(&user_id, &remote_endpoint_id);
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&local_email, "uplink"), 100);
@@ -4637,7 +4264,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
@@ -4656,399 +4283,12 @@ mod tests {
         drop(st);
 
         let store_guard = store.lock().await;
-        assert!(store_guard.get_grant_usage(&local_grant_id).is_some());
-        assert_eq!(store_guard.get_grant_usage(&remote_grant_id), None);
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn exceed_triggers_ban() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let (raft, raft_calls) = recording_raft(store.clone());
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let reconcile = ReconcileHandle::from_sender(tx);
-
-        let (grant_id, endpoint_tag) = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(
-                    user.user_id,
-                    endpoint.endpoint_id.clone(),
-                    QUOTA_TOLERANCE_BYTES + 100,
-                    true,
-                    None,
-                )
-                .unwrap();
-            (grant.grant_id, endpoint.tag)
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 100);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
-        assert!(usage.quota_banned_at.is_some());
-        drop(store_guard);
-
-        let st = state.lock().await;
-        assert!(st.calls.iter().any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)));
-
         assert!(
-            rx.try_recv().is_ok(),
-            "expected quota enforcement to request reconcile"
+            store_guard
+                .get_membership_usage(&local_membership)
+                .is_some()
         );
-
-        let calls = raft_calls.lock().await.clone();
-        assert!(calls.iter().any(|cmd| {
-            matches!(
-                cmd,
-                DesiredStateCommand::SetGrantEnabled {
-                    grant_id: cmd_grant_id,
-                    enabled: false,
-                    source: GrantEnabledSource::Quota,
-                } if cmd_grant_id == &grant_id
-            )
-        }));
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn quota_raft_retry_disables_grant_after_first_failure() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = fail_once_raft(store.clone());
-
-        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let grant_id = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 0, true, None)
-                .unwrap();
-            let (start, end) = current_cycle_window_at(
-                CycleTimeZone::FixedOffsetMinutes {
-                    tz_offset_minutes: 480,
-                },
-                1,
-                now,
-            )
-            .unwrap();
-            store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
-                    start.to_rfc3339(),
-                    end.to_rfc3339(),
-                    0,
-                    0,
-                    now.to_rfc3339(),
-                )
-                .unwrap();
-            store
-                .set_quota_banned(&grant.grant_id, "2025-12-18T00:00:00Z".to_string())
-                .unwrap();
-            grant.grant_id
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 0);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let reconcile = ReconcileHandle::noop();
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
-        drop(store_guard);
-
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn cycle_rollover_auto_unban() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let reconcile = ReconcileHandle::from_sender(tx);
-
-        let grant_id = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-                .unwrap();
-            store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
-                .unwrap();
-
-            let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc);
-            let (start, end) = current_cycle_window_at(
-                CycleTimeZone::FixedOffsetMinutes {
-                    tz_offset_minutes: 480,
-                },
-                1,
-                old_now,
-            )
-            .unwrap();
-            store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
-                    start.to_rfc3339(),
-                    end.to_rfc3339(),
-                    0,
-                    0,
-                    old_now.to_rfc3339(),
-                )
-                .unwrap();
-            store
-                .set_quota_banned(&grant.grant_id, "2025-11-15T00:00:00Z".to_string())
-                .unwrap();
-            grant.grant_id
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 0);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(!usage.quota_banned);
-        assert_eq!(usage.quota_banned_at, None);
-        assert_eq!(usage.used_bytes, 0);
-
-        assert!(
-            rx.try_recv().is_ok(),
-            "expected auto-unban to request reconcile"
-        );
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn manual_disabled_not_auto_unbanned() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
-
-        let grant_id = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-                .unwrap();
-            store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Manual)
-                .unwrap();
-
-            let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc);
-            let (start, end) = current_cycle_window_at(
-                CycleTimeZone::FixedOffsetMinutes {
-                    tz_offset_minutes: 480,
-                },
-                1,
-                old_now,
-            )
-            .unwrap();
-            store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
-                    start.to_rfc3339(),
-                    end.to_rfc3339(),
-                    0,
-                    0,
-                    old_now.to_rfc3339(),
-                )
-                .unwrap();
-            store.clear_quota_banned(&grant.grant_id).unwrap();
-            grant.grant_id
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 0);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let reconcile = ReconcileHandle::noop();
-        let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(!usage.quota_banned);
-
-        let _ = shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn missing_endpoint_tag_still_disables() {
-        let state = Arc::new(Mutex::new(RecordingState::default()));
-        let (addr, shutdown) = start_server(state.clone()).await;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
-
-        let grant_id = {
-            let mut store = store.lock().await;
-            let local_node_id = store.list_nodes()[0].node_id.clone();
-            let user = store.create_user("alice".to_string(), None).unwrap();
-            let endpoint = store
-                .create_endpoint(
-                    local_node_id,
-                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    8388,
-                    serde_json::json!({}),
-                )
-                .unwrap();
-            let grant = store
-                .create_grant(
-                    user.user_id,
-                    endpoint.endpoint_id.clone(),
-                    QUOTA_TOLERANCE_BYTES + 100,
-                    true,
-                    None,
-                )
-                .unwrap();
-            assert!(store.delete_endpoint(&endpoint.endpoint_id).unwrap());
-            grant.grant_id
-        };
-
-        let email = format!("grant:{grant_id}");
-        {
-            let mut st = state.lock().await;
-            st.stats.insert(stat_name(&email, "uplink"), 100);
-            st.stats.insert(stat_name(&email, "downlink"), 0);
-        }
-
-        let reconcile = ReconcileHandle::noop();
-        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
-            .await
-            .unwrap();
-
-        let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
-        assert!(usage.quota_banned);
-        assert!(usage.quota_banned_at.is_some());
-        drop(store_guard);
-
-        let st = state.lock().await;
-        assert_eq!(st.calls, vec![]);
+        assert_eq!(store_guard.get_membership_usage(&remote_membership), None);
 
         let _ = shutdown.send(());
     }
@@ -5060,78 +4300,91 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, false);
-        let raft = test_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
 
         let banned_at = "2025-11-15T00:00:00Z".to_string();
-        let grant_id = {
+        let (membership, email, node_id, user_id) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
+
+            // Enable enforceable shared quota with a deterministic (UTC+8) reset rule.
+            let _ = store
+                .upsert_node(Node {
+                    node_id: local_node_id.clone(),
+                    node_name: "node-1".to_string(),
+                    access_host: "".to_string(),
+                    api_base_url: "https://127.0.0.1:62416".to_string(),
+                    quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
+                    quota_reset: NodeQuotaReset::Monthly {
+                        day_of_month: 1,
+                        tz_offset_minutes: Some(480),
+                    },
+                })
+                .unwrap();
+
             let user = store.create_user("alice".to_string(), None).unwrap();
             let endpoint = store
                 .create_endpoint(
-                    local_node_id,
+                    local_node_id.clone(),
                     EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                     8388,
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+
+            let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
             store
-                .set_grant_enabled(&grant.grant_id, false, GrantEnabledSource::Quota)
+                .set_quota_banned(&membership, banned_at.clone())
                 .unwrap();
 
-            let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc);
-            let (start, end) = current_cycle_window_at(
-                CycleTimeZone::FixedOffsetMinutes {
-                    tz_offset_minutes: 480,
-                },
-                1,
-                old_now,
+            (
+                membership,
+                membership_xray_email(&user.user_id, &endpoint.endpoint_id),
+                local_node_id,
+                user.user_id,
             )
-            .unwrap();
-            store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
-                    start.to_rfc3339(),
-                    end.to_rfc3339(),
-                    0,
-                    0,
-                    old_now.to_rfc3339(),
-                )
-                .unwrap();
-            store
-                .set_quota_banned(&grant.grant_id, banned_at.clone())
-                .unwrap();
-            grant.grant_id
         };
 
-        let email = format!("grant:{grant_id}");
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
         }
 
+        // Establish a baseline pacing/cycle in the old window so the next tick crosses a rollover.
+        let old_now = DateTime::parse_from_rfc3339("2025-11-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(old_now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
         let new_now = DateTime::parse_from_rfc3339("2025-12-02T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        run_quota_tick_at(new_now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(new_now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(!grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        let usage = store_guard.get_membership_usage(&membership).unwrap();
         assert!(usage.quota_banned);
         assert_eq!(usage.quota_banned_at, Some(banned_at));
+        assert!(
+            store_guard
+                .get_user_node_pacing(&user_id, &node_id)
+                .is_some(),
+            "expected pacing to exist after ticks"
+        );
 
         assert!(
             rx.try_recv().is_err(),
@@ -5147,9 +4400,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
-        let grant_id = {
+        let membership = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store.create_user("alice".to_string(), None).unwrap();
@@ -5161,10 +4413,14 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, 1, true, None)
-                .unwrap();
-            grant.grant_id
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            membership_key(&user.user_id, &endpoint.endpoint_id)
         };
 
         let reconcile = ReconcileHandle::noop();
@@ -5172,13 +4428,13 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert!(
-            run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+            run_quota_tick_at(now, &config, &store, &reconcile)
                 .await
                 .is_ok()
         );
 
         let store_guard = store.lock().await;
-        assert_eq!(store_guard.get_grant_usage(&grant_id), None);
+        assert_eq!(store_guard.get_membership_usage(&membership), None);
     }
 
     #[tokio::test]
@@ -5188,7 +4444,6 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let (config, store) = test_store_init(tmp.path(), addr, true);
-        let raft = test_raft(store.clone());
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reconcile = ReconcileHandle::from_sender(tx);
@@ -5196,7 +4451,7 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let grant_id = {
+        let (membership, email) = {
             let mut store = store.lock().await;
             let local_node_id = store.list_nodes()[0].node_id.clone();
             let user = store.create_user("alice".to_string(), None).unwrap();
@@ -5208,9 +4463,15 @@ mod tests {
                     serde_json::json!({}),
                 )
                 .unwrap();
-            let grant = store
-                .create_grant(user.user_id, endpoint.endpoint_id, u64::MAX, true, None)
-                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+
+            let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
             let (start, end) = current_cycle_window_at(
                 CycleTimeZone::FixedOffsetMinutes {
                     tz_offset_minutes: 480,
@@ -5220,8 +4481,8 @@ mod tests {
             )
             .unwrap();
             store
-                .apply_grant_usage_sample(
-                    &grant.grant_id,
+                .apply_membership_usage_sample(
+                    &membership,
                     start.to_rfc3339(),
                     end.to_rfc3339(),
                     100,
@@ -5229,23 +4490,21 @@ mod tests {
                     now.to_rfc3339(),
                 )
                 .unwrap();
-            grant.grant_id
+            let email = membership_xray_email(&user.user_id, &endpoint.endpoint_id);
+            (membership, email)
         };
 
-        let email = format!("grant:{grant_id}");
         {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), -1);
         }
 
-        run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+        run_quota_tick_at(now, &config, &store, &reconcile)
             .await
             .unwrap();
 
         let store_guard = store.lock().await;
-        let grant = store_guard.get_grant(&grant_id).unwrap();
-        assert!(grant.enabled);
-        let usage = store_guard.get_grant_usage(&grant_id).unwrap();
+        let usage = store_guard.get_membership_usage(&membership).unwrap();
         assert_eq!(usage.used_bytes, 300);
         assert!(!usage.quota_banned);
         drop(store_guard);

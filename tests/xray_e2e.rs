@@ -15,13 +15,23 @@ use tower::util::ServiceExt;
 use xp::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
+    credentials,
+    domain::NodeQuotaReset,
+    protocol::{Ss2022EndpointMeta, ss2022_password},
     raft::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
     },
+    state::membership_xray_email,
     xray_supervisor::XrayHealthHandle,
 };
-use xp::{config::Config, http::build_router, reconcile::spawn_reconciler, state::StoreInit, xray};
+use xp::{
+    config::Config,
+    http::build_router,
+    reconcile::spawn_reconciler,
+    state::{StoreInit, membership_key},
+    xray,
+};
 
 fn test_admin_token_hash(token: &str) -> String {
     // Fast + deterministic: keep integration tests snappy.
@@ -87,7 +97,7 @@ fn store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     }
 }
 
-fn req_authed_json_with_method(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> {
+fn req_authed_json(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
@@ -95,10 +105,6 @@ fn req_authed_json_with_method(method: &str, uri: &str, value: serde_json::Value
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&value).unwrap()))
         .unwrap()
-}
-
-fn req_authed_json(uri: &str, value: serde_json::Value) -> Request<Body> {
-    req_authed_json_with_method("POST", uri, value)
 }
 
 async fn wait_for_remove_user(client: &mut xray::XrayClient, tag: &str, email: &str) {
@@ -240,7 +246,10 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     )
     .unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
     let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
         &config,
@@ -248,7 +257,11 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     ))
     .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
-    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let reconcile = spawn_reconciler(
+        std::sync::Arc::new(config.clone()),
+        store.clone(),
+        cluster_ca_key_pem.clone(),
+    );
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -296,7 +309,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem),
         raft.clone(),
         None,
     );
@@ -306,6 +319,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/users",
             json!({
               "display_name": "alice",
@@ -329,6 +343,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": node_id,
@@ -350,6 +365,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": endpoint_ss["node_id"],
@@ -376,61 +392,32 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
 
     let res = app
         .clone()
-        .oneshot(req_authed_json_with_method(
+        .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id_ss,
-                "note": null
+                "endpoint_id": endpoint_id_ss
               }, {
-                "endpoint_id": endpoint_id_vless,
-                "note": null
+                "endpoint_id": endpoint_id_vless
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let _access_detail: serde_json::Value = {
+    let _group_detail: serde_json::Value = {
         use http_body_util::BodyExt as _;
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
 
-    let grant_id_ss = {
-        let store = store.lock().await;
-        store
-            .list_grants()
-            .into_iter()
-            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_ss)
-            .map(|g| g.grant_id)
-            .expect("expected grant to exist for ss endpoint")
-    };
-
-    let grant_id_vless = {
-        let store = store.lock().await;
-        store
-            .list_grants()
-            .into_iter()
-            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_vless)
-            .map(|g| g.grant_id)
-            .expect("expected grant to exist for vless endpoint")
-    };
+    let membership_email_ss = membership_xray_email(&user_id, &endpoint_id_ss);
+    let membership_email_vless = membership_xray_email(&user_id, &endpoint_id_vless);
 
     let mut client = xray::connect(xray_api_addr).await.unwrap();
-    wait_for_remove_user(
-        &mut client,
-        &endpoint_tag_ss,
-        &format!("grant:{grant_id_ss}"),
-    )
-    .await;
-    wait_for_remove_user(
-        &mut client,
-        &endpoint_tag_vless,
-        &format!("grant:{grant_id_vless}"),
-    )
-    .await;
+    wait_for_remove_user(&mut client, &endpoint_tag_ss, &membership_email_ss).await;
+    wait_for_remove_user(&mut client, &endpoint_tag_vless, &membership_email_vless).await;
 
     wait_for_remove_inbound(&mut client, &endpoint_tag_ss).await;
     wait_for_remove_inbound(&mut client, &endpoint_tag_vless).await;
@@ -457,7 +444,10 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     )
     .unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
-    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster ca key pem");
 
     let store = xp::state::JsonSnapshotStore::load_or_init(store_init(
         &config,
@@ -465,7 +455,11 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     ))
     .unwrap();
     let store = std::sync::Arc::new(tokio::sync::Mutex::new(store));
-    let reconcile = spawn_reconciler(std::sync::Arc::new(config.clone()), store.clone());
+    let reconcile = spawn_reconciler(
+        std::sync::Arc::new(config.clone()),
+        store.clone(),
+        cluster_ca_key_pem.clone(),
+    );
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -513,33 +507,17 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         endpoint_probe,
         cluster,
         cluster_ca_pem,
-        cluster_ca_key_pem,
+        Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
 
-    // Hard-cut access keeps grants desired-enabled; quota enforcement is driven by
-    // shared node budget + usage pacing. Configure a tiny shared budget so the
-    // 1MiB transfer below deterministically exceeds today's allowance.
-    let res = app
-        .clone()
-        .oneshot(req_authed_json_with_method(
-            "PATCH",
-            &format!("/api/admin/nodes/{node_id}"),
-            json!({
-              "quota_limit_bytes": 257 * 1024 * 1024,
-              "quota_reset": { "policy": "monthly", "day_of_month": 1, "tz_offset_minutes": 0 }
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
-
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/users",
             json!({
               "display_name": "quota-e2e",
@@ -563,6 +541,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let res = app
         .clone()
         .oneshot(req_authed_json(
+            "POST",
             "/api/admin/endpoints",
             json!({
               "node_id": node_id,
@@ -581,40 +560,55 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
 
+    // Keep the distributable quota budget small to trigger a ban quickly, while respecting
+    // the shared-quota buffer (>=256MiB).
+    let quota_limit_bytes: u64 = 12 * 1024 * 1024;
+    {
+        let mut store = store.lock().await;
+        let node = store.get_node(&node_id).unwrap();
+        let _ = store
+            .upsert_node(xp::domain::Node {
+                quota_limit_bytes: 256 * 1024 * 1024 + quota_limit_bytes,
+                quota_reset: NodeQuotaReset::Monthly {
+                    day_of_month: 1,
+                    tz_offset_minutes: Some(0),
+                },
+                ..node
+            })
+            .unwrap();
+        store.save().unwrap();
+    }
+
+    // Grant access (membership-only hard cut).
     let res = app
         .clone()
-        .oneshot(req_authed_json_with_method(
+        .oneshot(req_authed_json(
             "PUT",
             &format!("/api/admin/users/{user_id}/access"),
             json!({
               "items": [{
-                "endpoint_id": endpoint_id_ss,
-                "note": null
+                "endpoint_id": endpoint_id_ss
               }]
             }),
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), axum::http::StatusCode::OK);
-    let access_detail: serde_json::Value = {
-        use http_body_util::BodyExt as _;
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
-    };
-    let ss_password = access_detail["items"][0]["grant"]["credentials"]["ss2022"]["password"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    drop(res);
 
-    let grant_id_ss = {
+    // Derive SS password deterministically (per-user secret, per-endpoint full string).
+    let ss_password = {
         let store = store.lock().await;
-        store
-            .list_grants()
-            .into_iter()
-            .find(|g| g.user_id == user_id && g.endpoint_id == endpoint_id_ss)
-            .map(|g| g.grant_id)
-            .expect("expected grant to exist for ss endpoint")
+        let endpoint = store.get_endpoint(&endpoint_id_ss).unwrap();
+        let meta: Ss2022EndpointMeta =
+            serde_json::from_value(endpoint.meta.clone()).expect("ss2022 endpoint meta");
+        let user_psk_b64 =
+            credentials::derive_ss2022_user_psk_b64(&cluster_ca_key_pem, &user_id, 0)
+                .expect("derive ss2022 user_psk");
+        ss2022_password(&meta.server_psk_b64, &user_psk_b64)
     };
+
+    let membership = membership_key(&user_id, &endpoint_id_ss);
 
     let (dest_port, echo_task) = spawn_echo_server().await;
 
@@ -633,15 +627,13 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let now = chrono::Utc::now();
-    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
         .await
         .unwrap();
 
     {
         let store = store.lock().await;
-        let grant = store.get_grant(&grant_id_ss).unwrap();
-        let usage = store.get_grant_usage(&grant_id_ss).unwrap();
-        assert_eq!(grant.enabled, true);
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert_eq!(usage.quota_banned, true);
     }
 
@@ -659,15 +651,13 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let later = now + chrono::Duration::days(40);
-    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile, &raft)
+    xp::quota::run_quota_tick_at(later, &config, &store, &reconcile)
         .await
         .unwrap();
 
     {
         let store = store.lock().await;
-        let grant = store.get_grant(&grant_id_ss).unwrap();
-        let usage = store.get_grant_usage(&grant_id_ss).unwrap();
-        assert_eq!(grant.enabled, true);
+        let usage = store.get_membership_usage(&membership).unwrap();
         assert_eq!(usage.quota_banned, false);
     }
 

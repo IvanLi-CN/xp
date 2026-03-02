@@ -22,6 +22,7 @@ type AdminUser = {
 	user_id: string;
 	display_name: string;
 	subscription_token: string;
+	credential_epoch: number;
 	priority_tier: "p1" | "p2" | "p3";
 	quota_reset: UserQuotaReset;
 };
@@ -57,21 +58,9 @@ type AdminUserNodeWeightItem = {
 };
 
 type AdminUserAccessItem = {
-	membership: {
-		user_id: string;
-		node_id: string;
-		endpoint_id: string;
-	};
-	grant: {
-		grant_id: string;
-		enabled: boolean;
-		quota_limit_bytes: number;
-		note: string | null;
-		credentials: {
-			vless?: { uuid: string; email: string };
-			ss2022?: { method: string; password: string };
-		};
-	};
+	user_id: string;
+	endpoint_id: string;
+	node_id: string;
 };
 
 type ClusterInfo = {
@@ -87,13 +76,12 @@ type AlertsResponse = {
 	unreachable_nodes: string[];
 	items: Array<{
 		type: string;
-		grant_id: string;
+		membership_key: string;
+		user_id: string;
 		endpoint_id: string;
 		owner_node_id: string;
-		desired_enabled: boolean;
 		quota_banned: boolean;
 		quota_banned_at: string | null;
-		effective_enabled: boolean;
 		message: string;
 		action_hint: string;
 	}>;
@@ -105,7 +93,7 @@ type MockApiOptions = {
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
 	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
-	userAccessByUser?: Record<string, AdminUserAccessItem[]>;
+	userAccessByUserId?: Record<string, AdminUserAccessItem[]>;
 	clusterInfo?: ClusterInfo;
 	alerts?: AlertsResponse;
 	healthStatus?: "ok" | "error";
@@ -119,7 +107,7 @@ type MockState = {
 	endpoints: AdminEndpoint[];
 	nodeQuotas: AdminUserNodeQuota[];
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
-	userAccessByUser: Record<string, AdminUserAccessItem[]>;
+	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
 	clusterInfo: ClusterInfo;
 	alerts: AlertsResponse;
 	healthStatus: "ok" | "error";
@@ -158,6 +146,7 @@ const defaultUsers: AdminUser[] = [
 		user_id: "user-1",
 		display_name: "Demo user",
 		subscription_token: "sub-user-1",
+		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
@@ -167,27 +156,9 @@ const defaultUsers: AdminUser[] = [
 	},
 ];
 
-const defaultUserAccessByUser: Record<string, AdminUserAccessItem[]> = {
+const defaultUserAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 	"user-1": [
-		{
-			membership: {
-				user_id: "user-1",
-				node_id: "node-1",
-				endpoint_id: "endpoint-1",
-			},
-			grant: {
-				grant_id: "grant-1",
-				enabled: true,
-				quota_limit_bytes: 1_048_576,
-				note: null,
-				credentials: {
-					vless: {
-						uuid: "11111111-1111-1111-1111-111111111111",
-						email: "demo@example.com",
-					},
-				},
-			},
-		},
+		{ user_id: "user-1", endpoint_id: "endpoint-1", node_id: "node-1" },
 	],
 };
 
@@ -277,15 +248,15 @@ export async function setupApiMocks(
 					]),
 				)
 			: {},
-		userAccessByUser: options.userAccessByUser
+		userAccessByUserId: options.userAccessByUserId
 			? Object.fromEntries(
-					Object.entries(options.userAccessByUser).map(([userId, items]) => [
+					Object.entries(options.userAccessByUserId).map(([userId, items]) => [
 						userId,
 						[...items],
 					]),
 				)
 			: Object.fromEntries(
-					Object.entries(defaultUserAccessByUser).map(([userId, items]) => [
+					Object.entries(defaultUserAccessByUserId).map(([userId, items]) => [
 						userId,
 						[...items],
 					]),
@@ -368,14 +339,6 @@ export async function setupApiMocks(
 			return;
 		}
 
-		if (
-			path.startsWith("/api/admin/grant-groups/") ||
-			path === "/api/admin/grant-groups"
-		) {
-			errorResponse(route, "grant groups route removed", 404);
-			return;
-		}
-
 		if (path === "/api/admin/users" && method === "GET") {
 			jsonResponse(route, { items: state.users });
 			return;
@@ -408,6 +371,7 @@ export async function setupApiMocks(
 				user_id: userId,
 				display_name: displayName,
 				subscription_token: `sub-${userId}`,
+				credential_epoch: 0,
 				priority_tier: "p3",
 				quota_reset:
 					quotaReset ??
@@ -418,7 +382,82 @@ export async function setupApiMocks(
 					} satisfies UserQuotaReset),
 			};
 			state.users.push(newUser);
+			state.userAccessByUserId[userId] = [];
 			jsonResponse(route, newUser, 201);
+			return;
+		}
+
+		const userAccessMatch = path.match(
+			/^\/api\/admin\/users\/([^/]+)\/access$/,
+		);
+		if (userAccessMatch && method === "GET") {
+			const userId = decodeURIComponent(userAccessMatch[1]);
+			const user = state.users.find((item) => item.user_id === userId);
+			if (!user) {
+				errorResponse(route, `User not found: ${userId}`, 404);
+				return;
+			}
+			jsonResponse(route, { items: state.userAccessByUserId[userId] ?? [] });
+			return;
+		}
+
+		if (userAccessMatch && method === "PUT") {
+			const userId = decodeURIComponent(userAccessMatch[1]);
+			const user = state.users.find((item) => item.user_id === userId);
+			if (!user) {
+				errorResponse(route, `User not found: ${userId}`, 404);
+				return;
+			}
+
+			const payload = parseJsonBody(request);
+			const items = Array.isArray(payload.items) ? payload.items : null;
+			if (!items) {
+				errorResponse(route, "invalid access payload", 400);
+				return;
+			}
+
+			const endpointById = new Map(
+				state.endpoints.map((endpoint) => [endpoint.endpoint_id, endpoint]),
+			);
+
+			const desired = new Set<string>();
+			for (const item of items) {
+				const endpointId =
+					typeof item.endpoint_id === "string" ? item.endpoint_id : "";
+				if (!endpointId) {
+					errorResponse(route, "invalid endpoint_id", 400);
+					return;
+				}
+				const endpoint = endpointById.get(endpointId);
+				if (!endpoint) {
+					errorResponse(route, `endpoint not found: ${endpointId}`, 404);
+					return;
+				}
+				desired.add(endpointId);
+			}
+
+			const existing = state.userAccessByUserId[userId] ?? [];
+			const existingIds = new Set(existing.map((i) => i.endpoint_id));
+
+			let created = 0;
+			let deleted = 0;
+			for (const id of desired) {
+				if (!existingIds.has(id)) created += 1;
+			}
+			for (const id of existingIds) {
+				if (!desired.has(id)) deleted += 1;
+			}
+
+			const nextItems: AdminUserAccessItem[] = [...desired]
+				.sort()
+				.map((endpointId) => ({
+					user_id: userId,
+					endpoint_id: endpointId,
+					node_id: endpointById.get(endpointId)?.node_id ?? "",
+				}));
+			state.userAccessByUserId[userId] = nextItems;
+
+			jsonResponse(route, { created, deleted, items: nextItems });
 			return;
 		}
 
@@ -446,8 +485,8 @@ export async function setupApiMocks(
 			const segments = path.split("/");
 			const userId = decodeURIComponent(segments[4] ?? "");
 			const isResetToken = segments[5] === "reset-token";
+			const isResetCredentials = segments[5] === "reset-credentials";
 			const isNodeWeights = segments[5] === "node-weights";
-			const isUserAccess = segments[5] === "access";
 
 			if (isNodeWeights && method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
@@ -456,69 +495,6 @@ export async function setupApiMocks(
 					return;
 				}
 				jsonResponse(route, { items: state.userNodeWeights[userId] ?? [] });
-				return;
-			}
-
-			if (isUserAccess && method === "GET") {
-				jsonResponse(route, { items: state.userAccessByUser[userId] ?? [] });
-				return;
-			}
-
-			if (isUserAccess && method === "PUT") {
-				const payload = parseJsonBody(request);
-				const rawItems = Array.isArray(payload.items) ? payload.items : [];
-				const endpointsById = new Map(
-					state.endpoints.map((endpoint) => [endpoint.endpoint_id, endpoint]),
-				);
-				const existingByEndpoint = new Map(
-					(state.userAccessByUser[userId] ?? []).map((item) => [
-						item.membership.endpoint_id,
-						item,
-					]),
-				);
-				const seen = new Set<string>();
-				const nextItems: AdminUserAccessItem[] = [];
-
-				for (const item of rawItems) {
-					const endpointId = String(item.endpoint_id ?? "").trim();
-					if (!endpointId) {
-						errorResponse(route, "endpoint_id is required", 400);
-						return;
-					}
-					if (seen.has(endpointId)) {
-						errorResponse(route, "duplicate endpoint_id", 400);
-						return;
-					}
-					seen.add(endpointId);
-					const endpoint = endpointsById.get(endpointId);
-					if (!endpoint) {
-						errorResponse(route, `endpoint not found: ${endpointId}`, 400);
-						return;
-					}
-					const previous = existingByEndpoint.get(endpointId);
-					nextItems.push({
-						membership: {
-							user_id: userId,
-							node_id: endpoint.node_id,
-							endpoint_id: endpointId,
-						},
-						grant: {
-							grant_id: previous?.grant.grant_id ?? `grant-${endpointId}`,
-							enabled: true,
-							quota_limit_bytes: previous?.grant.quota_limit_bytes ?? 0,
-							note: (item.note as string | null | undefined) ?? null,
-							credentials: previous?.grant.credentials ?? {
-								vless: {
-									uuid: "22222222-2222-2222-2222-222222222222",
-									email: "mock@example.com",
-								},
-							},
-						},
-					});
-				}
-
-				state.userAccessByUser[userId] = nextItems;
-				jsonResponse(route, { items: nextItems });
 				return;
 			}
 
@@ -582,6 +558,20 @@ export async function setupApiMocks(
 				return;
 			}
 
+			if (isResetCredentials && method === "POST") {
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				user.credential_epoch += 1;
+				jsonResponse(route, {
+					user_id: user.user_id,
+					credential_epoch: user.credential_epoch,
+				});
+				return;
+			}
+
 			if (method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
 				if (!user) {
@@ -619,7 +609,7 @@ export async function setupApiMocks(
 			if (method === "DELETE") {
 				state.users = state.users.filter((item) => item.user_id !== userId);
 				state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
-				delete state.userAccessByUser[userId];
+				delete state.userAccessByUserId[userId];
 				void route.fulfill({ status: 204, body: "" });
 				return;
 			}

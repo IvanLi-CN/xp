@@ -69,7 +69,7 @@ describe("storybook api mock", () => {
 		expect(listDataAfter.items.length).toBe(initialCount);
 	});
 
-	it("supports user access GET/PUT hard-cut", async () => {
+	it("supports user access hard-cut replace", async () => {
 		const mock = createMockApi();
 
 		const usersRes = await mock.handle(
@@ -82,97 +82,151 @@ describe("storybook api mock", () => {
 		const userId = usersData.items[0]?.user_id ?? "";
 		expect(userId.length).toBeGreaterThan(0);
 
-		const listNodes = await mock.handle(
-			jsonRequest("/api/admin/nodes", { method: "GET" }),
-		);
-		expect(listNodes.ok).toBe(true);
-		const nodesData = (await listNodes.json()) as {
-			items: Array<{ node_id: string }>;
-		};
-		const nodeId = nodesData.items[0]?.node_id ?? "";
-		expect(nodeId.length).toBeGreaterThan(0);
-
-		const listEndpoints = await mock.handle(
-			jsonRequest("/api/admin/endpoints", { method: "GET" }),
-		);
-		expect(listEndpoints.ok).toBe(true);
-		const endpointsData = (await listEndpoints.json()) as {
-			items: Array<{ endpoint_id: string; node_id: string }>;
-		};
-		const endpointOnNode =
-			endpointsData.items.find((item) => item.node_id === nodeId) ??
-			endpointsData.items[0];
-		expect(endpointOnNode).toBeTruthy();
-		if (!endpointOnNode) {
-			throw new Error("expected endpoint for access test");
-		}
-
-		const getRes = await mock.handle(
+		const listRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, { method: "GET" }),
 		);
-		expect(getRes.ok).toBe(true);
-		const beforeData = (await getRes.json()) as {
-			items: Array<{ membership: { user_id: string } }>;
+		expect(listRes.ok).toBe(true);
+		const listData = (await listRes.json()) as {
+			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
 		};
-		const initialCount = beforeData.items.length;
+		expect(listData.items.length).toBeGreaterThan(0);
+		expect(listData.items.every((item) => item.user_id === userId)).toBe(true);
+		expect(listData.items.every((item) => item.node_id.length > 0)).toBe(true);
 
-		const putRes = await mock.handle(
+		const replaceRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					items: [{ endpoint_id: endpointOnNode.endpoint_id, note: "hello" }],
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+						},
+					],
 				}),
 			}),
 		);
-		expect(putRes.ok).toBe(true);
-		const putData = (await putRes.json()) as {
-			items: Array<{
-				membership: { user_id: string; endpoint_id: string };
-				grant: { enabled: boolean; note: string | null };
-			}>;
+		expect(replaceRes.ok).toBe(true);
+		const replaced = (await replaceRes.json()) as {
+			created: number;
+			deleted: number;
+			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
 		};
-		expect(putData.items).toHaveLength(1);
-		expect(putData.items[0]?.membership.user_id).toBe(userId);
-		expect(putData.items[0]?.membership.endpoint_id).toBe(
-			endpointOnNode.endpoint_id,
-		);
-		expect(putData.items[0]?.grant.enabled).toBe(true);
-		expect(putData.items[0]?.grant.note).toBe("hello");
-
-		const getAfterRes = await mock.handle(
-			jsonRequest(`/api/admin/users/${userId}/access`, { method: "GET" }),
-		);
-		expect(getAfterRes.ok).toBe(true);
-		const afterData = (await getAfterRes.json()) as typeof putData;
-		expect(afterData.items).toHaveLength(1);
+		expect(replaced.created + replaced.deleted).toBeGreaterThanOrEqual(0);
+		expect(replaced.items).toHaveLength(1);
+		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
+		expect(replaced.items[0]?.user_id).toBe(userId);
+		expect(replaced.items[0]?.node_id.length).toBeGreaterThan(0);
 
 		const clearRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ items: [] }),
+				body: JSON.stringify({
+					items: [],
+				}),
 			}),
 		);
 		expect(clearRes.ok).toBe(true);
-		const clearData = (await clearRes.json()) as { items: unknown[] };
-		expect(clearData.items).toEqual([]);
+		const clearData = (await clearRes.json()) as {
+			deleted: number;
+			items: Array<unknown>;
+		};
+		expect(clearData.deleted).toBeGreaterThanOrEqual(1);
+		expect(clearData.items).toHaveLength(0);
 
-		expect(initialCount).toBeGreaterThanOrEqual(0);
+		const detailsRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/access`, {
+				method: "GET",
+			}),
+		);
+		expect(detailsRes.ok).toBe(true);
+		const detailsData = (await detailsRes.json()) as {
+			items: Array<unknown>;
+		};
+		expect(detailsData.items).toHaveLength(0);
 	});
 
-	it("returns 404 for removed grant-group routes", async () => {
+	it("rejects invalid items in user access hard-cut replace", async () => {
 		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
 
-		const listRes = await mock.handle(
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/access`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+						},
+						{ endpoint_id: "" },
+					],
+				}),
+			}),
+		);
+		expect(replaceRes.status).toBe(400);
+		const payload = (await replaceRes.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("invalid_request");
+	});
+
+	it("dedups duplicate endpoint items in user access hard-cut replace", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = usersData.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const replaceRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/access`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					items: [
+						{
+							endpoint_id: "endpoint-1",
+						},
+						{
+							endpoint_id: "endpoint-1",
+						},
+					],
+				}),
+			}),
+		);
+		expect(replaceRes.ok).toBe(true);
+		const payload = (await replaceRes.json()) as {
+			items: Array<{ endpoint_id: string }>;
+		};
+		expect(
+			payload.items.filter((i) => i.endpoint_id === "endpoint-1"),
+		).toHaveLength(1);
+	});
+
+	it("returns not_found for retired grant-groups routes", async () => {
+		const mock = createMockApi();
+		const res = await mock.handle(
 			jsonRequest("/api/admin/grant-groups", { method: "GET" }),
 		);
-		expect(listRes.ok).toBe(false);
-		expect(listRes.status).toBe(404);
-		const getRes = await mock.handle(
-			jsonRequest("/api/admin/grant-groups/test-group", { method: "GET" }),
-		);
-		expect(getRes.status).toBe(404);
+		expect(res.status).toBe(404);
+		const payload = (await res.json()) as {
+			error: { code: string };
+		};
+		expect(payload.error.code).toBe("not_found");
 	});
 
 	it("returns subscription text response", async () => {

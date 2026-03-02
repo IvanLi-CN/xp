@@ -4,6 +4,7 @@ import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 import type { AdminRealityDomain } from "../api/adminRealityDomains";
+import type { AdminUserAccessItem } from "../api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
@@ -29,28 +30,15 @@ const DESIGN_ALERTS: AlertsResponse = {
 	unreachable_nodes: [],
 	items: [
 		{
-			type: "quota_warning",
-			grant_id: "g_01HGRANTAAAAAA",
+			type: "quota_banned_membership",
+			membership_key: "u_01HUSERAAAAAA::ep_01HENDPTAAAAAA",
+			user_id: "u_01HUSERAAAAAA",
 			endpoint_id: "ep_01HENDPTAAAAAA",
 			owner_node_id: "n1",
-			desired_enabled: true,
-			quota_banned: false,
-			quota_banned_at: null,
-			effective_enabled: true,
-			message: "Usage is near the quota limit.",
-			action_hint: "Consider raising the quota.",
-		},
-		{
-			type: "quota_banned",
-			grant_id: "g_01HGRANTBBBBBB",
-			endpoint_id: "ep_01HENDPTBBBBBB",
-			owner_node_id: "n2",
-			desired_enabled: true,
 			quota_banned: true,
-			quota_banned_at: null,
-			effective_enabled: true,
-			message: "Grant is temporarily banned due to quota.",
-			action_hint: "Review usage and adjust quota.",
+			quota_banned_at: "2026-03-01T00:00:00Z",
+			message: "Quota enforced on owner node (membership is blocked).",
+			action_hint: "Wait for rollover/unban or adjust quota policy.",
 		},
 	],
 };
@@ -138,11 +126,6 @@ const DESIGN_REALITY_DOMAINS: AdminRealityDomain[] = [
 		server_name: "public.bn.files.1drv.com",
 		disabled_node_ids: ["n2"],
 	},
-	{
-		domain_id: "seed_oneclient_sfx_ms",
-		server_name: "oneclient.sfx.ms",
-		disabled_node_ids: [],
-	},
 ];
 
 const DESIGN_USERS: AdminUser[] = [
@@ -150,6 +133,7 @@ const DESIGN_USERS: AdminUser[] = [
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Customer A",
 		subscription_token: "sub_9c1234d2",
+		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
@@ -161,6 +145,7 @@ const DESIGN_USERS: AdminUser[] = [
 		user_id: "u_01HUSERBBBBBB",
 		display_name: "Customer B",
 		subscription_token: "sub_af5678e9",
+		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
 			policy: "monthly",
@@ -169,6 +154,23 @@ const DESIGN_USERS: AdminUser[] = [
 		} satisfies UserQuotaReset,
 	},
 ];
+
+const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
+	u_01HUSERAAAAAA: [
+		{
+			user_id: "u_01HUSERAAAAAA",
+			endpoint_id: "ep_01HENDPTAAAAAA",
+			node_id: "n1",
+		},
+	],
+	u_01HUSERBBBBBB: [
+		{
+			user_id: "u_01HUSERBBBBBB",
+			endpoint_id: "ep_01HENDPTBBBBBB",
+			node_id: "n2",
+		},
+	],
+};
 
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
@@ -199,6 +201,7 @@ const DESIGN_MOCK_API = {
 		endpoints: DESIGN_ENDPOINTS,
 		realityDomains: DESIGN_REALITY_DOMAINS,
 		users: DESIGN_USERS,
+		userAccessByUserId: DESIGN_USER_ACCESS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
 		alerts: DESIGN_ALERTS,
 		subscriptions: DESIGN_SUBSCRIPTIONS,
@@ -265,6 +268,7 @@ export const DashboardUpdateFailed: Story = {
 		},
 	},
 } satisfies Story;
+
 export const Nodes: Story = pageStory({ path: "/nodes" });
 export const NodeDetails: Story = pageStory({ path: "/nodes/n2" });
 export const Endpoints: Story = pageStory({ path: "/endpoints" });

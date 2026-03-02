@@ -1,55 +1,42 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
-import { GrantCredentialsSchema } from "./grantCredentials";
-
-export const AdminUserAccessMembershipSchema = z.object({
-	user_id: z.string(),
-	node_id: z.string(),
-	endpoint_id: z.string(),
-});
-
-export type AdminUserAccessMembership = z.infer<
-	typeof AdminUserAccessMembershipSchema
->;
-
-export const AdminUserAccessGrantSchema = z.object({
-	grant_id: z.string(),
-	enabled: z.boolean(),
-	quota_limit_bytes: z.number().int().nonnegative(),
-	note: z.string().nullable(),
-	credentials: GrantCredentialsSchema,
-});
-
-export type AdminUserAccessGrant = z.infer<typeof AdminUserAccessGrantSchema>;
 
 export const AdminUserAccessItemSchema = z.object({
-	membership: AdminUserAccessMembershipSchema,
-	grant: AdminUserAccessGrantSchema,
+	user_id: z.string(),
+	endpoint_id: z.string(),
+	node_id: z.string(),
 });
 
 export type AdminUserAccessItem = z.infer<typeof AdminUserAccessItemSchema>;
 
-export const AdminUserAccessResponseSchema = z.object({
+export const GetAdminUserAccessResponseSchema = z.object({
 	items: z.array(AdminUserAccessItemSchema),
 });
 
-export type AdminUserAccessResponse = z.infer<
-	typeof AdminUserAccessResponseSchema
+export type GetAdminUserAccessResponse = z.infer<
+	typeof GetAdminUserAccessResponseSchema
 >;
 
-export type AdminUserAccessReplaceRequest = {
-	items: Array<{
-		endpoint_id: string;
-		note?: string | null;
-	}>;
+export type PutAdminUserAccessRequest = {
+	items: Array<{ endpoint_id: string }>;
 };
+
+export const PutAdminUserAccessResponseSchema = z.object({
+	created: z.number().int().nonnegative(),
+	deleted: z.number().int().nonnegative(),
+	items: z.array(AdminUserAccessItemSchema),
+});
+
+export type PutAdminUserAccessResponse = z.infer<
+	typeof PutAdminUserAccessResponseSchema
+>;
 
 export async function fetchAdminUserAccess(
 	adminToken: string,
 	userId: string,
 	signal?: AbortSignal,
-): Promise<AdminUserAccessResponse> {
+): Promise<GetAdminUserAccessResponse> {
 	const res = await fetch(`/api/admin/users/${userId}/access`, {
 		method: "GET",
 		headers: {
@@ -62,15 +49,15 @@ export async function fetchAdminUserAccess(
 	await throwIfNotOk(res);
 
 	const json: unknown = await res.json();
-	return AdminUserAccessResponseSchema.parse(json);
+	return GetAdminUserAccessResponseSchema.parse(json);
 }
 
-export async function replaceAdminUserAccess(
+export async function putAdminUserAccess(
 	adminToken: string,
 	userId: string,
-	payload: AdminUserAccessReplaceRequest,
+	payload: PutAdminUserAccessRequest,
 	signal?: AbortSignal,
-): Promise<AdminUserAccessResponse> {
+): Promise<PutAdminUserAccessResponse> {
 	const res = await fetch(`/api/admin/users/${userId}/access`, {
 		method: "PUT",
 		headers: {
@@ -85,5 +72,5 @@ export async function replaceAdminUserAccess(
 	await throwIfNotOk(res);
 
 	const json: unknown = await res.json();
-	return AdminUserAccessResponseSchema.parse(json);
+	return PutAdminUserAccessResponseSchema.parse(json);
 }

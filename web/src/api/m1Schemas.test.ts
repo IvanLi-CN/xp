@@ -8,7 +8,10 @@ import {
 import { AdminJoinTokenResponseSchema } from "./adminJoinTokens";
 import { AdminNodesResponseSchema } from "./adminNodes";
 import { AdminQuotaPolicyNodeWeightRowsResponseSchema } from "./adminQuotaPolicyNodeWeightRows";
-import { AdminUserAccessResponseSchema } from "./adminUserAccess";
+import {
+	GetAdminUserAccessResponseSchema,
+	PutAdminUserAccessResponseSchema,
+} from "./adminUserAccess";
 import {
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
@@ -165,6 +168,7 @@ describe("AdminUsersResponseSchema", () => {
 						user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 						display_name: "alice",
 						subscription_token: "sub_123",
+						credential_epoch: 0,
 						priority_tier: "p3",
 						quota_reset: {
 							policy: "monthly",
@@ -180,6 +184,7 @@ describe("AdminUsersResponseSchema", () => {
 					user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
 					display_name: "alice",
 					subscription_token: "sub_123",
+					credential_epoch: 0,
 					priority_tier: "p3",
 					quota_reset: {
 						policy: "monthly",
@@ -252,52 +257,52 @@ describe("AdminUserTokenResponseSchema", () => {
 	});
 });
 
-describe("AdminUserAccessResponseSchema", () => {
+describe("GetAdminUserAccessResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
-			AdminUserAccessResponseSchema.parse({
+			GetAdminUserAccessResponseSchema.parse({
 				items: [
 					{
-						membership: {
-							user_id: "user-1",
-							node_id: "node-1",
-							endpoint_id: "endpoint-1",
-						},
-						grant: {
-							grant_id: "grant-1",
-							enabled: true,
-							quota_limit_bytes: 10737418240,
-							note: null,
-							credentials: {
-								vless: {
-									uuid: "00000000-0000-0000-0000-000000000000",
-									email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-								},
-							},
-						},
+						user_id: "user-1",
+						endpoint_id: "endpoint-1",
+						node_id: "node-1",
 					},
 				],
 			}),
 		).toEqual({
 			items: [
 				{
-					membership: {
+					user_id: "user-1",
+					endpoint_id: "endpoint-1",
+					node_id: "node-1",
+				},
+			],
+		});
+	});
+});
+
+describe("PutAdminUserAccessResponseSchema", () => {
+	it("accepts expected shape", () => {
+		expect(
+			PutAdminUserAccessResponseSchema.parse({
+				created: 1,
+				deleted: 2,
+				items: [
+					{
 						user_id: "user-1",
-						node_id: "node-1",
 						endpoint_id: "endpoint-1",
+						node_id: "node-1",
 					},
-					grant: {
-						grant_id: "grant-1",
-						enabled: true,
-						quota_limit_bytes: 10737418240,
-						note: null,
-						credentials: {
-							vless: {
-								uuid: "00000000-0000-0000-0000-000000000000",
-								email: "grant:01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-							},
-						},
-					},
+				],
+			}),
+		).toEqual({
+			created: 1,
+			deleted: 2,
+			items: [
+				{
+					user_id: "user-1",
+					endpoint_id: "endpoint-1",
+					node_id: "node-1",
 				},
 			],
 		});

@@ -1,7 +1,7 @@
 use base64::Engine as _;
 
 use crate::{
-    domain::{Endpoint, EndpointKind, Grant},
+    domain::{Endpoint, EndpointKind},
     protocol::{
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, SS2022_PSK_LEN_BYTES_AES_128, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, validate_short_id,
@@ -39,13 +39,8 @@ pub enum BuildError {
         kind: EndpointKind,
         reason: String,
     },
-    MissingGrantCredentials {
-        grant_id: String,
-        kind: EndpointKind,
-        which: &'static str,
-    },
-    InvalidGrantCredentials {
-        grant_id: String,
+    InvalidUserCredentials {
+        email: String,
         kind: EndpointKind,
         reason: String,
     },
@@ -62,31 +57,19 @@ impl std::fmt::Display for BuildError {
                 f,
                 "invalid endpoint.meta for {kind:?} ({endpoint_id}): {reason}"
             ),
-            Self::MissingGrantCredentials {
-                grant_id,
-                kind,
-                which,
-            } => write!(
-                f,
-                "missing grant.credentials.{which} for {kind:?} ({grant_id})"
-            ),
-            Self::InvalidGrantCredentials {
-                grant_id,
+            Self::InvalidUserCredentials {
+                email,
                 kind,
                 reason,
             } => write!(
                 f,
-                "invalid grant credentials for {kind:?} ({grant_id}): {reason}"
+                "invalid user credentials for {kind:?} ({email}): {reason}"
             ),
         }
     }
 }
 
 impl std::error::Error for BuildError {}
-
-fn expected_grant_email(grant: &Grant) -> String {
-    format!("grant:{}", grant.grant_id)
-}
 
 fn parse_vless_meta(endpoint: &Endpoint) -> Result<VlessRealityVisionTcpEndpointMeta, BuildError> {
     serde_json::from_value(endpoint.meta.clone()).map_err(|e| BuildError::InvalidEndpointMeta {
@@ -187,43 +170,25 @@ fn decode_short_id_hex(endpoint: &Endpoint, short_id_hex: &str) -> Result<Vec<u8
 }
 
 fn validate_ss2022_psk_b64(
-    grant: Option<&Grant>,
     endpoint: &Endpoint,
     psk_b64: &str,
     field: &'static str,
 ) -> Result<(), BuildError> {
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(psk_b64)
-        .map_err(|e| match grant {
-            Some(grant) => BuildError::InvalidGrantCredentials {
-                grant_id: grant.grant_id.clone(),
-                kind: endpoint.kind.clone(),
-                reason: format!("{field} base64 decode error: {e}"),
-            },
-            None => BuildError::InvalidEndpointMeta {
-                endpoint_id: endpoint.endpoint_id.clone(),
-                kind: endpoint.kind.clone(),
-                reason: format!("{field} base64 decode error: {e}"),
-            },
+        .map_err(|e| BuildError::InvalidEndpointMeta {
+            endpoint_id: endpoint.endpoint_id.clone(),
+            kind: endpoint.kind.clone(),
+            reason: format!("{field} base64 decode error: {e}"),
         })?;
     if decoded.len() != SS2022_PSK_LEN_BYTES_AES_128 {
-        return Err(match grant {
-            Some(grant) => BuildError::InvalidGrantCredentials {
-                grant_id: grant.grant_id.clone(),
-                kind: endpoint.kind.clone(),
-                reason: format!(
-                    "{field} invalid length: expected {SS2022_PSK_LEN_BYTES_AES_128}, got {}",
-                    decoded.len()
-                ),
-            },
-            None => BuildError::InvalidEndpointMeta {
-                endpoint_id: endpoint.endpoint_id.clone(),
-                kind: endpoint.kind.clone(),
-                reason: format!(
-                    "{field} invalid length: expected {SS2022_PSK_LEN_BYTES_AES_128}, got {}",
-                    decoded.len()
-                ),
-            },
+        return Err(BuildError::InvalidEndpointMeta {
+            endpoint_id: endpoint.endpoint_id.clone(),
+            kind: endpoint.kind.clone(),
+            reason: format!(
+                "{field} invalid length: expected {SS2022_PSK_LEN_BYTES_AES_128}, got {}",
+                decoded.len()
+            ),
         });
     }
     Ok(())
@@ -238,28 +203,20 @@ pub fn build_remove_user_operation(email: &str) -> xray::common::serial::TypedMe
 
 pub fn build_add_user_operation(
     endpoint: &Endpoint,
-    grant: &Grant,
+    email: &str,
+    vless_uuid: Option<&str>,
+    ss2022_user_psk_b64: Option<&str>,
 ) -> Result<xray::common::serial::TypedMessage, BuildError> {
     match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
-            let vless = grant.credentials.vless.as_ref().ok_or_else(|| {
-                BuildError::MissingGrantCredentials {
-                    grant_id: grant.grant_id.clone(),
-                    kind: endpoint.kind.clone(),
-                    which: "vless",
-                }
+            let uuid = vless_uuid.ok_or_else(|| BuildError::InvalidUserCredentials {
+                email: email.to_string(),
+                kind: endpoint.kind.clone(),
+                reason: "missing vless_uuid".to_string(),
             })?;
-            let expected_email = expected_grant_email(grant);
-            if vless.email != expected_email {
-                return Err(BuildError::InvalidGrantCredentials {
-                    grant_id: grant.grant_id.clone(),
-                    kind: endpoint.kind.clone(),
-                    reason: format!("email must be {expected_email}, got {}", vless.email),
-                });
-            }
 
             let account = xray::proxy::vless::Account {
-                id: vless.uuid.clone(),
+                id: uuid.to_string(),
                 flow: "xtls-rprx-vision".to_string(),
                 encryption: "none".to_string(),
                 xor_mode: 0,
@@ -272,7 +229,7 @@ pub fn build_add_user_operation(
 
             let user = xray::common::protocol::User {
                 level: 0,
-                email: vless.email.clone(),
+                email: email.to_string(),
                 account: Some(to_typed_message(TYPE_VLESS_ACCOUNT, &account)),
             };
 
@@ -280,13 +237,12 @@ pub fn build_add_user_operation(
             Ok(to_typed_message(TYPE_ADD_USER_OPERATION, &op))
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            let ss2022 = grant.credentials.ss2022.as_ref().ok_or_else(|| {
-                BuildError::MissingGrantCredentials {
-                    grant_id: grant.grant_id.clone(),
+            let user_psk_b64 =
+                ss2022_user_psk_b64.ok_or_else(|| BuildError::InvalidUserCredentials {
+                    email: email.to_string(),
                     kind: endpoint.kind.clone(),
-                    which: "ss2022",
-                }
-            })?;
+                    reason: "missing ss2022_user_psk_b64".to_string(),
+                })?;
 
             let meta = parse_ss2022_meta(endpoint)?;
             if meta.method != SS2022_METHOD_2022_BLAKE3_AES_128_GCM {
@@ -300,53 +256,18 @@ pub fn build_add_user_operation(
                 });
             }
             validate_ss2022_psk_b64(
-                None,
                 endpoint,
                 &meta.server_psk_b64,
                 "endpoint.meta.server_psk_b64",
             )?;
-            if ss2022.method != meta.method {
-                return Err(BuildError::InvalidGrantCredentials {
-                    grant_id: grant.grant_id.clone(),
-                    kind: endpoint.kind.clone(),
-                    reason: format!(
-                        "method must match endpoint meta ({}), got {}",
-                        meta.method, ss2022.method
-                    ),
-                });
-            }
-
-            let (server_psk_b64, user_psk_b64) =
-                ss2022.password.split_once(':').ok_or_else(|| {
-                    BuildError::InvalidGrantCredentials {
-                        grant_id: grant.grant_id.clone(),
-                        kind: endpoint.kind.clone(),
-                        reason: "password must be in form <server_psk_b64>:<user_psk_b64>"
-                            .to_string(),
-                    }
-                })?;
-
-            if server_psk_b64 != meta.server_psk_b64 {
-                return Err(BuildError::InvalidGrantCredentials {
-                    grant_id: grant.grant_id.clone(),
-                    kind: endpoint.kind.clone(),
-                    reason: "password server part must match endpoint.meta.server_psk_b64"
-                        .to_string(),
-                });
-            }
-            validate_ss2022_psk_b64(
-                Some(grant),
-                endpoint,
-                user_psk_b64,
-                "grant.credentials.ss2022.password (user psk)",
-            )?;
+            validate_ss2022_psk_b64(endpoint, user_psk_b64, "user_psk_b64")?;
 
             let account = xray::proxy::shadowsocks_2022::Account {
                 key: user_psk_b64.to_string(),
             };
             let user = xray::common::protocol::User {
                 level: 0,
-                email: expected_grant_email(grant),
+                email: email.to_string(),
                 account: Some(to_typed_message(TYPE_SS2022_ACCOUNT, &account)),
             };
 
@@ -459,7 +380,6 @@ pub fn build_add_inbound_request(
                 });
             }
             validate_ss2022_psk_b64(
-                None,
                 endpoint,
                 &meta.server_psk_b64,
                 "endpoint.meta.server_psk_b64",
@@ -535,10 +455,10 @@ mod tests {
 
     #[test]
     fn build_remove_user_operation_sets_type_and_email() {
-        let tm = build_remove_user_operation("grant:01");
+        let tm = build_remove_user_operation("m:u1::e1");
         assert_eq!(tm.r#type, TYPE_REMOVE_USER_OPERATION);
         let decoded: xray::app::proxyman::command::RemoveUserOperation = decode_typed(&tm);
-        assert_eq!(decoded.email, "grant:01");
+        assert_eq!(decoded.email, "m:u1::e1");
     }
 
     #[test]
@@ -557,33 +477,20 @@ mod tests {
             }),
         };
 
-        let grant = Grant {
-            grant_id: "g1".to_string(),
-            user_id: "u1".to_string(),
-            endpoint_id: "e1".to_string(),
-            enabled: true,
-            quota_limit_bytes: 0,
-            note: None,
-            credentials: crate::domain::GrantCredentials {
-                vless: Some(crate::domain::VlessCredentials {
-                    uuid: "66ad4540-b58c-4ad2-9926-ea63445a9b57".to_string(),
-                    email: "grant:g1".to_string(),
-                }),
-                ss2022: None,
-            },
-        };
+        let email = "m:u1::e1";
+        let uuid = "66ad4540-b58c-4ad2-9926-ea63445a9b57";
 
-        let tm = build_add_user_operation(&endpoint, &grant).unwrap();
+        let tm = build_add_user_operation(&endpoint, email, Some(uuid), None).unwrap();
         assert_eq!(tm.r#type, TYPE_ADD_USER_OPERATION);
 
         let op: xray::app::proxyman::command::AddUserOperation = decode_typed(&tm);
         let user = op.user.unwrap();
-        assert_eq!(user.email, "grant:g1");
+        assert_eq!(user.email, email);
 
         let account_tm = user.account.unwrap();
         assert_eq!(account_tm.r#type, TYPE_VLESS_ACCOUNT);
         let account: xray::proxy::vless::Account = decode_typed(&account_tm);
-        assert_eq!(account.id, "66ad4540-b58c-4ad2-9926-ea63445a9b57");
+        assert_eq!(account.id, uuid);
         assert_eq!(account.flow, "xtls-rprx-vision");
     }
 
@@ -601,33 +508,20 @@ mod tests {
             }),
         };
 
-        let grant = Grant {
-            grant_id: "g2".to_string(),
-            user_id: "u1".to_string(),
-            endpoint_id: "e2".to_string(),
-            enabled: true,
-            quota_limit_bytes: 0,
-            note: None,
-            credentials: crate::domain::GrantCredentials {
-                vless: None,
-                ss2022: Some(crate::domain::Ss2022Credentials {
-                    method: "2022-blake3-aes-128-gcm".to_string(),
-                    password: "AAAAAAAAAAAAAAAAAAAAAA==:AQEBAQEBAQEBAQEBAQEBAQ==".to_string(),
-                }),
-            },
-        };
+        let email = "m:u1::e2";
+        let user_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==";
 
-        let tm = build_add_user_operation(&endpoint, &grant).unwrap();
+        let tm = build_add_user_operation(&endpoint, email, None, Some(user_psk_b64)).unwrap();
         assert_eq!(tm.r#type, TYPE_ADD_USER_OPERATION);
 
         let op: xray::app::proxyman::command::AddUserOperation = decode_typed(&tm);
         let user = op.user.unwrap();
-        assert_eq!(user.email, "grant:g2");
+        assert_eq!(user.email, email);
 
         let account_tm = user.account.unwrap();
         assert_eq!(account_tm.r#type, TYPE_SS2022_ACCOUNT);
         let account: xray::proxy::shadowsocks_2022::Account = decode_typed(&account_tm);
-        assert_eq!(account.key, "AQEBAQEBAQEBAQEBAQEBAQ==");
+        assert_eq!(account.key, user_psk_b64);
     }
 
     #[test]
@@ -726,28 +620,14 @@ mod tests {
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({
-                "method": "2022-blake3-aes-128-gcm",
+                "method": "2022-blake3-aes-256-gcm",
                 "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
             }),
         };
 
-        let grant = Grant {
-            grant_id: "g2".to_string(),
-            user_id: "u1".to_string(),
-            endpoint_id: "e2".to_string(),
-            enabled: true,
-            quota_limit_bytes: 0,
-            note: None,
-            credentials: crate::domain::GrantCredentials {
-                vless: None,
-                ss2022: Some(crate::domain::Ss2022Credentials {
-                    method: "2022-blake3-aes-256-gcm".to_string(),
-                    password: "AAAAAAAAAAAAAAAAAAAAAA==:AQEBAQEBAQEBAQEBAQEBAQ==".to_string(),
-                }),
-            },
-        };
-
-        let err = build_add_user_operation(&endpoint, &grant).unwrap_err();
-        assert!(format!("{err}").contains("method must match endpoint meta"));
+        let email = "m:u1::e2";
+        let user_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==";
+        let err = build_add_user_operation(&endpoint, email, None, Some(user_psk_b64)).unwrap_err();
+        assert!(format!("{err}").contains("ss2022 method must be"));
     }
 }
