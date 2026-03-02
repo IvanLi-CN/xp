@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
@@ -8,6 +9,7 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { Button } from "../components/Button";
+import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { useUiPrefs } from "../components/UiPrefs";
 import {
@@ -354,7 +356,29 @@ export function HomePage() {
 								<tbody>
 									{adminNodes.data.items.map((n) => (
 										<tr key={n.node_id}>
-											<td className="font-mono">{n.node_name}</td>
+											<td>
+												<div className="flex min-w-0 items-center gap-[1em]">
+													<span
+														className="font-mono block min-w-0 truncate"
+														title={n.node_name}
+													>
+														{n.node_name}
+													</span>
+													<Link
+														to="/nodes/$nodeId"
+														params={{ nodeId: n.node_id }}
+														className="btn btn-ghost btn-lg btn-square shrink-0 -ml-[1.25em]"
+														title={`Open node panel: ${n.node_name || n.node_id}`}
+														aria-label={`Open node panel: ${n.node_name || n.node_id}`}
+													>
+														<Icon
+															name="tabler:external-link"
+															size={32}
+															className="!h-8 !w-8 scale-[2.1]"
+														/>
+													</Link>
+												</div>
+											</td>
 											<td className="font-mono">{n.node_id}</td>
 											<td className="font-mono">{n.api_base_url}</td>
 											<td className="font-mono">{n.access_host}</td>
