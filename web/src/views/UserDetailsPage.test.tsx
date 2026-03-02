@@ -132,6 +132,14 @@ function setupMocks(args?: {
 				port: 8443,
 				meta: {},
 			},
+			{
+				endpoint_id: "ep-ss-2",
+				node_id: "node-tokyo",
+				tag: "tokyo-ss-2",
+				kind: "ss2022_2022_blake3_aes_128_gcm",
+				port: 9443,
+				meta: {},
+			},
 		],
 	});
 
@@ -231,6 +239,17 @@ describe("<UserDetailsPage />", () => {
 		expect((checkbox as HTMLInputElement).checked).toBe(true);
 	});
 
+	it("shows per-node remaining quota without node id text in access matrix", async () => {
+		setupMocks();
+		renderPage();
+
+		const accessTab = await screenByRole("button", "Access");
+		fireEvent.click(accessTab);
+
+		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
+		expect(await queryByText("node-tokyo")).toBeNull();
+	});
+
 	it("applies selected endpoints via putAdminUserAccess", async () => {
 		setupMocks();
 		renderPage();
@@ -277,6 +296,190 @@ describe("<UserDetailsPage />", () => {
 				{ items: [] },
 			);
 		});
+	});
+
+	it("shows single endpoint metadata when unchecked", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+
+		expect(await screenByText("port 443")).toBeTruthy();
+		expect(await queryByText("port ?")).toBeNull();
+	});
+
+	it("supports multi-select endpoint leaves in access tree", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(
+			await screenByLabel(
+				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+		fireEvent.click(
+			await screenByLabel(
+				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+		fireEvent.click(await screenByRole("button", "Apply access"));
+
+		await waitFor(() => {
+			expect(putAdminUserAccess).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				{
+					items: expect.arrayContaining([
+						{ endpoint_id: "ep-ss" },
+						{ endpoint_id: "ep-ss-2" },
+					]),
+				},
+			);
+		});
+	});
+
+	it("shows partial state in row and column toggles for tree leaf selection", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(
+			await screenByLabel(
+				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+
+		const allToggle = (await screenByLabel("Toggle all")) as HTMLInputElement;
+		const rowToggle = (await screenByLabel(
+			"Toggle row Tokyo",
+		)) as HTMLInputElement;
+		const columnToggle = (await screenByLabel(
+			"Toggle SS2022",
+		)) as HTMLInputElement;
+
+		expect(allToggle.checked).toBe(false);
+		expect(allToggle.indeterminate).toBe(true);
+		expect(rowToggle.checked).toBe(false);
+		expect(rowToggle.indeterminate).toBe(true);
+		expect(columnToggle.checked).toBe(false);
+		expect(columnToggle.indeterminate).toBe(true);
+	});
+
+	it("does not render legacy outer checkbox for multi-endpoint cell", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+
+		expect(await queryByLabel("Toggle Tokyo SS2022")).toBeNull();
+		expect(
+			await screenByLabel(
+				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		).toBeTruthy();
+	});
+
+	it("checks all endpoint leaves when tree parent is enabled", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(
+			await screenByLabel(
+				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+
+		expect(
+			(
+				(await screenByLabel(
+					"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				)) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		expect(
+			(
+				(await screenByLabel(
+					"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				)) as HTMLInputElement
+			).checked,
+		).toBe(true);
+
+		fireEvent.click(await screenByRole("button", "Apply access"));
+
+		await waitFor(() => {
+			expect(putAdminUserAccess).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				{
+					items: expect.arrayContaining([
+						{ endpoint_id: "ep-ss" },
+						{ endpoint_id: "ep-ss-2" },
+					]),
+				},
+			);
+		});
+	});
+
+	it("uses fixed table layout with in-flow tree panel", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+
+		const table = document.body.querySelector("table");
+		expect(table?.className).toContain("table-fixed");
+		const cols = Array.from(table?.querySelectorAll("col") ?? []);
+		expect(cols).toHaveLength(4);
+		expect(cols[0]?.getAttribute("style") ?? "").toContain("2.5rem");
+		expect(cols[1]?.getAttribute("style") ?? "").toContain("14rem");
+		expect(cols[2]?.getAttribute("style") ?? "").toContain("16.5rem");
+
+		const tree = await screenByRole(
+			"tree",
+			"Endpoint options for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+		);
+		expect((tree.parentElement as HTMLElement | null)?.className).not.toContain(
+			"absolute",
+		);
+	});
+
+	it("keeps tree all-select usable while collapsed", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(
+			await screenByLabel(
+				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+		fireEvent.click(
+			await screenByLabel(
+				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+		fireEvent.click(
+			await screenByLabel(
+				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		);
+
+		expect(
+			(
+				(await screenByLabel(
+					"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				)) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		expect(
+			(
+				(await screenByLabel(
+					"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				)) as HTMLInputElement
+			).checked,
+		).toBe(true);
 	});
 
 	it("saves edited user profile", async () => {
@@ -379,4 +582,14 @@ async function screenByLabel(label: string): Promise<HTMLElement> {
 async function screenByText(text: string): Promise<HTMLElement> {
 	const { findByText } = await import("@testing-library/react");
 	return findByText(document.body, text);
+}
+
+async function queryByLabel(label: string): Promise<HTMLElement | null> {
+	const { queryByLabelText } = await import("@testing-library/react");
+	return queryByLabelText(document.body, label);
+}
+
+async function queryByText(text: string): Promise<HTMLElement | null> {
+	const { queryByText } = await import("@testing-library/react");
+	return queryByText(document.body, text);
 }
