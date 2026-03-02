@@ -237,17 +237,21 @@ export function UserDetailsPage() {
 				}
 
 				const selectedEndpointIds = selectedByCell[key] ?? [];
+				const optionIdSet = new Set(options.map((option) => option.endpointId));
+				const matchedSelectedEndpointIds = selectedEndpointIds.filter(
+					(endpointId) => optionIdSet.has(endpointId),
+				);
 				const selectedEndpoints = options.filter((option) =>
-					selectedEndpointIds.includes(option.endpointId),
+					matchedSelectedEndpointIds.includes(option.endpointId),
 				);
 				const selected = selectedEndpoints[0];
 				const display = selected ?? options[0];
 				row[protocol.protocolId] = {
-					value: selectedEndpointIds.length > 0 ? "on" : "off",
+					value: matchedSelectedEndpointIds.length > 0 ? "on" : "off",
 					meta: {
 						endpointId: display?.endpointId,
 						selectedEndpointId: selected?.endpointId,
-						selectedEndpointIds,
+						selectedEndpointIds: matchedSelectedEndpointIds,
 						tag: display?.tag,
 						port: display?.port,
 						options: options.map((option) => ({
@@ -381,8 +385,19 @@ export function UserDetailsPage() {
 	}
 
 	const selectedEndpointIds = useMemo(() => {
-		return Array.from(new Set(Object.values(selectedByCell).flat()));
-	}, [selectedByCell]);
+		const validEndpointIds = new Set(
+			Array.from(optionsByCell.values())
+				.flat()
+				.map((option) => option.endpointId),
+		);
+		return Array.from(
+			new Set(
+				Object.values(selectedByCell)
+					.flat()
+					.filter((endpointId) => validEndpointIds.has(endpointId)),
+			),
+		);
+	}, [optionsByCell, selectedByCell]);
 	const isAccessDataLoading =
 		nodesQuery.isLoading || endpointsQuery.isLoading || accessQuery.isLoading;
 	const accessDataError = nodesQuery.isError
