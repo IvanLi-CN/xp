@@ -458,7 +458,7 @@ export function NodesPage() {
 									className="grid grid-cols-2 gap-3 px-4 py-3"
 								>
 									<div className="flex min-w-0 flex-col gap-1">
-										<div className="flex min-w-0 items-center gap-2">
+										<div className="flex min-w-0 items-center gap-[1em]">
 											<span
 												className="block max-w-full truncate whitespace-nowrap"
 												title={nodeLabel}
@@ -468,11 +468,15 @@ export function NodesPage() {
 											<Link
 												to="/nodes/$nodeId"
 												params={{ nodeId: node.node_id }}
-												className="btn btn-ghost btn-xs btn-square shrink-0"
+												className="btn btn-ghost btn-lg btn-square shrink-0 -ml-[1.25em]"
 												title={openNodePanelLabel}
 												aria-label={openNodePanelLabel}
 											>
-												<Icon name="tabler:external-link" size={16} />
+												<Icon
+													name="tabler:external-link"
+													size={32}
+													className="!h-8 !w-8 scale-[2.1]"
+												/>
 											</Link>
 										</div>
 										<span

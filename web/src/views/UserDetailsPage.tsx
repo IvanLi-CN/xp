@@ -73,9 +73,9 @@ export function UserDetailsPage() {
 	const [resetTzOffsetMinutes, setResetTzOffsetMinutes] = useState(480);
 	const [isSavingUser, setIsSavingUser] = useState(false);
 	const [userSaveError, setUserSaveError] = useState<string | null>(null);
-	const [selectedByCell, setSelectedByCell] = useState<Record<string, string>>(
-		{},
-	);
+	const [selectedByCell, setSelectedByCell] = useState<
+		Record<string, string[]>
+	>({});
 	const [accessInitForUserId, setAccessInitForUserId] = useState<string | null>(
 		null,
 	);
@@ -126,7 +126,8 @@ export function UserDetailsPage() {
 
 	const nodeQuotaStatusQuery = useQuery({
 		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
-		enabled: adminToken.length > 0 && tab === "quotaStatus",
+		enabled:
+			adminToken.length > 0 && (tab === "quotaStatus" || tab === "access"),
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
@@ -194,12 +195,16 @@ export function UserDetailsPage() {
 		if (endpointsQuery.isLoading || accessQuery.isLoading) return;
 		if (endpointsQuery.isError || accessQuery.isError) return;
 
-		const next: Record<string, string> = {};
+		const next: Record<string, string[]> = {};
 		for (const item of access) {
 			const endpoint = endpointById.get(item.endpoint_id);
 			if (!endpoint) continue;
-			next[buildCellKey(endpoint.node_id, endpoint.kind)] =
-				endpoint.endpoint_id;
+			const key = buildCellKey(endpoint.node_id, endpoint.kind);
+			const current = next[key] ?? [];
+			if (!current.includes(endpoint.endpoint_id)) {
+				current.push(endpoint.endpoint_id);
+			}
+			next[key] = current;
 		}
 		setSelectedByCell(next);
 		setAccessError(null);
@@ -231,15 +236,17 @@ export function UserDetailsPage() {
 					continue;
 				}
 
-				const selectedEndpointId = selectedByCell[key];
-				const selected = options.find(
-					(option) => option.endpointId === selectedEndpointId,
+				const selectedEndpointIds = selectedByCell[key] ?? [];
+				const selectedEndpoints = options.filter((option) =>
+					selectedEndpointIds.includes(option.endpointId),
 				);
+				const selected = selectedEndpoints[0];
 				row[protocol.protocolId] = {
-					value: selected ? "on" : "off",
+					value: selectedEndpointIds.length > 0 ? "on" : "off",
 					meta: {
 						endpointId: selected?.endpointId,
-						selectedEndpointId,
+						selectedEndpointId: selected?.endpointId,
+						selectedEndpointIds,
 						tag: selected?.tag,
 						port: selected?.port,
 						options: options.map((option) => ({
@@ -257,26 +264,46 @@ export function UserDetailsPage() {
 
 	function toggleCell(nodeId: string, protocolId: SupportedProtocolId) {
 		const key = buildCellKey(nodeId, protocolId);
-		const options = optionsByCell.get(key) ?? [];
-		if (options.length === 0) return;
+		const allEndpointIds = (optionsByCell.get(key) ?? []).map(
+			(option) => option.endpointId,
+		);
+		if (allEndpointIds.length === 0) return;
 		setSelectedByCell((prev) => {
 			const next = { ...prev };
-			if (next[key]) {
+			if ((next[key] ?? []).length > 0) {
 				delete next[key];
 			} else {
-				next[key] = options[0].endpointId;
+				next[key] = allEndpointIds;
 			}
 			return next;
 		});
 	}
 
-	function setCellEndpoint(
+	function toggleCellEndpoint(
 		nodeId: string,
 		protocolId: SupportedProtocolId,
 		endpointId: string,
+		checked: boolean,
 	) {
 		const key = buildCellKey(nodeId, protocolId);
-		setSelectedByCell((prev) => ({ ...prev, [key]: endpointId }));
+		setSelectedByCell((prev) => {
+			const existing = prev[key] ?? [];
+			let nextSelected = existing;
+			if (checked) {
+				if (!existing.includes(endpointId)) {
+					nextSelected = [...existing, endpointId];
+				}
+			} else {
+				nextSelected = existing.filter((item) => item !== endpointId);
+			}
+			const next = { ...prev };
+			if (nextSelected.length === 0) {
+				delete next[key];
+			} else {
+				next[key] = nextSelected;
+			}
+			return next;
+		});
 	}
 
 	function toggleRow(nodeId: string) {
@@ -284,14 +311,19 @@ export function UserDetailsPage() {
 			buildCellKey(nodeId, protocol.protocolId),
 		).filter((key) => (optionsByCell.get(key) ?? []).length > 0);
 		if (keys.length === 0) return;
-		const hasOn = keys.some((key) => Boolean(selectedByCell[key]));
+		const hasOn = keys.some((key) => (selectedByCell[key] ?? []).length > 0);
 		setSelectedByCell((prev) => {
 			const next = { ...prev };
 			for (const key of keys) {
 				if (hasOn) {
 					delete next[key];
 				} else {
-					next[key] = optionsByCell.get(key)?.[0]?.endpointId ?? next[key];
+					const allEndpointIds = (optionsByCell.get(key) ?? []).map(
+						(option) => option.endpointId,
+					);
+					if (allEndpointIds.length > 0) {
+						next[key] = allEndpointIds;
+					}
 				}
 			}
 			return next;
@@ -304,14 +336,19 @@ export function UserDetailsPage() {
 			.map((nodeId) => buildCellKey(nodeId, protocolId))
 			.filter((key) => (optionsByCell.get(key) ?? []).length > 0);
 		if (keys.length === 0) return;
-		const hasOn = keys.some((key) => Boolean(selectedByCell[key]));
+		const hasOn = keys.some((key) => (selectedByCell[key] ?? []).length > 0);
 		setSelectedByCell((prev) => {
 			const next = { ...prev };
 			for (const key of keys) {
 				if (hasOn) {
 					delete next[key];
 				} else {
-					next[key] = optionsByCell.get(key)?.[0]?.endpointId ?? next[key];
+					const allEndpointIds = (optionsByCell.get(key) ?? []).map(
+						(option) => option.endpointId,
+					);
+					if (allEndpointIds.length > 0) {
+						next[key] = allEndpointIds;
+					}
 				}
 			}
 			return next;
@@ -323,14 +360,19 @@ export function UserDetailsPage() {
 			(key) => (optionsByCell.get(key) ?? []).length > 0,
 		);
 		if (keys.length === 0) return;
-		const hasOn = keys.some((key) => Boolean(selectedByCell[key]));
+		const hasOn = keys.some((key) => (selectedByCell[key] ?? []).length > 0);
 		setSelectedByCell((prev) => {
 			const next = { ...prev };
 			for (const key of keys) {
 				if (hasOn) {
 					delete next[key];
 				} else {
-					next[key] = optionsByCell.get(key)?.[0]?.endpointId ?? next[key];
+					const allEndpointIds = (optionsByCell.get(key) ?? []).map(
+						(option) => option.endpointId,
+					);
+					if (allEndpointIds.length > 0) {
+						next[key] = allEndpointIds;
+					}
 				}
 			}
 			return next;
@@ -338,7 +380,7 @@ export function UserDetailsPage() {
 	}
 
 	const selectedEndpointIds = useMemo(() => {
-		return Array.from(new Set(Object.values(selectedByCell)));
+		return Array.from(new Set(Object.values(selectedByCell).flat()));
 	}, [selectedByCell]);
 	const isAccessDataLoading =
 		nodesQuery.isLoading || endpointsQuery.isLoading || accessQuery.isLoading;
@@ -541,6 +583,27 @@ export function UserDetailsPage() {
 	const nodeQuotasByNodeId = new Map(
 		(nodeQuotasQuery.data?.items ?? []).map((quota) => [quota.node_id, quota]),
 	);
+	const nodeQuotaStatusByNodeId = new Map(
+		(nodeQuotaStatusQuery.data?.items ?? []).map((item) => [
+			item.node_id,
+			item,
+		]),
+	);
+	const unreachableNodeIds = new Set(
+		nodeQuotaStatusQuery.data?.unreachable_nodes ?? [],
+	);
+
+	function accessNodeRemainingText(nodeId: string): string {
+		if (nodeQuotaStatusQuery.isLoading) return "Remaining: loading...";
+		if (nodeQuotaStatusQuery.isError) return "Remaining: unavailable";
+		if (unreachableNodeIds.has(nodeId)) return "Remaining: unreachable";
+
+		const item = nodeQuotaStatusByNodeId.get(nodeId);
+		if (!item) return "Remaining: unknown";
+
+		if (item.quota_limit_bytes === 0) return "Remaining: unlimited";
+		return `Remaining: ${formatQuotaBytesHuman(item.remaining_bytes)}`;
+	}
 
 	return (
 		<div className="space-y-6">
@@ -800,9 +863,11 @@ export function UserDetailsPage() {
 								nodeId: node.node_id,
 								label: node.node_name,
 								details: (
-									<span className="text-xs opacity-60 font-mono">
-										{node.node_id}
-									</span>
+									<div className="space-y-0.5">
+										<div className="text-xs opacity-70">
+											{accessNodeRemainingText(node.node_id)}
+										</div>
+									</div>
 								),
 							}))}
 							protocols={PROTOCOLS.map((protocol) => ({
@@ -819,11 +884,12 @@ export function UserDetailsPage() {
 								toggleColumn(protocolId as SupportedProtocolId)
 							}
 							onToggleAll={toggleAll}
-							onSelectCellEndpoint={(nodeId, protocolId, endpointId) =>
-								setCellEndpoint(
+							onToggleCellEndpoint={(nodeId, protocolId, endpointId, checked) =>
+								toggleCellEndpoint(
 									nodeId,
 									protocolId as SupportedProtocolId,
 									endpointId,
+									checked,
 								)
 							}
 						/>

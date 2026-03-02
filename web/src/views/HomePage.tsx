@@ -357,7 +357,7 @@ export function HomePage() {
 									{adminNodes.data.items.map((n) => (
 										<tr key={n.node_id}>
 											<td>
-												<div className="flex min-w-0 items-center gap-2">
+												<div className="flex min-w-0 items-center gap-[1em]">
 													<span
 														className="font-mono block min-w-0 truncate"
 														title={n.node_name}
@@ -367,11 +367,15 @@ export function HomePage() {
 													<Link
 														to="/nodes/$nodeId"
 														params={{ nodeId: n.node_id }}
-														className="btn btn-ghost btn-xs btn-square shrink-0"
+														className="btn btn-ghost btn-lg btn-square shrink-0 -ml-[1.25em]"
 														title={`Open node panel: ${n.node_name || n.node_id}`}
 														aria-label={`Open node panel: ${n.node_name || n.node_id}`}
 													>
-														<Icon name="tabler:external-link" size={16} />
+														<Icon
+															name="tabler:external-link"
+															size={32}
+															className="!h-8 !w-8 scale-[2.1]"
+														/>
 													</Link>
 												</div>
 											</td>
