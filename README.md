@@ -14,6 +14,7 @@ into the `xp` binary at build time and served as a SPA by default.
 
 - Dynamic Xray inbound + client management (VLESS + REALITY, Shadowsocks 2022)
 - Subscription output: Raw URI / Base64 / Clash YAML (`GET /api/sub/{subscription_token}`; see `docs/desgin/subscription.md`)
+- Mihomo safety helper: `xp-ops mihomo redact [SOURCE]` sanitizes subscription/config text from URL, file, or stdin (`-`)
 - Quotas: cycle windows, bidirectional traffic, auto-ban, optional auto-unban (see `docs/desgin/quota.md` and `XP_QUOTA_*`)
 - Cluster consistency: 1–20 nodes Raft (OpenRaft); write requests are serialized by the leader
 - Embedded admin UI: served by `xp` (default: `http://127.0.0.1:62416/`)
@@ -164,6 +165,7 @@ See `docs/ops/README.md` for:
 - systemd/OpenRC examples
 - `XP_DATA_DIR` layout + backup guidance
 - `xp-ops` upgrade/rollback strategy (GitHub Releases)
+- `xp-ops mihomo redact` usage for safely sharing subscription/config snippets
 - optional public access via Cloudflare Tunnel
 
 ## Development & testing

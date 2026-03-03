@@ -56,6 +56,19 @@ Script alias:
 ./scripts/mihomo-redact.sh [SOURCE] [args...]
 ```
 
+Quick examples:
+
+```bash
+# Local file
+xp-ops mihomo redact ./config.yaml
+
+# Explicit stdin with SOURCE='-'
+cat ./config.yaml | xp-ops mihomo redact -
+
+# URL source with custom timeout
+xp-ops mihomo redact "https://example.com/sub?token=..." --timeout-secs 30
+```
+
 ## `xp-ops tui` (deploy wizard)
 
 `xp-ops tui` provides an interactive deploy wizard for `xp-ops deploy`.
