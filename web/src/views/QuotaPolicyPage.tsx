@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import {
+	type KeyboardEvent,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
 import {
@@ -111,8 +117,31 @@ const PIE_COLORS = [
 	"var(--color-neutral)",
 ] as const;
 
-const RATIO_TABLE_MIN_VIEWPORT = 1024;
+const TW_BREAKPOINT_SM = 640;
+const TW_BREAKPOINT_MD = 768;
+const TW_BREAKPOINT_LG = 1024;
+const TW_BREAKPOINT_XL = 1280;
+const TW_BREAKPOINT_2XL = 1536;
+const RATIO_TABLE_MIN_VIEWPORT = TW_BREAKPOINT_MD;
 const DEFAULT_GLOBAL_WEIGHT = 100;
+
+type RatioEditorWidthTier = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
+
+type RatioEditorLayout = {
+	isListLayout: boolean;
+	viewportTier: RatioEditorWidthTier;
+	panelTier: RatioEditorWidthTier;
+};
+
+type TablePercentInlineEditorProps = {
+	basisPoints: number;
+	disabled: boolean;
+	ariaLabel: string;
+	inputClassName: string;
+	onCommit: (basisPoints: number) => void;
+	onInvalid: (message: string) => void;
+	testId?: string;
+};
 
 function pieColorAt(index: number): string {
 	return PIE_COLORS[index % PIE_COLORS.length] ?? "var(--color-base-300)";
@@ -262,32 +291,54 @@ function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
 
-function shouldUseRatioEditorListLayout(
-	minTableViewport: number,
-	container: HTMLElement | null,
-): boolean {
-	if (container && container.clientWidth > 0) {
-		return container.clientWidth < minTableViewport;
-	}
-	if (typeof window === "undefined") return false;
-	return window.innerWidth < minTableViewport;
+function resolveViewportWidth(): number {
+	if (typeof window === "undefined") return TW_BREAKPOINT_2XL;
+	return window.innerWidth;
 }
 
-function useRatioEditorListLayout(
+function resolveRatioEditorWidth(container: HTMLElement | null): number {
+	if (container && container.clientWidth > 0) {
+		return container.clientWidth;
+	}
+	return resolveViewportWidth();
+}
+
+function widthTierForRatioEditor(width: number): RatioEditorWidthTier {
+	if (width >= TW_BREAKPOINT_2XL) return "2xl";
+	if (width >= TW_BREAKPOINT_XL) return "xl";
+	if (width >= TW_BREAKPOINT_LG) return "lg";
+	if (width >= TW_BREAKPOINT_MD) return "md";
+	if (width >= TW_BREAKPOINT_SM) return "sm";
+	return "xs";
+}
+
+function resolveRatioEditorLayout(
 	minTableViewport: number,
 	container: HTMLElement | null,
-): boolean {
-	const [isListLayout, setIsListLayout] = useState(() => {
-		return shouldUseRatioEditorListLayout(minTableViewport, container);
+): RatioEditorLayout {
+	const viewportWidth = resolveViewportWidth();
+	const panelWidth = resolveRatioEditorWidth(container);
+	return {
+		// Layout requirement is driven by viewport breakpoint: md and above uses table.
+		isListLayout: viewportWidth < minTableViewport,
+		viewportTier: widthTierForRatioEditor(viewportWidth),
+		panelTier: widthTierForRatioEditor(panelWidth),
+	};
+}
+
+function useRatioEditorLayout(
+	minTableViewport: number,
+	container: HTMLElement | null,
+): RatioEditorLayout {
+	const [layout, setLayout] = useState(() => {
+		return resolveRatioEditorLayout(minTableViewport, container);
 	});
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 
 		const updateLayout = () => {
-			setIsListLayout(
-				shouldUseRatioEditorListLayout(minTableViewport, container),
-			);
+			setLayout(resolveRatioEditorLayout(minTableViewport, container));
 		};
 		updateLayout();
 
@@ -306,7 +357,101 @@ function useRatioEditorListLayout(
 		};
 	}, [container, minTableViewport]);
 
-	return isListLayout;
+	return layout;
+}
+
+function formatPercentInputValue(basisPoints: number): string {
+	return String(basisPoints / 100);
+}
+
+function TablePercentInlineEditor({
+	basisPoints,
+	disabled,
+	ariaLabel,
+	inputClassName,
+	onCommit,
+	onInvalid,
+	testId,
+}: TablePercentInlineEditorProps) {
+	const [isEditing, setIsEditing] = useState(false);
+	const [draft, setDraft] = useState(() =>
+		formatPercentInputValue(basisPoints),
+	);
+	const inputRef = useRef<HTMLInputElement | null>(null);
+
+	useEffect(() => {
+		if (isEditing) return;
+		setDraft(formatPercentInputValue(basisPoints));
+	}, [basisPoints, isEditing]);
+
+	useEffect(() => {
+		if (!isEditing) return;
+		inputRef.current?.focus();
+		inputRef.current?.select();
+	}, [isEditing]);
+
+	const commitDraft = () => {
+		const parsed = parsePercentInput(draft);
+		if (!parsed.ok) {
+			onInvalid(parsed.error);
+			return;
+		}
+		onCommit(parsed.basisPoints);
+		setIsEditing(false);
+	};
+
+	const resetEditor = () => {
+		setDraft(formatPercentInputValue(basisPoints));
+		setIsEditing(false);
+	};
+
+	const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			commitDraft();
+			return;
+		}
+		if (event.key === "Escape") {
+			event.preventDefault();
+			resetEditor();
+		}
+	};
+
+	if (isEditing) {
+		return (
+			<input
+				type="number"
+				min={0}
+				max={100}
+				step={0.01}
+				ref={inputRef}
+				className={[inputClassName, "font-mono w-full mt-1 h-8 min-h-8"].join(
+					" ",
+				)}
+				value={draft}
+				disabled={disabled}
+				aria-label={ariaLabel}
+				data-testid={testId ? `${testId}-input` : undefined}
+				onChange={(event) => setDraft(event.target.value)}
+				onKeyDown={handleKeyDown}
+				onBlur={resetEditor}
+			/>
+		);
+	}
+
+	return (
+		<button
+			type="button"
+			className="font-mono text-xs opacity-70 mt-1 h-8 w-full rounded-btn px-2 text-left border border-transparent hover:border-base-content/20 hover:bg-base-200/30 transition-colors"
+			disabled={disabled}
+			aria-label={ariaLabel}
+			title="Double click the cell to edit percent"
+			data-testid={testId ? `${testId}-display` : undefined}
+			onDoubleClick={() => setIsEditing(true)}
+		>
+			{formatRatioPercent(basisPoints)}
+		</button>
+	);
 }
 
 export function QuotaPolicyPage() {
@@ -334,14 +479,24 @@ export function QuotaPolicyPage() {
 		useState<HTMLDivElement | null>(null);
 	const [nodeRatioEditorContainer, setNodeRatioEditorContainer] =
 		useState<HTMLDivElement | null>(null);
-	const globalRatioEditorListLayout = useRatioEditorListLayout(
+	const globalRatioEditorLayout = useRatioEditorLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
 		globalRatioEditorContainer,
 	);
-	const nodeRatioEditorListLayout = useRatioEditorListLayout(
+	const nodeRatioEditorLayout = useRatioEditorLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
 		nodeRatioEditorContainer,
 	);
+	const globalRatioEditorListLayout = globalRatioEditorLayout.isListLayout;
+	const nodeRatioEditorListLayout = nodeRatioEditorLayout.isListLayout;
+	const globalRatioTableCompact =
+		!globalRatioEditorListLayout &&
+		(globalRatioEditorLayout.panelTier === "xs" ||
+			globalRatioEditorLayout.panelTier === "sm");
+	const nodeRatioTableCompact =
+		!nodeRatioEditorListLayout &&
+		(nodeRatioEditorLayout.panelTier === "xs" ||
+			nodeRatioEditorLayout.panelTier === "sm");
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -1379,8 +1534,16 @@ export function QuotaPolicyPage() {
 
 							<div
 								data-testid="global-ratio-editor-panel"
+								data-layout={globalRatioEditorListLayout ? "list" : "table"}
+								data-width-tier={globalRatioEditorLayout.viewportTier}
+								data-panel-tier={globalRatioEditorLayout.panelTier}
 								ref={setGlobalRatioEditorContainer}
-								className="rounded-box border border-base-200 p-4 space-y-4"
+								className={[
+									"rounded-box border border-base-200 p-4 space-y-4",
+									`layout-${globalRatioEditorListLayout ? "list" : "table"}`,
+									`width-tier-${globalRatioEditorLayout.viewportTier}`,
+									`panel-tier-${globalRatioEditorLayout.panelTier}`,
+								].join(" ")}
 							>
 								{globalRatioEditorListLayout ? (
 									<div
@@ -1408,12 +1571,12 @@ export function QuotaPolicyPage() {
 														</span>
 													</div>
 
-													<div className="space-y-3">
-														<div className="space-y-1">
+													<div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
+														<div className="space-y-1 min-w-0">
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm"
+																className="range range-primary range-sm w-full"
 																min={0}
 																max={100}
 																step={0.1}
@@ -1429,11 +1592,8 @@ export function QuotaPolicyPage() {
 																	);
 																}}
 															/>
-															<div className="font-mono text-xs opacity-70">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
 														</div>
-														<div className="space-y-1">
+														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>
@@ -1499,18 +1659,39 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="global-ratio-editor-table"
-											className="table table-fixed w-full min-w-[980px]"
+											className="table table-fixed w-full"
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[30%]">User</th>
+													<th
+														className={
+															globalRatioTableCompact ? "w-[26%]" : "w-[28%]"
+														}
+													>
+														User
+													</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[21%]">Slider</th>
-													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[14%] whitespace-nowrap pr-4">
+													<th
+														className={
+															globalRatioTableCompact ? "w-[40%]" : "w-[38%]"
+														}
+													>
+														Slider
+													</th>
+													<th
+														className={[
+															"w-[18%] leading-tight",
+															globalRatioTableCompact ? "pr-2" : "pr-3",
+														].join(" ")}
+													>
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap pl-4">
+													<th
+														className={[
+															"w-[6%] text-center",
+															globalRatioTableCompact ? "pl-1" : "pl-2",
+														].join(" ")}
+													>
 														Lock
 													</th>
 												</tr>
@@ -1525,9 +1706,6 @@ export function QuotaPolicyPage() {
 																<div className="flex flex-col gap-1 min-w-0">
 																	<span className="font-semibold truncate">
 																		{row.displayName}
-																	</span>
-																	<span className="font-mono text-xs opacity-70 break-all">
-																		{row.userId}
 																	</span>
 																</div>
 															</td>
@@ -1555,39 +1733,27 @@ export function QuotaPolicyPage() {
 																		);
 																	}}
 																/>
-																<div className="font-mono text-xs opacity-70 mt-1">
-																	{formatRatioPercent(row.basisPoints)}
-																</div>
-															</td>
-															<td className="align-top">
-																<input
-																	type="number"
-																	min={0}
-																	max={100}
-																	step={0.01}
-																	className={[
-																		inputClass,
-																		"font-mono w-full",
-																	].join(" ")}
-																	value={row.basisPoints / 100}
+																<TablePercentInlineEditor
+																	basisPoints={row.basisPoints}
 																	disabled={isSavingGlobalRatio}
-																	aria-label={`Global ratio input for ${row.displayName}`}
-																	onChange={(event) => {
-																		const parsed = parsePercentInput(
-																			event.target.value,
-																		);
-																		if (!parsed.ok) {
-																			setGlobalRatioError(parsed.error);
-																			return;
-																		}
+																	ariaLabel={`Edit global ratio percent for ${row.displayName}`}
+																	inputClassName={inputClass}
+																	testId={`global-ratio-table-percent-${row.userId}`}
+																	onInvalid={setGlobalRatioError}
+																	onCommit={(basisPoints) =>
 																		applyGlobalRatioEdit(
 																			row.userId,
-																			parsed.basisPoints,
-																		);
-																	}}
+																			basisPoints,
+																		)
+																	}
 																/>
 															</td>
-															<td className="align-top whitespace-nowrap pr-4">
+															<td
+																className={[
+																	"align-top",
+																	globalRatioTableCompact ? "pr-2" : "pr-3",
+																].join(" ")}
+															>
 																<div className="font-mono text-sm">
 																	{targetWeight}
 																</div>
@@ -1597,8 +1763,13 @@ export function QuotaPolicyPage() {
 																		: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap pl-4">
-																<label className="label cursor-pointer justify-start gap-2 py-0">
+															<td
+																className={[
+																	"align-top",
+																	globalRatioTableCompact ? "pl-1" : "pl-2",
+																].join(" ")}
+															>
+																<label className="label cursor-pointer justify-center py-0">
 																	<input
 																		type="checkbox"
 																		className="checkbox checkbox-sm"
@@ -1608,9 +1779,7 @@ export function QuotaPolicyPage() {
 																			toggleGlobalRowLock(row.userId)
 																		}
 																	/>
-																	<span className="label-text text-xs">
-																		Lock
-																	</span>
+																	<span className="sr-only">Lock</span>
 																</label>
 															</td>
 														</tr>
@@ -1970,8 +2139,16 @@ export function QuotaPolicyPage() {
 
 							<div
 								data-testid="ratio-editor-panel"
+								data-layout={nodeRatioEditorListLayout ? "list" : "table"}
+								data-width-tier={nodeRatioEditorLayout.viewportTier}
+								data-panel-tier={nodeRatioEditorLayout.panelTier}
 								ref={setNodeRatioEditorContainer}
-								className="rounded-box border border-base-200 p-4 space-y-4"
+								className={[
+									"rounded-box border border-base-200 p-4 space-y-4",
+									`layout-${nodeRatioEditorListLayout ? "list" : "table"}`,
+									`width-tier-${nodeRatioEditorLayout.viewportTier}`,
+									`panel-tier-${nodeRatioEditorLayout.panelTier}`,
+								].join(" ")}
 							>
 								{nodeRatioEditorListLayout ? (
 									<div data-testid="ratio-editor-list" className="space-y-3">
@@ -2007,12 +2184,12 @@ export function QuotaPolicyPage() {
 														</span>
 													</div>
 
-													<div className="space-y-3">
-														<div className="space-y-1">
+													<div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
+														<div className="space-y-1 min-w-0">
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm"
+																className="range range-primary range-sm w-full"
 																min={0}
 																max={100}
 																step={0.1}
@@ -2034,11 +2211,8 @@ export function QuotaPolicyPage() {
 																	);
 																}}
 															/>
-															<div className="font-mono text-xs opacity-70">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
 														</div>
-														<div className="space-y-1">
+														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>
@@ -2116,18 +2290,39 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="ratio-editor-table"
-											className="table table-fixed w-full min-w-[980px]"
+											className="table table-fixed w-full"
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[28%]">User</th>
+													<th
+														className={
+															nodeRatioTableCompact ? "w-[28%]" : "w-[30%]"
+														}
+													>
+														User
+													</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[23%]">Slider</th>
-													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[14%] whitespace-nowrap pr-4">
+													<th
+														className={
+															nodeRatioTableCompact ? "w-[38%]" : "w-[36%]"
+														}
+													>
+														Slider
+													</th>
+													<th
+														className={[
+															"w-[18%] leading-tight",
+															nodeRatioTableCompact ? "pr-2" : "pr-3",
+														].join(" ")}
+													>
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap pl-4">
+													<th
+														className={[
+															"w-[6%] text-center",
+															nodeRatioTableCompact ? "pl-1" : "pl-2",
+														].join(" ")}
+													>
 														Lock
 													</th>
 												</tr>
@@ -2152,9 +2347,6 @@ export function QuotaPolicyPage() {
 																<div className="flex flex-col gap-1 min-w-0">
 																	<span className="font-semibold truncate">
 																		{row.displayName}
-																	</span>
-																	<span className="font-mono text-xs opacity-70 break-all">
-																		{row.userId}
 																	</span>
 																	<span className="text-xs opacity-70">
 																		Endpoints {row.endpointIds.length}
@@ -2191,45 +2383,28 @@ export function QuotaPolicyPage() {
 																		);
 																	}}
 																/>
-																<div className="font-mono text-xs opacity-70 mt-1">
-																	{formatRatioPercent(row.basisPoints)}
-																</div>
-															</td>
-															<td className="align-top">
-																<input
-																	type="number"
-																	min={0}
-																	max={100}
-																	step={0.01}
-																	className={[
-																		inputClass,
-																		"font-mono w-full",
-																	].join(" ")}
-																	value={row.basisPoints / 100}
+																<TablePercentInlineEditor
+																	basisPoints={row.basisPoints}
 																	disabled={
 																		isSavingRatio ||
 																		nodeInheritGlobal ||
 																		isUpdatingNodePolicy
 																	}
-																	aria-label={`Ratio input for ${row.displayName}`}
-																	onFocus={() => setHoveredUserId(row.userId)}
-																	onBlur={() => setHoveredUserId(null)}
-																	onChange={(event) => {
-																		const parsed = parsePercentInput(
-																			event.target.value,
-																		);
-																		if (!parsed.ok) {
-																			setRatioError(parsed.error);
-																			return;
-																		}
-																		applyRatioEdit(
-																			row.userId,
-																			parsed.basisPoints,
-																		);
-																	}}
+																	ariaLabel={`Edit ratio percent for ${row.displayName}`}
+																	inputClassName={inputClass}
+																	testId={`ratio-table-percent-${row.userId}`}
+																	onInvalid={setRatioError}
+																	onCommit={(basisPoints) =>
+																		applyRatioEdit(row.userId, basisPoints)
+																	}
 																/>
 															</td>
-															<td className="align-top whitespace-nowrap pr-4">
+															<td
+																className={[
+																	"align-top",
+																	nodeRatioTableCompact ? "pr-2" : "pr-3",
+																].join(" ")}
+															>
 																<div className="font-mono text-sm">
 																	{targetWeight}
 																</div>
@@ -2241,8 +2416,13 @@ export function QuotaPolicyPage() {
 																			: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap pl-4">
-																<label className="label cursor-pointer justify-start gap-2 py-0">
+															<td
+																className={[
+																	"align-top",
+																	nodeRatioTableCompact ? "pl-1" : "pl-2",
+																].join(" ")}
+															>
+																<label className="label cursor-pointer justify-center py-0">
 																	<input
 																		type="checkbox"
 																		className="checkbox checkbox-sm"
@@ -2254,9 +2434,7 @@ export function QuotaPolicyPage() {
 																		}
 																		onChange={() => toggleRowLock(row.userId)}
 																	/>
-																	<span className="label-text text-xs">
-																		Lock
-																	</span>
+																	<span className="sr-only">Lock</span>
 																</label>
 															</td>
 														</tr>

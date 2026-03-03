@@ -2,9 +2,9 @@
 
 ## Status
 
-- Status: in_progress
+- Status: completed
 - Created: 2026-02-26
-- Last Updated: 2026-02-26
+- Last Updated: 2026-03-03
 - Flow: normal
 
 ## Goal
@@ -154,6 +154,24 @@ The membership source migration from grants remains part of the same spec.
   - partial failure retention and `Retry failed rows`
   - reset to server values
   - last save status/time
+  - responsive editor switch based on viewport breakpoint:
+    - `< 768px (md)` uses list layout,
+    - `>= 768px (md)` uses table layout.
+  - list layout spacing refinement:
+    - keep slider track `w-full` in the available content area,
+    - place `Input (%)` at slider right side for `sm` list mode while preserving stacked layout on narrower widths.
+    - remove redundant percent text under slider; list card value display comes from the `Input (%)` field.
+  - table mode can use compact spacing when editor panel width is narrow, while keeping table structure on `md+`.
+  - table column widths prioritize `Slider` and remove hard min-width constraints to reduce horizontal scrolling on supported breakpoints.
+  - table layout readability/interaction refinements:
+    - hide user id line in table `User` column (keep display name focused),
+    - remove standalone `Input (%)` table column,
+    - allow inline percent edit by double-clicking the slider percent cell (not text-only trigger); commit on Enter and return to slider view.
+  - layout observability markers on editor panel DOM:
+    - `data-layout=list|table`
+    - `data-width-tier=xs|sm|md|lg|xl|2xl` (viewport tier)
+    - `data-panel-tier=xs|sm|md|lg|xl|2xl` (panel width tier)
+    - class markers `layout-*`, `width-tier-*`, and `panel-tier-*`
 
 ## Validation
 
@@ -177,6 +195,10 @@ Implemented automated coverage additions:
 - Every node defaults to inherit-global and can toggle to node-local override.
 - In inherited mode, node view reflects global ratios and cannot accidentally mutate node-local values.
 - After switching to node-local mode, edits persist only to node-local weights and do not mutate global defaults.
+- Ratio editor switches to table layout at `md` and above for both global and node editors, while preserving list layout below `md`.
+- Table mode keeps key info focused by hiding user id line and dropping the standalone `Input (%)` column.
+- Table mode supports double-click inline percent edit on the slider percent cell, with Enter-to-apply and restore behavior.
+- Editor panel exposes layout + width-tier markers for style/debug verification.
 
 ## Change log
 
@@ -185,3 +207,6 @@ Implemented automated coverage additions:
 - Added weight write audit log details.
 - Reworked quota policy UI to node-centric ratio editing with visual chart and lock-aware controls.
 - Added requirement delta: global default allocation + node inherit/override policy switch.
+- Adjusted ratio editor responsive threshold to `md`, added viewport/panel tier DOM markers, and tuned compact table spacing for narrow panels.
+- Rebalanced table columns (less `User`, more `Slider`) and removed hard table min-width to avoid unnecessary scrollbar in supported viewports.
+- Refined table UX by removing the dedicated `Input (%)` column, hiding user id text in table rows, and adding double-click inline percent editing.

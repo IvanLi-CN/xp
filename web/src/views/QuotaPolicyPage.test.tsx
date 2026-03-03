@@ -246,19 +246,33 @@ describe("<QuotaPolicyPage />", () => {
 	});
 
 	it("keeps slider/input linkage and recomputes weights", async () => {
-		const view = renderPage();
-		await openNodeTab(view.container);
-
-		const aliceInput = await within(view.container).findByLabelText(
-			"Ratio input for Alice",
-		);
-
-		fireEvent.change(aliceInput, { target: { value: "70" } });
-
-		await waitFor(() => {
-			expect(within(view.container).getByText("7000")).toBeInTheDocument();
-			expect(within(view.container).getByText("3000")).toBeInTheDocument();
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 700,
 		});
+		try {
+			const view = renderPage();
+			await openNodeTab(view.container);
+
+			const aliceInput = await within(view.container).findByLabelText(
+				"Ratio input for Alice",
+			);
+
+			fireEvent.change(aliceInput, { target: { value: "70" } });
+
+			await waitFor(() => {
+				expect(within(view.container).getByText("7000")).toBeInTheDocument();
+				expect(within(view.container).getByText("3000")).toBeInTheDocument();
+			});
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
 	});
 
 	it("keeps local draft on partial save failure and retries only failed rows", async () => {
@@ -267,42 +281,56 @@ describe("<QuotaPolicyPage />", () => {
 			.mockRejectedValueOnce(new Error("boom"))
 			.mockResolvedValueOnce({ node_id: "node-1", weight: 4000 });
 
-		const view = renderPage();
-		await openNodeTab(view.container);
-
-		const aliceInput = await within(view.container).findByLabelText(
-			"Ratio input for Alice",
-		);
-		fireEvent.change(aliceInput, { target: { value: "65" } });
-
-		const saveButton = within(view.container).getByRole("button", {
-			name: "Save ratios",
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 700,
 		});
-		fireEvent.click(saveButton);
+		try {
+			const view = renderPage();
+			await openNodeTab(view.container);
 
-		await waitFor(() => {
-			expect(
-				within(view.container).getByText(/Failed rows \(1\)/),
-			).toBeInTheDocument();
-		});
-		expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(2);
+			const aliceInput = await within(view.container).findByLabelText(
+				"Ratio input for Alice",
+			);
+			fireEvent.change(aliceInput, { target: { value: "65" } });
 
-		const retryButtons = within(view.container).getAllByRole("button", {
-			name: "Retry failed rows",
-		});
-		const retryButton =
-			retryButtons.find((button) => !button.hasAttribute("disabled")) ??
-			retryButtons[0];
-		if (!retryButton) {
-			throw new Error("expected retry button");
+			const saveButton = within(view.container).getByRole("button", {
+				name: "Save ratios",
+			});
+			fireEvent.click(saveButton);
+
+			await waitFor(() => {
+				expect(
+					within(view.container).getByText(/Failed rows \(1\)/),
+				).toBeInTheDocument();
+			});
+			expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(2);
+
+			const retryButtons = within(view.container).getAllByRole("button", {
+				name: "Retry failed rows",
+			});
+			const retryButton =
+				retryButtons.find((button) => !button.hasAttribute("disabled")) ??
+				retryButtons[0];
+			if (!retryButton) {
+				throw new Error("expected retry button");
+			}
+			fireEvent.click(retryButton);
+
+			await waitFor(() => {
+				expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(3);
+			});
+			const thirdCall = vi.mocked(putAdminUserNodeWeight).mock.calls[2];
+			expect(thirdCall?.[1]).toBe("user-2");
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
 		}
-		fireEvent.click(retryButton);
-
-		await waitFor(() => {
-			expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(3);
-		});
-		const thirdCall = vi.mocked(putAdminUserNodeWeight).mock.calls[2];
-		expect(thirdCall?.[1]).toBe("user-2");
 	});
 
 	it("disables node editor in inherit mode and enables after turning inherit off", async () => {
@@ -320,77 +348,139 @@ describe("<QuotaPolicyPage />", () => {
 			inherit_global: false,
 		});
 
-		const view = renderPage();
-		await openNodeTab(view.container);
-
-		const aliceInput = await within(view.container).findByLabelText(
-			"Ratio input for Alice",
-		);
-		expect(aliceInput).toBeDisabled();
-
-		const inheritToggle = within(view.container).getByRole("checkbox", {
-			name: "Inherit global default ratios",
-		});
-		fireEvent.click(inheritToggle);
-
-		await waitFor(() => {
-			expect(vi.mocked(putAdminQuotaPolicyNodePolicy)).toHaveBeenCalledWith(
-				"admintoken",
-				"node-1",
-				false,
-			);
-		});
-
-		await waitFor(() => {
-			expect(
-				within(view.container).getByLabelText("Ratio input for Alice"),
-			).not.toBeDisabled();
-		});
-	});
-
-	it("keeps pie legend and slice order stable after ratio ranking changes", async () => {
-		const view = renderPage();
-		await openNodeTab(view.container);
-		await within(view.container).findByLabelText("Node weight ratio pie chart");
-
-		const colorsBefore = readLegendColors(view.container);
-		const orderBefore = readLegendOrder(view.container);
-		const firstSliceBefore = readPieSliceFills(view.container)[0];
-		expect(colorsBefore.Alice).toBeTruthy();
-		expect(colorsBefore.Bob).toBeTruthy();
-		expect(orderBefore).toEqual(["Alice", "Bob"]);
-		expect(firstSliceBefore).toBeTruthy();
-
-		const aliceInput = await within(view.container).findByLabelText(
-			"Ratio input for Alice",
-		);
-		fireEvent.change(aliceInput, { target: { value: "30" } });
-
-		await waitFor(() => {
-			expect(within(view.container).getByText("3000")).toBeInTheDocument();
-			expect(within(view.container).getByText("7000")).toBeInTheDocument();
-		});
-
-		const colorsAfter = readLegendColors(view.container);
-		const orderAfter = readLegendOrder(view.container);
-		const firstSliceAfter = readPieSliceFills(view.container)[0];
-		expect(colorsAfter.Alice).toBe(colorsBefore.Alice);
-		expect(colorsAfter.Bob).toBe(colorsBefore.Bob);
-		expect(orderAfter).toEqual(orderBefore);
-		expect(firstSliceAfter).toBe(firstSliceBefore);
-	});
-
-	it("switches to list layout on narrow viewport instead of showing table scroll", async () => {
 		const originalInnerWidth = window.innerWidth;
 		Object.defineProperty(window, "innerWidth", {
 			configurable: true,
 			writable: true,
-			value: 900,
+			value: 700,
 		});
 		try {
 			const view = renderPage();
 			await openNodeTab(view.container);
+
+			const aliceInput = await within(view.container).findByLabelText(
+				"Ratio input for Alice",
+			);
+			expect(aliceInput).toBeDisabled();
+
+			const inheritToggle = within(view.container).getByRole("checkbox", {
+				name: "Inherit global default ratios",
+			});
+			fireEvent.click(inheritToggle);
+
+			await waitFor(() => {
+				expect(vi.mocked(putAdminQuotaPolicyNodePolicy)).toHaveBeenCalledWith(
+					"admintoken",
+					"node-1",
+					false,
+				);
+			});
+
+			await waitFor(() => {
+				expect(
+					within(view.container).getByLabelText("Ratio input for Alice"),
+				).not.toBeDisabled();
+			});
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("keeps pie legend and slice order stable after ratio ranking changes", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 700,
+		});
+		try {
+			const view = renderPage();
+			await openNodeTab(view.container);
+			await within(view.container).findByLabelText(
+				"Node weight ratio pie chart",
+			);
+
+			const colorsBefore = readLegendColors(view.container);
+			const orderBefore = readLegendOrder(view.container);
+			const firstSliceBefore = readPieSliceFills(view.container)[0];
+			expect(colorsBefore.Alice).toBeTruthy();
+			expect(colorsBefore.Bob).toBeTruthy();
+			expect(orderBefore).toEqual(["Alice", "Bob"]);
+			expect(firstSliceBefore).toBeTruthy();
+
+			const aliceInput = await within(view.container).findByLabelText(
+				"Ratio input for Alice",
+			);
+			fireEvent.change(aliceInput, { target: { value: "30" } });
+
+			await waitFor(() => {
+				expect(within(view.container).getByText("3000")).toBeInTheDocument();
+				expect(within(view.container).getByText("7000")).toBeInTheDocument();
+			});
+
+			const colorsAfter = readLegendColors(view.container);
+			const orderAfter = readLegendOrder(view.container);
+			const firstSliceAfter = readPieSliceFills(view.container)[0];
+			expect(colorsAfter.Alice).toBe(colorsBefore.Alice);
+			expect(colorsAfter.Bob).toBe(colorsBefore.Bob);
+			expect(orderAfter).toEqual(orderBefore);
+			expect(firstSliceAfter).toBe(firstSliceBefore);
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("uses list layout below md for both global and node editors", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 700,
+		});
+		try {
+			const view = renderPage();
+			await within(view.container).findByLabelText(
+				"Global ratio input for Alice",
+			);
+			const globalPanel = within(view.container).getByTestId(
+				"global-ratio-editor-panel",
+			);
+			expect(globalPanel).toHaveAttribute("data-layout", "list");
+			expect(globalPanel).toHaveAttribute("data-width-tier", "sm");
+			expect(globalPanel).toHaveAttribute("data-panel-tier", "sm");
+			expect(globalPanel).toHaveClass(
+				"layout-list",
+				"width-tier-sm",
+				"panel-tier-sm",
+			);
+			expect(
+				within(view.container).getByTestId("global-ratio-editor-list"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).queryByTestId("global-ratio-editor-table"),
+			).toBeNull();
+
+			await openNodeTab(view.container);
 			await within(view.container).findByLabelText("Ratio input for Alice");
+			const nodePanel = within(view.container).getByTestId(
+				"ratio-editor-panel",
+			);
+			expect(nodePanel).toHaveAttribute("data-layout", "list");
+			expect(nodePanel).toHaveAttribute("data-width-tier", "sm");
+			expect(nodePanel).toHaveAttribute("data-panel-tier", "sm");
+			expect(nodePanel).toHaveClass(
+				"layout-list",
+				"width-tier-sm",
+				"panel-tier-sm",
+			);
 			expect(
 				within(view.container).getByTestId("ratio-editor-list"),
 			).toBeInTheDocument();
@@ -406,7 +496,243 @@ describe("<QuotaPolicyPage />", () => {
 		}
 	});
 
-	it("switches to list layout when editor panel is narrow on desktop", async () => {
+	it("uses table layout from md and above for both global and node editors", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 768,
+		});
+		try {
+			const view = renderPage();
+			await within(view.container).findByTestId("global-ratio-editor-table");
+			const globalPanel = within(view.container).getByTestId(
+				"global-ratio-editor-panel",
+			);
+			expect(globalPanel).toHaveAttribute("data-layout", "table");
+			expect(globalPanel).toHaveAttribute("data-width-tier", "md");
+			expect(globalPanel).toHaveAttribute("data-panel-tier", "md");
+			expect(globalPanel).toHaveClass(
+				"layout-table",
+				"width-tier-md",
+				"panel-tier-md",
+			);
+			expect(
+				within(view.container).getByTestId("global-ratio-editor-table"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).getByTestId("global-ratio-editor-table")
+					.className,
+			).not.toMatch(/min-w-\[/);
+			expect(
+				within(view.container).queryByTestId("global-ratio-editor-list"),
+			).toBeNull();
+
+			await openNodeTab(view.container);
+			await within(view.container).findByTestId("ratio-editor-table");
+			const nodePanel = within(view.container).getByTestId(
+				"ratio-editor-panel",
+			);
+			expect(nodePanel).toHaveAttribute("data-layout", "table");
+			expect(nodePanel).toHaveAttribute("data-width-tier", "md");
+			expect(nodePanel).toHaveAttribute("data-panel-tier", "md");
+			expect(nodePanel).toHaveClass(
+				"layout-table",
+				"width-tier-md",
+				"panel-tier-md",
+			);
+			expect(
+				within(view.container).getByTestId("ratio-editor-table"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).getByTestId("ratio-editor-table").className,
+			).not.toMatch(/min-w-\[/);
+			expect(
+				within(view.container).queryByTestId("ratio-editor-list"),
+			).toBeNull();
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("hides user id and removes standalone input column in table layout", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 1024,
+		});
+		try {
+			const view = renderPage();
+			const globalTable = await within(view.container).findByTestId(
+				"global-ratio-editor-table",
+			);
+			expect(within(globalTable).queryByText("Input (%)")).toBeNull();
+			expect(within(globalTable).queryByText("user-1")).toBeNull();
+			expect(within(globalTable).queryByText("user-2")).toBeNull();
+
+			await openNodeTab(view.container);
+			const nodeTable = await within(view.container).findByTestId(
+				"ratio-editor-table",
+			);
+			expect(within(nodeTable).queryByText("Input (%)")).toBeNull();
+			expect(within(nodeTable).queryByText("user-1")).toBeNull();
+			expect(within(nodeTable).queryByText("user-2")).toBeNull();
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("supports inline percent edit in table on double click and enter", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 1024,
+		});
+		try {
+			const view = renderPage();
+			await within(view.container).findByTestId("global-ratio-editor-table");
+
+			const globalDisplay = within(view.container).getByTestId(
+				"global-ratio-table-percent-user-1-display",
+			);
+			fireEvent.doubleClick(globalDisplay);
+			const globalInput = within(view.container).getByTestId(
+				"global-ratio-table-percent-user-1-input",
+			);
+			fireEvent.change(globalInput, { target: { value: "60" } });
+			fireEvent.keyDown(globalInput, { key: "Enter" });
+
+			await waitFor(() => {
+				expect(
+					within(view.container).queryByTestId(
+						"global-ratio-table-percent-user-1-input",
+					),
+				).toBeNull();
+			});
+			expect(
+				within(view.container).getByTestId(
+					"global-ratio-table-percent-user-1-display",
+				),
+			).toHaveTextContent("60.00%");
+
+			await openNodeTab(view.container);
+			await within(view.container).findByTestId("ratio-editor-table");
+			const nodeDisplay = within(view.container).getByTestId(
+				"ratio-table-percent-user-1-display",
+			);
+			fireEvent.doubleClick(nodeDisplay);
+			const nodeInput = within(view.container).getByTestId(
+				"ratio-table-percent-user-1-input",
+			);
+			fireEvent.change(nodeInput, { target: { value: "70" } });
+			fireEvent.keyDown(nodeInput, { key: "Enter" });
+
+			await waitFor(() => {
+				expect(
+					within(view.container).queryByTestId(
+						"ratio-table-percent-user-1-input",
+					),
+				).toBeNull();
+			});
+			expect(
+				within(view.container).getByTestId(
+					"ratio-table-percent-user-1-display",
+				),
+			).toHaveTextContent("70.00%");
+			expect(within(view.container).getByText("7000")).toBeInTheDocument();
+			expect(within(view.container).getByText("3000")).toBeInTheDocument();
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("covers all viewport breakpoints with width-tier markers", async () => {
+		const originalInnerWidth = window.innerWidth;
+		const cases = [
+			{ width: 360, widthTier: "xs", layout: "list" },
+			{ width: 640, widthTier: "sm", layout: "list" },
+			{ width: 768, widthTier: "md", layout: "table" },
+			{ width: 1024, widthTier: "lg", layout: "table" },
+			{ width: 1280, widthTier: "xl", layout: "table" },
+			{ width: 1536, widthTier: "2xl", layout: "table" },
+		] as const;
+
+		try {
+			for (const testCase of cases) {
+				Object.defineProperty(window, "innerWidth", {
+					configurable: true,
+					writable: true,
+					value: testCase.width,
+				});
+
+				const view = renderPage();
+				if (testCase.layout === "list") {
+					await within(view.container).findByLabelText(
+						"Global ratio input for Alice",
+					);
+				} else {
+					await within(view.container).findByTestId(
+						"global-ratio-editor-table",
+					);
+				}
+				const globalPanel = within(view.container).getByTestId(
+					"global-ratio-editor-panel",
+				);
+				expect(globalPanel).toHaveAttribute("data-layout", testCase.layout);
+				expect(globalPanel).toHaveAttribute(
+					"data-width-tier",
+					testCase.widthTier,
+				);
+				expect(globalPanel).toHaveAttribute(
+					"data-panel-tier",
+					testCase.widthTier,
+				);
+
+				await openNodeTab(view.container);
+				if (testCase.layout === "list") {
+					await within(view.container).findByLabelText("Ratio input for Alice");
+				} else {
+					await within(view.container).findByTestId("ratio-editor-table");
+				}
+				const nodePanel = within(view.container).getByTestId(
+					"ratio-editor-panel",
+				);
+				expect(nodePanel).toHaveAttribute("data-layout", testCase.layout);
+				expect(nodePanel).toHaveAttribute(
+					"data-width-tier",
+					testCase.widthTier,
+				);
+				expect(nodePanel).toHaveAttribute(
+					"data-panel-tier",
+					testCase.widthTier,
+				);
+
+				view.unmount();
+			}
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("keeps table layout on desktop when the editor panel narrows", async () => {
 		const originalInnerWidth = window.innerWidth;
 		const originalResizeObserver = window.ResizeObserver;
 		Object.defineProperty(window, "innerWidth", {
@@ -427,18 +753,26 @@ describe("<QuotaPolicyPage />", () => {
 			const panel = within(view.container).getByTestId("ratio-editor-panel");
 			Object.defineProperty(panel, "clientWidth", {
 				configurable: true,
-				get: () => 900,
+				get: () => 700,
 			});
 
 			window.dispatchEvent(new Event("resize"));
 
 			await waitFor(() => {
 				expect(
-					within(view.container).getByTestId("ratio-editor-list"),
+					within(view.container).getByTestId("ratio-editor-table"),
 				).toBeInTheDocument();
 			});
+			expect(panel).toHaveAttribute("data-layout", "table");
+			expect(panel).toHaveAttribute("data-width-tier", "xl");
+			expect(panel).toHaveAttribute("data-panel-tier", "sm");
+			expect(panel).toHaveClass(
+				"layout-table",
+				"width-tier-xl",
+				"panel-tier-sm",
+			);
 			expect(
-				within(view.container).queryByTestId("ratio-editor-table"),
+				within(view.container).queryByTestId("ratio-editor-list"),
 			).toBeNull();
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
