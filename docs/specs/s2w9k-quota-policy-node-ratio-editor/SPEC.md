@@ -2,9 +2,9 @@
 
 ## Status
 
-- Status: in_progress
+- Status: completed
 - Created: 2026-02-26
-- Last Updated: 2026-02-26
+- Last Updated: 2026-03-03
 - Flow: normal
 
 ## Goal
@@ -154,6 +154,13 @@ The membership source migration from grants remains part of the same spec.
   - partial failure retention and `Retry failed rows`
   - reset to server values
   - last save status/time
+  - responsive editor switch based on editor panel width:
+    - `< 768px (md)` uses list layout,
+    - `>= 768px (md)` uses table layout.
+  - layout observability markers on editor panel DOM:
+    - `data-layout=list|table`
+    - `data-width-tier=xs|sm|md|lg|xl|2xl`
+    - class markers `layout-*` and `width-tier-*`
 
 ## Validation
 
@@ -177,6 +184,8 @@ Implemented automated coverage additions:
 - Every node defaults to inherit-global and can toggle to node-local override.
 - In inherited mode, node view reflects global ratios and cannot accidentally mutate node-local values.
 - After switching to node-local mode, edits persist only to node-local weights and do not mutate global defaults.
+- Ratio editor switches to table layout at `md` and above for both global and node editors, while preserving list layout below `md`.
+- Editor panel exposes layout + width-tier markers for style/debug verification.
 
 ## Change log
 
@@ -185,3 +194,4 @@ Implemented automated coverage additions:
 - Added weight write audit log details.
 - Reworked quota policy UI to node-centric ratio editing with visual chart and lock-aware controls.
 - Added requirement delta: global default allocation + node inherit/override policy switch.
+- Adjusted ratio editor responsive threshold to `md` and added layout/width-tier DOM markers with breakpoint coverage tests.

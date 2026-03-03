@@ -111,8 +111,20 @@ const PIE_COLORS = [
 	"var(--color-neutral)",
 ] as const;
 
-const RATIO_TABLE_MIN_VIEWPORT = 1024;
+const TW_BREAKPOINT_SM = 640;
+const TW_BREAKPOINT_MD = 768;
+const TW_BREAKPOINT_LG = 1024;
+const TW_BREAKPOINT_XL = 1280;
+const TW_BREAKPOINT_2XL = 1536;
+const RATIO_TABLE_MIN_VIEWPORT = TW_BREAKPOINT_MD;
 const DEFAULT_GLOBAL_WEIGHT = 100;
+
+type RatioEditorWidthTier = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
+
+type RatioEditorLayout = {
+	isListLayout: boolean;
+	widthTier: RatioEditorWidthTier;
+};
 
 function pieColorAt(index: number): string {
 	return PIE_COLORS[index % PIE_COLORS.length] ?? "var(--color-base-300)";
@@ -262,32 +274,47 @@ function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
 
-function shouldUseRatioEditorListLayout(
-	minTableViewport: number,
-	container: HTMLElement | null,
-): boolean {
+function resolveRatioEditorWidth(container: HTMLElement | null): number {
 	if (container && container.clientWidth > 0) {
-		return container.clientWidth < minTableViewport;
+		return container.clientWidth;
 	}
-	if (typeof window === "undefined") return false;
-	return window.innerWidth < minTableViewport;
+	if (typeof window === "undefined") return TW_BREAKPOINT_2XL;
+	return window.innerWidth;
 }
 
-function useRatioEditorListLayout(
+function widthTierForRatioEditor(width: number): RatioEditorWidthTier {
+	if (width >= TW_BREAKPOINT_2XL) return "2xl";
+	if (width >= TW_BREAKPOINT_XL) return "xl";
+	if (width >= TW_BREAKPOINT_LG) return "lg";
+	if (width >= TW_BREAKPOINT_MD) return "md";
+	if (width >= TW_BREAKPOINT_SM) return "sm";
+	return "xs";
+}
+
+function resolveRatioEditorLayout(
 	minTableViewport: number,
 	container: HTMLElement | null,
-): boolean {
-	const [isListLayout, setIsListLayout] = useState(() => {
-		return shouldUseRatioEditorListLayout(minTableViewport, container);
+): RatioEditorLayout {
+	const width = resolveRatioEditorWidth(container);
+	return {
+		isListLayout: width < minTableViewport,
+		widthTier: widthTierForRatioEditor(width),
+	};
+}
+
+function useRatioEditorLayout(
+	minTableViewport: number,
+	container: HTMLElement | null,
+): RatioEditorLayout {
+	const [layout, setLayout] = useState(() => {
+		return resolveRatioEditorLayout(minTableViewport, container);
 	});
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 
 		const updateLayout = () => {
-			setIsListLayout(
-				shouldUseRatioEditorListLayout(minTableViewport, container),
-			);
+			setLayout(resolveRatioEditorLayout(minTableViewport, container));
 		};
 		updateLayout();
 
@@ -306,7 +333,7 @@ function useRatioEditorListLayout(
 		};
 	}, [container, minTableViewport]);
 
-	return isListLayout;
+	return layout;
 }
 
 export function QuotaPolicyPage() {
@@ -334,14 +361,16 @@ export function QuotaPolicyPage() {
 		useState<HTMLDivElement | null>(null);
 	const [nodeRatioEditorContainer, setNodeRatioEditorContainer] =
 		useState<HTMLDivElement | null>(null);
-	const globalRatioEditorListLayout = useRatioEditorListLayout(
+	const globalRatioEditorLayout = useRatioEditorLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
 		globalRatioEditorContainer,
 	);
-	const nodeRatioEditorListLayout = useRatioEditorListLayout(
+	const nodeRatioEditorLayout = useRatioEditorLayout(
 		RATIO_TABLE_MIN_VIEWPORT,
 		nodeRatioEditorContainer,
 	);
+	const globalRatioEditorListLayout = globalRatioEditorLayout.isListLayout;
+	const nodeRatioEditorListLayout = nodeRatioEditorLayout.isListLayout;
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -1379,8 +1408,14 @@ export function QuotaPolicyPage() {
 
 							<div
 								data-testid="global-ratio-editor-panel"
+								data-layout={globalRatioEditorListLayout ? "list" : "table"}
+								data-width-tier={globalRatioEditorLayout.widthTier}
 								ref={setGlobalRatioEditorContainer}
-								className="rounded-box border border-base-200 p-4 space-y-4"
+								className={[
+									"rounded-box border border-base-200 p-4 space-y-4",
+									`layout-${globalRatioEditorListLayout ? "list" : "table"}`,
+									`width-tier-${globalRatioEditorLayout.widthTier}`,
+								].join(" ")}
 							>
 								{globalRatioEditorListLayout ? (
 									<div
@@ -1970,8 +2005,14 @@ export function QuotaPolicyPage() {
 
 							<div
 								data-testid="ratio-editor-panel"
+								data-layout={nodeRatioEditorListLayout ? "list" : "table"}
+								data-width-tier={nodeRatioEditorLayout.widthTier}
 								ref={setNodeRatioEditorContainer}
-								className="rounded-box border border-base-200 p-4 space-y-4"
+								className={[
+									"rounded-box border border-base-200 p-4 space-y-4",
+									`layout-${nodeRatioEditorListLayout ? "list" : "table"}`,
+									`width-tier-${nodeRatioEditorLayout.widthTier}`,
+								].join(" ")}
 							>
 								{nodeRatioEditorListLayout ? (
 									<div data-testid="ratio-editor-list" className="space-y-3">

@@ -380,17 +380,39 @@ describe("<QuotaPolicyPage />", () => {
 		expect(firstSliceAfter).toBe(firstSliceBefore);
 	});
 
-	it("switches to list layout on narrow viewport instead of showing table scroll", async () => {
+	it("uses list layout below md for both global and node editors", async () => {
 		const originalInnerWidth = window.innerWidth;
 		Object.defineProperty(window, "innerWidth", {
 			configurable: true,
 			writable: true,
-			value: 900,
+			value: 700,
 		});
 		try {
 			const view = renderPage();
+			await within(view.container).findByLabelText(
+				"Global ratio input for Alice",
+			);
+			const globalPanel = within(view.container).getByTestId(
+				"global-ratio-editor-panel",
+			);
+			expect(globalPanel).toHaveAttribute("data-layout", "list");
+			expect(globalPanel).toHaveAttribute("data-width-tier", "sm");
+			expect(globalPanel).toHaveClass("layout-list", "width-tier-sm");
+			expect(
+				within(view.container).getByTestId("global-ratio-editor-list"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).queryByTestId("global-ratio-editor-table"),
+			).toBeNull();
+
 			await openNodeTab(view.container);
 			await within(view.container).findByLabelText("Ratio input for Alice");
+			const nodePanel = within(view.container).getByTestId(
+				"ratio-editor-panel",
+			);
+			expect(nodePanel).toHaveAttribute("data-layout", "list");
+			expect(nodePanel).toHaveAttribute("data-width-tier", "sm");
+			expect(nodePanel).toHaveClass("layout-list", "width-tier-sm");
 			expect(
 				within(view.container).getByTestId("ratio-editor-list"),
 			).toBeInTheDocument();
@@ -406,7 +428,109 @@ describe("<QuotaPolicyPage />", () => {
 		}
 	});
 
-	it("switches to list layout when editor panel is narrow on desktop", async () => {
+	it("uses table layout from md and above for both global and node editors", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: 768,
+		});
+		try {
+			const view = renderPage();
+			await within(view.container).findByLabelText(
+				"Global ratio input for Alice",
+			);
+			const globalPanel = within(view.container).getByTestId(
+				"global-ratio-editor-panel",
+			);
+			expect(globalPanel).toHaveAttribute("data-layout", "table");
+			expect(globalPanel).toHaveAttribute("data-width-tier", "md");
+			expect(globalPanel).toHaveClass("layout-table", "width-tier-md");
+			expect(
+				within(view.container).getByTestId("global-ratio-editor-table"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).queryByTestId("global-ratio-editor-list"),
+			).toBeNull();
+
+			await openNodeTab(view.container);
+			await within(view.container).findByLabelText("Ratio input for Alice");
+			const nodePanel = within(view.container).getByTestId(
+				"ratio-editor-panel",
+			);
+			expect(nodePanel).toHaveAttribute("data-layout", "table");
+			expect(nodePanel).toHaveAttribute("data-width-tier", "md");
+			expect(nodePanel).toHaveClass("layout-table", "width-tier-md");
+			expect(
+				within(view.container).getByTestId("ratio-editor-table"),
+			).toBeInTheDocument();
+			expect(
+				within(view.container).queryByTestId("ratio-editor-list"),
+			).toBeNull();
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("covers all viewport breakpoints with width-tier markers", async () => {
+		const originalInnerWidth = window.innerWidth;
+		const cases = [
+			{ width: 360, widthTier: "xs", layout: "list" },
+			{ width: 640, widthTier: "sm", layout: "list" },
+			{ width: 768, widthTier: "md", layout: "table" },
+			{ width: 1024, widthTier: "lg", layout: "table" },
+			{ width: 1280, widthTier: "xl", layout: "table" },
+			{ width: 1536, widthTier: "2xl", layout: "table" },
+		] as const;
+
+		try {
+			for (const testCase of cases) {
+				Object.defineProperty(window, "innerWidth", {
+					configurable: true,
+					writable: true,
+					value: testCase.width,
+				});
+
+				const view = renderPage();
+				await within(view.container).findByLabelText(
+					"Global ratio input for Alice",
+				);
+				const globalPanel = within(view.container).getByTestId(
+					"global-ratio-editor-panel",
+				);
+				expect(globalPanel).toHaveAttribute("data-layout", testCase.layout);
+				expect(globalPanel).toHaveAttribute(
+					"data-width-tier",
+					testCase.widthTier,
+				);
+
+				await openNodeTab(view.container);
+				await within(view.container).findByLabelText("Ratio input for Alice");
+				const nodePanel = within(view.container).getByTestId(
+					"ratio-editor-panel",
+				);
+				expect(nodePanel).toHaveAttribute("data-layout", testCase.layout);
+				expect(nodePanel).toHaveAttribute(
+					"data-width-tier",
+					testCase.widthTier,
+				);
+
+				view.unmount();
+			}
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
+			});
+		}
+	});
+
+	it("switches to list layout when the editor panel itself is narrow on desktop", async () => {
 		const originalInnerWidth = window.innerWidth;
 		const originalResizeObserver = window.ResizeObserver;
 		Object.defineProperty(window, "innerWidth", {
@@ -427,7 +551,7 @@ describe("<QuotaPolicyPage />", () => {
 			const panel = within(view.container).getByTestId("ratio-editor-panel");
 			Object.defineProperty(panel, "clientWidth", {
 				configurable: true,
-				get: () => 900,
+				get: () => 700,
 			});
 
 			window.dispatchEvent(new Event("resize"));
@@ -437,6 +561,9 @@ describe("<QuotaPolicyPage />", () => {
 					within(view.container).getByTestId("ratio-editor-list"),
 				).toBeInTheDocument();
 			});
+			expect(panel).toHaveAttribute("data-layout", "list");
+			expect(panel).toHaveAttribute("data-width-tier", "sm");
+			expect(panel).toHaveClass("layout-list", "width-tier-sm");
 			expect(
 				within(view.container).queryByTestId("ratio-editor-table"),
 			).toBeNull();
