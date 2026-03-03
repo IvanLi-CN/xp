@@ -54,6 +54,9 @@ export const WithJoinToken: Story = {
 			name: /open node panel:/i,
 		});
 		await expect(openLinks).toHaveLength(2);
+		for (const link of openLinks) {
+			await expect(link.className.includes("btn")).toBe(false);
+		}
 		await userEvent.click(
 			canvas.getByRole("button", { name: /create token/i }),
 		);

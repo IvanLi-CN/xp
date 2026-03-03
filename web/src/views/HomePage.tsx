@@ -1,15 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import { verifyAdminToken } from "../api/adminAuth";
-import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { Button } from "../components/Button";
-import { Icon } from "../components/Icon";
+import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
 import { useUiPrefs } from "../components/UiPrefs";
 import {
@@ -49,9 +48,9 @@ export function HomePage() {
 	});
 
 	const adminNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 
 	const adminAlerts = useQuery({
@@ -327,7 +326,7 @@ export function HomePage() {
 					) : adminNodes.isLoading ? (
 						<p>Loading...</p>
 					) : adminNodes.isError ? (
-						<div className="space-y-1">
+						<div className="space-y-3">
 							<p className="text-error">Failed to load nodes.</p>
 							{isBackendApiError(adminNodes.error) ? (
 								<p className="font-mono text-sm opacity-70">
@@ -339,65 +338,38 @@ export function HomePage() {
 									{String(adminNodes.error)}
 								</p>
 							)}
+							<div className="card-actions justify-end">
+								<Button
+									variant="secondary"
+									loading={adminNodes.isFetching}
+									onClick={() => adminNodes.refetch()}
+								>
+									Retry
+								</Button>
+							</div>
 						</div>
 					) : !adminNodes.data ? (
-						<p className="text-sm opacity-70">No data.</p>
-					) : (
-						<div className="overflow-x-auto">
-							<table className="table table-zebra">
-								<thead>
-									<tr>
-										<th>node_name</th>
-										<th>node_id</th>
-										<th>api_base_url</th>
-										<th>access_host</th>
-									</tr>
-								</thead>
-								<tbody>
-									{adminNodes.data.items.map((n) => (
-										<tr key={n.node_id}>
-											<td>
-												<div className="flex min-w-0 items-center gap-[1em]">
-													<span
-														className="font-mono block min-w-0 truncate"
-														title={n.node_name}
-													>
-														{n.node_name}
-													</span>
-													<Link
-														to="/nodes/$nodeId"
-														params={{ nodeId: n.node_id }}
-														className="btn btn-ghost btn-lg btn-square shrink-0 -ml-[1.25em]"
-														title={`Open node panel: ${n.node_name || n.node_id}`}
-														aria-label={`Open node panel: ${n.node_name || n.node_id}`}
-													>
-														<Icon
-															name="tabler:external-link"
-															size={32}
-															className="!h-8 !w-8 scale-[2.1]"
-														/>
-													</Link>
-												</div>
-											</td>
-											<td className="font-mono">{n.node_id}</td>
-											<td className="font-mono">{n.api_base_url}</td>
-											<td className="font-mono">{n.access_host}</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
+						<div className="space-y-3">
+							<p className="text-sm opacity-70">No data.</p>
+							<div className="card-actions justify-end">
+								<Button
+									variant="secondary"
+									loading={adminNodes.isFetching}
+									onClick={() => adminNodes.refetch()}
+								>
+									Refresh
+								</Button>
+							</div>
 						</div>
+					) : (
+						<NodeInventoryList
+							items={adminNodes.data.items}
+							partial={adminNodes.data.partial}
+							unreachableNodes={adminNodes.data.unreachable_nodes}
+							isRefreshing={adminNodes.isFetching}
+							onRefresh={() => adminNodes.refetch()}
+						/>
 					)}
-					<div className="card-actions justify-end">
-						<Button
-							variant="secondary"
-							disabled={adminToken.length === 0}
-							loading={adminNodes.isFetching}
-							onClick={() => adminNodes.refetch()}
-						>
-							Refresh
-						</Button>
-					</div>
 				</div>
 			</div>
 		</div>

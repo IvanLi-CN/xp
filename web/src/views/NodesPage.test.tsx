@@ -167,14 +167,26 @@ describe("<NodesPage />", () => {
 		const links = await screen.findAllByRole("link", {
 			name: /open node panel:/i,
 		});
-		expect(links).toHaveLength(2);
-		expect(links[0]).toHaveAttribute("href", "/nodes/node-1");
-		expect(links[0]).toHaveAttribute("aria-label", "Open node panel: tokyo-1");
-		expect(links[1]).toHaveAttribute("href", "/nodes/node-2");
-		expect(links[1]).toHaveAttribute("aria-label", "Open node panel: node-2");
+		const uniqueHrefs = new Set(
+			links.map((link) => link.getAttribute("href")).filter(Boolean),
+		);
+		expect(uniqueHrefs).toEqual(new Set(["/nodes/node-1", "/nodes/node-2"]));
+		const labels = new Set(
+			links.map((link) => link.getAttribute("aria-label")).filter(Boolean),
+		);
+		expect(labels).toEqual(
+			new Set(["Open node panel: tokyo-1", "Open node panel: node-2"]),
+		);
+		expect(links.every((link) => !/\bbtn\b/.test(link.className))).toBe(true);
 
-		expect(screen.getByText("tokyo-1").closest("a")).toBeNull();
-		expect(screen.getByText("(unnamed)").closest("a")).toBeNull();
-		expect(screen.getByText("node-1").closest("a")).toBeNull();
+		for (const nodeName of screen.getAllByText("tokyo-1")) {
+			expect(nodeName.closest("a")).toBeNull();
+		}
+		for (const unnamed of screen.getAllByText("(unnamed)")) {
+			expect(unnamed.closest("a")).toBeNull();
+		}
+		for (const nodeId of screen.getAllByText("node-1")) {
+			expect(nodeId.closest("a")).toBeNull();
+		}
 	});
 });

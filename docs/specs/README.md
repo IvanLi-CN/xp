@@ -63,6 +63,7 @@
 
 |    ID | Title                                      | Status | Spec                                           | Last       | Notes                                                                  |
 | ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
+| gj4xg | Dashboard/Nodes shared node inventory list | 已完成 | `gj4xg-dashboard-nodes-shared-list/SPEC.md`    | 2026-03-04 | PR #93 + checks green；后续完成 2x2 列合并、窄宽度列表化与截图补充     |
 | 9fke7 | Mihomo subscription/config redact CLI      | 已完成 | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
 | puf2g | Node panel icon-only entry for node lists  | 已完成 | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
 | nujzm | Grant groups 硬切下线与 Access 模型迁移    | 待实现 | `nujzm-access-model-hardcut-v9/SPEC.md`        | 2026-02-27 | fast-track                                                             |
