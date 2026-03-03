@@ -63,6 +63,7 @@
 
 |    ID | Title                                      | Status | Spec                                           | Last       | Notes                                                                  |
 | ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
+| 9fke7 | Mihomo subscription/config redact CLI      | 已完成 | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
 | puf2g | Node panel icon-only entry for node lists  | 已完成 | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
 | nujzm | Grant groups 硬切下线与 Access 模型迁移    | 待实现 | `nujzm-access-model-hardcut-v9/SPEC.md`        | 2026-02-27 | fast-track                                                             |
 | s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成 | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-02-26 | PR #81                                                                 |

@@ -15,6 +15,7 @@
 - Install repo tooling (commitlint + dprint): `bun install`
 - Install Git hooks (required): `lefthook install`
 - Run backend locally: `cargo run` (default bind `127.0.0.1:62416`)
+- Sanitize Mihomo subscriptions/configs before sharing: `xp-ops mihomo redact [SOURCE]` (`SOURCE` supports URL, file path, `-` for stdin, or omit for stdin)
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
 - Install frontend deps: `cd web && bun install`
 - Run frontend dev server: `cd web && bun run dev` (binds `127.0.0.1:60080`)

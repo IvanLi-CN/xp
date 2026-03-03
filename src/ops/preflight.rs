@@ -1,6 +1,6 @@
 use crate::ops::cli::{
     AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, DeployArgs, ExitError,
-    InitArgs, InstallArgs, UpgradeArgs, XpCommand, XpInstallArgs,
+    InitArgs, InstallArgs, MihomoCommand, UpgradeArgs, XpCommand, XpInstallArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -113,6 +113,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
                 ],
             )
         }
+        Command::Mihomo(MihomoCommand::Redact(_args)) => Ok(()),
     }
 }
 
