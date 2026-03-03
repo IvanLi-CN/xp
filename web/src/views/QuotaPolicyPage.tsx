@@ -1592,9 +1592,6 @@ export function QuotaPolicyPage() {
 																	);
 																}}
 															/>
-															<div className="font-mono text-xs opacity-70">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
 														</div>
 														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
@@ -2214,9 +2211,6 @@ export function QuotaPolicyPage() {
 																	);
 																}}
 															/>
-															<div className="font-mono text-xs opacity-70">
-																{formatRatioPercent(row.basisPoints)}
-															</div>
 														</div>
 														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
