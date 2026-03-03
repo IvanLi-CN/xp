@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 部分完成（3/4）
+- Status: 已完成
 - Created: 2026-03-03
 - Last: 2026-03-03
 
@@ -137,7 +137,7 @@
 - [x] M1: 新建共享 `NodeInventoryList`，覆盖桌面表格 + 移动卡片 + 图标纯链接行为
 - [x] M2: Home/Nodes 页面统一切换到 runtime 查询并复用共享列表
 - [x] M3: 完成测试与 mock 同步，验证 lint/typecheck/test 全通过
-- [ ] M4: 快车道完成 PR + checks + review-loop 收敛并回写 spec 状态
+- [x] M4: 快车道完成 PR + checks + review-loop 收敛并回写 spec 状态
 
 ## 方案概述（Approach, high-level）
 
@@ -155,6 +155,8 @@
 
 - 2026-03-03: 初始规格创建，冻结“共享列表 + 图标纯链接 + 响应式卡片”口径。
 - 2026-03-03: 完成共享列表实现与页面接入，新增/更新单测并补齐 e2e mock 路由。
+- 2026-03-03: 修复 `ResizeObserver` 缺失时的降级渲染风险，补充对应单测。
+- 2026-03-03: PR #93 checks 全部通过（`pr-label-gate` / `ci` / `xray-e2e`），完成快车道收敛。
 
 ## 参考（References）
 
