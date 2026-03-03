@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import { verifyAdminToken } from "../api/adminAuth";
-import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -43,7 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../api/adminAlerts");
 vi.mock("../api/adminAuth");
-vi.mock("../api/adminNodes");
+vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/clusterInfo");
 vi.mock("../api/health");
 vi.mock("../components/Icon", () => ({
@@ -88,31 +88,59 @@ describe("<HomePage />", () => {
 			unreachable_nodes: [],
 			items: [],
 		});
-		vi.mocked(fetchAdminNodes).mockResolvedValue({
+		vi.mocked(fetchAdminNodesRuntime).mockResolvedValue({
+			partial: false,
+			unreachable_nodes: [],
 			items: [
 				{
 					node_id: "node-1",
 					node_name: "tokyo-1",
 					api_base_url: "https://node-1.example.com",
 					access_host: "node-1.example.com",
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
+					summary: {
+						status: "up",
+						updated_at: "2026-03-01T00:00:00Z",
 					},
+					components: [
+						{
+							component: "xp",
+							status: "up",
+							consecutive_failures: 0,
+							recoveries_observed: 2,
+							restart_attempts: 0,
+						},
+					],
+					recent_slots: [
+						{
+							slot_start: "2026-03-01T00:00:00Z",
+							status: "up",
+						},
+					],
 				},
 				{
 					node_id: "node-2",
 					node_name: "osaka-1",
 					api_base_url: "https://node-2.example.com",
 					access_host: "node-2.example.com",
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
+					summary: {
+						status: "up",
+						updated_at: "2026-03-01T00:00:00Z",
 					},
+					components: [
+						{
+							component: "xp",
+							status: "up",
+							consecutive_failures: 0,
+							recoveries_observed: 1,
+							restart_attempts: 0,
+						},
+					],
+					recent_slots: [
+						{
+							slot_start: "2026-03-01T00:00:00Z",
+							status: "up",
+						},
+					],
 				},
 			],
 		});
@@ -123,7 +151,7 @@ describe("<HomePage />", () => {
 		renderPage();
 
 		await waitFor(() => {
-			expect(fetchAdminNodes).toHaveBeenCalledWith(
+			expect(fetchAdminNodesRuntime).toHaveBeenCalledWith(
 				"admintoken",
 				expect.any(AbortSignal),
 			);
@@ -132,11 +160,15 @@ describe("<HomePage />", () => {
 		const links = await screen.findAllByRole("link", {
 			name: /open node panel:/i,
 		});
-		expect(links).toHaveLength(2);
-		expect(links[0]).toHaveAttribute("href", "/nodes/node-1");
-		expect(links[1]).toHaveAttribute("href", "/nodes/node-2");
+		const uniqueHrefs = new Set(
+			links.map((link) => link.getAttribute("href")).filter(Boolean),
+		);
+		expect(uniqueHrefs).toEqual(new Set(["/nodes/node-1", "/nodes/node-2"]));
+		expect(links.every((link) => !/\bbtn\b/.test(link.className))).toBe(true);
 
-		expect(screen.getByText("tokyo-1").closest("a")).toBeNull();
+		for (const nodeName of screen.getAllByText("tokyo-1")) {
+			expect(nodeName.closest("a")).toBeNull();
+		}
 		for (const nodeIdCell of screen.getAllByText("node-1")) {
 			expect(nodeIdCell.closest("a")).toBeNull();
 		}

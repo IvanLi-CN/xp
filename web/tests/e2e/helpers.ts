@@ -303,6 +303,40 @@ export async function setupApiMocks(
 			return;
 		}
 
+		if (path === "/api/admin/nodes/runtime" && method === "GET") {
+			const items = state.nodes.map((node) => ({
+				node_id: node.node_id,
+				node_name: node.node_name,
+				api_base_url: node.api_base_url,
+				access_host: node.access_host,
+				summary: {
+					status: "up",
+					updated_at: "2026-03-01T00:00:00Z",
+				},
+				components: [
+					{
+						component: "xp",
+						status: "up",
+						consecutive_failures: 0,
+						recoveries_observed: 1,
+						restart_attempts: 0,
+					},
+				],
+				recent_slots: [
+					{
+						slot_start: "2026-03-01T00:00:00Z",
+						status: "up",
+					},
+				],
+			}));
+			jsonResponse(route, {
+				partial: false,
+				unreachable_nodes: [],
+				items,
+			});
+			return;
+		}
+
 		const nodeGetMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)$/);
 		if (nodeGetMatch && method === "GET") {
 			const nodeId = decodeURIComponent(nodeGetMatch[1]);
