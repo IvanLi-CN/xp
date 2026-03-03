@@ -521,6 +521,10 @@ describe("<QuotaPolicyPage />", () => {
 				within(view.container).getByTestId("global-ratio-editor-table"),
 			).toBeInTheDocument();
 			expect(
+				within(view.container).getByTestId("global-ratio-editor-table")
+					.className,
+			).not.toMatch(/min-w-\[/);
+			expect(
 				within(view.container).queryByTestId("global-ratio-editor-list"),
 			).toBeNull();
 
@@ -540,6 +544,9 @@ describe("<QuotaPolicyPage />", () => {
 			expect(
 				within(view.container).getByTestId("ratio-editor-table"),
 			).toBeInTheDocument();
+			expect(
+				within(view.container).getByTestId("ratio-editor-table").className,
+			).not.toMatch(/min-w-\[/);
 			expect(
 				within(view.container).queryByTestId("ratio-editor-list"),
 			).toBeNull();

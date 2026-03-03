@@ -158,6 +158,7 @@ The membership source migration from grants remains part of the same spec.
     - `< 768px (md)` uses list layout,
     - `>= 768px (md)` uses table layout.
   - table mode can use compact spacing when editor panel width is narrow, while keeping table structure on `md+`.
+  - table column widths prioritize `Slider` and remove hard min-width constraints to reduce horizontal scrolling on supported breakpoints.
   - table layout readability/interaction refinements:
     - hide user id line in table `User` column (keep display name focused),
     - remove standalone `Input (%)` table column,
@@ -203,4 +204,5 @@ Implemented automated coverage additions:
 - Reworked quota policy UI to node-centric ratio editing with visual chart and lock-aware controls.
 - Added requirement delta: global default allocation + node inherit/override policy switch.
 - Adjusted ratio editor responsive threshold to `md`, added viewport/panel tier DOM markers, and tuned compact table spacing for narrow panels.
+- Rebalanced table columns (less `User`, more `Slider`) and removed hard table min-width to avoid unnecessary scrollbar in supported viewports.
 - Refined table UX by removing the dedicated `Input (%)` column, hiding user id text in table rows, and adding double-click inline percent editing.
