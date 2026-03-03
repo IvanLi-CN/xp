@@ -129,7 +129,8 @@ type RatioEditorWidthTier = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 type RatioEditorLayout = {
 	isListLayout: boolean;
-	widthTier: RatioEditorWidthTier;
+	viewportTier: RatioEditorWidthTier;
+	panelTier: RatioEditorWidthTier;
 };
 
 type TablePercentInlineEditorProps = {
@@ -290,12 +291,16 @@ function formatRatioPercent(basisPoints: number): string {
 	return `${formatPercentFromBasisPoints(basisPoints)}%`;
 }
 
+function resolveViewportWidth(): number {
+	if (typeof window === "undefined") return TW_BREAKPOINT_2XL;
+	return window.innerWidth;
+}
+
 function resolveRatioEditorWidth(container: HTMLElement | null): number {
 	if (container && container.clientWidth > 0) {
 		return container.clientWidth;
 	}
-	if (typeof window === "undefined") return TW_BREAKPOINT_2XL;
-	return window.innerWidth;
+	return resolveViewportWidth();
 }
 
 function widthTierForRatioEditor(width: number): RatioEditorWidthTier {
@@ -311,10 +316,13 @@ function resolveRatioEditorLayout(
 	minTableViewport: number,
 	container: HTMLElement | null,
 ): RatioEditorLayout {
-	const width = resolveRatioEditorWidth(container);
+	const viewportWidth = resolveViewportWidth();
+	const panelWidth = resolveRatioEditorWidth(container);
 	return {
-		isListLayout: width < minTableViewport,
-		widthTier: widthTierForRatioEditor(width),
+		// Layout requirement is driven by viewport breakpoint: md and above uses table.
+		isListLayout: viewportWidth < minTableViewport,
+		viewportTier: widthTierForRatioEditor(viewportWidth),
+		panelTier: widthTierForRatioEditor(panelWidth),
 	};
 }
 
@@ -481,6 +489,14 @@ export function QuotaPolicyPage() {
 	);
 	const globalRatioEditorListLayout = globalRatioEditorLayout.isListLayout;
 	const nodeRatioEditorListLayout = nodeRatioEditorLayout.isListLayout;
+	const globalRatioTableCompact =
+		!globalRatioEditorListLayout &&
+		(globalRatioEditorLayout.panelTier === "xs" ||
+			globalRatioEditorLayout.panelTier === "sm");
+	const nodeRatioTableCompact =
+		!nodeRatioEditorListLayout &&
+		(nodeRatioEditorLayout.panelTier === "xs" ||
+			nodeRatioEditorLayout.panelTier === "sm");
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -1519,12 +1535,14 @@ export function QuotaPolicyPage() {
 							<div
 								data-testid="global-ratio-editor-panel"
 								data-layout={globalRatioEditorListLayout ? "list" : "table"}
-								data-width-tier={globalRatioEditorLayout.widthTier}
+								data-width-tier={globalRatioEditorLayout.viewportTier}
+								data-panel-tier={globalRatioEditorLayout.panelTier}
 								ref={setGlobalRatioEditorContainer}
 								className={[
 									"rounded-box border border-base-200 p-4 space-y-4",
 									`layout-${globalRatioEditorListLayout ? "list" : "table"}`,
-									`width-tier-${globalRatioEditorLayout.widthTier}`,
+									`width-tier-${globalRatioEditorLayout.viewportTier}`,
+									`panel-tier-${globalRatioEditorLayout.panelTier}`,
 								].join(" ")}
 							>
 								{globalRatioEditorListLayout ? (
@@ -1644,17 +1662,46 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="global-ratio-editor-table"
-											className="table table-fixed w-full min-w-[760px]"
+											className={[
+												"table table-fixed w-full",
+												globalRatioTableCompact
+													? "min-w-[680px]"
+													: "min-w-[760px]",
+											].join(" ")}
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[36%]">User</th>
+													<th
+														className={
+															globalRatioTableCompact ? "w-[34%]" : "w-[36%]"
+														}
+													>
+														User
+													</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[30%]">Slider</th>
-													<th className="w-[16%] whitespace-nowrap pr-4">
+													<th
+														className={
+															globalRatioTableCompact ? "w-[34%]" : "w-[30%]"
+														}
+													>
+														Slider
+													</th>
+													<th
+														className={[
+															"w-[16%] whitespace-nowrap",
+															globalRatioTableCompact ? "pr-3" : "pr-4",
+														].join(" ")}
+													>
 														Computed weight
 													</th>
-													<th className="w-[8%] whitespace-nowrap pl-4">
+													<th
+														className={[
+															"whitespace-nowrap",
+															globalRatioTableCompact
+																? "w-[6%] text-center pl-2"
+																: "w-[8%] pl-4",
+														].join(" ")}
+													>
 														Lock
 													</th>
 												</tr>
@@ -1721,8 +1768,20 @@ export function QuotaPolicyPage() {
 																		: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap pl-4">
-																<label className="label cursor-pointer justify-start gap-2 py-0">
+															<td
+																className={[
+																	"align-top whitespace-nowrap",
+																	globalRatioTableCompact ? "pl-2" : "pl-4",
+																].join(" ")}
+															>
+																<label
+																	className={[
+																		"label cursor-pointer gap-2 py-0",
+																		globalRatioTableCompact
+																			? "justify-center"
+																			: "justify-start",
+																	].join(" ")}
+																>
 																	<input
 																		type="checkbox"
 																		className="checkbox checkbox-sm"
@@ -1732,7 +1791,12 @@ export function QuotaPolicyPage() {
 																			toggleGlobalRowLock(row.userId)
 																		}
 																	/>
-																	<span className="label-text text-xs">
+																	<span
+																		className={[
+																			"label-text text-xs",
+																			globalRatioTableCompact ? "sr-only" : "",
+																		].join(" ")}
+																	>
 																		Lock
 																	</span>
 																</label>
@@ -2095,12 +2159,14 @@ export function QuotaPolicyPage() {
 							<div
 								data-testid="ratio-editor-panel"
 								data-layout={nodeRatioEditorListLayout ? "list" : "table"}
-								data-width-tier={nodeRatioEditorLayout.widthTier}
+								data-width-tier={nodeRatioEditorLayout.viewportTier}
+								data-panel-tier={nodeRatioEditorLayout.panelTier}
 								ref={setNodeRatioEditorContainer}
 								className={[
 									"rounded-box border border-base-200 p-4 space-y-4",
 									`layout-${nodeRatioEditorListLayout ? "list" : "table"}`,
-									`width-tier-${nodeRatioEditorLayout.widthTier}`,
+									`width-tier-${nodeRatioEditorLayout.viewportTier}`,
+									`panel-tier-${nodeRatioEditorLayout.panelTier}`,
 								].join(" ")}
 							>
 								{nodeRatioEditorListLayout ? (
@@ -2246,17 +2312,46 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="ratio-editor-table"
-											className="table table-fixed w-full min-w-[760px]"
+											className={[
+												"table table-fixed w-full",
+												nodeRatioTableCompact
+													? "min-w-[700px]"
+													: "min-w-[760px]",
+											].join(" ")}
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[38%]">User</th>
+													<th
+														className={
+															nodeRatioTableCompact ? "w-[36%]" : "w-[38%]"
+														}
+													>
+														User
+													</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[28%]">Slider</th>
-													<th className="w-[16%] whitespace-nowrap pr-4">
+													<th
+														className={
+															nodeRatioTableCompact ? "w-[32%]" : "w-[28%]"
+														}
+													>
+														Slider
+													</th>
+													<th
+														className={[
+															"w-[16%] whitespace-nowrap",
+															nodeRatioTableCompact ? "pr-3" : "pr-4",
+														].join(" ")}
+													>
 														Computed weight
 													</th>
-													<th className="w-[8%] whitespace-nowrap pl-4">
+													<th
+														className={[
+															"whitespace-nowrap",
+															nodeRatioTableCompact
+																? "w-[6%] text-center pl-2"
+																: "w-[8%] pl-4",
+														].join(" ")}
+													>
 														Lock
 													</th>
 												</tr>
@@ -2345,8 +2440,20 @@ export function QuotaPolicyPage() {
 																			: "explicit"}
 																</div>
 															</td>
-															<td className="align-top whitespace-nowrap pl-4">
-																<label className="label cursor-pointer justify-start gap-2 py-0">
+															<td
+																className={[
+																	"align-top whitespace-nowrap",
+																	nodeRatioTableCompact ? "pl-2" : "pl-4",
+																].join(" ")}
+															>
+																<label
+																	className={[
+																		"label cursor-pointer gap-2 py-0",
+																		nodeRatioTableCompact
+																			? "justify-center"
+																			: "justify-start",
+																	].join(" ")}
+																>
 																	<input
 																		type="checkbox"
 																		className="checkbox checkbox-sm"
@@ -2358,7 +2465,12 @@ export function QuotaPolicyPage() {
 																		}
 																		onChange={() => toggleRowLock(row.userId)}
 																	/>
-																	<span className="label-text text-xs">
+																	<span
+																		className={[
+																			"label-text text-xs",
+																			nodeRatioTableCompact ? "sr-only" : "",
+																		].join(" ")}
+																	>
 																		Lock
 																	</span>
 																</label>

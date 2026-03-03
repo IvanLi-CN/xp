@@ -455,7 +455,12 @@ describe("<QuotaPolicyPage />", () => {
 			);
 			expect(globalPanel).toHaveAttribute("data-layout", "list");
 			expect(globalPanel).toHaveAttribute("data-width-tier", "sm");
-			expect(globalPanel).toHaveClass("layout-list", "width-tier-sm");
+			expect(globalPanel).toHaveAttribute("data-panel-tier", "sm");
+			expect(globalPanel).toHaveClass(
+				"layout-list",
+				"width-tier-sm",
+				"panel-tier-sm",
+			);
 			expect(
 				within(view.container).getByTestId("global-ratio-editor-list"),
 			).toBeInTheDocument();
@@ -470,7 +475,12 @@ describe("<QuotaPolicyPage />", () => {
 			);
 			expect(nodePanel).toHaveAttribute("data-layout", "list");
 			expect(nodePanel).toHaveAttribute("data-width-tier", "sm");
-			expect(nodePanel).toHaveClass("layout-list", "width-tier-sm");
+			expect(nodePanel).toHaveAttribute("data-panel-tier", "sm");
+			expect(nodePanel).toHaveClass(
+				"layout-list",
+				"width-tier-sm",
+				"panel-tier-sm",
+			);
 			expect(
 				within(view.container).getByTestId("ratio-editor-list"),
 			).toBeInTheDocument();
@@ -501,7 +511,12 @@ describe("<QuotaPolicyPage />", () => {
 			);
 			expect(globalPanel).toHaveAttribute("data-layout", "table");
 			expect(globalPanel).toHaveAttribute("data-width-tier", "md");
-			expect(globalPanel).toHaveClass("layout-table", "width-tier-md");
+			expect(globalPanel).toHaveAttribute("data-panel-tier", "md");
+			expect(globalPanel).toHaveClass(
+				"layout-table",
+				"width-tier-md",
+				"panel-tier-md",
+			);
 			expect(
 				within(view.container).getByTestId("global-ratio-editor-table"),
 			).toBeInTheDocument();
@@ -516,7 +531,12 @@ describe("<QuotaPolicyPage />", () => {
 			);
 			expect(nodePanel).toHaveAttribute("data-layout", "table");
 			expect(nodePanel).toHaveAttribute("data-width-tier", "md");
-			expect(nodePanel).toHaveClass("layout-table", "width-tier-md");
+			expect(nodePanel).toHaveAttribute("data-panel-tier", "md");
+			expect(nodePanel).toHaveClass(
+				"layout-table",
+				"width-tier-md",
+				"panel-tier-md",
+			);
 			expect(
 				within(view.container).getByTestId("ratio-editor-table"),
 			).toBeInTheDocument();
@@ -670,6 +690,10 @@ describe("<QuotaPolicyPage />", () => {
 					"data-width-tier",
 					testCase.widthTier,
 				);
+				expect(globalPanel).toHaveAttribute(
+					"data-panel-tier",
+					testCase.widthTier,
+				);
 
 				await openNodeTab(view.container);
 				if (testCase.layout === "list") {
@@ -685,6 +709,10 @@ describe("<QuotaPolicyPage />", () => {
 					"data-width-tier",
 					testCase.widthTier,
 				);
+				expect(nodePanel).toHaveAttribute(
+					"data-panel-tier",
+					testCase.widthTier,
+				);
 
 				view.unmount();
 			}
@@ -697,7 +725,7 @@ describe("<QuotaPolicyPage />", () => {
 		}
 	});
 
-	it("switches to list layout when the editor panel itself is narrow on desktop", async () => {
+	it("keeps table layout on desktop when the editor panel narrows", async () => {
 		const originalInnerWidth = window.innerWidth;
 		const originalResizeObserver = window.ResizeObserver;
 		Object.defineProperty(window, "innerWidth", {
@@ -725,14 +753,19 @@ describe("<QuotaPolicyPage />", () => {
 
 			await waitFor(() => {
 				expect(
-					within(view.container).getByTestId("ratio-editor-list"),
+					within(view.container).getByTestId("ratio-editor-table"),
 				).toBeInTheDocument();
 			});
-			expect(panel).toHaveAttribute("data-layout", "list");
-			expect(panel).toHaveAttribute("data-width-tier", "sm");
-			expect(panel).toHaveClass("layout-list", "width-tier-sm");
+			expect(panel).toHaveAttribute("data-layout", "table");
+			expect(panel).toHaveAttribute("data-width-tier", "xl");
+			expect(panel).toHaveAttribute("data-panel-tier", "sm");
+			expect(panel).toHaveClass(
+				"layout-table",
+				"width-tier-xl",
+				"panel-tier-sm",
+			);
 			expect(
-				within(view.container).queryByTestId("ratio-editor-table"),
+				within(view.container).queryByTestId("ratio-editor-list"),
 			).toBeNull();
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
