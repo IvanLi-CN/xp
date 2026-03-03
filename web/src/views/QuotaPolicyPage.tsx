@@ -442,10 +442,10 @@ function TablePercentInlineEditor({
 	return (
 		<button
 			type="button"
-			className="font-mono text-xs opacity-70 mt-1 hover:underline"
+			className="font-mono text-xs opacity-70 mt-1 h-8 w-full rounded-btn px-2 text-left border border-transparent hover:border-base-content/20 hover:bg-base-200/30 transition-colors"
 			disabled={disabled}
 			aria-label={ariaLabel}
-			title="Double click to edit percent"
+			title="Double click the cell to edit percent"
 			data-testid={testId ? `${testId}-display` : undefined}
 			onDoubleClick={() => setIsEditing(true)}
 		>

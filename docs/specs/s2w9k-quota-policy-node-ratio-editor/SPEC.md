@@ -162,7 +162,7 @@ The membership source migration from grants remains part of the same spec.
   - table layout readability/interaction refinements:
     - hide user id line in table `User` column (keep display name focused),
     - remove standalone `Input (%)` table column,
-    - allow inline percent edit by double-clicking slider percent text; commit on Enter and return to slider view.
+    - allow inline percent edit by double-clicking the slider percent cell (not text-only trigger); commit on Enter and return to slider view.
   - layout observability markers on editor panel DOM:
     - `data-layout=list|table`
     - `data-width-tier=xs|sm|md|lg|xl|2xl` (viewport tier)
