@@ -237,10 +237,14 @@ fn split_code_and_comment(line: &str) -> (&str, &str) {
     let mut in_single = false;
     let mut in_double = false;
     let mut escape = false;
+    let mut seq_depth = 0usize;
+    let mut map_depth = 0usize;
+    let mut prev_closed_flow = false;
 
     for (i, b) in bytes.iter().enumerate() {
         let b = *b;
         if in_double {
+            prev_closed_flow = false;
             if escape {
                 escape = false;
                 continue;
@@ -256,6 +260,7 @@ fn split_code_and_comment(line: &str) -> (&str, &str) {
         }
 
         if in_single {
+            prev_closed_flow = false;
             if b == b'\'' {
                 in_single = false;
             }
@@ -264,15 +269,56 @@ fn split_code_and_comment(line: &str) -> (&str, &str) {
 
         if b == b'\'' {
             in_single = true;
+            prev_closed_flow = false;
             continue;
         }
         if b == b'"' {
             in_double = true;
+            prev_closed_flow = false;
             continue;
         }
-        if b == b'#' {
+        if b == b'#'
+            && (i == 0
+                || bytes[i - 1].is_ascii_whitespace()
+                || matches!(bytes[i - 1], b'"' | b'\'')
+                || prev_closed_flow)
+        {
             return (&line[..i], &line[i..]);
         }
+
+        let mut closed_flow_now = false;
+        match b {
+            b'[' => {
+                if i == 0
+                    || bytes[i - 1].is_ascii_whitespace()
+                    || matches!(bytes[i - 1], b':' | b',' | b'[' | b'{' | b'-')
+                {
+                    seq_depth += 1;
+                }
+            }
+            b'{' => {
+                if i == 0
+                    || bytes[i - 1].is_ascii_whitespace()
+                    || matches!(bytes[i - 1], b':' | b',' | b'[' | b'{' | b'-')
+                {
+                    map_depth += 1;
+                }
+            }
+            b']' => {
+                if seq_depth > 0 {
+                    seq_depth -= 1;
+                    closed_flow_now = seq_depth == 0;
+                }
+            }
+            b'}' => {
+                if map_depth > 0 {
+                    map_depth -= 1;
+                    closed_flow_now = map_depth == 0;
+                }
+            }
+            _ => {}
+        }
+        prev_closed_flow = closed_flow_now;
     }
 
     (line, "")
@@ -416,6 +462,7 @@ fn is_credential_sensitive_key(key: &str) -> bool {
     key.contains("password")
         || key.contains("passwd")
         || key.contains("uuid")
+        || key == "id"
         || key.contains("secret")
         || key.contains("private-key")
         || key.contains("private_key")
@@ -433,7 +480,8 @@ fn is_credential_sensitive_key(key: &str) -> bool {
 }
 
 fn is_address_sensitive_key(key: &str) -> bool {
-    key.contains("server")
+    key == "add"
+        || key.contains("server")
         || key.contains("servername")
         || key == "sni"
         || key == "host"
@@ -576,6 +624,8 @@ fn redact_uri(uri: &str, level: RedactionLevel) -> String {
         None => (before_fragment, None),
     };
 
+    let fragment = fragment.map(|f| redact_fragment(f, level));
+
     if scheme == "vmess" && looks_like_opaque_payload(before_query) {
         let payload = redact_vmess_payload(before_query, level);
         return rebuild_opaque_uri(
@@ -604,6 +654,7 @@ fn redact_uri(uri: &str, level: RedactionLevel) -> String {
     } else {
         path.to_string()
     };
+    let path = redact_path_key_value_segments(&path, level);
     let query = query.map(|q| redact_query(q, level));
 
     let mut out = String::new();
@@ -616,7 +667,7 @@ fn redact_uri(uri: &str, level: RedactionLevel) -> String {
     }
     if let Some(f) = fragment {
         out.push('#');
-        out.push_str(f);
+        out.push_str(&f);
     }
     out
 }
@@ -625,7 +676,7 @@ fn rebuild_opaque_uri(
     scheme_prefix: &str,
     payload: &str,
     query: Option<String>,
-    fragment: Option<&str>,
+    fragment: Option<String>,
 ) -> String {
     let mut out = String::new();
     out.push_str(scheme_prefix);
@@ -636,7 +687,7 @@ fn rebuild_opaque_uri(
     }
     if let Some(f) = fragment {
         out.push('#');
-        out.push_str(f);
+        out.push_str(&f);
     }
     out
 }
@@ -888,10 +939,114 @@ fn redact_query(query: &str, level: RedactionLevel) -> String {
             continue;
         }
 
+        if let Some(v) = value {
+            let nested = redact_path_key_value_segments(v, level);
+            if nested != v {
+                out.push_str(key);
+                out.push('=');
+                out.push_str(&nested);
+                continue;
+            }
+        }
+
         out.push_str(item);
     }
 
     out
+}
+
+fn redact_fragment(fragment: &str, level: RedactionLevel) -> String {
+    if fragment.is_empty() {
+        return String::new();
+    }
+
+    let (prefix, body) = match fragment.strip_prefix('?') {
+        Some(rest) => ("?", rest),
+        None => ("", fragment),
+    };
+
+    if let Some((path_part, query_part)) = body.split_once('?') {
+        let redacted_path = if level == RedactionLevel::Minimal || level.includes_credentials() {
+            redact_subscription_path(path_part)
+        } else {
+            path_part.to_string()
+        };
+        let redacted_path = redact_path_key_value_segments(&redacted_path, level);
+        let redacted_query = redact_query(query_part, level);
+        return format!("{prefix}{redacted_path}?{redacted_query}");
+    }
+
+    if looks_like_fragment_query(body) {
+        let mut out = String::with_capacity(fragment.len());
+        out.push_str(prefix);
+        out.push_str(&redact_query(body, level));
+        return out;
+    }
+
+    if level == RedactionLevel::Minimal || level.includes_credentials() {
+        let redacted_path = redact_subscription_path(body);
+        let redacted_path = redact_path_key_value_segments(&redacted_path, level);
+        if redacted_path != body {
+            let mut out = String::with_capacity(fragment.len());
+            out.push_str(prefix);
+            out.push_str(&redacted_path);
+            return out;
+        }
+    }
+
+    let mut out = String::with_capacity(fragment.len());
+    out.push_str(prefix);
+    out.push_str(body);
+    redact_inline_uris(&out, level)
+}
+
+fn looks_like_fragment_query(body: &str) -> bool {
+    let Some(eq_idx) = body.find('=') else {
+        return false;
+    };
+
+    match body.find('/') {
+        Some(slash_idx) => eq_idx < slash_idx,
+        None => true,
+    }
+}
+
+fn redact_path_key_value_segments(path: &str, level: RedactionLevel) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+
+    let mut changed = false;
+    let segments = path
+        .split('/')
+        .map(|segment| {
+            let Some((key, value)) = segment.split_once('=') else {
+                return segment.to_string();
+            };
+
+            if key.eq_ignore_ascii_case("id") {
+                return segment.to_string();
+            }
+
+            let action = classify_key_action(&key.to_ascii_lowercase(), level);
+            let Some(mask_mode) = action else {
+                return segment.to_string();
+            };
+
+            let redacted = match mask_mode {
+                MaskMode::Secret => mask_secret(value),
+                MaskMode::Address => mask_host_like(value),
+            };
+            changed = true;
+            format!("{key}={redacted}")
+        })
+        .collect::<Vec<_>>();
+
+    if changed {
+        segments.join("/")
+    } else {
+        path.to_string()
+    }
 }
 
 fn mask_secret(value: &str) -> String {
@@ -980,6 +1135,56 @@ mod tests {
     }
 
     #[test]
+    fn url_fragment_query_token_is_redacted() {
+        let input = "url: https://example.com/api/sub/abcdef#token=mysecret\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("mysecret"));
+        assert!(!out.contains("/api/sub/abcdef"));
+    }
+
+    #[test]
+    fn url_fragment_path_and_query_token_are_redacted() {
+        let input = "url: https://example.com/#/api/sub/abcdef?token=mysecret\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("/api/sub/abcdef"));
+        assert!(!out.contains("mysecret"));
+    }
+
+    #[test]
+    fn url_fragment_path_with_equals_token_is_redacted() {
+        let input = "url: https://example.com/#/api/sub/abc123==\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("/api/sub/abc123=="));
+    }
+
+    #[test]
+    fn url_fragment_query_value_with_slash_is_redacted() {
+        let input = "url: https://example.com/#token=abc/def\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("abc/def"));
+    }
+
+    #[test]
+    fn url_fragment_path_key_value_token_is_redacted() {
+        let input = "url: https://example.com/#/token=mysecret\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("mysecret"));
+    }
+
+    #[test]
+    fn url_fragment_query_value_embedded_token_is_redacted() {
+        let input = "url: https://example.com/#foo=abc/token=mysecret\n";
+        let out = redact_text(input, RedactionLevel::Minimal);
+
+        assert!(!out.contains("mysecret"));
+    }
+
+    #[test]
     fn yaml_redaction_keeps_comment_indent_and_order() {
         let input =
             "proxies:\n  - name: edge\n    password: super-secret-value # keep this comment\n";
@@ -988,6 +1193,60 @@ mod tests {
         assert!(out.contains("proxies:\n  - name: edge\n    password:"));
         assert!(out.contains("# keep this comment"));
         assert!(!out.contains("super-secret-value"));
+    }
+
+    #[test]
+    fn yaml_plain_scalar_hash_is_not_treated_as_comment() {
+        let input = "password: abc#123\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(!out.contains("abc#123"));
+        assert!(!out.contains("#123"));
+    }
+
+    #[test]
+    fn yaml_plain_scalar_bracket_hash_is_not_treated_as_comment() {
+        let input = "password: abc]#123\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(!out.contains("abc]#123"));
+        assert!(!out.contains("#123"));
+    }
+
+    #[test]
+    fn yaml_plain_scalar_nested_brackets_hash_is_not_treated_as_comment() {
+        let input = "password: a[1]#9\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(!out.contains("a[1]#9"));
+        assert!(!out.contains("#9"));
+    }
+
+    #[test]
+    fn yaml_flow_sequence_allows_comment_without_space() {
+        let input = "password: [abc]#keep\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(out.contains("#keep"));
+        assert!(!out.contains("[abc]"));
+    }
+
+    #[test]
+    fn yaml_flow_mapping_allows_comment_without_space() {
+        let input = "password: {k: v}#keep\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(out.contains("#keep"));
+        assert!(!out.contains("{k: v}"));
+    }
+
+    #[test]
+    fn yaml_quoted_scalar_allows_comment_without_space() {
+        let input = "password: \"abc\"#keep\n";
+        let out = redact_text(input, RedactionLevel::Credentials);
+
+        assert!(out.contains("password: \"***\"#keep"));
+        assert!(!out.contains("abc"));
     }
 
     #[test]
@@ -1043,9 +1302,30 @@ mod tests {
         );
         let input = format!("vmess://{payload}");
         let out = redact_text(&input, RedactionLevel::Credentials);
+        let encoded = out.strip_prefix("vmess://").unwrap();
+        let decoded = decode_base64_bytes_lenient(encoded).unwrap();
+        let value = serde_json::from_slice::<serde_json::Value>(&decoded).unwrap();
+        let id = value.get("id").and_then(|v| v.as_str()).unwrap();
+        let add = value.get("add").and_then(|v| v.as_str()).unwrap();
 
-        assert!(!out.contains("12345678-90ab-cdef-1234-567890abcdef"));
         assert!(out.starts_with("vmess://"));
+        assert_ne!(id, "12345678-90ab-cdef-1234-567890abcdef");
+        assert_eq!(add, "server.example.com");
+    }
+
+    #[test]
+    fn vmess_opaque_payload_redacts_address_at_address_level() {
+        let payload = base64::engine::general_purpose::STANDARD.encode(
+            r#"{"v":"2","add":"server.example.com","id":"12345678-90ab-cdef-1234-567890abcdef","ps":"demo"}"#,
+        );
+        let input = format!("vmess://{payload}");
+        let out = redact_text(&input, RedactionLevel::CredentialsAndAddress);
+        let encoded = out.strip_prefix("vmess://").unwrap();
+        let decoded = decode_base64_bytes_lenient(encoded).unwrap();
+        let value = serde_json::from_slice::<serde_json::Value>(&decoded).unwrap();
+        let add = value.get("add").and_then(|v| v.as_str()).unwrap();
+
+        assert_ne!(add, "server.example.com");
     }
 
     #[test]
