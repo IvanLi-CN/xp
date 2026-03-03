@@ -72,6 +72,7 @@ function ProblematicComponentsField({
 		if (problematic.length <= 1) return;
 
 		let frame = 0;
+		let observer: ResizeObserver | null = null;
 		const measure = () => {
 			const container = containerRef.current;
 			if (!container) return;
@@ -134,12 +135,14 @@ function ProblematicComponentsField({
 		};
 
 		measure();
-		const observer = new ResizeObserver(() => measure());
-		if (containerRef.current) observer.observe(containerRef.current);
+		if (typeof ResizeObserver === "function") {
+			observer = new ResizeObserver(() => measure());
+			if (containerRef.current) observer.observe(containerRef.current);
+		}
 
 		return () => {
 			if (frame) window.cancelAnimationFrame(frame);
-			observer.disconnect();
+			observer?.disconnect();
 		};
 	}, [problematic]);
 

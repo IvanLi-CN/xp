@@ -139,4 +139,60 @@ describe("<NodeInventoryList />", () => {
 		).toBeInTheDocument();
 		expect(screen.getByText("node-3")).toBeInTheDocument();
 	});
+
+	it("renders problematic badges when ResizeObserver is unavailable", async () => {
+		const originalResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", {
+			configurable: true,
+			writable: true,
+			value: undefined,
+		});
+
+		try {
+			const { container } = render(
+				<UiPrefsProvider>
+					<NodeInventoryList
+						items={[
+							{
+								...baseNodes[0],
+								summary: {
+									status: "degraded",
+									updated_at: "2026-03-01T00:00:00Z",
+								},
+								components: [
+									{
+										component: "xp",
+										status: "down",
+										consecutive_failures: 1,
+										recoveries_observed: 0,
+										restart_attempts: 1,
+									},
+									{
+										component: "xray",
+										status: "down",
+										consecutive_failures: 1,
+										recoveries_observed: 0,
+										restart_attempts: 1,
+									},
+								],
+							},
+						]}
+						partial={false}
+						unreachableNodes={[]}
+					/>
+				</UiPrefsProvider>,
+			);
+
+			expect(container.querySelector("[title='xp:down']")).toBeInTheDocument();
+			expect(
+				container.querySelector("[title='xray:down']"),
+			).toBeInTheDocument();
+		} finally {
+			Object.defineProperty(globalThis, "ResizeObserver", {
+				configurable: true,
+				writable: true,
+				value: originalResizeObserver,
+			});
+		}
+	});
 });
