@@ -7,6 +7,7 @@ mod cloudflare;
 mod deploy;
 mod init;
 mod install;
+mod mihomo;
 mod paths;
 mod platform;
 mod preflight;

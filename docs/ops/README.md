@@ -30,6 +30,31 @@ Notes:
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 
+## `xp-ops mihomo redact` (subscription/config sanitization)
+
+Use `xp-ops mihomo redact` to sanitize Mihomo subscription/config text before sharing logs or snippets.
+
+Command shape:
+
+```bash
+xp-ops mihomo redact [SOURCE] [--level minimal|credentials|credentials-and-address] [--source-format auto|raw|base64|yaml] [--timeout-secs N]
+```
+
+Behavior:
+
+- `SOURCE` starts with `http://` or `https://`: fetch from URL and sanitize response text.
+- `SOURCE` is provided but not URL: read as local file path and sanitize.
+- `SOURCE` omitted: read from stdin and sanitize.
+- If both stdin and `SOURCE` are present, `SOURCE` wins.
+- Default level is `credentials`; default source format is `auto`; default timeout is 15 seconds.
+- Base64 subscription input is decoded, sanitized, and printed as readable plain text.
+
+Script alias:
+
+```bash
+./scripts/mihomo-redact.sh [SOURCE] [args...]
+```
+
 ## `xp-ops tui` (deploy wizard)
 
 `xp-ops tui` provides an interactive deploy wizard for `xp-ops deploy`.

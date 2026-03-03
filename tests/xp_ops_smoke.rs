@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use predicates::prelude::*;
 use std::fs;
 
@@ -17,6 +18,120 @@ fn cloudflare_token_set_dry_run_redacts_token() {
         .success()
         .stderr(predicate::str::contains("would write token"))
         .stderr(predicate::str::contains("supersecret").not());
+}
+
+#[test]
+fn mihomo_redact_file_masks_credentials() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("sub.txt");
+    fs::write(
+        &src,
+        "vless://12345678-1234-1234-1234-123456789abc@edge.example.com:443?pbk=public_key_value&sid=0123456789abcdef#node-a\n",
+    )
+    .unwrap();
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.args(["mihomo", "redact", &src.to_string_lossy()]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vless://"))
+        .stdout(predicate::str::contains("edge.example.com:443"))
+        .stdout(predicate::str::contains("12345678-1234-1234-1234-123456789abc").not())
+        .stdout(predicate::str::contains("public_key_value").not())
+        .stdout(predicate::str::contains("0123456789abcdef").not());
+}
+
+#[test]
+fn mihomo_redact_reads_stdin_when_source_missing() {
+    let input = "proxies:\n  - name: edge\n    password: super-secret-value # keep comment\n";
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.args(["mihomo", "redact"]).write_stdin(input);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("proxies:"))
+        .stdout(predicate::str::contains("# keep comment"))
+        .stdout(predicate::str::contains("super-secret-value").not());
+}
+
+#[test]
+fn mihomo_redact_prefers_source_over_stdin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("config.yaml");
+    fs::write(
+        &src,
+        "proxies:\n  - name: file-source\n    server: file.example.com\n    password: file-password\n",
+    )
+    .unwrap();
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.args(["mihomo", "redact", &src.to_string_lossy()])
+        .write_stdin("proxies:\n  - name: stdin-source\n    server: stdin.example.com\n");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("file-source"))
+        .stdout(predicate::str::contains("stdin-source").not())
+        .stdout(predicate::str::contains("file-password").not());
+}
+
+#[tokio::test]
+async fn mihomo_redact_url_fetch_supports_raw_base64_and_yaml() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let raw_body = "vless://12345678-1234-1234-1234-123456789abc@raw.example.com:443?pbk=raw_public_key&sid=raw_short_id#raw\n";
+    let b64_body = base64::engine::general_purpose::STANDARD.encode(
+        "ss://2022-blake3-aes-128-gcm:AAAAAAAAAAAAAAAAAAAAAA==:BBBBBBBBBBBBBBBBBBBBBB==@b64.example.com:443#b64\n",
+    );
+    let yaml_body = "proxies:\n  - name: yaml\n    server: yaml.example.com\n    password: yaml-secret-password\n";
+
+    Mock::given(method("GET"))
+        .and(path("/raw"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(raw_body))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/base64"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(b64_body))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/yaml"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(yaml_body))
+        .mount(&server)
+        .await;
+
+    let mut raw_cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    raw_cmd.args(["mihomo", "redact", &format!("{}/raw", server.uri())]);
+    raw_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("raw.example.com"))
+        .stdout(predicate::str::contains("raw_public_key").not())
+        .stdout(predicate::str::contains("raw_short_id").not());
+
+    let mut base64_cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    base64_cmd.args(["mihomo", "redact", &format!("{}/base64", server.uri())]);
+    base64_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ss://2022-blake3-aes-128-gcm"))
+        .stdout(
+            predicate::str::contains("AAAAAAAAAAAAAAAAAAAAAA==:BBBBBBBBBBBBBBBBBBBBBB==").not(),
+        );
+
+    let mut yaml_cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    yaml_cmd.args(["mihomo", "redact", &format!("{}/yaml", server.uri())]);
+    yaml_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("yaml.example.com"))
+        .stdout(predicate::str::contains("yaml-secret-password").not());
 }
 
 #[test]

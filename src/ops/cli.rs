@@ -3,6 +3,7 @@ use crate::ops::cloudflare;
 use crate::ops::deploy;
 use crate::ops::init;
 use crate::ops::install;
+use crate::ops::mihomo;
 use crate::ops::paths::Paths;
 use crate::ops::preflight;
 use crate::ops::status;
@@ -44,6 +45,9 @@ pub enum Command {
 
     #[command(subcommand)]
     Cloudflare(CloudflareCommand),
+
+    #[command(subcommand)]
+    Mihomo(MihomoCommand),
 
     Status(StatusArgs),
     Tui(TuiArgs),
@@ -344,6 +348,45 @@ pub enum CloudflareCommand {
     Provision(CloudflareProvisionArgs),
 }
 
+#[derive(Subcommand, Debug)]
+pub enum MihomoCommand {
+    Redact(MihomoRedactArgs),
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MihomoRedactionLevelArg {
+    Minimal,
+    Credentials,
+    CredentialsAndAddress,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MihomoSourceFormatArg {
+    Auto,
+    Raw,
+    Base64,
+    Yaml,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct MihomoRedactArgs {
+    /// Mihomo source (subscription URL or local config path). If omitted, read from stdin.
+    #[arg(value_name = "SOURCE")]
+    pub source: Option<String>,
+
+    /// Redaction level.
+    #[arg(long, value_enum, default_value = "credentials")]
+    pub level: MihomoRedactionLevelArg,
+
+    /// Input format hint.
+    #[arg(long, value_enum, default_value = "auto")]
+    pub source_format: MihomoSourceFormatArg,
+
+    /// HTTP timeout in seconds (only when SOURCE is a URL).
+    #[arg(long, default_value_t = 15, value_name = "N")]
+    pub timeout_secs: u64,
+}
+
 #[derive(Args, Debug)]
 pub struct CloudflareTokenArgs {
     #[command(subcommand)]
@@ -464,6 +507,9 @@ pub async fn run() -> i32 {
             CloudflareCommand::Provision(args) => {
                 cloudflare::cmd_cloudflare_provision(paths, args).await
             }
+        },
+        Some(Command::Mihomo(cmd)) => match cmd {
+            MihomoCommand::Redact(args) => mihomo::cmd_mihomo_redact(paths, args).await,
         },
         Some(Command::Status(args)) => status::cmd_status(paths, args).await,
         Some(Command::Tui(_args)) => tui::cmd_tui(paths).await,
