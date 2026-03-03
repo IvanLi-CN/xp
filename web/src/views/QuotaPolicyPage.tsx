@@ -1571,12 +1571,12 @@ export function QuotaPolicyPage() {
 														</span>
 													</div>
 
-													<div className="space-y-3">
-														<div className="space-y-1">
+													<div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
+														<div className="space-y-1 min-w-0">
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm"
+																className="range range-primary range-sm w-full"
 																min={0}
 																max={100}
 																step={0.1}
@@ -1596,7 +1596,7 @@ export function QuotaPolicyPage() {
 																{formatRatioPercent(row.basisPoints)}
 															</div>
 														</div>
-														<div className="space-y-1">
+														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>
@@ -2187,12 +2187,12 @@ export function QuotaPolicyPage() {
 														</span>
 													</div>
 
-													<div className="space-y-3">
-														<div className="space-y-1">
+													<div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
+														<div className="space-y-1 min-w-0">
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm"
+																className="range range-primary range-sm w-full"
 																min={0}
 																max={100}
 																step={0.1}
@@ -2218,7 +2218,7 @@ export function QuotaPolicyPage() {
 																{formatRatioPercent(row.basisPoints)}
 															</div>
 														</div>
-														<div className="space-y-1">
+														<div className="space-y-1 sm:w-[7.5rem]">
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>

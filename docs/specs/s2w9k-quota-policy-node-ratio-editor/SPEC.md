@@ -157,6 +157,9 @@ The membership source migration from grants remains part of the same spec.
   - responsive editor switch based on viewport breakpoint:
     - `< 768px (md)` uses list layout,
     - `>= 768px (md)` uses table layout.
+  - list layout spacing refinement:
+    - keep slider track `w-full` in the available content area,
+    - place `Input (%)` at slider right side for `sm` list mode while preserving stacked layout on narrower widths.
   - table mode can use compact spacing when editor panel width is narrow, while keeping table structure on `md+`.
   - table column widths prioritize `Slider` and remove hard min-width constraints to reduce horizontal scrolling on supported breakpoints.
   - table layout readability/interaction refinements:
