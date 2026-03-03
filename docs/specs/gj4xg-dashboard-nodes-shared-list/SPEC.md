@@ -78,10 +78,10 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `/api/admin/nodes/runtime` | HTTP API | internal | Modify (frontend usage) | None | Web UI | HomePage/NodesPage | 后端接口不变，仅两页统一改为该接口 |
-| `NodeInventoryListProps` | UI component props | internal | New | None | Web UI | HomePage/NodesPage | 统一列表渲染契约 |
+| 接口（Name）               | 类型（Kind）       | 范围（Scope） | 变更（Change）          | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                      |
+| -------------------------- | ------------------ | ------------- | ----------------------- | ------------------------ | --------------- | ------------------- | ---------------------------------- |
+| `/api/admin/nodes/runtime` | HTTP API           | internal      | Modify (frontend usage) | None                     | Web UI          | HomePage/NodesPage  | 后端接口不变，仅两页统一改为该接口 |
+| `NodeInventoryListProps`   | UI component props | internal      | New                     | None                     | Web UI          | HomePage/NodesPage  | 统一列表渲染契约                   |
 
 ### 契约文档（按 Kind 拆分）
 

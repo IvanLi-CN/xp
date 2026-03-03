@@ -61,13 +61,13 @@
 
 ## Index（固定表格）
 
-|    ID | Title                                      | Status | Spec                                           | Last       | Notes                                                                  |
-| ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
+|    ID | Title                                      | Status          | Spec                                           | Last       | Notes                                                                  |
+| ----: | ------------------------------------------ | --------------- | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
 | gj4xg | Dashboard/Nodes shared node inventory list | 部分完成（3/4） | `gj4xg-dashboard-nodes-shared-list/SPEC.md`    | 2026-03-03 | fast-track + local implementation + tests passed                       |
-| 9fke7 | Mihomo subscription/config redact CLI      | 已完成 | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
-| puf2g | Node panel icon-only entry for node lists  | 已完成 | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
-| nujzm | Grant groups 硬切下线与 Access 模型迁移    | 待实现 | `nujzm-access-model-hardcut-v9/SPEC.md`        | 2026-02-27 | fast-track                                                             |
-| s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成 | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-03-03 | PR #81 + responsive/table UX follow-up（双击内联输入 + 视口断点表格）  |
-| 9vmap | 节点服务可观测升级                         | 已完成 | `9vmap-node-service-observability/SPEC.md`     | 2026-02-26 | local implementation + tests passed                                    |
-| yzqn6 | Remove grant groups hard cut               | 已完成 | `yzqn6-remove-grant-groups-hard-cut/SPEC.md`   | 2026-02-27 | PR #84                                                                 |
-| wvrmn | Remove grants hard cut                     | 已完成 | `wvrmn-remove-grants-hard-cut/SPEC.md`         | 2026-03-02 | PR #86 + PR #90 AccessMatrix post-fix（含树勾选状态/单端点元数据修正） |
+| 9fke7 | Mihomo subscription/config redact CLI      | 已完成          | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
+| puf2g | Node panel icon-only entry for node lists  | 已完成          | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
+| nujzm | Grant groups 硬切下线与 Access 模型迁移    | 待实现          | `nujzm-access-model-hardcut-v9/SPEC.md`        | 2026-02-27 | fast-track                                                             |
+| s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成          | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-03-03 | PR #81 + responsive/table UX follow-up（双击内联输入 + 视口断点表格）  |
+| 9vmap | 节点服务可观测升级                         | 已完成          | `9vmap-node-service-observability/SPEC.md`     | 2026-02-26 | local implementation + tests passed                                    |
+| yzqn6 | Remove grant groups hard cut               | 已完成          | `yzqn6-remove-grant-groups-hard-cut/SPEC.md`   | 2026-02-27 | PR #84                                                                 |
+| wvrmn | Remove grants hard cut                     | 已完成          | `wvrmn-remove-grants-hard-cut/SPEC.md`         | 2026-03-02 | PR #86 + PR #90 AccessMatrix post-fix（含树勾选状态/单端点元数据修正） |
