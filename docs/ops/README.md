@@ -44,6 +44,7 @@ Behavior:
 
 - `SOURCE` starts with `http://` or `https://`: fetch from URL and sanitize response text.
 - `SOURCE` is provided but not URL: read as local file path and sanitize.
+- `SOURCE` is `-`: read from stdin and sanitize.
 - `SOURCE` omitted: read from stdin and sanitize.
 - If both stdin and `SOURCE` are present, `SOURCE` wins.
 - Default level is `credentials`; default source format is `auto`; default timeout is 15 seconds.

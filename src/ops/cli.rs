@@ -370,7 +370,7 @@ pub enum MihomoSourceFormatArg {
 
 #[derive(Args, Debug, Clone)]
 pub struct MihomoRedactArgs {
-    /// Mihomo source (subscription URL or local config path). If omitted, read from stdin.
+    /// Mihomo source (subscription URL or local config path). Use '-' or omit SOURCE to read stdin.
     #[arg(value_name = "SOURCE")]
     pub source: Option<String>,
 

@@ -56,6 +56,19 @@ fn mihomo_redact_reads_stdin_when_source_missing() {
 }
 
 #[test]
+fn mihomo_redact_reads_stdin_when_source_is_dash() {
+    let input = "proxies:\n  - name: edge\n    password: super-secret-value # keep comment\n";
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.args(["mihomo", "redact", "-"]).write_stdin(input);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("proxies:"))
+        .stdout(predicate::str::contains("# keep comment"))
+        .stdout(predicate::str::contains("super-secret-value").not());
+}
+
+#[test]
 fn mihomo_redact_prefers_source_over_stdin() {
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("config.yaml");

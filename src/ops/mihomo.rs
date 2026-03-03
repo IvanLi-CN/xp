@@ -72,6 +72,9 @@ pub async fn cmd_mihomo_redact(_paths: Paths, args: MihomoRedactArgs) -> Result<
 
 async fn load_source(args: &MihomoRedactArgs) -> Result<String, ExitError> {
     if let Some(source) = &args.source {
+        if source == "-" {
+            return read_stdin_source();
+        }
         if is_http_url(source) {
             return fetch_url_source(source, args.timeout_secs.max(1)).await;
         }
@@ -79,6 +82,10 @@ async fn load_source(args: &MihomoRedactArgs) -> Result<String, ExitError> {
             .map_err(|e| ExitError::new(4, format!("io_error: read source file: {e}")));
     }
 
+    read_stdin_source()
+}
+
+fn read_stdin_source() -> Result<String, ExitError> {
     let mut input = String::new();
     std::io::stdin()
         .read_to_string(&mut input)
