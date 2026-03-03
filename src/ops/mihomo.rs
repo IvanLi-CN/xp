@@ -131,14 +131,13 @@ fn normalize_input(raw: &str, format: SourceFormat) -> Result<String, ExitError>
 }
 
 fn decode_base64_to_text(raw: &str) -> Result<String, ExitError> {
-    let compact = raw.trim();
+    let compact = strip_ascii_whitespace(raw);
     if compact.is_empty() {
         return Err(ExitError::new(2, "invalid_input: empty base64 source"));
     }
 
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(compact)
-        .map_err(|e| ExitError::new(2, format!("invalid_input: base64 decode failed: {e}")))?;
+    let bytes = decode_base64_bytes_lenient(&compact)
+        .ok_or_else(|| ExitError::new(2, "invalid_input: base64 decode failed: invalid payload"))?;
 
     String::from_utf8(bytes).map_err(|e| {
         ExitError::new(
@@ -149,30 +148,50 @@ fn decode_base64_to_text(raw: &str) -> Result<String, ExitError> {
 }
 
 fn try_decode_base64_subscription(raw: &str) -> Option<String> {
-    let compact = raw.trim();
-    if compact.len() < 16 || !compact.len().is_multiple_of(4) {
+    let compact = strip_ascii_whitespace(raw);
+    if compact.len() < 16 {
         return None;
     }
 
     if compact.chars().any(|c| {
-        !(c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=' || c == '\r' || c == '\n')
+        !(c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=' || c == '-' || c == '_')
     }) {
         return None;
     }
 
-    if compact.bytes().any(|b| b == b' ' || b == b'\t') {
-        return None;
-    }
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(compact)
-        .ok()?;
+    let bytes = decode_base64_bytes_lenient(&compact)?;
     let decoded = String::from_utf8(bytes).ok()?;
     if !decoded.contains("://") {
         return None;
     }
 
     Some(decoded)
+}
+
+fn strip_ascii_whitespace(input: &str) -> String {
+    input.chars().filter(|c| !c.is_ascii_whitespace()).collect()
+}
+
+fn add_base64_padding(input: &str) -> String {
+    let mut normalized = input.to_string();
+    let rem = normalized.len() % 4;
+    if rem != 0 {
+        normalized.push_str(&"=".repeat(4 - rem));
+    }
+    normalized
+}
+
+fn decode_base64_bytes_lenient(input: &str) -> Option<Vec<u8>> {
+    let candidates = [input.to_string(), add_base64_padding(input)];
+    for candidate in candidates {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&candidate) {
+            return Some(bytes);
+        }
+        if let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(&candidate) {
+            return Some(bytes);
+        }
+    }
+    None
 }
 
 fn redact_text(input: &str, level: RedactionLevel) -> String {
@@ -557,6 +576,26 @@ fn redact_uri(uri: &str, level: RedactionLevel) -> String {
         None => (before_fragment, None),
     };
 
+    if scheme == "vmess" && looks_like_opaque_payload(before_query) {
+        let payload = redact_vmess_payload(before_query, level);
+        return rebuild_opaque_uri(
+            &uri[..scheme_end + 3],
+            &payload,
+            query.map(|q| redact_query(q, level)),
+            fragment,
+        );
+    }
+
+    if scheme == "ss" && looks_like_opaque_payload(before_query) {
+        let payload = redact_ss_opaque_payload(before_query, level);
+        return rebuild_opaque_uri(
+            &uri[..scheme_end + 3],
+            &payload,
+            query.map(|q| redact_query(q, level)),
+            fragment,
+        );
+    }
+
     let (authority, path) = split_authority_and_path(before_query);
 
     let authority = redact_authority(authority, scheme, level);
@@ -582,12 +621,139 @@ fn redact_uri(uri: &str, level: RedactionLevel) -> String {
     out
 }
 
+fn rebuild_opaque_uri(
+    scheme_prefix: &str,
+    payload: &str,
+    query: Option<String>,
+    fragment: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    out.push_str(scheme_prefix);
+    out.push_str(payload);
+    if let Some(q) = query {
+        out.push('?');
+        out.push_str(&q);
+    }
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    out
+}
+
 fn split_authority_and_path(s: &str) -> (&str, &str) {
     if let Some(idx) = s.find('/') {
         (&s[..idx], &s[idx..])
     } else {
         (s, "")
     }
+}
+
+fn looks_like_opaque_payload(value: &str) -> bool {
+    !value.is_empty() && !value.contains('@') && !value.contains('/')
+}
+
+fn redact_vmess_payload(payload: &str, level: RedactionLevel) -> String {
+    let Some(bytes) = decode_base64_bytes_lenient(payload) else {
+        if level.includes_credentials() {
+            return mask_secret(payload);
+        }
+        return payload.to_string();
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        if level.includes_credentials() {
+            return mask_secret(payload);
+        }
+        return payload.to_string();
+    };
+
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        if level.includes_credentials() {
+            return mask_secret(payload);
+        }
+        return payload.to_string();
+    };
+
+    redact_json_value(&mut value, None, level);
+    let redacted_json = serde_json::to_string(&value).unwrap_or_else(|_| mask_secret(&text));
+    base64::engine::general_purpose::STANDARD.encode(redacted_json.as_bytes())
+}
+
+fn redact_json_value(
+    value: &mut serde_json::Value,
+    parent_key: Option<&str>,
+    level: RedactionLevel,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, v) in map.iter_mut() {
+                redact_json_value(v, Some(key.as_str()), level);
+            }
+        }
+        serde_json::Value::Array(list) => {
+            for item in list {
+                redact_json_value(item, parent_key, level);
+            }
+        }
+        serde_json::Value::String(s) => {
+            if let Some(key) = parent_key {
+                let lower = key.to_ascii_lowercase();
+                if let Some(mode) = classify_key_action(&lower, level) {
+                    *s = match mode {
+                        MaskMode::Secret => mask_secret(s),
+                        MaskMode::Address => mask_host_like(s),
+                    };
+                    return;
+                }
+            }
+            *s = redact_inline_uris(s, level);
+        }
+        _ => {}
+    }
+}
+
+fn redact_ss_opaque_payload(payload: &str, level: RedactionLevel) -> String {
+    let Some(bytes) = decode_base64_bytes_lenient(payload) else {
+        if level.includes_credentials() {
+            return mask_secret(payload);
+        }
+        return payload.to_string();
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        if level.includes_credentials() {
+            return mask_secret(payload);
+        }
+        return payload.to_string();
+    };
+
+    let redacted = redact_ss_opaque_text(&text, level);
+    base64::engine::general_purpose::STANDARD.encode(redacted.as_bytes())
+}
+
+fn redact_ss_opaque_text(text: &str, level: RedactionLevel) -> String {
+    let Some((userinfo, hostport)) = text.rsplit_once('@') else {
+        if level.includes_credentials() {
+            return mask_secret(text);
+        }
+        return text.to_string();
+    };
+
+    let mut userinfo_out = userinfo.to_string();
+    if level.includes_credentials() {
+        if let Some((method, password)) = userinfo.split_once(':') {
+            userinfo_out = format!("{method}:{}", mask_secret(password));
+        } else {
+            userinfo_out = mask_secret(userinfo);
+        }
+    }
+
+    let hostport_out = if level.includes_address() {
+        redact_hostport(hostport)
+    } else {
+        hostport.to_string()
+    };
+
+    format!("{userinfo_out}@{hostport_out}")
 }
 
 fn redact_authority(authority: &str, scheme: &str, level: RedactionLevel) -> String {
@@ -853,5 +1019,43 @@ mod tests {
         let input = "not base64 text";
         let out = normalize_input(input, SourceFormat::Raw).unwrap();
         assert_eq!(out, input);
+    }
+
+    #[test]
+    fn explicit_base64_mode_accepts_missing_padding_and_newlines() {
+        let raw = "vless://a@b:1\n";
+        let mut encoded = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+        encoded = encoded.trim_end_matches('=').to_string();
+        let with_newlines = format!(
+            "{}\n{}",
+            &encoded[..encoded.len() / 2],
+            &encoded[encoded.len() / 2..]
+        );
+
+        let decoded = normalize_input(&with_newlines, SourceFormat::Base64).unwrap();
+        assert_eq!(decoded, raw);
+    }
+
+    #[test]
+    fn vmess_opaque_payload_is_redacted() {
+        let payload = base64::engine::general_purpose::STANDARD.encode(
+            r#"{"v":"2","add":"server.example.com","id":"12345678-90ab-cdef-1234-567890abcdef","ps":"demo"}"#,
+        );
+        let input = format!("vmess://{payload}");
+        let out = redact_text(&input, RedactionLevel::Credentials);
+
+        assert!(!out.contains("12345678-90ab-cdef-1234-567890abcdef"));
+        assert!(out.starts_with("vmess://"));
+    }
+
+    #[test]
+    fn ss_opaque_payload_is_redacted() {
+        let payload = base64::engine::general_purpose::STANDARD
+            .encode("aes-128-gcm:super-secret@example.com:443");
+        let input = format!("ss://{payload}#demo");
+        let out = redact_text(&input, RedactionLevel::Credentials);
+
+        assert!(out.starts_with("ss://"));
+        assert!(!out.contains("super-secret"));
     }
 }
