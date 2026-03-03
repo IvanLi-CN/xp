@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import {
+	type KeyboardEvent,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
 import {
@@ -124,6 +130,16 @@ type RatioEditorWidthTier = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 type RatioEditorLayout = {
 	isListLayout: boolean;
 	widthTier: RatioEditorWidthTier;
+};
+
+type TablePercentInlineEditorProps = {
+	basisPoints: number;
+	disabled: boolean;
+	ariaLabel: string;
+	inputClassName: string;
+	onCommit: (basisPoints: number) => void;
+	onInvalid: (message: string) => void;
+	testId?: string;
 };
 
 function pieColorAt(index: number): string {
@@ -334,6 +350,100 @@ function useRatioEditorLayout(
 	}, [container, minTableViewport]);
 
 	return layout;
+}
+
+function formatPercentInputValue(basisPoints: number): string {
+	return String(basisPoints / 100);
+}
+
+function TablePercentInlineEditor({
+	basisPoints,
+	disabled,
+	ariaLabel,
+	inputClassName,
+	onCommit,
+	onInvalid,
+	testId,
+}: TablePercentInlineEditorProps) {
+	const [isEditing, setIsEditing] = useState(false);
+	const [draft, setDraft] = useState(() =>
+		formatPercentInputValue(basisPoints),
+	);
+	const inputRef = useRef<HTMLInputElement | null>(null);
+
+	useEffect(() => {
+		if (isEditing) return;
+		setDraft(formatPercentInputValue(basisPoints));
+	}, [basisPoints, isEditing]);
+
+	useEffect(() => {
+		if (!isEditing) return;
+		inputRef.current?.focus();
+		inputRef.current?.select();
+	}, [isEditing]);
+
+	const commitDraft = () => {
+		const parsed = parsePercentInput(draft);
+		if (!parsed.ok) {
+			onInvalid(parsed.error);
+			return;
+		}
+		onCommit(parsed.basisPoints);
+		setIsEditing(false);
+	};
+
+	const resetEditor = () => {
+		setDraft(formatPercentInputValue(basisPoints));
+		setIsEditing(false);
+	};
+
+	const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			commitDraft();
+			return;
+		}
+		if (event.key === "Escape") {
+			event.preventDefault();
+			resetEditor();
+		}
+	};
+
+	if (isEditing) {
+		return (
+			<input
+				type="number"
+				min={0}
+				max={100}
+				step={0.01}
+				ref={inputRef}
+				className={[inputClassName, "font-mono w-full mt-1 h-8 min-h-8"].join(
+					" ",
+				)}
+				value={draft}
+				disabled={disabled}
+				aria-label={ariaLabel}
+				data-testid={testId ? `${testId}-input` : undefined}
+				onChange={(event) => setDraft(event.target.value)}
+				onKeyDown={handleKeyDown}
+				onBlur={resetEditor}
+			/>
+		);
+	}
+
+	return (
+		<button
+			type="button"
+			className="font-mono text-xs opacity-70 mt-1 hover:underline"
+			disabled={disabled}
+			aria-label={ariaLabel}
+			title="Double click to edit percent"
+			data-testid={testId ? `${testId}-display` : undefined}
+			onDoubleClick={() => setIsEditing(true)}
+		>
+			{formatRatioPercent(basisPoints)}
+		</button>
+	);
 }
 
 export function QuotaPolicyPage() {
@@ -1534,18 +1644,17 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="global-ratio-editor-table"
-											className="table table-fixed w-full min-w-[980px]"
+											className="table table-fixed w-full min-w-[760px]"
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[30%]">User</th>
+													<th className="w-[36%]">User</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[21%]">Slider</th>
-													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[14%] whitespace-nowrap pr-4">
+													<th className="w-[30%]">Slider</th>
+													<th className="w-[16%] whitespace-nowrap pr-4">
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap pl-4">
+													<th className="w-[8%] whitespace-nowrap pl-4">
 														Lock
 													</th>
 												</tr>
@@ -1560,9 +1669,6 @@ export function QuotaPolicyPage() {
 																<div className="flex flex-col gap-1 min-w-0">
 																	<span className="font-semibold truncate">
 																		{row.displayName}
-																	</span>
-																	<span className="font-mono text-xs opacity-70 break-all">
-																		{row.userId}
 																	</span>
 																</div>
 															</td>
@@ -1590,36 +1696,19 @@ export function QuotaPolicyPage() {
 																		);
 																	}}
 																/>
-																<div className="font-mono text-xs opacity-70 mt-1">
-																	{formatRatioPercent(row.basisPoints)}
-																</div>
-															</td>
-															<td className="align-top">
-																<input
-																	type="number"
-																	min={0}
-																	max={100}
-																	step={0.01}
-																	className={[
-																		inputClass,
-																		"font-mono w-full",
-																	].join(" ")}
-																	value={row.basisPoints / 100}
+																<TablePercentInlineEditor
+																	basisPoints={row.basisPoints}
 																	disabled={isSavingGlobalRatio}
-																	aria-label={`Global ratio input for ${row.displayName}`}
-																	onChange={(event) => {
-																		const parsed = parsePercentInput(
-																			event.target.value,
-																		);
-																		if (!parsed.ok) {
-																			setGlobalRatioError(parsed.error);
-																			return;
-																		}
+																	ariaLabel={`Edit global ratio percent for ${row.displayName}`}
+																	inputClassName={inputClass}
+																	testId={`global-ratio-table-percent-${row.userId}`}
+																	onInvalid={setGlobalRatioError}
+																	onCommit={(basisPoints) =>
 																		applyGlobalRatioEdit(
 																			row.userId,
-																			parsed.basisPoints,
-																		);
-																	}}
+																			basisPoints,
+																		)
+																	}
 																/>
 															</td>
 															<td className="align-top whitespace-nowrap pr-4">
@@ -2157,18 +2246,17 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="ratio-editor-table"
-											className="table table-fixed w-full min-w-[980px]"
+											className="table table-fixed w-full min-w-[760px]"
 										>
 											<thead>
 												<tr className="bg-base-200/50">
-													<th className="w-[28%]">User</th>
+													<th className="w-[38%]">User</th>
 													<th className="w-[10%]">Tier</th>
-													<th className="w-[23%]">Slider</th>
-													<th className="w-[16%]">Input (%)</th>
-													<th className="w-[14%] whitespace-nowrap pr-4">
+													<th className="w-[28%]">Slider</th>
+													<th className="w-[16%] whitespace-nowrap pr-4">
 														Computed weight
 													</th>
-													<th className="w-[9%] whitespace-nowrap pl-4">
+													<th className="w-[8%] whitespace-nowrap pl-4">
 														Lock
 													</th>
 												</tr>
@@ -2193,9 +2281,6 @@ export function QuotaPolicyPage() {
 																<div className="flex flex-col gap-1 min-w-0">
 																	<span className="font-semibold truncate">
 																		{row.displayName}
-																	</span>
-																	<span className="font-mono text-xs opacity-70 break-all">
-																		{row.userId}
 																	</span>
 																	<span className="text-xs opacity-70">
 																		Endpoints {row.endpointIds.length}
@@ -2232,42 +2317,20 @@ export function QuotaPolicyPage() {
 																		);
 																	}}
 																/>
-																<div className="font-mono text-xs opacity-70 mt-1">
-																	{formatRatioPercent(row.basisPoints)}
-																</div>
-															</td>
-															<td className="align-top">
-																<input
-																	type="number"
-																	min={0}
-																	max={100}
-																	step={0.01}
-																	className={[
-																		inputClass,
-																		"font-mono w-full",
-																	].join(" ")}
-																	value={row.basisPoints / 100}
+																<TablePercentInlineEditor
+																	basisPoints={row.basisPoints}
 																	disabled={
 																		isSavingRatio ||
 																		nodeInheritGlobal ||
 																		isUpdatingNodePolicy
 																	}
-																	aria-label={`Ratio input for ${row.displayName}`}
-																	onFocus={() => setHoveredUserId(row.userId)}
-																	onBlur={() => setHoveredUserId(null)}
-																	onChange={(event) => {
-																		const parsed = parsePercentInput(
-																			event.target.value,
-																		);
-																		if (!parsed.ok) {
-																			setRatioError(parsed.error);
-																			return;
-																		}
-																		applyRatioEdit(
-																			row.userId,
-																			parsed.basisPoints,
-																		);
-																	}}
+																	ariaLabel={`Edit ratio percent for ${row.displayName}`}
+																	inputClassName={inputClass}
+																	testId={`ratio-table-percent-${row.userId}`}
+																	onInvalid={setRatioError}
+																	onCommit={(basisPoints) =>
+																		applyRatioEdit(row.userId, basisPoints)
+																	}
 																/>
 															</td>
 															<td className="align-top whitespace-nowrap pr-4">

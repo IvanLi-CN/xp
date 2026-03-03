@@ -157,6 +157,10 @@ The membership source migration from grants remains part of the same spec.
   - responsive editor switch based on editor panel width:
     - `< 768px (md)` uses list layout,
     - `>= 768px (md)` uses table layout.
+  - table layout readability/interaction refinements:
+    - hide user id line in table `User` column (keep display name focused),
+    - remove standalone `Input (%)` table column,
+    - allow inline percent edit by double-clicking slider percent text; commit on Enter and return to slider view.
   - layout observability markers on editor panel DOM:
     - `data-layout=list|table`
     - `data-width-tier=xs|sm|md|lg|xl|2xl`
@@ -185,6 +189,8 @@ Implemented automated coverage additions:
 - In inherited mode, node view reflects global ratios and cannot accidentally mutate node-local values.
 - After switching to node-local mode, edits persist only to node-local weights and do not mutate global defaults.
 - Ratio editor switches to table layout at `md` and above for both global and node editors, while preserving list layout below `md`.
+- Table mode keeps key info focused by hiding user id line and dropping the standalone `Input (%)` column.
+- Table mode supports double-click inline percent edit on the slider percent cell, with Enter-to-apply and restore behavior.
 - Editor panel exposes layout + width-tier markers for style/debug verification.
 
 ## Change log
@@ -195,3 +201,4 @@ Implemented automated coverage additions:
 - Reworked quota policy UI to node-centric ratio editing with visual chart and lock-aware controls.
 - Added requirement delta: global default allocation + node inherit/override policy switch.
 - Adjusted ratio editor responsive threshold to `md` and added layout/width-tier DOM markers with breakpoint coverage tests.
+- Refined table UX by removing the dedicated `Input (%)` column, hiding user id text in table rows, and adding double-click inline percent editing.

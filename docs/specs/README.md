@@ -65,7 +65,7 @@
 | ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
 | puf2g | Node panel icon-only entry for node lists  | 已完成 | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
 | nujzm | Grant groups 硬切下线与 Access 模型迁移    | 待实现 | `nujzm-access-model-hardcut-v9/SPEC.md`        | 2026-02-27 | fast-track                                                             |
-| s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成 | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-03-03 | PR #81 + responsive layout/table marker follow-up                      |
+| s2w9k | Quota Policy 节点比例可视化编辑 + 映射替换 | 已完成 | `s2w9k-quota-policy-node-ratio-editor/SPEC.md` | 2026-03-03 | PR #81 + responsive/table UX follow-up（含双击内联输入）               |
 | 9vmap | 节点服务可观测升级                         | 已完成 | `9vmap-node-service-observability/SPEC.md`     | 2026-02-26 | local implementation + tests passed                                    |
 | yzqn6 | Remove grant groups hard cut               | 已完成 | `yzqn6-remove-grant-groups-hard-cut/SPEC.md`   | 2026-02-27 | PR #84                                                                 |
 | wvrmn | Remove grants hard cut                     | 已完成 | `wvrmn-remove-grants-hard-cut/SPEC.md`         | 2026-03-02 | PR #86 + PR #90 AccessMatrix post-fix（含树勾选状态/单端点元数据修正） |
