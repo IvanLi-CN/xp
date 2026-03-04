@@ -41,8 +41,8 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q "missing web/dist/index.html" /tmp/xp-missing-web-dist.log; then
-            echo "expected missing web/dist/index.html error message" >&2
+          if ! grep -q "^error: missing web/dist/index.html; run \`cd web && bun run build\`" /tmp/xp-missing-web-dist.log; then
+            echo "expected compile-time missing web/dist/index.html error message" >&2
             cat /tmp/xp-missing-web-dist.log >&2
             exit 1
           fi
