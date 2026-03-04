@@ -5,6 +5,7 @@
 - `GET /api/sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
 - `GET /api/sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
 - `GET /api/sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
+- `GET /api/sub/{subscription_token}?format=mihomo`：返回用户模板驱动的完整 Mihomo YAML（未配置模板时回退 clash）
 
 ## 2. 统一规则
 
@@ -117,3 +118,30 @@ MVP 建议输出“可直接导入”的最小 YAML：
 
 - `proxies: [...]`
 - 可选：追加一个 `proxy-groups`（例如 `select`）与基础 `rules`（后续再定，避免替用户做过多假设）
+
+## 6. Mihomo 模板驱动输出（`format=mihomo`）
+
+### 6.1 模板来源
+
+- 模板按用户维度存储（admin API 管理），不内置到仓库。
+- profile 字段：
+  - `template_yaml`（必填，YAML root 必须是 mapping）
+  - `extra_proxies_yaml`（可空；非空时 root 必须是 sequence）
+  - `extra_proxy_providers_yaml`（可空；非空时 root 必须是 mapping）
+
+### 6.2 渲染规则
+
+- 渲染时忽略模板中的 `proxies` 与 `proxy-providers`，由系统重建：
+  - 系统节点：
+    - reality direct：`<node_slug>-reality`
+    - ss direct：`<node_slug>-ss`
+    - ss chain：`<node_slug>-JP|HK|KR`，并设置 `dialer-proxy` 到 `🛣️ Japan|HongKong|Korea`
+  - 用户扩展：
+    - 追加 `extra_proxies_yaml` 到最终 `proxies`
+    - 以 `extra_proxy_providers_yaml` 作为最终 `proxy-providers`
+- 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
+- 所有 provider 名称会注入固定 relay 组 `🛣️ Japan|🛣️ HongKong|🛣️ Korea` 的 `use` 列表。
+
+### 6.3 缺失模板回退
+
+- 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。

@@ -37,6 +37,16 @@ export type ResetAdminUserCredentialsResponse = z.infer<
 	typeof ResetAdminUserCredentialsResponseSchema
 >;
 
+export const AdminUserMihomoProfileSchema = z.object({
+	template_yaml: z.string(),
+	extra_proxies_yaml: z.string(),
+	extra_proxy_providers_yaml: z.string(),
+});
+
+export type AdminUserMihomoProfile = z.infer<
+	typeof AdminUserMihomoProfileSchema
+>;
+
 export type AdminUserCreateRequest = {
 	display_name: string;
 	quota_reset?: UserQuotaReset;
@@ -187,4 +197,53 @@ export async function resetAdminUserCredentials(
 
 	const json: unknown = await res.json();
 	return ResetAdminUserCredentialsResponseSchema.parse(json);
+}
+
+export async function fetchAdminUserMihomoProfile(
+	adminToken: string,
+	userId: string,
+	signal?: AbortSignal,
+): Promise<AdminUserMihomoProfile> {
+	const res = await fetch(
+		`/api/admin/users/${userId}/subscription-mihomo-profile`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminUserMihomoProfileSchema.parse(json);
+}
+
+export async function putAdminUserMihomoProfile(
+	adminToken: string,
+	userId: string,
+	payload: AdminUserMihomoProfile,
+	signal?: AbortSignal,
+): Promise<AdminUserMihomoProfile> {
+	const res = await fetch(
+		`/api/admin/users/${userId}/subscription-mihomo-profile`,
+		{
+			method: "PUT",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(payload),
+			signal,
+		},
+	);
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminUserMihomoProfileSchema.parse(json);
 }

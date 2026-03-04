@@ -99,6 +99,14 @@ type MockApiOptions = {
 	healthStatus?: "ok" | "error";
 	subscriptionContentRaw?: string;
 	subscriptionContentClash?: string;
+	userMihomoProfiles?: Record<
+		string,
+		{
+			template_yaml: string;
+			extra_proxies_yaml: string;
+			extra_proxy_providers_yaml: string;
+		}
+	>;
 };
 
 type MockState = {
@@ -113,6 +121,14 @@ type MockState = {
 	healthStatus: "ok" | "error";
 	subscriptionContentRaw: string;
 	subscriptionContentClash: string;
+	userMihomoProfiles: Record<
+		string,
+		{
+			template_yaml: string;
+			extra_proxies_yaml: string;
+			extra_proxy_providers_yaml: string;
+		}
+	>;
 };
 
 const defaultNodes: AdminNode[] = [
@@ -268,6 +284,18 @@ export async function setupApiMocks(
 			options.subscriptionContentRaw ?? "vless://example-host?encryption=none",
 		subscriptionContentClash:
 			options.subscriptionContentClash ?? defaultSubscriptionClash,
+		userMihomoProfiles:
+			options.userMihomoProfiles ??
+			Object.fromEntries(
+				(options.users ? options.users : defaultUsers).map((user) => [
+					user.user_id,
+					{
+						template_yaml: "",
+						extra_proxies_yaml: "",
+						extra_proxy_providers_yaml: "",
+					},
+				]),
+			),
 	};
 
 	let userSeq = state.users.length + 1;
@@ -521,6 +549,7 @@ export async function setupApiMocks(
 			const isResetToken = segments[5] === "reset-token";
 			const isResetCredentials = segments[5] === "reset-credentials";
 			const isNodeWeights = segments[5] === "node-weights";
+			const isMihomoProfile = segments[5] === "subscription-mihomo-profile";
 
 			if (isNodeWeights && method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
@@ -606,6 +635,49 @@ export async function setupApiMocks(
 				return;
 			}
 
+			if (isMihomoProfile && method === "GET") {
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				jsonResponse(
+					route,
+					state.userMihomoProfiles[userId] ?? {
+						template_yaml: "",
+						extra_proxies_yaml: "",
+						extra_proxy_providers_yaml: "",
+					},
+				);
+				return;
+			}
+
+			if (isMihomoProfile && method === "PUT") {
+				const user = state.users.find((item) => item.user_id === userId);
+				if (!user) {
+					errorResponse(route, `User not found: ${userId}`, 404);
+					return;
+				}
+				const payload = parseJsonBody(request);
+				const profile = {
+					template_yaml:
+						typeof payload.template_yaml === "string"
+							? payload.template_yaml
+							: "",
+					extra_proxies_yaml:
+						typeof payload.extra_proxies_yaml === "string"
+							? payload.extra_proxies_yaml
+							: "",
+					extra_proxy_providers_yaml:
+						typeof payload.extra_proxy_providers_yaml === "string"
+							? payload.extra_proxy_providers_yaml
+							: "",
+				};
+				state.userMihomoProfiles[userId] = profile;
+				jsonResponse(route, profile);
+				return;
+			}
+
 			if (method === "GET") {
 				const user = state.users.find((item) => item.user_id === userId);
 				if (!user) {
@@ -644,6 +716,7 @@ export async function setupApiMocks(
 				state.users = state.users.filter((item) => item.user_id !== userId);
 				state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
 				delete state.userAccessByUserId[userId];
+				delete state.userMihomoProfiles[userId];
 				void route.fulfill({ status: 204, body: "" });
 				return;
 			}
@@ -651,7 +724,7 @@ export async function setupApiMocks(
 
 		if (path.startsWith("/api/sub/") && method === "GET") {
 			const format = url.searchParams.get("format");
-			if (format === "clash") {
+			if (format === "clash" || format === "mihomo") {
 				textResponse(route, state.subscriptionContentClash);
 				return;
 			}

@@ -5,7 +5,7 @@ use crate::{
     credentials,
     domain::{Endpoint, EndpointKind, Node, User},
     protocol::{SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta, ss2022_password},
-    state::NodeUserEndpointMembership,
+    state::{NodeUserEndpointMembership, UserMihomoProfile},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +44,24 @@ pub enum SubscriptionError {
     },
     VlessRealityMissingActiveShortId {
         endpoint_id: String,
+    },
+    MihomoTemplateParse {
+        reason: String,
+    },
+    MihomoTemplateRootNotMapping,
+    MihomoExtraProxiesParse {
+        reason: String,
+    },
+    MihomoExtraProxiesRootNotSequence,
+    MihomoExtraProxyProvidersParse {
+        reason: String,
+    },
+    MihomoExtraProxyProvidersRootNotMapping,
+    MihomoProxyNameMissing {
+        index: usize,
+    },
+    MihomoProxyNameNotString {
+        index: usize,
     },
 }
 
@@ -100,6 +118,33 @@ impl std::fmt::Display for SubscriptionError {
                 f,
                 "vless reality active_short_id is missing/empty: endpoint_id={endpoint_id}"
             ),
+            Self::MihomoTemplateParse { reason } => {
+                write!(f, "mihomo template yaml parse error: {reason}")
+            }
+            Self::MihomoTemplateRootNotMapping => {
+                write!(f, "mihomo template yaml root must be a mapping")
+            }
+            Self::MihomoExtraProxiesParse { reason } => {
+                write!(f, "mihomo extra_proxies_yaml parse error: {reason}")
+            }
+            Self::MihomoExtraProxiesRootNotSequence => {
+                write!(f, "mihomo extra_proxies_yaml root must be a sequence")
+            }
+            Self::MihomoExtraProxyProvidersParse { reason } => {
+                write!(f, "mihomo extra_proxy_providers_yaml parse error: {reason}")
+            }
+            Self::MihomoExtraProxyProvidersRootNotMapping => {
+                write!(
+                    f,
+                    "mihomo extra_proxy_providers_yaml root must be a mapping"
+                )
+            }
+            Self::MihomoProxyNameMissing { index } => {
+                write!(f, "mihomo proxy name is missing at index={index}")
+            }
+            Self::MihomoProxyNameNotString { index } => {
+                write!(f, "mihomo proxy name must be string at index={index}")
+            }
         }
     }
 }
@@ -187,6 +232,451 @@ pub fn build_clash_yaml(
     serde_yaml::to_string(&config).map_err(|e| SubscriptionError::YamlSerialize {
         reason: e.to_string(),
     })
+}
+
+pub fn build_mihomo_yaml(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+    profile: &UserMihomoProfile,
+) -> Result<String, SubscriptionError> {
+    let mut rng = rand::thread_rng();
+    let generated = build_mihomo_generated_proxies(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        &mut rng,
+    )?;
+    let mut merged_proxies = merge_and_rename_proxies(
+        generated,
+        parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?,
+    )?;
+    let provider_map = parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
+    let provider_names = provider_map
+        .keys()
+        .filter_map(|k| k.as_str().map(|s| s.to_string()))
+        .collect::<Vec<_>>();
+
+    let mut root = parse_template_mapping(&profile.template_yaml)?;
+    root.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        serde_yaml::Value::Sequence(std::mem::take(&mut merged_proxies)),
+    );
+    root.insert(
+        serde_yaml::Value::String("proxy-providers".to_string()),
+        serde_yaml::Value::Mapping(provider_map),
+    );
+    inject_relay_group_use(&mut root, &provider_names);
+
+    serde_yaml::to_string(&serde_yaml::Value::Mapping(root)).map_err(|e| {
+        SubscriptionError::YamlSerialize {
+            reason: e.to_string(),
+        }
+    })
+}
+
+const MIHOMO_RELAY_GROUPS: [&str; 3] = ["🛣️ Japan", "🛣️ HongKong", "🛣️ Korea"];
+const MIHOMO_CHAIN_SPECS: [(&str, &str); 3] = [
+    ("JP", "🛣️ Japan"),
+    ("HK", "🛣️ HongKong"),
+    ("KR", "🛣️ Korea"),
+];
+
+fn parse_template_mapping(input: &str) -> Result<serde_yaml::Mapping, SubscriptionError> {
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(input).map_err(|e| SubscriptionError::MihomoTemplateParse {
+            reason: e.to_string(),
+        })?;
+    let serde_yaml::Value::Mapping(map) = root else {
+        return Err(SubscriptionError::MihomoTemplateRootNotMapping);
+    };
+    Ok(map)
+}
+
+fn parse_extra_proxies_yaml(input: &str) -> Result<Vec<serde_yaml::Value>, SubscriptionError> {
+    if input.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(input).map_err(|e| SubscriptionError::MihomoExtraProxiesParse {
+            reason: e.to_string(),
+        })?;
+    let serde_yaml::Value::Sequence(list) = root else {
+        return Err(SubscriptionError::MihomoExtraProxiesRootNotSequence);
+    };
+    Ok(list)
+}
+
+fn parse_extra_proxy_providers_yaml(input: &str) -> Result<serde_yaml::Mapping, SubscriptionError> {
+    if input.trim().is_empty() {
+        return Ok(serde_yaml::Mapping::new());
+    }
+
+    let root: serde_yaml::Value = serde_yaml::from_str(input).map_err(|e| {
+        SubscriptionError::MihomoExtraProxyProvidersParse {
+            reason: e.to_string(),
+        }
+    })?;
+    let serde_yaml::Value::Mapping(map) = root else {
+        return Err(SubscriptionError::MihomoExtraProxyProvidersRootNotMapping);
+    };
+    Ok(map)
+}
+
+fn proxy_name_from_yaml(
+    value: &serde_yaml::Value,
+    index: usize,
+) -> Result<String, SubscriptionError> {
+    let serde_yaml::Value::Mapping(map) = value else {
+        return Err(SubscriptionError::MihomoProxyNameMissing { index });
+    };
+    let Some(name_value) = map.get(serde_yaml::Value::String("name".to_string())) else {
+        return Err(SubscriptionError::MihomoProxyNameMissing { index });
+    };
+    let Some(name) = name_value.as_str() else {
+        return Err(SubscriptionError::MihomoProxyNameNotString { index });
+    };
+    Ok(name.to_string())
+}
+
+fn set_proxy_name(value: &mut serde_yaml::Value, name: &str) {
+    let serde_yaml::Value::Mapping(map) = value else {
+        return;
+    };
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.to_string()),
+    );
+}
+
+fn next_renamed_name(used: &std::collections::BTreeSet<String>, base: &str) -> String {
+    for idx in 2.. {
+        let candidate = format!("{base}-dup{idx}");
+        if !used.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("infinite rename loop")
+}
+
+fn merge_and_rename_proxies(
+    generated: Vec<serde_yaml::Value>,
+    extra: Vec<serde_yaml::Value>,
+) -> Result<Vec<serde_yaml::Value>, SubscriptionError> {
+    let mut out = Vec::with_capacity(generated.len() + extra.len());
+    let mut used_names = std::collections::BTreeSet::<String>::new();
+
+    for (idx, mut proxy) in generated.into_iter().chain(extra).enumerate() {
+        let original = proxy_name_from_yaml(&proxy, idx)?;
+        let final_name = if used_names.contains(&original) {
+            let renamed = next_renamed_name(&used_names, &original);
+            tracing::warn!(
+                original_name = %original,
+                renamed_name = %renamed,
+                "mihomo proxy name conflict detected, renamed automatically"
+            );
+            renamed
+        } else {
+            original
+        };
+        set_proxy_name(&mut proxy, &final_name);
+        used_names.insert(final_name);
+        out.push(proxy);
+    }
+
+    Ok(out)
+}
+
+fn inject_relay_group_use(root: &mut serde_yaml::Mapping, provider_names: &[String]) {
+    let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
+        Some(serde_yaml::Value::Sequence(seq)) => seq,
+        _ => Vec::new(),
+    };
+
+    let provider_values = provider_names
+        .iter()
+        .map(|name| serde_yaml::Value::String(name.clone()))
+        .collect::<Vec<_>>();
+
+    for relay_name in MIHOMO_RELAY_GROUPS {
+        let mut found = false;
+        for group in &mut groups {
+            let serde_yaml::Value::Mapping(map) = group else {
+                continue;
+            };
+            let name = map
+                .get(serde_yaml::Value::String("name".to_string()))
+                .and_then(|v| v.as_str());
+            if name != Some(relay_name) {
+                continue;
+            }
+            map.insert(
+                serde_yaml::Value::String("use".to_string()),
+                serde_yaml::Value::Sequence(provider_values.clone()),
+            );
+            found = true;
+            break;
+        }
+
+        if found {
+            continue;
+        }
+
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(relay_name.to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("url-test".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+        );
+        map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.clone()),
+        );
+        groups.push(serde_yaml::Value::Mapping(map));
+    }
+
+    root.insert(
+        serde_yaml::Value::String("proxy-groups".to_string()),
+        serde_yaml::Value::Sequence(groups),
+    );
+}
+
+fn slugify_node_name(input: &str) -> String {
+    let lower = input.to_ascii_lowercase();
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in lower.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+            continue;
+        }
+        if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    while out.starts_with('-') {
+        out.remove(0);
+    }
+    if out.is_empty() {
+        return "node".to_string();
+    }
+    out
+}
+
+fn build_node_prefix_map(nodes: &[Node]) -> std::collections::BTreeMap<String, String> {
+    let mut ordered = nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), slugify_node_name(&node.node_name)))
+        .collect::<Vec<_>>();
+    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    let mut out = std::collections::BTreeMap::<String, String>::new();
+    for (node_id, base) in ordered {
+        let count = seen.entry(base.clone()).or_insert(0);
+        *count += 1;
+        if *count == 1 {
+            out.insert(node_id, base);
+        } else {
+            out.insert(node_id, format!("{base}-{}", count));
+        }
+    }
+    out
+}
+
+fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+    rng: &mut R,
+) -> Result<Vec<serde_yaml::Value>, SubscriptionError> {
+    let endpoints_by_id: std::collections::HashMap<&str, &Endpoint> = endpoints
+        .iter()
+        .map(|e| (e.endpoint_id.as_str(), e))
+        .collect();
+    let nodes_by_id: std::collections::HashMap<&str, &Node> =
+        nodes.iter().map(|n| (n.node_id.as_str(), n)).collect();
+    let node_prefix_map = build_node_prefix_map(nodes);
+
+    let vless_uuid =
+        credentials::derive_vless_uuid(cluster_ca_key_pem, &user.user_id, user.credential_epoch)
+            .map_err(|e| SubscriptionError::CredentialDerive {
+                reason: e.to_string(),
+            })?;
+    let ss2022_user_psk_b64 = credentials::derive_ss2022_user_psk_b64(
+        cluster_ca_key_pem,
+        &user.user_id,
+        user.credential_epoch,
+    )
+    .map_err(|e| SubscriptionError::CredentialDerive {
+        reason: e.to_string(),
+    })?;
+
+    let mut ordered_memberships = memberships.to_vec();
+    ordered_memberships.sort_by(|a, b| {
+        a.endpoint_id
+            .cmp(&b.endpoint_id)
+            .then_with(|| a.node_id.cmp(&b.node_id))
+    });
+
+    let mut out = Vec::<serde_yaml::Value>::new();
+
+    for membership in ordered_memberships {
+        if membership.user_id != user.user_id {
+            return Err(SubscriptionError::MembershipUserMismatch {
+                expected_user_id: user.user_id.clone(),
+                got_user_id: membership.user_id,
+            });
+        }
+
+        let endpoint = endpoints_by_id
+            .get(membership.endpoint_id.as_str())
+            .copied()
+            .ok_or_else(|| SubscriptionError::MissingEndpoint {
+                endpoint_id: membership.endpoint_id.clone(),
+            })?;
+        let node = nodes_by_id
+            .get(endpoint.node_id.as_str())
+            .copied()
+            .ok_or_else(|| SubscriptionError::MissingNode {
+                node_id: endpoint.node_id.clone(),
+                endpoint_id: endpoint.endpoint_id.clone(),
+            })?;
+        if node.access_host.is_empty() {
+            return Err(SubscriptionError::EmptyNodeAccessHost {
+                node_id: node.node_id.clone(),
+                endpoint_id: endpoint.endpoint_id.clone(),
+            });
+        }
+
+        let prefix = node_prefix_map
+            .get(&node.node_id)
+            .cloned()
+            .unwrap_or_else(|| slugify_node_name(&node.node_name));
+
+        match endpoint.kind {
+            EndpointKind::VlessRealityVisionTcp => {
+                let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
+                    serde_json::from_value(endpoint.meta.clone()).map_err(|e| {
+                        SubscriptionError::InvalidEndpointMetaVless {
+                            endpoint_id: endpoint.endpoint_id.clone(),
+                            reason: e.to_string(),
+                        }
+                    })?;
+                let sni = pick_server_name(&meta.reality.server_names, rng).ok_or_else(|| {
+                    SubscriptionError::VlessRealityServerNamesEmpty {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    }
+                })?;
+                let sid = meta.active_short_id.as_str();
+                if sid.is_empty() {
+                    return Err(SubscriptionError::VlessRealityMissingActiveShortId {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    });
+                }
+                let proxy = ClashProxy::Vless(ClashVlessProxy {
+                    name: format!("{prefix}-reality"),
+                    proxy_type: "vless".to_string(),
+                    server: node.access_host.clone(),
+                    port: endpoint.port,
+                    uuid: vless_uuid.clone(),
+                    network: "tcp".to_string(),
+                    udp: true,
+                    tls: true,
+                    flow: "xtls-rprx-vision".to_string(),
+                    servername: sni.to_string(),
+                    client_fingerprint: meta.reality.fingerprint,
+                    reality_opts: ClashRealityOpts {
+                        public_key: meta.reality_keys.public_key,
+                        short_id: sid.to_string(),
+                    },
+                });
+                out.push(serde_yaml::to_value(proxy).map_err(|e| {
+                    SubscriptionError::YamlSerialize {
+                        reason: e.to_string(),
+                    }
+                })?);
+            }
+            EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+                let meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())
+                    .map_err(|e| SubscriptionError::Ss2022UnsupportedMethod {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                        got_method: format!("invalid endpoint meta: {e}"),
+                    })?;
+                if meta.method != SS2022_METHOD_2022_BLAKE3_AES_128_GCM {
+                    return Err(SubscriptionError::Ss2022UnsupportedMethod {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                        got_method: meta.method,
+                    });
+                }
+                let password = ss2022_password(&meta.server_psk_b64, &ss2022_user_psk_b64);
+                let direct = ClashProxy::Ss(ClashSsProxy {
+                    name: format!("{prefix}-ss"),
+                    proxy_type: "ss".to_string(),
+                    server: node.access_host.clone(),
+                    port: endpoint.port,
+                    cipher: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
+                    password: password.clone(),
+                    udp: true,
+                    dialer_proxy: None,
+                    network: None,
+                });
+                out.push(serde_yaml::to_value(direct).map_err(|e| {
+                    SubscriptionError::YamlSerialize {
+                        reason: e.to_string(),
+                    }
+                })?);
+
+                for (suffix, dialer_proxy) in MIHOMO_CHAIN_SPECS {
+                    let chain = ClashProxy::Ss(ClashSsProxy {
+                        name: format!("{prefix}-{suffix}"),
+                        proxy_type: "ss".to_string(),
+                        server: node.access_host.clone(),
+                        port: endpoint.port,
+                        cipher: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
+                        password: password.clone(),
+                        udp: true,
+                        dialer_proxy: Some(dialer_proxy.to_string()),
+                        network: Some("tcp".to_string()),
+                    });
+                    out.push(serde_yaml::to_value(chain).map_err(|e| {
+                        SubscriptionError::YamlSerialize {
+                            reason: e.to_string(),
+                        }
+                    })?);
+                }
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 fn build_items(
@@ -361,6 +851,8 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     cipher: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
                     password,
                     udp: true,
+                    dialer_proxy: None,
+                    network: None,
                 });
 
                 (uri, proxy)
@@ -475,6 +967,10 @@ struct ClashSsProxy {
     cipher: String,
     password: String,
     udp: bool,
+    #[serde(rename = "dialer-proxy", skip_serializing_if = "Option::is_none")]
+    dialer_proxy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network: Option<String>,
 }
 
 #[cfg(test)]
@@ -736,5 +1232,117 @@ mod tests {
 
         assert_eq!(out1, out2);
         assert_eq!(out1.len(), 2);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_injects_generated_proxies_and_relay_use() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🛣️ Japan"
+    type: url-test
+    use: []
+  - name: "🛣️ HongKong"
+    type: url-test
+    use: []
+  - name: "🛣️ Korea"
+    type: url-test
+    use: []
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "tokyo-a-ss"
+  type: ss
+  server: custom.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "x:y"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/a
+providerB:
+  type: http
+  path: ./provider-b.yaml
+  url: https://example.com/b
+"#
+            .to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let proxies = v
+            .get("proxies")
+            .and_then(|x| x.as_sequence())
+            .expect("proxies must be a list");
+        let names = proxies
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(names.contains("tokyo-a-reality"));
+        assert!(names.contains("tokyo-a-ss"));
+        assert!(names.contains("tokyo-a-JP"));
+        assert!(names.contains("tokyo-a-HK"));
+        assert!(names.contains("tokyo-a-KR"));
+        assert!(names.contains("tokyo-a-ss-dup2"));
+
+        let proxy_groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a list");
+        for relay in ["🛣️ Japan", "🛣️ HongKong", "🛣️ Korea"] {
+            let group = proxy_groups
+                .iter()
+                .find(|g| g.get("name").and_then(Value::as_str) == Some(relay))
+                .expect("missing relay group");
+            let use_names = group
+                .get("use")
+                .and_then(Value::as_sequence)
+                .expect("use must be sequence")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert!(use_names.contains("providerA"));
+            assert!(use_names.contains("providerB"));
+        }
+    }
+
+    #[test]
+    fn build_mihomo_yaml_rejects_non_mapping_template() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            template_yaml: "- not-a-mapping".to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let err = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap_err();
+        assert_eq!(err, SubscriptionError::MihomoTemplateRootNotMapping);
     }
 }

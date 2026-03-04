@@ -1,0 +1,52 @@
+# HTTP APIs
+
+## GET `/api/admin/users/{user_id}/subscription-mihomo-profile`
+
+Response `200`:
+
+```json
+{
+  "template_yaml": "string",
+  "extra_proxies_yaml": "string",
+  "extra_proxy_providers_yaml": "string"
+}
+```
+
+- 若用户存在但未配置，返回空字符串字段（不是 404）。
+
+## PUT `/api/admin/users/{user_id}/subscription-mihomo-profile`
+
+Request body:
+
+```json
+{
+  "template_yaml": "string",
+  "extra_proxies_yaml": "string",
+  "extra_proxy_providers_yaml": "string"
+}
+```
+
+Validation:
+
+- `template_yaml` 必填，且 YAML 根必须为 mapping。
+- `extra_proxies_yaml` 允许空字符串；非空时 YAML 根必须为 sequence。
+- `extra_proxy_providers_yaml` 允许空字符串；非空时 YAML 根必须为 mapping。
+
+Response `200`: 同 GET 结构。
+
+Errors:
+
+- `404 not_found`: user 不存在
+- `400 invalid_request`: YAML 解析失败或根类型不匹配
+
+## GET `/api/sub/{subscription_token}?format=mihomo`
+
+- 当用户已配置 Mihomo profile：
+  - 使用 profile.template_yaml 为基底渲染；
+  - 系统重建并覆盖 `proxies`、`proxy-providers`；
+  - relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 自动注入所有 provider 名称。
+- 当用户未配置 Mihomo profile：回退到 clash 输出。
+
+Response:
+
+- `200 text/yaml; charset=utf-8`
