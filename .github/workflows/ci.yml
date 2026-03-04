@@ -27,6 +27,26 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      - name: contract: xp-ops builds without web/dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf web/dist
+
+          cargo check --locked --bin xp-ops
+
+          if cargo check --locked --bin xp >/tmp/xp-missing-web-dist.log 2>&1; then
+            echo "expected cargo check --bin xp to fail when web/dist is missing" >&2
+            cat /tmp/xp-missing-web-dist.log >&2
+            exit 1
+          fi
+
+          if ! grep -q "missing web/dist/index.html" /tmp/xp-missing-web-dist.log; then
+            echo "expected missing web/dist/index.html error message" >&2
+            cat /tmp/xp-missing-web-dist.log >&2
+            exit 1
+          fi
+
       - name: build embedded web assets
         shell: bash
         run: |
