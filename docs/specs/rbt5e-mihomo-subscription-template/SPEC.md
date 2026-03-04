@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-03-04
 - Last: 2026-03-04
 
@@ -140,11 +140,11 @@
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
-- [ ] M1: 状态层新增 `UserMihomoProfile` 持久化与 Raft 命令
-- [ ] M2: HTTP 管理 API + 订阅 `format=mihomo` 路由落地
-- [ ] M3: Mihomo 渲染引擎（系统节点生成 + 合并 + 冲突重命名 + relay use 注入）
-- [ ] M4: Web UserDetails 模板编辑 + `mihomo` 预览
-- [ ] M5: 测试补齐与质量门禁通过
+- [x] M1: 状态层新增 `UserMihomoProfile` 持久化与 Raft 命令
+- [x] M2: HTTP 管理 API + 订阅 `format=mihomo` 路由落地
+- [x] M3: Mihomo 渲染引擎（系统节点生成 + 合并 + 冲突重命名 + relay use 注入）
+- [x] M4: Web UserDetails 模板编辑 + `mihomo` 预览
+- [x] M5: 测试补齐与质量门禁通过
 
 ## 方案概述（Approach, high-level）
 
@@ -161,6 +161,7 @@
 ## 变更记录（Change log）
 
 - 2026-03-04: 创建规格并冻结 API/渲染/回退口径。
+- 2026-03-04: 完成实现与验证（`cargo test`、`web lint/typecheck/test`），PR #95（label: `type:minor`，xray-e2e + label-gate 通过）。
 
 ## 参考（References）
 
