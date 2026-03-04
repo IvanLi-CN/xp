@@ -1345,4 +1345,62 @@ providerB:
         let err = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap_err();
         assert_eq!(err, SubscriptionError::MihomoTemplateRootNotMapping);
     }
+
+    #[test]
+    fn build_mihomo_yaml_adds_missing_relay_groups() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==")];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["DIRECT"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/a
+"#
+            .to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a sequence");
+
+        assert!(
+            groups
+                .iter()
+                .any(|g| g.get("name").and_then(Value::as_str) == Some("Auto")),
+            "non-relay groups in template should be preserved"
+        );
+
+        for relay in ["🛣️ Japan", "🛣️ HongKong", "🛣️ Korea"] {
+            let group = groups
+                .iter()
+                .find(|g| g.get("name").and_then(Value::as_str) == Some(relay))
+                .expect("relay group should be auto-added");
+            assert_eq!(group.get("type"), Some(&Value::String("url-test".to_string())));
+            let use_values = group
+                .get("use")
+                .and_then(Value::as_sequence)
+                .expect("relay group must include use list")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(use_values, vec!["providerA"]);
+        }
+    }
 }

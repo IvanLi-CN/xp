@@ -3376,6 +3376,63 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
 }
 
 #[tokio::test]
+async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let cases = vec![
+        (
+            json!({
+              "template_yaml": "- not-a-mapping\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "template_yaml must be a yaml mapping",
+        ),
+        (
+            json!({
+              "template_yaml": "port: 0\n",
+              "extra_proxies_yaml": "k: v\n",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "extra_proxies_yaml must be a yaml sequence or empty string",
+        ),
+        (
+            json!({
+              "template_yaml": "port: 0\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "- not-a-mapping\n",
+            }),
+            "extra_proxy_providers_yaml must be a yaml mapping or empty string",
+        ),
+    ];
+
+    for (payload, expected_message) in cases {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+                payload,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(res).await;
+        assert_eq!(body["error"]["code"], "invalid_request");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains(expected_message)),
+            "expected message to contain: {expected_message}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn subscription_token_reset_invalidates_old_token() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
