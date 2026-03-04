@@ -1,3 +1,6 @@
+#[cfg(xp_missing_web_dist)]
+compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
+
 use anyhow::Result;
 use std::sync::Arc;
 

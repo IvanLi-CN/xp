@@ -74,12 +74,18 @@ bun install
 lefthook install
 ```
 
-Build the embedded admin UI assets (`cargo build` embeds `web/dist`; missing assets will fail the build):
+Build the embedded admin UI assets before building/running `xp` (`cargo build` and `cargo run --bin xp` embed `web/dist`; missing assets will fail those builds):
 
 ```bash
 cd web
 bun install
 bun run build
+```
+
+For `xp-ops` only workflows, `web/dist` is not required. You can run it directly, for example:
+
+```bash
+cargo run --bin xp-ops -- --help
 ```
 
 Initialize a fresh data dir and start `xp`:
