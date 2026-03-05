@@ -27,7 +27,7 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: contract: xp-ops builds without web/dist
+      - name: "contract: xp-ops builds without web/dist"
         shell: bash
         run: |
           set -euo pipefail
