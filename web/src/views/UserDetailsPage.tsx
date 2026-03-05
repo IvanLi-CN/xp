@@ -838,7 +838,7 @@ export function UserDetailsPage() {
 								label="template_yaml"
 								value={mihomoTemplateYaml}
 								onChange={setMihomoTemplateYaml}
-								placeholder="Paste full Mihomo YAML template"
+								placeholder="Paste full Mihomo YAML (proxies/proxy-providers will be extracted on save)"
 								minRows={14}
 							/>
 							<YamlCodeEditor

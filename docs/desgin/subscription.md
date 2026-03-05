@@ -128,6 +128,9 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `template_yaml`（必填，YAML root 必须是 mapping）
   - `extra_proxies_yaml`（可空；非空时 root 必须是 sequence）
   - `extra_proxy_providers_yaml`（可空；非空时 root 必须是 mapping）
+- 保存 profile 时若 `template_yaml` 顶层包含 `proxies` / `proxy-providers`，服务端会自动抽取到
+  `extra_proxies_yaml` / `extra_proxy_providers_yaml` 并从 `template_yaml` 移除（返回值为规范化后的文本；
+  注释/anchors 不保证保留）。
 
 ### 6.2 渲染规则
 

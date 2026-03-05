@@ -3376,6 +3376,133 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
 }
 
 #[tokio::test]
+async fn admin_user_mihomo_profile_put_autosplits_full_config_template() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "template_yaml": r#"port: 0
+proxies:
+  - name: "custom-direct"
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "abc:def"
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+    proxies: ["DIRECT"]
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+
+    let template_yaml = profile["template_yaml"].as_str().unwrap();
+    let template_root: YamlValue = serde_yaml::from_str(template_yaml).unwrap();
+    let template_map = template_root
+        .as_mapping()
+        .expect("template must be a mapping");
+    assert!(
+        !template_map.contains_key(&YamlValue::String("proxies".to_string())),
+        "expected top-level proxies to be removed from template_yaml"
+    );
+    assert!(
+        !template_map.contains_key(&YamlValue::String("proxy-providers".to_string())),
+        "expected top-level proxy-providers to be removed from template_yaml"
+    );
+
+    let extra_proxies_yaml = profile["extra_proxies_yaml"].as_str().unwrap();
+    let extra_proxies_root: YamlValue = serde_yaml::from_str(extra_proxies_yaml).unwrap();
+    let extra_proxies = extra_proxies_root
+        .as_sequence()
+        .expect("extra_proxies_yaml must be a sequence");
+    assert!(
+        extra_proxies.iter().any(|proxy| {
+            proxy
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|name| name == "custom-direct")
+        }),
+        "expected extracted extra_proxies_yaml to include custom-direct"
+    );
+
+    let extra_providers_yaml = profile["extra_proxy_providers_yaml"].as_str().unwrap();
+    let extra_providers_root: YamlValue = serde_yaml::from_str(extra_providers_yaml).unwrap();
+    let extra_providers = extra_providers_root
+        .as_mapping()
+        .expect("extra_proxy_providers_yaml must be a mapping");
+    assert!(
+        extra_providers.contains_key(&YamlValue::String("providerA".to_string())),
+        "expected extracted extra_proxy_providers_yaml to include providerA"
+    );
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    let providers = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("proxy-providers must exist");
+    assert!(
+        providers.contains_key(&YamlValue::String("providerA".to_string())),
+        "expected subscription output proxy-providers to include providerA"
+    );
+
+    let proxies = yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxies must exist");
+    assert!(
+        proxies.iter().any(|proxy| {
+            proxy
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|name| name == "custom-direct")
+        }),
+        "expected subscription output to include custom-direct"
+    );
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

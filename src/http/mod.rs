@@ -5029,17 +5029,6 @@ async fn admin_put_user_access(
     }))
 }
 
-fn ensure_yaml_mapping(raw: &str, field_name: &str) -> Result<(), ApiError> {
-    let value: serde_yaml::Value = serde_yaml::from_str(raw)
-        .map_err(|e| ApiError::invalid_request(format!("{field_name} must be valid yaml: {e}")))?;
-    if !matches!(value, serde_yaml::Value::Mapping(_)) {
-        return Err(ApiError::invalid_request(format!(
-            "{field_name} must be a yaml mapping"
-        )));
-    }
-    Ok(())
-}
-
 fn ensure_yaml_sequence_or_empty(raw: &str, field_name: &str) -> Result<(), ApiError> {
     if raw.trim().is_empty() {
         return Ok(());
@@ -5071,20 +5060,71 @@ fn ensure_yaml_mapping_or_empty(raw: &str, field_name: &str) -> Result<(), ApiEr
 fn validate_user_mihomo_profile_payload(
     req: PutUserMihomoProfileRequest,
 ) -> Result<crate::state::UserMihomoProfile, ApiError> {
+    normalize_user_mihomo_profile_payload(req)
+}
+
+fn normalize_user_mihomo_profile_payload(
+    req: PutUserMihomoProfileRequest,
+) -> Result<crate::state::UserMihomoProfile, ApiError> {
     if req.template_yaml.trim().is_empty() {
         return Err(ApiError::invalid_request("template_yaml is required"));
     }
-    ensure_yaml_mapping(&req.template_yaml, "template_yaml")?;
-    ensure_yaml_sequence_or_empty(&req.extra_proxies_yaml, "extra_proxies_yaml")?;
-    ensure_yaml_mapping_or_empty(
-        &req.extra_proxy_providers_yaml,
-        "extra_proxy_providers_yaml",
-    )?;
+
+    let template_root: serde_yaml::Value = serde_yaml::from_str(&req.template_yaml)
+        .map_err(|e| ApiError::invalid_request(format!("template_yaml must be valid yaml: {e}")))?;
+    let serde_yaml::Value::Mapping(mut template_map) = template_root else {
+        return Err(ApiError::invalid_request(
+            "template_yaml must be a yaml mapping",
+        ));
+    };
+
+    let mut template_yaml = req.template_yaml;
+    let mut extra_proxies_yaml = req.extra_proxies_yaml;
+    let mut extra_proxy_providers_yaml = req.extra_proxy_providers_yaml;
+    let mut extracted = false;
+
+    if let Some(value) = template_map.remove(&serde_yaml::Value::String("proxies".to_string())) {
+        if !matches!(value, serde_yaml::Value::Sequence(_)) {
+            return Err(ApiError::invalid_request(
+                "template_yaml.proxies must be a yaml sequence",
+            ));
+        }
+        extra_proxies_yaml = serde_yaml::to_string(&value).map_err(|e| {
+            ApiError::invalid_request(format!("template_yaml.proxies must be valid yaml: {e}"))
+        })?;
+        extracted = true;
+    }
+
+    if let Some(value) =
+        template_map.remove(&serde_yaml::Value::String("proxy-providers".to_string()))
+    {
+        if !matches!(value, serde_yaml::Value::Mapping(_)) {
+            return Err(ApiError::invalid_request(
+                "template_yaml.proxy-providers must be a yaml mapping",
+            ));
+        }
+        extra_proxy_providers_yaml = serde_yaml::to_string(&value).map_err(|e| {
+            ApiError::invalid_request(format!(
+                "template_yaml.proxy-providers must be valid yaml: {e}"
+            ))
+        })?;
+        extracted = true;
+    }
+
+    if extracted {
+        template_yaml =
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(template_map)).map_err(|e| {
+                ApiError::invalid_request(format!("template_yaml must be valid yaml: {e}"))
+            })?;
+    }
+
+    ensure_yaml_sequence_or_empty(&extra_proxies_yaml, "extra_proxies_yaml")?;
+    ensure_yaml_mapping_or_empty(&extra_proxy_providers_yaml, "extra_proxy_providers_yaml")?;
 
     Ok(crate::state::UserMihomoProfile {
-        template_yaml: req.template_yaml,
-        extra_proxies_yaml: req.extra_proxies_yaml,
-        extra_proxy_providers_yaml: req.extra_proxy_providers_yaml,
+        template_yaml,
+        extra_proxies_yaml,
+        extra_proxy_providers_yaml,
     })
 }
 

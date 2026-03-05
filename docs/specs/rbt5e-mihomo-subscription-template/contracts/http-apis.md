@@ -32,6 +32,12 @@ Validation:
 - `extra_proxies_yaml` 允许空字符串；非空时 YAML 根必须为 sequence。
 - `extra_proxy_providers_yaml` 允许空字符串；非空时 YAML 根必须为 mapping。
 
+Normalization:
+
+- 若 `template_yaml` 顶层包含 `proxies`（sequence）或 `proxy-providers`（mapping），服务端会自动抽取到
+  `extra_proxies_yaml` / `extra_proxy_providers_yaml` 并从 `template_yaml` 移除；响应会返回规范化后的结果
+  （YAML 注释/anchors 不保证保留）。
+
 Response `200`: 同 GET 结构。
 
 Errors:
