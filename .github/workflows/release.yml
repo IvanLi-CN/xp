@@ -5,33 +5,46 @@ on:
     workflows: ["ci"]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Commit SHA on main to backfill release for
+        required: true
+        type: string
 
 permissions:
   contents: write
   issues: read
   pull-requests: read
 
+env:
+  RELEASE_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.workflow_run.head_sha }}
+
 concurrency:
-  group: release-main
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ env.RELEASE_HEAD_SHA }}
 
       - name: determine release intent (labels)
         id: intent
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_SHA: ${{ env.RELEASE_HEAD_SHA }}
         run: bash ./.github/scripts/release-intent.sh
 
       - name: summary (release intent)
@@ -40,7 +53,8 @@ jobs:
         run: |
           {
             echo "### Release intent"
-            echo "- workflow_run: ${{ github.event.workflow_run.name }} @ ${{ github.event.workflow_run.head_sha }}"
+            echo "- trigger: ${{ github.event_name }}"
+            echo "- head_sha: ${{ env.RELEASE_HEAD_SHA }}"
             echo "- pr: #${{ steps.intent.outputs.pr_number }} (${{ steps.intent.outputs.pr_url }})"
             echo "- intent_label: ${{ steps.intent.outputs.release_intent_label }}"
             echo "- is_prerelease: ${{ steps.intent.outputs.is_prerelease }}"
