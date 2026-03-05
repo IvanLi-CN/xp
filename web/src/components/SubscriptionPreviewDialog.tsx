@@ -42,7 +42,7 @@ function chooseLanguage(
 	format: SubscriptionFormat,
 	content: string,
 ): CodeLanguage {
-	if (format === "clash") return "yaml";
+	if (format === "clash" || format === "mihomo") return "yaml";
 	if (isProbablyJson(content)) return "json";
 	return "text";
 }
@@ -595,7 +595,9 @@ function CodeView({
 		<div
 			className={[
 				"rounded-[14px] border overflow-hidden relative",
-				fillHeight ? "max-h-[40vh] lg:h-[508px] lg:max-h-none" : "max-h-[56vh]",
+				fillHeight
+					? "max-h-[40vh] lg:h-[508px] lg:max-h-none"
+					: "h-[56vh] min-h-[320px] max-h-[56vh]",
 			].join(" ")}
 			style={{ borderColor: codeStroke, backgroundColor: codeBg }}
 		>

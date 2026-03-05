@@ -251,6 +251,12 @@ pub fn build_mihomo_yaml(
         nodes,
         &mut rng,
     )?;
+    let mut root = parse_template_mapping(&profile.template_yaml)?;
+    let proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
+    remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
+    dedupe_proxy_refs_in_mapping(&mut root);
+    prune_template_reference_helper_blocks(&mut root);
+
     let mut merged_proxies = merge_and_rename_proxies(
         generated,
         parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?,
@@ -260,8 +266,6 @@ pub fn build_mihomo_yaml(
         .keys()
         .filter_map(|k| k.as_str().map(|s| s.to_string()))
         .collect::<Vec<_>>();
-
-    let mut root = parse_template_mapping(&profile.template_yaml)?;
     root.insert(
         serde_yaml::Value::String("proxies".to_string()),
         serde_yaml::Value::Sequence(std::mem::take(&mut merged_proxies)),
@@ -285,6 +289,357 @@ const MIHOMO_CHAIN_SPECS: [(&str, &str); 3] = [
     ("HK", "🛣️ HongKong"),
     ("KR", "🛣️ Korea"),
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProxyRefKind {
+    Reality,
+    SsDirect,
+    ChainJp,
+    ChainHk,
+    ChainKr,
+}
+
+impl ProxyRefKind {
+    const ALL: [Self; 5] = [
+        Self::Reality,
+        Self::SsDirect,
+        Self::ChainJp,
+        Self::ChainHk,
+        Self::ChainKr,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Reality => "reality",
+            Self::SsDirect => "ss-direct",
+            Self::ChainJp => "ss-chain-jp",
+            Self::ChainHk => "ss-chain-hk",
+            Self::ChainKr => "ss-chain-kr",
+        }
+    }
+}
+
+fn classify_proxy_ref_name(name: &str) -> Option<(ProxyRefKind, String)> {
+    if let Some(base) = name.strip_suffix("-reality") {
+        return Some((ProxyRefKind::Reality, base.to_string()));
+    }
+    if let Some(base) = name.strip_suffix("-ss") {
+        return Some((ProxyRefKind::SsDirect, base.to_string()));
+    }
+    if let Some(base) = name.strip_suffix("-JP") {
+        return Some((ProxyRefKind::ChainJp, base.to_string()));
+    }
+    if let Some(base) = name.strip_suffix("-HK") {
+        return Some((ProxyRefKind::ChainHk, base.to_string()));
+    }
+    if let Some(base) = name.strip_suffix("-KR") {
+        return Some((ProxyRefKind::ChainKr, base.to_string()));
+    }
+    None
+}
+
+fn collect_generated_proxy_names_by_kind(
+    generated: &[serde_yaml::Value],
+) -> std::collections::BTreeMap<ProxyRefKind, Vec<(String, String)>> {
+    let mut out = std::collections::BTreeMap::<ProxyRefKind, Vec<(String, String)>>::new();
+    for (idx, proxy) in generated.iter().enumerate() {
+        let Ok(name) = proxy_name_from_yaml(proxy, idx) else {
+            continue;
+        };
+        let Some((kind, base)) = classify_proxy_ref_name(&name) else {
+            continue;
+        };
+        out.entry(kind).or_default().push((base, name));
+    }
+    out
+}
+
+fn collect_template_proxy_refs_by_kind(
+    root: &serde_yaml::Mapping,
+) -> std::collections::BTreeMap<ProxyRefKind, Vec<(String, String)>> {
+    let mut out = std::collections::BTreeMap::<ProxyRefKind, Vec<(String, String)>>::new();
+    let mut seen_refs = std::collections::BTreeSet::<String>::new();
+    if let Some(groups) = root.get(serde_yaml::Value::String("proxy-groups".to_string())) {
+        collect_template_proxy_refs_in_value(groups, &mut seen_refs, &mut out);
+    }
+    collect_template_proxy_refs_in_mapping(root, &mut seen_refs, &mut out);
+
+    out
+}
+
+fn collect_template_proxy_refs_in_mapping(
+    mapping: &serde_yaml::Mapping,
+    seen_refs: &mut std::collections::BTreeSet<String>,
+    out: &mut std::collections::BTreeMap<ProxyRefKind, Vec<(String, String)>>,
+) {
+    for (key, value) in mapping {
+        if key.as_str() == Some("proxies") {
+            collect_proxy_refs_from_sequence_value(value, seen_refs, out);
+        }
+        collect_template_proxy_refs_in_value(value, seen_refs, out);
+    }
+}
+
+fn collect_template_proxy_refs_in_value(
+    value: &serde_yaml::Value,
+    seen_refs: &mut std::collections::BTreeSet<String>,
+    out: &mut std::collections::BTreeMap<ProxyRefKind, Vec<(String, String)>>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            collect_template_proxy_refs_in_mapping(mapping, seen_refs, out);
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                collect_template_proxy_refs_in_value(item, seen_refs, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_proxy_refs_from_sequence_value(
+    value: &serde_yaml::Value,
+    seen_refs: &mut std::collections::BTreeSet<String>,
+    out: &mut std::collections::BTreeMap<ProxyRefKind, Vec<(String, String)>>,
+) {
+    let serde_yaml::Value::Sequence(proxy_refs) = value else {
+        return;
+    };
+    for proxy_ref in proxy_refs {
+        let Some(proxy_ref) = proxy_ref.as_str() else {
+            continue;
+        };
+        if !seen_refs.insert(proxy_ref.to_string()) {
+            continue;
+        }
+        let Some((kind, base)) = classify_proxy_ref_name(proxy_ref) else {
+            continue;
+        };
+        out.entry(kind)
+            .or_default()
+            .push((base, proxy_ref.to_string()));
+    }
+}
+
+fn build_proxy_reference_rename_map(
+    root: &serde_yaml::Mapping,
+    generated: &[serde_yaml::Value],
+) -> std::collections::BTreeMap<String, String> {
+    let generated_by_kind = collect_generated_proxy_names_by_kind(generated);
+    let refs_by_kind = collect_template_proxy_refs_by_kind(root);
+    let mut rename_map = std::collections::BTreeMap::<String, String>::new();
+
+    for kind in ProxyRefKind::ALL {
+        let old_refs = refs_by_kind.get(&kind).cloned().unwrap_or_default();
+        if old_refs.is_empty() {
+            continue;
+        }
+        let generated_names = generated_by_kind.get(&kind).cloned().unwrap_or_default();
+        if generated_names.is_empty() {
+            for (_, old_name) in &old_refs {
+                tracing::warn!(
+                    proxy_name = %old_name,
+                    category = kind.label(),
+                    "mihomo proxy-group reference has no generated replacement"
+                );
+            }
+            continue;
+        }
+        if old_refs.len() != generated_names.len() {
+            tracing::warn!(
+                category = kind.label(),
+                old_count = old_refs.len(),
+                generated_count = generated_names.len(),
+                "mihomo proxy-group reference count differs from generated proxies; using best-effort remap"
+            );
+        }
+
+        let mut used_generated = vec![false; generated_names.len()];
+        let mut unresolved_old = vec![true; old_refs.len()];
+
+        for (old_idx, (old_base, old_name)) in old_refs.iter().enumerate() {
+            if let Some((gen_idx, (_, generated_name))) =
+                generated_names
+                    .iter()
+                    .enumerate()
+                    .find(|(gen_idx, (generated_base, _))| {
+                        !used_generated[*gen_idx] && generated_base == old_base
+                    })
+            {
+                used_generated[gen_idx] = true;
+                unresolved_old[old_idx] = false;
+                rename_map.insert(old_name.clone(), generated_name.clone());
+            }
+        }
+
+        let mut remaining_generated = generated_names
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !used_generated[*idx])
+            .map(|(_, (_, generated_name))| generated_name.clone());
+        for (old_idx, (_, old_name)) in old_refs.iter().enumerate() {
+            if !unresolved_old[old_idx] {
+                continue;
+            }
+            let Some(generated_name) = remaining_generated.next() else {
+                continue;
+            };
+            unresolved_old[old_idx] = false;
+            rename_map.insert(old_name.clone(), generated_name);
+        }
+
+        for (old_idx, (_, old_name)) in old_refs.iter().enumerate() {
+            if !unresolved_old[old_idx] {
+                continue;
+            }
+            let fallback = generated_names[old_idx % generated_names.len()].1.clone();
+            tracing::warn!(
+                proxy_name = %old_name,
+                mapped_to = %fallback,
+                category = kind.label(),
+                "mihomo proxy-group reference remap reused generated proxy due count mismatch"
+            );
+            rename_map.insert(old_name.clone(), fallback);
+        }
+    }
+
+    rename_map
+}
+
+fn remap_proxy_references_in_mapping(
+    mapping: &mut serde_yaml::Mapping,
+    rename_map: &std::collections::BTreeMap<String, String>,
+) {
+    if rename_map.is_empty() {
+        return;
+    }
+
+    for (key, value) in mapping.iter_mut() {
+        let is_proxies_key = key.as_str() == Some("proxies");
+        if is_proxies_key {
+            remap_proxy_reference_sequence(value, rename_map);
+        }
+        remap_proxy_references_in_value(value, rename_map);
+    }
+}
+
+fn remap_proxy_references_in_value(
+    value: &mut serde_yaml::Value,
+    rename_map: &std::collections::BTreeMap<String, String>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            remap_proxy_references_in_mapping(mapping, rename_map)
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                remap_proxy_references_in_value(item, rename_map);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn remap_proxy_reference_sequence(
+    value: &mut serde_yaml::Value,
+    rename_map: &std::collections::BTreeMap<String, String>,
+) {
+    let serde_yaml::Value::Sequence(seq) = value else {
+        return;
+    };
+    for item in seq {
+        let serde_yaml::Value::String(name) = item else {
+            continue;
+        };
+        if let Some(mapped) = rename_map.get(name) {
+            *name = mapped.clone();
+        }
+    }
+}
+
+fn dedupe_proxy_refs_in_mapping(mapping: &mut serde_yaml::Mapping) {
+    for (key, value) in mapping.iter_mut() {
+        if key.as_str() == Some("proxies") {
+            dedupe_proxy_refs_in_sequence(value);
+        }
+        dedupe_proxy_refs_in_value(value);
+    }
+}
+
+fn dedupe_proxy_refs_in_value(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => dedupe_proxy_refs_in_mapping(mapping),
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                dedupe_proxy_refs_in_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn dedupe_proxy_refs_in_sequence(value: &mut serde_yaml::Value) {
+    let serde_yaml::Value::Sequence(seq) = value else {
+        return;
+    };
+    let mut seen = std::collections::BTreeSet::<String>::new();
+    seq.retain(|item| {
+        let Some(name) = item.as_str() else {
+            return true;
+        };
+        if seen.insert(name.to_string()) {
+            return true;
+        }
+        tracing::warn!(
+            proxy_name = name,
+            "mihomo duplicate proxy reference removed while flattening template"
+        );
+        false
+    });
+}
+
+fn prune_template_reference_helper_blocks(root: &mut serde_yaml::Mapping) {
+    let keys_to_remove = root
+        .iter()
+        .filter_map(|(key, value)| {
+            let key_str = key.as_str()?;
+            if matches!(key_str, "proxies" | "proxy-providers" | "proxy-groups") {
+                return None;
+            }
+            let serde_yaml::Value::Mapping(map) = value else {
+                return None;
+            };
+            if map.len() != 1 {
+                return None;
+            }
+            let (inner_key, inner_value) = map.iter().next()?;
+            let Some(inner_key_str) = inner_key.as_str() else {
+                return None;
+            };
+            if !matches!(inner_key_str, "proxies" | "use") {
+                return None;
+            }
+            let serde_yaml::Value::Sequence(seq) = inner_value else {
+                return None;
+            };
+            if !seq.iter().all(|item| item.as_str().is_some()) {
+                return None;
+            }
+            Some(serde_yaml::Value::String(key_str.to_string()))
+        })
+        .collect::<Vec<_>>();
+
+    for key in keys_to_remove {
+        if let Some(key_str) = key.as_str() {
+            tracing::debug!(
+                key = key_str,
+                "removed mihomo template helper block after flattening references"
+            );
+        }
+        root.remove(&key);
+    }
+}
 
 fn parse_template_mapping(input: &str) -> Result<serde_yaml::Mapping, SubscriptionError> {
     let root: serde_yaml::Value =
@@ -462,10 +817,9 @@ fn inject_relay_group_use(root: &mut serde_yaml::Mapping, provider_names: &[Stri
 }
 
 fn slugify_node_name(input: &str) -> String {
-    let lower = input.to_ascii_lowercase();
     let mut out = String::new();
     let mut last_dash = false;
-    for ch in lower.chars() {
+    for ch in input.chars() {
         if ch.is_ascii_alphanumeric() {
             out.push(ch);
             last_dash = false;
@@ -1271,7 +1625,7 @@ rules: []
 "#
             .to_string(),
             extra_proxies_yaml: r#"
-- name: "tokyo-a-ss"
+- name: "Tokyo-A-ss"
   type: ss
   server: custom.example.com
   port: 443
@@ -1305,12 +1659,12 @@ providerB:
             .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
             .collect::<std::collections::BTreeSet<_>>();
 
-        assert!(names.contains("tokyo-a-reality"));
-        assert!(names.contains("tokyo-a-ss"));
-        assert!(names.contains("tokyo-a-JP"));
-        assert!(names.contains("tokyo-a-HK"));
-        assert!(names.contains("tokyo-a-KR"));
-        assert!(names.contains("tokyo-a-ss-dup2"));
+        assert!(names.contains("Tokyo-A-reality"));
+        assert!(names.contains("Tokyo-A-ss"));
+        assert!(names.contains("Tokyo-A-JP"));
+        assert!(names.contains("Tokyo-A-HK"));
+        assert!(names.contains("Tokyo-A-KR"));
+        assert!(names.contains("Tokyo-A-ss-dup2"));
 
         let proxy_groups = v
             .get("proxy-groups")
@@ -1350,7 +1704,13 @@ providerB:
     fn build_mihomo_yaml_adds_missing_relay_groups() {
         let u = user("u1", "alice");
         let n = node("n1", "Tokyo A", "example.com");
-        let endpoints = vec![endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==")];
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
             template_yaml: r#"
@@ -1392,7 +1752,10 @@ providerA:
                 .iter()
                 .find(|g| g.get("name").and_then(Value::as_str) == Some(relay))
                 .expect("relay group should be auto-added");
-            assert_eq!(group.get("type"), Some(&Value::String("url-test".to_string())));
+            assert_eq!(
+                group.get("type"),
+                Some(&Value::String("url-test".to_string()))
+            );
             let use_values = group
                 .get("use")
                 .and_then(Value::as_sequence)
@@ -1402,5 +1765,288 @@ providerA:
                 .collect::<Vec<_>>();
             assert_eq!(use_values, vec!["providerA"]);
         }
+    }
+
+    #[test]
+    fn build_mihomo_yaml_remaps_legacy_proxy_refs_to_generated_names() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let n2 = node("n2", "Beta", "beta.example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+            endpoint_ss("e3", "n2", "ss", 443, "BBBBBBBBBBBBBBBBBBBBBB=="),
+            endpoint_vless(
+                "e4",
+                "n2",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![
+            membership("u1", "n1", "e1"),
+            membership("u1", "n1", "e2"),
+            membership("u1", "n2", "e3"),
+            membership("u1", "n2", "e4"),
+        ];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+helpers:
+  keep: true
+  proxies:
+    - JP-BV-reality
+    - IIJ-LC-JP
+proxy-groups:
+  - name: "🔒 高质量"
+    type: select
+    proxies:
+      - JP-BV-reality
+      - IIJ-LC-reality
+      - JP-BV-ss
+      - IIJ-LC-ss
+      - JP-BV-JP
+      - IIJ-LC-JP
+      - JP-BV-HK
+      - IIJ-LC-HK
+      - JP-BV-KR
+      - IIJ-LC-KR
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1, n2], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+
+        let expected = [
+            "Alpha-reality",
+            "Beta-reality",
+            "Alpha-ss",
+            "Beta-ss",
+            "Alpha-JP",
+            "Beta-JP",
+            "Alpha-HK",
+            "Beta-HK",
+            "Alpha-KR",
+            "Beta-KR",
+        ];
+        let group = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| groups.first())
+            .expect("first group should exist");
+        let refs = group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, expected);
+
+        let helper_refs = v
+            .get("helpers")
+            .and_then(Value::as_mapping)
+            .and_then(|helpers| helpers.get(Value::String("proxies".to_string())))
+            .and_then(Value::as_sequence)
+            .expect("helper proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(helper_refs, vec!["Alpha-reality", "Beta-JP"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_remaps_all_legacy_refs_even_when_generated_count_is_smaller() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🔒 高质量"
+    type: select
+    proxies:
+      - JP-BV-reality
+      - IIJ-LC-reality
+      - JP-BV-ss
+      - IIJ-LC-ss
+      - JP-BV-JP
+      - IIJ-LC-JP
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| groups.first())
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["Alpha-reality", "Alpha-ss", "Alpha-JP"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_dedupes_all_proxy_refs_in_groups() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let endpoints = vec![endpoint_vless(
+            "e1",
+            "n1",
+            "vless",
+            8443,
+            serde_json::json!({
+              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+              "short_ids": ["0123456789abcdef"],
+              "active_short_id": "0123456789abcdef"
+            }),
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - 🌟 Korea
+      - 🌟 Korea
+      - JP-BV-reality
+      - IIJ-LC-reality
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| groups.first())
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["🌟 Korea", "Alpha-reality"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let endpoints = vec![endpoint_vless(
+            "e1",
+            "n1",
+            "vless",
+            8443,
+            serde_json::json!({
+              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+              "short_ids": ["0123456789abcdef"],
+              "active_short_id": "0123456789abcdef"
+            }),
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+proxy-group:
+  proxies: &subscription_proxies
+    - JP-BV-reality
+proxy-use:
+  use: &proxy_use
+    - providerA
+port: 0
+proxy-groups:
+  - name: "demo"
+    type: select
+    proxies: *subscription_proxies
+    use: *proxy_use
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/sub-a
+"#
+            .to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+
+        assert!(
+            v.get("proxy-group").is_none() && v.get("proxy-use").is_none(),
+            "helper reference blocks should be removed from final output"
+        );
+
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| groups.first())
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["Alpha-reality"]);
     }
 }

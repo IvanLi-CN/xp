@@ -37,6 +37,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
+import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
@@ -833,39 +834,27 @@ export function UserDetailsPage() {
 									{formatError(mihomoProfileQuery.error)}
 								</div>
 							) : null}
-							<label className="form-control gap-2">
-								<span className="label-text">template_yaml</span>
-								<textarea
-									className="textarea textarea-bordered font-mono min-h-40"
-									value={mihomoTemplateYaml}
-									onChange={(event) =>
-										setMihomoTemplateYaml(event.target.value)
-									}
-									placeholder="Paste full Mihomo YAML template"
-								/>
-							</label>
-							<label className="form-control gap-2">
-								<span className="label-text">extra_proxies_yaml</span>
-								<textarea
-									className="textarea textarea-bordered font-mono min-h-28"
-									value={mihomoExtraProxiesYaml}
-									onChange={(event) =>
-										setMihomoExtraProxiesYaml(event.target.value)
-									}
-									placeholder="- name: custom-ss\n  type: ss\n  ..."
-								/>
-							</label>
-							<label className="form-control gap-2">
-								<span className="label-text">extra_proxy_providers_yaml</span>
-								<textarea
-									className="textarea textarea-bordered font-mono min-h-28"
-									value={mihomoExtraProxyProvidersYaml}
-									onChange={(event) =>
-										setMihomoExtraProxyProvidersYaml(event.target.value)
-									}
-									placeholder="ProviderA:\n  type: http\n  ..."
-								/>
-							</label>
+							<YamlCodeEditor
+								label="template_yaml"
+								value={mihomoTemplateYaml}
+								onChange={setMihomoTemplateYaml}
+								placeholder="Paste full Mihomo YAML template"
+								minRows={14}
+							/>
+							<YamlCodeEditor
+								label="extra_proxies_yaml"
+								value={mihomoExtraProxiesYaml}
+								onChange={setMihomoExtraProxiesYaml}
+								placeholder="- name: custom-ss\n  type: ss\n  ..."
+								minRows={8}
+							/>
+							<YamlCodeEditor
+								label="extra_proxy_providers_yaml"
+								value={mihomoExtraProxyProvidersYaml}
+								onChange={setMihomoExtraProxyProvidersYaml}
+								placeholder="ProviderA:\n  type: http\n  ..."
+								minRows={8}
+							/>
 							{mihomoProfileSaveError ? (
 								<div className="alert alert-error py-2 text-sm">
 									{mihomoProfileSaveError}

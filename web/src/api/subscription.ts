@@ -21,6 +21,7 @@ export async function fetchSubscription(
 		headers: {
 			Accept: "text/plain",
 		},
+		cache: "no-store",
 		signal,
 	});
 
