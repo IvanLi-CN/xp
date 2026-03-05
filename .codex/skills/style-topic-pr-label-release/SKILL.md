@@ -10,6 +10,7 @@ This topic skill is generated from `skills/style-playbook/references/tags/pr-lab
 ## Starter Required
 
 Load `$style-playbook-starter` first for the standard maintenance workflow:
+
 - patch (write)
 - enhance (write)
 - update (read)

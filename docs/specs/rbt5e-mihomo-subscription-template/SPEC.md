@@ -83,11 +83,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GET /api/sub/{subscription_token}?format=mihomo` | HTTP API | external | New | ./contracts/http-apis.md | backend | mihomo client/web preview | 无模板时回退 clash |
-| `GET /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API | internal | New | ./contracts/http-apis.md | backend | web admin | 返回用户模板配置 |
-| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API | internal | New | ./contracts/http-apis.md | backend | web admin | 写入并校验 YAML |
+| 接口（Name）                                                 | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）       | 备注（Notes）      |
+| ------------------------------------------------------------ | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------------- | ------------------ |
+| `GET /api/sub/{subscription_token}?format=mihomo`            | HTTP API     | external      | New            | ./contracts/http-apis.md | backend         | mihomo client/web preview | 无模板时回退 clash |
+| `GET /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | New            | ./contracts/http-apis.md | backend         | web admin                 | 返回用户模板配置   |
+| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | New            | ./contracts/http-apis.md | backend         | web admin                 | 写入并校验 YAML    |
 
 ### 契约文档（按 Kind 拆分）
 
