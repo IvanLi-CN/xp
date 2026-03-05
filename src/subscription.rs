@@ -614,9 +614,7 @@ fn prune_template_reference_helper_blocks(root: &mut serde_yaml::Mapping) {
                 return None;
             }
             let (inner_key, inner_value) = map.iter().next()?;
-            let Some(inner_key_str) = inner_key.as_str() else {
-                return None;
-            };
+            let inner_key_str = inner_key.as_str()?;
             if !matches!(inner_key_str, "proxies" | "use") {
                 return None;
             }
