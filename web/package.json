@@ -18,10 +18,13 @@
 		"test:e2e": "playwright test"
 	},
 	"dependencies": {
+		"@codemirror/lang-yaml": "^6.1.2",
 		"@iconify-json/tabler": "^1.2.26",
 		"@iconify/react": "^6.0.2",
 		"@tanstack/react-query": "^5.0.0",
 		"@tanstack/react-router": "^1.0.0",
+		"@uiw/codemirror-theme-github": "^4.25.7",
+		"@uiw/react-codemirror": "^4.25.7",
 		"react": "^19.0.0",
 		"react-dom": "^19.0.0",
 		"zod": "^3.0.0"
