@@ -63,6 +63,7 @@
 
 |    ID | Title                                      | Status | Spec                                           | Last       | Notes                                                                  |
 | ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
+| 5yd72 | CI workflow YAML 语法修复                  | 部分完成（2/3） | `5yd72-ci-workflow-yaml-parse-fix/SPEC.md`    | 2026-03-05 | PR #97 follow-up（修复 `ci.yml` 语法阻断，恢复发版链路）               |
 | rbt5e | 用户订阅 Mihomo 定制化配置                | 已完成 | `rbt5e-mihomo-subscription-template/SPEC.md`   | 2026-03-04 | PR #95（type:minor；xray-e2e + pr-label-gate 通过）                   |
 | gj4xg | Dashboard/Nodes shared node inventory list | 已完成 | `gj4xg-dashboard-nodes-shared-list/SPEC.md`    | 2026-03-04 | PR #93 + checks green；后续完成 2x2 列合并、窄宽度列表化与截图补充     |
 | 9fke7 | Mihomo subscription/config redact CLI      | 已完成 | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
