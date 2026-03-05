@@ -63,7 +63,8 @@
 
 |    ID | Title                                      | Status | Spec                                           | Last       | Notes                                                                  |
 | ----: | ------------------------------------------ | ------ | ---------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
-| rbt5e | 用户订阅 Mihomo 定制化配置                | 已完成 | `rbt5e-mihomo-subscription-template/SPEC.md`   | 2026-03-04 | PR #95（type:minor；xray-e2e + pr-label-gate 通过）                   |
+| 5yd72 | CI workflow YAML 语法修复                  | 已完成 | `5yd72-ci-workflow-yaml-parse-fix/SPEC.md`     | 2026-03-05 | PR #98（type:patch；ci/pr-label-gate/xray-e2e 全绿，恢复发版链路）     |
+| rbt5e | 用户订阅 Mihomo 定制化配置                 | 已完成 | `rbt5e-mihomo-subscription-template/SPEC.md`   | 2026-03-04 | PR #95（type:minor；xray-e2e + pr-label-gate 通过）                    |
 | gj4xg | Dashboard/Nodes shared node inventory list | 已完成 | `gj4xg-dashboard-nodes-shared-list/SPEC.md`    | 2026-03-04 | PR #93 + checks green；后续完成 2x2 列合并、窄宽度列表化与截图补充     |
 | 9fke7 | Mihomo subscription/config redact CLI      | 已完成 | `9fke7-mihomo-redact-cli/SPEC.md`              | 2026-03-03 | PR #92                                                                 |
 | puf2g | Node panel icon-only entry for node lists  | 已完成 | `puf2g-node-panel-link-entry/SPEC.md`          | 2026-03-02 | PR #87                                                                 |
