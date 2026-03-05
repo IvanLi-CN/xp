@@ -518,6 +518,16 @@ struct PutUserAccessRequest {
     items: Vec<PutUserAccessItemRequest>,
 }
 
+#[derive(Deserialize)]
+struct PutUserMihomoProfileRequest {
+    #[serde(default)]
+    template_yaml: String,
+    #[serde(default)]
+    extra_proxies_yaml: String,
+    #[serde(default)]
+    extra_proxy_providers_yaml: String,
+}
+
 #[derive(Serialize)]
 struct PutUserAccessResponse {
     created: usize,
@@ -771,6 +781,10 @@ pub fn build_router(
         .route(
             "/users/:user_id/access",
             get(admin_get_user_access).put(admin_put_user_access),
+        )
+        .route(
+            "/users/:user_id/subscription-mihomo-profile",
+            get(admin_get_user_mihomo_profile).put(admin_put_user_mihomo_profile),
         )
         .route(
             "/users/:user_id/reset-credentials",
@@ -5015,6 +5029,96 @@ async fn admin_put_user_access(
     }))
 }
 
+fn ensure_yaml_mapping(raw: &str, field_name: &str) -> Result<(), ApiError> {
+    let value: serde_yaml::Value = serde_yaml::from_str(raw)
+        .map_err(|e| ApiError::invalid_request(format!("{field_name} must be valid yaml: {e}")))?;
+    if !matches!(value, serde_yaml::Value::Mapping(_)) {
+        return Err(ApiError::invalid_request(format!(
+            "{field_name} must be a yaml mapping"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_yaml_sequence_or_empty(raw: &str, field_name: &str) -> Result<(), ApiError> {
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    let value: serde_yaml::Value = serde_yaml::from_str(raw)
+        .map_err(|e| ApiError::invalid_request(format!("{field_name} must be valid yaml: {e}")))?;
+    if !matches!(value, serde_yaml::Value::Sequence(_)) {
+        return Err(ApiError::invalid_request(format!(
+            "{field_name} must be a yaml sequence or empty string"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_yaml_mapping_or_empty(raw: &str, field_name: &str) -> Result<(), ApiError> {
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    let value: serde_yaml::Value = serde_yaml::from_str(raw)
+        .map_err(|e| ApiError::invalid_request(format!("{field_name} must be valid yaml: {e}")))?;
+    if !matches!(value, serde_yaml::Value::Mapping(_)) {
+        return Err(ApiError::invalid_request(format!(
+            "{field_name} must be a yaml mapping or empty string"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_user_mihomo_profile_payload(
+    req: PutUserMihomoProfileRequest,
+) -> Result<crate::state::UserMihomoProfile, ApiError> {
+    if req.template_yaml.trim().is_empty() {
+        return Err(ApiError::invalid_request("template_yaml is required"));
+    }
+    ensure_yaml_mapping(&req.template_yaml, "template_yaml")?;
+    ensure_yaml_sequence_or_empty(&req.extra_proxies_yaml, "extra_proxies_yaml")?;
+    ensure_yaml_mapping_or_empty(
+        &req.extra_proxy_providers_yaml,
+        "extra_proxy_providers_yaml",
+    )?;
+
+    Ok(crate::state::UserMihomoProfile {
+        template_yaml: req.template_yaml,
+        extra_proxies_yaml: req.extra_proxies_yaml,
+        extra_proxy_providers_yaml: req.extra_proxy_providers_yaml,
+    })
+}
+
+async fn admin_get_user_mihomo_profile(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<crate::state::UserMihomoProfile>, ApiError> {
+    let store = state.store.lock().await;
+    if store.get_user(&user_id).is_none() {
+        return Err(ApiError::not_found(format!("user not found: {user_id}")));
+    }
+    Ok(Json(
+        store.get_user_mihomo_profile(&user_id).unwrap_or_default(),
+    ))
+}
+
+async fn admin_put_user_mihomo_profile(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    ApiJson(req): ApiJson<PutUserMihomoProfileRequest>,
+) -> Result<Json<crate::state::UserMihomoProfile>, ApiError> {
+    let profile = validate_user_mihomo_profile_payload(req)?;
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetUserMihomoProfile {
+            user_id: user_id.clone(),
+            profile: profile.clone(),
+        },
+    )
+    .await?;
+
+    Ok(Json(profile))
+}
+
 async fn admin_reset_user_credentials(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
@@ -5355,9 +5459,10 @@ async fn get_subscription(
         None => "base64",
         Some("raw") => "raw",
         Some("clash") => "clash",
+        Some("mihomo") => "mihomo",
         Some(_) => {
             return Err(ApiError::invalid_request(
-                "invalid format, expected raw|clash or omit for base64",
+                "invalid format, expected raw|clash|mihomo or omit for base64",
             ));
         }
     };
@@ -5368,7 +5473,7 @@ async fn get_subscription(
         .as_ref()
         .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
 
-    let (user, memberships, endpoints, nodes) = {
+    let (user, memberships, endpoints, nodes, mihomo_profile) = {
         let store = state.store.lock().await;
         let user = store
             .get_user_by_subscription_token(&subscription_token)
@@ -5378,7 +5483,8 @@ async fn get_subscription(
             .map_err(ApiError::from)?;
         let endpoints = store.list_endpoints();
         let nodes = store.list_nodes();
-        (user, memberships, endpoints, nodes)
+        let mihomo_profile = store.get_user_mihomo_profile(&user.user_id);
+        (user, memberships, endpoints, nodes, mihomo_profile)
     };
 
     match format {
@@ -5392,6 +5498,24 @@ async fn get_subscription(
             subscription::build_clash_yaml(ca_key_pem, &user, &memberships, &endpoints, &nodes)
                 .map(text_yaml_utf8)
                 .map_err(|_e| ApiError::internal("failed to build subscription"))
+        }
+        "mihomo" => {
+            if let Some(profile) = mihomo_profile {
+                subscription::build_mihomo_yaml(
+                    ca_key_pem,
+                    &user,
+                    &memberships,
+                    &endpoints,
+                    &nodes,
+                    &profile,
+                )
+                .map(text_yaml_utf8)
+                .map_err(|_e| ApiError::internal("failed to build subscription"))
+            } else {
+                subscription::build_clash_yaml(ca_key_pem, &user, &memberships, &endpoints, &nodes)
+                    .map(text_yaml_utf8)
+                    .map_err(|_e| ApiError::internal("failed to build subscription"))
+            }
         }
         _ => Err(ApiError::internal("unreachable subscription format")),
     }

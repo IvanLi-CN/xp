@@ -13,7 +13,9 @@ import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
 	deleteAdminUser,
 	fetchAdminUser,
+	fetchAdminUserMihomoProfile,
 	patchAdminUser,
+	putAdminUserMihomoProfile,
 	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
@@ -90,6 +92,14 @@ export function UserDetailsPage() {
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
 	const [subError, setSubError] = useState<string | null>(null);
+	const [mihomoTemplateYaml, setMihomoTemplateYaml] = useState("");
+	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
+	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
+		useState("");
+	const [isSavingMihomoProfile, setIsSavingMihomoProfile] = useState(false);
+	const [mihomoProfileSaveError, setMihomoProfileSaveError] = useState<
+		string | null
+	>(null);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
@@ -97,6 +107,13 @@ export function UserDetailsPage() {
 		queryKey: ["adminUser", adminToken, userId],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminUser(adminToken, userId, signal),
+	});
+
+	const mihomoProfileQuery = useQuery({
+		queryKey: ["adminUserMihomoProfile", adminToken, userId],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) =>
+			fetchAdminUserMihomoProfile(adminToken, userId, signal),
 	});
 
 	const nodesQuery = useQuery({
@@ -159,6 +176,16 @@ export function UserDetailsPage() {
 		}
 		setUserSaveError(null);
 	}, [user]);
+
+	useEffect(() => {
+		if (!mihomoProfileQuery.data) return;
+		setMihomoTemplateYaml(mihomoProfileQuery.data.template_yaml);
+		setMihomoExtraProxiesYaml(mihomoProfileQuery.data.extra_proxies_yaml);
+		setMihomoExtraProxyProvidersYaml(
+			mihomoProfileQuery.data.extra_proxy_providers_yaml,
+		);
+		setMihomoProfileSaveError(null);
+	}, [mihomoProfileQuery.data]);
 
 	const endpoints = endpointsQuery.data?.items ?? [];
 	const access = accessQuery.data?.items ?? [];
@@ -510,6 +537,25 @@ export function UserDetailsPage() {
 		}
 	}
 
+	async function saveUserMihomoProfile() {
+		if (!adminToken || !userId) return;
+		setIsSavingMihomoProfile(true);
+		setMihomoProfileSaveError(null);
+		try {
+			await putAdminUserMihomoProfile(adminToken, userId, {
+				template_yaml: mihomoTemplateYaml,
+				extra_proxies_yaml: mihomoExtraProxiesYaml,
+				extra_proxy_providers_yaml: mihomoExtraProxyProvidersYaml,
+			});
+			await mihomoProfileQuery.refetch();
+			pushToast({ variant: "success", message: "Mihomo profile updated" });
+		} catch (error) {
+			setMihomoProfileSaveError(formatError(error));
+		} finally {
+			setIsSavingMihomoProfile(false);
+		}
+	}
+
 	async function confirmResetToken() {
 		if (!adminToken || !userId) return;
 		setIsResettingToken(true);
@@ -749,6 +795,7 @@ export function UserDetailsPage() {
 									>
 										<option value="raw">raw</option>
 										<option value="clash">clash</option>
+										<option value="mihomo">mihomo</option>
 									</select>
 								</label>
 								<CopyButton
@@ -772,6 +819,65 @@ export function UserDetailsPage() {
 							<div className="text-xs opacity-70">
 								Preview opens in a modal and keeps subscription formatting
 								unchanged.
+							</div>
+						</div>
+						<div className="rounded-box border border-base-200 p-3 space-y-3">
+							<div className="font-medium text-sm">
+								Mihomo template profile (per user)
+							</div>
+							{mihomoProfileQuery.isLoading ? (
+								<div className="text-xs opacity-70">Loading profile…</div>
+							) : null}
+							{mihomoProfileQuery.isError ? (
+								<div className="alert alert-error py-2 text-sm">
+									{formatError(mihomoProfileQuery.error)}
+								</div>
+							) : null}
+							<label className="form-control gap-2">
+								<span className="label-text">template_yaml</span>
+								<textarea
+									className="textarea textarea-bordered font-mono min-h-40"
+									value={mihomoTemplateYaml}
+									onChange={(event) =>
+										setMihomoTemplateYaml(event.target.value)
+									}
+									placeholder="Paste full Mihomo YAML template"
+								/>
+							</label>
+							<label className="form-control gap-2">
+								<span className="label-text">extra_proxies_yaml</span>
+								<textarea
+									className="textarea textarea-bordered font-mono min-h-28"
+									value={mihomoExtraProxiesYaml}
+									onChange={(event) =>
+										setMihomoExtraProxiesYaml(event.target.value)
+									}
+									placeholder="- name: custom-ss\n  type: ss\n  ..."
+								/>
+							</label>
+							<label className="form-control gap-2">
+								<span className="label-text">extra_proxy_providers_yaml</span>
+								<textarea
+									className="textarea textarea-bordered font-mono min-h-28"
+									value={mihomoExtraProxyProvidersYaml}
+									onChange={(event) =>
+										setMihomoExtraProxyProvidersYaml(event.target.value)
+									}
+									placeholder="ProviderA:\n  type: http\n  ..."
+								/>
+							</label>
+							{mihomoProfileSaveError ? (
+								<div className="alert alert-error py-2 text-sm">
+									{mihomoProfileSaveError}
+								</div>
+							) : null}
+							<div>
+								<Button
+									loading={isSavingMihomoProfile}
+									onClick={saveUserMihomoProfile}
+								>
+									Save mihomo profile
+								</Button>
 							</div>
 						</div>
 

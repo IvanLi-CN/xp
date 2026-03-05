@@ -217,6 +217,8 @@ pub struct PersistedState {
     pub node_weight_policies: BTreeMap<String, NodeWeightPolicyConfig>,
     #[serde(default)]
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
+    #[serde(default)]
+    pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
 }
 
 impl PersistedState {
@@ -233,6 +235,7 @@ impl PersistedState {
             user_global_weights: BTreeMap::new(),
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
+            user_mihomo_profiles: BTreeMap::new(),
         }
     }
 }
@@ -383,6 +386,16 @@ pub struct NodeUserEndpointMembership {
     pub user_id: String,
     pub node_id: String,
     pub endpoint_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UserMihomoProfile {
+    #[serde(default)]
+    pub template_yaml: String,
+    #[serde(default)]
+    pub extra_proxies_yaml: String,
+    #[serde(default)]
+    pub extra_proxy_providers_yaml: String,
 }
 
 pub fn membership_key(user_id: &str, endpoint_id: &str) -> String {
@@ -1379,6 +1392,10 @@ pub enum DesiredStateCommand {
         node_id: String,
         inherit_global: bool,
     },
+    SetUserMihomoProfile {
+        user_id: String,
+        profile: UserMihomoProfile,
+    },
     /// Replace the user's access set (membership-only hard cut).
     ReplaceUserAccess {
         user_id: String,
@@ -1498,6 +1515,10 @@ enum DesiredStateCommandCompat {
     SetNodeWeightPolicy {
         node_id: String,
         inherit_global: bool,
+    },
+    SetUserMihomoProfile {
+        user_id: String,
+        profile: UserMihomoProfile,
     },
 
     ReplaceUserAccess {
@@ -1623,6 +1644,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 node_id,
                 inherit_global,
             },
+            DesiredStateCommandCompat::SetUserMihomoProfile { user_id, profile } => {
+                Self::SetUserMihomoProfile { user_id, profile }
+            }
             DesiredStateCommandCompat::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
@@ -2179,6 +2203,7 @@ impl DesiredStateCommand {
                 state.user_node_quotas.remove(user_id);
                 state.user_node_weights.remove(user_id);
                 state.user_global_weights.remove(user_id);
+                state.user_mihomo_profiles.remove(user_id);
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::UserDeleted { deleted })
             }
@@ -2296,6 +2321,18 @@ impl DesiredStateCommand {
                     },
                 );
 
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetUserMihomoProfile { user_id, profile } => {
+                if !state.users.contains_key(user_id) {
+                    return Err(DomainError::MissingUser {
+                        user_id: user_id.clone(),
+                    }
+                    .into());
+                }
+                state
+                    .user_mihomo_profiles
+                    .insert(user_id.clone(), profile.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::ReplaceUserAccess {
@@ -3309,6 +3346,10 @@ impl JsonSnapshotStore {
 
     pub fn get_user(&self, user_id: &str) -> Option<User> {
         self.state.users.get(user_id).cloned()
+    }
+
+    pub fn get_user_mihomo_profile(&self, user_id: &str) -> Option<UserMihomoProfile> {
+        self.state.user_mihomo_profiles.get(user_id).cloned()
     }
 
     pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {

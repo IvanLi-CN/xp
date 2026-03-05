@@ -1,6 +1,6 @@
 import { throwIfNotOk } from "./backendError";
 
-export type SubscriptionFormat = "raw" | "clash";
+export type SubscriptionFormat = "raw" | "clash" | "mihomo";
 
 export async function fetchSubscription(
 	subscriptionToken: string,

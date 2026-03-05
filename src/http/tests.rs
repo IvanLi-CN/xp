@@ -3252,6 +3252,187 @@ async fn subscription_format_clash_returns_yaml_with_proxies() {
 }
 
 #[tokio::test]
+async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let token = setup_subscription_fixtures(&tmp, &app)
+        .await
+        .subscription_token;
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/yaml; charset=utf-8"
+    );
+    let body = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&body).unwrap();
+    let proxies = yaml.get("proxies").and_then(|v| v.as_sequence()).unwrap();
+    assert!(!proxies.is_empty());
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "template_yaml": "port: 0\nproxy-groups:\n  - name: \"🛣️ Japan\"\n    type: url-test\n    use: []\n  - name: \"🛣️ HongKong\"\n    type: url-test\n    use: []\n  - name: \"🛣️ Korea\"\n    type: url-test\n    use: []\nrules: []\n",
+              "extra_proxies_yaml": "- name: \"custom-direct\"\n  type: ss\n  server: custom.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"abc:def\"\n  udp: true\n",
+              "extra_proxy_providers_yaml": "providerA:\n  type: http\n  path: ./provider-a.yaml\n  url: https://example.com/sub-a\n",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let get_res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(get_res.status(), StatusCode::OK);
+    let profile = body_json(get_res).await;
+    assert_eq!(
+        profile["template_yaml"]
+            .as_str()
+            .unwrap()
+            .contains("port: 0"),
+        true
+    );
+    assert_eq!(
+        profile["extra_proxy_providers_yaml"]
+            .as_str()
+            .unwrap()
+            .contains("providerA"),
+        true
+    );
+
+    let sub_res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(sub_res.status(), StatusCode::OK);
+    let sub_text = body_text(sub_res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    let providers = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("proxy-providers must exist");
+    assert!(providers.contains_key("providerA"));
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    for relay in ["🛣️ Japan", "🛣️ HongKong", "🛣️ Korea"] {
+        let group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(relay))
+            .expect("relay group missing");
+        let use_values = group
+            .get("use")
+            .and_then(YamlValue::as_sequence)
+            .expect("relay group use missing")
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>();
+        assert!(use_values.contains(&"providerA"));
+    }
+
+    let proxies = yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxies must exist");
+    assert!(
+        proxies.iter().any(|item| {
+            item.get("name")
+                .and_then(YamlValue::as_str)
+                .map(|n| n.ends_with("-JP"))
+                .unwrap_or(false)
+                && item.get("dialer-proxy").and_then(YamlValue::as_str) == Some("🛣️ Japan")
+        }),
+        "expected at least one generated JP chain proxy"
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let cases = vec![
+        (
+            json!({
+              "template_yaml": "- not-a-mapping\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "template_yaml must be a yaml mapping",
+        ),
+        (
+            json!({
+              "template_yaml": "port: 0\n",
+              "extra_proxies_yaml": "k: v\n",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "extra_proxies_yaml must be a yaml sequence or empty string",
+        ),
+        (
+            json!({
+              "template_yaml": "port: 0\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "- not-a-mapping\n",
+            }),
+            "extra_proxy_providers_yaml must be a yaml mapping or empty string",
+        ),
+    ];
+
+    for (payload, expected_message) in cases {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+                payload,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(res).await;
+        assert_eq!(body["error"]["code"], "invalid_request");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains(expected_message)),
+            "expected message to contain: {expected_message}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn subscription_token_reset_invalidates_old_token() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

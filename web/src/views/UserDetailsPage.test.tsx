@@ -16,7 +16,9 @@ import {
 import {
 	deleteAdminUser,
 	fetchAdminUser,
+	fetchAdminUserMihomoProfile,
 	patchAdminUser,
+	putAdminUserMihomoProfile,
 	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
@@ -194,6 +196,16 @@ function setupMocks(args?: {
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
+	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue({
+		template_yaml: "",
+		extra_proxies_yaml: "",
+		extra_proxy_providers_yaml: "",
+	});
+	vi.mocked(putAdminUserMihomoProfile).mockResolvedValue({
+		template_yaml: "",
+		extra_proxies_yaml: "",
+		extra_proxy_providers_yaml: "",
+	});
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
 		subscription_token: "sub_new",
 	});
@@ -505,6 +517,42 @@ describe("<UserDetailsPage />", () => {
 			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "raw");
 		});
 		expect(await screenByText("Subscription preview")).toBeTruthy();
+	});
+
+	it("supports mihomo subscription format preview", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.change(await screenByLabel("Subscription format"), {
+			target: { value: "mihomo" },
+		});
+		fireEvent.click(await screenByRole("button", "Fetch"));
+
+		await waitFor(() => {
+			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "mihomo");
+		});
+	});
+
+	it("saves mihomo profile from user tab", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.change(await screenByLabel("template_yaml"), {
+			target: { value: "port: 0\nproxy-groups: []\n" },
+		});
+		fireEvent.click(await screenByRole("button", "Save mihomo profile"));
+
+		await waitFor(() => {
+			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				{
+					template_yaml: "port: 0\nproxy-groups: []\n",
+					extra_proxies_yaml: "",
+					extra_proxy_providers_yaml: "",
+				},
+			);
+		});
 	});
 
 	it("shows node quota loading error instead of defaulting to zero", async () => {
