@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 部分完成（2/3）
+- Status: 已完成
 - Created: 2026-03-05
 - Last: 2026-03-05
 
@@ -59,7 +59,7 @@
 
 - [x] M1: 定位并修复 `ci.yml` 语法问题
 - [x] M2: 本地完成 YAML 语法验证
-- [ ] M3: PR checks / release 链路状态明确
+- [x] M3: PR checks / release 链路状态明确
 
 ## 风险 / 开放问题 / 假设
 
@@ -70,3 +70,4 @@
 
 - 2026-03-05: 创建规格，冻结“仅修复 workflow 语法并恢复发版链路”的范围。
 - 2026-03-05: 完成 `ci.yml` 语法修复与本地 YAML 解析验证（M1/M2）。
+- 2026-03-05: PR #98 checks 全绿（`ci`/`pr-label-gate`/`xray-e2e`），并补齐 CI 合约断言鲁棒性与既有 clippy lint 修复，完成 M3。
