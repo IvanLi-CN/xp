@@ -43,6 +43,7 @@
 		"@vitejs/plugin-react": "^5.0.0",
 		"autoprefixer": "^10.0.0",
 		"daisyui": "^5.0.0",
+		"js-yaml": "^4.1.1",
 		"jsdom": "^25.0.0",
 		"postcss": "^8.0.0",
 		"storybook": "^8.0.0",
