@@ -528,6 +528,23 @@ struct PutUserMihomoProfileRequest {
     extra_proxy_providers_yaml: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AdminUserMihomoProfileResponse {
+    mixin_yaml: String,
+    extra_proxies_yaml: String,
+    extra_proxy_providers_yaml: String,
+}
+
+impl From<crate::state::UserMihomoProfile> for AdminUserMihomoProfileResponse {
+    fn from(profile: crate::state::UserMihomoProfile) -> Self {
+        Self {
+            mixin_yaml: profile.mixin_yaml,
+            extra_proxies_yaml: profile.extra_proxies_yaml,
+            extra_proxy_providers_yaml: profile.extra_proxy_providers_yaml,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct PutUserAccessResponse {
     created: usize,
@@ -5140,13 +5157,16 @@ fn normalize_user_mihomo_profile_payload(
 async fn admin_get_user_mihomo_profile(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
-) -> Result<Json<crate::state::UserMihomoProfile>, ApiError> {
+) -> Result<Json<AdminUserMihomoProfileResponse>, ApiError> {
     let store = state.store.lock().await;
     if store.get_user(&user_id).is_none() {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
     Ok(Json(
-        store.get_user_mihomo_profile(&user_id).unwrap_or_default(),
+        store
+            .get_user_mihomo_profile(&user_id)
+            .unwrap_or_default()
+            .into(),
     ))
 }
 
@@ -5154,7 +5174,7 @@ async fn admin_put_user_mihomo_profile(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
     ApiJson(req): ApiJson<PutUserMihomoProfileRequest>,
-) -> Result<Json<crate::state::UserMihomoProfile>, ApiError> {
+) -> Result<Json<AdminUserMihomoProfileResponse>, ApiError> {
     let profile = validate_user_mihomo_profile_payload(req)?;
     let _ = raft_write(
         &state,
@@ -5165,7 +5185,7 @@ async fn admin_put_user_mihomo_profile(
     )
     .await?;
 
-    Ok(Json(profile))
+    Ok(Json(profile.into()))
 }
 
 async fn admin_reset_user_credentials(

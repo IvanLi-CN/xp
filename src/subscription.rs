@@ -254,9 +254,10 @@ pub fn build_mihomo_yaml(
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
     let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
     let mut proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
+    let generated_proxy_name_set = collect_top_level_proxy_names(&generated);
     let (mut merged_proxies, extra_proxy_rename_map) =
         merge_and_rename_proxies(generated, extra_proxies)?;
-    proxy_ref_rename_map.extend(extra_proxy_rename_map);
+    merge_extra_proxy_reference_rename_map(&mut proxy_ref_rename_map, extra_proxy_rename_map);
     remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
     dedupe_proxy_refs_in_mapping(&mut root);
     prune_template_reference_helper_blocks(&mut root);
@@ -279,7 +280,7 @@ pub fn build_mihomo_yaml(
         serde_yaml::Value::String("proxy-providers".to_string()),
         serde_yaml::Value::Mapping(provider_map),
     );
-    inject_mihomo_proxy_groups(&mut root, &provider_names, &proxy_name_set);
+    inject_mihomo_proxy_groups(&mut root, &provider_names, &generated_proxy_name_set);
     // Make the resulting subscription self-contained: avoid leaving template references to
     // providers/proxies that are not present in the final output (e.g. when the admin clears
     // `extra_*` after auto-splitting a full config into the template).
@@ -341,14 +342,14 @@ fn collect_mihomo_base_names(
 fn inject_mihomo_proxy_groups(
     root: &mut serde_yaml::Mapping,
     provider_names: &[String],
-    proxy_name_set: &std::collections::BTreeSet<String>,
+    generated_proxy_name_set: &std::collections::BTreeSet<String>,
 ) {
     let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
         Some(serde_yaml::Value::Sequence(seq)) => seq,
         _ => Vec::new(),
     };
 
-    let base_names = collect_mihomo_base_names(proxy_name_set);
+    let base_names = collect_mihomo_base_names(generated_proxy_name_set);
 
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.extend(MIHOMO_RELAY_GROUPS.iter().map(|s| s.to_string()));
@@ -385,7 +386,8 @@ fn inject_mihomo_proxy_groups(
 
     inject_mihomo_relay_groups(&mut groups, &provider_values);
     inject_mihomo_region_entry_groups(&mut groups, &provider_values);
-    let landing_groups = inject_mihomo_landing_groups(&mut groups, proxy_name_set, &base_names);
+    let landing_groups =
+        inject_mihomo_landing_groups(&mut groups, generated_proxy_name_set, &base_names);
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
 
     root.insert(
@@ -1086,6 +1088,23 @@ fn merge_and_rename_proxies(
     }
 
     Ok((out, rename_map))
+}
+
+fn merge_extra_proxy_reference_rename_map(
+    rename_map: &mut std::collections::BTreeMap<String, String>,
+    extra_proxy_rename_map: std::collections::BTreeMap<String, String>,
+) {
+    for (original, renamed) in extra_proxy_rename_map {
+        if rename_map.contains_key(&original) {
+            tracing::warn!(
+                proxy_name = %original,
+                renamed_name = %renamed,
+                "skipped extra proxy reference remap because a generated proxy remap already exists"
+            );
+            continue;
+        }
+        rename_map.insert(original, renamed);
+    }
 }
 
 fn collect_proxy_group_names(root: &serde_yaml::Mapping) -> std::collections::BTreeSet<String> {
@@ -2405,6 +2424,61 @@ rules: []
     }
 
     #[test]
+    fn build_mihomo_yaml_does_not_generate_landing_groups_for_extra_proxies() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            extra_proxies_yaml: r#"
+- name: "Legacy-ss"
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a sequence");
+        assert!(
+            !groups
+                .iter()
+                .any(|g| g.get("name").and_then(Value::as_str) == Some("🛬 Legacy")),
+            "extra proxies must not create synthetic landing groups"
+        );
+
+        let landing = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 落地"))
+            .expect("landing pool must exist");
+        let landing_proxies = landing
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("landing proxies must exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(landing_proxies, vec!["DIRECT"]);
+
+        let proxies = v
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("proxies must exist")
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(proxies, vec!["Legacy-ss"]);
+    }
+
+    #[test]
     fn build_mihomo_yaml_removes_template_landing_groups_when_base_missing() {
         let u = user("u1", "alice");
         let profile = UserMihomoProfile {
@@ -2677,7 +2751,7 @@ rules: []
     }
 
     #[test]
-    fn build_mihomo_yaml_remaps_conflicting_extra_proxy_refs_after_merge() {
+    fn build_mihomo_yaml_preserves_generated_remaps_when_extra_proxy_name_conflicts() {
         let u = user("u1", "alice");
         let n1 = node("n1", "Alpha", "alpha.example.com");
         let endpoints = vec![endpoint_vless(
@@ -2699,12 +2773,12 @@ port: 0
 proxy-groups:
   - name: "ExtraSelect"
     type: select
-    proxies: ["Alpha-reality"]
+    proxies: ["JP-BV-reality"]
 rules: []
 "#
             .to_string(),
             extra_proxies_yaml: r#"
-- name: "Alpha-reality"
+- name: "JP-BV-reality"
   type: ss
   server: extra.example.com
   port: 443
@@ -2733,7 +2807,17 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(refs, vec!["Alpha-reality-dup2"]);
+        assert_eq!(refs, vec!["Alpha-reality"]);
+
+        let top_proxy_names = v
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("top-level proxies should exist")
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(top_proxy_names.contains(&"Alpha-reality"));
+        assert!(top_proxy_names.contains(&"JP-BV-reality"));
     }
 
     #[test]
