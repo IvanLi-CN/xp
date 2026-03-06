@@ -5089,6 +5089,11 @@ fn normalize_user_mihomo_profile_payload(
                 "mixin_yaml.proxies must be a yaml sequence",
             ));
         }
+        if !extra_proxies_yaml.trim().is_empty() {
+            return Err(ApiError::invalid_request(
+                "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+            ));
+        }
         extra_proxies_yaml = serde_yaml::to_string(&value).map_err(|e| {
             ApiError::invalid_request(format!("mixin_yaml.proxies must be valid yaml: {e}"))
         })?;
@@ -5100,6 +5105,11 @@ fn normalize_user_mihomo_profile_payload(
         if !matches!(value, serde_yaml::Value::Mapping(_)) {
             return Err(ApiError::invalid_request(
                 "mixin_yaml.proxy-providers must be a yaml mapping",
+            ));
+        }
+        if !extra_proxy_providers_yaml.trim().is_empty() {
+            return Err(ApiError::invalid_request(
+                "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
             ));
         }
         extra_proxy_providers_yaml = serde_yaml::to_string(&value).map_err(|e| {

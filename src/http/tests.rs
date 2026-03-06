@@ -3375,6 +3375,18 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         japan_lock_use.contains(&"providerA"),
         "expected region group 🔒 Japan to use providerA"
     );
+    assert!(
+        japan_lock.get("include-all-proxies").is_none(),
+        "region groups should not fall back to include-all-proxies while providers exist"
+    );
+    let japan_probe = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 Japan"))
+        .expect("expected built-in region group 🤯 Japan");
+    assert!(
+        japan_probe.get("include-all-proxies").is_none(),
+        "url-test region groups should stay provider-backed while providers exist"
+    );
     for unexpected in [
         "🌟 Taiwan",
         "🔒 Taiwan",
@@ -3859,6 +3871,22 @@ async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
               "extra_proxy_providers_yaml": "- not-a-mapping\n",
             }),
             "extra_proxy_providers_yaml must be a yaml mapping or empty string",
+        ),
+        (
+            json!({
+              "mixin_yaml": "port: 0\nproxies:\n  - name: x\n    type: ss\n    server: example.com\n    port: 443\n    cipher: 2022-blake3-aes-128-gcm\n    password: abc:def\n    udp: true\n",
+              "extra_proxies_yaml": "- name: y\n  type: ss\n  server: example.org\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: ghi:jkl\n  udp: true\n",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+        ),
+        (
+            json!({
+              "mixin_yaml": "port: 0\nproxy-providers:\n  providerA:\n    type: http\n    path: ./provider-a.yaml\n    url: https://example.com/sub-a\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "providerB:\n  type: http\n  path: ./provider-b.yaml\n  url: https://example.com/sub-b\n",
+            }),
+            "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
         ),
     ];
 

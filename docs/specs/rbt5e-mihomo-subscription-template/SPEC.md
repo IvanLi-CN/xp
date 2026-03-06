@@ -77,6 +77,7 @@
 
 - `mixin_yaml` / extra YAML 在写入前做根类型校验并返回可读错误。
 - 保存时若 `mixin_yaml` 顶层包含 `proxies` / `proxy-providers`，服务端自动抽取到 `extra_*`，减少误用。
+- 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，服务端返回 `invalid_request`，避免静默覆盖。
 - 输出订阅示例应提供脱敏片段与差异说明，方便人工复核。
 
 ### COULD

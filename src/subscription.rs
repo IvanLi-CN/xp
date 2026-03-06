@@ -457,10 +457,12 @@ fn inject_mihomo_region_entry_groups(
             serde_yaml::Value::String("type".to_string()),
             serde_yaml::Value::String("select".to_string()),
         );
-        lock_map.insert(
-            serde_yaml::Value::String("include-all-proxies".to_string()),
-            serde_yaml::Value::Bool(true),
-        );
+        if provider_values.is_empty() {
+            lock_map.insert(
+                serde_yaml::Value::String("include-all-proxies".to_string()),
+                serde_yaml::Value::Bool(true),
+            );
+        }
         lock_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(spec.filter.to_string()),
@@ -483,10 +485,12 @@ fn inject_mihomo_region_entry_groups(
             serde_yaml::Value::String("hidden".to_string()),
             serde_yaml::Value::Bool(true),
         );
-        crazy_map.insert(
-            serde_yaml::Value::String("include-all-proxies".to_string()),
-            serde_yaml::Value::Bool(true),
-        );
+        if provider_values.is_empty() {
+            crazy_map.insert(
+                serde_yaml::Value::String("include-all-proxies".to_string()),
+                serde_yaml::Value::Bool(true),
+            );
+        }
         crazy_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(spec.filter.to_string()),

@@ -42,6 +42,7 @@ Normalization:
 - 若 `mixin_yaml` 顶层包含 `proxies`（sequence）或 `proxy-providers`（mapping），服务端会自动抽取到
   `extra_proxies_yaml` / `extra_proxy_providers_yaml` 并从 `mixin_yaml` 移除；响应返回规范化后的结果
   （YAML 注释/anchors 不保证保留）。
+- 若同一类动态段同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供，服务端返回 `400 invalid_request`，避免静默覆盖。
 
 Response `200`: 同 GET 结构。
 

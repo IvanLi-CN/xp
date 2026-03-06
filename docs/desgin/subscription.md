@@ -131,6 +131,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 保存 profile 时若 `mixin_yaml` 顶层包含 `proxies` / `proxy-providers`，服务端会自动抽取到
   `extra_proxies_yaml` / `extra_proxy_providers_yaml` 并从 `mixin_yaml` 移除（返回值为规范化后的文本；
   注释/anchors 不保证保留）。
+- 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，保存会返回 `invalid_request`，避免静默覆盖另一份输入。
 
 ### 6.2 渲染规则
 
