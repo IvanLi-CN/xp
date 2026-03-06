@@ -1,5 +1,7 @@
 import type { Page, Route } from "@playwright/test";
-import { dump, load } from "js-yaml";
+import yaml from "js-yaml";
+
+const { dump, load } = yaml;
 
 type QuotaResetSource = "user" | "node";
 

@@ -1,4 +1,8 @@
 declare module "js-yaml" {
-	export function load(input: string): unknown;
-	export function dump(input: unknown): string;
+	const yaml: {
+		load(input: string): unknown;
+		dump(input: unknown): string;
+	};
+
+	export default yaml;
 }
