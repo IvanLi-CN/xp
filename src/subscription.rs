@@ -266,6 +266,11 @@ pub fn build_mihomo_yaml(
         .keys()
         .filter_map(|k| k.as_str().map(|s| s.to_string()))
         .collect::<Vec<_>>();
+    let provider_name_set = provider_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let proxy_name_set = collect_top_level_proxy_names(&merged_proxies);
     root.insert(
         serde_yaml::Value::String("proxies".to_string()),
         serde_yaml::Value::Sequence(std::mem::take(&mut merged_proxies)),
@@ -275,6 +280,13 @@ pub fn build_mihomo_yaml(
         serde_yaml::Value::Mapping(provider_map),
     );
     inject_relay_group_use(&mut root, &provider_names);
+    // Make the resulting subscription self-contained: avoid leaving template references to
+    // providers/proxies that are not present in the final output (e.g. when the admin clears
+    // `extra_*` after auto-splitting a full config into the template).
+    prune_unknown_proxy_provider_names_in_use_fields(&mut root, &provider_name_set);
+    let proxy_group_name_set = collect_proxy_group_names(&root);
+    prune_unknown_proxy_names_in_proxies_fields(&mut root, &proxy_name_set, &proxy_group_name_set);
+    ensure_proxy_groups_have_candidates(&mut root, &provider_name_set);
 
     serde_yaml::to_string(&serde_yaml::Value::Mapping(root)).map_err(|e| {
         SubscriptionError::YamlSerialize {
@@ -812,6 +824,219 @@ fn inject_relay_group_use(root: &mut serde_yaml::Mapping, provider_names: &[Stri
         serde_yaml::Value::String("proxy-groups".to_string()),
         serde_yaml::Value::Sequence(groups),
     );
+}
+
+fn collect_proxy_group_names(root: &serde_yaml::Mapping) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::<String>::new();
+    let Some(serde_yaml::Value::Sequence(groups)) =
+        root.get(serde_yaml::Value::String("proxy-groups".to_string()))
+    else {
+        return out;
+    };
+
+    for group in groups {
+        let serde_yaml::Value::Mapping(map) = group else {
+            continue;
+        };
+        let Some(name) = map
+            .get(serde_yaml::Value::String("name".to_string()))
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
+        out.insert(name.to_string());
+    }
+
+    out
+}
+
+fn collect_top_level_proxy_names(
+    proxies: &[serde_yaml::Value],
+) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::<String>::new();
+    for (idx, proxy) in proxies.iter().enumerate() {
+        let Ok(name) = proxy_name_from_yaml(proxy, idx) else {
+            continue;
+        };
+        out.insert(name);
+    }
+    out
+}
+
+fn prune_unknown_proxy_provider_names_in_use_fields(
+    root: &mut serde_yaml::Mapping,
+    allowed: &std::collections::BTreeSet<String>,
+) {
+    prune_unknown_proxy_provider_names_in_mapping(root, allowed);
+}
+
+fn prune_unknown_proxy_provider_names_in_mapping(
+    mapping: &mut serde_yaml::Mapping,
+    allowed: &std::collections::BTreeSet<String>,
+) {
+    for (key, value) in mapping.iter_mut() {
+        if key.as_str() == Some("use") {
+            prune_use_sequence(value, allowed);
+        }
+        prune_unknown_proxy_provider_names_in_value(value, allowed);
+    }
+}
+
+fn prune_unknown_proxy_provider_names_in_value(
+    value: &mut serde_yaml::Value,
+    allowed: &std::collections::BTreeSet<String>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            prune_unknown_proxy_provider_names_in_mapping(map, allowed)
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                prune_unknown_proxy_provider_names_in_value(item, allowed);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn prune_use_sequence(value: &mut serde_yaml::Value, allowed: &std::collections::BTreeSet<String>) {
+    let serde_yaml::Value::Sequence(seq) = value else {
+        return;
+    };
+
+    let mut seen = std::collections::BTreeSet::<String>::new();
+    seq.retain(|item| {
+        let Some(name) = item.as_str() else {
+            return true;
+        };
+        if !allowed.contains(name) {
+            tracing::warn!(
+                provider_name = name,
+                "mihomo proxy-provider reference removed (provider not defined)"
+            );
+            return false;
+        }
+        if seen.insert(name.to_string()) {
+            return true;
+        }
+        false
+    });
+}
+
+fn prune_unknown_proxy_names_in_proxies_fields(
+    root: &mut serde_yaml::Mapping,
+    proxy_names: &std::collections::BTreeSet<String>,
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) {
+    prune_unknown_proxy_names_in_mapping(root, proxy_names, proxy_group_names);
+}
+
+fn prune_unknown_proxy_names_in_mapping(
+    mapping: &mut serde_yaml::Mapping,
+    proxy_names: &std::collections::BTreeSet<String>,
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) {
+    for (key, value) in mapping.iter_mut() {
+        if key.as_str() == Some("proxies") {
+            prune_proxies_sequence(value, proxy_names, proxy_group_names);
+        }
+        prune_unknown_proxy_names_in_value(value, proxy_names, proxy_group_names);
+    }
+}
+
+fn prune_unknown_proxy_names_in_value(
+    value: &mut serde_yaml::Value,
+    proxy_names: &std::collections::BTreeSet<String>,
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            prune_unknown_proxy_names_in_mapping(map, proxy_names, proxy_group_names)
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                prune_unknown_proxy_names_in_value(item, proxy_names, proxy_group_names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn prune_proxies_sequence(
+    value: &mut serde_yaml::Value,
+    proxy_names: &std::collections::BTreeSet<String>,
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) {
+    let serde_yaml::Value::Sequence(seq) = value else {
+        return;
+    };
+
+    seq.retain(|item| {
+        let Some(name) = item.as_str() else {
+            // Keep non-string items untouched.
+            return true;
+        };
+        if matches!(name, "DIRECT" | "REJECT") {
+            return true;
+        }
+        if proxy_names.contains(name) || proxy_group_names.contains(name) {
+            return true;
+        }
+        tracing::warn!(
+            proxy_name = name,
+            "mihomo proxy reference removed (proxy/group not defined)"
+        );
+        false
+    });
+}
+
+fn ensure_proxy_groups_have_candidates(
+    root: &mut serde_yaml::Mapping,
+    provider_names: &std::collections::BTreeSet<String>,
+) {
+    let Some(serde_yaml::Value::Sequence(groups)) =
+        root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
+    else {
+        return;
+    };
+
+    for group in groups {
+        let serde_yaml::Value::Mapping(map) = group else {
+            continue;
+        };
+
+        let include_all_providers = map
+            .get(serde_yaml::Value::String(
+                "include-all-providers".to_string(),
+            ))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let proxies_len = map
+            .get(serde_yaml::Value::String("proxies".to_string()))
+            .and_then(|v| v.as_sequence())
+            .map(|seq| seq.len())
+            .unwrap_or(0);
+        let use_len = map
+            .get(serde_yaml::Value::String("use".to_string()))
+            .and_then(|v| v.as_sequence())
+            .map(|seq| seq.len())
+            .unwrap_or(0);
+
+        let has_candidates =
+            proxies_len > 0 || use_len > 0 || (include_all_providers && !provider_names.is_empty());
+        if has_candidates {
+            continue;
+        }
+
+        // Avoid producing invalid configs when the template references only missing
+        // proxies/providers (e.g. extra_* cleared). "DIRECT" keeps the group usable and lets
+        // Mihomo accept the config.
+        map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("DIRECT".to_string())]),
+        );
+    }
 }
 
 fn slugify_node_name(input: &str) -> String {
@@ -1766,6 +1991,82 @@ providerA:
     }
 
     #[test]
+    fn build_mihomo_yaml_prunes_missing_proxy_and_provider_refs_when_extras_cleared() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        // Only SS endpoint: no reality proxies will be generated.
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Test"
+    type: select
+    proxies: ["Alpha-reality"]
+    use: ["providerA", "providerA", "missingProvider"]
+  - name: "🛣️ Japan"
+    type: url-test
+    use: ["providerA"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        assert!(!yaml.contains("providerA"));
+        assert!(!yaml.contains("Alpha-reality"));
+
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let providers = v
+            .get("proxy-providers")
+            .and_then(Value::as_mapping)
+            .expect("proxy-providers must exist");
+        assert!(providers.is_empty());
+
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a sequence");
+
+        let test_group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("Test"))
+            .expect("Test group must exist");
+        let test_proxies = test_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("Test proxies must exist");
+        let test_proxy_names = test_proxies
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(test_proxy_names, vec!["DIRECT"]);
+
+        let relay_group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ Japan"))
+            .expect("relay group must exist");
+        let relay_proxies = relay_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("relay proxies must exist");
+        let relay_proxy_names = relay_proxies
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(relay_proxy_names, vec!["DIRECT"]);
+    }
+
+    #[test]
     fn build_mihomo_yaml_remaps_legacy_proxy_refs_to_generated_names() {
         let u = user("u1", "alice");
         let n1 = node("n1", "Alpha", "alpha.example.com");
@@ -1959,6 +2260,9 @@ proxy-groups:
       - 🌟 Korea
       - JP-BV-reality
       - IIJ-LC-reality
+  - name: 🌟 Korea
+    type: select
+    proxies: ["DIRECT"]
 rules: []
 "#
             .to_string(),
