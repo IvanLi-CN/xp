@@ -994,6 +994,15 @@ fn ensure_proxy_groups_have_candidates(
     root: &mut serde_yaml::Mapping,
     provider_names: &std::collections::BTreeSet<String>,
 ) {
+    // `include-all-proxies` pulls from top-level `proxies`, which we inject before calling this.
+    // Treat it as "has candidates" only when we actually have proxies; otherwise keep the DIRECT
+    // fallback so the config remains loadable for users with zero memberships.
+    let has_any_proxies = root
+        .get(serde_yaml::Value::String("proxies".to_string()))
+        .and_then(|v| v.as_sequence())
+        .map(|seq| !seq.is_empty())
+        .unwrap_or(false);
+
     let Some(serde_yaml::Value::Sequence(groups)) =
         root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
     else {
@@ -1011,6 +1020,10 @@ fn ensure_proxy_groups_have_candidates(
             ))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let include_all_proxies = map
+            .get(serde_yaml::Value::String("include-all-proxies".to_string()))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let proxies_len = map
             .get(serde_yaml::Value::String("proxies".to_string()))
@@ -1025,6 +1038,7 @@ fn ensure_proxy_groups_have_candidates(
 
         let has_candidates =
             proxies_len > 0 || use_len > 0 || (include_all_providers && !provider_names.is_empty());
+        let has_candidates = has_candidates || (include_all_proxies && has_any_proxies);
         if has_candidates {
             continue;
         }
@@ -2064,6 +2078,63 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(relay_proxy_names, vec!["DIRECT"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_keeps_include_all_proxies_groups_without_direct_fallback() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Auto"
+    type: url-test
+    url: https://www.gstatic.com/generate_204
+    interval: 10
+    include-all-proxies: true
+    filter: Tokyo
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let proxies = v
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("proxies must exist");
+        assert!(!proxies.is_empty(), "generated proxies must be present");
+
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must exist");
+        let auto = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("Auto"))
+            .expect("Auto group must exist");
+        assert_eq!(
+            auto.get("include-all-proxies"),
+            Some(&Value::Bool(true)),
+            "include-all-proxies must be preserved"
+        );
+        assert!(
+            auto.get("proxies").is_none(),
+            "DIRECT fallback should not be injected when include-all-proxies can supply candidates"
+        );
     }
 
     #[test]
