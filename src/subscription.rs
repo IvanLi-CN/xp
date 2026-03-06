@@ -252,15 +252,15 @@ pub fn build_mihomo_yaml(
         &mut rng,
     )?;
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
-    let proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
+    let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    let mut proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
+    let (mut merged_proxies, extra_proxy_rename_map) =
+        merge_and_rename_proxies(generated, extra_proxies)?;
+    proxy_ref_rename_map.extend(extra_proxy_rename_map);
     remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
     dedupe_proxy_refs_in_mapping(&mut root);
     prune_template_reference_helper_blocks(&mut root);
 
-    let mut merged_proxies = merge_and_rename_proxies(
-        generated,
-        parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?,
-    )?;
     let provider_map = parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
     let provider_names = provider_map
         .keys()
@@ -313,15 +313,15 @@ struct MihomoRegionSpec {
 const MIHOMO_REGION_SPECS: [MihomoRegionSpec; 3] = [
     MihomoRegionSpec {
         label: "Japan",
-        filter: "日本|🇯🇵|Japan|JP",
+        filter: "(?i)(日本|🇯🇵|Japan|JP)",
     },
     MihomoRegionSpec {
         label: "HongKong",
-        filter: "香港|🇭🇰|HongKong|HK",
+        filter: "(?i)(香港|🇭🇰|HongKong|Hong Kong|HK)",
     },
     MihomoRegionSpec {
         label: "Korea",
-        filter: "韩国|🇰🇷|Korea|KR",
+        filter: "(?i)(韩国|🇰🇷|Korea|KR)",
     },
 ];
 
@@ -1055,9 +1055,16 @@ fn next_renamed_name(used: &std::collections::BTreeSet<String>, base: &str) -> S
 fn merge_and_rename_proxies(
     generated: Vec<serde_yaml::Value>,
     extra: Vec<serde_yaml::Value>,
-) -> Result<Vec<serde_yaml::Value>, SubscriptionError> {
+) -> Result<
+    (
+        Vec<serde_yaml::Value>,
+        std::collections::BTreeMap<String, String>,
+    ),
+    SubscriptionError,
+> {
     let mut out = Vec::with_capacity(generated.len() + extra.len());
     let mut used_names = std::collections::BTreeSet::<String>::new();
+    let mut rename_map = std::collections::BTreeMap::<String, String>::new();
 
     for (idx, mut proxy) in generated.into_iter().chain(extra).enumerate() {
         let original = proxy_name_from_yaml(&proxy, idx)?;
@@ -1068,6 +1075,7 @@ fn merge_and_rename_proxies(
                 renamed_name = %renamed,
                 "mihomo proxy name conflict detected, renamed automatically"
             );
+            rename_map.insert(original.clone(), renamed.clone());
             renamed
         } else {
             original
@@ -1077,7 +1085,7 @@ fn merge_and_rename_proxies(
         out.push(proxy);
     }
 
-    Ok(out)
+    Ok((out, rename_map))
 }
 
 fn collect_proxy_group_names(root: &serde_yaml::Mapping) -> std::collections::BTreeSet<String> {
@@ -2259,6 +2267,68 @@ providerA:
     }
 
     #[test]
+    fn build_mihomo_yaml_injects_case_insensitive_region_filters() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0
+rules: []
+"
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/a
+"#
+            .to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a sequence");
+
+        let japan = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ Japan"))
+            .expect("🛣️ Japan should exist");
+        assert_eq!(
+            japan.get("filter").and_then(Value::as_str),
+            Some("(?i)(日本|🇯🇵|Japan|JP)")
+        );
+
+        let hong_kong = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ HongKong"))
+            .expect("🛣️ HongKong should exist");
+        assert_eq!(
+            hong_kong.get("filter").and_then(Value::as_str),
+            Some("(?i)(香港|🇭🇰|HongKong|Hong Kong|HK)")
+        );
+
+        let korea = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ Korea"))
+            .expect("🛣️ Korea should exist");
+        assert_eq!(
+            korea.get("filter").and_then(Value::as_str),
+            Some("(?i)(韩国|🇰🇷|Korea|KR)")
+        );
+    }
+
+    #[test]
     fn build_mihomo_yaml_prunes_missing_proxy_and_provider_refs_when_extras_cleared() {
         let u = user("u1", "alice");
         let n = node("n1", "Tokyo A", "example.com");
@@ -2604,6 +2674,66 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(refs, vec!["Alpha-reality", "Alpha-ss", "Alpha-JP"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_remaps_conflicting_extra_proxy_refs_after_merge() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let endpoints = vec![endpoint_vless(
+            "e1",
+            "n1",
+            "vless",
+            8443,
+            serde_json::json!({
+              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+              "short_ids": ["0123456789abcdef"],
+              "active_short_id": "0123456789abcdef"
+            }),
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "ExtraSelect"
+    type: select
+    proxies: ["Alpha-reality"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "Alpha-reality"
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|g| g.get("name").and_then(Value::as_str) == Some("ExtraSelect"))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["Alpha-reality-dup2"]);
     }
 
     #[test]
