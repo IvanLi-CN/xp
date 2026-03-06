@@ -234,6 +234,66 @@ pub fn build_clash_yaml(
     })
 }
 
+pub(crate) fn normalize_user_mihomo_profile_for_runtime(
+    profile: &UserMihomoProfile,
+) -> Result<UserMihomoProfile, SubscriptionError> {
+    if profile.mixin_yaml.trim().is_empty() {
+        return Ok(profile.clone());
+    }
+
+    let mut mixin_map = parse_mixin_mapping(&profile.mixin_yaml)?;
+    let mut extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    let mut extra_proxy_providers =
+        parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
+    let mut extracted_proxies = false;
+    let mut extracted_proxy_providers = false;
+
+    match mixin_map.remove(serde_yaml::Value::String("proxies".to_string())) {
+        Some(serde_yaml::Value::Sequence(seq)) => {
+            extra_proxies.extend(seq);
+            extracted_proxies = true;
+        }
+        Some(_) => return Err(SubscriptionError::MihomoExtraProxiesRootNotSequence),
+        None => {}
+    }
+    match mixin_map.remove(serde_yaml::Value::String("proxy-providers".to_string())) {
+        Some(serde_yaml::Value::Mapping(map)) => {
+            for (key, value) in map {
+                extra_proxy_providers.entry(key).or_insert(value);
+            }
+            extracted_proxy_providers = true;
+        }
+        Some(_) => return Err(SubscriptionError::MihomoExtraProxyProvidersRootNotMapping),
+        None => {}
+    }
+
+    Ok(UserMihomoProfile {
+        mixin_yaml: serde_yaml::to_string(&serde_yaml::Value::Mapping(mixin_map)).map_err(|e| {
+            SubscriptionError::YamlSerialize {
+                reason: e.to_string(),
+            }
+        })?,
+        extra_proxies_yaml: if extracted_proxies {
+            serde_yaml::to_string(&serde_yaml::Value::Sequence(extra_proxies)).map_err(|e| {
+                SubscriptionError::YamlSerialize {
+                    reason: e.to_string(),
+                }
+            })?
+        } else {
+            profile.extra_proxies_yaml.clone()
+        },
+        extra_proxy_providers_yaml: if extracted_proxy_providers {
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(extra_proxy_providers)).map_err(
+                |e| SubscriptionError::YamlSerialize {
+                    reason: e.to_string(),
+                },
+            )?
+        } else {
+            profile.extra_proxy_providers_yaml.clone()
+        },
+    })
+}
+
 pub fn build_mihomo_yaml(
     cluster_ca_key_pem: &str,
     user: &User,
@@ -242,6 +302,7 @@ pub fn build_mihomo_yaml(
     nodes: &[Node],
     profile: &UserMihomoProfile,
 ) -> Result<String, SubscriptionError> {
+    let profile = normalize_user_mihomo_profile_for_runtime(profile)?;
     let mut rng = rand::thread_rng();
     let generated = build_mihomo_generated_proxies(
         cluster_ca_key_pem,
@@ -461,12 +522,10 @@ fn inject_mihomo_region_entry_groups(
             serde_yaml::Value::String("type".to_string()),
             serde_yaml::Value::String("select".to_string()),
         );
-        if provider_values.is_empty() {
-            lock_map.insert(
-                serde_yaml::Value::String("include-all-proxies".to_string()),
-                serde_yaml::Value::Bool(true),
-            );
-        }
+        lock_map.insert(
+            serde_yaml::Value::String("include-all-proxies".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
         lock_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(spec.filter.to_string()),
@@ -489,12 +548,10 @@ fn inject_mihomo_region_entry_groups(
             serde_yaml::Value::String("hidden".to_string()),
             serde_yaml::Value::Bool(true),
         );
-        if provider_values.is_empty() {
-            crazy_map.insert(
-                serde_yaml::Value::String("include-all-proxies".to_string()),
-                serde_yaml::Value::Bool(true),
-            );
-        }
+        crazy_map.insert(
+            serde_yaml::Value::String("include-all-proxies".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
         crazy_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(spec.filter.to_string()),
@@ -1276,7 +1333,10 @@ fn prune_proxies_sequence(
             // Keep non-string items untouched.
             return true;
         };
-        if matches!(name, "DIRECT" | "REJECT") {
+        if matches!(
+            name,
+            "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "COMPATIBLE"
+        ) {
             return true;
         }
         if proxy_names.contains(name) || proxy_group_names.contains(name) {
@@ -2600,6 +2660,103 @@ rules: []
         assert!(
             auto.get("proxies").is_none(),
             "DIRECT fallback should not be injected when include-all-proxies can supply candidates"
+        );
+    }
+
+    #[test]
+    fn normalize_user_mihomo_profile_for_runtime_autosplits_legacy_full_config() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxies:
+  - name: "custom-direct"
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "abc:def"
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+    proxies: ["DIRECT"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let normalized = normalize_user_mihomo_profile_for_runtime(&profile)
+            .expect("legacy full config should normalize");
+        let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
+        let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
+        assert!(!mixin_map.contains_key(&Value::String("proxies".to_string())));
+        assert!(!mixin_map.contains_key(&Value::String("proxy-providers".to_string())));
+
+        let extra_proxies: Value = serde_yaml::from_str(&normalized.extra_proxies_yaml).unwrap();
+        assert!(
+            extra_proxies
+                .as_sequence()
+                .expect("extra proxies must be a sequence")
+                .iter()
+                .any(|proxy| {
+                    proxy
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name == "custom-direct")
+                })
+        );
+
+        let extra_providers: Value =
+            serde_yaml::from_str(&normalized.extra_proxy_providers_yaml).unwrap();
+        assert!(
+            extra_providers
+                .as_mapping()
+                .expect("extra providers must be a mapping")
+                .contains_key(&Value::String("providerA".to_string()))
+        );
+    }
+
+    #[test]
+    fn build_mihomo_yaml_preserves_builtin_outbound_refs() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile)
+            .expect("built-in outbound refs should be preserved");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| groups.first())
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refs,
+            vec!["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"]
         );
     }
 

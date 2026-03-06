@@ -5162,12 +5162,14 @@ async fn admin_get_user_mihomo_profile(
     if store.get_user(&user_id).is_none() {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
-    Ok(Json(
-        store
-            .get_user_mihomo_profile(&user_id)
-            .unwrap_or_default()
-            .into(),
-    ))
+    let profile = match store.get_user_mihomo_profile(&user_id) {
+        Some(profile) => {
+            crate::subscription::normalize_user_mihomo_profile_for_runtime(&profile)
+                .map_err(|e| ApiError::internal(format!("invalid stored mihomo profile: {e}")))?
+        }
+        None => crate::state::UserMihomoProfile::default(),
+    };
+    Ok(Json(profile.into()))
 }
 
 async fn admin_put_user_mihomo_profile(
