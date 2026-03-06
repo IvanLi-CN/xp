@@ -62,6 +62,7 @@
 - `GET /api/sub/{token}?format=mihomo` 支持完整输出。
 - 用户 mixin 按 `user_id` 持久化存储。
 - 管理 API 对外主字段为 `mixin_yaml`；请求兼容旧字段 `template_yaml`，响应只返回 `mixin_yaml`。
+- 内部状态/WAL/snapshot 在兼容窗口内仍需可读取旧字段，并保持滚动升级期间的跨版本回放兼容。
 - 用户可输入 `extra_proxies_yaml`（sequence）与 `extra_proxy_providers_yaml`（mapping，可空）。
 - 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
 - 系统固定只生成 JP/HK/KR 三组 relay/稳定地区入口/落地逻辑。
@@ -124,7 +125,7 @@
 - Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-JP/HK/KR` 节点。
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then 稳定地区入口组仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
-- Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中。
+- Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-reality`。
 - Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 优先包含 `base-JP/HK/KR`，并以 `base-ss` 兜底。
 - Given 请求体只提供旧字段 `template_yaml`，When 保存并再次读取 profile，Then 返回体只包含 `mixin_yaml`。
@@ -200,6 +201,7 @@
 - 2026-03-06: 需求升级为“mixin + 系统内置动态组逻辑”，新增稳定入口组、落地组策略与 autosplit 防误用机制。
 - 2026-03-06: 对外主字段切换为 `mixin_yaml`，兼容读取旧字段 `template_yaml`；稳定地区范围锁定为 JP/HK/KR。
 - 2026-03-06: 在 `codex-testbox` 生成示例输出并完成两类证据：原样例的脱敏输出/差异分析，以及去掉已脱敏静态节点后的 provider-only 变体 Mihomo `-t` 通过记录。
+- 2026-03-06: review 收口补充滚动升级兼容：内部 `UserMihomoProfile` 持久化继续写旧字段形状，管理 API 仍只返回 `mixin_yaml`；同时收紧落地组注入范围，避免 `extra_proxies_yaml` 单独触发系统托管 `🛬 {base}` 组。
 
 ## 参考（References）
 
