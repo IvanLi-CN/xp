@@ -5164,8 +5164,13 @@ async fn admin_get_user_mihomo_profile(
     }
     let profile = match store.get_user_mihomo_profile(&user_id) {
         Some(profile) => {
-            crate::subscription::normalize_user_mihomo_profile_for_runtime(&profile)
-                .map_err(|e| ApiError::internal(format!("invalid stored mihomo profile: {e}")))?
+            match crate::subscription::normalize_user_mihomo_profile_for_runtime(&profile) {
+                Ok(normalized) => normalized,
+                Err(error) => {
+                    tracing::warn!(%user_id, %error, "returning raw stored mihomo profile after normalization failed");
+                    profile
+                }
+            }
         }
         None => crate::state::UserMihomoProfile::default(),
     };

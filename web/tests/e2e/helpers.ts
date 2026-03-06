@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { dump, load } from "js-yaml";
 
 type QuotaResetSource = "user" | "node";
 
@@ -236,6 +237,202 @@ function parseJsonBody(request: { postData(): string | null }): Record<
 	} catch {
 		return {};
 	}
+}
+
+type CanonicalMockMihomoProfile = {
+	mixin_yaml: string;
+	extra_proxies_yaml: string;
+	extra_proxy_providers_yaml: string;
+};
+
+type MockMihomoProfileNormalizationResult =
+	| { ok: true; profile: CanonicalMockMihomoProfile }
+	| { ok: false; message: string };
+
+function formatYamlError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function isYamlMapping(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canonicalizeMockMihomoProfile(
+	profile: Partial<MockMihomoProfile> | undefined,
+): CanonicalMockMihomoProfile {
+	return {
+		mixin_yaml:
+			typeof profile?.mixin_yaml === "string"
+				? profile.mixin_yaml
+				: typeof profile?.template_yaml === "string"
+					? profile.template_yaml
+					: "",
+		extra_proxies_yaml:
+			typeof profile?.extra_proxies_yaml === "string"
+				? profile.extra_proxies_yaml
+				: "",
+		extra_proxy_providers_yaml:
+			typeof profile?.extra_proxy_providers_yaml === "string"
+				? profile.extra_proxy_providers_yaml
+				: "",
+	};
+}
+
+function ensureYamlSequenceOrEmpty(
+	raw: string,
+	fieldName: string,
+): MockMihomoProfileNormalizationResult | null {
+	if (raw.trim() === "") {
+		return null;
+	}
+	let value: unknown;
+	try {
+		value = load(raw);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!Array.isArray(value)) {
+		return {
+			ok: false,
+			message: `${fieldName} must be a yaml sequence or empty string`,
+		};
+	}
+	return null;
+}
+
+function ensureYamlMappingOrEmpty(
+	raw: string,
+	fieldName: string,
+): MockMihomoProfileNormalizationResult | null {
+	if (raw.trim() === "") {
+		return null;
+	}
+	let value: unknown;
+	try {
+		value = load(raw);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!isYamlMapping(value)) {
+		return {
+			ok: false,
+			message: `${fieldName} must be a yaml mapping or empty string`,
+		};
+	}
+	return null;
+}
+
+export function normalizeMockMihomoProfilePayload(
+	payload: Record<string, unknown>,
+): MockMihomoProfileNormalizationResult {
+	const canonical = canonicalizeMockMihomoProfile(payload);
+	if (canonical.mixin_yaml.trim() === "") {
+		return { ok: false, message: "mixin_yaml is required" };
+	}
+
+	let mixinRoot: unknown;
+	try {
+		mixinRoot = load(canonical.mixin_yaml);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `mixin_yaml must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!isYamlMapping(mixinRoot)) {
+		return { ok: false, message: "mixin_yaml must be a yaml mapping" };
+	}
+
+	let mixinMap: Record<string, unknown> = { ...mixinRoot };
+	let mixin_yaml = canonical.mixin_yaml;
+	let extra_proxies_yaml = canonical.extra_proxies_yaml;
+	let extra_proxy_providers_yaml = canonical.extra_proxy_providers_yaml;
+	let extracted = false;
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
+		const value = mixinMap.proxies;
+		if (!Array.isArray(value)) {
+			return {
+				ok: false,
+				message: "mixin_yaml.proxies must be a yaml sequence",
+			};
+		}
+		if (extra_proxies_yaml.trim() !== "") {
+			return {
+				ok: false,
+				message:
+					"mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+			};
+		}
+		extra_proxies_yaml = dump(value);
+		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
+		mixinMap = nextMixinMap;
+		extracted = true;
+	}
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers")) {
+		const value = mixinMap["proxy-providers"];
+		if (!isYamlMapping(value)) {
+			return {
+				ok: false,
+				message: "mixin_yaml.proxy-providers must be a yaml mapping",
+			};
+		}
+		if (extra_proxy_providers_yaml.trim() !== "") {
+			return {
+				ok: false,
+				message:
+					"mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
+			};
+		}
+		extra_proxy_providers_yaml = dump(value);
+		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
+			mixinMap;
+		mixinMap = nextMixinMap;
+		extracted = true;
+	}
+
+	if (extracted) {
+		mixin_yaml = dump(mixinMap);
+	}
+
+	const extraProxiesError = ensureYamlSequenceOrEmpty(
+		extra_proxies_yaml,
+		"extra_proxies_yaml",
+	);
+	if (extraProxiesError) {
+		return extraProxiesError;
+	}
+	const extraProxyProvidersError = ensureYamlMappingOrEmpty(
+		extra_proxy_providers_yaml,
+		"extra_proxy_providers_yaml",
+	);
+	if (extraProxyProvidersError) {
+		return extraProxyProvidersError;
+	}
+
+	return {
+		ok: true,
+		profile: {
+			mixin_yaml,
+			extra_proxies_yaml,
+			extra_proxy_providers_yaml,
+		},
+	};
+}
+
+export function normalizeMockStoredMihomoProfile(
+	profile: MockMihomoProfile | undefined,
+): CanonicalMockMihomoProfile {
+	const canonical = canonicalizeMockMihomoProfile(profile);
+	const normalized = normalizeMockMihomoProfilePayload(canonical);
+	return normalized.ok ? normalized.profile : canonical;
 }
 
 export async function setupApiMocks(
@@ -636,11 +833,7 @@ export async function setupApiMocks(
 				}
 				jsonResponse(
 					route,
-					state.userMihomoProfiles[userId] ?? {
-						mixin_yaml: "",
-						extra_proxies_yaml: "",
-						extra_proxy_providers_yaml: "",
-					},
+					normalizeMockStoredMihomoProfile(state.userMihomoProfiles[userId]),
 				);
 				return;
 			}
@@ -652,24 +845,13 @@ export async function setupApiMocks(
 					return;
 				}
 				const payload = parseJsonBody(request);
-				const profile = {
-					mixin_yaml:
-						typeof payload.mixin_yaml === "string"
-							? payload.mixin_yaml
-							: typeof payload.template_yaml === "string"
-								? payload.template_yaml
-								: "",
-					extra_proxies_yaml:
-						typeof payload.extra_proxies_yaml === "string"
-							? payload.extra_proxies_yaml
-							: "",
-					extra_proxy_providers_yaml:
-						typeof payload.extra_proxy_providers_yaml === "string"
-							? payload.extra_proxy_providers_yaml
-							: "",
-				};
-				state.userMihomoProfiles[userId] = profile;
-				jsonResponse(route, profile);
+				const normalized = normalizeMockMihomoProfilePayload(payload);
+				if (!normalized.ok) {
+					errorResponse(route, normalized.message, 400);
+					return;
+				}
+				state.userMihomoProfiles[userId] = normalized.profile;
+				jsonResponse(route, normalized.profile);
 				return;
 			}
 

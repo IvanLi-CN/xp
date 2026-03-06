@@ -267,6 +267,10 @@ pub(crate) fn normalize_user_mihomo_profile_for_runtime(
         None => {}
     }
 
+    if !extracted_proxies && !extracted_proxy_providers {
+        return Ok(profile.clone());
+    }
+
     Ok(UserMihomoProfile {
         mixin_yaml: serde_yaml::to_string(&serde_yaml::Value::Mapping(mixin_map)).map_err(|e| {
             SubscriptionError::YamlSerialize {
@@ -2722,6 +2726,23 @@ rules: []
                 .expect("extra providers must be a mapping")
                 .contains_key(&Value::String("providerA".to_string()))
         );
+    }
+
+    #[test]
+    fn normalize_user_mihomo_profile_for_runtime_preserves_plain_mixin_text() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: "# keep comments
+port: 0
+rules: []
+"
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let normalized = normalize_user_mihomo_profile_for_runtime(&profile)
+            .expect("plain mixin should remain readable");
+        assert_eq!(normalized, profile);
     }
 
     #[test]
