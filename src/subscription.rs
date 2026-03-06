@@ -370,9 +370,6 @@ fn inject_mihomo_proxy_groups(
         override_names.insert(format!("🔒 {}", region.label));
         override_names.insert(format!("🤯 {}", region.label));
     }
-    for base in &base_names {
-        override_names.insert(format!("🛬 {base}"));
-    }
 
     groups.retain(|value| {
         let serde_yaml::Value::Mapping(map) = value else {
@@ -384,6 +381,12 @@ fn inject_mihomo_proxy_groups(
         else {
             return true;
         };
+        // `🛬 {base}` landing groups are system-generated and depend on the user's actual proxies.
+        // Treat all template-provided landing groups as overridable, even when the base doesn't
+        // exist anymore (e.g. user access removed, or profile reused across users).
+        if name.starts_with("🛬 ") {
+            return false;
+        }
         !override_names.contains(name)
     });
 
@@ -467,6 +470,10 @@ fn inject_mihomo_region_entry_groups(
             serde_yaml::Value::String("select".to_string()),
         );
         lock_map.insert(
+            serde_yaml::Value::String("include-all-proxies".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        lock_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(spec.filter.to_string()),
         );
@@ -486,6 +493,10 @@ fn inject_mihomo_region_entry_groups(
         );
         crazy_map.insert(
             serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        crazy_map.insert(
+            serde_yaml::Value::String("include-all-proxies".to_string()),
             serde_yaml::Value::Bool(true),
         );
         crazy_map.insert(
@@ -2329,6 +2340,52 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(relay_proxy_names, vec!["DIRECT"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_removes_template_landing_groups_when_base_missing() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            template_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Top"
+    type: select
+    proxies: ["🛬 Legacy"]
+  - name: "🛬 Legacy"
+    type: select
+    proxies: ["SomeProxy"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let groups = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must be a sequence");
+        assert!(
+            !groups
+                .iter()
+                .any(|g| g.get("name").and_then(Value::as_str) == Some("🛬 Legacy")),
+            "expected template landing group 🛬 Legacy to be removed"
+        );
+
+        let top = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("Top"))
+            .expect("Top group must exist");
+        let top_proxies = top
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("Top proxies must exist");
+        let top_proxy_names = top_proxies.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        assert_eq!(top_proxy_names, vec!["DIRECT"]);
     }
 
     #[test]
