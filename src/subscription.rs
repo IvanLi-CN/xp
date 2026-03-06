@@ -253,7 +253,9 @@ pub fn build_mihomo_yaml(
     )?;
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
     let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
-    let mut proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
+    let preserved_proxy_ref_names = collect_proxy_names(&extra_proxies)?;
+    let mut proxy_ref_rename_map =
+        build_proxy_reference_rename_map(&root, &generated, &preserved_proxy_ref_names);
     let generated_proxy_name_set = collect_top_level_proxy_names(&generated);
     let (mut merged_proxies, extra_proxy_rename_map) =
         merge_and_rename_proxies(generated, extra_proxies)?;
@@ -656,6 +658,16 @@ impl ProxyRefKind {
     }
 }
 
+fn collect_proxy_names(
+    proxies: &[serde_yaml::Value],
+) -> Result<std::collections::BTreeSet<String>, SubscriptionError> {
+    let mut out = std::collections::BTreeSet::<String>::new();
+    for (idx, proxy) in proxies.iter().enumerate() {
+        out.insert(proxy_name_from_yaml(proxy, idx)?);
+    }
+    Ok(out)
+}
+
 fn classify_proxy_ref_name(name: &str) -> Option<(ProxyRefKind, String)> {
     if let Some(base) = name.strip_suffix("-reality") {
         return Some((ProxyRefKind::Reality, base.to_string()));
@@ -762,13 +774,20 @@ fn collect_proxy_refs_from_sequence_value(
 fn build_proxy_reference_rename_map(
     root: &serde_yaml::Mapping,
     generated: &[serde_yaml::Value],
+    preserved_proxy_ref_names: &std::collections::BTreeSet<String>,
 ) -> std::collections::BTreeMap<String, String> {
     let generated_by_kind = collect_generated_proxy_names_by_kind(generated);
     let refs_by_kind = collect_template_proxy_refs_by_kind(root);
     let mut rename_map = std::collections::BTreeMap::<String, String>::new();
 
     for kind in ProxyRefKind::ALL {
-        let old_refs = refs_by_kind.get(&kind).cloned().unwrap_or_default();
+        let old_refs = refs_by_kind
+            .get(&kind)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, old_name)| !preserved_proxy_ref_names.contains(old_name))
+            .collect::<Vec<_>>();
         if old_refs.is_empty() {
             continue;
         }
@@ -2751,7 +2770,62 @@ rules: []
     }
 
     #[test]
-    fn build_mihomo_yaml_preserves_generated_remaps_when_extra_proxy_name_conflicts() {
+    fn build_mihomo_yaml_preserves_extra_proxy_refs_with_chain_suffixes() {
+        let u = user("u1", "alice");
+        let n1 = node("n1", "Alpha", "alpha.example.com");
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "ExtraSelect"
+    type: select
+    proxies: ["Legacy-JP"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "Legacy-JP"
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n1], &profile)
+            .expect("build mihomo yaml should succeed");
+        let v: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|g| g.get("name").and_then(Value::as_str) == Some("ExtraSelect"))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["Legacy-JP"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_preserves_extra_proxy_refs_with_reality_suffixes() {
         let u = user("u1", "alice");
         let n1 = node("n1", "Alpha", "alpha.example.com");
         let endpoints = vec![endpoint_vless(
@@ -2807,7 +2881,7 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(refs, vec!["Alpha-reality"]);
+        assert_eq!(refs, vec!["JP-BV-reality"]);
 
         let top_proxy_names = v
             .get("proxies")

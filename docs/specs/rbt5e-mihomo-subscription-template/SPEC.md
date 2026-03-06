@@ -126,6 +126,7 @@
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then 稳定地区入口组仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
+- Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-JP` / `-reality`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-reality`。
 - Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 优先包含 `base-JP/HK/KR`，并以 `base-ss` 兜底。
 - Given 请求体只提供旧字段 `template_yaml`，When 保存并再次读取 profile，Then 返回体只包含 `mixin_yaml`。
@@ -202,6 +203,7 @@
 - 2026-03-06: 对外主字段切换为 `mixin_yaml`，兼容读取旧字段 `template_yaml`；稳定地区范围锁定为 JP/HK/KR。
 - 2026-03-06: 在 `codex-testbox` 生成示例输出并完成两类证据：原样例的脱敏输出/差异分析，以及去掉已脱敏静态节点后的 provider-only 变体 Mihomo `-t` 通过记录。
 - 2026-03-06: review 收口补充滚动升级兼容：内部 `UserMihomoProfile` 持久化继续写旧字段形状，管理 API 仍只返回 `mixin_yaml`；同时收紧落地组注入范围，避免 `extra_proxies_yaml` 单独触发系统托管 `🛬 {base}` 组。
+- 2026-03-06: review 收口补充 extra proxy 引用保护：对显式 extra proxies 的名称保持最高优先级，即便名称带有 `-JP` / `-HK` / `-KR` / `-ss` / `-reality` 后缀，也不再被系统动态 remap 误绑。
 
 ## 参考（References）
 
