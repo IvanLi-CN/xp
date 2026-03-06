@@ -824,7 +824,7 @@ export function UserDetailsPage() {
 						</div>
 						<div className="rounded-box border border-base-200 p-3 space-y-3">
 							<div className="font-medium text-sm">
-								Mihomo template profile (per user)
+								Mihomo mixin config (per user)
 							</div>
 							{mihomoProfileQuery.isLoading ? (
 								<div className="text-xs opacity-70">Loading profile…</div>
@@ -865,7 +865,7 @@ export function UserDetailsPage() {
 									loading={isSavingMihomoProfile}
 									onClick={saveUserMihomoProfile}
 								>
-									Save mihomo profile
+									Save mihomo config
 								</Button>
 							</div>
 						</div>
