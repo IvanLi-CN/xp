@@ -390,8 +390,8 @@ pub struct NodeUserEndpointMembership {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct UserMihomoProfile {
-    #[serde(default)]
-    pub template_yaml: String,
+    #[serde(default, alias = "template_yaml")]
+    pub mixin_yaml: String,
     #[serde(default)]
     pub extra_proxies_yaml: String,
     #[serde(default)]
@@ -3798,6 +3798,22 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn user_mihomo_profile_deserializes_legacy_template_yaml_alias() {
+        let profile: UserMihomoProfile = serde_json::from_value(json!({
+            "template_yaml": "port: 0\nrules: []\n",
+            "extra_proxies_yaml": "",
+            "extra_proxy_providers_yaml": ""
+        }))
+        .unwrap();
+
+        assert_eq!(profile.mixin_yaml, "port: 0\nrules: []\n");
+
+        let serialized = serde_json::to_value(&profile).unwrap();
+        assert_eq!(serialized["mixin_yaml"], "port: 0\nrules: []\n");
+        assert!(serialized.get("template_yaml").is_none());
     }
 
     #[test]

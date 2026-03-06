@@ -45,10 +45,10 @@ pub enum SubscriptionError {
     VlessRealityMissingActiveShortId {
         endpoint_id: String,
     },
-    MihomoTemplateParse {
+    MihomoMixinParse {
         reason: String,
     },
-    MihomoTemplateRootNotMapping,
+    MihomoMixinRootNotMapping,
     MihomoExtraProxiesParse {
         reason: String,
     },
@@ -118,11 +118,11 @@ impl std::fmt::Display for SubscriptionError {
                 f,
                 "vless reality active_short_id is missing/empty: endpoint_id={endpoint_id}"
             ),
-            Self::MihomoTemplateParse { reason } => {
-                write!(f, "mihomo template yaml parse error: {reason}")
+            Self::MihomoMixinParse { reason } => {
+                write!(f, "mihomo mixin yaml parse error: {reason}")
             }
-            Self::MihomoTemplateRootNotMapping => {
-                write!(f, "mihomo template yaml root must be a mapping")
+            Self::MihomoMixinRootNotMapping => {
+                write!(f, "mihomo mixin yaml root must be a mapping")
             }
             Self::MihomoExtraProxiesParse { reason } => {
                 write!(f, "mihomo extra_proxies_yaml parse error: {reason}")
@@ -251,7 +251,7 @@ pub fn build_mihomo_yaml(
         nodes,
         &mut rng,
     )?;
-    let mut root = parse_template_mapping(&profile.template_yaml)?;
+    let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
     let proxy_ref_rename_map = build_proxy_reference_rename_map(&root, &generated);
     remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
     dedupe_proxy_refs_in_mapping(&mut root);
@@ -310,7 +310,7 @@ struct MihomoRegionSpec {
     filter: &'static str,
 }
 
-const MIHOMO_REGION_SPECS: [MihomoRegionSpec; 6] = [
+const MIHOMO_REGION_SPECS: [MihomoRegionSpec; 3] = [
     MihomoRegionSpec {
         label: "Japan",
         filter: "日本|🇯🇵|Japan|JP",
@@ -322,18 +322,6 @@ const MIHOMO_REGION_SPECS: [MihomoRegionSpec; 6] = [
     MihomoRegionSpec {
         label: "Korea",
         filter: "韩国|🇰🇷|Korea|KR",
-    },
-    MihomoRegionSpec {
-        label: "Singapore",
-        filter: "新加坡|🇸🇬|Singapore|SG",
-    },
-    MihomoRegionSpec {
-        label: "Taiwan",
-        filter: "台湾|🇹🇼|Taiwan|TW",
-    },
-    MihomoRegionSpec {
-        label: "US",
-        filter: "美国|🇺🇸|USA|US|United States",
     },
 ];
 
@@ -382,7 +370,7 @@ fn inject_mihomo_proxy_groups(
             return true;
         };
         // `🛬 {base}` landing groups are system-generated and depend on the user's actual proxies.
-        // Treat all template-provided landing groups as overridable, even when the base doesn't
+        // Treat all mixin-provided landing groups as overridable, even when the base doesn't
         // exist anymore (e.g. user access removed, or profile reused across users).
         if name.starts_with("🛬 ") {
             return false;
@@ -936,7 +924,7 @@ fn dedupe_proxy_refs_in_sequence(value: &mut serde_yaml::Value) {
         }
         tracing::warn!(
             proxy_name = name,
-            "mihomo duplicate proxy reference removed while flattening template"
+            "mihomo duplicate proxy reference removed while flattening mixin"
         );
         false
     });
@@ -975,20 +963,20 @@ fn prune_template_reference_helper_blocks(root: &mut serde_yaml::Mapping) {
         if let Some(key_str) = key.as_str() {
             tracing::debug!(
                 key = key_str,
-                "removed mihomo template helper block after flattening references"
+                "removed mihomo mixin helper block after flattening references"
             );
         }
         root.remove(&key);
     }
 }
 
-fn parse_template_mapping(input: &str) -> Result<serde_yaml::Mapping, SubscriptionError> {
+fn parse_mixin_mapping(input: &str) -> Result<serde_yaml::Mapping, SubscriptionError> {
     let root: serde_yaml::Value =
-        serde_yaml::from_str(input).map_err(|e| SubscriptionError::MihomoTemplateParse {
+        serde_yaml::from_str(input).map_err(|e| SubscriptionError::MihomoMixinParse {
             reason: e.to_string(),
         })?;
     let serde_yaml::Value::Mapping(map) = root else {
-        return Err(SubscriptionError::MihomoTemplateRootNotMapping);
+        return Err(SubscriptionError::MihomoMixinRootNotMapping);
     };
     Ok(map)
 }
@@ -2108,7 +2096,7 @@ mod tests {
         ];
         let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "🛣️ Japan"
@@ -2190,13 +2178,13 @@ providerB:
     fn build_mihomo_yaml_rejects_non_mapping_template() {
         let u = user("u1", "alice");
         let profile = UserMihomoProfile {
-            template_yaml: "- not-a-mapping".to_string(),
+            mixin_yaml: "- not-a-mapping".to_string(),
             extra_proxies_yaml: "".to_string(),
             extra_proxy_providers_yaml: "".to_string(),
         };
 
         let err = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap_err();
-        assert_eq!(err, SubscriptionError::MihomoTemplateRootNotMapping);
+        assert_eq!(err, SubscriptionError::MihomoMixinRootNotMapping);
     }
 
     #[test]
@@ -2212,7 +2200,7 @@ providerB:
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "Auto"
@@ -2280,7 +2268,7 @@ providerA:
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "Test"
@@ -2346,7 +2334,7 @@ rules: []
     fn build_mihomo_yaml_removes_template_landing_groups_when_base_missing() {
         let u = user("u1", "alice");
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "Top"
@@ -2384,7 +2372,10 @@ rules: []
             .get("proxies")
             .and_then(Value::as_sequence)
             .expect("Top proxies must exist");
-        let top_proxy_names = top_proxies.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        let top_proxy_names = top_proxies
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
         assert_eq!(top_proxy_names, vec!["DIRECT"]);
     }
 
@@ -2401,7 +2392,7 @@ rules: []
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "Auto"
@@ -2485,7 +2476,7 @@ rules: []
             membership("u1", "n2", "e4"),
         ];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 helpers:
   keep: true
@@ -2576,7 +2567,7 @@ rules: []
         ];
         let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "🔒 高质量"
@@ -2629,7 +2620,7 @@ rules: []
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: "🚀 节点选择"
@@ -2683,7 +2674,7 @@ rules: []
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
         let profile = UserMihomoProfile {
-            template_yaml: r#"
+            mixin_yaml: r#"
 proxy-group:
   proxies: &subscription_proxies
     - JP-BV-reality

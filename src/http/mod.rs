@@ -520,8 +520,8 @@ struct PutUserAccessRequest {
 
 #[derive(Deserialize)]
 struct PutUserMihomoProfileRequest {
-    #[serde(default)]
-    template_yaml: String,
+    #[serde(default, alias = "template_yaml")]
+    mixin_yaml: String,
     #[serde(default)]
     extra_proxies_yaml: String,
     #[serde(default)]
@@ -5066,55 +5066,54 @@ fn validate_user_mihomo_profile_payload(
 fn normalize_user_mihomo_profile_payload(
     req: PutUserMihomoProfileRequest,
 ) -> Result<crate::state::UserMihomoProfile, ApiError> {
-    if req.template_yaml.trim().is_empty() {
-        return Err(ApiError::invalid_request("template_yaml is required"));
+    if req.mixin_yaml.trim().is_empty() {
+        return Err(ApiError::invalid_request("mixin_yaml is required"));
     }
 
-    let template_root: serde_yaml::Value = serde_yaml::from_str(&req.template_yaml)
-        .map_err(|e| ApiError::invalid_request(format!("template_yaml must be valid yaml: {e}")))?;
-    let serde_yaml::Value::Mapping(mut template_map) = template_root else {
+    let mixin_root: serde_yaml::Value = serde_yaml::from_str(&req.mixin_yaml)
+        .map_err(|e| ApiError::invalid_request(format!("mixin_yaml must be valid yaml: {e}")))?;
+    let serde_yaml::Value::Mapping(mut mixin_map) = mixin_root else {
         return Err(ApiError::invalid_request(
-            "template_yaml must be a yaml mapping",
+            "mixin_yaml must be a yaml mapping",
         ));
     };
 
-    let mut template_yaml = req.template_yaml;
+    let mut mixin_yaml = req.mixin_yaml;
     let mut extra_proxies_yaml = req.extra_proxies_yaml;
     let mut extra_proxy_providers_yaml = req.extra_proxy_providers_yaml;
     let mut extracted = false;
 
-    if let Some(value) = template_map.remove(&serde_yaml::Value::String("proxies".to_string())) {
+    if let Some(value) = mixin_map.remove(serde_yaml::Value::String("proxies".to_string())) {
         if !matches!(value, serde_yaml::Value::Sequence(_)) {
             return Err(ApiError::invalid_request(
-                "template_yaml.proxies must be a yaml sequence",
+                "mixin_yaml.proxies must be a yaml sequence",
             ));
         }
         extra_proxies_yaml = serde_yaml::to_string(&value).map_err(|e| {
-            ApiError::invalid_request(format!("template_yaml.proxies must be valid yaml: {e}"))
+            ApiError::invalid_request(format!("mixin_yaml.proxies must be valid yaml: {e}"))
         })?;
         extracted = true;
     }
 
-    if let Some(value) =
-        template_map.remove(&serde_yaml::Value::String("proxy-providers".to_string()))
+    if let Some(value) = mixin_map.remove(serde_yaml::Value::String("proxy-providers".to_string()))
     {
         if !matches!(value, serde_yaml::Value::Mapping(_)) {
             return Err(ApiError::invalid_request(
-                "template_yaml.proxy-providers must be a yaml mapping",
+                "mixin_yaml.proxy-providers must be a yaml mapping",
             ));
         }
         extra_proxy_providers_yaml = serde_yaml::to_string(&value).map_err(|e| {
             ApiError::invalid_request(format!(
-                "template_yaml.proxy-providers must be valid yaml: {e}"
+                "mixin_yaml.proxy-providers must be valid yaml: {e}"
             ))
         })?;
         extracted = true;
     }
 
     if extracted {
-        template_yaml =
-            serde_yaml::to_string(&serde_yaml::Value::Mapping(template_map)).map_err(|e| {
-                ApiError::invalid_request(format!("template_yaml must be valid yaml: {e}"))
+        mixin_yaml =
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(mixin_map)).map_err(|e| {
+                ApiError::invalid_request(format!("mixin_yaml must be valid yaml: {e}"))
             })?;
     }
 
@@ -5122,7 +5121,7 @@ fn normalize_user_mihomo_profile_payload(
     ensure_yaml_mapping_or_empty(&extra_proxy_providers_yaml, "extra_proxy_providers_yaml")?;
 
     Ok(crate::state::UserMihomoProfile {
-        template_yaml,
+        mixin_yaml,
         extra_proxies_yaml,
         extra_proxy_providers_yaml,
     })

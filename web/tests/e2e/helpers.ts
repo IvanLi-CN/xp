@@ -87,6 +87,13 @@ type AlertsResponse = {
 	}>;
 };
 
+type MockMihomoProfile = {
+	mixin_yaml?: string;
+	template_yaml?: string;
+	extra_proxies_yaml: string;
+	extra_proxy_providers_yaml: string;
+};
+
 type MockApiOptions = {
 	users?: AdminUser[];
 	nodes?: AdminNode[];
@@ -99,14 +106,7 @@ type MockApiOptions = {
 	healthStatus?: "ok" | "error";
 	subscriptionContentRaw?: string;
 	subscriptionContentClash?: string;
-	userMihomoProfiles?: Record<
-		string,
-		{
-			template_yaml: string;
-			extra_proxies_yaml: string;
-			extra_proxy_providers_yaml: string;
-		}
-	>;
+	userMihomoProfiles?: Record<string, MockMihomoProfile>;
 };
 
 type MockState = {
@@ -121,14 +121,7 @@ type MockState = {
 	healthStatus: "ok" | "error";
 	subscriptionContentRaw: string;
 	subscriptionContentClash: string;
-	userMihomoProfiles: Record<
-		string,
-		{
-			template_yaml: string;
-			extra_proxies_yaml: string;
-			extra_proxy_providers_yaml: string;
-		}
-	>;
+	userMihomoProfiles: Record<string, MockMihomoProfile>;
 };
 
 const defaultNodes: AdminNode[] = [
@@ -290,7 +283,7 @@ export async function setupApiMocks(
 				(options.users ? options.users : defaultUsers).map((user) => [
 					user.user_id,
 					{
-						template_yaml: "",
+						mixin_yaml: "",
 						extra_proxies_yaml: "",
 						extra_proxy_providers_yaml: "",
 					},
@@ -644,7 +637,7 @@ export async function setupApiMocks(
 				jsonResponse(
 					route,
 					state.userMihomoProfiles[userId] ?? {
-						template_yaml: "",
+						mixin_yaml: "",
 						extra_proxies_yaml: "",
 						extra_proxy_providers_yaml: "",
 					},
@@ -660,10 +653,12 @@ export async function setupApiMocks(
 				}
 				const payload = parseJsonBody(request);
 				const profile = {
-					template_yaml:
-						typeof payload.template_yaml === "string"
-							? payload.template_yaml
-							: "",
+					mixin_yaml:
+						typeof payload.mixin_yaml === "string"
+							? payload.mixin_yaml
+							: typeof payload.template_yaml === "string"
+								? payload.template_yaml
+								: "",
 					extra_proxies_yaml:
 						typeof payload.extra_proxies_yaml === "string"
 							? payload.extra_proxies_yaml

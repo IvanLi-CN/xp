@@ -197,12 +197,12 @@ function setupMocks(args?: {
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
 	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue({
-		template_yaml: "",
+		mixin_yaml: "",
 		extra_proxies_yaml: "",
 		extra_proxy_providers_yaml: "",
 	});
 	vi.mocked(putAdminUserMihomoProfile).mockResolvedValue({
-		template_yaml: "",
+		mixin_yaml: "",
 		extra_proxies_yaml: "",
 		extra_proxy_providers_yaml: "",
 	});
@@ -537,17 +537,17 @@ describe("<UserDetailsPage />", () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.change(await screenByLabel("template_yaml"), {
+		fireEvent.change(await screenByLabel("mixin_yaml"), {
 			target: { value: "port: 0\nproxy-groups: []\n" },
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo profile"));
+		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
 
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
 				"u_01HUSERAAAAAA",
 				{
-					template_yaml: "port: 0\nproxy-groups: []\n",
+					mixin_yaml: "port: 0\nproxy-groups: []\n",
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: "",
 				},

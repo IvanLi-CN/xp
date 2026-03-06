@@ -93,7 +93,7 @@ export function UserDetailsPage() {
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
 	const [subError, setSubError] = useState<string | null>(null);
-	const [mihomoTemplateYaml, setMihomoTemplateYaml] = useState("");
+	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
 	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
 	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
 		useState("");
@@ -180,7 +180,7 @@ export function UserDetailsPage() {
 
 	useEffect(() => {
 		if (!mihomoProfileQuery.data) return;
-		setMihomoTemplateYaml(mihomoProfileQuery.data.template_yaml);
+		setMihomoMixinYaml(mihomoProfileQuery.data.mixin_yaml);
 		setMihomoExtraProxiesYaml(mihomoProfileQuery.data.extra_proxies_yaml);
 		setMihomoExtraProxyProvidersYaml(
 			mihomoProfileQuery.data.extra_proxy_providers_yaml,
@@ -544,12 +544,12 @@ export function UserDetailsPage() {
 		setMihomoProfileSaveError(null);
 		try {
 			await putAdminUserMihomoProfile(adminToken, userId, {
-				template_yaml: mihomoTemplateYaml,
+				mixin_yaml: mihomoMixinYaml,
 				extra_proxies_yaml: mihomoExtraProxiesYaml,
 				extra_proxy_providers_yaml: mihomoExtraProxyProvidersYaml,
 			});
 			await mihomoProfileQuery.refetch();
-			pushToast({ variant: "success", message: "Mihomo profile updated" });
+			pushToast({ variant: "success", message: "Mihomo mixin updated" });
 		} catch (error) {
 			setMihomoProfileSaveError(formatError(error));
 		} finally {
@@ -835,10 +835,10 @@ export function UserDetailsPage() {
 								</div>
 							) : null}
 							<YamlCodeEditor
-								label="template_yaml"
-								value={mihomoTemplateYaml}
-								onChange={setMihomoTemplateYaml}
-								placeholder="Paste full Mihomo YAML (proxies/proxy-providers will be extracted on save)"
+								label="mixin_yaml"
+								value={mihomoMixinYaml}
+								onChange={setMihomoMixinYaml}
+								placeholder="Paste Mihomo mixin YAML (top-level proxies/proxy-providers will be extracted on save)"
 								minRows={14}
 							/>
 							<YamlCodeEditor
@@ -865,7 +865,7 @@ export function UserDetailsPage() {
 									loading={isSavingMihomoProfile}
 									onClick={saveUserMihomoProfile}
 								>
-									Save mihomo config
+									Save mihomo mixin
 								</Button>
 							</div>
 						</div>
