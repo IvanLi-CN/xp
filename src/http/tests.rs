@@ -3359,6 +3359,22 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         assert!(use_values.contains(&"providerA"));
     }
 
+    let japan_lock = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected built-in region group 🔒 Japan");
+    let japan_lock_use = japan_lock
+        .get("use")
+        .and_then(YamlValue::as_sequence)
+        .expect("region group use missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        japan_lock_use.contains(&"providerA"),
+        "expected region group 🔒 Japan to use providerA"
+    );
+
     let proxies = yaml
         .get("proxies")
         .and_then(YamlValue::as_sequence)
@@ -3372,6 +3388,57 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
                 && item.get("dialer-proxy").and_then(YamlValue::as_str) == Some("🛣️ Japan")
         }),
         "expected at least one generated JP chain proxy"
+    );
+
+    let base = proxies
+        .iter()
+        .filter_map(|p| p.get("name").and_then(YamlValue::as_str))
+        .find_map(|name| name.strip_suffix("-ss"))
+        .expect("expected at least one generated -ss proxy for landing group test");
+    let landing_group_name = format!("🛬 {base}");
+
+    let landing_group = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(&landing_group_name))
+        .expect("expected per-base landing group to exist");
+    let landing_proxies = landing_group
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("landing group proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    let expected_chain_jp = format!("{base}-JP");
+    assert!(
+        landing_proxies
+            .iter()
+            .any(|p| *p == expected_chain_jp.as_str()),
+        "expected landing group to include JP chain proxy"
+    );
+    let expected_ss = format!("{base}-ss");
+    assert!(
+        landing_proxies
+            .last()
+            .is_some_and(|p| *p == expected_ss.as_str()),
+        "expected landing group to end with ss direct fallback"
+    );
+
+    let landing_pool = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 落地"))
+        .expect("expected built-in landing pool group 🔒 落地");
+    let landing_pool_proxies = landing_pool
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("landing pool proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        landing_pool_proxies
+            .iter()
+            .any(|p| *p == landing_group_name.as_str()),
+        "expected 🔒 落地 to include per-base landing group"
     );
 }
 

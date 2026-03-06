@@ -279,7 +279,7 @@ pub fn build_mihomo_yaml(
         serde_yaml::Value::String("proxy-providers".to_string()),
         serde_yaml::Value::Mapping(provider_map),
     );
-    inject_relay_group_use(&mut root, &provider_names);
+    inject_mihomo_proxy_groups(&mut root, &provider_names, &proxy_name_set);
     // Make the resulting subscription self-contained: avoid leaving template references to
     // providers/proxies that are not present in the final output (e.g. when the admin clears
     // `extra_*` after auto-splitting a full config into the template).
@@ -301,6 +301,326 @@ const MIHOMO_CHAIN_SPECS: [(&str, &str); 3] = [
     ("HK", "🛣️ HongKong"),
     ("KR", "🛣️ Korea"),
 ];
+
+const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
+
+#[derive(Debug, Clone, Copy)]
+struct MihomoRegionSpec {
+    label: &'static str,
+    filter: &'static str,
+}
+
+const MIHOMO_REGION_SPECS: [MihomoRegionSpec; 6] = [
+    MihomoRegionSpec {
+        label: "Japan",
+        filter: "日本|🇯🇵|Japan|JP",
+    },
+    MihomoRegionSpec {
+        label: "HongKong",
+        filter: "香港|🇭🇰|HongKong|HK",
+    },
+    MihomoRegionSpec {
+        label: "Korea",
+        filter: "韩国|🇰🇷|Korea|KR",
+    },
+    MihomoRegionSpec {
+        label: "Singapore",
+        filter: "新加坡|🇸🇬|Singapore|SG",
+    },
+    MihomoRegionSpec {
+        label: "Taiwan",
+        filter: "台湾|🇹🇼|Taiwan|TW",
+    },
+    MihomoRegionSpec {
+        label: "US",
+        filter: "美国|🇺🇸|USA|US|United States",
+    },
+];
+
+fn collect_mihomo_base_names(
+    proxy_names: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::<String>::new();
+    for name in proxy_names {
+        let Some((_, base)) = classify_proxy_ref_name(name) else {
+            continue;
+        };
+        out.insert(base);
+    }
+    out
+}
+
+fn inject_mihomo_proxy_groups(
+    root: &mut serde_yaml::Mapping,
+    provider_names: &[String],
+    proxy_name_set: &std::collections::BTreeSet<String>,
+) {
+    let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
+        Some(serde_yaml::Value::Sequence(seq)) => seq,
+        _ => Vec::new(),
+    };
+
+    let base_names = collect_mihomo_base_names(proxy_name_set);
+
+    let mut override_names = std::collections::BTreeSet::<String>::new();
+    override_names.extend(MIHOMO_RELAY_GROUPS.iter().map(|s| s.to_string()));
+    override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
+    for region in MIHOMO_REGION_SPECS {
+        override_names.insert(format!("🌟 {}", region.label));
+        override_names.insert(format!("🔒 {}", region.label));
+        override_names.insert(format!("🤯 {}", region.label));
+    }
+    for base in &base_names {
+        override_names.insert(format!("🛬 {base}"));
+    }
+
+    groups.retain(|value| {
+        let serde_yaml::Value::Mapping(map) = value else {
+            return true;
+        };
+        let Some(name) = map
+            .get(serde_yaml::Value::String("name".to_string()))
+            .and_then(|v| v.as_str())
+        else {
+            return true;
+        };
+        !override_names.contains(name)
+    });
+
+    let provider_values = provider_names
+        .iter()
+        .map(|name| serde_yaml::Value::String(name.clone()))
+        .collect::<Vec<_>>();
+
+    inject_mihomo_relay_groups(&mut groups, &provider_values);
+    inject_mihomo_region_entry_groups(&mut groups, &provider_values);
+    let landing_groups = inject_mihomo_landing_groups(&mut groups, proxy_name_set, &base_names);
+    inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
+
+    root.insert(
+        serde_yaml::Value::String("proxy-groups".to_string()),
+        serde_yaml::Value::Sequence(groups),
+    );
+}
+
+fn inject_mihomo_relay_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    provider_values: &[serde_yaml::Value],
+) {
+    for relay_name in MIHOMO_RELAY_GROUPS {
+        let filter = MIHOMO_REGION_SPECS
+            .iter()
+            .find(|spec| format!("🛣️ {}", spec.label) == relay_name)
+            .map(|spec| spec.filter);
+
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(relay_name.to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("url-test".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+        );
+        map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        if let Some(filter) = filter {
+            map.insert(
+                serde_yaml::Value::String("filter".to_string()),
+                serde_yaml::Value::String(filter.to_string()),
+            );
+        }
+        map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        groups.push(serde_yaml::Value::Mapping(map));
+    }
+}
+
+fn inject_mihomo_region_entry_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    provider_values: &[serde_yaml::Value],
+) {
+    for spec in MIHOMO_REGION_SPECS {
+        let star_name = format!("🌟 {}", spec.label);
+        let lock_name = format!("🔒 {}", spec.label);
+        let crazy_name = format!("🤯 {}", spec.label);
+
+        let mut lock_map = serde_yaml::Mapping::new();
+        lock_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(lock_name.clone()),
+        );
+        lock_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("select".to_string()),
+        );
+        lock_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(spec.filter.to_string()),
+        );
+        lock_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+
+        let mut crazy_map = serde_yaml::Mapping::new();
+        crazy_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(crazy_name.clone()),
+        );
+        crazy_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("url-test".to_string()),
+        );
+        crazy_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        crazy_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(spec.filter.to_string()),
+        );
+        crazy_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+
+        let mut star_map = serde_yaml::Mapping::new();
+        star_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(star_name),
+        );
+        star_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("fallback".to_string()),
+        );
+        star_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        star_map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(vec![
+                serde_yaml::Value::String(lock_name),
+                serde_yaml::Value::String(crazy_name),
+            ]),
+        );
+
+        groups.push(serde_yaml::Value::Mapping(star_map));
+        groups.push(serde_yaml::Value::Mapping(lock_map));
+        groups.push(serde_yaml::Value::Mapping(crazy_map));
+    }
+}
+
+fn inject_mihomo_landing_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    proxy_name_set: &std::collections::BTreeSet<String>,
+    base_names: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+
+    for base in base_names {
+        let group_name = format!("🛬 {base}");
+
+        let reality_name = format!("{base}-reality");
+        let ss_name = format!("{base}-ss");
+        let chain_names = ["JP", "HK", "KR"]
+            .into_iter()
+            .map(|suffix| format!("{base}-{suffix}"))
+            .collect::<Vec<_>>();
+
+        let mut proxies = Vec::<serde_yaml::Value>::new();
+
+        if proxy_name_set.contains(&reality_name) {
+            proxies.push(serde_yaml::Value::String(reality_name));
+        } else if proxy_name_set.contains(&ss_name) {
+            for chain in &chain_names {
+                if proxy_name_set.contains(chain) {
+                    proxies.push(serde_yaml::Value::String(chain.clone()));
+                }
+            }
+            proxies.push(serde_yaml::Value::String(ss_name));
+        } else {
+            continue;
+        }
+
+        out.push(group_name.clone());
+
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(group_name),
+        );
+        map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("fallback".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+        );
+        map.insert(
+            serde_yaml::Value::String("timeout".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
+        );
+        map.insert(
+            serde_yaml::Value::String("max-failed-times".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(1)),
+        );
+        map.insert(
+            serde_yaml::Value::String("lazy".to_string()),
+            serde_yaml::Value::Bool(false),
+        );
+        map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(proxies),
+        );
+        groups.push(serde_yaml::Value::Mapping(map));
+    }
+
+    out
+}
+
+fn inject_mihomo_landing_pool_group(
+    groups: &mut Vec<serde_yaml::Value>,
+    landing_groups: &[String],
+) {
+    let proxies = landing_groups
+        .iter()
+        .map(|name| serde_yaml::Value::String(name.clone()))
+        .collect::<Vec<_>>();
+
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(MIHOMO_LANDING_POOL_GROUP.to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("select".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        serde_yaml::Value::Sequence(proxies),
+    );
+    groups.push(serde_yaml::Value::Mapping(map));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProxyRefKind {
@@ -755,75 +1075,6 @@ fn merge_and_rename_proxies(
     }
 
     Ok(out)
-}
-
-fn inject_relay_group_use(root: &mut serde_yaml::Mapping, provider_names: &[String]) {
-    let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
-        Some(serde_yaml::Value::Sequence(seq)) => seq,
-        _ => Vec::new(),
-    };
-
-    let provider_values = provider_names
-        .iter()
-        .map(|name| serde_yaml::Value::String(name.clone()))
-        .collect::<Vec<_>>();
-
-    for relay_name in MIHOMO_RELAY_GROUPS {
-        let mut found = false;
-        for group in &mut groups {
-            let serde_yaml::Value::Mapping(map) = group else {
-                continue;
-            };
-            let name = map
-                .get(serde_yaml::Value::String("name".to_string()))
-                .and_then(|v| v.as_str());
-            if name != Some(relay_name) {
-                continue;
-            }
-            map.insert(
-                serde_yaml::Value::String("use".to_string()),
-                serde_yaml::Value::Sequence(provider_values.clone()),
-            );
-            found = true;
-            break;
-        }
-
-        if found {
-            continue;
-        }
-
-        let mut map = serde_yaml::Mapping::new();
-        map.insert(
-            serde_yaml::Value::String("name".to_string()),
-            serde_yaml::Value::String(relay_name.to_string()),
-        );
-        map.insert(
-            serde_yaml::Value::String("type".to_string()),
-            serde_yaml::Value::String("url-test".to_string()),
-        );
-        map.insert(
-            serde_yaml::Value::String("url".to_string()),
-            serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
-        );
-        map.insert(
-            serde_yaml::Value::String("interval".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
-        );
-        map.insert(
-            serde_yaml::Value::String("hidden".to_string()),
-            serde_yaml::Value::Bool(true),
-        );
-        map.insert(
-            serde_yaml::Value::String("use".to_string()),
-            serde_yaml::Value::Sequence(provider_values.clone()),
-        );
-        groups.push(serde_yaml::Value::Mapping(map));
-    }
-
-    root.insert(
-        serde_yaml::Value::String("proxy-groups".to_string()),
-        serde_yaml::Value::Sequence(groups),
-    );
 }
 
 fn collect_proxy_group_names(root: &serde_yaml::Mapping) -> std::collections::BTreeSet<String> {

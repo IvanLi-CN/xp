@@ -144,6 +144,13 @@ MVP 建议输出“可直接导入”的最小 YAML：
     - 以 `extra_proxy_providers_yaml` 作为最终 `proxy-providers`
 - 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
 - 所有 provider 名称会注入固定 relay 组 `🛣️ Japan|🛣️ HongKong|🛣️ Korea` 的 `use` 列表。
+- 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
+  - relay 组：`🛣️ Japan|🛣️ HongKong|🛣️ Korea`
+  - 地区入口组：`🌟 {Region}` / `🔒 {Region}` / `🤯 {Region}`（候选来自所有 provider）
+  - 落地组：`🛬 {base}`（按 `base-reality/base-ss` 与链式节点动态生成）与落地池 `🔒 落地`
+- 落地组生成策略：
+  - 若存在 `{base}-reality`：仅使用 `{base}-reality`（不使用 SS 及其链式）
+  - 否则若存在 `{base}-ss`：优先 `{base}-JP|HK|KR`，并以 `{base}-ss` 兜底
 
 ### 6.3 缺失模板回退
 

@@ -50,7 +50,9 @@ Errors:
 - 当用户已配置 Mihomo profile：
   - 使用 profile.template_yaml 为基底渲染；
   - 系统重建并覆盖 `proxies`、`proxy-providers`；
-  - relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 自动注入所有 provider 名称。
+  - relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 自动注入所有 provider 名称；
+  - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（地区入口组、落地组与落地池），使 mixin config 不需要写死
+    providers 列表或主力节点名称。
 - 当用户未配置 Mihomo profile：回退到 clash 输出。
 
 Response:
