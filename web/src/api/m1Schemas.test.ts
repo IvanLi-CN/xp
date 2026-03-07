@@ -13,6 +13,7 @@ import {
 	PutAdminUserAccessResponseSchema,
 } from "./adminUserAccess";
 import {
+	AdminUserMihomoProfileSchema,
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
 } from "./adminUsers";
@@ -254,6 +255,32 @@ describe("AdminUserTokenResponseSchema", () => {
 		).toEqual({
 			subscription_token: "sub_123",
 		});
+	});
+});
+
+describe("AdminUserMihomoProfileSchema", () => {
+	it("accepts the mixin field from current responses", () => {
+		expect(
+			AdminUserMihomoProfileSchema.parse({
+				mixin_yaml: "port: 0\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: "",
+			}),
+		).toEqual({
+			mixin_yaml: "port: 0\n",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		});
+	});
+
+	it("rejects legacy template_yaml-only responses", () => {
+		expect(() =>
+			AdminUserMihomoProfileSchema.parse({
+				template_yaml: "port: 7890\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: "",
+			}),
+		).toThrow();
 	});
 });
 

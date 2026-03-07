@@ -4823,6 +4823,7 @@ dependencies = [
  "rand 0.8.5",
  "ratatui",
  "rcgen",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

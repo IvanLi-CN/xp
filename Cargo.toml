@@ -17,6 +17,7 @@ hmac = "0.12"
 openraft = { version = "0.9.21", features = ["serde", "storage-v2"] }
 prost = "0.14"
 rand = "0.8"
+regex = "1.11"
 ratatui = "0.30.0"
 rcgen = { version = "0.14", features = ["x509-parser"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks"] }

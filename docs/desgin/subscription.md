@@ -5,7 +5,7 @@
 - `GET /api/sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
 - `GET /api/sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
 - `GET /api/sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
-- `GET /api/sub/{subscription_token}?format=mihomo`：返回用户模板驱动的完整 Mihomo YAML（未配置模板时回退 clash）
+- `GET /api/sub/{subscription_token}?format=mihomo`：返回用户混入配置驱动的完整 Mihomo YAML（未配置 mixin 时回退 clash）
 
 ## 2. 统一规则
 
@@ -119,19 +119,23 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - `proxies: [...]`
 - 可选：追加一个 `proxy-groups`（例如 `select`）与基础 `rules`（后续再定，避免替用户做过多假设）
 
-## 6. Mihomo 模板驱动输出（`format=mihomo`）
+## 6. Mihomo 混入配置输出（`format=mihomo`）
 
-### 6.1 模板来源
+### 6.1 混入配置来源
 
-- 模板按用户维度存储（admin API 管理），不内置到仓库。
+- 混入配置按用户维度存储（admin API 管理），不内置到仓库。
 - profile 字段：
-  - `template_yaml`（必填，YAML root 必须是 mapping）
+  - `mixin_yaml`（必填，YAML root 必须是 mapping）
   - `extra_proxies_yaml`（可空；非空时 root 必须是 sequence）
   - `extra_proxy_providers_yaml`（可空；非空时 root 必须是 mapping）
+- 保存 profile 时若 `mixin_yaml` 顶层包含 `proxies` / `proxy-providers`，服务端会自动抽取到
+  `extra_proxies_yaml` / `extra_proxy_providers_yaml` 并从 `mixin_yaml` 移除（返回值为规范化后的文本；
+  注释/anchors 不保证保留）。
+- 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，保存会返回 `invalid_request`，避免静默覆盖另一份输入。
 
 ### 6.2 渲染规则
 
-- 渲染时忽略模板中的 `proxies` 与 `proxy-providers`，由系统重建：
+- 渲染时忽略 mixin 中的 `proxies` 与 `proxy-providers`，由系统重建：
   - 系统节点：
     - reality direct：`<node_slug>-reality`
     - ss direct：`<node_slug>-ss`
@@ -141,7 +145,14 @@ MVP 建议输出“可直接导入”的最小 YAML：
     - 以 `extra_proxy_providers_yaml` 作为最终 `proxy-providers`
 - 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
 - 所有 provider 名称会注入固定 relay 组 `🛣️ Japan|🛣️ HongKong|🛣️ Korea` 的 `use` 列表。
+- 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
+  - relay 组：`🛣️ Japan|🛣️ HongKong|🛣️ Korea`
+  - 稳定地区入口组：`🌟/🔒/🤯 Japan|HongKong|Korea`（仅首批三区；候选来自所有 provider，provider 为空时回退到 `include-all-proxies`）
+  - 落地组：`🛬 {base}`（按 `base-reality/base-ss` 与链式节点动态生成）与落地池 `🔒 落地`
+- 落地组生成策略：
+  - 若存在 `{base}-reality`：仅使用 `{base}-reality`（不使用 SS 及其链式）
+  - 否则若存在 `{base}-ss`：优先 `{base}-JP|HK|KR`，并以 `{base}-ss` 兜底
 
-### 6.3 缺失模板回退
+### 6.3 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。

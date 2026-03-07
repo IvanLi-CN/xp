@@ -3292,8 +3292,8 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
             "PUT",
             &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
             json!({
-              "template_yaml": "port: 0\nproxy-groups:\n  - name: \"🛣️ Japan\"\n    type: url-test\n    use: []\n  - name: \"🛣️ HongKong\"\n    type: url-test\n    use: []\n  - name: \"🛣️ Korea\"\n    type: url-test\n    use: []\nrules: []\n",
-              "extra_proxies_yaml": "- name: \"custom-direct\"\n  type: ss\n  server: custom.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"abc:def\"\n  udp: true\n",
+              "mixin_yaml": "port: 0\nproxy-groups:\n  - name: \"🛣️ Japan\"\n    type: url-test\n    use: []\n  - name: \"🛣️ HongKong\"\n    type: url-test\n    use: []\n  - name: \"🛣️ Korea\"\n    type: url-test\n    use: []\nrules: []\n",
+              "extra_proxies_yaml": "- name: \"custom-direct\"\n  type: ss\n  server: custom.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"abc:def\"\n  udp: true\n- name: \"custom-JP\"\n  type: ss\n  server: japan.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"jp:def\"\n  udp: true\n",
               "extra_proxy_providers_yaml": "providerA:\n  type: http\n  path: ./provider-a.yaml\n  url: https://example.com/sub-a\n",
             }),
         ))
@@ -3312,10 +3312,7 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
     assert_eq!(get_res.status(), StatusCode::OK);
     let profile = body_json(get_res).await;
     assert_eq!(
-        profile["template_yaml"]
-            .as_str()
-            .unwrap()
-            .contains("port: 0"),
+        profile["mixin_yaml"].as_str().unwrap().contains("port: 0"),
         true
     );
     assert_eq!(
@@ -3324,6 +3321,10 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
             .unwrap()
             .contains("providerA"),
         true
+    );
+    assert!(
+        profile.get("template_yaml").is_none(),
+        "response should only expose mixin_yaml"
     );
 
     let sub_res = app
@@ -3359,6 +3360,54 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         assert!(use_values.contains(&"providerA"));
     }
 
+    let japan_lock = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected built-in region group 🔒 Japan");
+    let japan_lock_use = japan_lock
+        .get("use")
+        .and_then(YamlValue::as_sequence)
+        .expect("region group use missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        japan_lock_use.contains(&"providerA"),
+        "expected region group 🔒 Japan to use providerA"
+    );
+    assert_eq!(
+        japan_lock.get("include-all-proxies"),
+        Some(&YamlValue::Bool(true)),
+        "region groups should keep provider-backed use while exposing extra proxies via include-all-proxies"
+    );
+    let japan_probe = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 Japan"))
+        .expect("expected built-in region group 🤯 Japan");
+    assert_eq!(
+        japan_probe.get("include-all-proxies"),
+        Some(&YamlValue::Bool(true)),
+        "url-test region groups should also expose extra proxies while keeping provider-backed use"
+    );
+    for unexpected in [
+        "🌟 Taiwan",
+        "🔒 Taiwan",
+        "🤯 Taiwan",
+        "🌟 Singapore",
+        "🔒 Singapore",
+        "🤯 Singapore",
+        "🌟 US",
+        "🔒 US",
+        "🤯 US",
+    ] {
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
+            "unexpected stable region group leaked into output: {unexpected}"
+        );
+    }
+
     let proxies = yaml
         .get("proxies")
         .and_then(YamlValue::as_sequence)
@@ -3373,6 +3422,704 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         }),
         "expected at least one generated JP chain proxy"
     );
+
+    let base = proxies
+        .iter()
+        .filter_map(|p| p.get("name").and_then(YamlValue::as_str))
+        .find_map(|name| name.strip_suffix("-ss"))
+        .expect("expected at least one generated -ss proxy for landing group test");
+    let landing_group_name = format!("🛬 {base}");
+
+    let landing_group = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(&landing_group_name))
+        .expect("expected per-base landing group to exist");
+    let landing_proxies = landing_group
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("landing group proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    let expected_chain_jp = format!("{base}-JP");
+    assert!(
+        landing_proxies
+            .iter()
+            .any(|p| *p == expected_chain_jp.as_str()),
+        "expected landing group to include JP chain proxy"
+    );
+    let expected_ss = format!("{base}-ss");
+    assert!(
+        landing_proxies
+            .last()
+            .is_some_and(|p| *p == expected_ss.as_str()),
+        "expected landing group to end with ss direct fallback"
+    );
+
+    let landing_pool = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 落地"))
+        .expect("expected built-in landing pool group 🔒 落地");
+    let landing_pool_proxies = landing_pool
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("landing pool proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        landing_pool_proxies
+            .iter()
+            .any(|p| *p == landing_group_name.as_str()),
+        "expected 🔒 落地 to include per-base landing group"
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_rendering_without_proxy_providers_still_works() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": "port: 0\nrules: []\n",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    let providers = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("proxy-providers must exist");
+    assert!(
+        providers.is_empty(),
+        "proxy-providers should be empty when omitted"
+    );
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    let japan_lock = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected built-in region group 🔒 Japan");
+    assert_eq!(
+        japan_lock.get("include-all-proxies"),
+        Some(&YamlValue::Bool(true)),
+        "region groups should still draw from generated/extra proxies when providers are omitted"
+    );
+    let use_values = japan_lock
+        .get("use")
+        .and_then(YamlValue::as_sequence)
+        .expect("region group use missing");
+    assert!(
+        use_values.is_empty(),
+        "region group use should stay empty without providers"
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_put_autosplits_full_config_template() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": r#"port: 0
+proxies:
+  - name: "custom-direct"
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "abc:def"
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+    proxies: ["DIRECT"]
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+
+    let mixin_yaml = profile["mixin_yaml"].as_str().unwrap();
+    let template_root: YamlValue = serde_yaml::from_str(mixin_yaml).unwrap();
+    let template_map = template_root
+        .as_mapping()
+        .expect("template must be a mapping");
+    assert!(
+        !template_map.contains_key(&YamlValue::String("proxies".to_string())),
+        "expected top-level proxies to be removed from mixin_yaml"
+    );
+    assert!(
+        !template_map.contains_key(&YamlValue::String("proxy-providers".to_string())),
+        "expected top-level proxy-providers to be removed from mixin_yaml"
+    );
+
+    let extra_proxies_yaml = profile["extra_proxies_yaml"].as_str().unwrap();
+    let extra_proxies_root: YamlValue = serde_yaml::from_str(extra_proxies_yaml).unwrap();
+    let extra_proxies = extra_proxies_root
+        .as_sequence()
+        .expect("extra_proxies_yaml must be a sequence");
+    assert!(
+        extra_proxies.iter().any(|proxy| {
+            proxy
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|name| name == "custom-direct")
+        }),
+        "expected extracted extra_proxies_yaml to include custom-direct"
+    );
+
+    let extra_providers_yaml = profile["extra_proxy_providers_yaml"].as_str().unwrap();
+    let extra_providers_root: YamlValue = serde_yaml::from_str(extra_providers_yaml).unwrap();
+    let extra_providers = extra_providers_root
+        .as_mapping()
+        .expect("extra_proxy_providers_yaml must be a mapping");
+    assert!(
+        extra_providers.contains_key(&YamlValue::String("providerA".to_string())),
+        "expected extracted extra_proxy_providers_yaml to include providerA"
+    );
+    assert!(
+        profile.get("template_yaml").is_none(),
+        "response should only expose mixin_yaml after autosplit"
+    );
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    let providers = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("proxy-providers must exist");
+    assert!(
+        providers.contains_key(&YamlValue::String("providerA".to_string())),
+        "expected subscription output proxy-providers to include providerA"
+    );
+
+    let proxies = yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxies must exist");
+    assert!(
+        proxies.iter().any(|proxy| {
+            proxy
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|name| name == "custom-direct")
+        }),
+        "expected subscription output to include custom-direct"
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_get_and_render_autosplit_legacy_stored_full_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token;
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id.clone(),
+            crate::state::UserMihomoProfile {
+                mixin_yaml: r#"port: 0
+proxies:
+  - name: "custom-direct"
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "abc:def"
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+    proxies: ["DIRECT"]
+rules: []
+"#
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: "".to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+
+    let mixin_yaml = profile["mixin_yaml"].as_str().unwrap();
+    let mixin_root: YamlValue = serde_yaml::from_str(mixin_yaml).unwrap();
+    let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
+    assert!(
+        !mixin_map.contains_key(&YamlValue::String("proxies".to_string())),
+        "legacy stored full config should be normalized on GET"
+    );
+    assert!(
+        !mixin_map.contains_key(&YamlValue::String("proxy-providers".to_string())),
+        "legacy stored full config should expose split provider data on GET"
+    );
+
+    let extra_proxies_root: YamlValue =
+        serde_yaml::from_str(profile["extra_proxies_yaml"].as_str().unwrap()).unwrap();
+    assert!(
+        extra_proxies_root
+            .as_sequence()
+            .expect("extra_proxies_yaml must be a sequence")
+            .iter()
+            .any(|proxy| {
+                proxy
+                    .get("name")
+                    .and_then(YamlValue::as_str)
+                    .is_some_and(|name| name == "custom-direct")
+            }),
+        "legacy stored proxies should be extracted on GET"
+    );
+
+    let extra_providers_root: YamlValue =
+        serde_yaml::from_str(profile["extra_proxy_providers_yaml"].as_str().unwrap()).unwrap();
+    assert!(
+        extra_providers_root
+            .as_mapping()
+            .expect("extra_proxy_providers_yaml must be a mapping")
+            .contains_key(&YamlValue::String("providerA".to_string())),
+        "legacy stored provider map should be extracted on GET"
+    );
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    assert!(
+        yaml.get("proxy-providers")
+            .and_then(YamlValue::as_mapping)
+            .is_some_and(|providers| {
+                providers.contains_key(&YamlValue::String("providerA".to_string()))
+            }),
+        "legacy stored full config should also be normalized on render"
+    );
+    assert!(
+        yaml.get("proxies")
+            .and_then(YamlValue::as_sequence)
+            .is_some_and(|proxies| {
+                proxies.iter().any(|proxy| {
+                    proxy
+                        .get("name")
+                        .and_then(YamlValue::as_str)
+                        .is_some_and(|name| name == "custom-direct")
+                })
+            }),
+        "legacy stored extra proxies should remain visible in rendered subscriptions"
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_get_returns_raw_conflicting_legacy_provider_profile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id.clone(),
+            crate::state::UserMihomoProfile {
+                mixin_yaml: r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+"#
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+                .to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+    assert_eq!(
+        profile["mixin_yaml"],
+        r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+"#
+    );
+    assert_eq!(
+        profile["extra_proxy_providers_yaml"],
+        r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+    );
+}
+
+#[tokio::test]
+async fn subscription_format_mihomo_renders_conflicting_legacy_provider_profile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token;
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id,
+            crate::state::UserMihomoProfile {
+                mixin_yaml: r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+proxy-groups:
+  - name: Auto
+    type: select
+    use: [providerA]
+rules: []
+"#
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+                .to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let provider_a = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|map| map.get(YamlValue::String("providerA".to_string())))
+        .and_then(YamlValue::as_mapping)
+        .expect("providerA should still render from extra providers");
+    assert_eq!(
+        provider_a
+            .get(YamlValue::String("path".to_string()))
+            .and_then(YamlValue::as_str),
+        Some("./provider-a-from-extra.yaml")
+    );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_get_returns_raw_invalid_stored_profile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id.clone(),
+            crate::state::UserMihomoProfile {
+                mixin_yaml: "port: [
+"
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: "".to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+    assert_eq!(
+        profile["mixin_yaml"],
+        "port: [
+"
+    );
+    assert_eq!(profile["extra_proxies_yaml"], "");
+    assert_eq!(profile["extra_proxy_providers_yaml"], "");
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_put_rejects_legacy_template_yaml_field() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "template_yaml": "port: 0
+rules: []
+",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn subscription_format_mihomo_renders_without_proxy_providers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": r#"port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["🔒 Japan"]
+rules: []
+"#,
+              "extra_proxies_yaml": r#"- name: "custom-direct"
+  type: ss
+  server: custom.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#,
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+
+    let providers = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("proxy-providers must exist");
+    assert!(
+        providers.is_empty(),
+        "expected empty proxy-providers mapping"
+    );
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    let japan_lock = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected built-in region group 🔒 Japan");
+    assert_eq!(
+        japan_lock
+            .get("include-all-proxies")
+            .and_then(YamlValue::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        japan_lock
+            .get("use")
+            .and_then(YamlValue::as_sequence)
+            .map(|items| items.len()),
+        Some(0),
+        "expected 🔒 Japan to tolerate an empty provider pool"
+    );
+    for expected in [
+        "🌟 Japan",
+        "🔒 Japan",
+        "🤯 Japan",
+        "🌟 HongKong",
+        "🔒 HongKong",
+        "🤯 HongKong",
+        "🌟 Korea",
+        "🔒 Korea",
+        "🤯 Korea",
+    ] {
+        assert!(
+            groups
+                .iter()
+                .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
+            "missing stable region group: {expected}"
+        );
+    }
+    for unexpected in [
+        "🌟 Taiwan",
+        "🔒 Taiwan",
+        "🤯 Taiwan",
+        "🌟 Singapore",
+        "🔒 Singapore",
+        "🤯 Singapore",
+        "🌟 US",
+        "🔒 US",
+        "🤯 US",
+    ] {
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
+            "unexpected stable region group leaked into output: {unexpected}"
+        );
+    }
+
+    let proxies = yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxies must exist");
+    assert!(
+        proxies.iter().any(|proxy| {
+            proxy
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|name| name == "custom-direct")
+        }),
+        "expected extra_proxies_yaml to remain visible without proxy-providers"
+    );
 }
 
 #[tokio::test]
@@ -3386,27 +4133,74 @@ async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
     let cases = vec![
         (
             json!({
-              "template_yaml": "- not-a-mapping\n",
+              "mixin_yaml": "- not-a-mapping
+            ",
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
-            "template_yaml must be a yaml mapping",
+            "mixin_yaml must be a yaml mapping",
         ),
         (
             json!({
-              "template_yaml": "port: 0\n",
-              "extra_proxies_yaml": "k: v\n",
+              "mixin_yaml": "port: 0
+            ",
+              "extra_proxies_yaml": "k: v
+            ",
               "extra_proxy_providers_yaml": "",
             }),
             "extra_proxies_yaml must be a yaml sequence or empty string",
         ),
         (
             json!({
-              "template_yaml": "port: 0\n",
+              "mixin_yaml": "port: 0
+            ",
               "extra_proxies_yaml": "",
-              "extra_proxy_providers_yaml": "- not-a-mapping\n",
+              "extra_proxy_providers_yaml": "- not-a-mapping
+            ",
             }),
             "extra_proxy_providers_yaml must be a yaml mapping or empty string",
+        ),
+        (
+            json!({
+              "mixin_yaml": "port: 0
+proxies:
+  - name: x
+    type: ss
+    server: example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: abc:def
+    udp: true
+",
+              "extra_proxies_yaml": "- name: y
+  type: ss
+  server: example.org
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: ghi:jkl
+  udp: true
+",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+        ),
+        (
+            json!({
+              "mixin_yaml": "port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+",
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "providerB:
+  type: http
+  path: ./provider-b.yaml
+  url: https://example.com/sub-b
+",
+            }),
+            "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
         ),
     ];
 

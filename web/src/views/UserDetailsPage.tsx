@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import yaml from "js-yaml";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -48,6 +49,143 @@ const PROTOCOLS = [
 
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
 
+type MihomoProfileDraft = {
+	mixin_yaml: string;
+	extra_proxies_yaml: string;
+	extra_proxy_providers_yaml: string;
+};
+
+const { dump, load } = yaml;
+
+function isYamlMapping(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseYamlSequenceOrNull(raw: string): unknown[] | null {
+	if (raw.trim() === "") {
+		return [];
+	}
+	try {
+		const value = load(raw);
+		return Array.isArray(value) ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+function parseYamlMappingOrNull(raw: string): Record<string, unknown> | null {
+	if (raw.trim() === "") {
+		return {};
+	}
+	try {
+		const value = load(raw);
+		return isYamlMapping(value) ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+function getYamlProxyName(proxy: unknown): string | null {
+	return isYamlMapping(proxy) && typeof proxy.name === "string"
+		? proxy.name
+		: null;
+}
+
+function mergeLegacyProxiesPreferExtra(
+	extraProxies: unknown[],
+	legacyProxies: unknown[],
+): unknown[] | null {
+	const existingNames = new Set<string>();
+	for (const proxy of extraProxies) {
+		const name = getYamlProxyName(proxy);
+		if (!name) {
+			return null;
+		}
+		existingNames.add(name);
+	}
+
+	const merged = [...extraProxies];
+	for (const proxy of legacyProxies) {
+		const name = getYamlProxyName(proxy);
+		if (!name) {
+			return null;
+		}
+		if (existingNames.has(name)) {
+			continue;
+		}
+		merged.push(proxy);
+	}
+	return merged;
+}
+
+function normalizeMihomoProfileDraftForSave(
+	profile: MihomoProfileDraft,
+): MihomoProfileDraft {
+	if (profile.mixin_yaml.trim() === "") {
+		return profile;
+	}
+
+	let mixinRoot: unknown;
+	try {
+		mixinRoot = load(profile.mixin_yaml);
+	} catch {
+		return profile;
+	}
+	if (!isYamlMapping(mixinRoot)) {
+		return profile;
+	}
+
+	let mixinMap: Record<string, unknown> = { ...mixinRoot };
+	let mixinChanged = false;
+	let extraProxiesYaml = profile.extra_proxies_yaml;
+	let extraProxyProvidersYaml = profile.extra_proxy_providers_yaml;
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
+		const value = mixinMap.proxies;
+		if (!Array.isArray(value)) {
+			return profile;
+		}
+		const extraProxies = parseYamlSequenceOrNull(extraProxiesYaml);
+		if (extraProxies === null) {
+			return profile;
+		}
+		const merged = mergeLegacyProxiesPreferExtra(extraProxies, value);
+		if (merged === null) {
+			return profile;
+		}
+		extraProxiesYaml = dump(merged);
+		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
+		mixinMap = nextMixinMap;
+		mixinChanged = true;
+	}
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers")) {
+		const value = mixinMap["proxy-providers"];
+		if (!isYamlMapping(value)) {
+			return profile;
+		}
+		const extraProxyProviders = parseYamlMappingOrNull(extraProxyProvidersYaml);
+		if (extraProxyProviders === null) {
+			return profile;
+		}
+		extraProxyProvidersYaml = dump({ ...value, ...extraProxyProviders });
+		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
+			mixinMap;
+		mixinMap = nextMixinMap;
+		mixinChanged = true;
+	}
+
+	if (!mixinChanged) {
+		return profile;
+	}
+
+	return {
+		mixin_yaml: dump(mixinMap),
+		extra_proxies_yaml: extraProxiesYaml,
+		extra_proxy_providers_yaml: extraProxyProvidersYaml,
+	};
+}
+
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
 		const code = err.code ? ` ${err.code}` : "";
@@ -93,7 +231,7 @@ export function UserDetailsPage() {
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
 	const [subError, setSubError] = useState<string | null>(null);
-	const [mihomoTemplateYaml, setMihomoTemplateYaml] = useState("");
+	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
 	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
 	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
 		useState("");
@@ -180,7 +318,7 @@ export function UserDetailsPage() {
 
 	useEffect(() => {
 		if (!mihomoProfileQuery.data) return;
-		setMihomoTemplateYaml(mihomoProfileQuery.data.template_yaml);
+		setMihomoMixinYaml(mihomoProfileQuery.data.mixin_yaml);
 		setMihomoExtraProxiesYaml(mihomoProfileQuery.data.extra_proxies_yaml);
 		setMihomoExtraProxyProvidersYaml(
 			mihomoProfileQuery.data.extra_proxy_providers_yaml,
@@ -543,13 +681,14 @@ export function UserDetailsPage() {
 		setIsSavingMihomoProfile(true);
 		setMihomoProfileSaveError(null);
 		try {
-			await putAdminUserMihomoProfile(adminToken, userId, {
-				template_yaml: mihomoTemplateYaml,
+			const normalizedProfile = normalizeMihomoProfileDraftForSave({
+				mixin_yaml: mihomoMixinYaml,
 				extra_proxies_yaml: mihomoExtraProxiesYaml,
 				extra_proxy_providers_yaml: mihomoExtraProxyProvidersYaml,
 			});
+			await putAdminUserMihomoProfile(adminToken, userId, normalizedProfile);
 			await mihomoProfileQuery.refetch();
-			pushToast({ variant: "success", message: "Mihomo profile updated" });
+			pushToast({ variant: "success", message: "Mihomo mixin updated" });
 		} catch (error) {
 			setMihomoProfileSaveError(formatError(error));
 		} finally {
@@ -824,7 +963,7 @@ export function UserDetailsPage() {
 						</div>
 						<div className="rounded-box border border-base-200 p-3 space-y-3">
 							<div className="font-medium text-sm">
-								Mihomo template profile (per user)
+								Mihomo mixin config (per user)
 							</div>
 							{mihomoProfileQuery.isLoading ? (
 								<div className="text-xs opacity-70">Loading profile…</div>
@@ -835,10 +974,10 @@ export function UserDetailsPage() {
 								</div>
 							) : null}
 							<YamlCodeEditor
-								label="template_yaml"
-								value={mihomoTemplateYaml}
-								onChange={setMihomoTemplateYaml}
-								placeholder="Paste full Mihomo YAML template"
+								label="mixin_yaml"
+								value={mihomoMixinYaml}
+								onChange={setMihomoMixinYaml}
+								placeholder="Paste Mihomo mixin YAML (top-level proxies/proxy-providers will be extracted on save)"
 								minRows={14}
 							/>
 							<YamlCodeEditor
@@ -865,7 +1004,7 @@ export function UserDetailsPage() {
 									loading={isSavingMihomoProfile}
 									onClick={saveUserMihomoProfile}
 								>
-									Save mihomo profile
+									Save mihomo mixin
 								</Button>
 							</div>
 						</div>

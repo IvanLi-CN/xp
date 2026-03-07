@@ -38,7 +38,7 @@ export type ResetAdminUserCredentialsResponse = z.infer<
 >;
 
 export const AdminUserMihomoProfileSchema = z.object({
-	template_yaml: z.string(),
+	mixin_yaml: z.string(),
 	extra_proxies_yaml: z.string(),
 	extra_proxy_providers_yaml: z.string(),
 });
