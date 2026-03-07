@@ -246,9 +246,19 @@ type CanonicalMockMihomoProfile = {
 	extra_proxy_providers_yaml: string;
 };
 
+type MockMihomoProfileError = { ok: false; message: string };
+
 type MockMihomoProfileNormalizationResult =
 	| { ok: true; profile: CanonicalMockMihomoProfile }
-	| { ok: false; message: string };
+	| MockMihomoProfileError;
+
+type ParsedYamlSequenceField =
+	| { ok: true; value: unknown[] }
+	| MockMihomoProfileError;
+
+type ParsedYamlMappingField =
+	| { ok: true; value: Record<string, unknown> }
+	| MockMihomoProfileError;
 
 function formatYamlError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -349,7 +359,7 @@ function ensureYamlMappingOrEmpty(
 function parseYamlSequenceField(
 	raw: string,
 	fieldName: string,
-): { ok: true; value: unknown[] } | MockMihomoProfileNormalizationResult {
+): ParsedYamlSequenceField {
 	if (raw.trim() === "") {
 		return { ok: true, value: [] };
 	}
@@ -374,9 +384,7 @@ function parseYamlSequenceField(
 function parseYamlMappingField(
 	raw: string,
 	fieldName: string,
-):
-	| { ok: true; value: Record<string, unknown> }
-	| MockMihomoProfileNormalizationResult {
+): ParsedYamlMappingField {
 	if (raw.trim() === "") {
 		return { ok: true, value: {} };
 	}
