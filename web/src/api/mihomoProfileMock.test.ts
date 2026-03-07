@@ -151,6 +151,37 @@ providerA:
 		});
 	});
 
+	it("keeps structurally identical providers even when key order differs", () => {
+		expect(
+			normalizeMockStoredMihomoProfile({
+				mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+rules: []
+`,
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: `providerA:
+  url: https://example.com/sub-a
+  path: ./provider-a.yaml
+  type: http
+`,
+			}),
+		).toEqual({
+			mixin_yaml: `port: 0
+rules: []
+`,
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: `providerA:
+  url: https://example.com/sub-a
+  path: ./provider-a.yaml
+  type: http
+`,
+		});
+	});
+
 	it("falls back to raw stored text for conflicting provider names", () => {
 		expect(
 			normalizeMockStoredMihomoProfile({

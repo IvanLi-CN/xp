@@ -258,6 +258,27 @@ function isYamlMapping(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeYamlValueForComparison(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map((item) => normalizeYamlValueForComparison(item));
+	}
+	if (isYamlMapping(value)) {
+		return Object.fromEntries(
+			Object.keys(value)
+				.sort()
+				.map((key) => [key, normalizeYamlValueForComparison(value[key])]),
+		);
+	}
+	return value;
+}
+
+function yamlValuesEqual(left: unknown, right: unknown): boolean {
+	return (
+		JSON.stringify(normalizeYamlValueForComparison(left)) ===
+		JSON.stringify(normalizeYamlValueForComparison(right))
+	);
+}
+
 function canonicalizeMockMihomoProfile(
 	profile: Partial<MockMihomoProfile> | undefined,
 ): CanonicalMockMihomoProfile {
@@ -443,7 +464,7 @@ function normalizeMockStoredMihomoProfileForAdminGet(
 		for (const [name, provider] of Object.entries(value)) {
 			if (
 				Object.prototype.hasOwnProperty.call(mergedExtraProxyProviders, name) &&
-				dump(mergedExtraProxyProviders[name]) !== dump(provider)
+				!yamlValuesEqual(mergedExtraProxyProviders[name], provider)
 			) {
 				return {
 					ok: false,
