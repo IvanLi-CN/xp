@@ -110,11 +110,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）                                                 | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）       | 备注（Notes）              |
-| ------------------------------------------------------------ | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------------- | -------------------------- |
-| `GET /api/sub/{subscription_token}?format=mihomo`            | HTTP API     | external      | Existing       | ./contracts/http-apis.md | backend         | mihomo client/web preview | 无 mixin 时回退 clash      |
-| `GET /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 响应主字段为 `mixin_yaml`  |
-| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 仅接受 `mixin_yaml` |
+| 接口（Name）                                                 | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）       | 备注（Notes）             |
+| ------------------------------------------------------------ | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------------- | ------------------------- |
+| `GET /api/sub/{subscription_token}?format=mihomo`            | HTTP API     | external      | Existing       | ./contracts/http-apis.md | backend         | mihomo client/web preview | 无 mixin 时回退 clash     |
+| `GET /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 响应主字段为 `mixin_yaml` |
+| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 仅接受 `mixin_yaml`       |
 
 ### 契约文档（按 Kind 拆分）
 
