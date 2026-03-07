@@ -626,15 +626,31 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         }
     }
 
-    let now = chrono::Utc::now();
-    xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
-        .await
-        .unwrap();
+    // The first shared-quota tick can replay missed daily rollovers from cycle start. Pin the
+    // test to an early-cycle timestamp so the accumulated budget stays below this 1MiB echo.
+    let now = chrono::DateTime::parse_from_rfc3339("2026-03-01T12:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    // Xray stats can still lag slightly behind the completed proxy roundtrip, so retry the quota
+    // tick for a short window instead of assuming the first sample already reflects it.
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        xp::quota::run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
 
-    {
-        let store = store.lock().await;
-        let usage = store.get_membership_usage(&membership).unwrap();
-        assert_eq!(usage.quota_banned, true);
+        let (quota_banned, used_bytes) = {
+            let store = store.lock().await;
+            let usage = store.get_membership_usage(&membership).unwrap();
+            (usage.quota_banned, usage.used_bytes)
+        };
+        if quota_banned {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("timeout waiting for quota ban after ss traffic: used_bytes={used_bytes}");
+        }
+        sleep(Duration::from_millis(200)).await;
     }
 
     let deadline = Instant::now() + Duration::from_secs(4);
