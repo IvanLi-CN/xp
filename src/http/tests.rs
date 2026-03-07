@@ -3796,6 +3796,72 @@ rules: []
 }
 
 #[tokio::test]
+async fn admin_user_mihomo_profile_get_returns_raw_conflicting_legacy_provider_profile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id.clone(),
+            crate::state::UserMihomoProfile {
+                mixin_yaml: r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+"#
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+                .to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let profile = body_json(res).await;
+    assert_eq!(
+        profile["mixin_yaml"],
+        r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+"#
+    );
+    assert_eq!(
+        profile["extra_proxy_providers_yaml"],
+        r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+    );
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_get_returns_raw_invalid_stored_profile() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

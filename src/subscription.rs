@@ -1,5 +1,6 @@
 use base64::Engine as _;
 use rand::RngCore;
+use regex::Regex;
 
 use crate::{
     credentials,
@@ -57,6 +58,9 @@ pub enum SubscriptionError {
         reason: String,
     },
     MihomoExtraProxyProvidersRootNotMapping,
+    MihomoExtraProxyProviderConflict {
+        name: String,
+    },
     MihomoProxyNameMissing {
         index: usize,
     },
@@ -137,6 +141,12 @@ impl std::fmt::Display for SubscriptionError {
                 write!(
                     f,
                     "mihomo extra_proxy_providers_yaml root must be a mapping"
+                )
+            }
+            Self::MihomoExtraProxyProviderConflict { name } => {
+                write!(
+                    f,
+                    "mihomo proxy-provider name conflict while normalizing legacy profile: {name}"
                 )
             }
             Self::MihomoProxyNameMissing { index } => {
@@ -259,7 +269,23 @@ pub(crate) fn normalize_user_mihomo_profile_for_runtime(
     match mixin_map.remove(serde_yaml::Value::String("proxy-providers".to_string())) {
         Some(serde_yaml::Value::Mapping(map)) => {
             for (key, value) in map {
-                extra_proxy_providers.entry(key).or_insert(value);
+                match extra_proxy_providers.entry(key) {
+                    serde_yaml::mapping::Entry::Occupied(entry) => {
+                        if entry.get() != &value {
+                            let name = entry
+                                .key()
+                                .as_str()
+                                .unwrap_or("<non-string-key>")
+                                .to_string();
+                            return Err(SubscriptionError::MihomoExtraProxyProviderConflict {
+                                name,
+                            });
+                        }
+                    }
+                    serde_yaml::mapping::Entry::Vacant(entry) => {
+                        entry.insert(value);
+                    }
+                }
             }
             extracted_proxy_providers = true;
         }
@@ -1354,6 +1380,90 @@ fn prune_proxies_sequence(
     });
 }
 
+#[derive(Debug, Clone)]
+struct TopLevelProxyMetadata {
+    name: String,
+    proxy_type: Option<String>,
+}
+
+fn collect_top_level_proxy_metadata(root: &serde_yaml::Mapping) -> Vec<TopLevelProxyMetadata> {
+    root.get(serde_yaml::Value::String("proxies".to_string()))
+        .and_then(|value| value.as_sequence())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            let map = value.as_mapping()?;
+            let name = map
+                .get(serde_yaml::Value::String("name".to_string()))
+                .and_then(|value| value.as_str())?;
+            let proxy_type = map
+                .get(serde_yaml::Value::String("type".to_string()))
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            Some(TopLevelProxyMetadata {
+                name: name.to_string(),
+                proxy_type,
+            })
+        })
+        .collect()
+}
+
+fn compile_proxy_group_regex(
+    map: &serde_yaml::Mapping,
+    key: &str,
+) -> Result<Option<Regex>, regex::Error> {
+    let pattern = map
+        .get(serde_yaml::Value::String(key.to_string()))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    pattern.map(Regex::new).transpose()
+}
+
+fn collect_proxy_group_excluded_types(
+    map: &serde_yaml::Mapping,
+) -> std::collections::BTreeSet<String> {
+    map.get(serde_yaml::Value::String("exclude-type".to_string()))
+        .and_then(|value| value.as_str())
+        .into_iter()
+        .flat_map(|value| value.split('|'))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn group_has_include_all_proxy_candidates(
+    map: &serde_yaml::Mapping,
+    proxies: &[TopLevelProxyMetadata],
+) -> Result<bool, regex::Error> {
+    let filter = compile_proxy_group_regex(map, "filter")?;
+    let exclude_filter = compile_proxy_group_regex(map, "exclude-filter")?;
+    let excluded_types = collect_proxy_group_excluded_types(map);
+
+    Ok(proxies.iter().any(|proxy| {
+        if let Some(filter) = &filter
+            && !filter.is_match(&proxy.name)
+        {
+            return false;
+        }
+        if let Some(exclude_filter) = &exclude_filter
+            && exclude_filter.is_match(&proxy.name)
+        {
+            return false;
+        }
+        if !excluded_types.is_empty()
+            && proxy
+                .proxy_type
+                .as_ref()
+                .is_some_and(|value| excluded_types.contains(&value.to_ascii_lowercase()))
+        {
+            return false;
+        }
+        true
+    }))
+}
+
 fn ensure_proxy_groups_have_candidates(
     root: &mut serde_yaml::Mapping,
     provider_names: &std::collections::BTreeSet<String>,
@@ -1361,11 +1471,8 @@ fn ensure_proxy_groups_have_candidates(
     // `include-all-proxies` pulls from top-level `proxies`, which we inject before calling this.
     // Treat it as "has candidates" only when we actually have proxies; otherwise keep the DIRECT
     // fallback so the config remains loadable for users with zero memberships.
-    let has_any_proxies = root
-        .get(serde_yaml::Value::String("proxies".to_string()))
-        .and_then(|v| v.as_sequence())
-        .map(|seq| !seq.is_empty())
-        .unwrap_or(false);
+    let top_level_proxies = collect_top_level_proxy_metadata(root);
+    let has_any_proxies = !top_level_proxies.is_empty();
 
     let Some(serde_yaml::Value::Sequence(groups)) =
         root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
@@ -1399,10 +1506,28 @@ fn ensure_proxy_groups_have_candidates(
             .and_then(|v| v.as_sequence())
             .map(|seq| seq.len())
             .unwrap_or(0);
+        let include_all_proxy_candidates = if include_all_proxies {
+            match group_has_include_all_proxy_candidates(map, &top_level_proxies) {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::warn!(
+                        group_name = map
+                            .get(serde_yaml::Value::String("name".to_string()))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("<unnamed>"),
+                        %error,
+                        "failed to evaluate include-all-proxies candidate set; falling back to raw proxy presence"
+                    );
+                    has_any_proxies
+                }
+            }
+        } else {
+            false
+        };
 
         let has_candidates =
             proxies_len > 0 || use_len > 0 || (include_all_providers && !provider_names.is_empty());
-        let has_candidates = has_candidates || (include_all_proxies && has_any_proxies);
+        let has_candidates = has_candidates || include_all_proxy_candidates;
         if has_candidates {
             continue;
         }
@@ -2743,6 +2868,88 @@ rules: []
         let normalized = normalize_user_mihomo_profile_for_runtime(&profile)
             .expect("plain mixin should remain readable");
         assert_eq!(normalized, profile);
+    }
+
+    #[test]
+    fn normalize_user_mihomo_profile_for_runtime_rejects_conflicting_proxy_provider_sources() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+            .to_string(),
+        };
+
+        let err = normalize_user_mihomo_profile_for_runtime(&profile)
+            .expect_err("conflicting provider sources should be rejected");
+        assert!(matches!(
+            err,
+            SubscriptionError::MihomoExtraProxyProviderConflict { ref name } if name == "providerA"
+        ));
+    }
+
+    #[test]
+    fn build_mihomo_yaml_injects_direct_when_region_filters_match_no_top_level_proxies() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0
+rules: []
+"
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "Only-US"
+  type: ss
+  server: us.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile)
+            .expect("build mihomo yaml should succeed");
+        let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let groups = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups should exist");
+
+        for group_name in [
+            "🔒 Japan",
+            "🤯 Japan",
+            "🔒 HongKong",
+            "🤯 HongKong",
+            "🔒 Korea",
+            "🤯 Korea",
+        ] {
+            let proxies = groups
+                .iter()
+                .find(|group| group.get("name").and_then(Value::as_str) == Some(group_name))
+                .and_then(|group| group.get("proxies"))
+                .and_then(Value::as_sequence)
+                .expect("filtered region groups should receive DIRECT fallback");
+            assert_eq!(
+                proxies,
+                &vec![Value::String("DIRECT".to_string())],
+                "unexpected fallback proxies for {group_name}"
+            );
+        }
     }
 
     #[test]
