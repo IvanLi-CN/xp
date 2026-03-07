@@ -260,6 +260,8 @@ type ParsedYamlMappingField =
 	| { ok: true; value: Record<string, unknown> }
 	| MockMihomoProfileError;
 
+type LegacyConflictMode = "preferExtra" | "reject";
+
 function formatYamlError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -304,56 +306,6 @@ function canonicalizeMockMihomoProfile(
 				? profile.extra_proxy_providers_yaml
 				: "",
 	};
-}
-
-function ensureYamlSequenceOrEmpty(
-	raw: string,
-	fieldName: string,
-): MockMihomoProfileNormalizationResult | null {
-	if (raw.trim() === "") {
-		return null;
-	}
-	let value: unknown;
-	try {
-		value = load(raw);
-	} catch (error) {
-		return {
-			ok: false,
-			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
-		};
-	}
-	if (!Array.isArray(value)) {
-		return {
-			ok: false,
-			message: `${fieldName} must be a yaml sequence or empty string`,
-		};
-	}
-	return null;
-}
-
-function ensureYamlMappingOrEmpty(
-	raw: string,
-	fieldName: string,
-): MockMihomoProfileNormalizationResult | null {
-	if (raw.trim() === "") {
-		return null;
-	}
-	let value: unknown;
-	try {
-		value = load(raw);
-	} catch (error) {
-		return {
-			ok: false,
-			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
-		};
-	}
-	if (!isYamlMapping(value)) {
-		return {
-			ok: false,
-			message: `${fieldName} must be a yaml mapping or empty string`,
-		};
-	}
-	return null;
 }
 
 function parseYamlSequenceField(
@@ -406,6 +358,94 @@ function parseYamlMappingField(
 	return { ok: true, value };
 }
 
+function getMockProxyName(
+	proxy: unknown,
+	index: number,
+): { ok: true; name: string } | MockMihomoProfileError {
+	if (!isYamlMapping(proxy)) {
+		return {
+			ok: false,
+			message: `mihomo proxy must be a yaml mapping at index=${index}`,
+		};
+	}
+	if (!("name" in proxy)) {
+		return {
+			ok: false,
+			message: `mihomo proxy name is missing at index=${index}`,
+		};
+	}
+	if (typeof proxy.name !== "string") {
+		return {
+			ok: false,
+			message: `mihomo proxy name must be string at index=${index}`,
+		};
+	}
+	return { ok: true, name: proxy.name };
+}
+
+function mergeLegacyProxiesIntoExtra(
+	extraProxies: unknown[],
+	legacyProxies: unknown[],
+	conflictMode: LegacyConflictMode,
+): { ok: true; value: unknown[] } | MockMihomoProfileError {
+	const existingExtraProxies = new Map<string, unknown>();
+	for (const [index, proxy] of extraProxies.entries()) {
+		const proxyName = getMockProxyName(proxy, index);
+		if (!proxyName.ok) {
+			return proxyName;
+		}
+		if (!existingExtraProxies.has(proxyName.name)) {
+			existingExtraProxies.set(proxyName.name, proxy);
+		}
+	}
+
+	const merged = [...extraProxies];
+	for (const [index, proxy] of legacyProxies.entries()) {
+		const proxyName = getMockProxyName(proxy, index);
+		if (!proxyName.ok) {
+			return proxyName;
+		}
+		const existingProxy = existingExtraProxies.get(proxyName.name);
+		if (existingProxy !== undefined) {
+			if (conflictMode === "reject" && !yamlValuesEqual(existingProxy, proxy)) {
+				return {
+					ok: false,
+					message: `mixin_yaml.proxies conflicts with extra_proxies_yaml for ${proxyName.name}`,
+				};
+			}
+			continue;
+		}
+		merged.push(proxy);
+	}
+
+	return { ok: true, value: merged };
+}
+
+function mergeLegacyProxyProvidersIntoExtra(
+	extraProxyProviders: Record<string, unknown>,
+	legacyProxyProviders: Record<string, unknown>,
+	conflictMode: LegacyConflictMode,
+): { ok: true; value: Record<string, unknown> } | MockMihomoProfileError {
+	const merged = { ...extraProxyProviders };
+	for (const [name, provider] of Object.entries(legacyProxyProviders)) {
+		if (Object.prototype.hasOwnProperty.call(merged, name)) {
+			if (
+				conflictMode === "reject" &&
+				!yamlValuesEqual(merged[name], provider)
+			) {
+				return {
+					ok: false,
+					message: `mixin_yaml.proxy-providers conflicts with extra_proxy_providers_yaml for ${name}`,
+				};
+			}
+			continue;
+		}
+		merged[name] = provider;
+	}
+
+	return { ok: true, value: merged };
+}
+
 function normalizeMockStoredMihomoProfileForAdminGet(
 	profile: CanonicalMockMihomoProfile,
 ): MockMihomoProfileNormalizationResult {
@@ -444,8 +484,8 @@ function normalizeMockStoredMihomoProfileForAdminGet(
 	let mixinMap: Record<string, unknown> = { ...mixinRoot };
 	let extractedProxies = false;
 	let extractedProxyProviders = false;
-	const mergedExtraProxies = [...extraProxies.value];
-	const mergedExtraProxyProviders = { ...extraProxyProviders.value };
+	let mergedExtraProxies = [...extraProxies.value];
+	let mergedExtraProxyProviders = { ...extraProxyProviders.value };
 
 	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
 		const value = mixinMap.proxies;
@@ -455,7 +495,15 @@ function normalizeMockStoredMihomoProfileForAdminGet(
 				message: "mixin_yaml.proxies must be a yaml sequence",
 			};
 		}
-		mergedExtraProxies.push(...value);
+		const merged = mergeLegacyProxiesIntoExtra(
+			mergedExtraProxies,
+			value,
+			"reject",
+		);
+		if (!merged.ok) {
+			return merged;
+		}
+		mergedExtraProxies = merged.value;
 		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
 		mixinMap = nextMixinMap;
 		extractedProxies = true;
@@ -469,22 +517,15 @@ function normalizeMockStoredMihomoProfileForAdminGet(
 				message: "mixin_yaml.proxy-providers must be a yaml mapping",
 			};
 		}
-		for (const [name, provider] of Object.entries(value)) {
-			if (
-				Object.prototype.hasOwnProperty.call(mergedExtraProxyProviders, name) &&
-				!yamlValuesEqual(mergedExtraProxyProviders[name], provider)
-			) {
-				return {
-					ok: false,
-					message: `mixin_yaml.proxy-providers conflicts with extra_proxy_providers_yaml for ${name}`,
-				};
-			}
-			if (
-				!Object.prototype.hasOwnProperty.call(mergedExtraProxyProviders, name)
-			) {
-				mergedExtraProxyProviders[name] = provider;
-			}
+		const merged = mergeLegacyProxyProvidersIntoExtra(
+			mergedExtraProxyProviders,
+			value,
+			"reject",
+		);
+		if (!merged.ok) {
+			return merged;
 		}
+		mergedExtraProxyProviders = merged.value;
 		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
 			mixinMap;
 		mixinMap = nextMixinMap;
@@ -586,27 +627,31 @@ export function normalizeMockMihomoProfilePayload(
 		mixin_yaml = dump(mixinMap);
 	}
 
-	const extraProxiesError = ensureYamlSequenceOrEmpty(
+	const extraProxies = parseYamlSequenceField(
 		extra_proxies_yaml,
 		"extra_proxies_yaml",
 	);
-	if (extraProxiesError) {
-		return extraProxiesError;
+	if (!extraProxies.ok) {
+		return extraProxies;
 	}
-	const extraProxyProvidersError = ensureYamlMappingOrEmpty(
+	const extraProxyProviders = parseYamlMappingField(
 		extra_proxy_providers_yaml,
 		"extra_proxy_providers_yaml",
 	);
-	if (extraProxyProvidersError) {
-		return extraProxyProvidersError;
+	if (!extraProxyProviders.ok) {
+		return extraProxyProviders;
 	}
 
 	return {
 		ok: true,
 		profile: {
 			mixin_yaml,
-			extra_proxies_yaml,
-			extra_proxy_providers_yaml,
+			extra_proxies_yaml: extraProxies.ok
+				? extra_proxies_yaml
+				: canonical.extra_proxies_yaml,
+			extra_proxy_providers_yaml: extraProxyProviders.ok
+				? extra_proxy_providers_yaml
+				: canonical.extra_proxy_providers_yaml,
 		},
 	};
 }

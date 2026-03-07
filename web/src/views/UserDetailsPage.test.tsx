@@ -89,6 +89,11 @@ function setupMocks(args?: {
 		endpoint_id: string;
 		node_id: string;
 	}>;
+	mihomoProfile?: {
+		mixin_yaml: string;
+		extra_proxies_yaml: string;
+		extra_proxy_providers_yaml: string;
+	};
 }) {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
@@ -196,11 +201,13 @@ function setupMocks(args?: {
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
-	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue({
-		mixin_yaml: "",
-		extra_proxies_yaml: "",
-		extra_proxy_providers_yaml: "",
-	});
+	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue(
+		args?.mihomoProfile ?? {
+			mixin_yaml: "",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		},
+	);
 	vi.mocked(putAdminUserMihomoProfile).mockResolvedValue({
 		mixin_yaml: "",
 		extra_proxies_yaml: "",
@@ -550,6 +557,49 @@ describe("<UserDetailsPage />", () => {
 					mixin_yaml: "port: 0\nproxy-groups: []\n",
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: "",
+				},
+			);
+		});
+	});
+
+	it("normalizes legacy dynamic sections before saving mihomo profile", async () => {
+		setupMocks({
+			mihomoProfile: {
+				mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+`,
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
+			},
+		});
+		renderPage();
+
+		await waitFor(() => {
+			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
+		});
+		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+
+		await waitFor(() => {
+			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				{
+					mixin_yaml: "port: 0\nrules: []\n",
+					extra_proxies_yaml: "",
+					extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
 				},
 			);
 		});

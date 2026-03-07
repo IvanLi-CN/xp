@@ -182,6 +182,54 @@ rules: []
 		});
 	});
 
+	it("falls back to raw stored text for conflicting proxy names", () => {
+		expect(
+			normalizeMockStoredMihomoProfile({
+				mixin_yaml: `port: 0
+proxies:
+  - name: Legacy-ss
+    type: ss
+    server: mixin.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: mixin:def
+    udp: true
+rules: []
+`,
+				extra_proxies_yaml: `- name: Legacy-ss
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: extra:def
+  udp: true
+`,
+				extra_proxy_providers_yaml: "",
+			}),
+		).toEqual({
+			mixin_yaml: `port: 0
+proxies:
+  - name: Legacy-ss
+    type: ss
+    server: mixin.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: mixin:def
+    udp: true
+rules: []
+`,
+			extra_proxies_yaml: `- name: Legacy-ss
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: extra:def
+  udp: true
+`,
+			extra_proxy_providers_yaml: "",
+		});
+	});
+
 	it("falls back to raw stored text for conflicting provider names", () => {
 		expect(
 			normalizeMockStoredMihomoProfile({

@@ -54,6 +54,9 @@ pub enum SubscriptionError {
         reason: String,
     },
     MihomoExtraProxiesRootNotSequence,
+    MihomoExtraProxyConflict {
+        name: String,
+    },
     MihomoExtraProxyProvidersParse {
         reason: String,
     },
@@ -133,6 +136,12 @@ impl std::fmt::Display for SubscriptionError {
             }
             Self::MihomoExtraProxiesRootNotSequence => {
                 write!(f, "mihomo extra_proxies_yaml root must be a sequence")
+            }
+            Self::MihomoExtraProxyConflict { name } => {
+                write!(
+                    f,
+                    "mihomo proxy name conflict while normalizing legacy profile: {name}"
+                )
             }
             Self::MihomoExtraProxyProvidersParse { reason } => {
                 write!(f, "mihomo extra_proxy_providers_yaml parse error: {reason}")
@@ -245,14 +254,66 @@ pub fn build_clash_yaml(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProxyProviderConflictMode {
+enum LegacyMihomoConflictMode {
     PreferExtra,
     Reject,
 }
 
+fn merge_legacy_proxies_into_extra(
+    extra_proxies: &mut Vec<serde_yaml::Value>,
+    legacy_proxies: Vec<serde_yaml::Value>,
+    conflict_mode: LegacyMihomoConflictMode,
+) -> Result<(), SubscriptionError> {
+    let mut existing_extra_proxies = std::collections::BTreeMap::<String, usize>::new();
+    for (idx, proxy) in extra_proxies.iter().enumerate() {
+        let name = proxy_name_from_yaml(proxy, idx)?;
+        existing_extra_proxies.entry(name).or_insert(idx);
+    }
+
+    for (idx, proxy) in legacy_proxies.into_iter().enumerate() {
+        let name = proxy_name_from_yaml(&proxy, idx)?;
+        let Some(existing_idx) = existing_extra_proxies.get(&name).copied() else {
+            extra_proxies.push(proxy);
+            continue;
+        };
+        if conflict_mode == LegacyMihomoConflictMode::Reject && extra_proxies[existing_idx] != proxy
+        {
+            return Err(SubscriptionError::MihomoExtraProxyConflict { name });
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_legacy_proxy_providers_into_extra(
+    extra_proxy_providers: &mut serde_yaml::Mapping,
+    legacy_proxy_providers: serde_yaml::Mapping,
+    conflict_mode: LegacyMihomoConflictMode,
+) -> Result<(), SubscriptionError> {
+    for (key, value) in legacy_proxy_providers {
+        match extra_proxy_providers.entry(key) {
+            serde_yaml::mapping::Entry::Occupied(entry) => {
+                if conflict_mode == LegacyMihomoConflictMode::Reject && entry.get() != &value {
+                    let name = entry
+                        .key()
+                        .as_str()
+                        .unwrap_or("<non-string-key>")
+                        .to_string();
+                    return Err(SubscriptionError::MihomoExtraProxyProviderConflict { name });
+                }
+            }
+            serde_yaml::mapping::Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn normalize_user_mihomo_profile(
     profile: &UserMihomoProfile,
-    provider_conflict_mode: ProxyProviderConflictMode,
+    conflict_mode: LegacyMihomoConflictMode,
 ) -> Result<UserMihomoProfile, SubscriptionError> {
     if profile.mixin_yaml.trim().is_empty() {
         return Ok(profile.clone());
@@ -267,7 +328,7 @@ fn normalize_user_mihomo_profile(
 
     match mixin_map.remove(serde_yaml::Value::String("proxies".to_string())) {
         Some(serde_yaml::Value::Sequence(seq)) => {
-            extra_proxies.extend(seq);
+            merge_legacy_proxies_into_extra(&mut extra_proxies, seq, conflict_mode)?;
             extracted_proxies = true;
         }
         Some(_) => return Err(SubscriptionError::MihomoExtraProxiesRootNotSequence),
@@ -275,27 +336,11 @@ fn normalize_user_mihomo_profile(
     }
     match mixin_map.remove(serde_yaml::Value::String("proxy-providers".to_string())) {
         Some(serde_yaml::Value::Mapping(map)) => {
-            for (key, value) in map {
-                match extra_proxy_providers.entry(key) {
-                    serde_yaml::mapping::Entry::Occupied(entry) => {
-                        if provider_conflict_mode == ProxyProviderConflictMode::Reject
-                            && entry.get() != &value
-                        {
-                            let name = entry
-                                .key()
-                                .as_str()
-                                .unwrap_or("<non-string-key>")
-                                .to_string();
-                            return Err(SubscriptionError::MihomoExtraProxyProviderConflict {
-                                name,
-                            });
-                        }
-                    }
-                    serde_yaml::mapping::Entry::Vacant(entry) => {
-                        entry.insert(value);
-                    }
-                }
-            }
+            merge_legacy_proxy_providers_into_extra(
+                &mut extra_proxy_providers,
+                map,
+                conflict_mode,
+            )?;
             extracted_proxy_providers = true;
         }
         Some(_) => return Err(SubscriptionError::MihomoExtraProxyProvidersRootNotMapping),
@@ -336,13 +381,13 @@ fn normalize_user_mihomo_profile(
 pub(crate) fn normalize_user_mihomo_profile_for_runtime(
     profile: &UserMihomoProfile,
 ) -> Result<UserMihomoProfile, SubscriptionError> {
-    normalize_user_mihomo_profile(profile, ProxyProviderConflictMode::PreferExtra)
+    normalize_user_mihomo_profile(profile, LegacyMihomoConflictMode::PreferExtra)
 }
 
 pub(crate) fn normalize_user_mihomo_profile_for_admin_get(
     profile: &UserMihomoProfile,
 ) -> Result<UserMihomoProfile, SubscriptionError> {
-    normalize_user_mihomo_profile(profile, ProxyProviderConflictMode::Reject)
+    normalize_user_mihomo_profile(profile, LegacyMihomoConflictMode::Reject)
 }
 
 pub fn build_mihomo_yaml(
@@ -2892,6 +2937,62 @@ rules: []
     }
 
     #[test]
+    fn normalize_user_mihomo_profile_for_runtime_prefers_extra_proxy_conflicts() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxies:
+  - name: "Legacy-ss"
+    type: ss
+    server: mixin.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "mixin:def"
+    udp: true
+proxy-groups:
+  - name: ExtraSelect
+    type: select
+    proxies: [Legacy-ss]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "Legacy-ss"
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "extra:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let normalized = normalize_user_mihomo_profile_for_runtime(&profile)
+            .expect("runtime normalization should preserve existing extra proxies");
+        let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
+        let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
+        assert!(
+            !mixin_map.contains_key(&Value::String("proxies".to_string())),
+            "runtime normalization should still extract legacy proxy blocks"
+        );
+
+        let extra_proxies: Value = serde_yaml::from_str(&normalized.extra_proxies_yaml).unwrap();
+        let proxies = extra_proxies
+            .as_sequence()
+            .expect("extra proxies must be a sequence");
+        assert_eq!(proxies.len(), 1);
+        let legacy_ss = proxies[0].as_mapping().expect("proxy must be a mapping");
+        assert_eq!(
+            legacy_ss
+                .get(Value::String("server".to_string()))
+                .and_then(Value::as_str),
+            Some("extra.example.com")
+        );
+    }
+
+    #[test]
     fn normalize_user_mihomo_profile_for_runtime_prefers_extra_proxy_provider_conflicts() {
         let profile = UserMihomoProfile {
             mixin_yaml: r#"
@@ -2970,6 +3071,43 @@ providerA:
         assert!(matches!(
             err,
             SubscriptionError::MihomoExtraProxyProviderConflict { ref name } if name == "providerA"
+        ));
+    }
+
+    #[test]
+    fn normalize_user_mihomo_profile_for_admin_get_rejects_conflicting_proxy_sources() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxies:
+  - name: "Legacy-ss"
+    type: ss
+    server: mixin.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "mixin:def"
+    udp: true
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: "Legacy-ss"
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "extra:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let err = normalize_user_mihomo_profile_for_admin_get(&profile)
+            .expect_err("conflicting proxy sources should be surfaced to admin GET");
+        assert!(matches!(
+            err,
+            SubscriptionError::MihomoExtraProxyConflict { ref name } if name == "Legacy-ss"
         ));
     }
 

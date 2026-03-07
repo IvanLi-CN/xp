@@ -4133,7 +4133,8 @@ async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
     let cases = vec![
         (
             json!({
-              "mixin_yaml": "- not-a-mapping\n",
+              "mixin_yaml": "- not-a-mapping
+            ",
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
@@ -4141,33 +4142,63 @@ async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
         ),
         (
             json!({
-              "mixin_yaml": "port: 0\n",
-              "extra_proxies_yaml": "k: v\n",
+              "mixin_yaml": "port: 0
+            ",
+              "extra_proxies_yaml": "k: v
+            ",
               "extra_proxy_providers_yaml": "",
             }),
             "extra_proxies_yaml must be a yaml sequence or empty string",
         ),
         (
             json!({
-              "mixin_yaml": "port: 0\n",
+              "mixin_yaml": "port: 0
+            ",
               "extra_proxies_yaml": "",
-              "extra_proxy_providers_yaml": "- not-a-mapping\n",
+              "extra_proxy_providers_yaml": "- not-a-mapping
+            ",
             }),
             "extra_proxy_providers_yaml must be a yaml mapping or empty string",
         ),
         (
             json!({
-              "mixin_yaml": "port: 0\nproxies:\n  - name: x\n    type: ss\n    server: example.com\n    port: 443\n    cipher: 2022-blake3-aes-128-gcm\n    password: abc:def\n    udp: true\n",
-              "extra_proxies_yaml": "- name: y\n  type: ss\n  server: example.org\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: ghi:jkl\n  udp: true\n",
+              "mixin_yaml": "port: 0
+proxies:
+  - name: x
+    type: ss
+    server: example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: abc:def
+    udp: true
+",
+              "extra_proxies_yaml": "- name: y
+  type: ss
+  server: example.org
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: ghi:jkl
+  udp: true
+",
               "extra_proxy_providers_yaml": "",
             }),
             "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
         ),
         (
             json!({
-              "mixin_yaml": "port: 0\nproxy-providers:\n  providerA:\n    type: http\n    path: ./provider-a.yaml\n    url: https://example.com/sub-a\n",
+              "mixin_yaml": "port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+",
               "extra_proxies_yaml": "",
-              "extra_proxy_providers_yaml": "providerB:\n  type: http\n  path: ./provider-b.yaml\n  url: https://example.com/sub-b\n",
+              "extra_proxy_providers_yaml": "providerB:
+  type: http
+  path: ./provider-b.yaml
+  url: https://example.com/sub-b
+",
             }),
             "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
         ),
