@@ -325,6 +325,161 @@ function ensureYamlMappingOrEmpty(
 	return null;
 }
 
+function parseYamlSequenceField(
+	raw: string,
+	fieldName: string,
+): { ok: true; value: unknown[] } | MockMihomoProfileNormalizationResult {
+	if (raw.trim() === "") {
+		return { ok: true, value: [] };
+	}
+	let value: unknown;
+	try {
+		value = load(raw);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!Array.isArray(value)) {
+		return {
+			ok: false,
+			message: `${fieldName} must be a yaml sequence or empty string`,
+		};
+	}
+	return { ok: true, value };
+}
+
+function parseYamlMappingField(
+	raw: string,
+	fieldName: string,
+):
+	| { ok: true; value: Record<string, unknown> }
+	| MockMihomoProfileNormalizationResult {
+	if (raw.trim() === "") {
+		return { ok: true, value: {} };
+	}
+	let value: unknown;
+	try {
+		value = load(raw);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `${fieldName} must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!isYamlMapping(value)) {
+		return {
+			ok: false,
+			message: `${fieldName} must be a yaml mapping or empty string`,
+		};
+	}
+	return { ok: true, value };
+}
+
+function normalizeMockStoredMihomoProfileForAdminGet(
+	profile: CanonicalMockMihomoProfile,
+): MockMihomoProfileNormalizationResult {
+	if (profile.mixin_yaml.trim() === "") {
+		return { ok: true, profile };
+	}
+
+	let mixinRoot: unknown;
+	try {
+		mixinRoot = load(profile.mixin_yaml);
+	} catch (error) {
+		return {
+			ok: false,
+			message: `mixin_yaml must be valid yaml: ${formatYamlError(error)}`,
+		};
+	}
+	if (!isYamlMapping(mixinRoot)) {
+		return { ok: false, message: "mixin_yaml must be a yaml mapping" };
+	}
+
+	const extraProxies = parseYamlSequenceField(
+		profile.extra_proxies_yaml,
+		"extra_proxies_yaml",
+	);
+	if (!extraProxies.ok) {
+		return extraProxies;
+	}
+	const extraProxyProviders = parseYamlMappingField(
+		profile.extra_proxy_providers_yaml,
+		"extra_proxy_providers_yaml",
+	);
+	if (!extraProxyProviders.ok) {
+		return extraProxyProviders;
+	}
+
+	let mixinMap: Record<string, unknown> = { ...mixinRoot };
+	let extractedProxies = false;
+	let extractedProxyProviders = false;
+	const mergedExtraProxies = [...extraProxies.value];
+	const mergedExtraProxyProviders = { ...extraProxyProviders.value };
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
+		const value = mixinMap.proxies;
+		if (!Array.isArray(value)) {
+			return {
+				ok: false,
+				message: "mixin_yaml.proxies must be a yaml sequence",
+			};
+		}
+		mergedExtraProxies.push(...value);
+		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
+		mixinMap = nextMixinMap;
+		extractedProxies = true;
+	}
+
+	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers")) {
+		const value = mixinMap["proxy-providers"];
+		if (!isYamlMapping(value)) {
+			return {
+				ok: false,
+				message: "mixin_yaml.proxy-providers must be a yaml mapping",
+			};
+		}
+		for (const [name, provider] of Object.entries(value)) {
+			if (
+				Object.prototype.hasOwnProperty.call(mergedExtraProxyProviders, name) &&
+				dump(mergedExtraProxyProviders[name]) !== dump(provider)
+			) {
+				return {
+					ok: false,
+					message: `mixin_yaml.proxy-providers conflicts with extra_proxy_providers_yaml for ${name}`,
+				};
+			}
+			if (
+				!Object.prototype.hasOwnProperty.call(mergedExtraProxyProviders, name)
+			) {
+				mergedExtraProxyProviders[name] = provider;
+			}
+		}
+		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
+			mixinMap;
+		mixinMap = nextMixinMap;
+		extractedProxyProviders = true;
+	}
+
+	if (!extractedProxies && !extractedProxyProviders) {
+		return { ok: true, profile };
+	}
+
+	return {
+		ok: true,
+		profile: {
+			mixin_yaml: dump(mixinMap),
+			extra_proxies_yaml: extractedProxies
+				? dump(mergedExtraProxies)
+				: profile.extra_proxies_yaml,
+			extra_proxy_providers_yaml: extractedProxyProviders
+				? dump(mergedExtraProxyProviders)
+				: profile.extra_proxy_providers_yaml,
+		},
+	};
+}
+
 export function normalizeMockMihomoProfilePayload(
 	payload: Record<string, unknown>,
 ): MockMihomoProfileNormalizationResult {
@@ -431,7 +586,7 @@ export function normalizeMockStoredMihomoProfile(
 	profile: MockMihomoProfile | undefined,
 ): CanonicalMockMihomoProfile {
 	const canonical = canonicalizeMockMihomoProfile(profile);
-	const normalized = normalizeMockMihomoProfilePayload(canonical);
+	const normalized = normalizeMockStoredMihomoProfileForAdminGet(canonical);
 	return normalized.ok ? normalized.profile : canonical;
 }
 

@@ -71,17 +71,119 @@ proxies: []
 });
 
 describe("normalizeMockStoredMihomoProfile", () => {
+	it("normalizes stored mixins the same way as admin GET", () => {
+		expect(
+			normalizeMockStoredMihomoProfile({
+				mixin_yaml: `port: 0
+proxies:
+  - name: inline-a
+    type: ss
+    server: inline-a.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: a:def
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a
+rules: []
+`,
+				extra_proxies_yaml: `- name: existing-extra
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: extra:def
+  udp: true
+`,
+				extra_proxy_providers_yaml: `providerB:
+  type: http
+  path: ./provider-b.yaml
+  url: https://example.com/sub-b
+`,
+			}),
+		).toEqual({
+			mixin_yaml: `port: 0
+rules: []
+`,
+			extra_proxies_yaml: `- name: existing-extra
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: extra:def
+  udp: true
+- name: inline-a
+  type: ss
+  server: inline-a.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: a:def
+  udp: true
+`,
+			extra_proxy_providers_yaml: `providerB:
+  type: http
+  path: ./provider-b.yaml
+  url: https://example.com/sub-b
+providerA:
+  type: http
+  path: ./provider-a-from-mixin.yaml
+  url: https://example.com/sub-a
+`,
+		});
+	});
+
 	it("falls back to raw stored text when normalization fails", () => {
 		expect(
 			normalizeMockStoredMihomoProfile({
-				mixin_yaml: "port: [\n",
+				mixin_yaml: `port: [
+`,
 				extra_proxies_yaml: "",
 				extra_proxy_providers_yaml: "",
 			}),
 		).toEqual({
-			mixin_yaml: "port: [\n",
+			mixin_yaml: `port: [
+`,
 			extra_proxies_yaml: "",
 			extra_proxy_providers_yaml: "",
+		});
+	});
+
+	it("falls back to raw stored text for conflicting provider names", () => {
+		expect(
+			normalizeMockStoredMihomoProfile({
+				mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a
+rules: []
+`,
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a
+`,
+			}),
+		).toEqual({
+			mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a
+rules: []
+`,
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a
+`,
 		});
 	});
 });
