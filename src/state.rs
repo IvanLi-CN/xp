@@ -391,7 +391,7 @@ pub struct NodeUserEndpointMembership {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct UserMihomoProfile {
-    #[serde(default)]
+    #[serde(default, alias = "template_yaml")]
     pub mixin_yaml: String,
     #[serde(default)]
     pub extra_proxies_yaml: String,
@@ -3804,29 +3804,57 @@ mod tests {
     #[test]
     fn user_mihomo_profile_serializes_and_deserializes_mixin_yaml() {
         let profile: UserMihomoProfile = serde_json::from_value(json!({
-            "mixin_yaml": "port: 0\nrules: []\n",
+            "mixin_yaml": "port: 0
+rules: []
+",
             "extra_proxies_yaml": "",
             "extra_proxy_providers_yaml": ""
         }))
         .unwrap();
 
-        assert_eq!(profile.mixin_yaml, "port: 0\nrules: []\n");
+        assert_eq!(
+            profile.mixin_yaml,
+            "port: 0
+rules: []
+"
+        );
 
         let serialized = serde_json::to_value(&profile).unwrap();
-        assert_eq!(serialized["mixin_yaml"], "port: 0\nrules: []\n");
+        assert_eq!(
+            serialized["mixin_yaml"],
+            "port: 0
+rules: []
+"
+        );
         assert!(serialized.get("template_yaml").is_none());
     }
 
     #[test]
-    fn user_mihomo_profile_rejects_legacy_template_yaml_field() {
-        let err = serde_json::from_value::<UserMihomoProfile>(json!({
-            "template_yaml": "port: 0\nrules: []\n",
+    fn user_mihomo_profile_deserializes_legacy_template_yaml_for_internal_compat() {
+        let profile: UserMihomoProfile = serde_json::from_value(json!({
+            "template_yaml": "port: 0
+rules: []
+",
             "extra_proxies_yaml": "",
             "extra_proxy_providers_yaml": ""
         }))
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.to_string().contains("unknown field `template_yaml`"));
+        assert_eq!(
+            profile.mixin_yaml,
+            "port: 0
+rules: []
+"
+        );
+
+        let serialized = serde_json::to_value(&profile).unwrap();
+        assert_eq!(
+            serialized["mixin_yaml"],
+            "port: 0
+rules: []
+"
+        );
+        assert!(serialized.get("template_yaml").is_none());
     }
 
     #[test]
@@ -3834,7 +3862,10 @@ mod tests {
         let serialized = serde_json::to_value(DesiredStateCommand::SetUserMihomoProfile {
             user_id: "user_1".to_string(),
             profile: UserMihomoProfile {
-                mixin_yaml: "port: 0\nrules: []\n".to_string(),
+                mixin_yaml: "port: 0
+rules: []
+"
+                .to_string(),
                 extra_proxies_yaml: "".to_string(),
                 extra_proxy_providers_yaml: "".to_string(),
             },
@@ -3842,8 +3873,82 @@ mod tests {
         .unwrap();
 
         let profile = &serialized["profile"];
-        assert_eq!(profile["mixin_yaml"], "port: 0\nrules: []\n");
+        assert_eq!(
+            profile["mixin_yaml"],
+            "port: 0
+rules: []
+"
+        );
         assert!(profile.get("template_yaml").is_none());
+    }
+
+    #[test]
+    fn desired_state_command_deserializes_legacy_template_yaml_profile_for_internal_compat() {
+        let cmd: DesiredStateCommand = serde_json::from_value(json!({
+            "type": "set_user_mihomo_profile",
+            "user_id": "user_1",
+            "profile": {
+                "template_yaml": "port: 0
+rules: []
+",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": ""
+            }
+        }))
+        .unwrap();
+
+        match cmd {
+            DesiredStateCommand::SetUserMihomoProfile { user_id, profile } => {
+                assert_eq!(user_id, "user_1");
+                assert_eq!(
+                    profile.mixin_yaml,
+                    "port: 0
+rules: []
+"
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn migrate_state_value_to_latest_accepts_v10_template_yaml_mihomo_profiles() {
+        let mut raw = serde_json::to_value(PersistedState::empty()).unwrap();
+        raw["users"] = json!({
+            "user_1": {
+                "user_id": "user_1",
+                "display_name": "alice",
+                "subscription_token": "sub_1",
+                "credential_epoch": 0,
+                "priority_tier": "p2",
+                "quota_reset": {
+                    "policy": "monthly",
+                    "day_of_month": 1,
+                    "tz_offset_minutes": 480
+                }
+            }
+        });
+        raw["user_mihomo_profiles"] = json!({
+            "user_1": {
+                "template_yaml": "port: 0
+rules: []
+",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": ""
+            }
+        });
+
+        let state = migrate_state_value_to_latest(raw).expect("legacy v10 state should load");
+        let profile = state
+            .user_mihomo_profiles
+            .get("user_1")
+            .expect("profile should exist after migration");
+        assert_eq!(
+            profile.mixin_yaml,
+            "port: 0
+rules: []
+"
+        );
     }
 
     #[test]
