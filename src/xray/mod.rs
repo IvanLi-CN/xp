@@ -151,7 +151,10 @@ pub fn classify_idempotency_status(status: &tonic::Status) -> IdempotencyStatus 
     if msg.contains("not found") {
         return IdempotencyStatus::NotFound;
     }
-    if msg.contains("already exists") || msg.contains("already exist") {
+    if msg.contains("already exists")
+        || msg.contains("already exist")
+        || msg.contains("existing tag found")
+    {
         return IdempotencyStatus::AlreadyExists;
     }
 
@@ -190,6 +193,10 @@ mod tests {
         let missing = tonic::Status::new(tonic::Code::NotFound, "missing");
         let missing_unknown = tonic::Status::new(tonic::Code::Unknown, "handler not found: foo");
         let already_unknown = tonic::Status::new(tonic::Code::Unknown, "something already exists");
+        let existing_tag_found = tonic::Status::new(
+            tonic::Code::Unknown,
+            "app/proxyman/inbound: Existing Tag Found: vless-foo",
+        );
         let other = tonic::Status::new(tonic::Code::Internal, "boom");
 
         assert_eq!(
@@ -209,11 +216,16 @@ mod tests {
             IdempotencyStatus::AlreadyExists
         );
         assert_eq!(
+            classify_idempotency_status(&existing_tag_found),
+            IdempotencyStatus::AlreadyExists
+        );
+        assert_eq!(
             classify_idempotency_status(&other),
             IdempotencyStatus::Other
         );
 
         assert!(is_already_exists(&already));
+        assert!(is_already_exists(&existing_tag_found));
         assert!(!is_already_exists(&missing));
         assert!(is_not_found(&missing));
         assert!(!is_not_found(&already));

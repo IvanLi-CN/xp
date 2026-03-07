@@ -1127,6 +1127,7 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct Behavior {
+        add_inbound_existing_tag_found: bool,
         add_user_not_found_first: bool,
         remove_inbound_not_found: bool,
         remove_user_not_found: bool,
@@ -1165,10 +1166,15 @@ mod tests {
             let inbound = req
                 .inbound
                 .ok_or_else(|| tonic::Status::invalid_argument("inbound required"))?;
-            self.calls
-                .lock()
-                .await
-                .push(Call::AddInbound { tag: inbound.tag });
+            self.calls.lock().await.push(Call::AddInbound {
+                tag: inbound.tag.clone(),
+            });
+            if self.behavior.add_inbound_existing_tag_found {
+                return Err(tonic::Status::unknown(format!(
+                    "app/proxyman/inbound: existing tag found: {}",
+                    inbound.tag
+                )));
+            }
             Ok(tonic::Response::new(AddInboundResponse {}))
         }
 
@@ -1635,6 +1641,152 @@ mod tests {
             Call::AlterInbound { tag, op_type, .. }
                 if tag == endpoint_tag && op_type == "xray.app.proxyman.command.AddUserOperation"
         ));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn ensure_existing_inbound_treats_existing_tag_found_as_ok() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(
+            calls.clone(),
+            Behavior {
+                add_inbound_existing_tag_found: true,
+                ..Behavior::default()
+            },
+        )
+        .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let endpoint = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap()
+        };
+
+        let marker_path = config
+            .data_dir
+            .join(MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(&marker_path, b"").unwrap();
+
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        last_applied_hash_by_endpoint_id.insert(
+            endpoint.endpoint_id.clone(),
+            desired_inbound_hash(&endpoint).unwrap(),
+        );
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
+        )
+        .await
+        .unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert_eq!(calls, vec![Call::AddInbound { tag: endpoint.tag }]);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn rebuild_inbound_existing_tag_found_keeps_retrying_until_rebuilt() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(
+            calls.clone(),
+            Behavior {
+                add_inbound_existing_tag_found: true,
+                ..Behavior::default()
+            },
+        )
+        .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let (endpoint_id, endpoint_tag) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            (endpoint.endpoint_id, endpoint.tag)
+        };
+
+        let marker_path = config
+            .data_dir
+            .join(MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(&marker_path, b"").unwrap();
+
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        let mut pending = PendingBatch::default();
+        pending.add(ReconcileRequest::RebuildInbound {
+            endpoint_id: endpoint_id.clone(),
+        });
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
+        )
+        .await
+        .unwrap();
+
+        assert!(!last_applied_hash_by_endpoint_id.contains_key(&endpoint_id));
+
+        calls.lock().await.clear();
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
+        )
+        .await
+        .unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(
+            calls
+                .iter()
+                .any(|call| matches!(call, Call::RemoveInbound { tag } if tag == &endpoint_tag))
+        );
+        assert!(
+            calls
+                .iter()
+                .filter(|call| matches!(call, Call::AddInbound { tag } if tag == &endpoint_tag))
+                .count()
+                >= 2
+        );
+        assert!(!last_applied_hash_by_endpoint_id.contains_key(&endpoint_id));
 
         let _ = shutdown.send(());
     }
