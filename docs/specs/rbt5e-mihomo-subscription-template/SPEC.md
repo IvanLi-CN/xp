@@ -62,7 +62,7 @@
 - `GET /api/sub/{token}?format=mihomo` 支持完整输出。
 - 用户 mixin 按 `user_id` 持久化存储。
 - 管理 API 请求与响应统一使用 `mixin_yaml`。
-- 对外 API 只接受 `mixin_yaml`；内部状态/WAL/snapshot 继续只读兼容旧字段 `template_yaml`，以保证滚动升级可回放。
+- 对外 API 只接受 `mixin_yaml`；内部状态/WAL/snapshot 继续对旧字段 `template_yaml` 保持读写兼容（内部双写 `mixin_yaml` + `template_yaml`），以保证滚动升级与旧节点回放安全。
 - 用户可输入 `extra_proxies_yaml`（sequence）与 `extra_proxy_providers_yaml`（mapping，可空）。
 - 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
 - 系统固定只生成 JP/HK/KR 三组 relay/稳定地区入口/落地逻辑。
@@ -202,7 +202,7 @@
 - 2026-03-06: 需求升级为“mixin + 系统内置动态组逻辑”，新增稳定入口组、落地组策略与 autosplit 防误用机制。
 - 2026-03-06: 对外主字段切换为 `mixin_yaml`，稳定地区范围锁定为 JP/HK/KR。
 - 2026-03-06: 在 `codex-testbox` 生成示例输出并完成两类证据：原样例的脱敏输出/差异分析，以及去掉已脱敏静态节点后的 provider-only 变体 Mihomo `-t` 通过记录。
-- 2026-03-07: 清理对外 `template_yaml` 兼容层；管理 API、前端 schema/mock 与文档统一只保留 `mixin_yaml`，同时恢复内部状态/WAL 的只读兼容以保证滚动升级安全。
+- 2026-03-07: 清理对外 `template_yaml` 兼容层；管理 API、前端 schema/mock 与文档统一只保留 `mixin_yaml`，同时恢复内部状态/WAL 的读写兼容（内部双写）以保证滚动升级安全。
 - 2026-03-06: review 收口补充 extra proxy 引用保护：对显式 extra proxies 的名称保持最高优先级，即便名称带有 `-JP` / `-HK` / `-KR` / `-ss` / `-reality` 后缀，也不再被系统动态 remap 误绑。
 
 ## 参考（References）
