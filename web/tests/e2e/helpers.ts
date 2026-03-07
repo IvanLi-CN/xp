@@ -92,7 +92,6 @@ type AlertsResponse = {
 
 type MockMihomoProfile = {
 	mixin_yaml?: string;
-	template_yaml?: string;
 	extra_proxies_yaml: string;
 	extra_proxy_providers_yaml: string;
 };
@@ -264,11 +263,7 @@ function canonicalizeMockMihomoProfile(
 ): CanonicalMockMihomoProfile {
 	return {
 		mixin_yaml:
-			typeof profile?.mixin_yaml === "string"
-				? profile.mixin_yaml
-				: typeof profile?.template_yaml === "string"
-					? profile.template_yaml
-					: "",
+			typeof profile?.mixin_yaml === "string" ? profile.mixin_yaml : "",
 		extra_proxies_yaml:
 			typeof profile?.extra_proxies_yaml === "string"
 				? profile.extra_proxies_yaml
@@ -333,6 +328,9 @@ function ensureYamlMappingOrEmpty(
 export function normalizeMockMihomoProfilePayload(
 	payload: Record<string, unknown>,
 ): MockMihomoProfileNormalizationResult {
+	if (Object.prototype.hasOwnProperty.call(payload, "template_yaml")) {
+		return { ok: false, message: "template_yaml is no longer supported" };
+	}
 	const canonical = canonicalizeMockMihomoProfile(payload);
 	if (canonical.mixin_yaml.trim() === "") {
 		return { ok: false, message: "mixin_yaml is required" };

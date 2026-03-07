@@ -519,8 +519,9 @@ struct PutUserAccessRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PutUserMihomoProfileRequest {
-    #[serde(default, alias = "template_yaml")]
+    #[serde(default)]
     mixin_yaml: String,
     #[serde(default)]
     extra_proxies_yaml: String,

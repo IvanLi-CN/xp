@@ -3839,7 +3839,7 @@ async fn admin_user_mihomo_profile_get_returns_raw_invalid_stored_profile() {
 }
 
 #[tokio::test]
-async fn admin_user_mihomo_profile_put_accepts_legacy_template_yaml_alias() {
+async fn admin_user_mihomo_profile_put_rejects_legacy_template_yaml_field() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
@@ -3853,30 +3853,16 @@ async fn admin_user_mihomo_profile_put_accepts_legacy_template_yaml_alias() {
             "PUT",
             &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
             json!({
-              "template_yaml": "port: 0\nrules: []\n",
+              "template_yaml": "port: 0
+rules: []
+",
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let res = app
-        .clone()
-        .oneshot(req_authed(
-            "GET",
-            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let profile = body_json(res).await;
-    assert_eq!(profile["mixin_yaml"], "port: 0\nrules: []\n");
-    assert!(
-        profile.get("template_yaml").is_none(),
-        "legacy field should not be emitted in GET responses"
-    );
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

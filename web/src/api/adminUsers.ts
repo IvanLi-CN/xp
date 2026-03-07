@@ -37,19 +37,11 @@ export type ResetAdminUserCredentialsResponse = z.infer<
 	typeof ResetAdminUserCredentialsResponseSchema
 >;
 
-const AdminUserMihomoProfileWireSchema = z.object({
-	mixin_yaml: z.string().optional(),
-	template_yaml: z.string().optional(),
+export const AdminUserMihomoProfileSchema = z.object({
+	mixin_yaml: z.string(),
 	extra_proxies_yaml: z.string(),
 	extra_proxy_providers_yaml: z.string(),
 });
-
-export const AdminUserMihomoProfileSchema =
-	AdminUserMihomoProfileWireSchema.transform((value) => ({
-		mixin_yaml: value.mixin_yaml ?? value.template_yaml ?? "",
-		extra_proxies_yaml: value.extra_proxies_yaml,
-		extra_proxy_providers_yaml: value.extra_proxy_providers_yaml,
-	}));
 
 export type AdminUserMihomoProfile = z.infer<
 	typeof AdminUserMihomoProfileSchema

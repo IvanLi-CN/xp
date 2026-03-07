@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize, ser::SerializeStruct};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
@@ -388,30 +388,15 @@ pub struct NodeUserEndpointMembership {
     pub endpoint_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct UserMihomoProfile {
-    #[serde(default, alias = "template_yaml")]
+    #[serde(default)]
     pub mixin_yaml: String,
     #[serde(default)]
     pub extra_proxies_yaml: String,
     #[serde(default)]
     pub extra_proxy_providers_yaml: String,
-}
-
-impl Serialize for UserMihomoProfile {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("UserMihomoProfile", 3)?;
-        state.serialize_field("template_yaml", &self.mixin_yaml)?;
-        state.serialize_field("extra_proxies_yaml", &self.extra_proxies_yaml)?;
-        state.serialize_field(
-            "extra_proxy_providers_yaml",
-            &self.extra_proxy_providers_yaml,
-        )?;
-        state.end()
-    }
 }
 
 pub fn membership_key(user_id: &str, endpoint_id: &str) -> String {
@@ -3817,9 +3802,9 @@ mod tests {
     }
 
     #[test]
-    fn user_mihomo_profile_deserializes_legacy_template_yaml_alias() {
+    fn user_mihomo_profile_serializes_and_deserializes_mixin_yaml() {
         let profile: UserMihomoProfile = serde_json::from_value(json!({
-            "template_yaml": "port: 0\nrules: []\n",
+            "mixin_yaml": "port: 0\nrules: []\n",
             "extra_proxies_yaml": "",
             "extra_proxy_providers_yaml": ""
         }))
@@ -3828,12 +3813,24 @@ mod tests {
         assert_eq!(profile.mixin_yaml, "port: 0\nrules: []\n");
 
         let serialized = serde_json::to_value(&profile).unwrap();
-        assert_eq!(serialized["template_yaml"], "port: 0\nrules: []\n");
-        assert!(serialized.get("mixin_yaml").is_none());
+        assert_eq!(serialized["mixin_yaml"], "port: 0\nrules: []\n");
+        assert!(serialized.get("template_yaml").is_none());
     }
 
     #[test]
-    fn desired_state_command_set_user_mihomo_profile_serializes_legacy_template_yaml() {
+    fn user_mihomo_profile_rejects_legacy_template_yaml_field() {
+        let err = serde_json::from_value::<UserMihomoProfile>(json!({
+            "template_yaml": "port: 0\nrules: []\n",
+            "extra_proxies_yaml": "",
+            "extra_proxy_providers_yaml": ""
+        }))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `template_yaml`"));
+    }
+
+    #[test]
+    fn desired_state_command_set_user_mihomo_profile_serializes_mixin_yaml() {
         let serialized = serde_json::to_value(DesiredStateCommand::SetUserMihomoProfile {
             user_id: "user_1".to_string(),
             profile: UserMihomoProfile {
@@ -3845,8 +3842,8 @@ mod tests {
         .unwrap();
 
         let profile = &serialized["profile"];
-        assert_eq!(profile["template_yaml"], "port: 0\nrules: []\n");
-        assert!(profile.get("mixin_yaml").is_none());
+        assert_eq!(profile["mixin_yaml"], "port: 0\nrules: []\n");
+        assert!(profile.get("template_yaml").is_none());
     }
 
     #[test]

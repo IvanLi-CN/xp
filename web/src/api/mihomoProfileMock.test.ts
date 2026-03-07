@@ -38,7 +38,7 @@ rules: []
 		expect(result.profile.extra_proxy_providers_yaml).toContain("providerA");
 	});
 
-	it("rejects empty mixin and conflicting extracted sections", () => {
+	it("rejects empty mixin, legacy template fields, and conflicting extracted sections", () => {
 		expect(
 			normalizeMockMihomoProfilePayload({
 				mixin_yaml: "",
@@ -46,6 +46,14 @@ rules: []
 				extra_proxy_providers_yaml: "",
 			}),
 		).toEqual({ ok: false, message: "mixin_yaml is required" });
+
+		expect(
+			normalizeMockMihomoProfilePayload({
+				template_yaml: "port: 0\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: "",
+			}),
+		).toEqual({ ok: false, message: "template_yaml is no longer supported" });
 
 		expect(
 			normalizeMockMihomoProfilePayload({

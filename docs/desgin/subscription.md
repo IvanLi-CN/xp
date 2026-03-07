@@ -125,7 +125,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 
 - 混入配置按用户维度存储（admin API 管理），不内置到仓库。
 - profile 字段：
-  - `mixin_yaml`（必填，YAML root 必须是 mapping；请求兼容 legacy `template_yaml`，响应仅返回 `mixin_yaml`）
+  - `mixin_yaml`（必填，YAML root 必须是 mapping）
   - `extra_proxies_yaml`（可空；非空时 root 必须是 sequence）
   - `extra_proxy_providers_yaml`（可空；非空时 root 必须是 mapping）
 - 保存 profile 时若 `mixin_yaml` 顶层包含 `proxies` / `proxy-providers`，服务端会自动抽取到

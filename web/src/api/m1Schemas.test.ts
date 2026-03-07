@@ -273,18 +273,14 @@ describe("AdminUserMihomoProfileSchema", () => {
 		});
 	});
 
-	it("falls back to legacy template_yaml responses", () => {
-		expect(
+	it("rejects legacy template_yaml-only responses", () => {
+		expect(() =>
 			AdminUserMihomoProfileSchema.parse({
 				template_yaml: "port: 7890\n",
 				extra_proxies_yaml: "",
 				extra_proxy_providers_yaml: "",
 			}),
-		).toEqual({
-			mixin_yaml: "port: 7890\n",
-			extra_proxies_yaml: "",
-			extra_proxy_providers_yaml: "",
-		});
+		).toThrow();
 	});
 });
 

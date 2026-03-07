@@ -29,7 +29,7 @@ Request body:
 
 Backward compatibility:
 
-- 请求体兼容旧字段 `template_yaml` 一轮实现周期；若只传旧字段，服务端会按 `mixin_yaml` 语义处理。
+- 无；请求与响应统一只接受 `mixin_yaml`。
 
 Validation:
 
