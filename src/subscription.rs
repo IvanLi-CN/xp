@@ -244,8 +244,15 @@ pub fn build_clash_yaml(
     })
 }
 
-pub(crate) fn normalize_user_mihomo_profile_for_runtime(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProxyProviderConflictMode {
+    PreferExtra,
+    Reject,
+}
+
+fn normalize_user_mihomo_profile(
     profile: &UserMihomoProfile,
+    provider_conflict_mode: ProxyProviderConflictMode,
 ) -> Result<UserMihomoProfile, SubscriptionError> {
     if profile.mixin_yaml.trim().is_empty() {
         return Ok(profile.clone());
@@ -271,7 +278,9 @@ pub(crate) fn normalize_user_mihomo_profile_for_runtime(
             for (key, value) in map {
                 match extra_proxy_providers.entry(key) {
                     serde_yaml::mapping::Entry::Occupied(entry) => {
-                        if entry.get() != &value {
+                        if provider_conflict_mode == ProxyProviderConflictMode::Reject
+                            && entry.get() != &value
+                        {
                             let name = entry
                                 .key()
                                 .as_str()
@@ -322,6 +331,18 @@ pub(crate) fn normalize_user_mihomo_profile_for_runtime(
             profile.extra_proxy_providers_yaml.clone()
         },
     })
+}
+
+pub(crate) fn normalize_user_mihomo_profile_for_runtime(
+    profile: &UserMihomoProfile,
+) -> Result<UserMihomoProfile, SubscriptionError> {
+    normalize_user_mihomo_profile(profile, ProxyProviderConflictMode::PreferExtra)
+}
+
+pub(crate) fn normalize_user_mihomo_profile_for_admin_get(
+    profile: &UserMihomoProfile,
+) -> Result<UserMihomoProfile, SubscriptionError> {
+    normalize_user_mihomo_profile(profile, ProxyProviderConflictMode::Reject)
 }
 
 pub fn build_mihomo_yaml(
@@ -2871,7 +2892,58 @@ rules: []
     }
 
     #[test]
-    fn normalize_user_mihomo_profile_for_runtime_rejects_conflicting_proxy_provider_sources() {
+    fn normalize_user_mihomo_profile_for_runtime_prefers_extra_proxy_provider_conflicts() {
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+proxy-groups:
+  - name: Auto
+    type: select
+    use: [providerA]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+            .to_string(),
+        };
+
+        let normalized = normalize_user_mihomo_profile_for_runtime(&profile)
+            .expect("runtime normalization should preserve legacy render semantics");
+        let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
+        let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
+        assert!(
+            !mixin_map.contains_key(&Value::String("proxy-providers".to_string())),
+            "runtime normalization should still extract legacy provider blocks"
+        );
+
+        let extra_providers: Value =
+            serde_yaml::from_str(&normalized.extra_proxy_providers_yaml).unwrap();
+        let provider_a = extra_providers
+            .as_mapping()
+            .and_then(|map| map.get(Value::String("providerA".to_string())))
+            .and_then(Value::as_mapping)
+            .expect("providerA must still exist in extra providers");
+        assert_eq!(
+            provider_a
+                .get(Value::String("path".to_string()))
+                .and_then(Value::as_str),
+            Some("./provider-a-from-extra.yaml")
+        );
+    }
+
+    #[test]
+    fn normalize_user_mihomo_profile_for_admin_get_rejects_conflicting_proxy_provider_sources() {
         let profile = UserMihomoProfile {
             mixin_yaml: r#"
 port: 0
@@ -2893,8 +2965,8 @@ providerA:
             .to_string(),
         };
 
-        let err = normalize_user_mihomo_profile_for_runtime(&profile)
-            .expect_err("conflicting provider sources should be rejected");
+        let err = normalize_user_mihomo_profile_for_admin_get(&profile)
+            .expect_err("conflicting provider sources should be surfaced to admin GET");
         assert!(matches!(
             err,
             SubscriptionError::MihomoExtraProxyProviderConflict { ref name } if name == "providerA"

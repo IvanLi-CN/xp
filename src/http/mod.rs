@@ -5165,7 +5165,7 @@ async fn admin_get_user_mihomo_profile(
     }
     let profile = match store.get_user_mihomo_profile(&user_id) {
         Some(profile) => {
-            match crate::subscription::normalize_user_mihomo_profile_for_runtime(&profile) {
+            match crate::subscription::normalize_user_mihomo_profile_for_admin_get(&profile) {
                 Ok(normalized) => normalized,
                 Err(error) => {
                     tracing::warn!(%user_id, %error, "returning raw stored mihomo profile after normalization failed");

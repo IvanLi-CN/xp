@@ -3862,6 +3862,68 @@ rules: []
 }
 
 #[tokio::test]
+async fn subscription_format_mihomo_renders_conflicting_legacy_provider_profile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token;
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().user_mihomo_profiles.insert(
+            user_id,
+            crate::state::UserMihomoProfile {
+                mixin_yaml: r#"port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+proxy-groups:
+  - name: Auto
+    type: select
+    use: [providerA]
+rules: []
+"#
+                .to_string(),
+                extra_proxies_yaml: "".to_string(),
+                extra_proxy_providers_yaml: r#"providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+"#
+                .to_string(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let provider_a = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|map| map.get(YamlValue::String("providerA".to_string())))
+        .and_then(YamlValue::as_mapping)
+        .expect("providerA should still render from extra providers");
+    assert_eq!(
+        provider_a
+            .get(YamlValue::String("path".to_string()))
+            .and_then(YamlValue::as_str),
+        Some("./provider-a-from-extra.yaml")
+    );
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_get_returns_raw_invalid_stored_profile() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
