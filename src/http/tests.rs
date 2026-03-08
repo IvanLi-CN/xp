@@ -3382,16 +3382,20 @@ rules: []
         .collect::<Vec<_>>();
     assert!(outer_use.contains(&"providerA"));
 
-    for unexpected in [
+    for expected in [
         "🛣️ Japan",
-        "🛣️ HongKong",
-        "🛣️ Korea",
         "🌟 Japan",
         "🔒 Japan",
         "🤯 Japan",
+        "🛣️ HongKong",
         "🌟 HongKong",
         "🔒 HongKong",
         "🤯 HongKong",
+        "🛣️ Taiwan",
+        "🌟 Taiwan",
+        "🔒 Taiwan",
+        "🤯 Taiwan",
+        "🛣️ Korea",
         "🌟 Korea",
         "🔒 Korea",
         "🤯 Korea",
@@ -3399,8 +3403,8 @@ rules: []
         assert!(
             groups
                 .iter()
-                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
-            "unexpected legacy system group leaked into output: {unexpected}"
+                .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
+            "compat region group missing from output: {expected}"
         );
     }
 
@@ -3803,12 +3807,15 @@ rules: []
             .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW")),
         "rendered legacy profile should inject the combined outer group"
     );
-    for unexpected in ["🛣️ Japan", "🔒 Japan"] {
-        assert!(
-            groups
-                .iter()
-                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
-            "legacy system group should be stripped on render: {unexpected}"
+    for expected in ["🛣️ Japan", "🔒 Japan"] {
+        let group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected))
+            .expect("compat region group should survive render");
+        assert_eq!(
+            group.get("type").and_then(YamlValue::as_str),
+            Some("select"),
+            "compat region group should be passive: {expected}"
         );
     }
 }
@@ -4086,16 +4093,20 @@ rules: []
         outer_group.get("proxies").and_then(YamlValue::as_sequence),
         Some(&vec![YamlValue::String("DIRECT".to_string())])
     );
-    for unexpected in [
+    for expected in [
         "🛣️ Japan",
-        "🛣️ HongKong",
-        "🛣️ Korea",
         "🌟 Japan",
         "🔒 Japan",
         "🤯 Japan",
+        "🛣️ HongKong",
         "🌟 HongKong",
         "🔒 HongKong",
         "🤯 HongKong",
+        "🛣️ Taiwan",
+        "🌟 Taiwan",
+        "🔒 Taiwan",
+        "🤯 Taiwan",
+        "🛣️ Korea",
         "🌟 Korea",
         "🔒 Korea",
         "🤯 Korea",
@@ -4103,8 +4114,8 @@ rules: []
         assert!(
             groups
                 .iter()
-                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
-            "unexpected legacy system group leaked into output: {unexpected}"
+                .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
+            "compat region group missing from output: {expected}"
         );
     }
 

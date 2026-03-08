@@ -458,19 +458,53 @@ pub fn build_mihomo_yaml(
 const MIHOMO_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|台湾|台灣|🇹🇼|Taiwan|TW)";
-const MIHOMO_LEGACY_SYSTEM_GROUPS: [&str; 12] = [
-    "🛣️ Japan",
-    "🛣️ HongKong",
-    "🛣️ Korea",
+const MIHOMO_REGION_GROUP_NAMES: [&str; 16] = [
     "🌟 Japan",
     "🔒 Japan",
     "🤯 Japan",
+    "🛣️ Japan",
     "🌟 HongKong",
     "🔒 HongKong",
     "🤯 HongKong",
+    "🛣️ HongKong",
+    "🌟 Taiwan",
+    "🔒 Taiwan",
+    "🤯 Taiwan",
+    "🛣️ Taiwan",
     "🌟 Korea",
     "🔒 Korea",
     "🤯 Korea",
+    "🛣️ Korea",
+];
+
+#[derive(Clone, Copy)]
+struct MihomoRegionGroup {
+    name: &'static str,
+    filter: &'static str,
+    slug_hints: &'static [&'static str],
+}
+
+const MIHOMO_REGION_GROUPS: [MihomoRegionGroup; 4] = [
+    MihomoRegionGroup {
+        name: "Japan",
+        filter: "日本|🇯🇵|Japan|JP",
+        slug_hints: &["jp", "japan", "tokyo", "osaka"],
+    },
+    MihomoRegionGroup {
+        name: "HongKong",
+        filter: "香港|🇭🇰|HongKong|Hong Kong|HK",
+        slug_hints: &["hk", "hongkong", "hong-kong", "hong kong"],
+    },
+    MihomoRegionGroup {
+        name: "Taiwan",
+        filter: "台湾|台灣|🇹🇼|Taiwan|TW",
+        slug_hints: &["tw", "taiwan", "taipei"],
+    },
+    MihomoRegionGroup {
+        name: "Korea",
+        filter: "韩国|韓國|🇰🇷|Korea|KR",
+        slug_hints: &["kr", "korea", "seoul"],
+    },
 ];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
@@ -504,7 +538,7 @@ fn inject_mihomo_proxy_groups(
     override_names.insert(MIHOMO_OUTER_GROUP.to_string());
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
     override_names.extend(
-        MIHOMO_LEGACY_SYSTEM_GROUPS
+        MIHOMO_REGION_GROUP_NAMES
             .iter()
             .map(|name| (*name).to_string()),
     );
@@ -536,6 +570,12 @@ fn inject_mihomo_proxy_groups(
     inject_mihomo_outer_group(&mut groups, &provider_values);
     let landing_groups =
         inject_mihomo_landing_groups(&mut groups, generated_proxy_name_set, &base_names);
+    inject_mihomo_region_groups(
+        &mut groups,
+        &provider_values,
+        generated_proxy_name_set,
+        &landing_groups,
+    );
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
 
     root.insert(
@@ -578,6 +618,94 @@ fn inject_mihomo_outer_group(
         serde_yaml::Value::Sequence(provider_values.to_vec()),
     );
     groups.push(serde_yaml::Value::Mapping(map));
+}
+
+fn mihomo_region_slug_matches(base: &str, region: MihomoRegionGroup) -> bool {
+    let lower = base.to_ascii_lowercase();
+    let normalized = lower.replace('-', " ");
+    region
+        .slug_hints
+        .iter()
+        .any(|hint| lower.contains(hint) || normalized.contains(hint))
+}
+
+fn inject_mihomo_region_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    provider_values: &[serde_yaml::Value],
+    proxy_name_set: &std::collections::BTreeSet<String>,
+    landing_groups: &[String],
+) {
+    for region in MIHOMO_REGION_GROUPS {
+        let select_name = format!("🔒 {}", region.name);
+
+        let mut proxies = landing_groups
+            .iter()
+            .filter_map(|name| {
+                name.strip_prefix("🛬 ").and_then(|base| {
+                    mihomo_region_slug_matches(base, region)
+                        .then(|| serde_yaml::Value::String(name.clone()))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut reality_names = proxy_name_set
+            .iter()
+            .filter_map(|name| {
+                let (kind, base) = classify_proxy_ref_name(name)?;
+                (kind == ProxyRefKind::Reality && mihomo_region_slug_matches(&base, region))
+                    .then(|| serde_yaml::Value::String(name.clone()))
+            })
+            .collect::<Vec<_>>();
+        proxies.append(&mut reality_names);
+
+        let mut select_map = serde_yaml::Mapping::new();
+        select_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(select_name.clone()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("select".to_string()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(region.filter.to_string()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        if !proxies.is_empty() {
+            select_map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(proxies),
+            );
+        }
+        groups.push(serde_yaml::Value::Mapping(select_map));
+
+        for (prefix, hidden) in [("🌟", true), ("🤯", true), ("🛣️", true)] {
+            let mut alias_map = serde_yaml::Mapping::new();
+            alias_map.insert(
+                serde_yaml::Value::String("name".to_string()),
+                serde_yaml::Value::String(format!("{prefix} {}", region.name)),
+            );
+            alias_map.insert(
+                serde_yaml::Value::String("type".to_string()),
+                serde_yaml::Value::String("select".to_string()),
+            );
+            if hidden {
+                alias_map.insert(
+                    serde_yaml::Value::String("hidden".to_string()),
+                    serde_yaml::Value::Bool(true),
+                );
+            }
+            alias_map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(select_name.clone())]),
+            );
+            groups.push(serde_yaml::Value::Mapping(alias_map));
+        }
+    }
 }
 
 fn inject_mihomo_landing_groups(
@@ -2346,11 +2474,22 @@ providerB:
             use_names,
             std::collections::BTreeSet::from(["providerA", "providerB"])
         );
-        assert!(
-            proxy_groups
-                .iter()
-                .all(|g| g.get("name").and_then(Value::as_str) != Some("🛣️ Japan"))
+        let japan_group = proxy_groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
+            .expect("compat Japan group should exist");
+        assert_eq!(
+            japan_group.get("type"),
+            Some(&Value::String("select".to_string()))
         );
+        let japan_refs = japan_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("compat Japan group should expose generated landing proxies")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(japan_refs, vec!["🛬 Tokyo-A", "Tokyo-A-reality"]);
 
         let landing = proxy_groups
             .iter()
@@ -2549,18 +2688,37 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(test_proxy_names, vec!["DIRECT"]);
+        assert_eq!(test_proxy_names, vec!["🛣️ Japan", "🔒 Japan"]);
 
-        assert!(
-            groups
-                .iter()
-                .all(|g| g.get("name").and_then(Value::as_str) != Some("🛣️ Japan"))
+        let japan_relay = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ Japan"))
+            .expect("compat relay group should exist");
+        assert_eq!(
+            japan_relay.get("type"),
+            Some(&Value::String("select".to_string()))
         );
-        assert!(
-            groups
-                .iter()
-                .all(|g| g.get("name").and_then(Value::as_str) != Some("🔒 Japan"))
-        );
+        let japan_relay_refs = japan_relay
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("relay proxies must exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(japan_relay_refs, vec!["🔒 Japan"]);
+
+        let japan_group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
+            .expect("compat Japan group should exist");
+        let japan_group_refs = japan_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("compat Japan proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(japan_group_refs, vec!["🛬 Tokyo-A"]);
 
         let outer_group = groups
             .iter()

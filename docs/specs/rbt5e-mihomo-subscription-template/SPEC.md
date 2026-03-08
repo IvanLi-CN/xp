@@ -27,6 +27,7 @@
 - 将管理 API 字段统一收敛为 `mixin_yaml`，移除旧字段 `template_yaml` 兼容层。
 - 系统内置生成并覆盖 JP/HK/TW 单一外层候选组与落地组：
   - 外层候选组：`🛣️ JP/HK/TW`
+  - 兼容地区组：`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
   - SS 链式节点：`{base}-chain`（固定经 `🛣️ JP/HK/TW` 出口）
 - 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
