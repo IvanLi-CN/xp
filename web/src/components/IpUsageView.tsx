@@ -89,8 +89,9 @@ type TimelineDatum = {
 	value: [laneIndex: number, startMs: number, endMsExclusive: number];
 };
 
-type ChartEventHandlers = NonNullable<EChartsReactProps["onEvents"]>;
 type EChartsReactRef = InstanceType<typeof ReactEChartsCore>;
+type EChartsInstance = ReturnType<EChartsReactRef["getEchartsInstance"]>;
+type ChartEventHandlers = NonNullable<EChartsReactProps["onEvents"]>;
 type TimelineTooltipTarget = {
 	dataIndex: number;
 };
@@ -251,7 +252,7 @@ function getTimeRangeFromEvent(param: unknown): TimeRange | null {
 		}
 		if (Array.isArray(datum.value) && typeof datum.value[0] === "number") {
 			const endValue =
-				typeof datum.value[1] === "number"
+				typeof datum.value[1] === "number" && datum.value[1] > datum.value[0]
 					? datum.value[1]
 					: datum.value[0] + MINUTE_MS;
 			return buildTimeRange(datum.value[0], endValue);
@@ -259,12 +260,41 @@ function getTimeRangeFromEvent(param: unknown): TimeRange | null {
 	}
 	if (Array.isArray(param.value) && typeof param.value[0] === "number") {
 		const endValue =
-			typeof param.value[1] === "number"
+			typeof param.value[1] === "number" && param.value[1] > param.value[0]
 				? param.value[1]
 				: param.value[0] + MINUTE_MS;
 		return buildTimeRange(param.value[0], endValue);
 	}
 	return null;
+}
+
+function getTimeRangeFromAxisPointerEvent(param: unknown): TimeRange | null {
+	if (!isObjectRecord(param) || !Array.isArray(param.axesInfo)) return null;
+	const axisInfo = param.axesInfo[0];
+	if (!isObjectRecord(axisInfo)) return null;
+	const value = axisInfo.value;
+	if (typeof value !== "number" && typeof value !== "string") return null;
+	return buildMinuteRange(value);
+}
+
+function getTimeRangeFromChartPointer(
+	chart: EChartsInstance,
+	point: { offsetX?: unknown; offsetY?: unknown },
+	windowStartMs: number,
+	windowEndMs: number,
+): TimeRange | null {
+	const offsetX = typeof point.offsetX === "number" ? point.offsetX : null;
+	const offsetY = typeof point.offsetY === "number" ? point.offsetY : null;
+	if (offsetX === null || offsetY === null) return null;
+	if (!chart.containPixel({ gridIndex: 0 }, [offsetX, offsetY])) return null;
+	const coord = chart.convertFromPixel({ xAxisIndex: 0 }, [offsetX, offsetY]);
+	const axisValue = Array.isArray(coord) ? coord[0] : coord;
+	if (typeof axisValue !== "number" || Number.isNaN(axisValue)) return null;
+	const clampedValue = Math.min(
+		windowEndMs,
+		Math.max(windowStartMs, axisValue),
+	);
+	return buildMinuteRange(clampedValue);
 }
 
 function buildIpRangeIndex(
@@ -563,19 +593,37 @@ function UniqueIpAreaChart({
 
 	const onEvents = useMemo<ChartEventHandlers>(
 		() => ({
-			click: (param: unknown) => {
-				const nextRange = getTimeRangeFromEvent(param);
+			click: (param: unknown, chart: EChartsInstance) => {
+				const nextRange =
+					(isObjectRecord(param) && isObjectRecord(param.event)
+						? getTimeRangeFromChartPointer(
+								chart,
+								param.event,
+								windowStartMs,
+								windowEndMs,
+							)
+						: null) ?? getTimeRangeFromEvent(param);
 				if (nextRange) onSelectTimeRange(nextRange);
 			},
 			globalout: () => {
 				onClearHover();
 			},
-			mousemove: (param: unknown) => {
-				const nextRange = getTimeRangeFromEvent(param);
-				if (nextRange) onHoverTimeRange(nextRange);
+			updateAxisPointer: (param: unknown) => {
+				const nextRange = getTimeRangeFromAxisPointerEvent(param);
+				if (nextRange) {
+					onHoverTimeRange(nextRange);
+					return;
+				}
+				onClearHover();
 			},
 		}),
-		[onClearHover, onHoverTimeRange, onSelectTimeRange],
+		[
+			onClearHover,
+			onHoverTimeRange,
+			onSelectTimeRange,
+			windowEndMs,
+			windowStartMs,
+		],
 	);
 
 	const option = useMemo(() => {
