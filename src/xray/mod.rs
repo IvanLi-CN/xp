@@ -117,6 +117,40 @@ impl XrayClient {
         Ok(response.ips.into_keys().collect())
     }
 
+    pub async fn get_online_stat_value(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<u64>, tonic::Status> {
+        let req = GetStatsRequest {
+            name: name.to_string(),
+            reset: false,
+        };
+        let resp = match self.stats.get_stats_online(req).await {
+            Ok(resp) => resp.into_inner(),
+            Err(status) if is_not_found(&status) => return Ok(None),
+            Err(status) => return Err(status),
+        };
+
+        let stat = resp
+            .stat
+            .ok_or_else(|| tonic::Status::internal("missing stat in GetStatsResponse"))?;
+        if stat.value < 0 {
+            return Err(tonic::Status::internal(format!(
+                "xray stat value must be non-negative: name={} value={}",
+                stat.name, stat.value
+            )));
+        }
+        Ok(Some(stat.value as u64))
+    }
+
+    pub async fn get_user_online_count(
+        &mut self,
+        email: &str,
+    ) -> Result<Option<u64>, tonic::Status> {
+        self.get_online_stat_value(&format!("user>>>{email}>>>online"))
+            .await
+    }
+
     pub async fn get_stat_value(&mut self, name: &str) -> Result<Option<u64>, tonic::Status> {
         let req = GetStatsRequest {
             name: name.to_string(),

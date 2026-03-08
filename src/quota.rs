@@ -254,6 +254,15 @@ async fn run_quota_tick_at_with_geo(
 
         for snapshot in &snapshots {
             let email = membership_xray_email(&snapshot.user_id, &snapshot.endpoint_id);
+            let empty_sample = || crate::inbound_ip_usage::InboundIpMinuteSample {
+                membership_key: snapshot.membership_key.clone(),
+                user_id: snapshot.user_id.clone(),
+                node_id: snapshot.node_id.clone(),
+                endpoint_id: snapshot.endpoint_id.clone(),
+                endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                ips: Vec::new(),
+            };
+
             match client.get_user_online_ip_list(&email).await {
                 Ok(ips) => online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: snapshot.membership_key.clone(),
@@ -263,24 +272,38 @@ async fn run_quota_tick_at_with_geo(
                     endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
                     ips: ips.into_iter().collect(),
                 }),
-                Err(status)
-                    if status.code() == tonic::Code::Unimplemented
-                        || xray::is_not_found(&status) =>
-                {
+                Err(status) if status.code() == tonic::Code::Unimplemented => {
                     online_stats_unavailable = true;
                     warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
                     break;
                 }
+                Err(status) if xray::is_not_found(&status) => {
+                    match client.get_user_online_count(&email).await {
+                        Ok(Some(0)) => online_samples.push(empty_sample()),
+                        Ok(Some(count)) => {
+                            online_stats_unavailable = true;
+                            warn!(membership_key = %snapshot.membership_key, online_count = count, "quota tick: xray online ip list missing while online count is non-zero");
+                            break;
+                        }
+                        Ok(None) => {
+                            online_stats_unavailable = true;
+                            warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
+                            break;
+                        }
+                        Err(count_status) if count_status.code() == tonic::Code::Unimplemented => {
+                            online_stats_unavailable = true;
+                            warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray online stats are unavailable");
+                            break;
+                        }
+                        Err(count_status) => {
+                            warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray get_user_online_count failed after missing online ip list");
+                            online_samples.push(empty_sample());
+                        }
+                    }
+                }
                 Err(status) => {
                     warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray get_user_online_ip_list failed");
-                    online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
-                        membership_key: snapshot.membership_key.clone(),
-                        user_id: snapshot.user_id.clone(),
-                        node_id: snapshot.node_id.clone(),
-                        endpoint_id: snapshot.endpoint_id.clone(),
-                        endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
-                        ips: Vec::new(),
-                    });
+                    online_samples.push(empty_sample());
                 }
             }
         }
@@ -1207,14 +1230,27 @@ mod tests {
 
         async fn get_stats_online(
             &self,
-            _request: tonic::Request<
-                crate::xray::proto::xray::app::stats::command::GetStatsRequest,
-            >,
+            request: tonic::Request<crate::xray::proto::xray::app::stats::command::GetStatsRequest>,
         ) -> Result<
             tonic::Response<crate::xray::proto::xray::app::stats::command::GetStatsResponse>,
             tonic::Status,
         > {
-            Err(tonic::Status::unimplemented("get_stats_online"))
+            let req = request.into_inner();
+            let mut state = self.state.lock().await;
+            state.stats_calls.push(req.name.clone());
+            let value = state
+                .stats
+                .get(&req.name)
+                .copied()
+                .ok_or_else(|| tonic::Status::not_found("missing online stat"))?;
+            Ok(tonic::Response::new(
+                crate::xray::proto::xray::app::stats::command::GetStatsResponse {
+                    stat: Some(crate::xray::proto::xray::app::stats::command::Stat {
+                        name: req.name,
+                        value,
+                    }),
+                },
+            ))
         }
 
         async fn query_stats(
@@ -1335,6 +1371,10 @@ mod tests {
 
     fn stat_name(email: &str, direction: &str) -> String {
         format!("user>>>{email}>>>traffic>>>{direction}")
+    }
+
+    fn online_stat_name(email: &str) -> String {
+        format!("user>>>{email}>>>online")
     }
 
     #[tokio::test]
@@ -4578,6 +4618,146 @@ mod tests {
             let mut st = state.lock().await;
             st.stats.insert(stat_name(&email, "uplink"), 0);
             st.stats.insert(stat_name(&email, "downlink"), 0);
+            st.online_stats_behavior = OnlineStatsBehavior::NotFound;
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        assert_eq!(
+            store_guard.latest_inbound_ip_usage_minute(),
+            Some(floor_minute(now))
+        );
+        assert!(store_guard.inbound_ip_usage().online_stats_unavailable);
+        assert!(
+            !store_guard
+                .inbound_ip_usage()
+                .memberships
+                .contains_key(&membership)
+        );
+        drop(store_guard);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn missing_online_ip_list_with_zero_online_count_is_treated_as_empty_sample() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let (membership, email) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            (
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                membership_xray_email(&user.user_id, &endpoint.endpoint_id),
+            )
+        };
+
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+            st.stats.insert(online_stat_name(&email), 0);
+            st.online_stats_behavior = OnlineStatsBehavior::NotFound;
+        }
+
+        let reconcile = ReconcileHandle::noop();
+        let now = DateTime::parse_from_rfc3339("2025-12-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        run_quota_tick_at(now, &config, &store, &reconcile)
+            .await
+            .unwrap();
+
+        let store_guard = store.lock().await;
+        assert_eq!(
+            store_guard.latest_inbound_ip_usage_minute(),
+            Some(floor_minute(now))
+        );
+        assert!(!store_guard.inbound_ip_usage().online_stats_unavailable);
+        assert!(
+            !store_guard
+                .inbound_ip_usage()
+                .memberships
+                .contains_key(&membership)
+        );
+        drop(store_guard);
+
+        let st = state.lock().await;
+        assert!(
+            st.stats_calls
+                .iter()
+                .any(|name| name == &online_stat_name(&email))
+        );
+        drop(st);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn missing_online_ip_list_with_nonzero_online_count_marks_ip_usage_unavailable() {
+        let state = Arc::new(Mutex::new(RecordingState::default()));
+        let (addr, shutdown) = start_server(state.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr, true);
+
+        let (membership, email) = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    8388,
+                    serde_json::json!({}),
+                )
+                .unwrap();
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            (
+                membership_key(&user.user_id, &endpoint.endpoint_id),
+                membership_xray_email(&user.user_id, &endpoint.endpoint_id),
+            )
+        };
+
+        {
+            let mut st = state.lock().await;
+            st.stats.insert(stat_name(&email, "uplink"), 0);
+            st.stats.insert(stat_name(&email, "downlink"), 0);
+            st.stats.insert(online_stat_name(&email), 2);
             st.online_stats_behavior = OnlineStatsBehavior::NotFound;
         }
 
