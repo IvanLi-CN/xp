@@ -418,32 +418,34 @@ function HighlightSummary({
 	onClearPinned: () => void;
 }) {
 	return (
-		<div className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300 bg-base-200/40 px-3 py-2 text-xs">
-			<span className="opacity-70">
+		<div className="grid min-h-10 gap-2 rounded-xl border border-base-300 bg-base-200/40 px-3 py-1.5 text-xs md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+			<span className="min-w-0 opacity-70">
 				Hover or click any IP or time to highlight matching data across the
 				chart and table.
 			</span>
-			{activeHighlight.ip ? (
-				<span className="badge badge-info badge-outline gap-1">
-					<span className="opacity-70">IP</span>
-					<span className="font-mono">{activeHighlight.ip}</span>
-				</span>
-			) : null}
-			{activeHighlight.timeRange ? (
-				<span className="badge badge-warning badge-outline gap-1">
-					<span className="opacity-70">Time</span>
-					<span>{formatTimeRange(activeHighlight.timeRange)}</span>
-				</span>
-			) : null}
-			{hasPinnedHighlight ? (
-				<button
-					type="button"
-					className="btn btn-ghost btn-xs"
-					onClick={onClearPinned}
-				>
-					Clear pinned highlight
-				</button>
-			) : null}
+			<div className="flex min-h-6 flex-wrap items-center gap-2 md:justify-self-end">
+				{activeHighlight.ip ? (
+					<span className="badge badge-info badge-outline gap-1">
+						<span className="opacity-70">IP</span>
+						<span className="font-mono">{activeHighlight.ip}</span>
+					</span>
+				) : null}
+				{activeHighlight.timeRange ? (
+					<span className="badge badge-warning badge-outline gap-1">
+						<span className="opacity-70">Time</span>
+						<span>{formatTimeRange(activeHighlight.timeRange)}</span>
+					</span>
+				) : null}
+				{hasPinnedHighlight ? (
+					<button
+						type="button"
+						className="btn btn-ghost btn-xs"
+						onClick={onClearPinned}
+					>
+						Clear pinned highlight
+					</button>
+				) : null}
+			</div>
 		</div>
 	);
 }
