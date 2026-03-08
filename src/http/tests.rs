@@ -3567,7 +3567,13 @@ proxy-groups:
   - name: "Auto"
     type: select
     use: ["providerA"]
-    proxies: ["DIRECT"]
+    proxies: ["DIRECT", "🛣️ Japan", "🔒 Japan"]
+  - name: "🛣️ Japan"
+    type: url-test
+    use: ["providerA"]
+  - name: "🔒 Japan"
+    type: fallback
+    proxies: ["🛣️ Japan"]
 rules: []
 "#,
               "extra_proxies_yaml": "",
@@ -3786,6 +3792,25 @@ rules: []
             }),
         "legacy stored extra proxies should remain visible in rendered subscriptions"
     );
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW")),
+        "rendered legacy profile should inject the combined outer group"
+    );
+    for unexpected in ["🛣️ Japan", "🔒 Japan"] {
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
+            "legacy system group should be stripped on render: {unexpected}"
+        );
+    }
 }
 
 #[tokio::test]

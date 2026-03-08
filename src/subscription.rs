@@ -458,6 +458,20 @@ pub fn build_mihomo_yaml(
 const MIHOMO_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|台湾|台灣|🇹🇼|Taiwan|TW)";
+const MIHOMO_LEGACY_SYSTEM_GROUPS: [&str; 12] = [
+    "🛣️ Japan",
+    "🛣️ HongKong",
+    "🛣️ Korea",
+    "🌟 Japan",
+    "🔒 Japan",
+    "🤯 Japan",
+    "🌟 HongKong",
+    "🔒 HongKong",
+    "🤯 HongKong",
+    "🌟 Korea",
+    "🔒 Korea",
+    "🤯 Korea",
+];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
 
@@ -489,6 +503,11 @@ fn inject_mihomo_proxy_groups(
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.insert(MIHOMO_OUTER_GROUP.to_string());
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
+    override_names.extend(
+        MIHOMO_LEGACY_SYSTEM_GROUPS
+            .iter()
+            .map(|name| (*name).to_string()),
+    );
 
     groups.retain(|value| {
         let serde_yaml::Value::Mapping(map) = value else {
@@ -2487,11 +2506,14 @@ port: 0
 proxy-groups:
   - name: "Test"
     type: select
-    proxies: ["Alpha-reality", "Tokyo-A-JP"]
+    proxies: ["Alpha-reality", "Tokyo-A-JP", "🛣️ Japan", "🔒 Japan"]
     use: ["providerA", "providerA", "missingProvider"]
   - name: "🛣️ Japan"
     type: url-test
     use: ["providerA"]
+  - name: "🔒 Japan"
+    type: fallback
+    proxies: ["🛣️ Japan"]
 rules: []
 "#
             .to_string(),
@@ -2528,6 +2550,17 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(test_proxy_names, vec!["DIRECT"]);
+
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.get("name").and_then(Value::as_str) != Some("🛣️ Japan"))
+        );
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.get("name").and_then(Value::as_str) != Some("🔒 Japan"))
+        );
 
         let outer_group = groups
             .iter()
