@@ -358,7 +358,7 @@ export function EndpointNewPage() {
 											label="serverNames"
 											value={realityServerNamesManual}
 											onChange={setRealityServerNamesManual}
-											placeholder="oneclient.sfx.ms"
+											placeholder="download.example.com"
 											disabled={createMutation.isPending}
 											inputClass={inputClass}
 											validateTag={validateRealityServerName}

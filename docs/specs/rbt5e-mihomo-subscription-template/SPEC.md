@@ -31,7 +31,7 @@
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
   - SS 链式节点：`{base}-chain`（固定经 `🛣️ JP/HK/TW` 出口）
 - 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
-- 对 `/Users/ivan/Downloads/mihomo.yaml` 生成可证明的“功能等价”输出，并给出脱敏示例与差异说明。
+- 对一份外部提供的脱敏 Mihomo 示例生成可证明的“功能等价”输出，并给出脱敏示例与差异说明。
 
 ### Non-goals
 
@@ -126,13 +126,13 @@
 - Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then 外层候选组 `🛣️ JP/HK/TW` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then `🛣️ JP/HK/TW` 仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
-- Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被剔除，对它们的引用会按悬挂引用处理并裁剪。
+- Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-chain` 与 `base-ss`。
 - Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 优先包含 `base-chain`，并以 `base-ss` 兜底。
 - Given 请求体只提供旧字段 `template_yaml`，When 保存 profile，Then 请求被拒绝。
-- Given `/Users/ivan/Downloads/mihomo.yaml` 作为目标示例，When 在共享测试机生成 `format=mihomo` 输出，Then 必须能展示一份脱敏但结构真实的订阅片段，并说明系统托管动态段带来的结构差异与业务行为等价证据。
+- Given 一份外部提供的脱敏 Mihomo 示例作为目标，When 在共享测试机生成 `format=mihomo` 输出，Then 必须能展示一份脱敏但结构真实的订阅片段，并说明系统托管动态段带来的结构差异与业务行为等价证据。
 - Given 目标示例自带脱敏后的静态 `proxies`（如遮蔽的 REALITY 公钥），When 需要做真实 Mihomo `-t` 校验，Then 应基于同一份业务 mixin 去掉这些不可解析的脱敏静态节点后再校验，以验证系统生成的动态层、provider 池与业务分组仍可被 Mihomo 实际加载。
 - Given 现有 `raw/clash/base64` 调用，When 回归测试，Then 输出语义与 content-type 不回归。
 
@@ -211,4 +211,4 @@
 
 ## 参考（References）
 
-- 样例配置：`/Users/ivan/Downloads/mihomo.yaml`
+- 样例配置：外部提供的脱敏 Mihomo YAML（不入仓）

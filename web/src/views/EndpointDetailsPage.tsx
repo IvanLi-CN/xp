@@ -530,7 +530,7 @@ export function EndpointDetailsPage() {
 											label="serverNames"
 											value={realityServerNamesManual}
 											onChange={setRealityServerNamesManual}
-											placeholder="oneclient.sfx.ms"
+											placeholder="download.example.com"
 											disabled={patchMutation.isPending}
 											inputClass={inputClass}
 											validateTag={validateRealityServerName}

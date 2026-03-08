@@ -3269,20 +3269,20 @@ port: 0
 helpers:
   keep: true
   proxies:
-    - JP-BV-reality
-    - IIJ-LC-JP
+    - Legacy-A-reality
+    - Legacy-B-JP
 proxy-groups:
   - name: "🔒 高质量"
     type: select
     proxies:
-      - JP-BV-reality
-      - IIJ-LC-reality
-      - JP-BV-ss
-      - IIJ-LC-ss
-      - JP-BV-JP
-      - IIJ-LC-JP
-      - JP-BV-HK
-      - IIJ-LC-HK
+      - Legacy-A-reality
+      - Legacy-B-reality
+      - Legacy-A-ss
+      - Legacy-B-ss
+      - Legacy-A-JP
+      - Legacy-B-JP
+      - Legacy-A-HK
+      - Legacy-B-HK
 rules: []
 "#
             .to_string(),
@@ -3350,12 +3350,12 @@ proxy-groups:
   - name: "🔒 高质量"
     type: select
     proxies:
-      - JP-BV-reality
-      - IIJ-LC-reality
-      - JP-BV-ss
-      - IIJ-LC-ss
-      - JP-BV-JP
-      - IIJ-LC-JP
+      - Legacy-A-reality
+      - Legacy-B-reality
+      - Legacy-A-ss
+      - Legacy-B-ss
+      - Legacy-A-JP
+      - Legacy-B-JP
 rules: []
 "#
             .to_string(),
@@ -3457,12 +3457,12 @@ port: 0
 proxy-groups:
   - name: "ExtraSelect"
     type: select
-    proxies: ["JP-BV-reality"]
+    proxies: ["Legacy-A-reality"]
 rules: []
 "#
             .to_string(),
             extra_proxies_yaml: r#"
-- name: "JP-BV-reality"
+- name: "Legacy-A-reality"
   type: ss
   server: extra.example.com
   port: 443
@@ -3491,7 +3491,7 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(refs, vec!["JP-BV-reality"]);
+        assert_eq!(refs, vec!["Legacy-A-reality"]);
 
         let top_proxy_names = v
             .get("proxies")
@@ -3501,7 +3501,7 @@ rules: []
             .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
             .collect::<Vec<_>>();
         assert!(top_proxy_names.contains(&"Alpha-reality"));
-        assert!(top_proxy_names.contains(&"JP-BV-reality"));
+        assert!(top_proxy_names.contains(&"Legacy-A-reality"));
     }
 
     #[test]
@@ -3530,8 +3530,8 @@ proxy-groups:
     proxies:
       - 🛣️ JP/HK/TW
       - 🛣️ JP/HK/TW
-      - JP-BV-reality
-      - IIJ-LC-reality
+      - Legacy-A-reality
+      - Legacy-B-reality
   - name: 🛣️ JP/HK/TW
     type: select
     proxies: ["DIRECT"]
@@ -3579,7 +3579,7 @@ rules: []
             mixin_yaml: r#"
 proxy-group:
   proxies: &subscription_proxies
-    - JP-BV-reality
+    - Legacy-A-reality
 proxy-use:
   use: &proxy_use
     - providerA

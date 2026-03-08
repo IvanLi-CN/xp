@@ -712,8 +712,8 @@ fn default_seed_reality_domains() -> Vec<RealityDomain> {
             disabled_node_ids: BTreeSet::new(),
         },
         RealityDomain {
-            domain_id: "seed_oneclient_sfx_ms".to_string(),
-            server_name: "oneclient.sfx.ms".to_string(),
+            domain_id: "seed_download_example_com".to_string(),
+            server_name: "download.example.com".to_string(),
             disabled_node_ids: BTreeSet::new(),
         },
     ]
