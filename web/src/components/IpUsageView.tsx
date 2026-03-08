@@ -284,16 +284,16 @@ function TimelineChart({
 				</div>
 			) : (
 				<div className="overflow-x-auto">
-					<div className="min-w-[52rem] space-y-2">
+					<div className="min-w-[52rem] space-y-1.5">
 						<div
-							className="grid items-end gap-3"
+							className="grid items-end gap-2.5"
 							style={{ gridTemplateColumns: "16rem minmax(0, 1fr)" }}
 						>
 							<div className="px-1 text-[11px] font-medium uppercase tracking-[0.24em] opacity-45">
 								Endpoint / IP
 							</div>
-							<div className="relative h-8 rounded-t-xl border border-b-0 border-base-300 bg-base-100/80">
-								<div className="absolute inset-y-0 left-3 right-3 pt-1">
+							<div className="relative h-7 rounded-t-xl border border-b-0 border-base-300 bg-base-100/80">
+								<div className="absolute inset-y-0 left-2.5 right-2.5 pt-0.5">
 									{ticks.map((tick, index) => {
 										const labelClassName =
 											index === 0
@@ -307,9 +307,9 @@ function TimelineChart({
 												className="absolute inset-y-0"
 												style={{ left: `${tick.left}%` }}
 											>
-												<div className="absolute bottom-0 top-4 w-px bg-base-300/85" />
+												<div className="absolute bottom-0 top-3.5 w-px bg-base-300/85" />
 												<span
-													className={`absolute left-0 top-0 whitespace-nowrap text-[11px] opacity-60 ${labelClassName}`}
+													className={`absolute left-0 top-0 whitespace-nowrap text-[10px] opacity-55 ${labelClassName}`}
 												>
 													{tick.label}
 												</span>
@@ -322,19 +322,19 @@ function TimelineChart({
 						{lanes.map((lane) => (
 							<div
 								key={lane.lane_key}
-								className="grid gap-3"
+								className="grid gap-2.5"
 								style={{ gridTemplateColumns: "16rem minmax(0, 1fr)" }}
 							>
-								<div className="min-w-0 self-center px-1 py-1.5">
-									<p className="truncate font-mono text-[13px] font-medium">
+								<div className="min-w-0 self-center px-1 py-0.5 leading-tight">
+									<p className="truncate font-mono text-[12px] font-medium leading-tight">
 										{lane.ip}
 									</p>
-									<p className="truncate text-xs opacity-70">
+									<p className="truncate text-[10px] opacity-65 leading-tight">
 										{lane.endpoint_tag} · {lane.minutes} min
 									</p>
 								</div>
-								<div className="relative h-12 overflow-hidden rounded-xl border border-base-300 bg-base-100/80">
-									<div className="absolute inset-y-0 left-3 right-3">
+								<div className="relative h-9 overflow-hidden rounded-xl border border-base-300 bg-base-100/80">
+									<div className="absolute inset-y-0 left-2.5 right-2.5">
 										<div className="absolute inset-0 rounded-lg bg-base-200/35" />
 										{ticks.map((tick) => (
 											<div
@@ -371,7 +371,7 @@ function TimelineChart({
 											return (
 												<div
 													key={`${lane.lane_key}-${segment.start_minute}-${index}`}
-													className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md shadow-[0_6px_18px_rgba(0,0,0,0.16)]"
+													className="absolute top-1/2 h-4.5 -translate-y-1/2 rounded-[0.4rem] shadow-[0_4px_10px_rgba(0,0,0,0.14)]"
 													style={{
 														left: `${left}%`,
 														width: `calc(${width}% - 0.1rem)`,
@@ -381,7 +381,7 @@ function TimelineChart({
 													}}
 													title={`${formatDateTime(segment.start_minute)} → ${formatDateTime(segment.end_minute)}`}
 												>
-													<div className="absolute inset-y-1 left-1 w-1 rounded-full bg-white/24" />
+													<div className="absolute inset-y-0.5 left-0.5 w-0.5 rounded-full bg-white/24" />
 												</div>
 											);
 										})}
