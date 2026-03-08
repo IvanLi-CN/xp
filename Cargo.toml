@@ -35,6 +35,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1.2.1"
 nanoid = "0.4"
+maxminddb = "0.27.3"
 uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zip = "7.1.0"

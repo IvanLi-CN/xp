@@ -141,8 +141,32 @@ Optional quota knobs:
 
 - `XP_QUOTA_POLL_INTERVAL_SECS` (default: `10`, allowed range `5..=30`)
 - `XP_QUOTA_AUTO_UNBAN` (default: `true`)
+- `XP_IP_USAGE_CITY_DB_PATH` (default: empty)
+  - Absolute path to `GeoLite2-City.mmdb`.
+- `XP_IP_USAGE_ASN_DB_PATH` (default: empty)
+  - Absolute path to `GeoLite2-ASN.mmdb`.
 
 An example env file is provided at `docs/ops/env/xp.env.example`.
+
+## Inbound IP usage prerequisites
+
+To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. GeoLite2 City + ASN is optional but recommended if you want region/operator enrichment in the IP list.
+
+1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats.
+2. Recommended: the host provides local GeoLite2 City + ASN mmdb files and points `XP_IP_USAGE_CITY_DB_PATH` / `XP_IP_USAGE_ASN_DB_PATH` at them.
+
+Operational notes:
+
+- Geo DB files are optional for collection; if missing, `xp` still records IP occupancy but returns empty `region` / `operator` fields plus a warning.
+- `statsUserOnline` is required for the online IP snapshot itself. If it is missing, `xp` keeps quota collection running and returns an `online_stats_unavailable` warning to the admin UI.
+- `xp-ops init` now writes `/etc/xray/config.json` with `statsUserOnline=true` by default; nodes provisioned before this change should verify their static config before rollout.
+
+Quick checks on a node:
+
+```
+jq '.policy.levels["0"]' /etc/xray/config.json
+test -r "$XP_IP_USAGE_CITY_DB_PATH" && test -r "$XP_IP_USAGE_ASN_DB_PATH"
+```
 
 ## Data directory layout (`XP_DATA_DIR`)
 
@@ -166,6 +190,7 @@ ${XP_DATA_DIR}/
     snapshots/
   state.json
   usage.json
+  inbound_ip_usage.json
   service_runtime.json
 ```
 
@@ -173,7 +198,8 @@ Notes:
 
 - `cluster/` holds long-lived identity and TLS assets. Treat `cluster_ca_key.pem` as sensitive (private key).
 - `raft/` holds the raft write-ahead log and snapshots.
-- `state.json` and `usage.json` are JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
+- `state.json` and `usage.json` are raft-backed JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
+- `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
 
 ## Service examples

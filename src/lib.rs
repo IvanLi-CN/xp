@@ -9,6 +9,7 @@ pub mod domain;
 pub mod endpoint_probe;
 pub mod http;
 pub mod id;
+pub mod inbound_ip_usage;
 pub mod internal_auth;
 pub mod login_token;
 pub mod node_runtime;

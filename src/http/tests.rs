@@ -64,6 +64,8 @@ fn test_config(data_dir: PathBuf) -> Config {
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
+        ip_usage_city_db_path: String::new(),
+        ip_usage_asn_db_path: String::new(),
     }
 }
 
@@ -126,7 +128,6 @@ fn app_with(
         "test-probe-secret".to_string(),
         false,
     );
-
     let router = build_router(
         config,
         store.clone(),
@@ -418,6 +419,25 @@ fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
         .unwrap()
 }
 
+async fn record_inbound_ip_usage_samples(
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    minute: chrono::DateTime<chrono::Utc>,
+    online_stats_unavailable: bool,
+    samples: Vec<crate::inbound_ip_usage::InboundIpMinuteSample>,
+) {
+    let mut store = store.lock().await;
+    let geo_resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+    store
+        .record_inbound_ip_usage_samples(
+            minute,
+            crate::inbound_ip_usage::PersistedInboundIpUsageGeoDb::default(),
+            online_stats_unavailable,
+            &samples,
+            &geo_resolver,
+        )
+        .unwrap();
+}
+
 fn extract_asset_paths_from_index_html(html: &str) -> Vec<String> {
     let mut out = Vec::new();
 
@@ -450,6 +470,28 @@ async fn body_json(res: axum::response::Response) -> Value {
 async fn body_text(res: axum::response::Response) -> String {
     let bytes = body_bytes(res).await;
     String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+fn warning_codes(value: &Value) -> Vec<String> {
+    let mut out = value
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .filter_map(|item| item.get("code").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
+fn series_count_at(series: &Value, minute: &str) -> u64 {
+    series
+        .as_array()
+        .expect("series array")
+        .iter()
+        .find(|item| item.get("minute").and_then(Value::as_str) == Some(minute))
+        .and_then(|item| item.get("count").and_then(Value::as_u64))
+        .unwrap_or_default()
 }
 
 async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, access_host: &str) {
@@ -552,6 +594,9 @@ struct SubscriptionFixtures {
     subscription_token: String,
     membership_key: String,
     user_id: String,
+    node_id: String,
+    endpoint_id: String,
+    endpoint_tag: String,
     ss2022_password: String,
 }
 
@@ -642,6 +687,9 @@ async fn setup_subscription_fixtures(tmp: &TempDir, app: &axum::Router) -> Subsc
         subscription_token,
         membership_key,
         user_id,
+        node_id: node_id.to_string(),
+        endpoint_id,
+        endpoint_tag: endpoint["tag"].as_str().unwrap().to_string(),
         ss2022_password: password,
     }
 }
@@ -656,7 +704,7 @@ async fn unauthorized_admin_returns_401_with_error_shape() {
 
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "unauthorized");
-    assert!(json["error"]["message"].as_str().unwrap().len() > 0);
+    assert!(!json["error"]["message"].as_str().unwrap().is_empty());
     assert!(json["error"]["details"].is_object());
 }
 
@@ -964,8 +1012,8 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
     let json = body_json(res).await;
 
     assert_eq!(json["node_id"], expected_node_id);
-    assert!(json["signed_cert_pem"].as_str().unwrap().len() > 0);
-    assert!(json["cluster_ca_pem"].as_str().unwrap().len() > 0);
+    assert!(!json["signed_cert_pem"].as_str().unwrap().is_empty());
+    assert!(!json["cluster_ca_pem"].as_str().unwrap().is_empty());
 
     let key_pem = json["cluster_ca_key_pem"].as_str().unwrap();
     assert!(key_pem.starts_with("-----BEGIN"));
@@ -1064,7 +1112,7 @@ async fn follower_admin_write_does_not_redirect() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
-    assert!(json["user_id"].as_str().unwrap().len() > 0);
+    assert!(!json["user_id"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -3283,7 +3331,7 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
     set_bootstrap_node_access_host(&store, "example.com").await;
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
-    let user_id = fixtures.user_id;
+    let user_id = fixtures.user_id.clone();
     let token = fixtures.subscription_token;
 
     let put_res = app
@@ -3443,9 +3491,7 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         .collect::<Vec<_>>();
     let expected_chain_jp = format!("{base}-JP");
     assert!(
-        landing_proxies
-            .iter()
-            .any(|p| *p == expected_chain_jp.as_str()),
+        landing_proxies.contains(&expected_chain_jp.as_str()),
         "expected landing group to include JP chain proxy"
     );
     let expected_ss = format!("{base}-ss");
@@ -3468,9 +3514,7 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
     assert!(
-        landing_pool_proxies
-            .iter()
-            .any(|p| *p == landing_group_name.as_str()),
+        landing_pool_proxies.contains(&landing_group_name.as_str()),
         "expected 🔒 落地 to include per-base landing group"
     );
 }
@@ -3482,7 +3526,7 @@ async fn admin_user_mihomo_profile_rendering_without_proxy_providers_still_works
     set_bootstrap_node_access_host(&store, "example.com").await;
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
-    let user_id = fixtures.user_id;
+    let user_id = fixtures.user_id.clone();
     let token = fixtures.subscription_token;
 
     let res = app
@@ -3602,11 +3646,11 @@ rules: []
         .as_mapping()
         .expect("template must be a mapping");
     assert!(
-        !template_map.contains_key(&YamlValue::String("proxies".to_string())),
+        !template_map.contains_key(YamlValue::String("proxies".to_string())),
         "expected top-level proxies to be removed from mixin_yaml"
     );
     assert!(
-        !template_map.contains_key(&YamlValue::String("proxy-providers".to_string())),
+        !template_map.contains_key(YamlValue::String("proxy-providers".to_string())),
         "expected top-level proxy-providers to be removed from mixin_yaml"
     );
 
@@ -3631,7 +3675,7 @@ rules: []
         .as_mapping()
         .expect("extra_proxy_providers_yaml must be a mapping");
     assert!(
-        extra_providers.contains_key(&YamlValue::String("providerA".to_string())),
+        extra_providers.contains_key(YamlValue::String("providerA".to_string())),
         "expected extracted extra_proxy_providers_yaml to include providerA"
     );
     assert!(
@@ -3652,7 +3696,7 @@ rules: []
         .and_then(YamlValue::as_mapping)
         .expect("proxy-providers must exist");
     assert!(
-        providers.contains_key(&YamlValue::String("providerA".to_string())),
+        providers.contains_key(YamlValue::String("providerA".to_string())),
         "expected subscription output proxy-providers to include providerA"
     );
 
@@ -3730,11 +3774,11 @@ rules: []
     let mixin_root: YamlValue = serde_yaml::from_str(mixin_yaml).unwrap();
     let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
     assert!(
-        !mixin_map.contains_key(&YamlValue::String("proxies".to_string())),
+        !mixin_map.contains_key(YamlValue::String("proxies".to_string())),
         "legacy stored full config should be normalized on GET"
     );
     assert!(
-        !mixin_map.contains_key(&YamlValue::String("proxy-providers".to_string())),
+        !mixin_map.contains_key(YamlValue::String("proxy-providers".to_string())),
         "legacy stored full config should expose split provider data on GET"
     );
 
@@ -3760,7 +3804,7 @@ rules: []
         extra_providers_root
             .as_mapping()
             .expect("extra_proxy_providers_yaml must be a mapping")
-            .contains_key(&YamlValue::String("providerA".to_string())),
+            .contains_key(YamlValue::String("providerA".to_string())),
         "legacy stored provider map should be extracted on GET"
     );
 
@@ -3776,7 +3820,7 @@ rules: []
         yaml.get("proxy-providers")
             .and_then(YamlValue::as_mapping)
             .is_some_and(|providers| {
-                providers.contains_key(&YamlValue::String("providerA".to_string()))
+                providers.contains_key(YamlValue::String("providerA".to_string()))
             }),
         "legacy stored full config should also be normalized on render"
     );
@@ -4302,7 +4346,7 @@ async fn put_user_access_empty_removes_usage_entry() {
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let membership_key = fixtures.membership_key.clone();
-    let user_id = fixtures.user_id;
+    let user_id = fixtures.user_id.clone();
     let banned_at = "2025-12-18T00:00:00Z".to_string();
 
     {
@@ -4315,6 +4359,20 @@ async fn put_user_access_empty_removes_usage_entry() {
                 .quota_banned
         );
     }
+    record_inbound_ip_usage_samples(
+        &store,
+        crate::inbound_ip_usage::floor_minute(chrono::Utc::now()),
+        false,
+        vec![crate::inbound_ip_usage::InboundIpMinuteSample {
+            membership_key: membership_key.clone(),
+            user_id: user_id.clone(),
+            node_id: fixtures.node_id.clone(),
+            endpoint_id: fixtures.endpoint_id.clone(),
+            endpoint_tag: fixtures.endpoint_tag.clone(),
+            ips: vec!["203.0.113.7".to_string()],
+        }],
+    )
+    .await;
 
     let res = app
         .clone()
@@ -4329,6 +4387,12 @@ async fn put_user_access_empty_removes_usage_entry() {
 
     let store = store.lock().await;
     assert!(store.get_membership_usage(&membership_key).is_none());
+    assert!(
+        !store
+            .inbound_ip_usage()
+            .memberships
+            .contains_key(&membership_key)
+    );
 }
 
 #[tokio::test]
@@ -4461,13 +4525,418 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
 }
 
 #[tokio::test]
+async fn node_ip_usage_returns_series_timeline_and_ip_list() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (
+        node_id,
+        membership_one,
+        membership_two,
+        endpoint_one_tag,
+        endpoint_two_tag,
+        minute0,
+        minute1,
+    ) = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint_one = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let endpoint_two = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8389,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![
+                endpoint_one.endpoint_id.clone(),
+                endpoint_two.endpoint_id.clone(),
+            ],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let minute0 = crate::inbound_ip_usage::floor_minute(chrono::Utc::now())
+            - chrono::Duration::minutes(1);
+        let minute1 = minute0 + chrono::Duration::minutes(1);
+        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let geo_db = resolver.geo_db();
+        let membership_one = membership_key(&user.user_id, &endpoint_one.endpoint_id);
+        let membership_two = membership_key(&user.user_id, &endpoint_two.endpoint_id);
+        store
+            .record_inbound_ip_usage_samples(
+                minute0,
+                geo_db.clone(),
+                false,
+                &[crate::inbound_ip_usage::InboundIpMinuteSample {
+                    membership_key: membership_one.clone(),
+                    user_id: user.user_id.clone(),
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint_one.endpoint_id.clone(),
+                    endpoint_tag: endpoint_one.tag.clone(),
+                    ips: vec!["203.0.113.7".to_string()],
+                }],
+                &resolver,
+            )
+            .unwrap();
+        store
+            .record_inbound_ip_usage_samples(
+                minute1,
+                geo_db,
+                false,
+                &[
+                    crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: membership_one.clone(),
+                        user_id: user.user_id.clone(),
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_one.endpoint_id.clone(),
+                        endpoint_tag: endpoint_one.tag.clone(),
+                        ips: vec!["203.0.113.7".to_string()],
+                    },
+                    crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: membership_two.clone(),
+                        user_id: user.user_id.clone(),
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_two.endpoint_id.clone(),
+                        endpoint_tag: endpoint_two.tag.clone(),
+                        ips: vec!["203.0.113.7".to_string(), "198.51.100.9".to_string()],
+                    },
+                ],
+                &resolver,
+            )
+            .unwrap();
+
+        (
+            node_id,
+            membership_one,
+            membership_two,
+            endpoint_one.tag,
+            endpoint_two.tag,
+            minute0.to_rfc3339(),
+            minute1.to_rfc3339(),
+        )
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/ip-usage?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["node"]["node_id"], node_id);
+    assert_eq!(json["window"], "24h");
+    assert_eq!(json["window_end"], minute1);
+    assert_eq!(json["unique_ip_series"].as_array().unwrap().len(), 24 * 60);
+    assert_eq!(series_count_at(&json["unique_ip_series"], &minute0), 1);
+    assert_eq!(series_count_at(&json["unique_ip_series"], &minute1), 2);
+    assert_eq!(
+        warning_codes(&json["warnings"]),
+        vec!["geo_db_missing".to_string()]
+    );
+
+    let timeline = json["timeline"].as_array().unwrap();
+    assert_eq!(timeline.len(), 3);
+    let merged_lane = timeline
+        .iter()
+        .find(|item| item["endpoint_tag"] == endpoint_one_tag && item["ip"] == "203.0.113.7")
+        .expect("merged lane");
+    assert_eq!(merged_lane["minutes"], 2);
+    assert_eq!(merged_lane["segments"].as_array().unwrap().len(), 1);
+    assert_eq!(merged_lane["segments"][0]["start_minute"], minute0);
+    assert_eq!(merged_lane["segments"][0]["end_minute"], minute1);
+
+    let ip_entry = json["ips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["ip"] == "203.0.113.7")
+        .expect("ip entry");
+    assert_eq!(ip_entry["minutes"], 2);
+    let mut endpoint_tags = ip_entry["endpoint_tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    endpoint_tags.sort();
+    let mut expected_tags = vec![endpoint_one_tag, endpoint_two_tag];
+    expected_tags.sort();
+    assert_eq!(endpoint_tags, expected_tags);
+    assert_eq!(ip_entry["region"], "");
+    assert_eq!(ip_entry["operator"], "");
+
+    let store = store.lock().await;
+    assert!(store.get_membership_usage(&membership_one).is_none());
+    assert!(store.get_membership_usage(&membership_two).is_none());
+}
+
+#[tokio::test]
+async fn user_ip_usage_groups_local_data_and_merges_warnings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (user_id, node_id, endpoint_tag, minute) = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
+        let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
+        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        store
+            .record_inbound_ip_usage_samples(
+                minute,
+                resolver.geo_db(),
+                false,
+                &[crate::inbound_ip_usage::InboundIpMinuteSample {
+                    membership_key: membership,
+                    user_id: user.user_id.clone(),
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint.endpoint_id,
+                    endpoint_tag: endpoint.tag.clone(),
+                    ips: vec!["203.0.113.9".to_string()],
+                }],
+                &resolver,
+            )
+            .unwrap();
+        store
+            .update_inbound_ip_usage(|usage| {
+                usage.online_stats_unavailable = true;
+            })
+            .unwrap();
+
+        (user.user_id, node_id, endpoint.tag, minute.to_rfc3339())
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/ip-usage?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["user"]["user_id"], user_id);
+    assert_eq!(json["window"], "24h");
+    assert_eq!(json["partial"], false);
+    assert_eq!(json["unreachable_nodes"], json!([]));
+    assert_eq!(
+        warning_codes(&json["warnings"]),
+        vec![
+            "geo_db_missing".to_string(),
+            "online_stats_unavailable".to_string()
+        ]
+    );
+
+    let groups = json["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1);
+    let group = &groups[0];
+    assert_eq!(group["node"]["node_id"], node_id);
+    assert_eq!(group["window_end"], minute);
+    assert_eq!(
+        warning_codes(&group["warnings"]),
+        vec![
+            "geo_db_missing".to_string(),
+            "online_stats_unavailable".to_string()
+        ]
+    );
+    assert_eq!(series_count_at(&group["unique_ip_series"], &minute), 1);
+    assert_eq!(
+        group["timeline"].as_array().unwrap()[0]["endpoint_tag"],
+        endpoint_tag
+    );
+    assert_eq!(group["ips"].as_array().unwrap()[0]["ip"], "203.0.113.9");
+}
+
+#[tokio::test]
+async fn user_ip_usage_marks_remote_nodes_as_partial() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (user_id, local_node_id, remote_node_id) = {
+        let mut store = store.lock().await;
+        let local_node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let remote_node_id = new_ulid_string();
+        store
+            .upsert_node(Node {
+                node_id: remote_node_id.clone(),
+                node_name: "node-remote".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "https://127.0.0.1:1".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .unwrap();
+
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let local_endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let remote_endpoint = store
+            .create_endpoint(
+                remote_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                9393,
+                json!({}),
+            )
+            .unwrap();
+        crate::state::DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![
+                local_endpoint.endpoint_id.clone(),
+                remote_endpoint.endpoint_id.clone(),
+            ],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+
+        let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
+        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        store
+            .record_inbound_ip_usage_samples(
+                minute,
+                resolver.geo_db(),
+                false,
+                &[crate::inbound_ip_usage::InboundIpMinuteSample {
+                    membership_key: membership_key(&user.user_id, &local_endpoint.endpoint_id),
+                    user_id: user.user_id.clone(),
+                    node_id: local_node_id.clone(),
+                    endpoint_id: local_endpoint.endpoint_id,
+                    endpoint_tag: local_endpoint.tag,
+                    ips: vec!["203.0.113.20".to_string()],
+                }],
+                &resolver,
+            )
+            .unwrap();
+
+        (user.user_id, local_node_id, remote_node_id)
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/ip-usage?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["partial"], true);
+    assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
+    let groups = json["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["node"]["node_id"], local_node_id);
+}
+
+#[tokio::test]
+async fn ip_usage_rejects_invalid_window_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (node_id, user_id) = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        (node_id, user.user_id)
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/ip-usage?window=nope"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/ip-usage?window=nope"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
 async fn admin_delete_user_removes_usage_entry() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
-    let membership_key = fixtures.membership_key;
-    let user_id = fixtures.user_id;
+    let membership_key = fixtures.membership_key.clone();
+    let user_id = fixtures.user_id.clone();
 
     {
         let mut store = store.lock().await;
@@ -4476,6 +4945,20 @@ async fn admin_delete_user_removes_usage_entry() {
             .unwrap();
         assert!(store.get_membership_usage(&membership_key).is_some());
     }
+    record_inbound_ip_usage_samples(
+        &store,
+        crate::inbound_ip_usage::floor_minute(chrono::Utc::now()),
+        false,
+        vec![crate::inbound_ip_usage::InboundIpMinuteSample {
+            membership_key: membership_key.clone(),
+            user_id: user_id.clone(),
+            node_id: fixtures.node_id.clone(),
+            endpoint_id: fixtures.endpoint_id.clone(),
+            endpoint_tag: fixtures.endpoint_tag.clone(),
+            ips: vec!["203.0.113.7".to_string()],
+        }],
+    )
+    .await;
 
     let res = app
         .oneshot(req_authed("DELETE", &format!("/api/admin/users/{user_id}")))
@@ -4485,6 +4968,12 @@ async fn admin_delete_user_removes_usage_entry() {
 
     let store = store.lock().await;
     assert!(store.get_membership_usage(&membership_key).is_none());
+    assert!(
+        !store
+            .inbound_ip_usage()
+            .memberships
+            .contains_key(&membership_key)
+    );
 }
 
 #[tokio::test]
@@ -5216,15 +5705,15 @@ async fn endpoint_probe_run_status_shows_progress() {
         assert_eq!(status["run_id"].as_str().unwrap(), run_id);
         let nodes = status["nodes"].as_array().unwrap();
         assert_eq!(nodes.len(), 1);
-        assert!(nodes[0]["node_id"].as_str().unwrap().len() > 0);
+        assert!(!nodes[0]["node_id"].as_str().unwrap().is_empty());
 
         let overall = status["status"].as_str().unwrap();
         if overall == "finished" || overall == "failed" {
             let progress = nodes[0]["progress"].as_object().unwrap();
             assert_eq!(progress["run_id"].as_str().unwrap(), run_id);
-            assert!(progress["hour"].as_str().unwrap().len() > 0);
-            assert!(progress["config_hash"].as_str().unwrap().len() > 0);
-            assert!(progress["updated_at"].as_str().unwrap().len() > 0);
+            assert!(!progress["hour"].as_str().unwrap().is_empty());
+            assert!(!progress["config_hash"].as_str().unwrap().is_empty());
+            assert!(!progress["updated_at"].as_str().unwrap().is_empty());
             return;
         }
 

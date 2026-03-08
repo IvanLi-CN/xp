@@ -1,0 +1,204 @@
+# 节点 / 用户入站 IP 使用详情（#6e7e4）
+
+## 状态
+
+- Status: 部分完成（3/4）
+- Created: 2026-03-08
+- Last: 2026-03-08
+
+## 背景 / 问题陈述
+
+- 当前管理端只能看到节点运行态、端点探测与用户配额状态，看不到“谁在什么时间段从哪些来源 IP 占用入站”。
+- 节点详情与用户详情都缺少 source IP 维度的使用画像，排查共享账号、多地并发、异常占用时只能靠外部日志。
+- 现有本地历史能力只有 `service_runtime.json`（7d/30min）与 `endpoint_probe_history`（24h/hour），没有 1 分钟粒度的 per-IP 历史。
+
+## 目标 / 非目标
+
+### Goals
+
+- 在每个节点本地记录 membership 级别的 source IP 分钟 presence，保留最近 7 天。
+- 在节点详情新增 `IP usage` tab，支持最近 `24h` / `7d` 的 unique-IP 趋势、IP 占用时间线与 IP 列表。
+- 在用户详情新增 `Usage details` tab，按节点分组展示最近 `24h` / `7d` 的同类信息。
+- 通过 Xray 官方 `statsUserOnline` + `GetStatsOnlineIpList` 做每分钟在线快照，不解析 access log。
+- 使用本地 GeoLite2 City + ASN 解析地区与运营商信息，并对首次出现 IP 做缓存。
+
+### Non-goals
+
+- 不实现 access log 解析、历史回填或更细粒度秒级采样。
+- 不引入外部 IP API、自动下载 GeoLite2 数据库或新的前端图表库。
+- 不新增跨节点混合总览页，也不做 usage SSE/live streaming。
+
+## 范围（Scope）
+
+### In scope
+
+- Backend：Xray online IP 采集、本地持久化 `inbound_ip_usage.json`、Geo 解析缓存、node/user usage admin APIs、internal local fan-out APIs、删除/快照安装清理逻辑。
+- Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点分组的 `Usage details` tab；24h/7d 切换、面积折线图、泳道时间图、IP 列表、warning/empty/error 空态。
+- Ops / config：新增 `XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH`；Xray 静态配置开启 `statsUserOnline=true`。
+- Docs：规格、HTTP API、文件格式、CLI/env、设计文档同步。
+
+### Out of scope
+
+- access log/会话日志采集。
+- 外部依赖服务（Geo API、对象存储、TSDB）。
+- 自动迁移旧历史数据。
+
+## 需求（Requirements）
+
+### MUST
+
+- 节点本地必须保留最近 7 天（10080 分钟）的 membership source IP presence 历史。
+- 采集口径固定为每分钟在线快照：每分钟最多采一次 `GetStatsOnlineIpList("user>>>m:{membership_key}>>>online")`。
+- 新增 `GET /api/admin/nodes/{node_id}/ip-usage?window=24h|7d`。
+- 新增 `GET /api/admin/users/{user_id}/ip-usage?window=24h|7d`。
+- 新增 internal local APIs：
+  - `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
+  - `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`
+- 节点详情 unique-IP 图必须按“节点内所有 membership 去重后的每分钟不同 IP 数”计算。
+- 用户详情必须按节点分组；每个分组内 unique-IP 图按“该用户在该节点所有 membership 去重后的每分钟不同 IP 数”计算。
+- 占用时间图必须按 `endpoint_tag / IP` 输出已合并的连续时间段。
+- IP 列表必须返回 `ip`、`minutes`、`endpoint_tags`、`region`、`operator`、`last_seen_at`，并按 `minutes desc` 排序。
+- 首次见到新 IP 时必须尝试 GeoLite2 City + ASN 解析，并缓存到本地文件；缺库或未命中时不阻断采集/API。
+- 当 Xray online stats 不可用时，collector/API 必须返回 warning，不得把它误判为“当前没有在线 IP”。
+- membership / user / endpoint 删除，以及 snapshot install 后，必须清理对应 stale IP 历史。
+
+### SHOULD
+
+- 分钟 presence 存储应使用紧凑位图/压缩字节，避免全量分钟 JSON 展开。
+- Node API 的远端访问失败应返回明确错误；User API 的跨节点聚合应返回 `partial` 与 `unreachable_nodes`。
+- 默认只展示占用分钟数最高的前 20 条时间线泳道，避免节点上多 endpoint 时页面过载。
+
+### COULD
+
+- None.
+
+## 功能与行为规格（Functional/Behavior Spec）
+
+### Core flows
+
+- quota worker 在常规流量采样循环中枚举 active memberships；若 UTC 分钟未变化，仅更新字节使用量，不重复抓 online IP。
+- 当分钟发生变化时，worker 对每个 membership 调用 Xray online IP stats，记录当前在线 IP 到该分钟位图，并更新每个 IP 的 `last_seen_at` 与 Geo 缓存。
+- 管理员打开节点详情 `IP usage` tab：前端请求 node usage API，渲染范围切换器、unique-IP 面积图、泳道图、IP 列表。
+- 管理员打开用户详情 `Usage details` tab：前端请求 user usage API，按节点分组渲染同样三块内容。
+- 查询远端节点详情时，leader/follower 通过 internal signature 调用远端 local node usage API。
+- 查询用户详情时，本地节点先返回 local user usage，再 fan-out 其余节点的 internal local user usage API，并聚合为按节点分组结果。
+
+### Edge cases / errors
+
+- `statsUserOnline` 未开启或 Xray 不支持 online IP stats：collector 标记 `online_stats_unavailable=true`，API 返回 warning，前端显示 explanation 空态。
+- GeoLite2 City / ASN DB 路径为空、文件不存在或单 IP 解析失败：地区/运营商字段为空，页面显示 `Unknown` 与 warning；采集与图表继续工作。
+- Node 详情查询远端节点失败：直接返回错误，不静默回空结果。
+- User 详情查询远端节点失败：返回 `partial=true` 且列出 `unreachable_nodes`，可达节点数据仍正常展示。
+- 两次采样之间出现并断开的极短连接不会被回填；这是固定采样语义的一部分。
+
+## 接口契约（Interfaces & Contracts）
+
+### 接口清单（Inventory）
+
+| 接口（Name）             | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc）    | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                    |
+| ------------------------ | ------------ | ------------- | -------------- | --------------------------- | --------------- | ------------------- | -------------------------------- |
+| Node IP usage admin APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web/admin           | 节点详情与 local internal detail |
+| User IP usage admin APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web/admin           | 用户详情按节点分组聚合           |
+| inbound_ip_usage.json    | File format  | internal      | New            | ./contracts/file-formats.md | backend         | backend             | 本地高频历史与 Geo 缓存          |
+| IP usage config/env      | CLI          | internal      | Modify         | ./contracts/cli.md          | backend/ops     | xp/xp-ops/operators | 新增 GeoLite2 路径配置           |
+
+### 契约文档（按 Kind 拆分）
+
+- [contracts/README.md](./contracts/README.md)
+- [contracts/http-apis.md](./contracts/http-apis.md)
+- [contracts/file-formats.md](./contracts/file-formats.md)
+- [contracts/cli.md](./contracts/cli.md)
+
+## 验收标准（Acceptance Criteria）
+
+- Given 某个 membership 在最近 7 天内持续有在线 IP，When quota worker 每分钟推进，Then `inbound_ip_usage.json` 仅保留最近 10080 个分钟位且旧窗口外数据被裁掉。
+- Given 节点详情打开 `IP usage` tab，When 选择 `24h` 或 `7d`，Then 页面显示对应窗口的 unique-IP 面积图、`endpoint_tag / IP` 泳道图与 IP 列表。
+- Given 某节点下同一 IP 同时占用多个 endpoint，When 渲染泳道图，Then 行维度按 `endpoint_tag / IP` 区分，连续分钟先合并为时间段。
+- Given 用户详情打开 `Usage details` tab，When 选择任一窗口，Then 页面按节点分组展示该用户的 unique-IP 图、时间线与列表。
+- Given 远端节点不可达，When 请求用户 usage API，Then 返回 `partial=true` 且 `unreachable_nodes` 包含对应 `node_id`，可达节点数据仍返回。
+- Given Xray 未开启 `statsUserOnline`，When collector 运行或页面加载，Then 返回 warning，而不是把图表展示成正常的全零无数据。
+- Given Geo DB 缺失，When 页面渲染 IP 列表，Then `region/operator` 显示 `Unknown`，并展示 Geo 数据缺失 warning。
+- Given user / endpoint / membership 已删除或安装新 snapshot，When cleanup 运行后再次查询，Then 不再返回对应 stale IP 历史。
+
+## 实现前置条件（Definition of Ready / Preconditions）
+
+- 采集语义已冻结为 `statsUserOnline` 每分钟快照。
+- 公开 API 的时间窗口仅允许 `24h` / `7d`，且 UTC 分钟起点口径已冻结。
+- 用户详情按节点分组的展示语义已冻结。
+- Geo 数据源固定为 operator-supplied GeoLite2 City + ASN，本计划不负责分发数据库文件。
+
+## 非功能性验收 / 质量门槛（Quality Gates）
+
+### Testing
+
+- Unit tests: 位图窗口推进、minute 去重、timeline segment 合并、Geo fallback、cleanup。
+- Integration tests: node/user usage APIs、internal fan-out、partial/warning 语义。
+- E2E tests (if applicable): node/user 详情 tab 基础交互 smoke。
+
+### UI / Storybook (if applicable)
+
+- Stories to add/update: `NodeDetailsPage`、`UserDetailsPage` usage 场景。
+- Visual regression baseline changes (if any): usage tab 的 charts/list states。
+
+### Quality checks
+
+- Backend: `cargo fmt` / `cargo clippy -- -D warnings` / `cargo test`
+- Web: `cd web && bun run lint && bun run typecheck && bun run test`
+- Storybook: `cd web && bun run test-storybook`
+
+## 文档更新（Docs to Update）
+
+- `docs/desgin/api.md`: 新增 node/user IP usage APIs。
+- `docs/desgin/xray.md`: 增加 `statsUserOnline` 要求与采集限制说明。
+- `docs/ops/README.md`: 增加 GeoLite2 数据库部署说明。
+- `docs/ops/env/xp.env.example`: 增加 GeoLite2 路径配置。
+
+## 计划资产（Plan assets）
+
+- Directory: `docs/specs/6e7e4-node-user-inbound-ip-usage/assets/`
+- In-plan references: None.
+- PR visual evidence source: maintain `## Visual Evidence (PR)` in this spec when PR screenshots are needed.
+
+## Visual Evidence (PR)
+
+None yet.
+
+## 资产晋升（Asset promotion）
+
+None.
+
+## 实现里程碑（Milestones / Delivery checklist）
+
+- [x] M1: 本地 IP usage 采集/存储/cleanup 与 Xray online stats 接入
+- [x] M2: Node/User usage admin/internal APIs、Geo 解析与 warning/partial 语义
+- [x] M3: NodeDetailsPage / UserDetailsPage usage 视图、API client、Storybook/Vitest/E2E 与文档同步
+- [ ] M4: 快车道收敛（提交 / PR / checks / review-loop）并回写最终状态
+
+## 方案概述（Approach, high-level）
+
+- 复用 quota worker 的 membership 枚举与 Xray client，避免引入第二个高频调度器。
+- 使用本地 `inbound_ip_usage.json` 做单节点高频存储，不进入 Raft；跨节点展示通过现有 internal signature fan-out 聚合。
+- 前端沿用当前手写 SVG/HTML 图表模式，保持依赖面与样式体系不变。
+- Geo 解析只在首次见 IP 时写缓存，API 读缓存优先，避免在请求路径反复查库。
+
+## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
+
+- 风险：每分钟对全部 active memberships 调用 online IP stats，在 membership 数量很大时会放大 Xray API 压力。
+- 风险：两次采样之间的短连接不会出现在历史中，需在文档与 UI 说明中明确。
+- 风险：整文件 JSON 持久化会有写放大，必须通过紧凑位图与最小字段集控制文件体积。
+- 需要决策的问题：None.
+- 假设（需主人确认）：现网节点允许通过重启/升级切换到包含 `statsUserOnline=true` 的 Xray 配置。
+
+## 变更记录（Change log）
+
+- 2026-03-08: 创建规格并冻结采集口径、窗口策略、API/UI 语义与 Geo 数据源。
+- 2026-03-08: 根据当前实现回写 M1-M3 进度，并同步 API / Xray / ops 文档与运维示例。
+
+## 参考（References）
+
+- `src/quota.rs`
+- `src/http/mod.rs`
+- `src/state.rs`
+- `src/node_runtime.rs`
+- `web/src/views/NodeDetailsPage.tsx`
+- `web/src/views/UserDetailsPage.tsx`

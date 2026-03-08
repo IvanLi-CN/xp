@@ -35,6 +35,13 @@ use crate::{
         Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
         UserNodeQuota, UserQuotaReset,
     },
+    inbound_ip_usage::{
+        InboundIpUsageListItem as IpListEntry, InboundIpUsageMembershipView,
+        InboundIpUsageSeriesPoint as UniqueIpPoint, InboundIpUsageTimelineLane as TimelineLane,
+        InboundIpUsageWarning as IpUsageWarning, InboundIpUsageWindow as IpUsageWindow,
+        InboundIpUsageWindowView as IpUsageReport, build_warnings, build_window_view,
+        geo_db_missing,
+    },
     internal_auth,
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
@@ -699,6 +706,7 @@ pub fn build_router(
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
+        .route("/nodes/:node_id/ip-usage", get(admin_get_node_ip_usage))
         .route(
             "/nodes/:node_id/runtime/events",
             get(admin_stream_node_runtime_events),
@@ -780,6 +788,7 @@ pub fn build_router(
             "/users/:user_id/node-quotas/status",
             get(admin_get_user_node_quota_status),
         )
+        .route("/users/:user_id/ip-usage", get(admin_get_user_ip_usage))
         .route(
             "/users/:user_id/node-quotas",
             get(admin_list_user_node_quotas),
@@ -825,8 +834,16 @@ pub fn build_router(
             get(admin_internal_get_local_node_runtime),
         )
         .route(
+            "/_internal/nodes/ip-usage/local",
+            get(admin_internal_get_local_node_ip_usage),
+        )
+        .route(
             "/_internal/nodes/runtime/local/events",
             get(admin_internal_stream_local_node_runtime_events),
+        )
+        .route(
+            "/_internal/users/:user_id/ip-usage/local",
+            get(admin_internal_get_local_user_ip_usage),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -1730,6 +1747,62 @@ impl From<LocalNodeRuntimeSnapshot> for AdminInternalNodeRuntimeLocalResponse {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct IpUsageQuery {
+    window: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminNodeIpUsageResponse {
+    node: Node,
+    window: IpUsageWindow,
+    window_start: String,
+    window_end: String,
+    warnings: Vec<IpUsageWarning>,
+    unique_ip_series: Vec<UniqueIpPoint>,
+    timeline: Vec<TimelineLane>,
+    ips: Vec<IpListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalUserIpUsageLocalResponse {
+    node: Node,
+    window: IpUsageWindow,
+    window_start: String,
+    window_end: String,
+    warnings: Vec<IpUsageWarning>,
+    unique_ip_series: Vec<UniqueIpPoint>,
+    timeline: Vec<TimelineLane>,
+    ips: Vec<IpListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminUserIpUsageNodeGroup {
+    node: Node,
+    window_start: String,
+    window_end: String,
+    warnings: Vec<IpUsageWarning>,
+    unique_ip_series: Vec<UniqueIpPoint>,
+    timeline: Vec<TimelineLane>,
+    ips: Vec<IpListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminUserIpUsageUserSummary {
+    user_id: String,
+    display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminUserIpUsageResponse {
+    user: AdminUserIpUsageUserSummary,
+    window: IpUsageWindow,
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    warnings: Vec<IpUsageWarning>,
+    groups: Vec<AdminUserIpUsageNodeGroup>,
+}
+
 #[derive(Debug, Serialize)]
 struct AdminNodeRuntimeSseHello {
     node_id: String,
@@ -1987,6 +2060,414 @@ async fn admin_get_node_runtime(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(node_runtime_detail_from_snapshot(node, snapshot)))
+}
+
+fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError> {
+    IpUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
+}
+
+fn config_ip_usage_geo_db_missing(config: &Config) -> bool {
+    let city = if config.ip_usage_city_db_path.trim().is_empty() {
+        None
+    } else {
+        Some(std::path::Path::new(config.ip_usage_city_db_path.as_str()))
+    };
+    let asn = if config.ip_usage_asn_db_path.trim().is_empty() {
+        None
+    } else {
+        Some(std::path::Path::new(config.ip_usage_asn_db_path.as_str()))
+    };
+    geo_db_missing(city, asn)
+}
+
+fn build_ip_usage_membership_views(
+    store: &JsonSnapshotStore,
+    node_id: &str,
+    user_id: Option<&str>,
+) -> Vec<InboundIpUsageMembershipView> {
+    let endpoints_by_id = store
+        .list_endpoints()
+        .into_iter()
+        .map(|endpoint| (endpoint.endpoint_id.clone(), endpoint))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut memberships = Vec::new();
+    for membership in store.state().node_user_endpoint_memberships.iter() {
+        if membership.node_id != node_id {
+            continue;
+        }
+        if let Some(user_id) = user_id
+            && membership.user_id != user_id
+        {
+            continue;
+        }
+        let Some(endpoint) = endpoints_by_id.get(&membership.endpoint_id) else {
+            continue;
+        };
+        memberships.push(InboundIpUsageMembershipView {
+            membership_key: crate::state::membership_key(
+                &membership.user_id,
+                &membership.endpoint_id,
+            ),
+            endpoint_id: membership.endpoint_id.clone(),
+            endpoint_tag: endpoint.tag.clone(),
+        });
+    }
+    memberships
+}
+
+fn build_local_node_ip_usage_report(
+    store: &JsonSnapshotStore,
+    config: &Config,
+    node_id: &str,
+    window: IpUsageWindow,
+) -> IpUsageReport {
+    let warnings = build_warnings(
+        store.inbound_ip_usage().online_stats_unavailable,
+        config_ip_usage_geo_db_missing(config),
+    );
+    let memberships = build_ip_usage_membership_views(store, node_id, None);
+    build_window_view(
+        store.inbound_ip_usage(),
+        Utc::now(),
+        window,
+        &memberships,
+        warnings,
+    )
+}
+
+fn build_local_user_node_ip_usage_report(
+    store: &JsonSnapshotStore,
+    config: &Config,
+    user_id: &str,
+    node_id: &str,
+    window: IpUsageWindow,
+) -> IpUsageReport {
+    let warnings = build_warnings(
+        store.inbound_ip_usage().online_stats_unavailable,
+        config_ip_usage_geo_db_missing(config),
+    );
+    let memberships = build_ip_usage_membership_views(store, node_id, Some(user_id));
+    build_window_view(
+        store.inbound_ip_usage(),
+        Utc::now(),
+        window,
+        &memberships,
+        warnings,
+    )
+}
+
+fn node_ip_usage_response_from_report(
+    node: Node,
+    window: IpUsageWindow,
+    report: IpUsageReport,
+) -> AdminNodeIpUsageResponse {
+    AdminNodeIpUsageResponse {
+        node,
+        window,
+        window_start: report.window_start,
+        window_end: report.window_end,
+        warnings: report.warnings,
+        unique_ip_series: report.unique_ip_series,
+        timeline: report.timeline,
+        ips: report.ips,
+    }
+}
+
+fn user_ip_usage_group_from_report(node: Node, report: IpUsageReport) -> AdminUserIpUsageNodeGroup {
+    AdminUserIpUsageNodeGroup {
+        node,
+        window_start: report.window_start,
+        window_end: report.window_end,
+        warnings: report.warnings,
+        unique_ip_series: report.unique_ip_series,
+        timeline: report.timeline,
+        ips: report.ips,
+    }
+}
+
+fn merge_ip_usage_warnings(groups: &[AdminUserIpUsageNodeGroup]) -> Vec<IpUsageWarning> {
+    let mut warnings = Vec::<IpUsageWarning>::new();
+    let mut seen = BTreeSet::<String>::new();
+    for group in groups {
+        for warning in &group.warnings {
+            if seen.insert(warning.code.clone()) {
+                warnings.push(warning.clone());
+            }
+        }
+    }
+    warnings
+}
+
+async fn admin_internal_get_local_node_ip_usage(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    Query(query): Query<IpUsageQuery>,
+) -> Result<Json<AdminNodeIpUsageResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let window = parse_ip_usage_window(&query)?;
+    let node = {
+        let store = state.store.lock().await;
+        store.get_node(&state.cluster.node_id).ok_or_else(|| {
+            ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
+        })?
+    };
+    let report = {
+        let store = state.store.lock().await;
+        build_local_node_ip_usage_report(&store, state.config.as_ref(), &node.node_id, window)
+    };
+    Ok(Json(node_ip_usage_response_from_report(
+        node, window, report,
+    )))
+}
+
+async fn admin_get_node_ip_usage(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    Query(query): Query<IpUsageQuery>,
+) -> Result<Json<AdminNodeIpUsageResponse>, ApiError> {
+    let window = parse_ip_usage_window(&query)?;
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    if node.node_id == state.cluster.node_id {
+        let report = {
+            let store = state.store.lock().await;
+            build_local_node_ip_usage_report(&store, state.config.as_ref(), &node.node_id, window)
+        };
+        return Ok(Json(node_ip_usage_response_from_report(
+            node, window, report,
+        )));
+    }
+
+    let base = node.api_base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err(ApiError::internal(format!(
+            "node is unreachable: {}",
+            node.node_id
+        )));
+    }
+
+    let client = build_cluster_http_client(&state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri =
+        format!("/_internal/nodes/ip-usage/local?window={}", window.as_str())
+            .parse()
+            .map_err(|_| ApiError::invalid_request("invalid window"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let request = client
+        .get(format!(
+            "{base}/api/admin/_internal/nodes/ip-usage/local?window={}",
+            window.as_str()
+        ))
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send();
+    let response = tokio::time::timeout(Duration::from_secs(3), request)
+        .await
+        .map_err(|_| ApiError::internal("request timeout"))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(ApiError::internal(format!(
+            "node ip usage request failed: {}",
+            response.status()
+        )));
+    }
+
+    let remote = response
+        .json::<AdminNodeIpUsageResponse>()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(remote))
+}
+
+async fn admin_internal_get_local_user_ip_usage(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    Path(user_id): Path<String>,
+    Query(query): Query<IpUsageQuery>,
+) -> Result<Json<AdminInternalUserIpUsageLocalResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let window = parse_ip_usage_window(&query)?;
+    let node = {
+        let store = state.store.lock().await;
+        if store.get_user(&user_id).is_none() {
+            return Err(ApiError::not_found(format!("user not found: {user_id}")));
+        }
+        store.get_node(&state.cluster.node_id).ok_or_else(|| {
+            ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
+        })?
+    };
+    let report = {
+        let store = state.store.lock().await;
+        build_local_user_node_ip_usage_report(
+            &store,
+            state.config.as_ref(),
+            &user_id,
+            &node.node_id,
+            window,
+        )
+    };
+    Ok(Json(AdminInternalUserIpUsageLocalResponse {
+        node,
+        window,
+        window_start: report.window_start,
+        window_end: report.window_end,
+        warnings: report.warnings,
+        unique_ip_series: report.unique_ip_series,
+        timeline: report.timeline,
+        ips: report.ips,
+    }))
+}
+
+async fn admin_get_user_ip_usage(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    Query(query): Query<IpUsageQuery>,
+) -> Result<Json<AdminUserIpUsageResponse>, ApiError> {
+    let window = parse_ip_usage_window(&query)?;
+    let (user, relevant_nodes) = {
+        let store = state.store.lock().await;
+        let user = store
+            .get_user(&user_id)
+            .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
+        let nodes_by_id = store
+            .list_nodes()
+            .into_iter()
+            .map(|node| (node.node_id.clone(), node))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut relevant = Vec::<Node>::new();
+        let mut seen = BTreeSet::<String>::new();
+        for membership in store.state().node_user_endpoint_memberships.iter() {
+            if membership.user_id != user_id {
+                continue;
+            }
+            if !seen.insert(membership.node_id.clone()) {
+                continue;
+            }
+            if let Some(node) = nodes_by_id.get(&membership.node_id) {
+                relevant.push(node.clone());
+            }
+        }
+        (user, relevant)
+    };
+
+    let local_node_id = state.cluster.node_id.clone();
+    let mut groups = Vec::<AdminUserIpUsageNodeGroup>::new();
+    let mut unreachable_nodes = Vec::<String>::new();
+
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let local_uri: axum::http::Uri = format!(
+        "/_internal/users/{user_id}/ip-usage/local?window={}",
+        window.as_str()
+    )
+    .parse()
+    .map_err(|_| ApiError::invalid_request("invalid window"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
+        .map_err(ApiError::internal)?;
+
+    for node in relevant_nodes {
+        if node.node_id == local_node_id {
+            let report = {
+                let store = state.store.lock().await;
+                build_local_user_node_ip_usage_report(
+                    &store,
+                    state.config.as_ref(),
+                    &user_id,
+                    &node.node_id,
+                    window,
+                )
+            };
+            groups.push(user_ip_usage_group_from_report(node, report));
+            continue;
+        }
+
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+
+        let url = format!(
+            "{base}/api/admin/_internal/users/{user_id}/ip-usage/local?window={}",
+            window.as_str()
+        );
+        let request = client
+            .get(url)
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id.clone());
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+
+        match response
+            .json::<AdminInternalUserIpUsageLocalResponse>()
+            .await
+        {
+            Ok(remote) => groups.push(AdminUserIpUsageNodeGroup {
+                node: remote.node,
+                window_start: remote.window_start,
+                window_end: remote.window_end,
+                warnings: remote.warnings,
+                unique_ip_series: remote.unique_ip_series,
+                timeline: remote.timeline,
+                ips: remote.ips,
+            }),
+            Err(_) => unreachable_nodes.push(node.node_id.clone()),
+        }
+    }
+
+    groups.sort_by(|a, b| a.node.node_id.cmp(&b.node.node_id));
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    let warnings = merge_ip_usage_warnings(&groups);
+
+    Ok(Json(AdminUserIpUsageResponse {
+        user: AdminUserIpUsageUserSummary {
+            user_id: user.user_id,
+            display_name: user.display_name,
+        },
+        window,
+        partial: !unreachable_nodes.is_empty(),
+        unreachable_nodes,
+        warnings,
+        groups,
+    }))
 }
 
 async fn forward_local_node_runtime_events(

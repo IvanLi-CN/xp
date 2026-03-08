@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, within } from "@storybook/test";
+import { expect, userEvent, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/NodeDetailsPage",
@@ -40,5 +40,19 @@ export const Default: Story = {
 			await canvas.findByRole("heading", { name: /service runtime/i }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText(/^key events$/i)).toBeInTheDocument();
+	},
+};
+
+export const IpUsageTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
+		await expect(
+			await canvas.findByText("203.0.113.7", { selector: "td" }),
+		).toBeInTheDocument();
+		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
+		await expect(
+			await canvas.findByText("203.0.113.7", { selector: "td" }),
+		).toBeInTheDocument();
 	},
 };

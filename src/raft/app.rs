@@ -404,8 +404,8 @@ impl RaftFacade for LocalRaft {
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
         Box::pin(async move {
             let mut store = self.store.lock().await;
-            // Local-only cleanup: usage keys for removed memberships should be deleted to keep
-            // the local usage file compact (hard-cut behavior).
+            // Local-only cleanup: usage keys and inbound IP history for removed memberships
+            // should be deleted to keep local files compact (hard-cut behavior).
             let membership_keys_before: Option<std::collections::BTreeSet<String>> = match &cmd {
                 DesiredStateCommand::ReplaceUserAccess { user_id, .. }
                 | DesiredStateCommand::DeleteUser { user_id } => Some(
@@ -456,6 +456,9 @@ impl RaftFacade for LocalRaft {
                 for membership_key in before.difference(&after) {
                     store
                         .clear_membership_usage(membership_key)
+                        .map_err(anyhow::Error::new)?;
+                    store
+                        .clear_membership_inbound_ip_usage(membership_key)
                         .map_err(anyhow::Error::new)?;
                 }
             }

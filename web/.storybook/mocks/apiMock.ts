@@ -5,6 +5,10 @@ import type {
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
 import type {
+	AdminNodeIpUsageResponse,
+	AdminUserIpUsageResponse,
+} from "../../src/api/adminIpUsage";
+import type {
 	AdminNodeRuntimeDetailResponse,
 	AdminNodeRuntimeListItem,
 	NodeRuntimeComponent,
@@ -59,6 +63,8 @@ type MockStateSeed = {
 	users: AdminUser[];
 	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
 	nodeQuotas: AdminUserNodeQuota[];
+	nodeIpUsageByNodeId: Record<string, AdminNodeIpUsageResponse>;
+	userIpUsageByUserId: Record<string, AdminUserIpUsageResponse>;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
 	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
@@ -351,6 +357,118 @@ function refreshGlobalEndpointReality(state: MockState): void {
 	}
 }
 
+function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
+	const endpointTag = `${node.node_name || node.node_id}-edge-a`;
+	return {
+		node,
+		window: "24h",
+		window_start: "2026-03-08T00:00:00Z",
+		window_end: "2026-03-08T00:02:00Z",
+		warnings: [
+			{
+				code: "geo_db_missing",
+				message:
+					"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+			},
+		],
+		unique_ip_series: [
+			{ minute: "2026-03-08T00:00:00Z", count: 1 },
+			{ minute: "2026-03-08T00:01:00Z", count: 2 },
+			{ minute: "2026-03-08T00:02:00Z", count: 1 },
+		],
+		timeline: [
+			{
+				lane_key: `${node.node_id}::203.0.113.7`,
+				endpoint_id: `${node.node_id}-endpoint-a`,
+				endpoint_tag: endpointTag,
+				ip: "203.0.113.7",
+				minutes: 2,
+				segments: [
+					{
+						start_minute: "2026-03-08T00:00:00Z",
+						end_minute: "2026-03-08T00:01:00Z",
+					},
+				],
+			},
+		],
+		ips: [
+			{
+				ip: "203.0.113.7",
+				minutes: 2,
+				endpoint_tags: [endpointTag],
+				region: "Japan / Tokyo",
+				operator: "ExampleNet",
+				last_seen_at: "2026-03-08T00:01:00Z",
+			},
+		],
+	};
+}
+
+function buildDefaultUserIpUsage(
+	user: AdminUser,
+	nodes: AdminNode[],
+): AdminUserIpUsageResponse {
+	const groups = nodes.slice(0, 2).map((node, index) => {
+		const endpointTag = `${node.node_name || node.node_id}-edge-${index + 1}`;
+		return {
+			node,
+			window_start: "2026-03-08T00:00:00Z",
+			window_end: "2026-03-08T00:02:00Z",
+			warnings:
+				index === 0
+					? []
+					: [
+							{
+								code: "geo_db_missing",
+								message:
+									"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+							},
+						],
+			unique_ip_series: [
+				{ minute: "2026-03-08T00:00:00Z", count: 1 },
+				{ minute: "2026-03-08T00:01:00Z", count: 1 },
+			],
+			timeline: [
+				{
+					lane_key: `${node.node_id}::${user.user_id}::203.0.113.${index + 7}`,
+					endpoint_id: `${node.node_id}-endpoint-${index + 1}`,
+					endpoint_tag: endpointTag,
+					ip: `203.0.113.${index + 7}`,
+					minutes: 2,
+					segments: [
+						{
+							start_minute: "2026-03-08T00:00:00Z",
+							end_minute: "2026-03-08T00:01:00Z",
+						},
+					],
+				},
+			],
+			ips: [
+				{
+					ip: `203.0.113.${index + 7}`,
+					minutes: 2,
+					endpoint_tags: [endpointTag],
+					region: index === 0 ? "Japan / Tokyo" : "Japan / Osaka",
+					operator: index === 0 ? "ExampleNet" : "CarrierNet",
+					last_seen_at: "2026-03-08T00:01:00Z",
+				},
+			],
+		};
+	});
+
+	return {
+		user: {
+			user_id: user.user_id,
+			display_name: user.display_name,
+		},
+		window: "24h",
+		partial: false,
+		unreachable_nodes: [],
+		warnings: [],
+		groups,
+	};
+}
+
 function createDefaultSeed(): MockStateSeed {
 	const defaultNodeQuotaReset = (dayOfMonth: number): NodeQuotaReset => ({
 		policy: "monthly",
@@ -507,9 +625,17 @@ function createDefaultSeed(): MockStateSeed {
 	};
 
 	const subscriptions: Record<string, string> = {
-		[subToken1]: `# raw subscription for ${subToken1}\nnode-1`,
-		[subToken2]: `# raw subscription for ${subToken2}\nnode-2`,
+		[subToken1]: `# raw subscription for ${subToken1}
+node-1`,
+		[subToken2]: `# raw subscription for ${subToken2}
+node-2`,
 	};
+	const nodeIpUsageByNodeId = Object.fromEntries(
+		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
+	) satisfies Record<string, AdminNodeIpUsageResponse>;
+	const userIpUsageByUserId = Object.fromEntries(
+		users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
+	) satisfies Record<string, AdminUserIpUsageResponse>;
 
 	return {
 		health: { status: "ok" },
@@ -540,6 +666,8 @@ function createDefaultSeed(): MockStateSeed {
 		users,
 		userAccessByUserId,
 		nodeQuotas: [],
+		nodeIpUsageByNodeId,
+		userIpUsageByUserId,
 		userNodeWeights,
 		userGlobalWeights,
 		nodeWeightPolicies,
@@ -565,6 +693,14 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...(overrides?.userAccessByUserId ?? {}),
 		},
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		nodeIpUsageByNodeId: {
+			...base.nodeIpUsageByNodeId,
+			...(overrides?.nodeIpUsageByNodeId ?? {}),
+		},
+		userIpUsageByUserId: {
+			...base.userIpUsageByUserId,
+			...(overrides?.userIpUsageByUserId ?? {}),
+		},
 		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
 		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
 		nodeWeightPolicies:
@@ -731,6 +867,44 @@ async function handleRequest(
 				},
 			},
 		]);
+	}
+
+	const nodeIpUsageMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/ip-usage$/,
+	);
+	if (nodeIpUsageMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeIpUsageMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		const report =
+			state.nodeIpUsageByNodeId[nodeId] ??
+			(node ? buildDefaultNodeIpUsage(node) : null);
+		if (!report) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		const window = url.searchParams.get("window");
+		return jsonResponse({
+			...clone(report),
+			window: window === "7d" ? "7d" : "24h",
+		});
+	}
+
+	const userIpUsageMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/ip-usage$/,
+	);
+	if (userIpUsageMatch && method === "GET") {
+		const userId = decodeURIComponent(userIpUsageMatch[1]);
+		const user = state.users.find((item) => item.user_id === userId);
+		const report =
+			state.userIpUsageByUserId[userId] ??
+			(user ? buildDefaultUserIpUsage(user, state.nodes) : null);
+		if (!report) {
+			return errorResponse(404, "not_found", "user not found");
+		}
+		const window = url.searchParams.get("window");
+		return jsonResponse({
+			...clone(report),
+			window: window === "7d" ? "7d" : "24h",
+		});
 	}
 
 	const userNodeQuotasMatch = path.match(

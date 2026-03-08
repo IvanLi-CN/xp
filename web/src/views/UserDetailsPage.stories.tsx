@@ -80,3 +80,18 @@ export const QuotaStatusTab: Story = {
 		await expect(tab).toHaveClass("tab-active");
 	},
 };
+
+export const UsageDetailsTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Usage details" }),
+		);
+		await expect(
+			await canvas.findByText("Usage details · tokyo-1"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText("203.0.113.7", { selector: "td" }),
+		).toBeInTheDocument();
+	},
+};

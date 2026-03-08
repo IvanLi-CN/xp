@@ -543,6 +543,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                             std::io::Error::other(e.to_string()),
                                         )
                                     })?;
+                                    store
+                                        .clear_membership_inbound_ip_usage(membership_key)
+                                        .map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
                                 }
                             }
 
@@ -667,6 +676,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     .memberships
                     .retain(|key, _| allowed_membership_keys.contains(key));
             });
+            let _ = store.prune_inbound_ip_usage_memberships();
         }
 
         {

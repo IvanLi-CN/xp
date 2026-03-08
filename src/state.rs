@@ -14,6 +14,9 @@ use crate::{
         validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
+    inbound_ip_usage::{
+        InboundIpMinuteSample, PersistedInboundIpUsage, PersistedInboundIpUsageGeoDb,
+    },
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
@@ -1364,8 +1367,8 @@ mod migrate_tests {
             mapping.get("grant_1"),
             Some(&"user_1::endpoint_1".to_string())
         );
-        assert!(mapping.get("grant_orphan_user").is_none());
-        assert!(mapping.get("grant_orphan_endpoint").is_none());
+        assert!(!mapping.contains_key("grant_orphan_user"));
+        assert!(!mapping.contains_key("grant_orphan_endpoint"));
         assert_eq!(stats.grants_total, 4);
         assert_eq!(stats.grants_orphan_dropped, 2);
         assert_eq!(stats.memberships_created, 1);
@@ -2631,6 +2634,8 @@ pub struct JsonSnapshotStore {
     state: PersistedState,
     usage_path: PathBuf,
     usage: PersistedUsage,
+    inbound_ip_usage_path: PathBuf,
+    inbound_ip_usage: PersistedInboundIpUsage,
 }
 
 impl JsonSnapshotStore {
@@ -2639,6 +2644,7 @@ impl JsonSnapshotStore {
 
         let state_path = init.data_dir.join("state.json");
         let usage_path = init.data_dir.join("usage.json");
+        let inbound_ip_usage_path = init.data_dir.join("inbound_ip_usage.json");
         let (mut state, grant_id_to_membership_key, is_new_state, mut migrated) =
             if state_path.exists() {
                 let bytes = fs::read(&state_path)?;
@@ -2867,11 +2873,24 @@ impl JsonSnapshotStore {
             usage_migrated = true;
         }
 
+        let mut inbound_ip_usage_migrated = false;
+        let mut inbound_ip_usage = if inbound_ip_usage_path.exists() {
+            let bytes = fs::read(&inbound_ip_usage_path)?;
+            serde_json::from_slice::<PersistedInboundIpUsage>(&bytes)?
+        } else {
+            PersistedInboundIpUsage::default()
+        };
+        if inbound_ip_usage.normalize(&allowed_membership_keys) {
+            inbound_ip_usage_migrated = true;
+        }
+
         let store = Self {
             state_path,
             state,
             usage_path,
             usage,
+            inbound_ip_usage_path,
+            inbound_ip_usage,
         };
 
         if is_new_state || migrated {
@@ -2879,6 +2898,9 @@ impl JsonSnapshotStore {
         }
         if usage_migrated {
             store.save_usage()?;
+        }
+        if inbound_ip_usage_migrated {
+            store.save_inbound_ip_usage()?;
         }
 
         Ok(store)
@@ -2901,6 +2923,73 @@ impl JsonSnapshotStore {
     pub fn save_usage(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.usage)?;
         write_atomic(&self.usage_path, &bytes)?;
+        Ok(())
+    }
+
+    pub fn inbound_ip_usage(&self) -> &PersistedInboundIpUsage {
+        &self.inbound_ip_usage
+    }
+
+    pub fn save_inbound_ip_usage(&self) -> Result<(), StoreError> {
+        let bytes = serde_json::to_vec_pretty(&self.inbound_ip_usage)?;
+        write_atomic(&self.inbound_ip_usage_path, &bytes)?;
+        Ok(())
+    }
+
+    pub fn update_inbound_ip_usage<R>(
+        &mut self,
+        f: impl FnOnce(&mut PersistedInboundIpUsage) -> R,
+    ) -> Result<R, StoreError> {
+        let out = f(&mut self.inbound_ip_usage);
+        self.save_inbound_ip_usage()?;
+        Ok(out)
+    }
+
+    pub fn latest_inbound_ip_usage_minute(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.inbound_ip_usage.latest_minute_dt()
+    }
+
+    pub fn clear_membership_inbound_ip_usage(
+        &mut self,
+        membership_key: &str,
+    ) -> Result<(), StoreError> {
+        if self.inbound_ip_usage.clear_membership(membership_key) {
+            self.save_inbound_ip_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn record_inbound_ip_usage_samples(
+        &mut self,
+        minute: chrono::DateTime<chrono::Utc>,
+        geo_db: PersistedInboundIpUsageGeoDb,
+        online_stats_unavailable: bool,
+        samples: &[InboundIpMinuteSample],
+        geo_resolver: &crate::inbound_ip_usage::GeoResolver,
+    ) -> Result<(), StoreError> {
+        let changed = self.inbound_ip_usage.record_minute_samples(
+            minute,
+            geo_db,
+            online_stats_unavailable,
+            samples,
+            geo_resolver,
+        );
+        if changed {
+            self.save_inbound_ip_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn prune_inbound_ip_usage_memberships(&mut self) -> Result<(), StoreError> {
+        let allowed_membership_keys = self
+            .state
+            .node_user_endpoint_memberships
+            .iter()
+            .map(|membership| membership_key(&membership.user_id, &membership.endpoint_id))
+            .collect::<BTreeSet<_>>();
+        if self.inbound_ip_usage.normalize(&allowed_membership_keys) {
+            self.save_inbound_ip_usage()?;
+        }
         Ok(())
     }
 
@@ -4504,6 +4593,159 @@ rules: []
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert!(store.get_membership_usage(membership_key).is_none());
+    }
+
+    #[test]
+    fn record_inbound_ip_usage_samples_persists_minute_and_warning_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (membership_key, minute) = {
+            let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+            let node_id = store.list_nodes()[0].node_id.clone();
+            let user = store.create_user("alice".to_string(), None).unwrap();
+            let endpoint = store
+                .create_endpoint(
+                    node_id.clone(),
+                    EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                    443,
+                    json!({}),
+                )
+                .unwrap();
+            let membership_key = membership_key(&user.user_id, &endpoint.endpoint_id);
+            DesiredStateCommand::ReplaceUserAccess {
+                user_id: user.user_id.clone(),
+                endpoint_ids: vec![endpoint.endpoint_id.clone()],
+            }
+            .apply(store.state_mut())
+            .unwrap();
+            store.save().unwrap();
+            let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
+            let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+            store
+                .record_inbound_ip_usage_samples(
+                    minute,
+                    resolver.geo_db(),
+                    true,
+                    &[crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: membership_key.clone(),
+                        user_id: user.user_id,
+                        node_id,
+                        endpoint_id: endpoint.endpoint_id,
+                        endpoint_tag: endpoint.tag,
+                        ips: vec!["203.0.113.7".to_string()],
+                    }],
+                    &resolver,
+                )
+                .unwrap();
+            (membership_key, minute.to_rfc3339())
+        };
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let inbound = store.inbound_ip_usage();
+        assert_eq!(inbound.latest_minute.as_deref(), Some(minute.as_str()));
+        assert!(inbound.online_stats_unavailable);
+        assert_eq!(
+            inbound.memberships[&membership_key].ips["203.0.113.7"].minutes,
+            1
+        );
+    }
+
+    #[test]
+    fn prune_and_clear_inbound_ip_usage_remove_stale_memberships() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let valid_membership_key = membership_key(&user.user_id, &endpoint.endpoint_id);
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        store.save().unwrap();
+
+        let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
+        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        store
+            .record_inbound_ip_usage_samples(
+                minute,
+                resolver.geo_db(),
+                false,
+                &[
+                    crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: valid_membership_key.clone(),
+                        user_id: user.user_id,
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                        endpoint_tag: endpoint.tag.clone(),
+                        ips: vec!["203.0.113.7".to_string()],
+                    },
+                    crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: "stale-user::stale-endpoint".to_string(),
+                        user_id: "stale-user".to_string(),
+                        node_id,
+                        endpoint_id: "stale-endpoint".to_string(),
+                        endpoint_tag: "stale-tag".to_string(),
+                        ips: vec!["198.51.100.9".to_string()],
+                    },
+                ],
+                &resolver,
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key("stale-user::stale-endpoint")
+        );
+
+        store.prune_inbound_ip_usage_memberships().unwrap();
+        assert!(
+            !store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key("stale-user::stale-endpoint")
+        );
+        assert!(
+            store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key(&valid_membership_key)
+        );
+
+        store
+            .clear_membership_inbound_ip_usage(&valid_membership_key)
+            .unwrap();
+        assert!(
+            !store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key(&valid_membership_key)
+        );
+
+        drop(store);
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert!(
+            !store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key("stale-user::stale-endpoint")
+        );
+        assert!(
+            !store
+                .inbound_ip_usage()
+                .memberships
+                .contains_key(&valid_membership_key)
+        );
     }
 
     #[test]

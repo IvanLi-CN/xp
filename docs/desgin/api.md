@@ -599,3 +599,125 @@ SSE 事件类型：
   ]
 }
 ```
+
+## 6. Inbound IP usage（分钟级在线 IP 明细）
+
+### 6.1 节点视角：查询节点入站 IP 使用详情（管理员）
+
+`GET /api/admin/nodes/{node_id}/ip-usage?window=24h|7d`
+
+返回：
+
+```json
+{
+  "node": {
+    "node_id": "01J...",
+    "node_name": "node-1",
+    "access_host": "example.com",
+    "api_base_url": "https://node-1.internal:8443"
+  },
+  "window": "24h",
+  "window_start": "2026-03-07T12:00:00Z",
+  "window_end": "2026-03-08T11:59:00Z",
+  "warnings": [
+    {
+      "code": "geo_db_missing",
+      "message": "GeoLite2 City/ASN DB is missing; region and operator fields will be empty."
+    }
+  ],
+  "unique_ip_series": [
+    {
+      "minute": "2026-03-08T11:57:00Z",
+      "count": 2
+    }
+  ],
+  "timeline": [
+    {
+      "lane_key": "ss22-01J...|203.0.113.7",
+      "endpoint_id": "01J...",
+      "endpoint_tag": "ss22-01J...",
+      "ip": "203.0.113.7",
+      "minutes": 18,
+      "segments": [
+        {
+          "start_minute": "2026-03-08T11:40:00Z",
+          "end_minute": "2026-03-08T11:57:00Z"
+        }
+      ]
+    }
+  ],
+  "ips": [
+    {
+      "ip": "203.0.113.7",
+      "minutes": 18,
+      "endpoint_tags": ["ss22-01J..."],
+      "region": "US California",
+      "operator": "ExampleNet",
+      "last_seen_at": "2026-03-08T11:57:00Z"
+    }
+  ]
+}
+```
+
+说明：
+
+- `unique_ip_series` 为节点内所有 membership 按分钟去重后的不同 source IP 数量。
+- `timeline` 以 `endpoint_tag / IP` 为行维度，连续分钟已合并成时间段；默认仅返回占用分钟数最高的前 20 行。
+- `ips` 以 IP 聚合，`minutes` 表示当前窗口内该 IP 的去重分钟数。
+- `warnings` 目前包含：
+  - `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
+  - `geo_db_missing`：GeoLite2 City / ASN 数据库缺失，地区与运营商字段返回空字符串。
+- 如果目标节点不可达，接口返回错误而不是静默空数据。
+
+### 6.2 用户视角：查询用户入站 IP 使用详情（管理员）
+
+`GET /api/admin/users/{user_id}/ip-usage?window=24h|7d`
+
+返回：
+
+```json
+{
+  "user": {
+    "user_id": "01J...",
+    "display_name": "alice"
+  },
+  "window": "7d",
+  "partial": true,
+  "unreachable_nodes": ["01JREMOTE..."],
+  "warnings": [
+    {
+      "code": "online_stats_unavailable",
+      "message": "Xray online IP stats are unavailable; enable statsUserOnline to collect inbound IP usage."
+    }
+  ],
+  "groups": [
+    {
+      "node": {
+        "node_id": "01J...",
+        "node_name": "node-1",
+        "access_host": "example.com",
+        "api_base_url": "https://node-1.internal:8443"
+      },
+      "window_start": "2026-03-01T12:00:00Z",
+      "window_end": "2026-03-08T11:59:00Z",
+      "warnings": [],
+      "unique_ip_series": [],
+      "timeline": [],
+      "ips": []
+    }
+  ]
+}
+```
+
+说明：
+
+- `groups` 按节点分组，每组字段语义与节点视角一致。
+- `partial=true` 表示至少一个远端节点不可达；`unreachable_nodes` 给出对应 `node_id`。
+- 顶层 `warnings` 为各节点 warning 的去重并集，便于用户详情页统一提示。
+
+### 6.3 Internal local fan-out 接口
+
+仅供节点间 fan-out 聚合使用，要求 internal signature：
+
+- `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
+- `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`

@@ -84,6 +84,8 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
+        ip_usage_city_db_path: String::new(),
+        ip_usage_asn_db_path: String::new(),
     }
 }
 
@@ -654,16 +656,11 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     }
 
     let deadline = Instant::now() + Duration::from_secs(4);
-    loop {
-        match ss_roundtrip_echo(ss_port, &ss_password, dest_port, 32).await {
-            Ok(()) => {
-                if Instant::now() >= deadline {
-                    panic!("expected ss connection to fail after quota ban");
-                }
-                sleep(Duration::from_millis(200)).await;
-            }
-            Err(_) => break,
+    while let Ok(()) = ss_roundtrip_echo(ss_port, &ss_password, dest_port, 32).await {
+        if Instant::now() >= deadline {
+            panic!("expected ss connection to fail after quota ban");
         }
+        sleep(Duration::from_millis(200)).await;
     }
 
     let later = now + chrono::Duration::days(40);

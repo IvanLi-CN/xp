@@ -127,7 +127,7 @@ fn write_xray_config(paths: &Paths) -> Result<(), ExitError> {
       "stats": {},
       "policy": {
         "levels": {
-          "0": { "statsUserUplink": true, "statsUserDownlink": true }
+          "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true }
         }
       },
       "inbounds": [

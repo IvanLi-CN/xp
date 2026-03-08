@@ -182,10 +182,10 @@ async fn wait_for_snapshot(
 fn error_chain_has_not_found(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut current: &(dyn std::error::Error + 'static) = err;
     loop {
-        if let Some(io) = current.downcast_ref::<std::io::Error>() {
-            if io.kind() == std::io::ErrorKind::NotFound {
-                return true;
-            }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::NotFound
+        {
+            return true;
         }
         match current.source() {
             Some(next) => current = next,

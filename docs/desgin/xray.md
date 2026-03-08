@@ -26,10 +26,17 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 要得到“按用户（client/email）”统计，必须满足：
 
 - 配置中存在 `stats: {}`
-- `policy.levels.<level>.statsUserUplink=true` 且 `statsUserDownlink=true`
-- 每个 client 必须设置 `email`（否则无法按用户区分统计）
+- `policy.levels.<level>.statsUserUplink=true`、`statsUserDownlink=true`、`statsUserOnline=true`
+- 每个 client 必须设置 `email`（否则无法按 membership 区分流量/IP 统计）
 
-`xp` 约定：所有 Grant 的 client email 固定为 `grant:<grant_id>`。
+`xp` 约定：所有 membership 的 client email 固定为 `m:{user_id}::{endpoint_id}`。
+
+### 2.3 在线 IP 快照（statsUserOnline）
+
+- `xp` 只做**每分钟一次**的 online 快照采样，不解析 access log。
+- 极短连接如果发生在两次采样之间，不会出现在历史中；这属于采样口径的已知限制。
+- 如果 Xray 未开启 `statsUserOnline`，`xp` 会保留 warning 并继续 quota 主流程，但 IP usage 图表会进入 explanation 空态。
+- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认打开 `statsUserOnline=true`；旧节点升级时需要确认静态配置已同步。
 
 ## 3. 推荐的 Xray 基础配置（示例）
 
@@ -46,7 +53,7 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
   "stats": {},
   "policy": {
     "levels": {
-      "0": { "statsUserUplink": true, "statsUserDownlink": true }
+      "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true }
     }
   },
   "inbounds": [],
@@ -82,10 +89,11 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 
 `xp` 使用 StatsService 周期性读取：
 
-- `user>>>grant:<grant_id>>>traffic>>>uplink`
-- `user>>>grant:<grant_id>>>traffic>>>downlink`
+- `user>>>m:{user_id}::{endpoint_id}>>>traffic>>>uplink`
+- `user>>>m:{user_id}::{endpoint_id}>>>traffic>>>downlink`
+- `user>>>m:{user_id}::{endpoint_id}>>>online`（通过 `GetStatsOnlineIpList` 拉每分钟在线 source IP 快照）
 
-并以 `uplink + downlink` 作为 Grant 的累计使用量（双向合计）。
+并以 `uplink + downlink` 作为 membership 的累计使用量（双向合计）；`online` 用于最近 24 小时 / 7 天的分钟级 inbound IP 使用详情。
 
 ## 6. REALITY 的 shortId 与 publicKey（落地约束）
 

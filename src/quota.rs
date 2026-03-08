@@ -8,6 +8,7 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
     domain::{NodeQuotaReset, UserPriorityTier},
+    inbound_ip_usage::{GeoResolver, floor_minute},
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
@@ -42,13 +43,17 @@ pub fn spawn_quota_worker(
     };
 
     tokio::spawn(async move {
+        let geo_resolver = GeoResolver::new(
+            config_geo_db_path(&config.ip_usage_city_db_path),
+            config_geo_db_path(&config.ip_usage_asn_db_path),
+        );
         let mut interval =
             tokio::time::interval(Duration::from_secs(config.quota_poll_interval_secs));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
                     let now = Utc::now();
-                    if let Err(err) = run_quota_tick_at(now, &config, &store, &reconcile).await {
+                    if let Err(err) = run_quota_tick_at_with_geo(now, &config, &store, &reconcile, &geo_resolver).await {
                         warn!(%err, "quota tick failed");
                     }
                 }
@@ -83,10 +88,21 @@ enum QuotaResetPolicy {
 struct MembershipUsageTick {
     snapshot: MembershipQuotaSnapshot,
     used_bytes: u64,
+    uplink_total: u64,
+    downlink_total: u64,
 }
 
 fn map_cycle_error(subject: &str, err: CycleWindowError) -> anyhow::Error {
     anyhow::anyhow!("{subject} cycle window error: {err}")
+}
+
+fn config_geo_db_path(raw: &str) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(trimmed))
+    }
 }
 
 fn resolve_node_quota_reset(
@@ -131,6 +147,20 @@ pub async fn run_quota_tick_at(
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
+) -> anyhow::Result<()> {
+    let geo_resolver = GeoResolver::new(
+        config_geo_db_path(&config.ip_usage_city_db_path),
+        config_geo_db_path(&config.ip_usage_asn_db_path),
+    );
+    run_quota_tick_at_with_geo(now, config, store, reconcile, &geo_resolver).await
+}
+
+async fn run_quota_tick_at_with_geo(
+    now: DateTime<Utc>,
+    config: &Config,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    reconcile: &ReconcileHandle,
+    geo_resolver: &GeoResolver,
 ) -> anyhow::Result<()> {
     let snapshots: Vec<MembershipQuotaSnapshot> = {
         let store = store.lock().await;
@@ -208,10 +238,96 @@ pub async fn run_quota_tick_at(
     };
 
     let mut ticks = Vec::new();
-    for snapshot in snapshots {
+    for snapshot in snapshots.clone() {
         match update_membership_usage_once(now, store, &mut client, snapshot).await {
             Ok(tick) => ticks.push(tick),
             Err(err) => warn!(%err, "quota tick: membership processing failed"),
+        }
+    }
+
+    let sample_minute = floor_minute(now);
+    let should_collect_minute = {
+        let store = store.lock().await;
+        store.latest_inbound_ip_usage_minute() != Some(sample_minute)
+    };
+    if should_collect_minute {
+        let tick_by_membership = ticks
+            .iter()
+            .map(|tick| {
+                (
+                    tick.snapshot.membership_key.clone(),
+                    (tick.uplink_total, tick.downlink_total),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut online_samples = Vec::new();
+        let mut online_stats_unavailable = false;
+
+        for snapshot in &snapshots {
+            let email = membership_xray_email(&snapshot.user_id, &snapshot.endpoint_id);
+            match client.get_user_online_ip_list(&email).await {
+                Ok(ips) => online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
+                    membership_key: snapshot.membership_key.clone(),
+                    user_id: snapshot.user_id.clone(),
+                    node_id: snapshot.node_id.clone(),
+                    endpoint_id: snapshot.endpoint_id.clone(),
+                    endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                    ips: ips.into_iter().collect(),
+                }),
+                Err(status) if status.code() == tonic::Code::Unimplemented => {
+                    online_stats_unavailable = true;
+                    warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
+                    break;
+                }
+                Err(status) if xray::is_not_found(&status) => {
+                    let had_traffic = tick_by_membership
+                        .get(&snapshot.membership_key)
+                        .map(|(uplink_total, downlink_total)| {
+                            *uplink_total > 0 || *downlink_total > 0
+                        })
+                        .unwrap_or(false);
+                    if had_traffic {
+                        online_stats_unavailable = true;
+                        warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats map is missing despite traffic counters");
+                        break;
+                    }
+                    online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: snapshot.membership_key.clone(),
+                        user_id: snapshot.user_id.clone(),
+                        node_id: snapshot.node_id.clone(),
+                        endpoint_id: snapshot.endpoint_id.clone(),
+                        endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                        ips: Vec::new(),
+                    });
+                }
+                Err(status) => {
+                    warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray get_user_online_ip_list failed");
+                    online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: snapshot.membership_key.clone(),
+                        user_id: snapshot.user_id.clone(),
+                        node_id: snapshot.node_id.clone(),
+                        endpoint_id: snapshot.endpoint_id.clone(),
+                        endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                        ips: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        let geo_db = geo_resolver.geo_db();
+        let mut store = store.lock().await;
+        if let Err(err) = store.record_inbound_ip_usage_samples(
+            sample_minute,
+            geo_db,
+            online_stats_unavailable,
+            if online_stats_unavailable {
+                &[]
+            } else {
+                &online_samples
+            },
+            geo_resolver,
+        ) {
+            warn!(%err, "quota tick: failed to persist inbound ip usage snapshot");
         }
     }
 
@@ -303,6 +419,8 @@ async fn update_membership_usage_once(
     Ok(MembershipUsageTick {
         snapshot,
         used_bytes,
+        uplink_total,
+        downlink_total,
     })
 }
 
@@ -1215,6 +1333,8 @@ mod tests {
             endpoint_probe_skip_self_test: false,
             quota_poll_interval_secs: 10,
             quota_auto_unban,
+            ip_usage_city_db_path: String::new(),
+            ip_usage_asn_db_path: String::new(),
         };
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {

@@ -2371,7 +2371,7 @@ mod tests {
             &u,
             &[m2.clone(), m1.clone()],
             &[ep2.clone(), ep1.clone()],
-            &[n.clone()],
+            std::slice::from_ref(&n),
         )
         .unwrap();
         let out2 = build_raw_lines(SEED, &u, &[m1, m2], &[ep1, ep2], &[n]).unwrap();
@@ -2892,8 +2892,8 @@ rules: []
             .expect("legacy full config should normalize");
         let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
         let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
-        assert!(!mixin_map.contains_key(&Value::String("proxies".to_string())));
-        assert!(!mixin_map.contains_key(&Value::String("proxy-providers".to_string())));
+        assert!(!mixin_map.contains_key(Value::String("proxies".to_string())));
+        assert!(!mixin_map.contains_key(Value::String("proxy-providers".to_string())));
 
         let extra_proxies: Value = serde_yaml::from_str(&normalized.extra_proxies_yaml).unwrap();
         assert!(
@@ -2915,7 +2915,7 @@ rules: []
             extra_providers
                 .as_mapping()
                 .expect("extra providers must be a mapping")
-                .contains_key(&Value::String("providerA".to_string()))
+                .contains_key(Value::String("providerA".to_string()))
         );
     }
 
@@ -2974,7 +2974,7 @@ rules: []
         let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
         let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
         assert!(
-            !mixin_map.contains_key(&Value::String("proxies".to_string())),
+            !mixin_map.contains_key(Value::String("proxies".to_string())),
             "runtime normalization should still extract legacy proxy blocks"
         );
 
@@ -3024,7 +3024,7 @@ providerA:
         let mixin_root: Value = serde_yaml::from_str(&normalized.mixin_yaml).unwrap();
         let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
         assert!(
-            !mixin_map.contains_key(&Value::String("proxy-providers".to_string())),
+            !mixin_map.contains_key(Value::String("proxy-providers".to_string())),
             "runtime normalization should still extract legacy provider blocks"
         );
 

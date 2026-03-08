@@ -4,6 +4,10 @@ import yaml from "js-yaml";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
+import {
+	type AdminIpUsageWindow,
+	fetchAdminUserIpUsage,
+} from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
 import {
 	fetchAdminUserAccess,
@@ -33,6 +37,7 @@ import {
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
+import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -205,7 +210,10 @@ export function UserDetailsPage() {
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
 
-	const [tab, setTab] = useState<"user" | "access" | "quotaStatus">("user");
+	const [tab, setTab] = useState<
+		"user" | "access" | "quotaStatus" | "usageDetails"
+	>("user");
+	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [displayName, setDisplayName] = useState("");
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -288,6 +296,13 @@ export function UserDetailsPage() {
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
 
+	const ipUsageQuery = useQuery({
+		queryKey: ["adminUserIpUsage", adminToken, userId, ipUsageWindow],
+		enabled: adminToken.length > 0 && tab === "usageDetails",
+		queryFn: ({ signal }) =>
+			fetchAdminUserIpUsage(adminToken, userId, ipUsageWindow, signal),
+	});
+
 	const user = userQuery.data;
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
@@ -300,6 +315,11 @@ export function UserDetailsPage() {
 		url.searchParams.set("format", subFormat);
 		return url.toString();
 	}, [subFormat, subscriptionToken]);
+
+	useEffect(() => {
+		if (!userId) return;
+		setIpUsageWindow("24h");
+	}, [userId]);
 
 	useEffect(() => {
 		if (!user) return;
@@ -811,7 +831,7 @@ export function UserDetailsPage() {
 		<div className="space-y-6">
 			<PageHeader
 				title={user.display_name}
-				description="Manage profile, access, and quota status"
+				description="Manage profile, access, quota status, and usage details"
 				actions={
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" onClick={() => setResetTokenOpen(true)}>
@@ -851,6 +871,13 @@ export function UserDetailsPage() {
 					onClick={() => setTab("quotaStatus")}
 				>
 					Quota status
+				</button>
+				<button
+					type="button"
+					className={`tab ${tab === "usageDetails" ? "tab-active" : ""}`}
+					onClick={() => setTab("usageDetails")}
+				>
+					Usage details
 				</button>
 			</div>
 
@@ -1143,6 +1170,58 @@ export function UserDetailsPage() {
 								)
 							}
 						/>
+					) : null}
+				</div>
+			) : null}
+
+			{tab === "usageDetails" ? (
+				<div className="space-y-4">
+					{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
+						<PageState
+							variant="loading"
+							title="Loading usage details"
+							description="Fetching minute-level inbound IP usage grouped by node."
+						/>
+					) : null}
+					{ipUsageQuery.isError && !ipUsageQuery.data ? (
+						<PageState
+							variant="error"
+							title="Failed to load usage details"
+							description={formatError(ipUsageQuery.error)}
+						/>
+					) : null}
+					{ipUsageQuery.data?.partial ? (
+						<div className="alert alert-warning py-2 text-sm">
+							<div className="space-y-1">
+								<div>Usage details are partial.</div>
+								<div className="font-mono text-xs">
+									Unreachable nodes:{" "}
+									{ipUsageQuery.data.unreachable_nodes.join(", ")}
+								</div>
+							</div>
+						</div>
+					) : null}
+					{ipUsageQuery.data ? (
+						ipUsageQuery.data.groups.length > 0 ? (
+							ipUsageQuery.data.groups.map((group) => (
+								<IpUsageView
+									key={group.node.node_id}
+									title={`Usage details · ${group.node.node_name}`}
+									description={`${group.node.node_id} · ${group.node.access_host || group.node.api_base_url || "local node"}`}
+									window={ipUsageWindow}
+									onWindowChange={setIpUsageWindow}
+									report={group}
+									isFetching={ipUsageQuery.isFetching}
+									emptyTitle="No inbound IP activity for this node"
+								/>
+							))
+						) : (
+							<PageState
+								variant="empty"
+								title="No usage groups"
+								description="This user has no active node memberships to aggregate inbound IP usage from."
+							/>
+						)
 					) : null}
 				</div>
 			) : null}
