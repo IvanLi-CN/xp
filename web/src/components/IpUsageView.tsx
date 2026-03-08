@@ -1,4 +1,10 @@
-import { useId } from "react";
+import type { CustomSeriesRenderItem, EChartsOption } from "echarts";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import { CustomChart, LineChart } from "echarts/charts";
+import { GridComponent, TooltipComponent } from "echarts/components";
+import * as echarts from "echarts/core";
+import { SVGRenderer } from "echarts/renderers";
+import { useMemo } from "react";
 
 import type {
 	AdminIpUsageListEntry,
@@ -9,7 +15,22 @@ import type {
 	AdminUserIpUsageNodeGroup,
 } from "../api/adminIpUsage";
 
-const CHART_HEIGHT = 220;
+const SVG_RENDERER = { renderer: "svg" } as const;
+const AREA_CHART_HEIGHT = 224;
+
+const CHART_GRID_COLOR = "rgba(148, 163, 184, 0.14)";
+const CHART_AXIS_COLOR = "rgba(148, 163, 184, 0.55)";
+const CHART_LINE_COLOR = "oklch(var(--p))";
+const LANE_FILL_COLOR = "rgba(56, 189, 248, 0.30)";
+const LANE_BORDER_COLOR = "rgba(125, 211, 252, 0.92)";
+
+echarts.use([
+	GridComponent,
+	TooltipComponent,
+	LineChart,
+	CustomChart,
+	SVGRenderer,
+]);
 
 type SharedIpUsageReport = Pick<
 	AdminNodeIpUsageResponse,
@@ -31,6 +52,25 @@ type IpUsageViewProps = {
 	emptyTitle?: string;
 };
 
+type TimelineDatum = {
+	endMinute: string;
+	endpointTag: string;
+	ip: string;
+	laneMinutes: number;
+	startMinute: string;
+	value: [laneIndex: number, startMs: number, endMsExclusive: number];
+};
+
+function shouldRenderECharts(): boolean {
+	if (typeof navigator === "undefined") return true;
+	return !navigator.userAgent.toLowerCase().includes("jsdom");
+}
+
+function safeTimestamp(value: string, fallback = 0): number {
+	const timestamp = new Date(value).getTime();
+	return Number.isNaN(timestamp) ? fallback : timestamp;
+}
+
 function formatDateTime(value: string): string {
 	const dt = new Date(value);
 	if (Number.isNaN(dt.getTime())) return value;
@@ -48,20 +88,19 @@ function formatShortTime(value: string): string {
 	});
 }
 
-function buildAreaPath(
-	points: Array<[number, number]>,
-	height: number,
-): string {
-	if (points.length === 0) return "";
-	const line = points
-		.map(
-			([x, y], index) =>
-				`${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`,
-		)
-		.join(" ");
-	const firstX = points[0]?.[0] ?? 0;
-	const lastX = points[points.length - 1]?.[0] ?? 0;
-	return `${line} L${lastX.toFixed(2)},${height.toFixed(2)} L${firstX.toFixed(2)},${height.toFixed(2)} Z`;
+function formatAxisTime(value: number, window: AdminIpUsageWindow): string {
+	const dt = new Date(value);
+	if (Number.isNaN(dt.getTime())) return "";
+	if (window === "24h") {
+		return dt.toLocaleTimeString([], {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+	}
+	return dt.toLocaleString([], {
+		month: "short",
+		day: "numeric",
+	});
 }
 
 function isReportEmpty(report: SharedIpUsageReport): boolean {
@@ -95,29 +134,150 @@ function WindowSwitch({
 	);
 }
 
-function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
-	const chartId = useId().replace(/:/g, "");
-	const gradientId = `${chartId}-gradient`;
-	const titleId = `${chartId}-title`;
-	const series = report.unique_ip_series;
-	const maxCount = Math.max(1, ...series.map((point) => point.count));
-	const width = Math.max(1, series.length - 1);
-	const points = series.map((point, index) => {
-		const x = width === 0 ? 0 : (index / width) * 100;
-		const y =
-			CHART_HEIGHT - (point.count / maxCount) * (CHART_HEIGHT - 20) - 10;
-		return [x, y] as [number, number];
-	});
-	const areaPath = buildAreaPath(points, CHART_HEIGHT);
-	const linePath = points
-		.map(
-			([x, y], index) =>
-				`${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`,
-		)
-		.join(" ");
-	const ticks = [0, Math.ceil(maxCount / 2), maxCount].filter(
-		(value, index, array) => array.indexOf(value) === index,
+function ChartSurface({
+	ariaLabel,
+	height,
+	option,
+}: {
+	ariaLabel: string;
+	height: number;
+	option: EChartsOption;
+}) {
+	if (!shouldRenderECharts()) {
+		return (
+			<div
+				role="img"
+				aria-label={ariaLabel}
+				className="w-full rounded-xl border border-base-300 bg-base-100/80"
+				style={{ height }}
+			/>
+		);
+	}
+
+	return (
+		<ReactEChartsCore
+			echarts={echarts}
+			option={option}
+			notMerge
+			lazyUpdate
+			autoResize
+			opts={SVG_RENDERER}
+			style={{ height, width: "100%" }}
+		/>
 	);
+}
+
+function UniqueIpAreaChart({
+	report,
+	window,
+}: {
+	report: SharedIpUsageReport;
+	window: AdminIpUsageWindow;
+}) {
+	const maxCount = Math.max(
+		1,
+		...report.unique_ip_series.map((point) => point.count),
+	);
+	const windowStartMs = safeTimestamp(report.window_start);
+	const windowEndMs = safeTimestamp(
+		report.window_end,
+		report.unique_ip_series.at(-1)
+			? safeTimestamp(
+					report.unique_ip_series.at(-1)?.minute ?? report.window_end,
+				)
+			: windowStartMs,
+	);
+
+	const option = useMemo(() => {
+		const data = report.unique_ip_series.map((point) => [
+			safeTimestamp(point.minute),
+			point.count,
+		]);
+		return {
+			animation: false,
+			grid: {
+				bottom: 28,
+				left: 42,
+				right: 12,
+				top: 14,
+			},
+			tooltip: {
+				trigger: "axis",
+				axisPointer: {
+					lineStyle: {
+						color: "rgba(148, 163, 184, 0.35)",
+						type: "dashed",
+					},
+					type: "line",
+				},
+				formatter: (params: unknown) => {
+					const point = Array.isArray(params) ? params[0] : params;
+					if (
+						typeof point !== "object" ||
+						point === null ||
+						!("value" in point) ||
+						!Array.isArray(point.value)
+					)
+						return "";
+					return [
+						formatDateTime(new Date(Number(point.value[0])).toISOString()),
+						`Unique IPs: ${point.value[1]}`,
+					].join("<br/>");
+				},
+			},
+			xAxis: {
+				axisLabel: {
+					color: CHART_AXIS_COLOR,
+					hideOverlap: true,
+					formatter: (value: number) => formatAxisTime(value, window),
+				},
+				axisLine: {
+					lineStyle: { color: CHART_GRID_COLOR },
+				},
+				axisTick: { show: false },
+				boundaryGap: false,
+				max: windowEndMs,
+				min: windowStartMs,
+				splitLine: { show: false },
+				type: "time",
+			},
+			yAxis: {
+				axisLabel: {
+					color: CHART_AXIS_COLOR,
+				},
+				axisLine: { show: false },
+				axisTick: { show: false },
+				max: maxCount,
+				min: 0,
+				minInterval: 1,
+				splitLine: {
+					lineStyle: { color: CHART_GRID_COLOR },
+				},
+				splitNumber: 3,
+				type: "value",
+			},
+			series: [
+				{
+					areaStyle: {
+						color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+							{ offset: 0, color: "oklch(var(--p) / 0.42)" },
+							{ offset: 1, color: "oklch(var(--p) / 0.06)" },
+						]),
+					},
+					data,
+					itemStyle: { color: CHART_LINE_COLOR },
+					lineStyle: {
+						color: CHART_LINE_COLOR,
+						width: 2,
+					},
+					showSymbol: false,
+					smooth: 0.22,
+					symbol: "none",
+					type: "line",
+				},
+			],
+		} as unknown as EChartsOption;
+	}, [maxCount, report.unique_ip_series, window, windowEndMs, windowStartMs]);
 
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
@@ -130,66 +290,12 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 				</div>
 				<div className="badge badge-outline">max {maxCount}</div>
 			</div>
-			<div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary/8 via-base-100 to-secondary/10">
-				<svg
-					viewBox={`0 0 100 ${CHART_HEIGHT}`}
-					preserveAspectRatio="none"
-					className="h-56 w-full"
-					role="img"
-					aria-labelledby={titleId}
-				>
-					<title id={titleId}>Unique IPs per minute</title>
-					{ticks.map((tick) => {
-						const y =
-							CHART_HEIGHT - (tick / maxCount) * (CHART_HEIGHT - 20) - 10;
-						return (
-							<g key={tick}>
-								<line
-									x1="0"
-									y1={y}
-									x2="100"
-									y2={y}
-									stroke="currentColor"
-									strokeOpacity="0.12"
-									vectorEffect="non-scaling-stroke"
-								/>
-								<text
-									x="1"
-									y={Math.max(10, y - 2)}
-									fontSize="3.2"
-									fill="currentColor"
-									fillOpacity="0.65"
-								>
-									{tick}
-								</text>
-							</g>
-						);
-					})}
-					<path d={areaPath} fill={`url(#${gradientId})`} opacity="0.9" />
-					<path
-						d={linePath}
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="1.6"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						vectorEffect="non-scaling-stroke"
-					/>
-					<defs>
-						<linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-							<stop
-								offset="0%"
-								stopColor="oklch(var(--p))"
-								stopOpacity="0.65"
-							/>
-							<stop
-								offset="100%"
-								stopColor="oklch(var(--p))"
-								stopOpacity="0.08"
-							/>
-						</linearGradient>
-					</defs>
-				</svg>
+			<div className="rounded-xl border border-base-300 bg-base-100/80 p-1">
+				<ChartSurface
+					ariaLabel="Unique IPs per minute"
+					height={AREA_CHART_HEIGHT}
+					option={option}
+				/>
 			</div>
 			<div className="mt-3 flex items-center justify-between text-xs opacity-70">
 				<span>{formatShortTime(report.window_start)}</span>
@@ -199,72 +305,160 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 	);
 }
 
-function formatTimelineTickLabel(
-	value: Date,
-	window: AdminIpUsageWindow,
-): string {
-	if (window === "24h") {
-		return value.toLocaleTimeString([], {
-			hour: "2-digit",
-			minute: "2-digit",
-		});
-	}
-	return value.toLocaleString([], {
-		month: "short",
-		day: "numeric",
-		hour: "2-digit",
-	});
-}
-
-type TimelineTick = {
-	offsetMinutes: number;
-	left: number;
-	label: string;
-};
-
-function buildTimelineTicks(
-	windowStart: string,
-	window: AdminIpUsageWindow,
-	totalMinutes: number,
-): TimelineTick[] {
-	const baseline = new Date(windowStart);
-	const safeBaseline = Number.isNaN(baseline.getTime())
-		? new Date(0)
-		: baseline;
-	const stepMinutes = window === "24h" ? 4 * 60 : 24 * 60;
-	const offsets = new Set<number>([0, totalMinutes]);
-	for (let offset = 0; offset <= totalMinutes; offset += stepMinutes) {
-		offsets.add(offset);
-	}
-	return Array.from(offsets)
-		.sort((left, right) => left - right)
-		.map((offsetMinutes) => {
-			const tickValue = new Date(
-				safeBaseline.getTime() + offsetMinutes * 60_000,
-			);
-			return {
-				offsetMinutes,
-				left: (offsetMinutes / totalMinutes) * 100,
-				label: formatTimelineTickLabel(tickValue, window),
-			};
-		});
-}
-
 function TimelineChart({
 	lanes,
 	window,
 	windowStart,
+	windowEnd,
 }: {
 	lanes: AdminIpUsageTimelineLane[];
 	window: AdminIpUsageWindow;
+	windowEnd: string;
 	windowStart: string;
 }) {
-	const totalMinutes = window === "24h" ? 24 * 60 : 7 * 24 * 60;
-	const baseline = new Date(windowStart);
-	const safeBaseline = Number.isNaN(baseline.getTime())
-		? new Date(0)
-		: baseline;
-	const ticks = buildTimelineTicks(windowStart, window, totalMinutes);
+	const timelineData = useMemo<TimelineDatum[]>(() => {
+		return lanes.flatMap((lane, laneIndex) =>
+			lane.segments.map((segment) => ({
+				endMinute: segment.end_minute,
+				endpointTag: lane.endpoint_tag,
+				ip: lane.ip,
+				laneMinutes: lane.minutes,
+				startMinute: segment.start_minute,
+				value: [
+					laneIndex,
+					safeTimestamp(segment.start_minute),
+					safeTimestamp(segment.end_minute) + 60_000,
+				],
+			})),
+		);
+	}, [lanes]);
+
+	const windowStartMs = safeTimestamp(windowStart);
+	const windowEndMs = safeTimestamp(windowEnd, windowStartMs) + 60_000;
+	const chartHeight = Math.max(180, lanes.length * 22 + 54);
+
+	const option = useMemo(() => {
+		const renderLane: CustomSeriesRenderItem = (params, api) => {
+			const laneIndex = api.value(0);
+			const start = api.coord([api.value(1), laneIndex]);
+			const end = api.coord([api.value(2), laneIndex]);
+			const bandSize =
+				typeof api.size === "function" ? api.size([0, 1]) : [0, 12];
+			const categoryHeight = Array.isArray(bandSize)
+				? (bandSize[1] ?? 12)
+				: bandSize;
+			const barHeight = Math.max(categoryHeight * 0.52, 6);
+			const coordSys = params.coordSys as unknown as {
+				height: number;
+				width: number;
+				x: number;
+				y: number;
+			};
+			const rectShape = echarts.graphic.clipRectByRect(
+				{
+					height: barHeight,
+					width: Math.max(end[0] - start[0], 3),
+					x: start[0],
+					y: start[1] - barHeight / 2,
+				},
+				{
+					height: coordSys.height,
+					width: coordSys.width,
+					x: coordSys.x,
+					y: coordSys.y,
+				},
+			);
+
+			if (!rectShape) return null;
+			return {
+				type: "rect",
+				shape: { ...rectShape, r: 4 },
+				style: api.style({
+					fill: LANE_FILL_COLOR,
+					shadowBlur: 8,
+					shadowColor: "rgba(15, 23, 42, 0.18)",
+					stroke: LANE_BORDER_COLOR,
+					lineWidth: 1,
+				}),
+			};
+		};
+
+		return {
+			animation: false,
+			grid: {
+				bottom: 16,
+				left: 110,
+				right: 18,
+				top: 28,
+			},
+			tooltip: {
+				formatter: (param: unknown) => {
+					const datum =
+						typeof param === "object" && param !== null && "data" in param
+							? (param.data as TimelineDatum | undefined)
+							: undefined;
+					if (!datum) return "";
+					return [
+						`<strong>${datum.ip}</strong>`,
+						datum.endpointTag,
+						`${formatDateTime(datum.startMinute)} → ${formatDateTime(datum.endMinute)}`,
+						`Lane total: ${datum.laneMinutes} min`,
+					].join("<br/>");
+				},
+				trigger: "item",
+			},
+			xAxis: {
+				axisLabel: {
+					color: CHART_AXIS_COLOR,
+					hideOverlap: true,
+					fontSize: 10,
+					formatter: (value: number) => formatAxisTime(value, window),
+				},
+				axisLine: {
+					lineStyle: { color: CHART_GRID_COLOR },
+				},
+				axisTick: { show: false },
+				max: windowEndMs,
+				min: windowStartMs,
+				position: "top",
+				splitLine: {
+					lineStyle: { color: CHART_GRID_COLOR, type: "dashed" },
+					show: true,
+				},
+				splitNumber: window === "24h" ? 6 : 7,
+				type: "time",
+			},
+			yAxis: {
+				axisLabel: {
+					color: "rgba(226, 232, 240, 0.88)",
+					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+					fontSize: 11,
+					formatter: (_value: string, index: number) => lanes[index]?.ip ?? "",
+					margin: 14,
+				},
+				axisLine: { show: false },
+				axisTick: { show: false },
+				data: lanes.map((lane) => lane.lane_key),
+				inverse: true,
+				splitLine: {
+					lineStyle: { color: "rgba(148, 163, 184, 0.10)" },
+					show: true,
+				},
+				type: "category",
+			},
+			series: [
+				{
+					data: timelineData,
+					encode: {
+						x: [1, 2],
+						y: 0,
+					},
+					renderItem: renderLane,
+					type: "custom",
+				},
+			],
+		} as unknown as EChartsOption;
+	}, [lanes, timelineData, window, windowEndMs, windowStartMs]);
 
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
@@ -272,8 +466,8 @@ function TimelineChart({
 				<div>
 					<p className="text-sm font-semibold">IP occupancy lanes</p>
 					<p className="text-xs opacity-70">
-						Swimlane chart for the top 20 endpoint/IP rows merged into
-						continuous minute spans.
+						Rendered with Apache ECharts as a swimlane timeline for the top 20
+						endpoint/IP rows.
 					</p>
 				</div>
 				<div className="badge badge-outline">{lanes.length} lanes</div>
@@ -283,113 +477,12 @@ function TimelineChart({
 					No occupancy lanes in this window.
 				</div>
 			) : (
-				<div className="overflow-x-auto">
-					<div className="min-w-[44rem] space-y-1">
-						<div
-							className="grid items-end gap-2"
-							style={{ gridTemplateColumns: "9rem minmax(0, 1fr)" }}
-						>
-							<div className="px-0.5 text-[10px] font-medium uppercase tracking-[0.2em] opacity-40">
-								Endpoint / IP
-							</div>
-							<div className="relative h-5.5 rounded-t-lg border border-b-0 border-base-300 bg-base-100/80">
-								<div className="absolute inset-y-0 left-1.5 right-1.5 pt-0.5">
-									{ticks.map((tick, index) => {
-										const labelClassName =
-											index === 0
-												? "translate-x-0"
-												: index === ticks.length - 1
-													? "-translate-x-full"
-													: "-translate-x-1/2";
-										return (
-											<div
-												key={`${tick.offsetMinutes}-${tick.label}`}
-												className="absolute inset-y-0"
-												style={{ left: `${tick.left}%` }}
-											>
-												<div className="absolute bottom-0 top-2.5 w-px bg-base-300/70" />
-												<span
-													className={`absolute left-0 top-0 whitespace-nowrap text-[8px] opacity-45 ${labelClassName}`}
-												>
-													{tick.label}
-												</span>
-											</div>
-										);
-									})}
-								</div>
-							</div>
-						</div>
-						{lanes.map((lane) => (
-							<div
-								key={lane.lane_key}
-								className="grid gap-1.5"
-								style={{ gridTemplateColumns: "9rem minmax(0, 1fr)" }}
-							>
-								<div
-									className="min-w-0 self-center px-0.5"
-									title={`${lane.ip} · ${lane.endpoint_tag} · ${lane.minutes} min`}
-								>
-									<p className="truncate font-mono text-[10px] font-medium leading-none">
-										{lane.ip}
-									</p>
-								</div>
-								<div className="relative h-6 overflow-hidden rounded-lg border border-base-300 bg-base-100/80">
-									<div className="absolute inset-y-0 left-1.5 right-1.5">
-										<div className="absolute inset-0 rounded-lg bg-base-200/35" />
-										{ticks.map((tick) => (
-											<div
-												key={`${lane.lane_key}-tick-${tick.offsetMinutes}`}
-												className="absolute inset-y-0 w-px bg-base-300/65"
-												style={{ left: `${tick.left}%` }}
-											/>
-										))}
-										{lane.segments.map((segment, index) => {
-											const start = new Date(segment.start_minute);
-											const end = new Date(segment.end_minute);
-											if (
-												Number.isNaN(start.getTime()) ||
-												Number.isNaN(end.getTime())
-											) {
-												return null;
-											}
-											const offsetMinutes = Math.max(
-												0,
-												Math.floor(
-													(start.getTime() - safeBaseline.getTime()) / 60000,
-												),
-											);
-											const segmentMinutes = Math.max(
-												1,
-												Math.floor((end.getTime() - start.getTime()) / 60000) +
-													1,
-											);
-											const left = (offsetMinutes / totalMinutes) * 100;
-											const width = Math.max(
-												(segmentMinutes / totalMinutes) * 100,
-												0.45,
-											);
-											return (
-												<div
-													key={`${lane.lane_key}-${segment.start_minute}-${index}`}
-													className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm shadow-[0_1px_4px_rgba(0,0,0,0.1)]"
-													style={{
-														left: `${left}%`,
-														width: `calc(${width}% - 0.1rem)`,
-														border: "1px solid rgba(125, 211, 252, 0.72)",
-														background:
-															"linear-gradient(90deg, rgba(56, 189, 248, 0.34) 0%, rgba(96, 165, 250, 0.18) 100%)",
-													}}
-													title={`${formatDateTime(segment.start_minute)} → ${formatDateTime(segment.end_minute)}`}
-												>
-													<div className="absolute inset-y-0.5 left-0.5 w-0.5 rounded-full bg-white/24" />
-												</div>
-											);
-										})}
-									</div>
-								</div>
-							</div>
-						))}
-					</div>
+				<div className="rounded-xl border border-base-300 bg-base-100/80 p-1">
+					<ChartSurface
+						ariaLabel="IP occupancy lanes"
+						height={chartHeight}
+						option={option}
+					/>
 				</div>
 			)}
 		</div>
@@ -522,10 +615,11 @@ export function IpUsageView({
 					</div>
 				) : (
 					<div className="space-y-4">
-						<UniqueIpAreaChart report={report} />
+						<UniqueIpAreaChart report={report} window={window} />
 						<TimelineChart
 							lanes={report.timeline}
 							window={window}
+							windowEnd={report.window_end}
 							windowStart={report.window_start}
 						/>
 						<IpListTable ips={report.ips} />
