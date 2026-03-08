@@ -133,6 +133,7 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 			<div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary/8 via-base-100 to-secondary/10">
 				<svg
 					viewBox={`0 0 100 ${CHART_HEIGHT}`}
+					preserveAspectRatio="none"
 					className="h-56 w-full"
 					role="img"
 					aria-labelledby={titleId}
@@ -150,6 +151,7 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 									y2={y}
 									stroke="currentColor"
 									strokeOpacity="0.12"
+									vectorEffect="non-scaling-stroke"
 								/>
 								<text
 									x="1"
@@ -171,6 +173,7 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 						strokeWidth="1.6"
 						strokeLinecap="round"
 						strokeLinejoin="round"
+						vectorEffect="non-scaling-stroke"
 					/>
 					<defs>
 						<linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
@@ -196,6 +199,57 @@ function UniqueIpAreaChart({ report }: { report: SharedIpUsageReport }) {
 	);
 }
 
+function formatTimelineTickLabel(
+	value: Date,
+	window: AdminIpUsageWindow,
+): string {
+	if (window === "24h") {
+		return value.toLocaleTimeString([], {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+	}
+	return value.toLocaleString([], {
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+	});
+}
+
+type TimelineTick = {
+	offsetMinutes: number;
+	left: number;
+	label: string;
+};
+
+function buildTimelineTicks(
+	windowStart: string,
+	window: AdminIpUsageWindow,
+	totalMinutes: number,
+): TimelineTick[] {
+	const baseline = new Date(windowStart);
+	const safeBaseline = Number.isNaN(baseline.getTime())
+		? new Date(0)
+		: baseline;
+	const stepMinutes = window === "24h" ? 4 * 60 : 24 * 60;
+	const offsets = new Set<number>([0, totalMinutes]);
+	for (let offset = 0; offset <= totalMinutes; offset += stepMinutes) {
+		offsets.add(offset);
+	}
+	return Array.from(offsets)
+		.sort((left, right) => left - right)
+		.map((offsetMinutes) => {
+			const tickValue = new Date(
+				safeBaseline.getTime() + offsetMinutes * 60_000,
+			);
+			return {
+				offsetMinutes,
+				left: (offsetMinutes / totalMinutes) * 100,
+				label: formatTimelineTickLabel(tickValue, window),
+			};
+		});
+}
+
 function TimelineChart({
 	lanes,
 	window,
@@ -207,6 +261,10 @@ function TimelineChart({
 }) {
 	const totalMinutes = window === "24h" ? 24 * 60 : 7 * 24 * 60;
 	const baseline = new Date(windowStart);
+	const safeBaseline = Number.isNaN(baseline.getTime())
+		? new Date(0)
+		: baseline;
+	const ticks = buildTimelineTicks(windowStart, window, totalMinutes);
 
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
@@ -214,7 +272,8 @@ function TimelineChart({
 				<div>
 					<p className="text-sm font-semibold">IP occupancy lanes</p>
 					<p className="text-xs opacity-70">
-						Top 20 endpoint/IP rows merged into continuous minute spans.
+						Swimlane chart for the top 20 endpoint/IP rows merged into
+						continuous minute spans.
 					</p>
 				</div>
 				<div className="badge badge-outline">{lanes.length} lanes</div>
@@ -224,59 +283,113 @@ function TimelineChart({
 					No occupancy lanes in this window.
 				</div>
 			) : (
-				<div className="space-y-3">
-					{lanes.map((lane) => (
+				<div className="overflow-x-auto">
+					<div className="min-w-[52rem] space-y-2">
 						<div
-							key={lane.lane_key}
-							className="grid gap-2 md:grid-cols-[18rem,minmax(0,1fr)] md:items-center"
+							className="grid items-end gap-3"
+							style={{ gridTemplateColumns: "16rem minmax(0, 1fr)" }}
 						>
-							<div className="min-w-0">
-								<p className="truncate text-sm font-medium">{lane.ip}</p>
-								<p className="truncate text-xs opacity-70">
-									{lane.endpoint_tag} · {lane.minutes} min
-								</p>
+							<div className="px-1 text-[11px] font-medium uppercase tracking-[0.24em] opacity-45">
+								Endpoint / IP
 							</div>
-							<div className="relative h-11 rounded-xl border border-base-300 bg-base-100/80">
-								<div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-base-300/80" />
-								{lane.segments.map((segment, index) => {
-									const start = new Date(segment.start_minute);
-									const end = new Date(segment.end_minute);
-									if (
-										Number.isNaN(start.getTime()) ||
-										Number.isNaN(end.getTime())
-									) {
-										return null;
-									}
-									const safeBaseline = !Number.isNaN(baseline.getTime())
-										? baseline
-										: start;
-									const offsetMinutes = Math.max(
-										0,
-										Math.floor(
-											(start.getTime() - safeBaseline.getTime()) / 60000,
-										),
-									);
-									const segmentMinutes = Math.max(
-										1,
-										Math.floor((end.getTime() - start.getTime()) / 60000) + 1,
-									);
-									const left = (offsetMinutes / totalMinutes) * 100;
-									const width = Math.max(
-										(segmentMinutes / totalMinutes) * 100,
-										0.35,
-									);
-									return (
-										<div
-											key={`${lane.lane_key}-${segment.start_minute}-${index}`}
-											className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full bg-gradient-to-r from-primary to-secondary shadow-sm"
-											style={{ left: `${left}%`, width: `${width}%` }}
-											title={`${formatDateTime(segment.start_minute)} → ${formatDateTime(segment.end_minute)}`}
-										/>
-									);
-								})}
+							<div className="relative h-8 rounded-t-xl border border-b-0 border-base-300 bg-base-100/80">
+								<div className="absolute inset-y-0 left-3 right-3 pt-1">
+									{ticks.map((tick, index) => {
+										const labelClassName =
+											index === 0
+												? "translate-x-0"
+												: index === ticks.length - 1
+													? "-translate-x-full"
+													: "-translate-x-1/2";
+										return (
+											<div
+												key={`${tick.offsetMinutes}-${tick.label}`}
+												className="absolute inset-y-0"
+												style={{ left: `${tick.left}%` }}
+											>
+												<div className="absolute bottom-0 top-4 w-px bg-base-300/85" />
+												<span
+													className={`absolute left-0 top-0 whitespace-nowrap text-[11px] opacity-60 ${labelClassName}`}
+												>
+													{tick.label}
+												</span>
+											</div>
+										);
+									})}
+								</div>
 							</div>
 						</div>
-					))}
+						{lanes.map((lane) => (
+							<div
+								key={lane.lane_key}
+								className="grid gap-3"
+								style={{ gridTemplateColumns: "16rem minmax(0, 1fr)" }}
+							>
+								<div className="min-w-0 self-center px-1 py-1.5">
+									<p className="truncate font-mono text-[13px] font-medium">
+										{lane.ip}
+									</p>
+									<p className="truncate text-xs opacity-70">
+										{lane.endpoint_tag} · {lane.minutes} min
+									</p>
+								</div>
+								<div className="relative h-12 overflow-hidden rounded-xl border border-base-300 bg-base-100/80">
+									<div className="absolute inset-y-0 left-3 right-3">
+										<div className="absolute inset-0 rounded-lg bg-base-200/35" />
+										{ticks.map((tick) => (
+											<div
+												key={`${lane.lane_key}-tick-${tick.offsetMinutes}`}
+												className="absolute inset-y-0 w-px bg-base-300/65"
+												style={{ left: `${tick.left}%` }}
+											/>
+										))}
+										{lane.segments.map((segment, index) => {
+											const start = new Date(segment.start_minute);
+											const end = new Date(segment.end_minute);
+											if (
+												Number.isNaN(start.getTime()) ||
+												Number.isNaN(end.getTime())
+											) {
+												return null;
+											}
+											const offsetMinutes = Math.max(
+												0,
+												Math.floor(
+													(start.getTime() - safeBaseline.getTime()) / 60000,
+												),
+											);
+											const segmentMinutes = Math.max(
+												1,
+												Math.floor((end.getTime() - start.getTime()) / 60000) +
+													1,
+											);
+											const left = (offsetMinutes / totalMinutes) * 100;
+											const width = Math.max(
+												(segmentMinutes / totalMinutes) * 100,
+												0.45,
+											);
+											return (
+												<div
+													key={`${lane.lane_key}-${segment.start_minute}-${index}`}
+													className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md shadow-[0_6px_18px_rgba(0,0,0,0.16)]"
+													style={{
+														left: `${left}%`,
+														width: `calc(${width}% - 0.1rem)`,
+														border: "1px solid rgba(125, 211, 252, 0.72)",
+														background:
+															"linear-gradient(90deg, rgba(56, 189, 248, 0.34) 0%, rgba(96, 165, 250, 0.18) 100%)",
+													}}
+													title={`${formatDateTime(segment.start_minute)} → ${formatDateTime(segment.end_minute)}`}
+												>
+													<div className="absolute inset-y-1 left-1 w-1 rounded-full bg-white/24" />
+												</div>
+											);
+										})}
+									</div>
+								</div>
+							</div>
+						))}
+					</div>
 				</div>
 			)}
 		</div>

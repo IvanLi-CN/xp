@@ -42,7 +42,6 @@ export type WindowedUserIpUsageStories = Record<
 >;
 
 const ONE_MINUTE_MS = 60_000;
-const DAY_MINUTES = 24 * 60;
 
 function isoMinuteFromOffset(
 	startMinuteIso: string,
@@ -134,24 +133,6 @@ function buildReportFromLanes(
 		}),
 		ips,
 	};
-}
-
-function repeatDailySegments(
-	dailySegments: SegmentRange[],
-	days: number,
-	jitterByDay = 0,
-): SegmentRange[] {
-	const ranges: SegmentRange[] = [];
-	for (let day = 0; day < days; day += 1) {
-		const shift = day * jitterByDay;
-		for (const [startMinute, endMinute] of dailySegments) {
-			ranges.push([
-				day * DAY_MINUTES + startMinute + shift,
-				day * DAY_MINUTES + endMinute + shift,
-			]);
-		}
-	}
-	return ranges;
 }
 
 function buildNodeLanes24h(node: AdminNode): LaneSeed[] {
@@ -281,16 +262,14 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "203.0.113.7",
 			region: "Japan / Tokyo",
 			operator: "ExampleNet",
-			segments: repeatDailySegments(
-				[
-					[10, 120],
-					[320, 430],
-					[700, 860],
-					[1080, 1210],
-				],
-				7,
-				3,
-			),
+			segments: [
+				[180, 780],
+				[1620, 2340],
+				[3200, 3960],
+				[4800, 5580],
+				[6500, 7200],
+				[8220, 9000],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-a`,
@@ -298,15 +277,13 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "203.0.113.11",
 			region: "Japan / Saitama",
 			operator: "ExampleNet",
-			segments: repeatDailySegments(
-				[
-					[180, 260],
-					[540, 630],
-					[1260, 1380],
-				],
-				7,
-				5,
-			),
+			segments: [
+				[960, 1320],
+				[2880, 3300],
+				[5160, 5640],
+				[7440, 7920],
+				[9240, 9720],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-b`,
@@ -314,15 +291,13 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "198.51.100.22",
 			region: "South Korea / Seoul",
 			operator: "Hanabit",
-			segments: repeatDailySegments(
-				[
-					[90, 160],
-					[450, 570],
-					[840, 930],
-				],
-				7,
-				2,
-			),
+			segments: [
+				[300, 510],
+				[2460, 3000],
+				[4380, 4860],
+				[6600, 7020],
+				[8880, 9360],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-b`,
@@ -330,7 +305,11 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "203.0.113.7",
 			region: "Japan / Tokyo",
 			operator: "ExampleNet",
-			segments: repeatDailySegments([[1180, 1225]], 7, 1),
+			segments: [
+				[2100, 2340],
+				[5700, 5940],
+				[9420, 9660],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-c`,
@@ -338,15 +317,11 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "198.51.100.24",
 			region: "Singapore",
 			operator: "LionLink",
-			segments: repeatDailySegments(
-				[
-					[210, 300],
-					[610, 730],
-					[980, 1040],
-				],
-				7,
-				4,
-			),
+			segments: [
+				[1260, 1860],
+				[3720, 4260],
+				[7080, 7680],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-c`,
@@ -354,15 +329,12 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "192.0.2.33",
 			region: "Hong Kong",
 			operator: "Victoria Mobile",
-			segments: repeatDailySegments(
-				[
-					[0, 45],
-					[360, 420],
-					[900, 1020],
-				],
-				7,
-				0,
-			),
+			segments: [
+				[0, 360],
+				[2040, 2460],
+				[5400, 6000],
+				[8160, 8580],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-d`,
@@ -370,15 +342,12 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "192.0.2.44",
 			region: "United States / California",
 			operator: "West Carrier",
-			segments: repeatDailySegments(
-				[
-					[60, 90],
-					[780, 920],
-					[1320, 1439],
-				],
-				7,
-				6,
-			),
+			segments: [
+				[600, 900],
+				[2880, 3360],
+				[5640, 6240],
+				[8460, 9120],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-d`,
@@ -386,15 +355,11 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "203.0.113.55",
 			region: "Japan / Osaka",
 			operator: "CarrierNet",
-			segments: repeatDailySegments(
-				[
-					[240, 320],
-					[660, 720],
-					[1110, 1180],
-				],
-				7,
-				2,
-			),
+			segments: [
+				[1800, 2340],
+				[4860, 5580],
+				[7860, 8400],
+			],
 		},
 		{
 			endpoint_id: `${node.node_id}-endpoint-e`,
@@ -402,14 +367,12 @@ function buildNodeLanes7d(node: AdminNode): LaneSeed[] {
 			ip: "198.51.100.88",
 			region: "Germany / Frankfurt",
 			operator: "EuroFiber",
-			segments: repeatDailySegments(
-				[
-					[500, 620],
-					[1020, 1130],
-				],
-				7,
-				5,
-			),
+			segments: [
+				[1320, 1440],
+				[4200, 4380],
+				[6960, 7140],
+				[9780, 9960],
+			],
 		},
 	];
 }
@@ -581,10 +544,115 @@ function buildUserLanes(
 
 	if (window === "24h") return lanes24h;
 
-	return lanes24h.map((lane, index) => ({
-		...lane,
-		segments: repeatDailySegments(lane.segments, 7, (index % 3) + 1),
-	}));
+	return isTokyo
+		? [
+				{
+					endpoint_id: `${node.node_id}-endpoint-1`,
+					endpoint_tag: `${prefix}-edge-1`,
+					ip: "203.0.113.7",
+					region: "Japan / Tokyo",
+					operator: "ExampleNet",
+					segments: [
+						[240, 840],
+						[1800, 2460],
+						[4620, 5340],
+						[7560, 8280],
+						[8940, 9660],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-1`,
+					endpoint_tag: `${prefix}-edge-1`,
+					ip: "203.0.113.19",
+					region: "Japan / Yokohama",
+					operator: "MetroLink",
+					segments: [
+						[1140, 1500],
+						[3180, 3720],
+						[6120, 6600],
+						[9300, 9780],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-2`,
+					endpoint_tag: `${prefix}-edge-2`,
+					ip: "198.51.100.44",
+					region: "South Korea / Seoul",
+					operator: "Hanabit",
+					segments: [
+						[600, 900],
+						[2520, 2880],
+						[5340, 5880],
+						[8100, 8460],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-2`,
+					endpoint_tag: `${prefix}-edge-2`,
+					ip: "198.51.100.57",
+					region: "Singapore",
+					operator: "LionLink",
+					segments: [
+						[0, 420],
+						[3720, 4380],
+						[6840, 7500],
+						[9360, 10079],
+					],
+				},
+			]
+		: [
+				{
+					endpoint_id: `${node.node_id}-endpoint-1`,
+					endpoint_tag: `${prefix}-edge-1`,
+					ip: "203.0.113.8",
+					region: "Japan / Osaka",
+					operator: "CarrierNet",
+					segments: [
+						[120, 720],
+						[2040, 2700],
+						[5100, 5760],
+						[8040, 8700],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-1`,
+					endpoint_tag: `${prefix}-edge-1`,
+					ip: "203.0.113.41",
+					region: "Japan / Kobe",
+					operator: "CarrierNet",
+					segments: [
+						[1380, 1740],
+						[4200, 4620],
+						[7080, 7560],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-2`,
+					endpoint_tag: `${prefix}-edge-2`,
+					ip: "192.0.2.81",
+					region: "Hong Kong",
+					operator: "Victoria Mobile",
+					segments: [
+						[780, 1260],
+						[3300, 3780],
+						[6180, 6840],
+						[9060, 9480],
+					],
+				},
+				{
+					endpoint_id: `${node.node_id}-endpoint-2`,
+					endpoint_tag: `${prefix}-edge-2`,
+					ip: "198.51.100.99",
+					region: "United States / California",
+					operator: "West Carrier",
+					segments: [
+						[420, 840],
+						[2520, 3000],
+						[5580, 6060],
+						[8700, 9300],
+					],
+				},
+			];
 }
 
 export function buildDenseUserIpUsageStories(
