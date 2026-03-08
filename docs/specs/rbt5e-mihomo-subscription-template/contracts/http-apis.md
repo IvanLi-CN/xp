@@ -56,11 +56,12 @@ Errors:
 - 当用户已配置 Mihomo profile：
   - 使用 `profile.mixin_yaml` 为静态基底渲染；
   - 系统重建并覆盖 `proxies`、`proxy-providers`；
-  - relay 组 `🛣️ Japan|HongKong|Korea` 的 `use` 自动注入所有 provider 名称；
+  - 单一外层候选组 `🛣️ JP/HK/TW` 的 `use` 自动注入所有 provider 名称，并以日本/香港/台湾 filter 做 `url-test`；
   - 系统覆盖并注入动态相关的 `proxy-groups`：
-    - `🛣️ Japan|HongKong|Korea`
-    - `🌟/🔒/🤯 {Japan|HongKong|Korea}`
+    - `🛣️ JP/HK/TW`
     - `🛬 {base}` 与 `🔒 落地`
+  - SS 接入点只生成 `{base}-ss` 与 `{base}-chain`；`{base}-chain` 的 `dialer-proxy` 固定指向 `🛣️ JP/HK/TW`。
+  - 旧 `-JP/-HK/-KR/-TW` 代理引用与旧地区组名不做兼容映射；最终输出会裁剪悬挂引用。
   - `proxy-providers` 可为空；为空时仍需输出可加载配置。
   - `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
 - 当用户未配置 Mihomo profile：回退到 clash 输出。
