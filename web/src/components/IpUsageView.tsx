@@ -28,6 +28,7 @@ const CHART_AREA_END_FALLBACK = "rgba(34, 211, 238, 0.05)";
 const HIGHLIGHT_IP_BAND_FALLBACK = "rgba(103, 232, 249, 0.10)";
 const HIGHLIGHT_TIME_BAND_FALLBACK = "rgba(251, 191, 36, 0.14)";
 const HIGHLIGHT_TIME_POINT_FALLBACK = "rgb(251, 191, 36)";
+const HIGHLIGHT_TIME_RULE_FALLBACK = "rgba(251, 191, 36, 0.92)";
 const LANE_FILL_FALLBACK = "rgba(56, 189, 248, 0.26)";
 const LANE_BORDER_FALLBACK = "rgba(103, 232, 249, 0.92)";
 const LANE_ACTIVE_FILL_FALLBACK = "rgba(34, 211, 238, 0.44)";
@@ -332,6 +333,36 @@ const renderVerticalBand: CustomSeriesRenderItem = (params, api) => {
 			height: coordSys.height,
 			width: Math.max(end[0] - start[0], 2),
 			x: start[0],
+			y: coordSys.y,
+		},
+		{
+			height: coordSys.height,
+			width: coordSys.width,
+			x: coordSys.x,
+			y: coordSys.y,
+		},
+	);
+	if (!rectShape) return null;
+	return {
+		type: "rect",
+		shape: rectShape,
+		style: api.style(),
+	};
+};
+
+const renderVerticalRule: CustomSeriesRenderItem = (params, api) => {
+	const x = api.coord([api.value(0), 0])[0];
+	const coordSys = params.coordSys as unknown as {
+		height: number;
+		width: number;
+		x: number;
+		y: number;
+	};
+	const rectShape = echarts.graphic.clipRectByRect(
+		{
+			height: coordSys.height,
+			width: 2,
+			x: x - 1,
 			y: coordSys.y,
 		},
 		{
@@ -808,6 +839,10 @@ function TimelineChart({
 				"color-mix(in srgb, var(--color-warning) 14%, transparent)",
 				HIGHLIGHT_TIME_BAND_FALLBACK,
 			),
+			timeRule: resolveCssColor(
+				"color-mix(in srgb, var(--color-warning) 90%, transparent)",
+				HIGHLIGHT_TIME_RULE_FALLBACK,
+			),
 		}),
 		[],
 	);
@@ -822,10 +857,14 @@ function TimelineChart({
 				},
 			]
 		: [];
+	const highlightRule = activeHighlight.timeRange
+		? [{ value: [activeHighlight.timeRange.startMs] as [number] }]
+		: [];
 	const chartRef = useRef<EChartsReactRef | null>(null);
 	const hoveredTooltipRef = useRef<TimelineTooltipTarget | null>(null);
 	const tooltipRafRef = useRef<number | null>(null);
-	const timelineSeriesIndex = highlightBand.length > 0 ? 1 : 0;
+	const timelineSeriesIndex =
+		(highlightBand.length > 0 ? 1 : 0) + (highlightRule.length > 0 ? 1 : 0);
 	const scheduleTimelineTooltip = useCallback(
 		(dataIndex: number) => {
 			if (tooltipRafRef.current !== null) {
@@ -980,6 +1019,18 @@ function TimelineChart({
 				z: 0,
 			});
 		}
+		if (highlightRule.length > 0) {
+			series.push({
+				animation: false,
+				data: highlightRule,
+				itemStyle: { color: palette.timeRule },
+				renderItem: renderVerticalRule,
+				silent: true,
+				tooltip: { show: false },
+				type: "custom",
+				z: 1,
+			});
+		}
 		series.push({
 			data: timelineData,
 			encode: {
@@ -1074,6 +1125,8 @@ function TimelineChart({
 		palette.mutedBorder,
 		palette.mutedFill,
 		palette.timeBand,
+		palette.timeRule,
+		highlightRule,
 		timelineData,
 		window,
 		windowEndMs,
