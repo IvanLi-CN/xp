@@ -1,73 +1,24 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 
-import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
+import type { AdminNode } from "../api/adminNodes";
+import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { IpUsageView } from "./IpUsageView";
 
-const baseReport: Pick<
-	AdminNodeIpUsageResponse,
-	| "window_start"
-	| "window_end"
-	| "warnings"
-	| "unique_ip_series"
-	| "timeline"
-	| "ips"
-> = {
-	window_start: "2026-03-08T00:00:00Z",
-	window_end: "2026-03-08T00:02:00Z",
-	warnings: [],
-	unique_ip_series: [
-		{ minute: "2026-03-08T00:00:00Z", count: 1 },
-		{ minute: "2026-03-08T00:01:00Z", count: 2 },
-		{ minute: "2026-03-08T00:02:00Z", count: 1 },
-	],
-	timeline: [
-		{
-			lane_key: "edge-tokyo::203.0.113.7",
-			endpoint_id: "endpoint-1",
-			endpoint_tag: "edge-tokyo",
-			ip: "203.0.113.7",
-			minutes: 2,
-			segments: [
-				{
-					start_minute: "2026-03-08T00:00:00Z",
-					end_minute: "2026-03-08T00:01:00Z",
-				},
-			],
-		},
-		{
-			lane_key: "edge-osaka::203.0.113.9",
-			endpoint_id: "endpoint-2",
-			endpoint_tag: "edge-osaka",
-			ip: "203.0.113.9",
-			minutes: 1,
-			segments: [
-				{
-					start_minute: "2026-03-08T00:02:00Z",
-					end_minute: "2026-03-08T00:02:00Z",
-				},
-			],
-		},
-	],
-	ips: [
-		{
-			ip: "203.0.113.7",
-			minutes: 2,
-			endpoint_tags: ["edge-tokyo"],
-			region: "Japan / Tokyo",
-			operator: "ExampleNet",
-			last_seen_at: "2026-03-08T00:01:00Z",
-		},
-		{
-			ip: "203.0.113.9",
-			minutes: 1,
-			endpoint_tags: ["edge-osaka"],
-			region: "Japan / Osaka",
-			operator: "CarrierNet",
-			last_seen_at: "2026-03-08T00:02:00Z",
-		},
-	],
+const demoNode: AdminNode = {
+	node_id: "demo-node-1",
+	node_name: "tokyo-1",
+	access_host: "tokyo-1.example.com",
+	api_base_url: "https://tokyo-1.example.com",
+	quota_limit_bytes: 0,
+	quota_reset: {
+		policy: "monthly",
+		day_of_month: 1,
+		tz_offset_minutes: null,
+	},
 };
+
+const reports = buildDenseNodeIpUsageStories(demoNode);
 
 const meta = {
 	title: "Components/IpUsageView",
@@ -78,7 +29,7 @@ const meta = {
 		description:
 			"Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows.",
 		window: "24h",
-		report: baseReport,
+		report: reports["24h"],
 	},
 	render: function Render(args) {
 		const [window, setWindow] = useState(args.window);
@@ -91,15 +42,29 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-	args: {},
+	args: {
+		report: reports["24h"],
+		window: "24h",
+	},
+};
+
+export const Dense7d: Story = {
+	args: {
+		report: reports["7d"],
+		window: "7d",
+	},
 };
 
 export const Empty: Story = {
 	args: {
 		emptyTitle: "No inbound IP activity",
 		report: {
-			...baseReport,
-			unique_ip_series: [],
+			...reports["24h"],
+			warnings: [],
+			unique_ip_series: reports["24h"].unique_ip_series.map((point) => ({
+				...point,
+				count: 0,
+			})),
 			timeline: [],
 			ips: [],
 		},
@@ -109,7 +74,7 @@ export const Empty: Story = {
 export const OnlineStatsUnavailable: Story = {
 	args: {
 		report: {
-			...baseReport,
+			...reports["24h"],
 			warnings: [
 				{
 					code: "online_stats_unavailable",

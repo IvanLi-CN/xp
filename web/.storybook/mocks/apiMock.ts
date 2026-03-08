@@ -5,6 +5,7 @@ import type {
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
 import type {
+	AdminIpUsageWindow,
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageResponse,
 } from "../../src/api/adminIpUsage";
@@ -53,6 +54,14 @@ type MockEndpointRecord = AdminEndpoint & {
 	short_ids: string[];
 };
 
+type MockWindowedNodeIpUsage =
+	| AdminNodeIpUsageResponse
+	| Partial<Record<AdminIpUsageWindow, AdminNodeIpUsageResponse>>;
+
+type MockWindowedUserIpUsage =
+	| AdminUserIpUsageResponse
+	| Partial<Record<AdminIpUsageWindow, AdminUserIpUsageResponse>>;
+
 type MockStateSeed = {
 	health: HealthResponse;
 	clusterInfo: ClusterInfoResponse;
@@ -63,8 +72,8 @@ type MockStateSeed = {
 	users: AdminUser[];
 	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
 	nodeQuotas: AdminUserNodeQuota[];
-	nodeIpUsageByNodeId: Record<string, AdminNodeIpUsageResponse>;
-	userIpUsageByUserId: Record<string, AdminUserIpUsageResponse>;
+	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
+	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
 	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
@@ -100,6 +109,46 @@ let originalFetch: typeof fetch | null = null;
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 const TEXT_HEADERS = { "Content-Type": "text/plain" } as const;
 const DEFAULT_GLOBAL_WEIGHT = 100;
+
+function selectWindowedNodeIpUsage(
+	entry: MockWindowedNodeIpUsage,
+	window: AdminIpUsageWindow,
+): AdminNodeIpUsageResponse {
+	if ("window_start" in entry) {
+		return {
+			...clone(entry),
+			window,
+		};
+	}
+	const report = entry[window] ?? entry["24h"] ?? entry["7d"];
+	if (!report) {
+		throw new Error(`missing node IP usage report for window ${window}`);
+	}
+	return {
+		...clone(report),
+		window,
+	};
+}
+
+function selectWindowedUserIpUsage(
+	entry: MockWindowedUserIpUsage,
+	window: AdminIpUsageWindow,
+): AdminUserIpUsageResponse {
+	if ("partial" in entry) {
+		return {
+			...clone(entry),
+			window,
+		};
+	}
+	const report = entry[window] ?? entry["24h"] ?? entry["7d"];
+	if (!report) {
+		throw new Error(`missing user IP usage report for window ${window}`);
+	}
+	return {
+		...clone(report),
+		window,
+	};
+}
 
 function clone<T>(value: T): T {
 	if (typeof structuredClone === "function") {
@@ -881,11 +930,8 @@ async function handleRequest(
 		if (!report) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		const window = url.searchParams.get("window");
-		return jsonResponse({
-			...clone(report),
-			window: window === "7d" ? "7d" : "24h",
-		});
+		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
+		return jsonResponse(selectWindowedNodeIpUsage(report, window));
 	}
 
 	const userIpUsageMatch = path.match(
@@ -900,11 +946,8 @@ async function handleRequest(
 		if (!report) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const window = url.searchParams.get("window");
-		return jsonResponse({
-			...clone(report),
-			window: window === "7d" ? "7d" : "24h",
-		});
+		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
+		return jsonResponse(selectWindowedUserIpUsage(report, window));
 	}
 
 	const userNodeQuotasMatch = path.match(

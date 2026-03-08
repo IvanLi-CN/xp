@@ -1,29 +1,37 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
 
+import type { AdminNode } from "../api/adminNodes";
+import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
+
+const node: AdminNode = {
+	node_id: "01J000000000000000000000001",
+	node_name: "node-a",
+	access_host: "node-a.example.invalid",
+	api_base_url: "https://node-a.example.invalid",
+	quota_limit_bytes: 0,
+	quota_reset: {
+		policy: "monthly",
+		day_of_month: 1,
+		tz_offset_minutes: null,
+	},
+};
+
+const ipUsageReports = buildDenseNodeIpUsageStories(node);
+
 const meta = {
 	title: "Pages/NodeDetailsPage",
 	render: () => <div />,
 	parameters: {
 		router: {
-			initialEntry: "/nodes/01J000000000000000000000001",
+			initialEntry: `/nodes/${node.node_id}`,
 		},
 		mockApi: {
 			data: {
-				nodes: [
-					{
-						node_id: "01J000000000000000000000001",
-						node_name: "node-a",
-						access_host: "node-a.example.invalid",
-						api_base_url: "https://node-a.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
-					},
-				],
+				nodes: [node],
+				nodeIpUsageByNodeId: {
+					[node.node_id]: ipUsageReports,
+				},
 			},
 		},
 	},
@@ -48,11 +56,23 @@ export const IpUsageTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await expect(
-			await canvas.findByText("203.0.113.7", { selector: "td" }),
+			await canvas.findByText("198.51.100.88", { selector: "td" }),
 		).toBeInTheDocument();
-		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
 		await expect(
-			await canvas.findByText("203.0.113.7", { selector: "td" }),
+			await canvas.findByText("203.0.113.55", { selector: "td" }),
+		).toBeInTheDocument();
+	},
+};
+
+export const IpUsageTab7d: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
+		const switchButton = await canvas.findByRole("button", { name: "7d" });
+		await expect(switchButton).toHaveClass("btn-primary");
+		await expect(
+			await canvas.findByText("198.51.100.88", { selector: "td" }),
 		).toBeInTheDocument();
 	},
 };
