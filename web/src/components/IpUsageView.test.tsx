@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
@@ -35,6 +35,19 @@ const baseReport: Pick<
 				},
 			],
 		},
+		{
+			lane_key: "edge-osaka|198.51.100.4",
+			endpoint_id: "endpoint-2",
+			endpoint_tag: "edge-osaka",
+			ip: "198.51.100.4",
+			minutes: 1,
+			segments: [
+				{
+					start_minute: "2026-03-08T00:02:00Z",
+					end_minute: "2026-03-08T00:02:00Z",
+				},
+			],
+		},
 	],
 	ips: [
 		{
@@ -44,6 +57,14 @@ const baseReport: Pick<
 			region: "Japan / Tokyo",
 			operator: "ExampleNet",
 			last_seen_at: "2026-03-08T00:01:00Z",
+		},
+		{
+			ip: "198.51.100.4",
+			minutes: 1,
+			endpoint_tags: ["edge-osaka"],
+			region: "Singapore",
+			operator: "LionLink",
+			last_seen_at: "2026-03-08T00:02:00Z",
 		},
 	],
 };
@@ -67,6 +88,44 @@ describe("<IpUsageView />", () => {
 			screen.getByText("Unique IPs per minute", { selector: "p" }),
 		).toBeInTheDocument();
 		expect(screen.getByText("IP occupancy lanes")).toBeInTheDocument();
+	});
+
+	it("highlights matching rows when hovering and clicking IP/time controls", () => {
+		render(
+			<IpUsageView
+				title="IP usage"
+				description="Node inbound IP snapshots"
+				window="24h"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+			/>,
+		);
+
+		const ipButton = screen.getAllByRole("button", { name: "203.0.113.7" })[0];
+		const tokyoRow = ipButton?.closest("tr");
+		const osakaRow = screen
+			.getAllByRole("button", { name: "198.51.100.4" })[0]
+			?.closest("tr");
+		expect(tokyoRow).not.toBeNull();
+		expect(osakaRow).not.toBeNull();
+
+		fireEvent.mouseEnter(ipButton);
+		expect(screen.getAllByText("203.0.113.7").length).toBeGreaterThan(1);
+		expect(tokyoRow).toHaveClass("bg-info/8");
+		expect(osakaRow).toHaveClass("opacity-45");
+
+		fireEvent.click(ipButton);
+		expect(ipButton).toHaveAttribute("aria-pressed", "true");
+		expect(
+			screen.getByRole("button", { name: "Clear pinned highlight" }),
+		).toBeInTheDocument();
+
+		const lastSeenButton = within(tokyoRow as HTMLTableRowElement).getAllByRole(
+			"button",
+		)[1];
+		fireEvent.click(lastSeenButton);
+		expect(lastSeenButton).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByText("Time")).toBeInTheDocument();
 	});
 
 	it("shows blocking online-stats empty state", () => {

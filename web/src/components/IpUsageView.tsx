@@ -1,10 +1,11 @@
 import type { CustomSeriesRenderItem, EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
+import type { EChartsReactProps } from "echarts-for-react/lib/types";
 import { CustomChart, LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type {
 	AdminIpUsageListEntry,
@@ -17,15 +18,24 @@ import type {
 
 const SVG_RENDERER = { renderer: "svg" } as const;
 const AREA_CHART_HEIGHT = 224;
+const MINUTE_MS = 60_000;
 
 const CHART_GRID_COLOR = "rgba(148, 163, 184, 0.14)";
 const CHART_AXIS_COLOR = "rgba(148, 163, 184, 0.55)";
 const CHART_LINE_FALLBACK = "rgb(34, 211, 238)";
 const CHART_AREA_START_FALLBACK = "rgba(34, 211, 238, 0.32)";
 const CHART_AREA_END_FALLBACK = "rgba(34, 211, 238, 0.05)";
+const HIGHLIGHT_IP_BAND_FALLBACK = "rgba(103, 232, 249, 0.10)";
+const HIGHLIGHT_TIME_BAND_FALLBACK = "rgba(251, 191, 36, 0.14)";
+const HIGHLIGHT_TIME_POINT_FALLBACK = "rgb(251, 191, 36)";
 const LANE_FILL_FALLBACK = "rgba(56, 189, 248, 0.26)";
 const LANE_BORDER_FALLBACK = "rgba(103, 232, 249, 0.92)";
+const LANE_ACTIVE_FILL_FALLBACK = "rgba(34, 211, 238, 0.44)";
+const LANE_ACTIVE_BORDER_FALLBACK = "rgba(165, 243, 252, 1)";
+const LANE_MUTED_FILL_FALLBACK = "rgba(71, 85, 105, 0.16)";
+const LANE_MUTED_BORDER_FALLBACK = "rgba(100, 116, 139, 0.32)";
 const LANE_LABEL_FALLBACK = "rgba(226, 232, 240, 0.88)";
+const LANE_LABEL_MUTED_FALLBACK = "rgba(148, 163, 184, 0.52)";
 
 echarts.use([
 	GridComponent,
@@ -55,14 +65,30 @@ type IpUsageViewProps = {
 	emptyTitle?: string;
 };
 
+type TimeRange = {
+	endMsExclusive: number;
+	startMs: number;
+};
+
+type ActiveHighlight = {
+	ip: string | null;
+	hasFilter: boolean;
+	timeRange: TimeRange | null;
+};
+
 type TimelineDatum = {
 	endMinute: string;
+	endMsExclusive: number;
 	endpointTag: string;
 	ip: string;
+	laneKey: string;
 	laneMinutes: number;
 	startMinute: string;
+	startMs: number;
 	value: [laneIndex: number, startMs: number, endMsExclusive: number];
 };
+
+type ChartEventHandlers = NonNullable<EChartsReactProps["onEvents"]>;
 
 function shouldRenderECharts(): boolean {
 	if (typeof navigator === "undefined") return true;
@@ -86,6 +112,65 @@ function resolveCssColor(value: string, fallback: string): string {
 function safeTimestamp(value: string, fallback = 0): number {
 	const timestamp = new Date(value).getTime();
 	return Number.isNaN(timestamp) ? fallback : timestamp;
+}
+
+function normalizeMinuteStart(timestamp: number): number {
+	return Math.floor(timestamp / MINUTE_MS) * MINUTE_MS;
+}
+
+function buildTimeRange(startMs: number, endMsExclusive: number): TimeRange {
+	const normalizedStart = normalizeMinuteStart(startMs);
+	const normalizedEnd = Math.max(
+		normalizedStart + MINUTE_MS,
+		normalizeMinuteStart(endMsExclusive - 1) + MINUTE_MS,
+	);
+	return {
+		endMsExclusive: normalizedEnd,
+		startMs: normalizedStart,
+	};
+}
+
+function buildMinuteRange(value: number | string): TimeRange {
+	const minuteStart = normalizeMinuteStart(
+		typeof value === "number" ? value : safeTimestamp(value),
+	);
+	return {
+		endMsExclusive: minuteStart + MINUTE_MS,
+		startMs: minuteStart,
+	};
+}
+
+function sameTimeRange(a: TimeRange | null, b: TimeRange | null): boolean {
+	if (!a || !b) return a === b;
+	return a.startMs === b.startMs && a.endMsExclusive === b.endMsExclusive;
+}
+
+function rangesOverlap(a: TimeRange, b: TimeRange): boolean {
+	return a.startMs < b.endMsExclusive && b.startMs < a.endMsExclusive;
+}
+
+function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {
+	if (ranges.length === 0) return [];
+	const sorted = [...ranges].sort(
+		(left, right) => left.startMs - right.startMs,
+	);
+	const merged: TimeRange[] = [sorted[0] ?? buildMinuteRange(0)];
+	for (const range of sorted.slice(1)) {
+		const previous = merged.at(-1);
+		if (!previous) {
+			merged.push(range);
+			continue;
+		}
+		if (range.startMs <= previous.endMsExclusive) {
+			previous.endMsExclusive = Math.max(
+				previous.endMsExclusive,
+				range.endMsExclusive,
+			);
+			continue;
+		}
+		merged.push({ ...range });
+	}
+	return merged;
 }
 
 function formatDateTime(value: string): string {
@@ -120,6 +205,13 @@ function formatAxisTime(value: number, window: AdminIpUsageWindow): string {
 	});
 }
 
+function formatTimeRange(range: TimeRange): string {
+	const inclusiveEnd = new Date(
+		Math.max(range.startMs, range.endMsExclusive - MINUTE_MS),
+	);
+	return `${new Date(range.startMs).toLocaleString()} -> ${inclusiveEnd.toLocaleString()}`;
+}
+
 function isReportEmpty(report: SharedIpUsageReport): boolean {
 	return report.ips.length === 0 && report.timeline.length === 0;
 }
@@ -130,6 +222,128 @@ function hasWarning(
 ): boolean {
 	return warnings.some((warning) => warning.code === code);
 }
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function getIpFromEvent(param: unknown): string | null {
+	if (!isObjectRecord(param)) return null;
+	const datum = param.data;
+	if (isObjectRecord(datum) && typeof datum.ip === "string") return datum.ip;
+	return null;
+}
+
+function getTimeRangeFromEvent(param: unknown): TimeRange | null {
+	if (!isObjectRecord(param)) return null;
+	const datum = param.data;
+	if (isObjectRecord(datum)) {
+		if (
+			typeof datum.startMs === "number" &&
+			typeof datum.endMsExclusive === "number"
+		) {
+			return buildTimeRange(datum.startMs, datum.endMsExclusive);
+		}
+		if (Array.isArray(datum.value) && typeof datum.value[0] === "number") {
+			const endValue =
+				typeof datum.value[1] === "number"
+					? datum.value[1]
+					: datum.value[0] + MINUTE_MS;
+			return buildTimeRange(datum.value[0], endValue);
+		}
+	}
+	if (Array.isArray(param.value) && typeof param.value[0] === "number") {
+		const endValue =
+			typeof param.value[1] === "number"
+				? param.value[1]
+				: param.value[0] + MINUTE_MS;
+		return buildTimeRange(param.value[0], endValue);
+	}
+	return null;
+}
+
+function buildIpRangeIndex(
+	lanes: AdminIpUsageTimelineLane[],
+): Map<string, TimeRange[]> {
+	const collected = new Map<string, TimeRange[]>();
+	for (const lane of lanes) {
+		const ranges = collected.get(lane.ip) ?? [];
+		for (const segment of lane.segments) {
+			ranges.push(
+				buildTimeRange(
+					safeTimestamp(segment.start_minute),
+					safeTimestamp(segment.end_minute) + MINUTE_MS,
+				),
+			);
+		}
+		collected.set(lane.ip, ranges);
+	}
+	return new Map(
+		Array.from(collected.entries(), ([ip, ranges]) => [
+			ip,
+			mergeTimeRanges(ranges),
+		]),
+	);
+}
+
+function ipMatchesTimeRange(
+	ip: string,
+	timeRange: TimeRange | null,
+	ipRangeIndex: Map<string, TimeRange[]>,
+): boolean {
+	if (!timeRange) return true;
+	const ranges = ipRangeIndex.get(ip) ?? [];
+	return ranges.some((range) => rangesOverlap(range, timeRange));
+}
+
+function laneMatchesHighlight(
+	lane: AdminIpUsageTimelineLane,
+	activeHighlight: ActiveHighlight,
+): boolean {
+	if (!activeHighlight.hasFilter) return true;
+	if (activeHighlight.ip && lane.ip !== activeHighlight.ip) return false;
+	if (!activeHighlight.timeRange) return true;
+	return lane.segments.some((segment) =>
+		rangesOverlap(
+			buildTimeRange(
+				safeTimestamp(segment.start_minute),
+				safeTimestamp(segment.end_minute) + MINUTE_MS,
+			),
+			activeHighlight.timeRange as TimeRange,
+		),
+	);
+}
+
+const renderVerticalBand: CustomSeriesRenderItem = (params, api) => {
+	const start = api.coord([api.value(0), 0]);
+	const end = api.coord([api.value(1), 0]);
+	const coordSys = params.coordSys as unknown as {
+		height: number;
+		width: number;
+		x: number;
+		y: number;
+	};
+	const rectShape = echarts.graphic.clipRectByRect(
+		{
+			height: coordSys.height,
+			width: Math.max(end[0] - start[0], 2),
+			x: start[0],
+			y: coordSys.y,
+		},
+		{
+			height: coordSys.height,
+			width: coordSys.width,
+			x: coordSys.x,
+			y: coordSys.y,
+		},
+	);
+	if (!rectShape) return null;
+	return {
+		type: "rect",
+		shape: rectShape,
+		style: api.style(),
+	};
+};
 
 function WindowSwitch({
 	window,
@@ -154,10 +368,12 @@ function WindowSwitch({
 function ChartSurface({
 	ariaLabel,
 	height,
+	onEvents,
 	option,
 }: {
 	ariaLabel: string;
 	height: number;
+	onEvents?: ChartEventHandlers;
 	option: EChartsOption;
 }) {
 	if (!shouldRenderECharts()) {
@@ -178,16 +394,67 @@ function ChartSurface({
 			notMerge
 			lazyUpdate
 			autoResize
+			onEvents={onEvents}
 			opts={SVG_RENDERER}
 			style={{ height, width: "100%" }}
 		/>
 	);
 }
 
+function HighlightSummary({
+	activeHighlight,
+	hasPinnedHighlight,
+	onClearPinned,
+}: {
+	activeHighlight: ActiveHighlight;
+	hasPinnedHighlight: boolean;
+	onClearPinned: () => void;
+}) {
+	return (
+		<div className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300 bg-base-200/40 px-3 py-2 text-xs">
+			<span className="opacity-70">
+				Hover or click any IP or time to highlight matching data across the
+				chart and table.
+			</span>
+			{activeHighlight.ip ? (
+				<span className="badge badge-info badge-outline gap-1">
+					<span className="opacity-70">IP</span>
+					<span className="font-mono">{activeHighlight.ip}</span>
+				</span>
+			) : null}
+			{activeHighlight.timeRange ? (
+				<span className="badge badge-warning badge-outline gap-1">
+					<span className="opacity-70">Time</span>
+					<span>{formatTimeRange(activeHighlight.timeRange)}</span>
+				</span>
+			) : null}
+			{hasPinnedHighlight ? (
+				<button
+					type="button"
+					className="btn btn-ghost btn-xs"
+					onClick={onClearPinned}
+				>
+					Clear pinned highlight
+				</button>
+			) : null}
+		</div>
+	);
+}
+
 function UniqueIpAreaChart({
 	report,
 	window,
+	activeHighlight,
+	ipRangeIndex,
+	onClearHover,
+	onHoverTimeRange,
+	onSelectTimeRange,
 }: {
+	activeHighlight: ActiveHighlight;
+	ipRangeIndex: Map<string, TimeRange[]>;
+	onClearHover: () => void;
+	onHoverTimeRange: (timeRange: TimeRange | null) => void;
+	onSelectTimeRange: (timeRange: TimeRange) => void;
 	report: SharedIpUsageReport;
 	window: AdminIpUsageWindow;
 }) {
@@ -204,7 +471,6 @@ function UniqueIpAreaChart({
 				)
 			: windowStartMs,
 	);
-
 	const palette = useMemo(
 		() => ({
 			areaEnd: resolveCssColor(
@@ -215,9 +481,61 @@ function UniqueIpAreaChart({
 				"color-mix(in srgb, var(--color-primary) 34%, transparent)",
 				CHART_AREA_START_FALLBACK,
 			),
+			ipBand: resolveCssColor(
+				"color-mix(in srgb, var(--color-info) 16%, transparent)",
+				HIGHLIGHT_IP_BAND_FALLBACK,
+			),
 			line: resolveCssColor("var(--color-primary)", CHART_LINE_FALLBACK),
+			timeBand: resolveCssColor(
+				"color-mix(in srgb, var(--color-warning) 18%, transparent)",
+				HIGHLIGHT_TIME_BAND_FALLBACK,
+			),
+			timePoint: resolveCssColor(
+				"var(--color-warning)",
+				HIGHLIGHT_TIME_POINT_FALLBACK,
+			),
 		}),
 		[],
+	);
+
+	const activeIpBands = activeHighlight.ip
+		? (ipRangeIndex.get(activeHighlight.ip) ?? []).map((range) => ({
+				value: [range.startMs, range.endMsExclusive] as [number, number],
+			}))
+		: [];
+	const activeTimeBand = activeHighlight.timeRange
+		? [
+				{
+					value: [
+						activeHighlight.timeRange.startMs,
+						activeHighlight.timeRange.endMsExclusive,
+					] as [number, number],
+				},
+			]
+		: [];
+	const activePoint = activeHighlight.timeRange
+		? report.unique_ip_series.find(
+				(point) =>
+					normalizeMinuteStart(safeTimestamp(point.minute)) ===
+					activeHighlight.timeRange?.startMs,
+			)
+		: null;
+
+	const onEvents = useMemo<ChartEventHandlers>(
+		() => ({
+			click: (param: unknown) => {
+				const nextRange = getTimeRangeFromEvent(param);
+				if (nextRange) onSelectTimeRange(nextRange);
+			},
+			globalout: () => {
+				onClearHover();
+			},
+			mousemove: (param: unknown) => {
+				const nextRange = getTimeRangeFromEvent(param);
+				if (nextRange) onHoverTimeRange(nextRange);
+			},
+		}),
+		[onClearHover, onHoverTimeRange, onSelectTimeRange],
 	);
 
 	const option = useMemo(() => {
@@ -225,6 +543,74 @@ function UniqueIpAreaChart({
 			safeTimestamp(point.minute),
 			point.count,
 		]);
+		const series: EChartsOption["series"] = [];
+		if (activeIpBands.length > 0) {
+			series.push({
+				animation: false,
+				data: activeIpBands,
+				itemStyle: { color: palette.ipBand },
+				renderItem: renderVerticalBand,
+				silent: true,
+				tooltip: { show: false },
+				type: "custom",
+				z: 0,
+			});
+		}
+		if (activeTimeBand.length > 0) {
+			series.push({
+				animation: false,
+				data: activeTimeBand,
+				itemStyle: { color: palette.timeBand },
+				renderItem: renderVerticalBand,
+				silent: true,
+				tooltip: { show: false },
+				type: "custom",
+				z: 1,
+			});
+		}
+		series.push({
+			animation: false,
+			areaStyle: {
+				color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+					{ offset: 0, color: palette.areaStart },
+					{ offset: 1, color: palette.areaEnd },
+				]),
+				opacity: activeHighlight.hasFilter ? 0.9 : 1,
+			},
+			data,
+			itemStyle: { color: palette.line },
+			lineStyle: {
+				color: palette.line,
+				opacity: activeHighlight.hasFilter ? 0.92 : 1,
+				width: activeHighlight.timeRange ? 2.4 : 2,
+			},
+			markPoint: activePoint
+				? {
+						animation: false,
+						data: [
+							{
+								coord: [safeTimestamp(activePoint.minute), activePoint.count],
+								name: "active-minute",
+								itemStyle: {
+									borderColor: "rgba(15, 23, 42, 0.68)",
+									borderWidth: 2,
+									color: palette.timePoint,
+								},
+								symbol: "circle",
+								symbolSize: 10,
+							},
+						],
+						label: { show: false },
+						silent: true,
+					}
+				: undefined,
+			showSymbol: false,
+			smooth: 0.22,
+			symbol: "none",
+			type: "line",
+			z: 2,
+		});
+
 		return {
 			animation: false,
 			grid: {
@@ -234,7 +620,6 @@ function UniqueIpAreaChart({
 				top: 14,
 			},
 			tooltip: {
-				trigger: "axis",
 				axisPointer: {
 					lineStyle: {
 						color: "rgba(148, 163, 184, 0.35)",
@@ -243,10 +628,10 @@ function UniqueIpAreaChart({
 					type: "line",
 				},
 				formatter: (params: unknown) => {
-					const point = Array.isArray(params) ? params[0] : params;
+					const point = Array.isArray(params) ? params.at(-1) : params;
 					if (
+						!point ||
 						typeof point !== "object" ||
-						point === null ||
 						!("value" in point) ||
 						!Array.isArray(point.value)
 					)
@@ -256,6 +641,7 @@ function UniqueIpAreaChart({
 						`Unique IPs: ${point.value[1]}`,
 					].join("<br/>");
 				},
+				trigger: "axis",
 			},
 			xAxis: {
 				axisLabel: {
@@ -288,32 +674,21 @@ function UniqueIpAreaChart({
 				splitNumber: 3,
 				type: "value",
 			},
-			series: [
-				{
-					areaStyle: {
-						color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-							{ offset: 0, color: palette.areaStart },
-							{ offset: 1, color: palette.areaEnd },
-						]),
-					},
-					data,
-					itemStyle: { color: palette.line },
-					lineStyle: {
-						color: palette.line,
-						width: 2,
-					},
-					showSymbol: false,
-					smooth: 0.22,
-					symbol: "none",
-					type: "line",
-				},
-			],
+			series,
 		} as unknown as EChartsOption;
 	}, [
+		activeHighlight.hasFilter,
+		activeHighlight.timeRange,
+		activeIpBands,
+		activePoint,
+		activeTimeBand,
 		maxCount,
 		palette.areaEnd,
 		palette.areaStart,
+		palette.ipBand,
 		palette.line,
+		palette.timeBand,
+		palette.timePoint,
 		report.unique_ip_series,
 		window,
 		windowEndMs,
@@ -335,6 +710,7 @@ function UniqueIpAreaChart({
 				<ChartSurface
 					ariaLabel="Unique IPs per minute"
 					height={AREA_CHART_HEIGHT}
+					onEvents={onEvents}
 					option={option}
 				/>
 			</div>
@@ -351,35 +727,53 @@ function TimelineChart({
 	window,
 	windowStart,
 	windowEnd,
+	activeHighlight,
+	onClearHover,
+	onHoverSegment,
+	onSelectSegment,
 }: {
+	activeHighlight: ActiveHighlight;
 	lanes: AdminIpUsageTimelineLane[];
+	onClearHover: () => void;
+	onHoverSegment: (ip: string, timeRange: TimeRange) => void;
+	onSelectSegment: (ip: string, timeRange: TimeRange) => void;
 	window: AdminIpUsageWindow;
 	windowEnd: string;
 	windowStart: string;
 }) {
 	const timelineData = useMemo<TimelineDatum[]>(() => {
 		return lanes.flatMap((lane, laneIndex) =>
-			lane.segments.map((segment) => ({
-				endMinute: segment.end_minute,
-				endpointTag: lane.endpoint_tag,
-				ip: lane.ip,
-				laneMinutes: lane.minutes,
-				startMinute: segment.start_minute,
-				value: [
-					laneIndex,
-					safeTimestamp(segment.start_minute),
-					safeTimestamp(segment.end_minute) + 60_000,
-				],
-			})),
+			lane.segments.map((segment) => {
+				const startMs = safeTimestamp(segment.start_minute);
+				const endMsExclusive = safeTimestamp(segment.end_minute) + MINUTE_MS;
+				return {
+					endMinute: segment.end_minute,
+					endMsExclusive,
+					endpointTag: lane.endpoint_tag,
+					ip: lane.ip,
+					laneKey: lane.lane_key,
+					laneMinutes: lane.minutes,
+					startMinute: segment.start_minute,
+					startMs,
+					value: [laneIndex, startMs, endMsExclusive],
+				};
+			}),
 		);
 	}, [lanes]);
 
 	const windowStartMs = safeTimestamp(windowStart);
-	const windowEndMs = safeTimestamp(windowEnd, windowStartMs) + 60_000;
+	const windowEndMs = safeTimestamp(windowEnd, windowStartMs) + MINUTE_MS;
 	const chartHeight = Math.max(180, lanes.length * 22 + 54);
-
 	const palette = useMemo(
 		() => ({
+			activeBorder: resolveCssColor(
+				"color-mix(in srgb, var(--color-info) 92%, white)",
+				LANE_ACTIVE_BORDER_FALLBACK,
+			),
+			activeFill: resolveCssColor(
+				"color-mix(in srgb, var(--color-info) 42%, transparent)",
+				LANE_ACTIVE_FILL_FALLBACK,
+			),
 			border: resolveCssColor("var(--color-info)", LANE_BORDER_FALLBACK),
 			fill: resolveCssColor(
 				"color-mix(in srgb, var(--color-info) 26%, transparent)",
@@ -389,12 +783,60 @@ function TimelineChart({
 				"color-mix(in srgb, var(--color-base-content) 82%, transparent)",
 				LANE_LABEL_FALLBACK,
 			),
+			labelMuted: resolveCssColor(
+				"color-mix(in srgb, var(--color-base-content) 42%, transparent)",
+				LANE_LABEL_MUTED_FALLBACK,
+			),
+			mutedBorder: resolveCssColor(
+				"color-mix(in srgb, var(--color-base-content) 18%, transparent)",
+				LANE_MUTED_BORDER_FALLBACK,
+			),
+			mutedFill: resolveCssColor(
+				"color-mix(in srgb, var(--color-base-content) 12%, transparent)",
+				LANE_MUTED_FILL_FALLBACK,
+			),
+			timeBand: resolveCssColor(
+				"color-mix(in srgb, var(--color-warning) 14%, transparent)",
+				HIGHLIGHT_TIME_BAND_FALLBACK,
+			),
 		}),
 		[],
 	);
 
+	const highlightBand = activeHighlight.timeRange
+		? [
+				{
+					value: [
+						activeHighlight.timeRange.startMs,
+						activeHighlight.timeRange.endMsExclusive,
+					] as [number, number],
+				},
+			]
+		: [];
+
+	const onEvents = useMemo<ChartEventHandlers>(
+		() => ({
+			click: (param: unknown) => {
+				const ip = getIpFromEvent(param);
+				const timeRange = getTimeRangeFromEvent(param);
+				if (ip && timeRange) onSelectSegment(ip, timeRange);
+			},
+			globalout: () => {
+				onClearHover();
+			},
+			mousemove: (param: unknown) => {
+				const ip = getIpFromEvent(param);
+				const timeRange = getTimeRangeFromEvent(param);
+				if (ip && timeRange) onHoverSegment(ip, timeRange);
+			},
+		}),
+		[onClearHover, onHoverSegment, onSelectSegment],
+	);
+
 	const option = useMemo(() => {
 		const renderLane: CustomSeriesRenderItem = (params, api) => {
+			const datum = timelineData[params.dataIndex ?? 0];
+			if (!datum) return null;
 			const laneIndex = api.value(0);
 			const start = api.coord([api.value(1), laneIndex]);
 			const end = api.coord([api.value(2), laneIndex]);
@@ -424,26 +866,88 @@ function TimelineChart({
 					y: coordSys.y,
 				},
 			);
-
 			if (!rectShape) return null;
+			const matchesHighlight =
+				(!activeHighlight.ip || datum.ip === activeHighlight.ip) &&
+				(!activeHighlight.timeRange ||
+					rangesOverlap(
+						buildTimeRange(datum.startMs, datum.endMsExclusive),
+						activeHighlight.timeRange,
+					));
+			const dimmed = activeHighlight.hasFilter && !matchesHighlight;
+			const fill = dimmed
+				? palette.mutedFill
+				: matchesHighlight && activeHighlight.hasFilter
+					? palette.activeFill
+					: palette.fill;
+			const stroke = dimmed
+				? palette.mutedBorder
+				: matchesHighlight && activeHighlight.hasFilter
+					? palette.activeBorder
+					: palette.border;
+
 			return {
 				type: "rect",
 				shape: { ...rectShape, r: 4 },
 				style: api.style({
-					fill: palette.fill,
-					shadowBlur: 8,
+					fill,
+					opacity: dimmed ? 0.48 : 1,
+					shadowBlur: dimmed ? 0 : 8,
 					shadowColor: "rgba(15, 23, 42, 0.18)",
-					stroke: palette.border,
-					lineWidth: 1,
+					stroke,
+					lineWidth: matchesHighlight && activeHighlight.hasFilter ? 1.4 : 1,
 				}),
 			};
 		};
+
+		const axisRich = {
+			active: {
+				color: palette.label,
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+				fontSize: 11,
+				fontWeight: 600,
+			},
+			base: {
+				color: palette.label,
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+				fontSize: 11,
+			},
+			muted: {
+				color: palette.labelMuted,
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+				fontSize: 11,
+			},
+		};
+
+		const series: EChartsOption["series"] = [];
+		if (highlightBand.length > 0) {
+			series.push({
+				animation: false,
+				data: highlightBand,
+				itemStyle: { color: palette.timeBand },
+				renderItem: renderVerticalBand,
+				silent: true,
+				tooltip: { show: false },
+				type: "custom",
+				z: 0,
+			});
+		}
+		series.push({
+			data: timelineData,
+			encode: {
+				x: [1, 2],
+				y: 0,
+			},
+			renderItem: renderLane,
+			type: "custom",
+			z: 2,
+		});
 
 		return {
 			animation: false,
 			grid: {
 				bottom: 16,
-				left: 110,
+				left: 118,
 				right: 18,
 				top: 28,
 			},
@@ -457,7 +961,7 @@ function TimelineChart({
 					return [
 						`<strong>${datum.ip}</strong>`,
 						datum.endpointTag,
-						`${formatDateTime(datum.startMinute)} → ${formatDateTime(datum.endMinute)}`,
+						`${formatDateTime(datum.startMinute)} -> ${formatDateTime(datum.endMinute)}`,
 						`Lane total: ${datum.laneMinutes} min`,
 					].join("<br/>");
 				},
@@ -486,11 +990,16 @@ function TimelineChart({
 			},
 			yAxis: {
 				axisLabel: {
-					color: palette.label,
-					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-					fontSize: 11,
-					formatter: (_value: string, index: number) => lanes[index]?.ip ?? "",
+					formatter: (_value: string, index: number) => {
+						const lane = lanes[index];
+						if (!lane) return "";
+						if (!activeHighlight.hasFilter) return `{base|${lane.ip}}`;
+						return laneMatchesHighlight(lane, activeHighlight)
+							? `{active|${lane.ip}}`
+							: `{muted|${lane.ip}}`;
+					},
 					margin: 14,
+					rich: axisRich,
 				},
 				axisLine: { show: false },
 				axisTick: { show: false },
@@ -502,23 +1011,21 @@ function TimelineChart({
 				},
 				type: "category",
 			},
-			series: [
-				{
-					data: timelineData,
-					encode: {
-						x: [1, 2],
-						y: 0,
-					},
-					renderItem: renderLane,
-					type: "custom",
-				},
-			],
+			series,
 		} as unknown as EChartsOption;
 	}, [
+		activeHighlight,
+		highlightBand,
 		lanes,
+		palette.activeBorder,
+		palette.activeFill,
 		palette.border,
 		palette.fill,
 		palette.label,
+		palette.labelMuted,
+		palette.mutedBorder,
+		palette.mutedFill,
+		palette.timeBand,
 		timelineData,
 		window,
 		windowEndMs,
@@ -531,8 +1038,8 @@ function TimelineChart({
 				<div>
 					<p className="text-sm font-semibold">IP occupancy lanes</p>
 					<p className="text-xs opacity-70">
-						Rendered with Apache ECharts as a swimlane timeline for the top 20
-						endpoint/IP rows.
+						Hover or click a lane segment to cross-highlight the same IP and
+						time slice.
 					</p>
 				</div>
 				<div className="badge badge-outline">{lanes.length} lanes</div>
@@ -546,6 +1053,7 @@ function TimelineChart({
 					<ChartSurface
 						ariaLabel="IP occupancy lanes"
 						height={chartHeight}
+						onEvents={onEvents}
 						option={option}
 					/>
 				</div>
@@ -554,14 +1062,39 @@ function TimelineChart({
 	);
 }
 
-function IpListTable({ ips }: { ips: AdminIpUsageListEntry[] }) {
+function IpListTable({
+	ips,
+	activeHighlight,
+	ipRangeIndex,
+	onHoverIp,
+	onHoverTimeRange,
+	onLeaveIp,
+	onLeaveTimeRange,
+	onSelectIp,
+	onSelectTimeRange,
+	selectedIp,
+	selectedTimeRange,
+}: {
+	activeHighlight: ActiveHighlight;
+	ipRangeIndex: Map<string, TimeRange[]>;
+	ips: AdminIpUsageListEntry[];
+	onHoverIp: (ip: string | null) => void;
+	onHoverTimeRange: (timeRange: TimeRange | null) => void;
+	onLeaveIp: (ip: string) => void;
+	onLeaveTimeRange: (timeRange: TimeRange) => void;
+	onSelectIp: (ip: string) => void;
+	onSelectTimeRange: (timeRange: TimeRange) => void;
+	selectedIp: string | null;
+	selectedTimeRange: TimeRange | null;
+}) {
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
 			<div className="mb-3 flex items-center justify-between gap-2">
 				<div>
 					<p className="text-sm font-semibold">IP list</p>
 					<p className="text-xs opacity-70">
-						Aggregated by IP with unique minutes inside the selected window.
+						Hover or click the IP / last seen time to highlight the matching
+						rows and chart regions.
 					</p>
 				</div>
 				<div className="badge badge-outline">{ips.length} IPs</div>
@@ -586,20 +1119,68 @@ function IpListTable({ ips }: { ips: AdminIpUsageListEntry[] }) {
 								</td>
 							</tr>
 						) : (
-							ips.map((entry) => (
-								<tr key={entry.ip}>
-									<td className="font-mono text-xs">{entry.ip}</td>
-									<td>{entry.minutes}</td>
-									<td className="text-xs">
-										{entry.endpoint_tags.join(", ") || "-"}
-									</td>
-									<td className="text-xs">{entry.region || "Unknown"}</td>
-									<td className="text-xs">{entry.operator || "Unknown"}</td>
-									<td className="text-xs">
-										{formatDateTime(entry.last_seen_at)}
-									</td>
-								</tr>
-							))
+							ips.map((entry) => {
+								const timeButtonRange = buildMinuteRange(entry.last_seen_at);
+								const matchesIp =
+									!activeHighlight.ip || activeHighlight.ip === entry.ip;
+								const matchesTime = ipMatchesTimeRange(
+									entry.ip,
+									activeHighlight.timeRange,
+									ipRangeIndex,
+								);
+								const activeRow = matchesIp && matchesTime;
+								const dimmed = activeHighlight.hasFilter && !activeRow;
+								const ipButtonActive = activeHighlight.ip === entry.ip;
+								const timeButtonActive = sameTimeRange(
+									activeHighlight.timeRange,
+									timeButtonRange,
+								);
+
+								return (
+									<tr
+										key={entry.ip}
+										className={`${dimmed ? "opacity-45" : "opacity-100"} ${activeRow && activeHighlight.hasFilter ? "bg-info/8" : ""} transition-opacity`}
+									>
+										<td>
+											<button
+												type="button"
+												className={`rounded px-1.5 py-0.5 font-mono text-xs transition-colors ${ipButtonActive ? "bg-info/15 text-info" : "hover:bg-base-200"}`}
+												onMouseEnter={() => onHoverIp(entry.ip)}
+												onMouseLeave={() => onLeaveIp(entry.ip)}
+												onFocus={() => onHoverIp(entry.ip)}
+												onBlur={() => onLeaveIp(entry.ip)}
+												onClick={() => onSelectIp(entry.ip)}
+												aria-pressed={selectedIp === entry.ip}
+											>
+												{entry.ip}
+											</button>
+										</td>
+										<td>{entry.minutes}</td>
+										<td className="text-xs">
+											{entry.endpoint_tags.join(", ") || "-"}
+										</td>
+										<td className="text-xs">{entry.region || "Unknown"}</td>
+										<td className="text-xs">{entry.operator || "Unknown"}</td>
+										<td className="text-xs">
+											<button
+												type="button"
+												className={`rounded px-1.5 py-0.5 text-left transition-colors ${timeButtonActive ? "bg-warning/15 text-warning" : "hover:bg-base-200"}`}
+												onMouseEnter={() => onHoverTimeRange(timeButtonRange)}
+												onMouseLeave={() => onLeaveTimeRange(timeButtonRange)}
+												onFocus={() => onHoverTimeRange(timeButtonRange)}
+												onBlur={() => onLeaveTimeRange(timeButtonRange)}
+												onClick={() => onSelectTimeRange(timeButtonRange)}
+												aria-pressed={sameTimeRange(
+													selectedTimeRange,
+													timeButtonRange,
+												)}
+											>
+												{formatDateTime(entry.last_seen_at)}
+											</button>
+										</td>
+									</tr>
+								);
+							})
 						)}
 					</tbody>
 				</table>
@@ -633,10 +1214,72 @@ export function IpUsageView({
 	isFetching = false,
 	emptyTitle = "No inbound IP data",
 }: IpUsageViewProps) {
+	const [hoveredIp, setHoveredIp] = useState<string | null>(null);
+	const [selectedIp, setSelectedIp] = useState<string | null>(null);
+	const [hoveredTimeRange, setHoveredTimeRange] = useState<TimeRange | null>(
+		null,
+	);
+	const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange | null>(
+		null,
+	);
+
 	const empty = isReportEmpty(report);
 	const blockingWarning = hasWarning(
 		report.warnings,
 		"online_stats_unavailable",
+	);
+	const ipRangeIndex = useMemo(
+		() => buildIpRangeIndex(report.timeline),
+		[report.timeline],
+	);
+	const activeHighlight = useMemo<ActiveHighlight>(
+		() => ({
+			hasFilter: Boolean(
+				hoveredIp || hoveredTimeRange || selectedIp || selectedTimeRange,
+			),
+			ip: hoveredIp ?? selectedIp,
+			timeRange: hoveredTimeRange ?? selectedTimeRange,
+		}),
+		[hoveredIp, hoveredTimeRange, selectedIp, selectedTimeRange],
+	);
+	const hasPinnedHighlight = Boolean(selectedIp || selectedTimeRange);
+
+	const clearHoveredIp = useCallback((ip?: string) => {
+		setHoveredIp((current) => (!ip || current === ip ? null : current));
+	}, []);
+	const clearHoveredTimeRange = useCallback((timeRange?: TimeRange) => {
+		setHoveredTimeRange((current) =>
+			!timeRange || sameTimeRange(current, timeRange) ? null : current,
+		);
+	}, []);
+	const clearHover = useCallback(() => {
+		setHoveredIp(null);
+		setHoveredTimeRange(null);
+	}, []);
+	const clearPinnedHighlight = useCallback(() => {
+		setSelectedIp(null);
+		setSelectedTimeRange(null);
+	}, []);
+
+	const selectIp = useCallback((ip: string) => {
+		setSelectedIp((current) => (current === ip ? null : ip));
+	}, []);
+	const selectTimeRange = useCallback((timeRange: TimeRange) => {
+		setSelectedTimeRange((current) =>
+			sameTimeRange(current, timeRange) ? null : timeRange,
+		);
+	}, []);
+	const selectTimelineSegment = useCallback(
+		(ip: string, timeRange: TimeRange) => {
+			if (selectedIp === ip && sameTimeRange(selectedTimeRange, timeRange)) {
+				setSelectedIp(null);
+				setSelectedTimeRange(null);
+				return;
+			}
+			setSelectedIp(ip);
+			setSelectedTimeRange(timeRange);
+		},
+		[selectedIp, selectedTimeRange],
 	);
 
 	return (
@@ -647,7 +1290,7 @@ export function IpUsageView({
 						<h2 className="card-title">{title}</h2>
 						<p className="text-sm opacity-70">{description}</p>
 						<p className="mt-1 text-xs opacity-60">
-							Window: {formatDateTime(report.window_start)} →{" "}
+							Window: {formatDateTime(report.window_start)} {"->"}{" "}
 							{formatDateTime(report.window_end)}
 						</p>
 					</div>
@@ -680,14 +1323,46 @@ export function IpUsageView({
 					</div>
 				) : (
 					<div className="space-y-4">
-						<UniqueIpAreaChart report={report} window={window} />
+						<HighlightSummary
+							activeHighlight={activeHighlight}
+							hasPinnedHighlight={hasPinnedHighlight}
+							onClearPinned={clearPinnedHighlight}
+						/>
+						<UniqueIpAreaChart
+							activeHighlight={activeHighlight}
+							ipRangeIndex={ipRangeIndex}
+							onClearHover={clearHover}
+							onHoverTimeRange={setHoveredTimeRange}
+							onSelectTimeRange={selectTimeRange}
+							report={report}
+							window={window}
+						/>
 						<TimelineChart
+							activeHighlight={activeHighlight}
 							lanes={report.timeline}
+							onClearHover={clearHover}
+							onHoverSegment={(ip, timeRange) => {
+								setHoveredIp(ip);
+								setHoveredTimeRange(timeRange);
+							}}
+							onSelectSegment={selectTimelineSegment}
 							window={window}
 							windowEnd={report.window_end}
 							windowStart={report.window_start}
 						/>
-						<IpListTable ips={report.ips} />
+						<IpListTable
+							activeHighlight={activeHighlight}
+							ipRangeIndex={ipRangeIndex}
+							ips={report.ips}
+							onHoverIp={setHoveredIp}
+							onHoverTimeRange={setHoveredTimeRange}
+							onLeaveIp={clearHoveredIp}
+							onLeaveTimeRange={clearHoveredTimeRange}
+							onSelectIp={selectIp}
+							onSelectTimeRange={selectTimeRange}
+							selectedIp={selectedIp}
+							selectedTimeRange={selectedTimeRange}
+						/>
 					</div>
 				)}
 			</div>
