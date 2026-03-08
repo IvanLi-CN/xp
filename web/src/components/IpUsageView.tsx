@@ -20,9 +20,12 @@ const AREA_CHART_HEIGHT = 224;
 
 const CHART_GRID_COLOR = "rgba(148, 163, 184, 0.14)";
 const CHART_AXIS_COLOR = "rgba(148, 163, 184, 0.55)";
-const CHART_LINE_COLOR = "oklch(var(--p))";
-const LANE_FILL_COLOR = "rgba(56, 189, 248, 0.30)";
-const LANE_BORDER_COLOR = "rgba(125, 211, 252, 0.92)";
+const CHART_LINE_FALLBACK = "rgb(34, 211, 238)";
+const CHART_AREA_START_FALLBACK = "rgba(34, 211, 238, 0.32)";
+const CHART_AREA_END_FALLBACK = "rgba(34, 211, 238, 0.05)";
+const LANE_FILL_FALLBACK = "rgba(56, 189, 248, 0.26)";
+const LANE_BORDER_FALLBACK = "rgba(103, 232, 249, 0.92)";
+const LANE_LABEL_FALLBACK = "rgba(226, 232, 240, 0.88)";
 
 echarts.use([
 	GridComponent,
@@ -64,6 +67,20 @@ type TimelineDatum = {
 function shouldRenderECharts(): boolean {
 	if (typeof navigator === "undefined") return true;
 	return !navigator.userAgent.toLowerCase().includes("jsdom");
+}
+
+function resolveCssColor(value: string, fallback: string): string {
+	if (typeof document === "undefined" || !document.body) return fallback;
+	const probe = document.createElement("span");
+	probe.style.color = value;
+	if (!probe.style.color) return fallback;
+	probe.style.opacity = "0";
+	probe.style.pointerEvents = "none";
+	probe.style.position = "fixed";
+	document.body.append(probe);
+	const resolved = getComputedStyle(probe).color;
+	probe.remove();
+	return resolved || fallback;
 }
 
 function safeTimestamp(value: string, fallback = 0): number {
@@ -188,6 +205,21 @@ function UniqueIpAreaChart({
 			: windowStartMs,
 	);
 
+	const palette = useMemo(
+		() => ({
+			areaEnd: resolveCssColor(
+				"color-mix(in srgb, var(--color-primary) 6%, transparent)",
+				CHART_AREA_END_FALLBACK,
+			),
+			areaStart: resolveCssColor(
+				"color-mix(in srgb, var(--color-primary) 34%, transparent)",
+				CHART_AREA_START_FALLBACK,
+			),
+			line: resolveCssColor("var(--color-primary)", CHART_LINE_FALLBACK),
+		}),
+		[],
+	);
+
 	const option = useMemo(() => {
 		const data = report.unique_ip_series.map((point) => [
 			safeTimestamp(point.minute),
@@ -260,14 +292,14 @@ function UniqueIpAreaChart({
 				{
 					areaStyle: {
 						color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-							{ offset: 0, color: "oklch(var(--p) / 0.42)" },
-							{ offset: 1, color: "oklch(var(--p) / 0.06)" },
+							{ offset: 0, color: palette.areaStart },
+							{ offset: 1, color: palette.areaEnd },
 						]),
 					},
 					data,
-					itemStyle: { color: CHART_LINE_COLOR },
+					itemStyle: { color: palette.line },
 					lineStyle: {
-						color: CHART_LINE_COLOR,
+						color: palette.line,
 						width: 2,
 					},
 					showSymbol: false,
@@ -277,7 +309,16 @@ function UniqueIpAreaChart({
 				},
 			],
 		} as unknown as EChartsOption;
-	}, [maxCount, report.unique_ip_series, window, windowEndMs, windowStartMs]);
+	}, [
+		maxCount,
+		palette.areaEnd,
+		palette.areaStart,
+		palette.line,
+		report.unique_ip_series,
+		window,
+		windowEndMs,
+		windowStartMs,
+	]);
 
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
@@ -337,6 +378,21 @@ function TimelineChart({
 	const windowEndMs = safeTimestamp(windowEnd, windowStartMs) + 60_000;
 	const chartHeight = Math.max(180, lanes.length * 22 + 54);
 
+	const palette = useMemo(
+		() => ({
+			border: resolveCssColor("var(--color-info)", LANE_BORDER_FALLBACK),
+			fill: resolveCssColor(
+				"color-mix(in srgb, var(--color-info) 26%, transparent)",
+				LANE_FILL_FALLBACK,
+			),
+			label: resolveCssColor(
+				"color-mix(in srgb, var(--color-base-content) 82%, transparent)",
+				LANE_LABEL_FALLBACK,
+			),
+		}),
+		[],
+	);
+
 	const option = useMemo(() => {
 		const renderLane: CustomSeriesRenderItem = (params, api) => {
 			const laneIndex = api.value(0);
@@ -374,10 +430,10 @@ function TimelineChart({
 				type: "rect",
 				shape: { ...rectShape, r: 4 },
 				style: api.style({
-					fill: LANE_FILL_COLOR,
+					fill: palette.fill,
 					shadowBlur: 8,
 					shadowColor: "rgba(15, 23, 42, 0.18)",
-					stroke: LANE_BORDER_COLOR,
+					stroke: palette.border,
 					lineWidth: 1,
 				}),
 			};
@@ -430,7 +486,7 @@ function TimelineChart({
 			},
 			yAxis: {
 				axisLabel: {
-					color: "rgba(226, 232, 240, 0.88)",
+					color: palette.label,
 					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
 					fontSize: 11,
 					formatter: (_value: string, index: number) => lanes[index]?.ip ?? "",
@@ -458,7 +514,16 @@ function TimelineChart({
 				},
 			],
 		} as unknown as EChartsOption;
-	}, [lanes, timelineData, window, windowEndMs, windowStartMs]);
+	}, [
+		lanes,
+		palette.border,
+		palette.fill,
+		palette.label,
+		timelineData,
+		window,
+		windowEndMs,
+		windowStartMs,
+	]);
 
 	return (
 		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
