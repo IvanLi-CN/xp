@@ -4524,6 +4524,21 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
     assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
 }
 
+#[test]
+fn config_ip_usage_geo_db_missing_when_mmdb_files_are_unreadable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let city_path = tmp.path().join("GeoLite2-City.mmdb");
+    let asn_path = tmp.path().join("GeoLite2-ASN.mmdb");
+    std::fs::write(&city_path, b"not-a-mmdb").unwrap();
+    std::fs::write(&asn_path, b"not-a-mmdb").unwrap();
+
+    let mut config = test_config(tmp.path().to_path_buf());
+    config.ip_usage_city_db_path = city_path.display().to_string();
+    config.ip_usage_asn_db_path = asn_path.display().to_string();
+
+    assert!(super::config_ip_usage_geo_db_missing(&config));
+}
+
 #[tokio::test]
 async fn node_ip_usage_returns_series_timeline_and_ip_list() {
     let tmp = tempfile::tempdir().unwrap();

@@ -36,11 +36,10 @@ use crate::{
         UserNodeQuota, UserQuotaReset,
     },
     inbound_ip_usage::{
-        InboundIpUsageListItem as IpListEntry, InboundIpUsageMembershipView,
+        GeoResolver, InboundIpUsageListItem as IpListEntry, InboundIpUsageMembershipView,
         InboundIpUsageSeriesPoint as UniqueIpPoint, InboundIpUsageTimelineLane as TimelineLane,
         InboundIpUsageWarning as IpUsageWarning, InboundIpUsageWindow as IpUsageWindow,
         InboundIpUsageWindowView as IpUsageReport, build_warnings, build_window_view,
-        geo_db_missing,
     },
     internal_auth,
     node_runtime::{
@@ -2066,18 +2065,21 @@ fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError
     IpUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
 }
 
+fn config_ip_usage_geo_db_path(raw: &str) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(trimmed))
+    }
+}
+
 fn config_ip_usage_geo_db_missing(config: &Config) -> bool {
-    let city = if config.ip_usage_city_db_path.trim().is_empty() {
-        None
-    } else {
-        Some(std::path::Path::new(config.ip_usage_city_db_path.as_str()))
-    };
-    let asn = if config.ip_usage_asn_db_path.trim().is_empty() {
-        None
-    } else {
-        Some(std::path::Path::new(config.ip_usage_asn_db_path.as_str()))
-    };
-    geo_db_missing(city, asn)
+    GeoResolver::new(
+        config_ip_usage_geo_db_path(&config.ip_usage_city_db_path),
+        config_ip_usage_geo_db_path(&config.ip_usage_asn_db_path),
+    )
+    .is_missing()
 }
 
 fn build_ip_usage_membership_views(

@@ -1215,6 +1215,12 @@ export function UserDetailsPage() {
 									emptyTitle="No inbound IP activity for this node"
 								/>
 							))
+						) : ipUsageQuery.data.partial ? (
+							<PageState
+								variant="empty"
+								title="Usage details unavailable"
+								description="All nodes for this user's inbound IP usage are currently unreachable."
+							/>
 						) : (
 							<PageState
 								variant="empty"

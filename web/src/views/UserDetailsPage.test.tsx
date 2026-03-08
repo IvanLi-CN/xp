@@ -835,7 +835,7 @@ rules: []
 		});
 	});
 
-	it("shows partial usage warning with unreachable nodes", async () => {
+	it("shows unreachable-only empty state when all usage nodes fail", async () => {
 		setupMocks({
 			ipUsage: {
 				user: {
@@ -860,6 +860,17 @@ rules: []
 		expect(
 			screen.getByText("Unreachable nodes: node-osaka"),
 		).toBeInTheDocument();
+		expect(screen.getByText("Usage details unavailable")).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"All nodes for this user's inbound IP usage are currently unreachable.",
+			),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(
+				"This user has no active node memberships to aggregate inbound IP usage from.",
+			),
+		).not.toBeInTheDocument();
 	});
 
 	it("shows token-required state when admin token is missing", async () => {
