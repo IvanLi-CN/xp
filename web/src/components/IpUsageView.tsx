@@ -1210,8 +1210,10 @@ function TimelineChart({
 						ariaLabel="IP occupancy lanes"
 						chartRef={chartRef}
 						height={chartHeight}
+						notMerge={false}
 						onEvents={onEvents}
 						option={option}
+						replaceMerge={["series"]}
 					/>
 				</div>
 			)}
