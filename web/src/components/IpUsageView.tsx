@@ -5,7 +5,7 @@ import { CustomChart, LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type {
 	AdminIpUsageListEntry,
@@ -89,6 +89,10 @@ type TimelineDatum = {
 };
 
 type ChartEventHandlers = NonNullable<EChartsReactProps["onEvents"]>;
+type EChartsReactRef = InstanceType<typeof ReactEChartsCore>;
+type TimelineTooltipTarget = {
+	dataIndex: number;
+};
 
 function shouldRenderECharts(): boolean {
 	if (typeof navigator === "undefined") return true;
@@ -367,11 +371,13 @@ function WindowSwitch({
 
 function ChartSurface({
 	ariaLabel,
+	chartRef,
 	height,
 	onEvents,
 	option,
 }: {
 	ariaLabel: string;
+	chartRef?: { current: EChartsReactRef | null };
 	height: number;
 	onEvents?: ChartEventHandlers;
 	option: EChartsOption;
@@ -389,6 +395,7 @@ function ChartSurface({
 
 	return (
 		<ReactEChartsCore
+			ref={chartRef}
 			echarts={echarts}
 			option={option}
 			notMerge
@@ -813,24 +820,63 @@ function TimelineChart({
 				},
 			]
 		: [];
+	const chartRef = useRef<EChartsReactRef | null>(null);
+	const hoveredTooltipRef = useRef<TimelineTooltipTarget | null>(null);
+	const tooltipRafRef = useRef<number | null>(null);
+	const timelineSeriesIndex = highlightBand.length > 0 ? 1 : 0;
+	const scheduleTimelineTooltip = useCallback(
+		(dataIndex: number) => {
+			if (tooltipRafRef.current !== null) {
+				cancelAnimationFrame(tooltipRafRef.current);
+			}
+			tooltipRafRef.current = requestAnimationFrame(() => {
+				chartRef.current?.getEchartsInstance().dispatchAction({
+					type: "showTip",
+					seriesIndex: timelineSeriesIndex,
+					dataIndex,
+				});
+				tooltipRafRef.current = null;
+			});
+		},
+		[timelineSeriesIndex],
+	);
 
 	const onEvents = useMemo<ChartEventHandlers>(
 		() => ({
 			click: (param: unknown) => {
 				const ip = getIpFromEvent(param);
 				const timeRange = getTimeRangeFromEvent(param);
-				if (ip && timeRange) onSelectSegment(ip, timeRange);
+				if (
+					isObjectRecord(param) &&
+					typeof param.dataIndex === "number" &&
+					ip &&
+					timeRange
+				) {
+					hoveredTooltipRef.current = { dataIndex: param.dataIndex };
+					onSelectSegment(ip, timeRange);
+					scheduleTimelineTooltip(param.dataIndex);
+				}
 			},
 			globalout: () => {
+				hoveredTooltipRef.current = null;
 				onClearHover();
 			},
-			mousemove: (param: unknown) => {
+			mouseover: (param: unknown) => {
 				const ip = getIpFromEvent(param);
 				const timeRange = getTimeRangeFromEvent(param);
-				if (ip && timeRange) onHoverSegment(ip, timeRange);
+				if (
+					isObjectRecord(param) &&
+					typeof param.dataIndex === "number" &&
+					ip &&
+					timeRange
+				) {
+					hoveredTooltipRef.current = { dataIndex: param.dataIndex };
+					onHoverSegment(ip, timeRange);
+					scheduleTimelineTooltip(param.dataIndex);
+				}
 			},
 		}),
-		[onClearHover, onHoverSegment, onSelectSegment],
+		[onClearHover, onHoverSegment, onSelectSegment, scheduleTimelineTooltip],
 	);
 
 	const option = useMemo(() => {
@@ -1052,6 +1098,7 @@ function TimelineChart({
 				<div className="rounded-xl border border-base-300 bg-base-100/80 p-1">
 					<ChartSurface
 						ariaLabel="IP occupancy lanes"
+						chartRef={chartRef}
 						height={chartHeight}
 						onEvents={onEvents}
 						option={option}
@@ -1244,6 +1291,27 @@ export function IpUsageView({
 	);
 	const hasPinnedHighlight = Boolean(selectedIp || selectedTimeRange);
 
+	const setHoveredIpStable = useCallback((nextIp: string | null) => {
+		setHoveredIp((current) => (current === nextIp ? current : nextIp));
+	}, []);
+	const setHoveredTimeRangeStable = useCallback(
+		(nextTimeRange: TimeRange | null) => {
+			setHoveredTimeRange((current) =>
+				sameTimeRange(current, nextTimeRange) ? current : nextTimeRange,
+			);
+		},
+		[],
+	);
+	const setHoveredSegmentStable = useCallback(
+		(ip: string, timeRange: TimeRange) => {
+			setHoveredIp((current) => (current === ip ? current : ip));
+			setHoveredTimeRange((current) =>
+				sameTimeRange(current, timeRange) ? current : timeRange,
+			);
+		},
+		[],
+	);
+
 	const clearHoveredIp = useCallback((ip?: string) => {
 		setHoveredIp((current) => (!ip || current === ip ? null : current));
 	}, []);
@@ -1332,7 +1400,7 @@ export function IpUsageView({
 							activeHighlight={activeHighlight}
 							ipRangeIndex={ipRangeIndex}
 							onClearHover={clearHover}
-							onHoverTimeRange={setHoveredTimeRange}
+							onHoverTimeRange={setHoveredTimeRangeStable}
 							onSelectTimeRange={selectTimeRange}
 							report={report}
 							window={window}
@@ -1341,10 +1409,7 @@ export function IpUsageView({
 							activeHighlight={activeHighlight}
 							lanes={report.timeline}
 							onClearHover={clearHover}
-							onHoverSegment={(ip, timeRange) => {
-								setHoveredIp(ip);
-								setHoveredTimeRange(timeRange);
-							}}
+							onHoverSegment={setHoveredSegmentStable}
 							onSelectSegment={selectTimelineSegment}
 							window={window}
 							windowEnd={report.window_end}
@@ -1354,8 +1419,8 @@ export function IpUsageView({
 							activeHighlight={activeHighlight}
 							ipRangeIndex={ipRangeIndex}
 							ips={report.ips}
-							onHoverIp={setHoveredIp}
-							onHoverTimeRange={setHoveredTimeRange}
+							onHoverIp={setHoveredIpStable}
+							onHoverTimeRange={setHoveredTimeRangeStable}
 							onLeaveIp={clearHoveredIp}
 							onLeaveTimeRange={clearHoveredTimeRange}
 							onSelectIp={selectIp}
