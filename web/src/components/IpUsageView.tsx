@@ -101,18 +101,50 @@ function shouldRenderECharts(): boolean {
 	return !navigator.userAgent.toLowerCase().includes("jsdom");
 }
 
+let colorProbeContext: CanvasRenderingContext2D | null | undefined;
+
+function normalizeCssColor(value: string): string {
+	if (typeof document === "undefined") return value;
+	if (
+		typeof navigator !== "undefined" &&
+		navigator.userAgent.toLowerCase().includes("jsdom")
+	) {
+		return value;
+	}
+	if (colorProbeContext === undefined) {
+		try {
+			const canvas = document.createElement("canvas");
+			canvas.width = 1;
+			canvas.height = 1;
+			colorProbeContext = canvas.getContext("2d");
+		} catch {
+			colorProbeContext = null;
+		}
+	}
+	const context = colorProbeContext;
+	if (!context) return value;
+	context.clearRect(0, 0, 1, 1);
+	context.fillStyle = "rgba(0, 0, 0, 0)";
+	context.fillRect(0, 0, 1, 1);
+	context.fillStyle = value;
+	context.fillRect(0, 0, 1, 1);
+	const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+	if (alpha === 255) return `rgb(${red}, ${green}, ${blue})`;
+	return `rgba(${red}, ${green}, ${blue}, ${Number((alpha / 255).toFixed(3))})`;
+}
+
 function resolveCssColor(value: string, fallback: string): string {
 	if (typeof document === "undefined" || !document.body) return fallback;
 	const probe = document.createElement("span");
 	probe.style.color = value;
-	if (!probe.style.color) return fallback;
+	if (!probe.style.color) return normalizeCssColor(fallback);
 	probe.style.opacity = "0";
 	probe.style.pointerEvents = "none";
 	probe.style.position = "fixed";
 	document.body.append(probe);
 	const resolved = getComputedStyle(probe).color;
 	probe.remove();
-	return resolved || fallback;
+	return normalizeCssColor(resolved || fallback);
 }
 
 function safeTimestamp(value: string, fallback = 0): number {
