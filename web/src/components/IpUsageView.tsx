@@ -434,14 +434,18 @@ function ChartSurface({
 	ariaLabel,
 	chartRef,
 	height,
+	notMerge = true,
 	onEvents,
 	option,
+	replaceMerge,
 }: {
 	ariaLabel: string;
 	chartRef?: { current: EChartsReactRef | null };
 	height: number;
+	notMerge?: boolean;
 	onEvents?: ChartEventHandlers;
 	option: EChartsOption;
+	replaceMerge?: string[];
 }) {
 	if (!shouldRenderECharts()) {
 		return (
@@ -459,7 +463,8 @@ function ChartSurface({
 			ref={chartRef}
 			echarts={echarts}
 			option={option}
-			notMerge
+			notMerge={notMerge}
+			replaceMerge={replaceMerge}
 			lazyUpdate
 			autoResize
 			onEvents={onEvents}
@@ -798,8 +803,10 @@ function UniqueIpAreaChart({
 				<ChartSurface
 					ariaLabel="Unique IPs per minute"
 					height={AREA_CHART_HEIGHT}
+					notMerge={false}
 					onEvents={onEvents}
 					option={option}
+					replaceMerge={["series"]}
 				/>
 			</div>
 			<div className="mt-3 flex items-center justify-between text-xs opacity-70">
