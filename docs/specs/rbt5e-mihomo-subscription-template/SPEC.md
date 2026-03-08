@@ -125,6 +125,7 @@
 - Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then 外层候选组 `🛣️ JP/HK/TW` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then `🛣️ JP/HK/TW` 仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
+- Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被剔除，对它们的引用会按悬挂引用处理并裁剪。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-chain` 与 `base-ss`。
@@ -202,7 +203,7 @@
 - 2026-03-04: 完成首版实现与验证（`cargo test`、`web lint/typecheck/test`），PR #95。
 - 2026-03-06: 需求升级为“mixin + 系统内置动态组逻辑”，新增稳定入口组、落地组策略与 autosplit 防误用机制。
 - 2026-03-06: 对外主字段切换为 `mixin_yaml`，稳定地区范围锁定为 JP/HK/KR。
-- 2026-03-08: 将 SS 链式代理收敛为单一 `-chain` 节点，并把系统外层候选组改为 `🛣️ JP/HK/TW`；旧地区组名与 `-JP/-HK/-KR/-TW` 不再兼容映射，仅做悬挂引用裁剪。
+- 2026-03-08: 将 SS 链式代理收敛为单一 `-chain` 节点，并把系统外层候选组改为 `🛣️ JP/HK/TW`；旧地区组名与 `-JP/-HK/-KR/-TW` 不再兼容映射，旧系统组定义会在渲染阶段被剔除，其引用仅做悬挂引用裁剪。
 - 2026-03-06: 在 `codex-testbox` 生成示例输出并完成两类证据：原样例的脱敏输出/差异分析，以及去掉已脱敏静态节点后的 provider-only 变体 Mihomo `-t` 通过记录。
 - 2026-03-07: 清理对外 `template_yaml` 兼容层；管理 API、前端 schema/mock 与文档统一只保留 `mixin_yaml`，同时恢复内部状态/WAL 的读写兼容（内部双写）以保证滚动升级安全。
 - 2026-03-06: review 收口补充 extra proxy 引用保护：对显式 extra proxies 的名称保持最高优先级，即便名称带有 `-JP` / `-HK` / `-KR` / `-ss` / `-reality` 后缀，也不再被系统动态 remap 误绑。
