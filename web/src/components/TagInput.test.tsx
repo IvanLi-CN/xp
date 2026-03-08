@@ -23,7 +23,7 @@ function Harness() {
 			value={tags}
 			onChange={setTags}
 			validateTag={validateDomain}
-			placeholder="oneclient.sfx.ms"
+			placeholder="download.example.com"
 		/>
 	);
 }
@@ -34,7 +34,7 @@ describe("<TagInput />", () => {
 	it("does not prevent default mousedown on the input (caret/selection should work)", () => {
 		render(<Harness />);
 
-		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const input = screen.getByPlaceholderText("download.example.com");
 		const evt = new MouseEvent("mousedown", {
 			bubbles: true,
 			cancelable: true,
@@ -46,7 +46,7 @@ describe("<TagInput />", () => {
 	it("adds multiple tags from a comma-separated draft and allows make primary", () => {
 		render(<Harness />);
 
-		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const input = screen.getByPlaceholderText("download.example.com");
 		fireEvent.change(input, {
 			target: { value: "a.example.com, b.example.com" },
 		});
@@ -74,7 +74,7 @@ describe("<TagInput />", () => {
 	it("rejects invalid tags and shows an error", () => {
 		render(<Harness />);
 
-		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const input = screen.getByPlaceholderText("download.example.com");
 		fireEvent.change(input, {
 			target: { value: "https://example.com" },
 		});
@@ -87,7 +87,7 @@ describe("<TagInput />", () => {
 	it("keeps an error visible when some tokens are accepted and some are rejected", () => {
 		render(<Harness />);
 
-		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const input = screen.getByPlaceholderText("download.example.com");
 		fireEvent.change(input, {
 			target: { value: "a.example.com, https://example.com" },
 		});
@@ -101,7 +101,7 @@ describe("<TagInput />", () => {
 	it("does not remove tags when clicking helper/empty areas", () => {
 		render(<Harness />);
 
-		const input = screen.getByPlaceholderText("oneclient.sfx.ms");
+		const input = screen.getByPlaceholderText("download.example.com");
 		fireEvent.change(input, {
 			target: { value: "a.example.com, b.example.com" },
 		});

@@ -3292,9 +3292,33 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
             "PUT",
             &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
             json!({
-              "mixin_yaml": "port: 0\nproxy-groups:\n  - name: \"🛣️ Japan\"\n    type: url-test\n    use: []\n  - name: \"🛣️ HongKong\"\n    type: url-test\n    use: []\n  - name: \"🛣️ Korea\"\n    type: url-test\n    use: []\nrules: []\n",
-              "extra_proxies_yaml": "- name: \"custom-direct\"\n  type: ss\n  server: custom.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"abc:def\"\n  udp: true\n- name: \"custom-JP\"\n  type: ss\n  server: japan.example.com\n  port: 443\n  cipher: 2022-blake3-aes-128-gcm\n  password: \"jp:def\"\n  udp: true\n",
-              "extra_proxy_providers_yaml": "providerA:\n  type: http\n  path: ./provider-a.yaml\n  url: https://example.com/sub-a\n",
+              "mixin_yaml": r#"port: 0
+proxy-groups:
+  - name: "🛣️ JP/HK/TW"
+    type: url-test
+    use: []
+rules: []
+"#,
+              "extra_proxies_yaml": r#"- name: "custom-direct"
+  type: ss
+  server: custom.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+- name: "custom-JP"
+  type: ss
+  server: japan.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "jp:def"
+  udp: true
+"#,
+              "extra_proxy_providers_yaml": r#"providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/sub-a
+"#,
             }),
         ))
         .await
@@ -3345,66 +3369,42 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    for relay in ["🛣️ Japan", "🛣️ HongKong", "🛣️ Korea"] {
-        let group = groups
-            .iter()
-            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(relay))
-            .expect("relay group missing");
-        let use_values = group
-            .get("use")
-            .and_then(YamlValue::as_sequence)
-            .expect("relay group use missing")
-            .iter()
-            .filter_map(YamlValue::as_str)
-            .collect::<Vec<_>>();
-        assert!(use_values.contains(&"providerA"));
-    }
-
-    let japan_lock = groups
+    let outer_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
-        .expect("expected built-in region group 🔒 Japan");
-    let japan_lock_use = japan_lock
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW"))
+        .expect("outer group missing");
+    let outer_use = outer_group
         .get("use")
         .and_then(YamlValue::as_sequence)
-        .expect("region group use missing")
+        .expect("outer group use missing")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    assert!(
-        japan_lock_use.contains(&"providerA"),
-        "expected region group 🔒 Japan to use providerA"
-    );
-    assert_eq!(
-        japan_lock.get("include-all-proxies"),
-        Some(&YamlValue::Bool(true)),
-        "region groups should keep provider-backed use while exposing extra proxies via include-all-proxies"
-    );
-    let japan_probe = groups
-        .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 Japan"))
-        .expect("expected built-in region group 🤯 Japan");
-    assert_eq!(
-        japan_probe.get("include-all-proxies"),
-        Some(&YamlValue::Bool(true)),
-        "url-test region groups should also expose extra proxies while keeping provider-backed use"
-    );
-    for unexpected in [
+    assert!(outer_use.contains(&"providerA"));
+
+    for expected in [
+        "🛣️ Japan",
+        "🌟 Japan",
+        "🔒 Japan",
+        "🤯 Japan",
+        "🛣️ HongKong",
+        "🌟 HongKong",
+        "🔒 HongKong",
+        "🤯 HongKong",
+        "🛣️ Taiwan",
         "🌟 Taiwan",
         "🔒 Taiwan",
         "🤯 Taiwan",
-        "🌟 Singapore",
-        "🔒 Singapore",
-        "🤯 Singapore",
-        "🌟 US",
-        "🔒 US",
-        "🤯 US",
+        "🛣️ Korea",
+        "🌟 Korea",
+        "🔒 Korea",
+        "🤯 Korea",
     ] {
         assert!(
             groups
                 .iter()
-                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
-            "unexpected stable region group leaked into output: {unexpected}"
+                .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
+            "compat region group missing from output: {expected}"
         );
     }
 
@@ -3416,11 +3416,11 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         proxies.iter().any(|item| {
             item.get("name")
                 .and_then(YamlValue::as_str)
-                .map(|n| n.ends_with("-JP"))
+                .map(|n| n.ends_with("-chain"))
                 .unwrap_or(false)
-                && item.get("dialer-proxy").and_then(YamlValue::as_str) == Some("🛣️ Japan")
+                && item.get("dialer-proxy").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW")
         }),
-        "expected at least one generated JP chain proxy"
+        "expected at least one generated single-chain proxy"
     );
 
     let base = proxies
@@ -3441,19 +3441,11 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    let expected_chain_jp = format!("{base}-JP");
-    assert!(
-        landing_proxies
-            .iter()
-            .any(|p| *p == expected_chain_jp.as_str()),
-        "expected landing group to include JP chain proxy"
-    );
+    let expected_chain = format!("{base}-chain");
     let expected_ss = format!("{base}-ss");
-    assert!(
-        landing_proxies
-            .last()
-            .is_some_and(|p| *p == expected_ss.as_str()),
-        "expected landing group to end with ss direct fallback"
+    assert_eq!(
+        landing_proxies,
+        vec![expected_chain.as_str(), expected_ss.as_str()]
     );
 
     let landing_pool = groups
@@ -3491,7 +3483,9 @@ async fn admin_user_mihomo_profile_rendering_without_proxy_providers_still_works
             "PUT",
             &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
             json!({
-              "mixin_yaml": "port: 0\nrules: []\n",
+              "mixin_yaml": "port: 0
+rules: []
+",
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
@@ -3521,22 +3515,25 @@ async fn admin_user_mihomo_profile_rendering_without_proxy_providers_still_works
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let japan_lock = groups
+    let outer_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
-        .expect("expected built-in region group 🔒 Japan");
-    assert_eq!(
-        japan_lock.get("include-all-proxies"),
-        Some(&YamlValue::Bool(true)),
-        "region groups should still draw from generated/extra proxies when providers are omitted"
-    );
-    let use_values = japan_lock
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW"))
+        .expect("expected built-in outer group 🛣️ JP/HK/TW");
+    let use_values = outer_group
         .get("use")
         .and_then(YamlValue::as_sequence)
-        .expect("region group use missing");
+        .expect("outer group use missing");
     assert!(
         use_values.is_empty(),
-        "region group use should stay empty without providers"
+        "outer group use should stay empty without providers"
+    );
+    let fallback_values = outer_group
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("outer group should fall back to DIRECT without providers");
+    assert_eq!(
+        fallback_values,
+        &vec![YamlValue::String("DIRECT".to_string())]
     );
 }
 
@@ -3574,7 +3571,13 @@ proxy-groups:
   - name: "Auto"
     type: select
     use: ["providerA"]
-    proxies: ["DIRECT"]
+    proxies: ["DIRECT", "🛣️ Japan", "🔒 Japan"]
+  - name: "🛣️ Japan"
+    type: url-test
+    use: ["providerA"]
+  - name: "🔒 Japan"
+    type: fallback
+    proxies: ["🛣️ Japan"]
 rules: []
 "#,
               "extra_proxies_yaml": "",
@@ -3793,6 +3796,28 @@ rules: []
             }),
         "legacy stored extra proxies should remain visible in rendered subscriptions"
     );
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW")),
+        "rendered legacy profile should inject the combined outer group"
+    );
+    for expected in ["🛣️ Japan", "🔒 Japan"] {
+        let group = groups
+            .iter()
+            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected))
+            .expect("compat region group should survive render");
+        assert_eq!(
+            group.get("type").and_then(YamlValue::as_str),
+            Some("select"),
+            "compat region group should be passive: {expected}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -4013,7 +4038,7 @@ async fn subscription_format_mihomo_renders_without_proxy_providers() {
 proxy-groups:
   - name: "Auto"
     type: select
-    proxies: ["🔒 Japan"]
+    proxies: ["🛣️ JP/HK/TW"]
 rules: []
 "#,
               "extra_proxies_yaml": r#"- name: "custom-direct"
@@ -4052,31 +4077,36 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let japan_lock = groups
+    let outer_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
-        .expect("expected built-in region group 🔒 Japan");
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW"))
+        .expect("expected built-in outer group 🛣️ JP/HK/TW");
     assert_eq!(
-        japan_lock
-            .get("include-all-proxies")
-            .and_then(YamlValue::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        japan_lock
+        outer_group
             .get("use")
             .and_then(YamlValue::as_sequence)
             .map(|items| items.len()),
         Some(0),
-        "expected 🔒 Japan to tolerate an empty provider pool"
+        "expected 🛣️ JP/HK/TW to tolerate an empty provider pool"
+    );
+    assert_eq!(
+        outer_group.get("proxies").and_then(YamlValue::as_sequence),
+        Some(&vec![YamlValue::String("DIRECT".to_string())])
     );
     for expected in [
+        "🛣️ Japan",
         "🌟 Japan",
         "🔒 Japan",
         "🤯 Japan",
+        "🛣️ HongKong",
         "🌟 HongKong",
         "🔒 HongKong",
         "🤯 HongKong",
+        "🛣️ Taiwan",
+        "🌟 Taiwan",
+        "🔒 Taiwan",
+        "🤯 Taiwan",
+        "🛣️ Korea",
         "🌟 Korea",
         "🔒 Korea",
         "🤯 Korea",
@@ -4085,25 +4115,7 @@ rules: []
             groups
                 .iter()
                 .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
-            "missing stable region group: {expected}"
-        );
-    }
-    for unexpected in [
-        "🌟 Taiwan",
-        "🔒 Taiwan",
-        "🤯 Taiwan",
-        "🌟 Singapore",
-        "🔒 Singapore",
-        "🤯 Singapore",
-        "🌟 US",
-        "🔒 US",
-        "🤯 US",
-    ] {
-        assert!(
-            groups
-                .iter()
-                .all(|g| g.get("name").and_then(YamlValue::as_str) != Some(unexpected)),
-            "unexpected stable region group leaked into output: {unexpected}"
+            "compat region group missing from output: {expected}"
         );
     }
 
