@@ -161,7 +161,27 @@
 
 ## Visual Evidence (PR)
 
-None yet.
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  sensitive_exclusion: `N/A`
+  submission_gate: `pending-owner-approval`
+  story_id_or_title: `Pages/NodeDetailsPage/IpUsageTab`
+  state: `default (24h)`
+  evidence_note: 验证节点详情 `IP usage` tab 的 unique-IP 面积图、占用泳道与 IP 列表在同一视图内完整出现。
+  image:
+  ![Node details IP usage tab](./assets/node-details-ip-usage-tab.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  sensitive_exclusion: `N/A`
+  submission_gate: `pending-owner-approval`
+  story_id_or_title: `Pages/UserDetailsPage/UsageDetailsTab`
+  state: `default (24h)`
+  evidence_note: 验证用户详情 `Usage details` tab 以节点切换 tabs 呈现，并展示对应节点的图表与 IP 列表。
+  image:
+  ![User details usage details tab](./assets/user-details-usage-details-tab.png)
 
 ## 资产晋升（Asset promotion）
 
