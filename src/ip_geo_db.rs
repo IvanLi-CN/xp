@@ -4,6 +4,7 @@ use std::{
     net::IpAddr,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
+    time::Duration as StdDuration,
 };
 
 use anyhow::{Context, anyhow};
@@ -27,6 +28,9 @@ const DBIP_LITE_DOWNLOAD_BASE_URL: &str = "https://download.db-ip.com/free";
 const CITY_FILE_NAME: &str = "dbip-city-lite.mmdb";
 const ASN_FILE_NAME: &str = "dbip-asn-lite.mmdb";
 const RUNTIME_FILE_NAME: &str = "geoip_update_runtime.json";
+const GEO_DB_UPDATE_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
+const GEO_DB_UPDATE_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
+const GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES: i64 = 15;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -272,6 +276,8 @@ pub fn spawn_geo_db_update_worker_with_origin(
     let persisted = load_runtime(&runtime_path)?;
     let handle = GeoDbUpdateHandle {
         client: reqwest::Client::builder()
+            .connect_timeout(GEO_DB_UPDATE_CONNECT_TIMEOUT)
+            .timeout(GEO_DB_UPDATE_HTTP_TIMEOUT)
             .build()
             .context("build geo db update reqwest client")?,
         store,
@@ -401,11 +407,13 @@ impl GeoDbUpdateHandle {
                     message: None,
                 });
             }
+            let mut persisted = runtime.persisted.clone();
+            persisted.schema_version = GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION;
+            persisted.last_started_at = Some(started_at.clone());
+            persisted.last_error = None;
+            save_runtime(&self.resolver.managed_paths().runtime, &persisted)?;
+            runtime.persisted = persisted;
             runtime.running = true;
-            runtime.persisted.schema_version = GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION;
-            runtime.persisted.last_started_at = Some(started_at.clone());
-            runtime.persisted.last_error = None;
-            save_runtime(&self.resolver.managed_paths().runtime, &runtime.persisted)?;
         }
 
         let handle = self.clone();
@@ -521,22 +529,43 @@ fn resolve_active_paths(
     }
 }
 
+fn auto_update_due_at(
+    settings: &GeoDbUpdateSettings,
+    mode: GeoDbLocalMode,
+    runtime: &PersistedGeoDbUpdateRuntime,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    if !settings.auto_update_enabled || mode == GeoDbLocalMode::ExternalOverride {
+        return None;
+    }
+
+    let scheduled_from_success = runtime
+        .last_success_at
+        .as_deref()
+        .and_then(parse_timestamp)
+        .map(|last| last + chrono::Duration::days(i64::from(settings.update_interval_days)))
+        .unwrap_or(now);
+
+    let retry_after_failure = runtime
+        .last_error
+        .as_ref()
+        .and(runtime.last_started_at.as_deref())
+        .and_then(parse_timestamp)
+        .map(|last| last + chrono::Duration::minutes(GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES));
+
+    Some(match retry_after_failure {
+        Some(retry_at) if retry_at > scheduled_from_success => retry_at,
+        _ => scheduled_from_success,
+    })
+}
+
 fn is_auto_update_due(
     settings: &GeoDbUpdateSettings,
     mode: GeoDbLocalMode,
     runtime: &PersistedGeoDbUpdateRuntime,
     now: DateTime<Utc>,
 ) -> bool {
-    if !settings.auto_update_enabled || mode == GeoDbLocalMode::ExternalOverride {
-        return false;
-    }
-    let Some(last_success_at) = runtime.last_success_at.as_deref() else {
-        return true;
-    };
-    let Some(last_success_at) = parse_timestamp(last_success_at) else {
-        return true;
-    };
-    now >= last_success_at + chrono::Duration::days(i64::from(settings.update_interval_days))
+    auto_update_due_at(settings, mode, runtime, now).is_some_and(|due_at| now >= due_at)
 }
 
 fn next_scheduled_at(
@@ -545,16 +574,8 @@ fn next_scheduled_at(
     runtime: &PersistedGeoDbUpdateRuntime,
     now: DateTime<Utc>,
 ) -> Option<String> {
-    if !settings.auto_update_enabled || mode == GeoDbLocalMode::ExternalOverride {
-        return None;
-    }
-    let next = runtime
-        .last_success_at
-        .as_deref()
-        .and_then(parse_timestamp)
-        .map(|last| last + chrono::Duration::days(i64::from(settings.update_interval_days)))
-        .unwrap_or(now);
-    Some(next.to_rfc3339_opts(SecondsFormat::Secs, true))
+    auto_update_due_at(settings, mode, runtime, now)
+        .map(|due_at| due_at.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
 
 fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
@@ -567,13 +588,41 @@ fn load_runtime(path: &Path) -> anyhow::Result<PersistedGeoDbUpdateRuntime> {
     if !path.exists() {
         return Ok(PersistedGeoDbUpdateRuntime::default());
     }
-    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let mut runtime: PersistedGeoDbUpdateRuntime =
-        serde_json::from_slice(&bytes).with_context(|| format!("decode {}", path.display()))?;
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!(path = %path.display(), %err, "ignoring unreadable geo db runtime state");
+            return Ok(PersistedGeoDbUpdateRuntime::default());
+        }
+    };
+    let mut runtime: PersistedGeoDbUpdateRuntime = match serde_json::from_slice(&bytes) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            warn!(path = %path.display(), %err, "ignoring invalid geo db runtime state");
+            backup_invalid_runtime(path);
+            return Ok(PersistedGeoDbUpdateRuntime::default());
+        }
+    };
     if runtime.schema_version != GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION {
         runtime = PersistedGeoDbUpdateRuntime::default();
     }
     Ok(runtime)
+}
+
+fn backup_invalid_runtime(path: &Path) {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(RUNTIME_FILE_NAME);
+    let backup = path.with_file_name(format!("{file_name}.corrupt-{}", Utc::now().timestamp()));
+    if let Err(err) = fs::rename(path, &backup) {
+        warn!(
+            path = %path.display(),
+            backup = %backup.display(),
+            %err,
+            "failed to quarantine invalid geo db runtime state"
+        );
+    }
 }
 
 fn save_runtime(path: &Path, runtime: &PersistedGeoDbUpdateRuntime) -> anyhow::Result<()> {
@@ -682,7 +731,33 @@ async fn download_bytes(client: &reqwest::Client, url: &str) -> anyhow::Result<V
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use clap::Parser as _;
+    use tokio::sync::Mutex;
+
     use super::*;
+    use crate::{
+        config::Cli,
+        state::{JsonSnapshotStore, StoreInit},
+    };
+
+    fn test_config(data_dir: &Path) -> Config {
+        let mut config = Cli::try_parse_from(["xp"]).unwrap().config;
+        config.data_dir = data_dir.to_path_buf();
+        config
+    }
+
+    fn test_store(data_dir: &Path) -> JsonSnapshotStore {
+        JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: data_dir.to_path_buf(),
+            bootstrap_node_id: Some("node-1".to_string()),
+            bootstrap_node_name: "node-1".to_string(),
+            bootstrap_access_host: String::new(),
+            bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn auto_update_due_without_previous_success() {
@@ -722,6 +797,85 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn auto_update_backoff_throttles_failed_runs() {
+        let settings = GeoDbUpdateSettings {
+            auto_update_enabled: true,
+            update_interval_days: 1,
+            ..GeoDbUpdateSettings::default()
+        };
+        let started_at = Utc::now() - chrono::Duration::minutes(5);
+        let runtime = PersistedGeoDbUpdateRuntime {
+            last_started_at: Some(started_at.to_rfc3339_opts(SecondsFormat::Secs, true)),
+            last_error: Some("download failed".to_string()),
+            ..PersistedGeoDbUpdateRuntime::default()
+        };
+
+        assert!(!is_auto_update_due(
+            &settings,
+            GeoDbLocalMode::Missing,
+            &runtime,
+            Utc::now(),
+        ));
+        assert_eq!(
+            next_scheduled_at(&settings, GeoDbLocalMode::Missing, &runtime, Utc::now()),
+            Some(
+                (started_at + chrono::Duration::minutes(GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES))
+                    .to_rfc3339_opts(SecondsFormat::Secs, true)
+            )
+        );
+    }
+
+    #[test]
+    fn load_runtime_ignores_invalid_json_and_quarantines_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runtime_path = tmp.path().join(RUNTIME_FILE_NAME);
+        fs::write(&runtime_path, b"{not-json").unwrap();
+
+        let runtime = load_runtime(&runtime_path).unwrap();
+
+        assert_eq!(runtime, PersistedGeoDbUpdateRuntime::default());
+        assert!(!runtime_path.exists());
+        let quarantined = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .any(|name| name.starts_with(&format!("{RUNTIME_FILE_NAME}.corrupt-")));
+        assert!(quarantined);
+    }
+
+    #[tokio::test]
+    async fn try_start_update_save_failure_does_not_latch_running() {
+        let workspace = tempfile::tempdir().unwrap();
+        let blocked_data_dir = workspace.path().join("blocked-data-dir");
+        fs::write(&blocked_data_dir, b"not-a-directory").unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Mutex::new(test_store(store_dir.path())));
+        let (handle, worker) = spawn_geo_db_update_worker_with_origin(
+            Arc::new(test_config(&blocked_data_dir)),
+            store,
+            "https://example.invalid".to_string(),
+        )
+        .unwrap();
+
+        let err = handle
+            .try_start_update(
+                GeoDbUpdateSettings {
+                    auto_update_enabled: true,
+                    ..GeoDbUpdateSettings::default()
+                },
+                true,
+            )
+            .await
+            .expect_err("runtime persistence should fail");
+
+        assert!(err.to_string().contains("write"));
+        let runtime = handle.runtime.lock().await;
+        assert!(!runtime.running);
+        assert_eq!(runtime.persisted, PersistedGeoDbUpdateRuntime::default());
+        worker.abort();
     }
 
     #[test]
