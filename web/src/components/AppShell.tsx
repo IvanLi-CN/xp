@@ -3,15 +3,49 @@ import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import {
+	CommandDialog,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	CommandShortcut,
+} from "@/components/ui/command";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Sheet,
+	SheetContent,
+	SheetDescription,
+	SheetHeader,
+	SheetTitle,
+} from "@/components/ui/sheet";
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { fetchVersionCheck } from "../api/versionCheck";
+import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionBadges } from "./VersionBadges";
 import { clearAdminToken, readAdminToken } from "./auth";
+import { inputClass } from "./ui-helpers";
 import {
 	type VersionCheckUiState,
 	readVersionCheckLastAtMs,
@@ -30,8 +64,6 @@ type AppShellProps = {
 	headerStatus?: ReactNode;
 	children?: ReactNode;
 };
-
-type CommandPaletteState = { open: boolean };
 
 function safeHostFromUrl(value: string): string | null {
 	try {
@@ -52,9 +84,7 @@ export function AppShell({
 	const navigate = useNavigate();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
-	const [commandPalette, setCommandPalette] = useState<CommandPaletteState>({
-		open: false,
-	});
+	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
 		reduceVersionCheckUiState,
@@ -85,7 +115,7 @@ export function AppShell({
 			if (!(event.ctrlKey || event.metaKey)) return;
 			if (event.key.toLowerCase() !== "k") return;
 			event.preventDefault();
-			setCommandPalette({ open: true });
+			setCommandPaletteOpen(true);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
@@ -132,22 +162,39 @@ export function AppShell({
 		return () => window.removeEventListener("focus", onFocus);
 	}, [runVersionCheck]);
 
+	const effectiveNavGroups =
+		navGroups ??
+		(navItems
+			? [
+					{
+						title: "NAV",
+						items: navItems,
+					},
+				]
+			: []);
+
+	const navEntries = useMemo(
+		() =>
+			effectiveNavGroups.flatMap((group) =>
+				group.items.map((item) => ({ ...item, group: group.title })),
+			),
+		[effectiveNavGroups],
+	);
+
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
-
 		const healthOk = health.isSuccess && health.data?.status === "ok";
 		items.push(
-			<span
+			<Badge
 				key="health"
-				className={[
-					"badge badge-sm gap-2 font-mono",
-					healthOk ? "badge-info" : "badge-error",
-				].join(" ")}
+				variant={healthOk ? "info" : "destructive"}
+				size="sm"
+				className="gap-2 font-mono"
 				title="Backend health"
 			>
 				<span>Health</span>
 				<span className="opacity-80">{healthOk ? "OK" : "error"}</span>
-			</span>,
+			</Badge>,
 		);
 
 		if (clusterInfo.isSuccess) {
@@ -156,26 +203,29 @@ export function AppShell({
 				clusterInfo.data.role === "leader"
 					? clusterInfo.data.node_id
 					: (leaderHost ?? clusterInfo.data.leader_api_base_url);
-
 			items.push(
-				<span
+				<Badge
 					key="leader"
-					className="badge badge-sm gap-2 font-mono badge-ghost"
+					variant="ghost"
+					size="sm"
+					className="gap-2 font-mono"
 					title="Cluster leader"
 				>
 					<span>leader:</span>
 					<span className="opacity-80">{leaderValue}</span>
-				</span>,
+				</Badge>,
 			);
 			items.push(
-				<span
+				<Badge
 					key="term"
-					className="badge badge-sm gap-2 font-mono badge-ghost"
+					variant="ghost"
+					size="sm"
+					className="gap-2 font-mono"
 					title="Cluster term"
 				>
 					<span>term:</span>
 					<span className="opacity-80">{clusterInfo.data.term}</span>
-				</span>,
+				</Badge>,
 			);
 		}
 
@@ -183,14 +233,14 @@ export function AppShell({
 			const count = adminAlerts.data.items.length;
 			const unreachable = adminAlerts.data.unreachable_nodes.length;
 			const partial = adminAlerts.data.partial;
-			const tone =
-				count > 0 || unreachable > 0 || partial
-					? "badge-warning"
-					: "badge-ghost";
+			const variant =
+				count > 0 || unreachable > 0 || partial ? "warning" : "ghost";
 			items.push(
-				<span
+				<Badge
 					key="alerts"
-					className={["badge badge-sm gap-2 font-mono", tone].join(" ")}
+					variant={variant}
+					size="sm"
+					className="gap-2 font-mono"
 					title="Admin alerts"
 				>
 					<span>alerts:</span>
@@ -199,7 +249,7 @@ export function AppShell({
 						<span className="opacity-80">+{unreachable}n</span>
 					) : null}
 					{partial ? <span className="opacity-80">partial</span> : null}
-				</span>,
+				</Badge>,
 			);
 		}
 
@@ -231,41 +281,28 @@ export function AppShell({
 		);
 	}, [clusterInfo.data, clusterInfo.isSuccess, runVersionCheck, versionCheck]);
 
-	const effectiveNavGroups =
-		navGroups ??
-		(navItems
-			? [
-					{
-						title: "NAV",
-						items: navItems,
-					},
-				]
-			: []);
-
 	const navContent = (
-		<nav
-			aria-label="Primary navigation"
-			className="rounded-box border border-base-200 bg-base-100 p-4"
-		>
+		<nav aria-label="Primary navigation" className="xp-panel p-4">
 			<div className="space-y-6">
 				{effectiveNavGroups.map((group) => (
 					<div key={group.title} className="space-y-2">
-						<p className="px-2 text-xs uppercase tracking-wide opacity-50">
+						<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 							{group.title}
 						</p>
-						<ul className="space-y-2">
+						<ul className="space-y-1.5">
 							{group.items.map((item) => (
 								<li key={item.to}>
 									<Link
 										to={item.to}
-										className="flex items-center gap-3 rounded-box px-3 py-2 border border-base-200 bg-base-100 hover:bg-base-200 transition-colors"
+										className="flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/60 hover:text-foreground"
 										activeProps={{
 											className:
-												"bg-info/10 border-info/30 text-base-content hover:bg-info/10",
+												"border-primary/25 bg-primary/10 text-foreground shadow-sm",
 										}}
+										onClick={() => setMobileNavOpen(false)}
 									>
 										<Icon name={item.icon} className="size-5 opacity-80" />
-										<span className="font-medium">{item.label}</span>
+										<span className="truncate">{item.label}</span>
 									</Link>
 								</li>
 							))}
@@ -277,22 +314,22 @@ export function AppShell({
 	);
 
 	return (
-		<div className="min-h-screen bg-base-200">
-			<div className="p-4">
-				<div className="mx-auto max-w-7xl space-y-4">
-					<header className="rounded-box border border-base-200 bg-base-100 px-4 py-3">
+		<div className="min-h-screen bg-background">
+			<div className="p-4 md:p-5">
+				<div className="mx-auto flex max-w-7xl flex-col gap-4">
+					<header className="xp-panel px-4 py-3">
 						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
-							<div className="flex items-center gap-3 min-w-0">
-								<button
-									type="button"
-									className="btn btn-ghost btn-sm lg:hidden"
+							<div className="flex min-w-0 items-center gap-3">
+								<Button
+									variant="ghost"
+									size="sm"
+									className="lg:hidden"
 									aria-label="Open menu"
 									onClick={() => setMobileNavOpen(true)}
 								>
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
-								</button>
-
-								<Link to="/" className="flex items-center gap-2 min-w-0">
+								</Button>
+								<Link to="/" className="flex min-w-0 items-center gap-2">
 									{brand.markSrc ? (
 										<img
 											src={brand.markSrc}
@@ -301,30 +338,33 @@ export function AppShell({
 											className="size-6 shrink-0"
 										/>
 									) : null}
-									<span className="font-semibold tracking-tight text-lg">
+									<span className="text-lg font-semibold tracking-tight">
 										{brand.name}
 									</span>
 									{brand.subtitle ? (
-										<span className="hidden sm:inline text-sm opacity-60 truncate">
+										<span className="hidden truncate text-sm text-muted-foreground sm:inline">
 											{brand.subtitle}
 										</span>
 									) : null}
 								</Link>
 							</div>
 
-							<div className="hidden lg:flex items-center justify-center gap-4">
-								<div className="w-full max-w-md relative">
+							<div className="hidden items-center justify-center lg:flex">
+								<div className="relative w-full max-w-md">
 									<input
 										type="text"
 										readOnly
 										placeholder="Search / command palette"
-										className="input input-bordered w-full pr-20 bg-base-200/40 cursor-pointer"
-										onClick={() => setCommandPalette({ open: true })}
-										onFocus={() => setCommandPalette({ open: true })}
+										className={inputClass(
+											prefs.density,
+											"cursor-pointer bg-muted/50 pr-20 font-mono",
+										)}
+										onClick={() => setCommandPaletteOpen(true)}
+										onFocus={() => setCommandPaletteOpen(true)}
 									/>
-									<div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
-										<kbd className="kbd kbd-sm">Ctrl</kbd>
-										<kbd className="kbd kbd-sm">K</kbd>
+									<div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+										<kbd className="xp-kbd">Ctrl</kbd>
+										<kbd className="xp-kbd">K</kbd>
 									</div>
 								</div>
 							</div>
@@ -332,166 +372,166 @@ export function AppShell({
 							<div className="flex items-center justify-end gap-2">
 								<div className="flex items-center gap-2">{versionBadges}</div>
 
-								<div className="dropdown dropdown-end">
-									<button
-										type="button"
-										className="btn btn-outline btn-sm xp-btn-outline"
-										aria-label="Open status"
-									>
-										<Icon name="tabler:activity-heartbeat" ariaLabel="Status" />
-										<span className="hidden sm:inline">Status</span>
-									</button>
-									<div className="dropdown-content z-[1] w-80 rounded-box border border-base-200 bg-base-100 shadow">
-										<div className="p-3 space-y-3">
-											<p className="text-xs uppercase tracking-wide opacity-60">
-												Status
-											</p>
-											<div className="flex flex-wrap gap-2">
-												{statusMenuBadges}
-											</div>
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant="secondary"
+											size="sm"
+											aria-label="Open status"
+										>
+											<Icon
+												name="tabler:activity-heartbeat"
+												ariaLabel="Status"
+											/>
+											<span className="hidden sm:inline">Status</span>
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" className="w-80 p-3">
+										<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+											Status
+										</DropdownMenuLabel>
+										<div className="mt-2 flex flex-wrap gap-2">
+											{statusMenuBadges}
 										</div>
-									</div>
-								</div>
+									</DropdownMenuContent>
+								</DropdownMenu>
 
-								<div className="dropdown dropdown-end">
-									<button
-										type="button"
-										className="btn btn-outline btn-sm xp-btn-outline"
-										aria-label="Open settings"
-									>
-										<Icon name="tabler:settings" ariaLabel="Settings" />
-										<span className="hidden sm:inline">Settings</span>
-									</button>
-									<div className="dropdown-content z-[1] w-72 rounded-box border border-base-200 bg-base-100 shadow">
-										<div className="p-3 space-y-3">
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant="secondary"
+											size="sm"
+											aria-label="Open settings"
+										>
+											<Icon name="tabler:settings" ariaLabel="Settings" />
+											<span className="hidden sm:inline">Settings</span>
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" className="w-80 p-3">
+										<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+											Theme
+										</DropdownMenuLabel>
+										<div className="mt-2 space-y-3">
+											<Select
+												value={prefs.theme}
+												onValueChange={(next) => {
+													if (
+														next === "dark" ||
+														next === "light" ||
+														next === "system"
+													) {
+														prefs.setTheme(next);
+													}
+												}}
+											>
+												<SelectTrigger aria-label="Theme">
+													<SelectValue placeholder="Theme" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="system">System</SelectItem>
+													<SelectItem value="light">Light</SelectItem>
+													<SelectItem value="dark">Dark</SelectItem>
+												</SelectContent>
+											</Select>
 											<div className="space-y-1">
-												<p className="text-xs uppercase tracking-wide opacity-60">
-													Theme
-												</p>
-												<select
-													className="select select-bordered select-sm w-full"
-													aria-label="Theme"
-													value={prefs.theme}
-													onChange={(event) => {
-														const next = event.target.value;
-														if (
-															next === "dark" ||
-															next === "light" ||
-															next === "system"
-														) {
-															prefs.setTheme(next);
-														}
-													}}
-												>
-													<option value="system">System</option>
-													<option value="light">Light</option>
-													<option value="dark">Dark</option>
-												</select>
-											</div>
-											<div className="space-y-1">
-												<p className="text-xs uppercase tracking-wide opacity-60">
+												<p className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 													Density
 												</p>
-												<select
-													className="select select-bordered select-sm w-full"
-													aria-label="Density"
+												<Select
 													value={prefs.density}
-													onChange={(event) => {
-														const next = event.target.value;
+													onValueChange={(next) =>
 														prefs.setDensity(
 															next === "compact" ? "compact" : "comfortable",
-														);
-													}}
+														)
+													}
 												>
-													<option value="comfortable">Comfortable</option>
-													<option value="compact">Compact</option>
-												</select>
-											</div>
-											<div className="border-t border-base-200 pt-3">
-												<button
-													type="button"
-													className="btn btn-ghost btn-sm w-full justify-start"
-													onClick={() => setCommandPalette({ open: true })}
-												>
-													Command palette
-													<span className="ml-auto font-mono text-xs opacity-60">
-														Ctrl/⌘K
-													</span>
-												</button>
-												<button
-													type="button"
-													className="btn btn-ghost btn-sm w-full justify-start text-error"
-													onClick={() => {
-														clearAdminToken();
-														navigate({ to: "/login" });
-													}}
-												>
-													<Icon name="tabler:logout" ariaLabel="Logout" />
-													Logout
-												</button>
+													<SelectTrigger aria-label="Density">
+														<SelectValue placeholder="Density" />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="comfortable">
+															Comfortable
+														</SelectItem>
+														<SelectItem value="compact">Compact</SelectItem>
+													</SelectContent>
+												</Select>
 											</div>
 										</div>
-									</div>
-								</div>
+										<DropdownMenuSeparator />
+										<DropdownMenuItem
+											onSelect={() => setCommandPaletteOpen(true)}
+										>
+											<span>Command palette</span>
+											<CommandShortcut>Ctrl/⌘K</CommandShortcut>
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											className="text-destructive focus:text-destructive"
+											onSelect={() => {
+												clearAdminToken();
+												navigate({ to: "/login" });
+											}}
+										>
+											<Icon name="tabler:logout" ariaLabel="Logout" />
+											<span>Logout</span>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</div>
 						</div>
 					</header>
 
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
-						<aside>{navContent}</aside>
-						<main className="rounded-box border border-base-200 bg-base-100 p-[var(--xp-page-padding)]">
+						<aside className="hidden lg:block">{navContent}</aside>
+						<main className="xp-panel p-[var(--xp-page-padding)]">
 							{children ?? <Outlet />}
 						</main>
 					</div>
 				</div>
 			</div>
 
-			<dialog className="modal" open={commandPalette.open}>
-				<div className="modal-box">
-					<h3 className="text-lg font-bold">Command palette</h3>
-					<p className="py-4 text-sm opacity-70">
-						Placeholder for Ctrl/⌘+K quick actions. (Planned in #0010.)
-					</p>
-					<div className="modal-action">
-						<button
-							type="button"
-							className="btn"
-							onClick={() => setCommandPalette({ open: false })}
-						>
-							Close
-						</button>
-					</div>
-				</div>
-				<form method="dialog" className="modal-backdrop">
-					<button
-						type="button"
-						onClick={() => setCommandPalette({ open: false })}
-					>
-						close
-					</button>
-				</form>
-			</dialog>
+			<CommandDialog
+				open={commandPaletteOpen}
+				onOpenChange={setCommandPaletteOpen}
+			>
+				<CommandInput placeholder="Search navigation and quick actions" />
+				<CommandList>
+					<CommandEmpty>No quick actions yet.</CommandEmpty>
+					<CommandGroup heading="Navigation">
+						{navEntries.map((item) => (
+							<CommandItem
+								key={item.to}
+								onSelect={() => {
+									setCommandPaletteOpen(false);
+									navigate({ to: item.to as never });
+								}}
+							>
+								<Icon
+									name={item.icon}
+									ariaLabel={item.label}
+									className="size-4"
+								/>
+								<span>{item.label}</span>
+								<CommandShortcut>{item.group}</CommandShortcut>
+							</CommandItem>
+						))}
+					</CommandGroup>
+				</CommandList>
+			</CommandDialog>
 
-			<dialog className="modal" open={mobileNavOpen}>
-				<div className="modal-box p-0">
-					<div className="p-4 flex items-center justify-between">
-						<p className="font-semibold tracking-tight">{brand.name}</p>
-						<button
-							type="button"
-							className="btn btn-ghost btn-sm"
-							onClick={() => setMobileNavOpen(false)}
-						>
-							Close
-						</button>
-					</div>
-					<div className="px-4 pb-4">{navContent}</div>
-				</div>
-				<form method="dialog" className="modal-backdrop">
-					<button type="button" onClick={() => setMobileNavOpen(false)}>
-						close
-					</button>
-				</form>
-			</dialog>
+			<Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+				<SheetContent
+					side="left"
+					className="flex w-[20rem] flex-col gap-4 p-4 sm:max-w-[20rem]"
+				>
+					<SheetHeader>
+						<SheetTitle>{brand.name}</SheetTitle>
+						<SheetDescription>
+							{brand.subtitle ?? "Primary navigation"}
+						</SheetDescription>
+					</SheetHeader>
+					{navContent}
+				</SheetContent>
+			</Sheet>
 		</div>
 	);
 }

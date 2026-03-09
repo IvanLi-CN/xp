@@ -119,9 +119,12 @@ export const AccessTab: Story = {
 export const QuotaStatusTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const tab = await canvas.findByRole("button", { name: "Quota status" });
-		await userEvent.click(tab);
-		await expect(tab).toHaveClass("tab-active");
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Quota status" }),
+		);
+		await expect(
+			(await canvas.findAllByText(/Remaining:/)).length,
+		).toBeGreaterThan(0);
 	},
 };
 
@@ -237,9 +240,9 @@ export const UsageDetailsTab7d: Story = {
 			await canvas.findByRole("heading", { name: "Usage details · osaka-1" }),
 		).toBeInTheDocument();
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
-		await expect(await canvas.findByRole("button", { name: "7d" })).toHaveClass(
-			"btn-primary",
-		);
+		await expect(
+			await canvas.findByRole("button", { name: "7d" }),
+		).toHaveAttribute("aria-pressed", "true");
 		await expect(
 			await canvas.findByRole("button", { name: "198.51.100.99" }),
 		).toBeInTheDocument();

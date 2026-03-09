@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Icon } from "./Icon";
+import { badgeClass } from "./ui-helpers";
 import {
 	type VersionCheckUiState,
 	XP_GITHUB_REPO,
@@ -34,7 +35,11 @@ export function VersionBadges({
 			href={xpHref}
 			target="_blank"
 			rel="noreferrer"
-			className="badge badge-sm gap-2 font-mono badge-ghost hover:bg-base-200 transition-colors"
+			className={badgeClass(
+				"ghost",
+				"sm",
+				"font-mono transition-colors hover:bg-accent",
+			)}
 			title={
 				xpVersion
 					? `xp version (from /api/cluster/info): ${xpVersion}`
@@ -60,7 +65,7 @@ function renderVersionCheckBadge(
 		return (
 			<span
 				key="version-check"
-				className="badge badge-sm gap-2 font-mono badge-ghost"
+				className={badgeClass("ghost", "sm", "font-mono")}
 				title="Checking latest version…"
 			>
 				<Icon
@@ -84,7 +89,11 @@ function renderVersionCheckBadge(
 				href={href}
 				target="_blank"
 				rel="noreferrer"
-				className="badge badge-sm gap-2 font-mono badge-warning text-warning-content hover:brightness-95 transition"
+				className={badgeClass(
+					"warning",
+					"sm",
+					"font-mono transition hover:brightness-95",
+				)}
 				title="Update available"
 			>
 				<Icon name="tabler:download" size={14} className="opacity-90" />
@@ -98,7 +107,7 @@ function renderVersionCheckBadge(
 		return (
 			<span
 				key="version-check"
-				className="badge badge-sm gap-2 font-mono badge-ghost"
+				className={badgeClass("ghost", "sm", "font-mono")}
 				title={
 					versionCheck.comparable
 						? `Up to date (checked at ${versionCheck.checked_at})`
@@ -118,7 +127,11 @@ function renderVersionCheckBadge(
 			<button
 				key="version-check"
 				type="button"
-				className="badge badge-sm gap-2 font-mono badge-error hover:brightness-95 transition"
+				className={badgeClass(
+					"error",
+					"sm",
+					"cursor-pointer font-mono transition hover:brightness-95",
+				)}
 				title={versionCheck.message}
 				onClick={onRetry}
 			>
@@ -131,7 +144,7 @@ function renderVersionCheckBadge(
 	return (
 		<span
 			key="version-check"
-			className="badge badge-sm gap-2 font-mono badge-ghost"
+			className={badgeClass("ghost", "sm", "font-mono")}
 			title="Focus the page to check updates (1h cooldown)"
 		>
 			<Icon name="tabler:refresh" size={14} className="opacity-70" />

@@ -13,6 +13,7 @@ import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { inputClass as inputControlClass } from "../components/ui-helpers";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -39,7 +40,7 @@ function highlightShell(text: string) {
 		} else if (part.startsWith("--")) {
 			className = "text-warning";
 		} else if (part.startsWith("$")) {
-			className = "text-accent";
+			className = "text-accent-foreground";
 		} else if (part.startsWith("'") || part.startsWith('"')) {
 			className = "text-success";
 		}
@@ -221,28 +222,22 @@ export function NodesPage() {
 				description="Inspect cluster nodes and issue join tokens for new members."
 			/>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
 					<div>
-						<h2 className="card-title">Join token</h2>
-						<p className="text-sm opacity-70">
+						<h2 className="xp-card-title">Join token</h2>
+						<p className="text-sm text-muted-foreground">
 							Generate a token and share it with the node you want to join.
 						</p>
 					</div>
 					<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">TTL (seconds)</span>
-							</div>
+						<label className="xp-field-stack">
+							<span className="text-sm font-medium">TTL (seconds)</span>
 							<input
 								type="number"
 								min={60}
 								step={60}
-								className={
-									prefs.density === "compact"
-										? "input input-bordered input-sm font-mono"
-										: "input input-bordered font-mono"
-								}
+								className={inputControlClass(prefs.density, "font-mono")}
 								value={ttlSeconds}
 								onChange={(event) => {
 									const next = Number(event.target.value);
@@ -262,14 +257,16 @@ export function NodesPage() {
 						</div>
 					</div>
 					{joinTokenError ? (
-						<p className="text-sm text-error font-mono">{joinTokenError}</p>
+						<p className="font-mono text-sm text-destructive">
+							{joinTokenError}
+						</p>
 					) : null}
 					{joinToken ? (
-						<div className="space-y-4 rounded-box bg-base-200 p-4">
+						<div className="space-y-4 rounded-2xl border border-border/60 bg-muted/35 p-4">
 							<div className="grid gap-4 lg:grid-cols-12">
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
+								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-6">
 									<div className="flex items-center justify-between gap-2">
-										<p className="text-xs uppercase tracking-wide opacity-60">
+										<p className="text-xs uppercase tracking-wide text-muted-foreground">
 											Join token
 										</p>
 										<CopyButton
@@ -280,12 +277,12 @@ export function NodesPage() {
 											size="sm"
 										/>
 									</div>
-									<p className="font-mono text-sm break-all">{joinToken}</p>
+									<p className="break-all font-mono text-sm">{joinToken}</p>
 								</div>
 
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-6">
+								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-6">
 									<div className="flex items-center justify-between gap-2">
-										<p className="text-xs uppercase tracking-wide opacity-60">
+										<p className="text-xs uppercase tracking-wide text-muted-foreground">
 											xp join command (legacy)
 										</p>
 										<CopyButton
@@ -296,13 +293,13 @@ export function NodesPage() {
 											size="sm"
 										/>
 									</div>
-									<p className="font-mono text-sm break-all">{joinCommand}</p>
+									<p className="break-all font-mono text-sm">{joinCommand}</p>
 								</div>
 
-								<div className="space-y-3 rounded-box bg-base-100/60 p-4 lg:col-span-12">
+								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-12">
 									<div className="space-y-1 min-w-0">
 										<div className="flex items-center justify-between gap-2">
-											<p className="text-xs uppercase tracking-wide opacity-60">
+											<p className="text-xs uppercase tracking-wide text-muted-foreground">
 												xp-ops deploy command (recommended)
 											</p>
 											<CopyButton
@@ -314,24 +311,18 @@ export function NodesPage() {
 											/>
 										</div>
 										{deployCommand ? (
-											<pre
-												className={
-													prefs.density === "compact"
-														? "rounded-box border border-base-content/20 bg-base-100/40 p-3 font-mono text-sm leading-5 max-h-72 overflow-auto"
-														: "rounded-box border border-base-content/20 bg-base-100/40 p-3 font-mono text-sm leading-5 max-h-72 overflow-auto"
-												}
-											>
+											<pre className="max-h-72 overflow-auto rounded-xl border border-border/60 bg-background/80 p-3 font-mono text-sm leading-5">
 												{highlightShell(deployCommand)}
 											</pre>
 										) : (
-											<p className="text-sm opacity-70">
+											<p className="text-sm text-muted-foreground">
 												Loading cluster version...
 											</p>
 										)}
 									</div>
 								</div>
 							</div>
-							<div className="text-sm opacity-70">
+							<div className="text-sm text-muted-foreground">
 								<p>
 									Notes: you can override{" "}
 									<span className="font-mono">XP_REPO</span>,{" "}
@@ -346,9 +337,9 @@ export function NodesPage() {
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Node inventory</h2>
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Node inventory</h2>
 					{nodesContent}
 				</div>
 			</div>

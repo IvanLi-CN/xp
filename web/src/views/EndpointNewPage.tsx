@@ -1,9 +1,11 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 
 import {
-	type AdminEndpointKind,
 	AdminEndpointKindSchema,
 	createAdminEndpoint,
 } from "../api/adminEndpoints";
@@ -15,8 +17,31 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
-import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { Badge } from "../components/ui/badge";
+import {
+	Card,
+	CardContent,
+	CardHeader,
+	CardTitle,
+} from "../components/ui/card";
+import {
+	Form,
+	FormControl,
+	FormDescription,
+	FormField,
+	FormItem,
+	FormLabel,
+	FormMessage,
+} from "../components/ui/form";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
@@ -43,20 +68,21 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+const endpointSchema = z.object({
+	kind: AdminEndpointKindSchema,
+	nodeId: z.string().min(1, "Node is required."),
+	port: z.coerce.number().int().positive("Please enter a valid port."),
+	realityServerNamesSource: z.enum(["manual", "global"]),
+	realityServerNamesManual: z.array(z.string()),
+	realityFingerprint: z.string(),
+});
+
+type EndpointFormValues = z.infer<typeof endpointSchema>;
+
 export function EndpointNewPage() {
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
-	const prefs = useUiPrefs();
 	const adminToken = readAdminToken();
-
-	const selectClass =
-		prefs.density === "compact"
-			? "select select-bordered select-sm"
-			: "select select-bordered";
-	const inputClass =
-		prefs.density === "compact"
-			? "input input-bordered input-sm"
-			: "input input-bordered";
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -70,26 +96,29 @@ export function EndpointNewPage() {
 		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
 	});
 
-	const [kind, setKind] = useState<AdminEndpointKind>(
-		"vless_reality_vision_tcp",
-	);
-	const [nodeId, setNodeId] = useState("");
-	const [port, setPort] = useState("443");
-	const [realityServerNamesSource, setRealityServerNamesSource] = useState<
-		"manual" | "global"
-	>("global");
-	const [realityServerNamesManual, setRealityServerNamesManual] = useState<
-		string[]
-	>([]);
-	const [realityFingerprint, setRealityFingerprint] = useState("chrome");
+	const form = useForm<EndpointFormValues>({
+		resolver: zodResolver(endpointSchema),
+		defaultValues: {
+			kind: "vless_reality_vision_tcp",
+			nodeId: "",
+			port: 443,
+			realityServerNamesSource: "global",
+			realityServerNamesManual: [],
+			realityFingerprint: "chrome",
+		},
+	});
+
+	const kind = form.watch("kind");
+	const nodeId = form.watch("nodeId");
+	const realityServerNamesSource = form.watch("realityServerNamesSource");
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
 		if (nodes.length === 0) return;
 		if (!nodeId || !nodes.some((node) => node.node_id === nodeId)) {
-			setNodeId(nodes[0].node_id);
+			form.setValue("nodeId", nodes[0]?.node_id ?? "", { shouldDirty: false });
 		}
-	}, [nodeId, nodesQuery.data]);
+	}, [form, nodeId, nodesQuery.data]);
 
 	const derivedGlobalServerNames = useMemo(() => {
 		if (!nodeId) return [];
@@ -97,26 +126,26 @@ export function EndpointNewPage() {
 		return deriveGlobalRealityServerNames(domains, nodeId);
 	}, [nodeId, realityDomainsQuery.data]);
 
+	const globalDomainsReady =
+		!realityDomainsQuery.isLoading && !realityDomainsQuery.isError;
+	const globalHasDomains = derivedGlobalServerNames.length > 0;
+
 	const createMutation = useMutation({
-		mutationFn: async () => {
-			const portNumber = Number.parseInt(port, 10);
-			if (!Number.isFinite(portNumber) || portNumber <= 0) {
-				throw new Error("Please enter a valid port.");
-			}
+		mutationFn: async (values: EndpointFormValues) => {
 			if (adminToken.length === 0) {
 				throw new Error("Missing admin token.");
 			}
 
-			if (kind === "vless_reality_vision_tcp") {
-				const fingerprintValue = realityFingerprint.trim() || "chrome";
+			if (values.kind === "vless_reality_vision_tcp") {
+				const fingerprintValue = values.realityFingerprint.trim() || "chrome";
 				const serverNames =
-					realityServerNamesSource === "global"
+					values.realityServerNamesSource === "global"
 						? derivedGlobalServerNames
-						: realityServerNamesManual
+						: values.realityServerNamesManual
 								.map(normalizeRealityServerName)
-								.filter((s) => s.length > 0);
+								.filter((serverName) => serverName.length > 0);
 
-				if (realityServerNamesSource === "manual") {
+				if (values.realityServerNamesSource === "manual") {
 					if (serverNames.length === 0) {
 						throw new Error("serverName is required.");
 					}
@@ -139,24 +168,23 @@ export function EndpointNewPage() {
 				}
 
 				const primary = serverNames[0];
-
 				return createAdminEndpoint(adminToken, {
-					kind,
-					node_id: nodeId,
-					port: portNumber,
+					kind: values.kind,
+					node_id: values.nodeId,
+					port: values.port,
 					reality: {
 						dest: `${primary}:443`,
 						server_names: serverNames,
-						server_names_source: realityServerNamesSource,
+						server_names_source: values.realityServerNamesSource,
 						fingerprint: fingerprintValue,
 					},
 				});
 			}
 
 			return createAdminEndpoint(adminToken, {
-				kind,
-				node_id: nodeId,
-				port: portNumber,
+				kind: values.kind,
+				node_id: values.nodeId,
+				port: values.port,
 			});
 		},
 		onSuccess: (endpoint) => {
@@ -177,317 +205,105 @@ export function EndpointNewPage() {
 		},
 	});
 
-	const globalDomainsReady =
-		!realityDomainsQuery.isLoading && !realityDomainsQuery.isError;
-	const globalHasDomains = derivedGlobalServerNames.length > 0;
-
-	const content = (() => {
-		if (adminToken.length === 0) {
-			return (
+	if (adminToken.length === 0) {
+		return (
+			<div className="space-y-6">
+				<PageHeader
+					title="New endpoint"
+					description="Create an ingress endpoint for a node."
+					actions={
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/endpoints">Back</Link>
+						</Button>
+					}
+				/>
 				<PageState
 					variant="empty"
 					title="Admin token required"
 					description="Set an admin token to create endpoints."
 					action={
-						<Link className="btn btn-primary" to="/login">
-							Go to login
-						</Link>
+						<Button asChild>
+							<Link to="/login">Go to login</Link>
+						</Button>
 					}
 				/>
-			);
-		}
+			</div>
+		);
+	}
 
-		if (nodesQuery.isLoading) {
-			return (
+	if (nodesQuery.isLoading) {
+		return (
+			<div className="space-y-6">
+				<PageHeader
+					title="New endpoint"
+					description="Create an ingress endpoint for a node."
+					actions={
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/endpoints">Back</Link>
+						</Button>
+					}
+				/>
 				<PageState
 					variant="loading"
 					title="Loading nodes"
 					description="Fetching nodes for endpoint assignment."
 				/>
-			);
-		}
+			</div>
+		);
+	}
 
-		if (nodesQuery.isError) {
-			const description = formatErrorMessage(nodesQuery.error);
-			return (
+	if (nodesQuery.isError) {
+		return (
+			<div className="space-y-6">
+				<PageHeader
+					title="New endpoint"
+					description="Create an ingress endpoint for a node."
+					actions={
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/endpoints">Back</Link>
+						</Button>
+					}
+				/>
 				<PageState
 					variant="error"
 					title="Failed to load nodes"
-					description={description}
+					description={formatErrorMessage(nodesQuery.error)}
 					action={
 						<Button variant="secondary" onClick={() => nodesQuery.refetch()}>
 							Retry
 						</Button>
 					}
 				/>
-			);
-		}
+			</div>
+		);
+	}
 
-		const nodes = nodesQuery.data?.items ?? [];
-		if (nodes.length === 0) {
-			return (
+	const nodes = nodesQuery.data?.items ?? [];
+	if (nodes.length === 0) {
+		return (
+			<div className="space-y-6">
+				<PageHeader
+					title="New endpoint"
+					description="Create an ingress endpoint for a node."
+					actions={
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/endpoints">Back</Link>
+						</Button>
+					}
+				/>
 				<PageState
 					variant="empty"
 					title="No nodes available"
 					description="Create or register a node before adding endpoints."
 					action={
-						<Link className="btn btn-primary" to="/nodes">
-							Go to nodes
-						</Link>
+						<Button asChild>
+							<Link to="/nodes">Go to nodes</Link>
+						</Button>
 					}
 				/>
-			);
-		}
-
-		return (
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<form
-						className="space-y-4"
-						onSubmit={(event) => {
-							event.preventDefault();
-							createMutation.mutate();
-						}}
-					>
-						<div className="grid gap-4 md:grid-cols-2">
-							<label className="form-control">
-								<div className="label">
-									<span className="label-text">Kind</span>
-								</div>
-								<select
-									className={selectClass}
-									value={kind}
-									onChange={(event) =>
-										setKind(AdminEndpointKindSchema.parse(event.target.value))
-									}
-								>
-									{kindOptions.map((option) => (
-										<option key={option.value} value={option.value}>
-											{option.label}
-										</option>
-									))}
-								</select>
-							</label>
-
-							{nodes.length <= 1 ? (
-								<div className="form-control">
-									<div className="label">
-										<span className="label-text">Node</span>
-									</div>
-									<div className="rounded-lg border border-base-300 bg-base-200 px-3 py-3 text-sm">
-										<span className="font-medium">
-											{nodes[0]?.node_name ?? "Node"}
-										</span>{" "}
-										<span className="font-mono text-xs opacity-70">
-											({nodes[0]?.node_id ?? nodeId})
-										</span>
-									</div>
-								</div>
-							) : (
-								<label className="form-control">
-									<div className="label">
-										<span className="label-text">Node</span>
-									</div>
-									<select
-										className={selectClass}
-										value={nodeId}
-										onChange={(event) => setNodeId(event.target.value)}
-									>
-										{nodes.map((node) => (
-											<option key={node.node_id} value={node.node_id}>
-												{node.node_name} ({node.node_id})
-											</option>
-										))}
-									</select>
-								</label>
-							)}
-						</div>
-
-						{kind === "vless_reality_vision_tcp" ? (
-							<div className="space-y-4 border-t border-base-200 pt-4">
-								<h2 className="text-lg font-semibold">VLESS settings</h2>
-								<div className="grid gap-4">
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">port</span>
-										</div>
-										<input
-											type="number"
-											className={inputClass}
-											value={port}
-											min={1}
-											onChange={(event) => setPort(event.target.value)}
-										/>
-										<p className="text-xs opacity-70">
-											The inbound listen port on this node.
-										</p>
-									</label>
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">
-												serverNamesSource
-											</span>
-										</div>
-										<select
-											className={selectClass}
-											value={realityServerNamesSource}
-											onChange={(event) =>
-												setRealityServerNamesSource(
-													event.target.value as "manual" | "global",
-												)
-											}
-											disabled={createMutation.isPending}
-										>
-											<option value="global">global</option>
-											<option value="manual">manual</option>
-										</select>
-										<p className="text-xs opacity-70">
-											<span className="font-mono">global</span> derives
-											serverNames from{" "}
-											<Link className="link link-primary" to="/reality-domains">
-												Settings &gt; Reality domains
-											</Link>{" "}
-											(enabled per node).{" "}
-											<span className="font-mono">manual</span> stores the list
-											on this endpoint.
-										</p>
-									</label>
-
-									{realityServerNamesSource === "manual" ? (
-										<TagInput
-											label="serverNames"
-											value={realityServerNamesManual}
-											onChange={setRealityServerNamesManual}
-											placeholder="download.example.com"
-											disabled={createMutation.isPending}
-											inputClass={inputClass}
-											validateTag={validateRealityServerName}
-											helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
-										/>
-									) : (
-										<div className="form-control">
-											<div className="label">
-												<span className="label-text font-mono">
-													derived serverNames
-												</span>
-											</div>
-											<div className="rounded-lg border border-base-300 bg-base-200 px-3 py-3 text-sm">
-												{realityDomainsQuery.isLoading ? (
-													<span className="opacity-70">
-														Loading reality domains...
-													</span>
-												) : realityDomainsQuery.isError ? (
-													<span className="text-error">
-														Failed to load reality domains.
-													</span>
-												) : derivedGlobalServerNames.length === 0 ? (
-													<span className="text-warning">
-														No enabled domains for this node.
-													</span>
-												) : (
-													<div className="flex flex-wrap gap-2">
-														{derivedGlobalServerNames.map((name, idx) => (
-															<span
-																key={`${idx}:${name}`}
-																className={[
-																	"badge font-mono gap-2",
-																	idx === 0 ? "badge-primary" : "badge-ghost",
-																].join(" ")}
-																title={
-																	idx === 0
-																		? "Primary (used for dest / probe)"
-																		: name
-																}
-															>
-																<span>{name}</span>
-																{idx === 0 ? (
-																	<span className="opacity-80">primary</span>
-																) : null}
-															</span>
-														))}
-													</div>
-												)}
-											</div>
-											<p className="text-xs opacity-70">
-												Derived from the ordered registry; the first enabled
-												domain becomes primary.
-											</p>
-										</div>
-									)}
-
-									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40">
-										<summary className="collapse-title text-sm font-medium">
-											Advanced (optional)
-										</summary>
-										<div className="collapse-content space-y-4">
-											<label className="form-control">
-												<div className="label">
-													<span className="label-text font-mono">
-														fingerprint
-													</span>
-												</div>
-												<input
-													type="text"
-													className={inputClass}
-													value={realityFingerprint}
-													placeholder="chrome"
-													onChange={(event) =>
-														setRealityFingerprint(event.target.value)
-													}
-												/>
-												<p className="text-xs opacity-70">
-													Defaults to <span className="font-mono">chrome</span>.
-												</p>
-											</label>
-										</div>
-									</details>
-								</div>
-							</div>
-						) : (
-							<div className="space-y-4 border-t border-base-200 pt-4">
-								<h2 className="text-lg font-semibold">SS2022 settings</h2>
-								<div className="grid gap-4 md:grid-cols-2">
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">port</span>
-										</div>
-										<input
-											type="number"
-											className={inputClass}
-											value={port}
-											min={1}
-											onChange={(event) => setPort(event.target.value)}
-										/>
-										<p className="text-xs opacity-70">
-											The inbound listen port on this node.
-										</p>
-									</label>
-								</div>
-							</div>
-						)}
-
-						<div className="card-actions justify-end gap-2">
-							<Link className="btn btn-ghost" to="/endpoints">
-								Cancel
-							</Link>
-							<Button
-								loading={createMutation.isPending}
-								disabled={
-									createMutation.isPending ||
-									(kind === "vless_reality_vision_tcp" &&
-										realityServerNamesSource === "global" &&
-										(!globalDomainsReady || !globalHasDomains))
-								}
-								type="submit"
-							>
-								Create endpoint
-							</Button>
-						</div>
-					</form>
-				</div>
 			</div>
 		);
-	})();
+	}
 
 	return (
 		<div className="space-y-6">
@@ -495,12 +311,300 @@ export function EndpointNewPage() {
 				title="New endpoint"
 				description="Create an ingress endpoint for a node."
 				actions={
-					<Link className="btn btn-ghost btn-sm" to="/endpoints">
-						Back
-					</Link>
+					<Button asChild variant="ghost" size="sm">
+						<Link to="/endpoints">Back</Link>
+					</Button>
 				}
 			/>
-			{content}
+			<Card>
+				<CardHeader>
+					<CardTitle>Create endpoint</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<Form {...form}>
+						<form
+							className="space-y-6"
+							onSubmit={form.handleSubmit(async (values) => {
+								try {
+									form.clearErrors("root");
+									await createMutation.mutateAsync(values);
+								} catch (error) {
+									form.setError("root", { message: formatErrorMessage(error) });
+								}
+							})}
+						>
+							<div className="grid gap-4 md:grid-cols-2">
+								<FormField
+									control={form.control}
+									name="kind"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>Kind</FormLabel>
+											<Select
+												value={field.value}
+												onValueChange={(value) =>
+													field.onChange(AdminEndpointKindSchema.parse(value))
+												}
+											>
+												<FormControl>
+													<SelectTrigger>
+														<SelectValue />
+													</SelectTrigger>
+												</FormControl>
+												<SelectContent>
+													{kindOptions.map((option) => (
+														<SelectItem key={option.value} value={option.value}>
+															{option.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+
+								{nodes.length <= 1 ? (
+									<div className="space-y-2">
+										<p className="text-sm font-medium">Node</p>
+										<div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
+											<span className="font-medium">
+												{nodes[0]?.node_name ?? "Node"}
+											</span>{" "}
+											<span className="font-mono text-xs text-muted-foreground">
+												({nodes[0]?.node_id ?? nodeId})
+											</span>
+										</div>
+									</div>
+								) : (
+									<FormField
+										control={form.control}
+										name="nodeId"
+										render={({ field }) => (
+											<FormItem>
+												<FormLabel>Node</FormLabel>
+												<Select
+													value={field.value}
+													onValueChange={field.onChange}
+												>
+													<FormControl>
+														<SelectTrigger>
+															<SelectValue placeholder="Choose a node" />
+														</SelectTrigger>
+													</FormControl>
+													<SelectContent>
+														{nodes.map((node) => (
+															<SelectItem
+																key={node.node_id}
+																value={node.node_id}
+															>
+																{node.node_name} ({node.node_id})
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+												<FormMessage />
+											</FormItem>
+										)}
+									/>
+								)}
+							</div>
+
+							<div className="space-y-4 border-t border-border/70 pt-6">
+								<h2 className="text-lg font-semibold">
+									{kind === "vless_reality_vision_tcp"
+										? "VLESS settings"
+										: "SS2022 settings"}
+								</h2>
+
+								<FormField
+									control={form.control}
+									name="port"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel className="font-mono">port</FormLabel>
+											<FormControl>
+												<Input
+													{...field}
+													type="number"
+													min={1}
+													onChange={(event) =>
+														field.onChange(event.target.value)
+													}
+												/>
+											</FormControl>
+											<FormDescription>
+												The inbound listen port on this node.
+											</FormDescription>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+
+								{kind === "vless_reality_vision_tcp" ? (
+									<>
+										<FormField
+											control={form.control}
+											name="realityServerNamesSource"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel className="font-mono">
+														serverNamesSource
+													</FormLabel>
+													<Select
+														value={field.value}
+														onValueChange={field.onChange}
+														disabled={createMutation.isPending}
+													>
+														<FormControl>
+															<SelectTrigger>
+																<SelectValue />
+															</SelectTrigger>
+														</FormControl>
+														<SelectContent>
+															<SelectItem value="global">global</SelectItem>
+															<SelectItem value="manual">manual</SelectItem>
+														</SelectContent>
+													</Select>
+													<FormDescription>
+														<span className="font-mono">global</span> derives
+														serverNames from{" "}
+														<Link className="xp-link" to="/reality-domains">
+															Settings &gt; Reality domains
+														</Link>{" "}
+														(enabled per node).{" "}
+														<span className="font-mono">manual</span> stores the
+														list on this endpoint.
+													</FormDescription>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+
+										{realityServerNamesSource === "manual" ? (
+											<FormField
+												control={form.control}
+												name="realityServerNamesManual"
+												render={({ field }) => (
+													<FormItem>
+														<FormControl>
+															<TagInput
+																label="serverNames"
+																value={field.value ?? []}
+																onChange={field.onChange}
+																placeholder="download.example.com"
+																disabled={createMutation.isPending}
+																validateTag={validateRealityServerName}
+																helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
+															/>
+														</FormControl>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+										) : (
+											<div className="space-y-2">
+												<p className="font-mono text-sm font-medium">
+													derived serverNames
+												</p>
+												<div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
+													{realityDomainsQuery.isLoading ? (
+														<span className="text-muted-foreground">
+															Loading reality domains...
+														</span>
+													) : realityDomainsQuery.isError ? (
+														<span className="text-destructive">
+															Failed to load reality domains.
+														</span>
+													) : derivedGlobalServerNames.length === 0 ? (
+														<span className="text-warning-foreground">
+															No enabled domains for this node.
+														</span>
+													) : (
+														<div className="flex flex-wrap gap-2">
+															{derivedGlobalServerNames.map((name, index) => (
+																<Badge
+																	key={`${index}:${name}`}
+																	variant={index === 0 ? "default" : "ghost"}
+																	className="gap-2 font-mono"
+																>
+																	<span>{name}</span>
+																	{index === 0 ? (
+																		<span className="opacity-80">primary</span>
+																	) : null}
+																</Badge>
+															))}
+														</div>
+													)}
+												</div>
+												<p className="text-xs text-muted-foreground">
+													Derived from the ordered registry; the first enabled
+													domain becomes primary.
+												</p>
+											</div>
+										)}
+
+										<details className="rounded-2xl border border-border/70 bg-muted/35 px-4 py-3">
+											<summary className="cursor-pointer text-sm font-medium">
+												Advanced (optional)
+											</summary>
+											<div className="mt-4">
+												<FormField
+													control={form.control}
+													name="realityFingerprint"
+													render={({ field }) => (
+														<FormItem>
+															<FormLabel className="font-mono">
+																fingerprint
+															</FormLabel>
+															<FormControl>
+																<Input
+																	{...field}
+																	type="text"
+																	placeholder="chrome"
+																/>
+															</FormControl>
+															<FormDescription>
+																Defaults to{" "}
+																<span className="font-mono">chrome</span>.
+															</FormDescription>
+															<FormMessage />
+														</FormItem>
+													)}
+												/>
+											</div>
+										</details>
+									</>
+								) : null}
+							</div>
+
+							{form.formState.errors.root?.message ? (
+								<p className="text-sm font-medium text-destructive">
+									{form.formState.errors.root.message}
+								</p>
+							) : null}
+
+							<div className="flex flex-wrap justify-end gap-2">
+								<Button asChild variant="ghost">
+									<Link to="/endpoints">Cancel</Link>
+								</Button>
+								<Button
+									type="submit"
+									loading={createMutation.isPending}
+									disabled={
+										createMutation.isPending ||
+										(kind === "vless_reality_vision_tcp" &&
+											realityServerNamesSource === "global" &&
+											(!globalDomainsReady || !globalHasDomains))
+									}
+								>
+									Create endpoint
+								</Button>
+							</div>
+						</form>
+					</Form>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }

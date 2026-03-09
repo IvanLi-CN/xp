@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
+import { buttonVariants } from "@/components/ui/button";
+
 import { fetchAdminUserQuotaSummaries } from "../api/adminUserQuotaSummaries";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
@@ -49,11 +51,11 @@ export function UsersPage() {
 
 	const actions =
 		adminToken.length === 0 ? (
-			<Link to="/login" className="btn btn-primary">
+			<Link to="/login" className={buttonVariants()}>
 				Go to login
 			</Link>
 		) : (
-			<Link to="/users/new" className="btn btn-primary">
+			<Link to="/users/new" className={buttonVariants()}>
 				New user
 			</Link>
 		);
@@ -156,7 +158,7 @@ export function UsersPage() {
 								<Link
 									to="/users/$userId"
 									params={{ userId: user.user_id }}
-									className="link link-hover font-semibold block truncate"
+									className="block truncate font-semibold text-foreground transition-colors hover:text-primary hover:underline"
 									title="Open user details"
 								>
 									{user.display_name}
@@ -165,7 +167,7 @@ export function UsersPage() {
 									<Link
 										to="/users/$userId"
 										params={{ userId: user.user_id }}
-										className="link link-primary font-mono text-xs block truncate min-w-0"
+										className="block min-w-0 truncate font-mono text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
 										title={user.user_id}
 									>
 										{user.user_id}
@@ -284,7 +286,7 @@ export function UsersPage() {
 
 											return (
 												<div
-													className="h-2.5 rounded bg-base-200 relative overflow-hidden"
+													className="relative h-2.5 overflow-hidden rounded-full bg-muted"
 													title={`Used: ${used} · Remaining: ${remaining}`}
 												>
 													<div

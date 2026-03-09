@@ -1,6 +1,13 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
+
 import type { SubscriptionFormat } from "../api/subscription";
 import { useUiPrefsOptional } from "./UiPrefs";
 
@@ -832,30 +839,23 @@ export function SubscriptionPreviewDialog({
 			: "placeholder:text-[#94a3b8]";
 
 	return (
-		<dialog
-			className="modal"
-			open={open}
-			onCancel={(e) => {
-				e.preventDefault();
-				onClose();
-			}}
-			style={{
-				backgroundColor:
-					resolvedTheme === "light"
-						? "rgba(15,23,42,0.45)"
-						: "rgba(0,0,0,0.38)",
-				backdropFilter: "none",
-				WebkitBackdropFilter: "none",
-			}}
-		>
-			<div
+		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+			<DialogContent
+				showCloseButton={false}
 				className={[
-					"modal-box w-[calc(100vw-64px)] max-w-[1160px] p-0 border rounded-[18px] !shadow-none overflow-x-hidden overflow-y-auto lg:overflow-hidden max-h-[calc(100vh-64px)]",
+					"w-[calc(100vw-64px)] max-w-[1160px] max-h-[calc(100vh-64px)] overflow-x-hidden overflow-y-auto rounded-[18px] border p-0 !shadow-none lg:overflow-hidden",
 					showFieldsPanel ? "lg:h-[660px]" : "",
 					theme.modalBg,
 				].join(" ")}
 				data-sub-preview-dialog
 			>
+				<DialogTitle className="sr-only">
+					Subscription content dialog
+				</DialogTitle>
+				<DialogDescription className="sr-only">
+					Inspect the generated subscription content and copy derived connection
+					fields.
+				</DialogDescription>
 				{/* Keep the close action pinned to the top-right for all sizes. */}
 				<div className="sticky top-0 z-30 h-0 pointer-events-none">
 					<div
@@ -901,7 +901,7 @@ export function SubscriptionPreviewDialog({
 									{format}
 								</span>
 								{loading ? (
-									<span className="loading loading-spinner loading-xs" />
+									<span className="xp-loading-spinner xp-loading-spinner-xs" />
 								) : null}
 							</div>
 						</div>
@@ -1006,7 +1006,9 @@ export function SubscriptionPreviewDialog({
 				</div>
 
 				<div className={[contentPadClass, "pb-[28px]"].join(" ")}>
-					{error ? <div className="text-sm text-error">{error}</div> : null}
+					{error ? (
+						<div className="text-sm text-destructive">{error}</div>
+					) : null}
 
 					<div
 						className={[
@@ -1205,11 +1207,7 @@ export function SubscriptionPreviewDialog({
 						) : null}
 					</div>
 				</div>
-			</div>
-
-			<form method="dialog" className="modal-backdrop">
-				<button type="button" aria-label="close modal" onClick={onClose} />
-			</form>
-		</dialog>
+			</DialogContent>
+		</Dialog>
 	);
 }

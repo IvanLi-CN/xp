@@ -25,7 +25,7 @@ export function EndpointsTable(props: {
 
 	return (
 		<ResourceTable
-			tableClassName="table-fixed w-full"
+			tableClassName="w-full table-fixed"
 			headers={[
 				{ key: "probe", label: "Probe (24h)", className: "w-40" },
 				{
@@ -35,7 +35,7 @@ export function EndpointsTable(props: {
 					label: (
 						<div className="flex flex-col leading-tight">
 							<span>Latency</span>
-							<span className="text-xs opacity-60 font-normal whitespace-nowrap">
+							<span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
 								p50 ms
 							</span>
 						</div>
@@ -46,7 +46,7 @@ export function EndpointsTable(props: {
 					label: (
 						<div className="flex flex-col leading-tight">
 							<span>Endpoint</span>
-							<span className="text-xs opacity-60 font-normal whitespace-nowrap">
+							<span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
 								tag/kind
 							</span>
 						</div>
@@ -57,7 +57,7 @@ export function EndpointsTable(props: {
 					label: (
 						<div className="flex flex-col leading-tight">
 							<span>Node</span>
-							<span className="text-xs opacity-60 font-normal whitespace-nowrap">
+							<span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
 								name/port
 							</span>
 						</div>
@@ -69,21 +69,21 @@ export function EndpointsTable(props: {
 				<tr key={endpoint.endpoint_id}>
 					<td>
 						<Link
-							className="inline-flex items-center"
+							className="inline-flex items-center rounded-md outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50"
 							to="/endpoints/$endpointId/probe"
 							params={{ endpointId: endpoint.endpoint_id }}
 						>
 							<EndpointProbeBar slots={endpoint.probe?.slots ?? []} />
 						</Link>
 					</td>
-					<td className="font-mono text-xs text-right tabular-nums truncate">
+					<td className="truncate text-right font-mono text-xs tabular-nums">
 						{endpoint.probe?.latest_latency_ms_p50 ?? "-"}
 					</td>
 					<td className="align-top">
-						<div className="flex flex-col gap-1 min-w-0">
-							<div className="flex items-center gap-2 min-w-0">
+						<div className="flex min-w-0 flex-col gap-1">
+							<div className="flex min-w-0 items-center gap-2">
 								<Link
-									className="link link-primary font-mono text-xs block truncate min-w-0 whitespace-nowrap"
+									className="xp-link block min-w-0 truncate whitespace-nowrap font-mono text-xs"
 									to="/endpoints/$endpointId"
 									params={{ endpointId: endpoint.endpoint_id }}
 									title={endpoint.tag}
@@ -96,11 +96,11 @@ export function EndpointsTable(props: {
 									variant="ghost"
 									size="sm"
 									ariaLabel="Copy endpoint ID"
-									className="px-2 shrink-0"
+									className="shrink-0 px-2"
 								/>
 							</div>
 							<div
-								className="text-xs opacity-60 whitespace-nowrap truncate"
+								className="truncate whitespace-nowrap text-xs text-muted-foreground"
 								title={endpoint.kind}
 							>
 								{formatKindShort(endpoint.kind)}
@@ -108,7 +108,7 @@ export function EndpointsTable(props: {
 						</div>
 					</td>
 					<td className="align-top">
-						<div className="flex flex-col gap-1 min-w-0">
+						<div className="flex min-w-0 flex-col gap-1">
 							{(() => {
 								const node = nodeById?.get(endpoint.node_id);
 								const nodeName = node?.node_name?.trim() ?? "";
@@ -121,7 +121,7 @@ export function EndpointsTable(props: {
 
 								return (
 									<div
-										className="text-xs font-medium block truncate min-w-0 whitespace-nowrap"
+										className="block min-w-0 truncate whitespace-nowrap text-xs font-medium"
 										title={nodeTitle}
 									>
 										{nodeLabel}
@@ -129,7 +129,7 @@ export function EndpointsTable(props: {
 								);
 							})()}
 							<div
-								className="font-mono text-xs opacity-60 whitespace-nowrap truncate"
+								className="truncate whitespace-nowrap font-mono text-xs text-muted-foreground"
 								title={String(endpoint.port)}
 							>
 								{endpoint.port}

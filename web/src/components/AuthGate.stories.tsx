@@ -1,16 +1,37 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+
 import { AuthGate } from "./AuthGate";
 import { clearAdminToken, writeAdminToken } from "./auth";
 
-const meta: Meta<typeof AuthGate> = {
+const meta = {
 	title: "Components/AuthGate",
 	component: AuthGate,
-};
+	tags: ["autodocs", "coverage-ui"],
+	args: {
+		children: <div>Protected content</div>,
+		fallback: undefined,
+	},
+	parameters: {
+		docs: {
+			description: {
+				component:
+					"Route guard that checks whether an admin token is available before rendering protected content. The authenticated story uses the shared card primitives and documents the protected-state shell.",
+			},
+		},
+	},
+} satisfies Meta<typeof AuthGate>;
 
 export default meta;
 
-type Story = StoryObj<typeof AuthGate>;
+type Story = StoryObj<typeof meta>;
 
 export const Unauthenticated: Story = {
 	render: () => {
@@ -28,14 +49,15 @@ export const Authenticated: Story = {
 		writeAdminToken("storybook-token");
 		return (
 			<AuthGate>
-				<div className="card bg-base-100 shadow">
-					<div className="card-body">
-						<h2 className="card-title">Authenticated</h2>
-						<p className="text-sm opacity-70">
-							Token detected in localStorage.
-						</p>
-					</div>
-				</div>
+				<Card className="max-w-md">
+					<CardHeader>
+						<CardTitle>Authenticated</CardTitle>
+						<CardDescription>Token detected in localStorage.</CardDescription>
+					</CardHeader>
+					<CardContent className="pt-0 text-sm text-muted-foreground">
+						Protected content renders normally.
+					</CardContent>
+				</Card>
 			</AuthGate>
 		);
 	},

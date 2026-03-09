@@ -7,6 +7,8 @@ import type {
 } from "../api/adminNodeRuntime";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { ResourceTable } from "./ResourceTable";
+import { alertClass, badgeClass } from "./ui-helpers";
 
 const BADGE_GAP_PX = 4;
 const LIST_LAYOUT_BREAKPOINT_PX = 960;
@@ -24,15 +26,15 @@ export type NodeInventoryListProps = {
 function componentBadgeClass(status: string): string {
 	switch (status) {
 		case "up":
-			return "badge badge-success badge-sm";
+			return badgeClass("success", "sm");
 		case "down":
-			return "badge badge-error badge-sm";
+			return badgeClass("error", "sm");
 		case "unknown":
-			return "badge badge-warning badge-sm";
+			return badgeClass("warning", "sm");
 		case "disabled":
-			return "badge badge-ghost badge-sm";
+			return badgeClass("ghost", "sm");
 		default:
-			return "badge badge-outline badge-sm";
+			return badgeClass("outline", "sm");
 	}
 }
 
@@ -43,16 +45,16 @@ function historySlotClass(status: string): string {
 		case "degraded":
 			return "bg-warning";
 		case "down":
-			return "bg-error";
+			return "bg-destructive";
 		default:
-			return "bg-base-300";
+			return "bg-border";
 	}
 }
 
 function overflowBadgeClass(problematic: ProblematicComponent[]): string {
 	return problematic.some((item) => item.status === "down")
-		? "badge badge-error badge-sm"
-		: "badge badge-warning badge-sm";
+		? badgeClass("error", "sm")
+		: badgeClass("warning", "sm");
 }
 
 function ProblematicComponentsField({
@@ -150,7 +152,7 @@ function ProblematicComponentsField({
 	if (problematic.length === 0) {
 		return (
 			<span
-				className="badge badge-success badge-sm"
+				className={badgeClass("success", "sm")}
 				title="All monitored components are healthy."
 			>
 				normal
@@ -209,7 +211,7 @@ function ProblematicComponentsField({
 							ref={(el) => {
 								plusBadgeRefs.current[count] = el;
 							}}
-							className="badge badge-sm"
+							className={badgeClass("ghost", "sm")}
 						>
 							+{count}
 						</span>
@@ -233,7 +235,7 @@ function NodePanelLink({
 		<Link
 			to="/nodes/$nodeId"
 			params={{ nodeId }}
-			className="inline-flex shrink-0 items-center rounded-sm text-base-content/60 transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-none"
+			className="inline-flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 			title={openNodePanelLabel}
 			aria-label={openNodePanelLabel}
 		>
@@ -311,7 +313,7 @@ export function NodeInventoryList({
 	return (
 		<div className="space-y-3">
 			{partial ? (
-				<div className="alert alert-warning">
+				<div className={alertClass("warning")}>
 					<span className="text-sm">
 						Partial result: unreachable node(s):{" "}
 						<span className="font-mono">
@@ -321,7 +323,7 @@ export function NodeInventoryList({
 				</div>
 			) : null}
 			<div className="flex items-center justify-between gap-3">
-				<p className="text-sm opacity-70">
+				<p className="text-sm text-muted-foreground">
 					{sortedItems.length} node{sortedItems.length === 1 ? "" : "s"} total
 				</p>
 				{onRefresh ? (
@@ -334,153 +336,155 @@ export function NodeInventoryList({
 					</Button>
 				) : null}
 			</div>
-			<div
-				ref={layoutRef}
-				className="rounded-box border border-base-300 bg-base-100 shadow-sm"
-			>
+			<div ref={layoutRef}>
 				{useListLayout ? (
-					<div className="divide-y divide-base-200">
+					<div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+						<div className="divide-y divide-border/60">
+							{sortedItems.map((node) => {
+								const nodeLabel = node.node_name || "(unnamed)";
+								const accessibleNodeLabel = node.node_name || node.node_id;
+								return (
+									<div key={node.node_id} className="space-y-3 px-4 py-3">
+										<div className="flex min-w-0 items-start justify-between gap-3">
+											<div className="min-w-0 space-y-1">
+												<p className="truncate text-sm" title={nodeLabel}>
+													{nodeLabel}
+												</p>
+												<p
+													className="break-all font-mono text-xs text-muted-foreground"
+													title={node.node_id}
+												>
+													{node.node_id}
+												</p>
+											</div>
+											<NodePanelLink
+												nodeId={node.node_id}
+												accessibleNodeLabel={accessibleNodeLabel}
+											/>
+										</div>
+										<div className="space-y-1">
+											<p className="text-xs uppercase text-muted-foreground">
+												API base URL
+											</p>
+											<p className="break-all font-mono text-xs">
+												{node.api_base_url}
+											</p>
+										</div>
+										<div className="space-y-1">
+											<p className="text-xs uppercase text-muted-foreground">
+												Access host
+											</p>
+											<p className="break-all font-mono text-xs">
+												{node.access_host}
+											</p>
+										</div>
+										<div className="space-y-1">
+											<p className="text-xs uppercase text-muted-foreground">
+												Components
+											</p>
+											<ProblematicComponentsField
+												problematic={node.components.filter(
+													(component) =>
+														component.status === "down" ||
+														component.status === "unknown",
+												)}
+											/>
+										</div>
+										<div className="space-y-1">
+											<p className="text-xs uppercase text-muted-foreground">
+												7d (30m)
+											</p>
+											{renderHistorySlots(node)}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				) : (
+					<ResourceTable
+						headers={[
+							{ key: "node", label: "Node" },
+							{ key: "endpoint", label: "Endpoint" },
+							{ key: "runtime", label: "Runtime" },
+						]}
+					>
 						{sortedItems.map((node) => {
 							const nodeLabel = node.node_name || "(unnamed)";
 							const accessibleNodeLabel = node.node_name || node.node_id;
+
 							return (
-								<div key={node.node_id} className="space-y-3 px-4 py-3">
-									<div className="flex min-w-0 items-start justify-between gap-3">
+								<tr key={node.node_id}>
+									<td>
 										<div className="min-w-0 space-y-1">
-											<p className="truncate text-sm" title={nodeLabel}>
-												{nodeLabel}
-											</p>
+											<div className="flex min-w-0 items-center gap-2">
+												<span
+													className="block min-w-0 truncate"
+													title={nodeLabel}
+												>
+													{nodeLabel}
+												</span>
+												<NodePanelLink
+													nodeId={node.node_id}
+													accessibleNodeLabel={accessibleNodeLabel}
+												/>
+											</div>
 											<p
-												className="break-all font-mono text-xs opacity-70"
+												className="break-all font-mono text-xs text-muted-foreground"
 												title={node.node_id}
 											>
 												{node.node_id}
 											</p>
 										</div>
-										<NodePanelLink
-											nodeId={node.node_id}
-											accessibleNodeLabel={accessibleNodeLabel}
-										/>
-									</div>
-									<div className="space-y-1">
-										<p className="text-xs uppercase opacity-60">API base URL</p>
-										<p className="break-all font-mono text-xs">
-											{node.api_base_url}
-										</p>
-									</div>
-									<div className="space-y-1">
-										<p className="text-xs uppercase opacity-60">Access host</p>
-										<p className="break-all font-mono text-xs">
-											{node.access_host}
-										</p>
-									</div>
-									<div className="space-y-1">
-										<p className="text-xs uppercase opacity-60">Components</p>
-										<ProblematicComponentsField
-											problematic={node.components.filter(
-												(component) =>
-													component.status === "down" ||
-													component.status === "unknown",
-											)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<p className="text-xs uppercase opacity-60">7d (30m)</p>
-										{renderHistorySlots(node)}
-									</div>
-								</div>
+									</td>
+									<td>
+										<div className="space-y-2">
+											<div className="space-y-1">
+												<p className="text-xs uppercase text-muted-foreground">
+													API base URL
+												</p>
+												<p className="break-all font-mono whitespace-normal">
+													{node.api_base_url}
+												</p>
+											</div>
+											<div className="space-y-1">
+												<p className="text-xs uppercase text-muted-foreground">
+													Access host
+												</p>
+												<p className="break-all font-mono whitespace-normal">
+													{node.access_host}
+												</p>
+											</div>
+										</div>
+									</td>
+									<td>
+										<div className="space-y-2">
+											<div className="space-y-1">
+												<p className="text-xs uppercase text-muted-foreground">
+													Components
+												</p>
+												<div className="max-w-full truncate whitespace-nowrap">
+													<ProblematicComponentsField
+														problematic={node.components.filter(
+															(component) =>
+																component.status === "down" ||
+																component.status === "unknown",
+														)}
+													/>
+												</div>
+											</div>
+											<div className="space-y-1">
+												<p className="text-xs uppercase text-muted-foreground">
+													7d (30m)
+												</p>
+												{renderHistorySlots(node)}
+											</div>
+										</div>
+									</td>
+								</tr>
 							);
 						})}
-					</div>
-				) : (
-					<div className="overflow-x-auto">
-						<table className="table table-zebra">
-							<thead>
-								<tr>
-									<th>Node</th>
-									<th>Endpoint</th>
-									<th>Runtime</th>
-								</tr>
-							</thead>
-							<tbody>
-								{sortedItems.map((node) => {
-									const nodeLabel = node.node_name || "(unnamed)";
-									const accessibleNodeLabel = node.node_name || node.node_id;
-
-									return (
-										<tr key={node.node_id}>
-											<td>
-												<div className="min-w-0 space-y-1">
-													<div className="flex min-w-0 items-center gap-2">
-														<span
-															className="block min-w-0 truncate"
-															title={nodeLabel}
-														>
-															{nodeLabel}
-														</span>
-														<NodePanelLink
-															nodeId={node.node_id}
-															accessibleNodeLabel={accessibleNodeLabel}
-														/>
-													</div>
-													<p
-														className="break-all font-mono text-xs opacity-70"
-														title={node.node_id}
-													>
-														{node.node_id}
-													</p>
-												</div>
-											</td>
-											<td>
-												<div className="space-y-2">
-													<div className="space-y-1">
-														<p className="text-xs uppercase opacity-60">
-															API base URL
-														</p>
-														<p className="break-all font-mono whitespace-normal">
-															{node.api_base_url}
-														</p>
-													</div>
-													<div className="space-y-1">
-														<p className="text-xs uppercase opacity-60">
-															Access host
-														</p>
-														<p className="break-all font-mono whitespace-normal">
-															{node.access_host}
-														</p>
-													</div>
-												</div>
-											</td>
-											<td>
-												<div className="space-y-2">
-													<div className="space-y-1">
-														<p className="text-xs uppercase opacity-60">
-															Components
-														</p>
-														<div className="max-w-full truncate whitespace-nowrap">
-															<ProblematicComponentsField
-																problematic={node.components.filter(
-																	(component) =>
-																		component.status === "down" ||
-																		component.status === "unknown",
-																)}
-															/>
-														</div>
-													</div>
-													<div className="space-y-1">
-														<p className="text-xs uppercase opacity-60">
-															7d (30m)
-														</p>
-														{renderHistorySlots(node)}
-													</div>
-												</div>
-											</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
-					</div>
+					</ResourceTable>
 				)}
 			</div>
 		</div>

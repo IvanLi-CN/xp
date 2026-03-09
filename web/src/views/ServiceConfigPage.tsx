@@ -50,14 +50,14 @@ function SummaryChip({ label, value, tone = "neutral" }: SummaryChipProps) {
 	return (
 		<div
 			className={[
-				"rounded-box border bg-base-100 px-4 py-3",
-				tone === "warning" ? "border-warning/40" : "border-base-200",
+				"rounded-2xl border bg-card px-4 py-3 shadow-sm",
+				tone === "warning" ? "border-warning/40" : "border-border/70",
 			].join(" ")}
 		>
-			<div className="text-xs uppercase tracking-widest opacity-60">
+			<div className="text-xs uppercase tracking-widest text-muted-foreground">
 				{label}
 			</div>
-			<div className="mt-1 font-semibold">{value}</div>
+			<div className="mt-1 font-semibold text-foreground">{value}</div>
 		</div>
 	);
 }
@@ -72,14 +72,14 @@ function FieldBlock({ label, value, copyText }: FieldBlockProps) {
 	const text = displayValue(value);
 
 	return (
-		<div className="rounded-box border border-base-200 bg-base-100 px-3 py-3">
+		<div className="rounded-2xl border border-border/70 bg-card px-3 py-3 shadow-sm">
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0 flex-1">
-					<div className="text-xs uppercase tracking-widest opacity-60">
+					<div className="text-xs uppercase tracking-widest text-muted-foreground">
 						{label}
 					</div>
 					<div
-						className="mt-1 font-mono text-sm whitespace-nowrap overflow-x-auto"
+						className="mt-1 overflow-x-auto whitespace-nowrap font-mono text-sm"
 						title={value}
 					>
 						{text}
@@ -93,7 +93,7 @@ function FieldBlock({ label, value, copyText }: FieldBlockProps) {
 						errorLabel="error"
 						variant="secondary"
 						size="sm"
-						className="btn-xs btn-info uppercase tracking-wide"
+						className="h-7 px-2 text-[11px] uppercase tracking-wide"
 					/>
 				) : null}
 			</div>
@@ -228,11 +228,11 @@ export function ServiceConfigPage() {
 				</div>
 
 				<div className="grid gap-4 lg:grid-cols-2">
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-3 p-4">
+					<div className="xp-card">
+						<div className="xp-card-body space-y-3">
 							<div>
 								<h2 className="text-base font-semibold">Network</h2>
-								<p className="text-sm opacity-70">
+								<p className="text-sm text-muted-foreground">
 									控制面监听与对外 API 地址。
 								</p>
 							</div>
@@ -256,11 +256,11 @@ export function ServiceConfigPage() {
 						</div>
 					</div>
 
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-3 p-4">
+					<div className="xp-card">
+						<div className="xp-card-body space-y-3">
 							<div>
 								<h2 className="text-base font-semibold">Node</h2>
-								<p className="text-sm opacity-70">
+								<p className="text-sm text-muted-foreground">
 									用于订阅与客户端连接的对外 host。
 								</p>
 							</div>
@@ -284,11 +284,13 @@ export function ServiceConfigPage() {
 						</div>
 					</div>
 
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-3 p-4">
+					<div className="xp-card">
+						<div className="xp-card-body space-y-3">
 							<div>
 								<h2 className="text-base font-semibold">Quota</h2>
-								<p className="text-sm opacity-70">流量统计与自动解封策略。</p>
+								<p className="text-sm text-muted-foreground">
+									流量统计与自动解封策略。
+								</p>
 							</div>
 							<div className="space-y-3">
 								<FieldBlock
@@ -305,11 +307,11 @@ export function ServiceConfigPage() {
 						</div>
 					</div>
 
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-3 p-4">
+					<div className="xp-card">
+						<div className="xp-card-body space-y-3">
 							<div>
 								<h2 className="text-base font-semibold">Security</h2>
-								<p className="text-sm opacity-70">
+								<p className="text-sm text-muted-foreground">
 									仅展示可公开信息，敏感字段全量脱敏。
 								</p>
 							</div>
@@ -329,7 +331,7 @@ export function ServiceConfigPage() {
 					</div>
 				</div>
 
-				<div className="flex items-center justify-between gap-3 text-xs opacity-60">
+				<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
 					<div>Settings / Service config</div>
 					<div>All fields are read-only · JSON export logs hidden</div>
 				</div>

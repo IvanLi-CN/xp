@@ -1,5 +1,16 @@
 import type { ReactNode } from "react";
 
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 type ConfirmDialogProps = {
 	open: boolean;
 	title: string;
@@ -22,30 +33,25 @@ export function ConfirmDialog({
 	footer,
 }: ConfirmDialogProps) {
 	return (
-		<dialog className="modal" open={open}>
-			<div className="modal-box">
-				<h3 className="text-lg font-bold">{title}</h3>
-				{description ? <p className="py-4">{description}</p> : null}
+		<AlertDialog open={open} onOpenChange={(next) => !next && onCancel?.()}>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>{title}</AlertDialogTitle>
+					{description ? (
+						<AlertDialogDescription>{description}</AlertDialogDescription>
+					) : null}
+				</AlertDialogHeader>
 				{footer ?? (
-					<div className="modal-action">
-						<button type="button" className="btn" onClick={onCancel}>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={onCancel}>
 							{cancelLabel}
-						</button>
-						<button
-							type="button"
-							className="btn btn-primary"
-							onClick={onConfirm}
-						>
+						</AlertDialogCancel>
+						<AlertDialogAction onClick={onConfirm}>
 							{confirmLabel}
-						</button>
-					</div>
+						</AlertDialogAction>
+					</AlertDialogFooter>
 				)}
-			</div>
-			<form method="dialog" className="modal-backdrop">
-				<button type="button" onClick={onCancel}>
-					close
-				</button>
-			</form>
-		</dialog>
+			</AlertDialogContent>
+		</AlertDialog>
 	);
 }

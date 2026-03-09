@@ -69,9 +69,9 @@ export const IpUsageTab7d: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
-		await expect(await canvas.findByRole("button", { name: "7d" })).toHaveClass(
-			"btn-primary",
-		);
+		await expect(
+			await canvas.findByRole("button", { name: "7d" }),
+		).toHaveAttribute("aria-pressed", "true");
 		await expect(
 			await canvas.findByRole("button", { name: "198.51.100.88" }),
 		).toBeInTheDocument();

@@ -2,7 +2,9 @@ import { yaml } from "@codemirror/lang-yaml";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import CodeMirror from "@uiw/react-codemirror";
 import { useId, useMemo } from "react";
+
 import { useUiPrefsOptional } from "./UiPrefs";
+import { textareaClass } from "./ui-helpers";
 
 type YamlCodeEditorProps = {
 	label: string;
@@ -47,10 +49,10 @@ export function YamlCodeEditor({
 
 	if (IS_TEST_MODE) {
 		return (
-			<label className="form-control gap-2">
-				<span className="label-text">{label}</span>
+			<label className="space-y-2">
+				<span className="text-sm font-medium text-foreground">{label}</span>
 				<textarea
-					className="textarea textarea-bordered font-mono"
+					className={textareaClass("font-mono")}
 					rows={minRows}
 					value={value}
 					onChange={(event) => onChange(event.target.value)}
@@ -61,11 +63,11 @@ export function YamlCodeEditor({
 	}
 
 	return (
-		<div className="form-control gap-2">
-			<span className="label-text" id={labelId}>
+		<div className="space-y-2">
+			<span className="text-sm font-medium text-foreground" id={labelId}>
 				{label}
 			</span>
-			<div className="rounded-box border border-base-300 bg-base-100 overflow-hidden">
+			<div className="overflow-hidden rounded-2xl border border-border bg-background">
 				<CodeMirror
 					value={value}
 					height={editorHeight}

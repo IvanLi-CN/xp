@@ -5,6 +5,7 @@ import { CopyButton } from "./CopyButton";
 const meta: Meta<typeof CopyButton> = {
 	title: "Components/CopyButton",
 	component: CopyButton,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		text: "https://example.com",
 	},

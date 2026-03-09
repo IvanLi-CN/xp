@@ -5,6 +5,7 @@ import { ResourceTable } from "./ResourceTable";
 const meta: Meta<typeof ResourceTable> = {
 	title: "Components/ResourceTable",
 	component: ResourceTable,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		headers: [
 			{ key: "name", label: "name" },

@@ -55,7 +55,7 @@ describe("<DataTable />", () => {
 		const table = container.querySelector("table");
 		expect(table).not.toBeNull();
 		return waitFor(() => {
-			expect(table).toHaveClass("table-sm");
+			expect(table).toHaveClass("xp-table-compact");
 		});
 	});
 });

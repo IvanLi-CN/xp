@@ -56,6 +56,7 @@ function resolveTheme(preference: UiThemePreference): UiThemeResolved {
 function applyResolvedTheme(resolved: UiThemeResolved): void {
 	const themeName = resolved === "dark" ? "xp-dark" : "xp-light";
 	document.documentElement.setAttribute("data-theme", themeName);
+	document.documentElement.classList.toggle("dark", resolved === "dark");
 }
 
 function applyDensity(density: UiDensity): void {

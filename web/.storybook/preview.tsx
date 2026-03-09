@@ -87,6 +87,19 @@ export const initialGlobals = {
 } as const;
 
 const preview: Preview = {
+	tags: ["autodocs"],
+	parameters: {
+		actions: { argTypesRegex: "^on[A-Z].*" },
+		controls: {
+			matchers: {
+				color: /(background|color)$/i,
+				date: /Date$/,
+			},
+		},
+		docs: {
+			toc: true,
+		},
+	},
 	decorators: [
 		(Story, context) => {
 			const queryClient = createQueryClient();

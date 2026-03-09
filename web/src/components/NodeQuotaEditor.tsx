@@ -8,12 +8,15 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { cn } from "@/lib/utils";
+
 import {
 	formatQuotaBytesCompactInput,
 	formatQuotaBytesHuman,
 	parseQuotaInputToBytes,
 } from "../utils/quota";
 import { Button } from "./Button";
+import { inputClass as inputControlClass } from "./ui-helpers";
 
 export type NodeQuotaEditorValue = number | "mixed";
 
@@ -48,7 +51,7 @@ export function NodeQuotaEditor(props: {
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
-	const editorRef = useRef<HTMLDialogElement | null>(null);
+	const editorRef = useRef<HTMLDivElement | null>(null);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const editorId = useMemo(
 		() => `quota-editor-${Math.random().toString(16).slice(2)}`,
@@ -179,17 +182,11 @@ export function NodeQuotaEditor(props: {
 					const maxWidth = Math.max(220, window.innerWidth - left - margin);
 
 					return (
-						<dialog
+						<div
 							ref={editorRef}
 							id={editorId}
 							aria-label="Edit node quota"
-							className="rounded-xl border border-base-300 bg-base-100 p-3 shadow-lg"
-							open
-							onCancel={(event) => {
-								event.preventDefault();
-								cancel();
-							}}
-							onClose={() => cancel()}
+							className="rounded-2xl border border-border bg-popover p-3 text-popover-foreground shadow-lg"
 							style={{
 								position: "fixed",
 								left,
@@ -198,18 +195,17 @@ export function NodeQuotaEditor(props: {
 								width: desiredWidth,
 								maxWidth,
 								visibility: popoverPos ? "visible" : "hidden",
-								margin: 0,
 							}}
 						>
 							<div className="flex flex-col gap-2">
 								<input
 									ref={inputRef}
-									className={[
-										"input input-bordered input-sm w-full font-mono",
-										error ? "input-error" : "",
-									]
-										.filter(Boolean)
-										.join(" ")}
+									className={inputControlClass(
+										"compact",
+										"w-full font-mono",
+										error &&
+											"border-destructive focus-visible:border-destructive focus-visible:ring-destructive/20",
+									)}
 									value={draft}
 									disabled={disabled || isSaving}
 									aria-invalid={Boolean(error)}
@@ -231,7 +227,7 @@ export function NodeQuotaEditor(props: {
 								/>
 
 								{error ? (
-									<div className="text-xs text-error">{error}</div>
+									<div className="text-xs text-destructive">{error}</div>
 								) : null}
 
 								<div className="flex items-center justify-end gap-2">
@@ -253,7 +249,7 @@ export function NodeQuotaEditor(props: {
 									</Button>
 								</div>
 							</div>
-						</dialog>
+						</div>
 					);
 				})(),
 				document.body,
@@ -265,7 +261,10 @@ export function NodeQuotaEditor(props: {
 			<button
 				ref={triggerRef}
 				type="button"
-				className="btn btn-ghost btn-xs px-2"
+				className={cn(
+					"inline-flex items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+					disabled && "cursor-not-allowed opacity-60",
+				)}
 				disabled={disabled}
 				aria-expanded={isEditing}
 				aria-controls={isEditing ? editorId : undefined}
@@ -276,8 +275,12 @@ export function NodeQuotaEditor(props: {
 					requestAnimationFrame(() => updatePopoverPosition());
 				}}
 			>
-				<span className="font-mono text-xs opacity-70">Quota: {display}</span>
-				<span className="font-mono text-[10px] opacity-50">(edit)</span>
+				<span className="font-mono text-xs text-muted-foreground">
+					Quota: {display}
+				</span>
+				<span className="font-mono text-[10px] text-muted-foreground/80">
+					(edit)
+				</span>
 			</button>
 			{editorPopover}
 		</div>

@@ -1,5 +1,8 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 
 import {
 	type AdminIpGeoDbNodeStatus,
@@ -9,10 +12,34 @@ import {
 } from "../api/adminIpGeoDb";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import { DataTable, TableCell } from "../components/DataTable";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { Badge } from "../components/ui/badge";
+import { Checkbox } from "../components/ui/checkbox";
+import {
+	Form,
+	FormControl,
+	FormDescription,
+	FormField,
+	FormItem,
+	FormLabel,
+	FormMessage,
+} from "../components/ui/form";
+import { Input } from "../components/ui/input";
+
+const geoDbSettingsSchema = z.object({
+	autoUpdateEnabled: z.boolean(),
+	updateIntervalDays: z.coerce
+		.number()
+		.int("Allowed range: 1-30 days.")
+		.min(1, "Allowed range: 1-30 days.")
+		.max(30, "Allowed range: 1-30 days."),
+});
+
+type GeoDbSettingsValues = z.infer<typeof geoDbSettingsSchema>;
 
 function formatError(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -40,14 +67,16 @@ function modeLabel(mode: AdminIpGeoDbNodeStatus["mode"]): string {
 	}
 }
 
-function modeBadgeClass(mode: AdminIpGeoDbNodeStatus["mode"]): string {
+function modeBadgeVariant(
+	mode: AdminIpGeoDbNodeStatus["mode"],
+): "success" | "info" | "warning" {
 	switch (mode) {
 		case "managed":
-			return "badge-success";
+			return "success";
 		case "external_override":
-			return "badge-info";
+			return "info";
 		case "missing":
-			return "badge-warning";
+			return "warning";
 	}
 }
 
@@ -62,12 +91,13 @@ function SummaryChip({
 }) {
 	return (
 		<div
-			className={[
-				"rounded-box border bg-base-100 px-4 py-3",
-				tone === "warning" ? "border-warning/40" : "border-base-200",
-			].join(" ")}
+			className={
+				tone === "warning"
+					? "xp-panel border-warning/40 px-4 py-3"
+					: "xp-panel px-4 py-3"
+			}
 		>
-			<div className="text-xs uppercase tracking-widest opacity-60">
+			<div className="text-xs uppercase tracking-widest text-muted-foreground">
 				{label}
 			</div>
 			<div className="mt-1 font-semibold">{value}</div>
@@ -79,8 +109,13 @@ export function IpGeoDbPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
 	const queryClient = useQueryClient();
-	const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false);
-	const [updateIntervalDays, setUpdateIntervalDays] = useState("1");
+	const form = useForm<GeoDbSettingsValues>({
+		resolver: zodResolver(geoDbSettingsSchema),
+		defaultValues: {
+			autoUpdateEnabled: false,
+			updateIntervalDays: 1,
+		},
+	});
 
 	const geoDbQuery = useQuery({
 		queryKey: ["adminIpGeoDb", adminToken],
@@ -92,20 +127,18 @@ export function IpGeoDbPage() {
 
 	useEffect(() => {
 		if (!geoDbQuery.data) return;
-		setAutoUpdateEnabled(geoDbQuery.data.settings.auto_update_enabled);
-		setUpdateIntervalDays(
-			String(geoDbQuery.data.settings.update_interval_days),
-		);
-	}, [geoDbQuery.data]);
+		form.reset({
+			autoUpdateEnabled: geoDbQuery.data.settings.auto_update_enabled,
+			updateIntervalDays: geoDbQuery.data.settings.update_interval_days,
+		});
+	}, [form, geoDbQuery.data]);
 
 	const saveMutation = useMutation({
-		mutationFn: async () => {
-			const parsedInterval = Number(updateIntervalDays);
-			return patchAdminIpGeoDb(adminToken, {
-				auto_update_enabled: autoUpdateEnabled,
-				update_interval_days: parsedInterval,
-			});
-		},
+		mutationFn: async (values: GeoDbSettingsValues) =>
+			patchAdminIpGeoDb(adminToken, {
+				auto_update_enabled: values.autoUpdateEnabled,
+				update_interval_days: values.updateIntervalDays,
+			}),
 		onSuccess: async () => {
 			toast.pushToast({ variant: "success", message: "Saved Geo DB settings" });
 			await queryClient.invalidateQueries({
@@ -138,14 +171,16 @@ export function IpGeoDbPage() {
 		},
 	});
 
+	const values = form.watch();
 	const isDirty = useMemo(() => {
 		if (!geoDbQuery.data) return false;
 		return (
-			autoUpdateEnabled !== geoDbQuery.data.settings.auto_update_enabled ||
-			Number(updateIntervalDays) !==
+			values.autoUpdateEnabled !==
+				geoDbQuery.data.settings.auto_update_enabled ||
+			Number(values.updateIntervalDays) !==
 				geoDbQuery.data.settings.update_interval_days
 		);
-	}, [autoUpdateEnabled, geoDbQuery.data, updateIntervalDays]);
+	}, [geoDbQuery.data, values.autoUpdateEnabled, values.updateIntervalDays]);
 
 	const managedCount =
 		geoDbQuery.data?.nodes.filter((node) => node.mode === "managed").length ??
@@ -238,9 +273,7 @@ export function IpGeoDbPage() {
 	}
 
 	const data = geoDbQuery.data;
-	if (!data) {
-		return null;
-	}
+	if (!data) return null;
 
 	return (
 		<div className="space-y-6">
@@ -250,16 +283,14 @@ export function IpGeoDbPage() {
 				actions={headerActions}
 				meta={
 					<>
-						<span className="badge badge-outline">Provider: DB-IP Lite</span>
-						{anyRunning ? (
-							<span className="badge badge-info">running</span>
-						) : null}
+						<Badge variant="outline">Provider: DB-IP Lite</Badge>
+						{anyRunning ? <Badge variant="info">running</Badge> : null}
 					</>
 				}
 			/>
 
 			{data.partial ? (
-				<div className="alert alert-warning py-2 text-sm">
+				<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
 					<div className="space-y-1">
 						<div>Node status is partial.</div>
 						<div className="font-mono text-xs">
@@ -287,143 +318,166 @@ export function IpGeoDbPage() {
 			</div>
 
 			<div className="grid gap-4 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-				<div className="card bg-base-100 shadow">
-					<div className="card-body space-y-4 p-5">
+				<div className="xp-card">
+					<div className="xp-card-body px-5 py-5">
 						<div>
-							<h2 className="card-title text-base">Update policy</h2>
-							<p className="text-sm opacity-70">
-								xp manages DB-IP Lite City + ASN MMDB files under
+							<h2 className="xp-card-title text-base">Update policy</h2>
+							<p className="text-sm text-muted-foreground">
+								xp manages DB-IP Lite City + ASN MMDB files under{" "}
 								<code className="font-mono">XP_DATA_DIR/geoip/</code> unless a
 								node explicitly overrides the paths via environment variables.
 							</p>
 						</div>
 
-						<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-3">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary"
-								checked={autoUpdateEnabled}
-								onChange={(event) => setAutoUpdateEnabled(event.target.checked)}
-							/>
-							<div>
-								<div className="font-medium">Automatic updates</div>
-								<div className="text-xs opacity-70">
-									Run the managed DB-IP Lite refresh worker on every node.
+						<Form {...form}>
+							<form
+								className="space-y-4"
+								onSubmit={form.handleSubmit(async (submittedValues) =>
+									saveMutation.mutateAsync(submittedValues),
+								)}
+							>
+								<FormField
+									control={form.control}
+									name="autoUpdateEnabled"
+									render={({ field }) => (
+										<FormItem className="rounded-xl border border-border/70 px-4 py-3">
+											<div className="flex items-start gap-3">
+												<FormControl>
+													<Checkbox
+														aria-label="Automatic updates"
+														checked={field.value}
+														onCheckedChange={(checked) =>
+															field.onChange(Boolean(checked))
+														}
+													/>
+												</FormControl>
+												<div className="space-y-1">
+													<FormLabel className="font-medium text-foreground">
+														Automatic updates
+													</FormLabel>
+													<FormDescription className="text-xs">
+														Run the managed DB-IP Lite refresh worker on every
+														node.
+													</FormDescription>
+												</div>
+											</div>
+										</FormItem>
+									)}
+								/>
+
+								<FormField
+									control={form.control}
+									name="updateIntervalDays"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>Update interval (days)</FormLabel>
+											<FormControl>
+												<Input
+													{...field}
+													type="number"
+													min={1}
+													max={30}
+													disabled={saveMutation.isPending}
+													onChange={(event) =>
+														field.onChange(event.target.value)
+													}
+												/>
+											</FormControl>
+											<FormDescription>
+												Allowed range: 1-30 days.
+											</FormDescription>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+
+								<div className="flex flex-wrap justify-end gap-2">
+									<Button
+										variant="secondary"
+										type="button"
+										disabled={!isDirty}
+										onClick={() => {
+											form.reset({
+												autoUpdateEnabled: data.settings.auto_update_enabled,
+												updateIntervalDays: data.settings.update_interval_days,
+											});
+										}}
+									>
+										Reset
+									</Button>
+									<Button
+										type="submit"
+										loading={saveMutation.isPending}
+										disabled={!isDirty}
+									>
+										Save settings
+									</Button>
 								</div>
-							</div>
-						</label>
-
-						<label className="form-control">
-							<div className="label">
-								<span className="label-text">Update interval (days)</span>
-							</div>
-							<input
-								type="number"
-								min={1}
-								max={30}
-								className="input input-bordered"
-								value={updateIntervalDays}
-								onChange={(event) => setUpdateIntervalDays(event.target.value)}
-							/>
-							<div className="label">
-								<span className="label-text-alt opacity-70">
-									Allowed range: 1-30 days.
-								</span>
-							</div>
-						</label>
-
-						<div className="flex flex-wrap justify-end gap-2">
-							<Button
-								variant="secondary"
-								disabled={!isDirty}
-								onClick={() => {
-									setAutoUpdateEnabled(data.settings.auto_update_enabled);
-									setUpdateIntervalDays(
-										String(data.settings.update_interval_days),
-									);
-								}}
-							>
-								Reset
-							</Button>
-							<Button
-								variant="primary"
-								loading={saveMutation.isPending}
-								disabled={!isDirty}
-								onClick={() => saveMutation.mutate()}
-							>
-								Save settings
-							</Button>
-						</div>
+							</form>
+						</Form>
 					</div>
 				</div>
 
-				<div className="card bg-base-100 shadow">
-					<div className="card-body p-0">
-						<div className="flex items-center justify-between px-5 pt-5">
-							<div>
-								<h2 className="card-title text-base">Node runtime</h2>
-								<p className="text-sm opacity-70">
-									Every node downloads locally; leader only stores the shared
-									settings.
-								</p>
-							</div>
+				<div className="xp-card">
+					<div className="xp-card-body p-0">
+						<div className="px-5 pt-5">
+							<h2 className="xp-card-title text-base">Node runtime</h2>
+							<p className="text-sm text-muted-foreground">
+								Every node downloads locally; leader only stores the shared
+								settings.
+							</p>
 						</div>
-						<div className="overflow-x-auto px-5 pb-5 pt-4">
-							<table className="table table-zebra">
-								<thead>
-									<tr>
-										<th>Node</th>
-										<th>Mode</th>
-										<th>Status</th>
-										<th>Next</th>
-										<th>Last success</th>
-										<th>Paths</th>
-									</tr>
-								</thead>
-								<tbody>
-									{data.nodes.map((node) => (
-										<tr key={node.node.node_id}>
-											<td>
-												<div className="font-medium">{node.node.node_name}</div>
-												<div className="font-mono text-xs opacity-70">
-													{node.node.node_id}
-												</div>
-											</td>
-											<td>
-												<span className={`badge ${modeBadgeClass(node.mode)}`}>
-													{modeLabel(node.mode)}
-												</span>
-											</td>
-											<td>
-												<div className="flex flex-col gap-1 text-xs">
-													<span
-														className={`badge ${node.running ? "badge-info" : "badge-ghost"}`}
-													>
-														{node.running ? "Running" : "Idle"}
+						<div className="px-5 pb-5 pt-4">
+							<DataTable
+								headers={[
+									{ key: "node", label: "Node" },
+									{ key: "mode", label: "Mode" },
+									{ key: "status", label: "Status" },
+									{ key: "next", label: "Next" },
+									{ key: "lastSuccess", label: "Last success" },
+									{ key: "paths", label: "Paths" },
+								]}
+							>
+								{data.nodes.map((node) => (
+									<tr key={node.node.node_id}>
+										<TableCell>
+											<div className="font-medium">{node.node.node_name}</div>
+											<div className="font-mono text-xs text-muted-foreground">
+												{node.node.node_id}
+											</div>
+										</TableCell>
+										<TableCell>
+											<Badge variant={modeBadgeVariant(node.mode)}>
+												{modeLabel(node.mode)}
+											</Badge>
+										</TableCell>
+										<TableCell>
+											<div className="flex flex-col gap-1 text-xs">
+												<Badge variant={node.running ? "info" : "ghost"}>
+													{node.running ? "Running" : "Idle"}
+												</Badge>
+												{node.last_error ? (
+													<span className="max-w-xs text-destructive">
+														{node.last_error}
 													</span>
-													{node.last_error ? (
-														<span className="max-w-xs text-error">
-															{node.last_error}
-														</span>
-													) : null}
-												</div>
-											</td>
-											<td className="text-xs">
-												{formatDateTime(node.next_scheduled_at)}
-											</td>
-											<td className="text-xs">
-												{formatDateTime(node.last_success_at)}
-											</td>
-											<td>
-												<div className="max-w-md space-y-1 font-mono text-[11px] opacity-80">
-													<div>{node.city_db_path || "(empty city path)"}</div>
-													<div>{node.asn_db_path || "(empty ASN path)"}</div>
-												</div>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
+												) : null}
+											</div>
+										</TableCell>
+										<TableCell className="text-xs">
+											{formatDateTime(node.next_scheduled_at)}
+										</TableCell>
+										<TableCell className="text-xs">
+											{formatDateTime(node.last_success_at)}
+										</TableCell>
+										<TableCell>
+											<div className="max-w-md space-y-1 font-mono text-[11px] text-muted-foreground">
+												<div>{node.city_db_path || "(empty city path)"}</div>
+												<div>{node.asn_db_path || "(empty ASN path)"}</div>
+											</div>
+										</TableCell>
+									</tr>
+								))}
+							</DataTable>
 						</div>
 					</div>
 				</div>

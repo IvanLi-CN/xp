@@ -8,6 +8,9 @@ import {
 	useState,
 } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
+
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
 import {
 	type AdminQuotaPolicyGlobalWeightRow,
@@ -33,6 +36,12 @@ import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import {
+	badgeClass,
+	inputClass as inputControlClass,
+	selectClass as selectControlClass,
+	tableClass,
+} from "../components/ui-helpers";
 import {
 	RATIO_BASIS_POINTS,
 	basisPointsToWeights,
@@ -143,8 +152,29 @@ type TablePercentInlineEditorProps = {
 	testId?: string;
 };
 
+const rangeInputClass =
+	"h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary disabled:cursor-not-allowed disabled:opacity-50";
+const surfaceClass = "xp-card";
+
+function ratioStatusTone(
+	totalBasisPoints: number,
+): "success" | "warning" | "error" {
+	if (totalBasisPoints === RATIO_BASIS_POINTS) return "success";
+	if (totalBasisPoints < RATIO_BASIS_POINTS) return "warning";
+	return "error";
+}
+
+function scopeTabClass(selected: boolean): string {
+	return cn(
+		"-mb-px rounded-t-xl border border-transparent px-3 py-2 text-sm font-medium transition-colors md:px-4",
+		selected
+			? "border-border/70 border-b-card bg-card text-foreground shadow-sm"
+			: "bg-muted/60 text-muted-foreground hover:bg-muted",
+	);
+}
+
 function pieColorAt(index: number): string {
-	return PIE_COLORS[index % PIE_COLORS.length] ?? "var(--color-base-300)";
+	return PIE_COLORS[index % PIE_COLORS.length] ?? "var(--color-muted)";
 }
 
 function stableColorIndex(key: string): number {
@@ -158,7 +188,7 @@ function stableColorIndex(key: string): number {
 
 function pieColorForKey(key: string): string {
 	if (key === "others") {
-		return "var(--color-ratio-others, var(--color-base-300))";
+		return "var(--color-ratio-others, var(--color-muted))";
 	}
 	return pieColorAt(stableColorIndex(key));
 }
@@ -442,7 +472,7 @@ function TablePercentInlineEditor({
 	return (
 		<button
 			type="button"
-			className="font-mono text-xs opacity-70 mt-1 h-8 w-full rounded-btn px-2 text-left border border-transparent hover:border-base-content/20 hover:bg-base-200/30 transition-colors"
+			className="mt-1 h-8 w-full rounded-lg border border-transparent px-2 text-left font-mono text-xs text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/50"
 			disabled={disabled}
 			aria-label={ariaLabel}
 			title="Double click the cell to edit percent"
@@ -1178,10 +1208,8 @@ export function QuotaPolicyPage() {
 		}
 	};
 
-	const inputClass =
-		prefs.density === "compact"
-			? "input input-bordered input-sm"
-			: "input input-bordered";
+	const inputClass = inputControlClass(prefs.density);
+	const selectClass = selectControlClass(prefs.density);
 
 	if (adminToken.length === 0) {
 		return (
@@ -1190,9 +1218,9 @@ export function QuotaPolicyPage() {
 				title="Admin token required"
 				description="Set an admin token to manage quota policy."
 				action={
-					<Link to="/login" className="btn btn-primary">
-						Go to login
-					</Link>
+					<Button asChild>
+						<Link to="/login">Go to login</Link>
+					</Button>
 				}
 			/>
 		);
@@ -1245,18 +1273,10 @@ export function QuotaPolicyPage() {
 		);
 	}
 
-	const ratioStatusClass =
-		totalBasisPoints === RATIO_BASIS_POINTS
-			? "badge badge-success"
-			: totalBasisPoints < RATIO_BASIS_POINTS
-				? "badge badge-warning"
-				: "badge badge-error";
-	const globalRatioStatusClass =
-		globalTotalBasisPoints === RATIO_BASIS_POINTS
-			? "badge badge-success"
-			: globalTotalBasisPoints < RATIO_BASIS_POINTS
-				? "badge badge-warning"
-				: "badge badge-error";
+	const ratioStatusClass = badgeClass(ratioStatusTone(totalBasisPoints));
+	const globalRatioStatusClass = badgeClass(
+		ratioStatusTone(globalTotalBasisPoints),
+	);
 
 	return (
 		<div className="space-y-6">
@@ -1265,7 +1285,7 @@ export function QuotaPolicyPage() {
 				description="Shared node quota budgets, user tiers, and node-scoped ratio weights."
 			/>
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+			<div className={cn(surfaceClass, "p-6", "space-y-4")}>
 				<div className="space-y-1">
 					<h2 className="text-lg font-semibold">Node budgets</h2>
 					<p className="text-sm opacity-70">
@@ -1289,7 +1309,7 @@ export function QuotaPolicyPage() {
 									<Link
 										to="/nodes/$nodeId"
 										params={{ nodeId: node.node_id }}
-										className="link link-hover font-semibold block truncate"
+										className="xp-link block truncate font-semibold"
 										title="Open node details"
 									>
 										{node.node_name}
@@ -1333,7 +1353,7 @@ export function QuotaPolicyPage() {
 				</ResourceTable>
 			</div>
 
-			<div className="rounded-box border border-base-200 bg-base-100 px-4 pt-4 md:px-6 md:pt-5">
+			<div className={cn(surfaceClass, "px-4 pt-4 md:px-6 md:pt-5")}>
 				<div className="space-y-2">
 					<div className="text-sm font-medium opacity-80">分配规则作用域</div>
 					<div
@@ -1345,11 +1365,7 @@ export function QuotaPolicyPage() {
 							type="button"
 							role="tab"
 							aria-selected={selectedWeightTab === "global"}
-							className={`-mb-px rounded-t-lg border border-base-200 border-b-0 px-3 py-2 text-sm font-medium transition-colors md:px-4 ${
-								selectedWeightTab === "global"
-									? "bg-base-100 text-primary border-primary/60 border-t-2 shadow-sm"
-									: "bg-base-200/60 text-base-content/70 hover:bg-base-200"
-							}`}
+							className={scopeTabClass(selectedWeightTab === "global")}
 							onClick={() => handleSelectWeightTab("global")}
 						>
 							全局默认
@@ -1360,11 +1376,7 @@ export function QuotaPolicyPage() {
 								type="button"
 								role="tab"
 								aria-selected={selectedWeightTab === node.node_id}
-								className={`-mb-px rounded-t-lg border border-base-200 border-b-0 px-3 py-2 text-sm font-medium transition-colors md:px-4 ${
-									selectedWeightTab === node.node_id
-										? "bg-base-100 text-primary border-primary/60 border-t-2 shadow-sm"
-										: "bg-base-200/60 text-base-content/70 hover:bg-base-200"
-								}`}
+								className={scopeTabClass(selectedWeightTab === node.node_id)}
 								onClick={() => handleSelectWeightTab(node.node_id)}
 							>
 								{node.node_name}
@@ -1372,11 +1384,11 @@ export function QuotaPolicyPage() {
 						))}
 					</div>
 				</div>
-				<div className="border-t border-base-200" />
+				<div className="border-t border-border/70" />
 			</div>
 
 			{selectedWeightTab === "global" ? (
-				<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+				<div className={cn(surfaceClass, "p-6", "space-y-4")}>
 					<div className="space-y-1">
 						<h2 className="text-lg font-semibold">全局默认权重比例</h2>
 						<p className="text-sm opacity-70">
@@ -1385,7 +1397,7 @@ export function QuotaPolicyPage() {
 					</div>
 
 					{globalRatioRows.length === 0 ? (
-						<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
+						<div className="rounded-2xl border border-border/70 p-4 text-sm text-muted-foreground">
 							No users available.
 						</div>
 					) : (
@@ -1394,14 +1406,14 @@ export function QuotaPolicyPage() {
 								<span className={globalRatioStatusClass}>
 									Total {formatRatioPercent(globalTotalBasisPoints)}
 								</span>
-								<span className="badge badge-outline">
+								<span className={badgeClass("outline")}>
 									Users {globalRatioRows.length}
 								</span>
-								<span className="badge badge-outline">
+								<span className={badgeClass("outline")}>
 									Unlocked {globalUnlockedCount}
 								</span>
 								{globalTotalBasisPoints < RATIO_BASIS_POINTS ? (
-									<span className="text-sm text-warning">
+									<span className="text-sm text-warning-foreground">
 										Remaining{" "}
 										{formatRatioPercent(
 											RATIO_BASIS_POINTS - globalTotalBasisPoints,
@@ -1410,7 +1422,7 @@ export function QuotaPolicyPage() {
 								) : null}
 							</div>
 
-							<div className="rounded-box border border-base-200 p-4 space-y-4">
+							<div className="rounded-2xl border border-border/70 p-4 space-y-4">
 								<div className="grid gap-4 md:grid-cols-[320px_1fr]">
 									<div className="flex items-center justify-center">
 										<svg
@@ -1423,7 +1435,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="96"
-												fill="var(--color-base-200)"
+												fill="var(--color-muted)"
 											/>
 											{globalPieSegments.length === 1 &&
 											firstGlobalPieSegment &&
@@ -1471,7 +1483,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="58"
-												fill="var(--color-base-100)"
+												fill="var(--color-card)"
 											/>
 											<text
 												x="110"
@@ -1508,7 +1520,7 @@ export function QuotaPolicyPage() {
 												return (
 													<div
 														key={segment.key}
-														className={`flex items-center justify-between rounded-box border border-base-200 px-3 py-2 ${
+														className={`flex items-center justify-between rounded-2xl border border-border/70 px-3 py-2 ${
 															hoveredUserId && !active ? "opacity-50" : ""
 														}`}
 													>
@@ -1539,7 +1551,7 @@ export function QuotaPolicyPage() {
 								data-panel-tier={globalRatioEditorLayout.panelTier}
 								ref={setGlobalRatioEditorContainer}
 								className={[
-									"rounded-box border border-base-200 p-4 space-y-4",
+									"rounded-2xl border border-border/70 p-4 space-y-4",
 									`layout-${globalRatioEditorListLayout ? "list" : "table"}`,
 									`width-tier-${globalRatioEditorLayout.viewportTier}`,
 									`panel-tier-${globalRatioEditorLayout.panelTier}`,
@@ -1555,7 +1567,7 @@ export function QuotaPolicyPage() {
 											return (
 												<div
 													key={row.userId}
-													className="rounded-box border border-base-200 p-3 space-y-3"
+													className="rounded-2xl border border-border/70 p-3 space-y-3"
 												>
 													<div className="flex items-start justify-between gap-2">
 														<div className="min-w-0 space-y-1">
@@ -1566,7 +1578,14 @@ export function QuotaPolicyPage() {
 																{row.userId}
 															</div>
 														</div>
-														<span className="badge badge-ghost uppercase shrink-0">
+														<span
+															className={badgeClass(
+																"ghost",
+																"default",
+																"uppercase",
+																"shrink-0",
+															)}
+														>
 															{row.priorityTier}
 														</span>
 													</div>
@@ -1576,7 +1595,7 @@ export function QuotaPolicyPage() {
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm w-full"
+																className={rangeInputClass}
 																min={0}
 																max={100}
 																step={0.1}
@@ -1626,7 +1645,7 @@ export function QuotaPolicyPage() {
 														</div>
 													</div>
 
-													<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+													<div className="flex items-center justify-between gap-2 border-t border-border/70 pt-3">
 														<div className="min-w-0">
 															<div className="text-xs opacity-70">
 																Computed weight
@@ -1640,16 +1659,17 @@ export function QuotaPolicyPage() {
 																	: "explicit"}
 															</div>
 														</div>
-														<label className="label cursor-pointer justify-start gap-2 py-0">
-															<input
-																type="checkbox"
-																className="checkbox checkbox-sm"
+														<div className="flex items-center gap-2">
+															<Checkbox
+																aria-label="Lock"
 																checked={row.locked}
 																disabled={isSavingGlobalRatio}
-																onChange={() => toggleGlobalRowLock(row.userId)}
+																onCheckedChange={() =>
+																	toggleGlobalRowLock(row.userId)
+																}
 															/>
-															<span className="label-text text-xs">Lock</span>
-														</label>
+															<span className="text-xs">Lock</span>
+														</div>
 													</div>
 												</div>
 											);
@@ -1659,10 +1679,13 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="global-ratio-editor-table"
-											className="table table-fixed w-full"
+											className={tableClass(
+												globalRatioTableCompact,
+												"table-fixed w-full",
+											)}
 										>
 											<thead>
-												<tr className="bg-base-200/50">
+												<tr className="bg-muted/50">
 													<th
 														className={
 															globalRatioTableCompact ? "w-[26%]" : "w-[28%]"
@@ -1710,14 +1733,20 @@ export function QuotaPolicyPage() {
 																</div>
 															</td>
 															<td className="align-top">
-																<span className="badge badge-ghost uppercase">
+																<span
+																	className={badgeClass(
+																		"ghost",
+																		"default",
+																		"uppercase",
+																	)}
+																>
 																	{row.priorityTier}
 																</span>
 															</td>
 															<td className="align-top">
 																<input
 																	type="range"
-																	className="range range-primary range-sm"
+																	className={rangeInputClass}
 																	min={0}
 																	max={100}
 																	step={0.1}
@@ -1769,18 +1798,16 @@ export function QuotaPolicyPage() {
 																	globalRatioTableCompact ? "pl-1" : "pl-2",
 																].join(" ")}
 															>
-																<label className="label cursor-pointer justify-center py-0">
-																	<input
-																		type="checkbox"
-																		className="checkbox checkbox-sm"
+																<div className="flex justify-center">
+																	<Checkbox
 																		checked={row.locked}
 																		disabled={isSavingGlobalRatio}
-																		onChange={() =>
+																		onCheckedChange={() =>
 																			toggleGlobalRowLock(row.userId)
 																		}
+																		aria-label="Lock"
 																	/>
-																	<span className="sr-only">Lock</span>
-																</label>
+																</div>
 															</td>
 														</tr>
 													);
@@ -1791,11 +1818,11 @@ export function QuotaPolicyPage() {
 								)}
 
 								{globalRatioError ? (
-									<p className="text-sm text-error">{globalRatioError}</p>
+									<p className="text-sm text-destructive">{globalRatioError}</p>
 								) : null}
 								{globalFailedRows.length > 0 ? (
-									<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
-										<p className="text-sm font-medium text-error">
+									<div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+										<p className="text-sm font-medium text-destructive">
 											Failed rows ({globalFailedRows.length})
 										</p>
 										<ul className="text-xs space-y-1">
@@ -1854,7 +1881,7 @@ export function QuotaPolicyPage() {
 				</div>
 			) : null}
 
-			<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+			<div className={cn(surfaceClass, "p-6", "space-y-4")}>
 				<div className="space-y-1">
 					<h2 className="text-lg font-semibold">User tiers</h2>
 					<p className="text-sm opacity-70">
@@ -1877,7 +1904,7 @@ export function QuotaPolicyPage() {
 									<Link
 										to="/users/$userId"
 										params={{ userId: user.user_id }}
-										className="link link-hover font-semibold block truncate"
+										className="xp-link block truncate font-semibold"
 										title="Open user details"
 									>
 										{user.display_name}
@@ -1889,11 +1916,7 @@ export function QuotaPolicyPage() {
 							</td>
 							<td className="align-top">
 								<select
-									className={
-										prefs.density === "compact"
-											? "select select-bordered select-sm"
-											: "select select-bordered"
-									}
+									className={selectClass}
 									value={user.priority_tier}
 									onChange={async (event) => {
 										const next = event.target.value as "p1" | "p2" | "p3";
@@ -1930,7 +1953,7 @@ export function QuotaPolicyPage() {
 			</div>
 
 			{selectedWeightTab !== "global" ? (
-				<div className="rounded-box border border-base-200 bg-base-100 p-6 space-y-4">
+				<div className={cn(surfaceClass, "p-6", "space-y-4")}>
 					<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
 						<div className="space-y-1">
 							<h2 className="text-lg font-semibold">
@@ -1943,24 +1966,21 @@ export function QuotaPolicyPage() {
 							</p>
 						</div>
 						<div className="w-full md:w-[20rem]">
-							<label className="label cursor-pointer justify-start gap-3 rounded-box border border-base-200 px-3 py-2">
-								<input
-									type="checkbox"
-									className="toggle toggle-primary"
+							<div className="flex items-center gap-3 rounded-2xl border border-border/70 px-3 py-2">
+								<Checkbox
+									aria-label="Inherit global default ratios"
 									checked={nodeInheritGlobal}
 									disabled={
 										!selectedNodeId ||
 										nodePolicyQuery.isLoading ||
 										isUpdatingNodePolicy
 									}
-									onChange={(event) =>
-										void updateNodeInheritGlobal(event.target.checked)
+									onCheckedChange={(checked) =>
+										void updateNodeInheritGlobal(checked === true)
 									}
 								/>
-								<span className="label-text text-sm">
-									Inherit global default ratios
-								</span>
-							</label>
+								<span className="text-sm">Inherit global default ratios</span>
+							</div>
 						</div>
 					</div>
 
@@ -1968,7 +1988,7 @@ export function QuotaPolicyPage() {
 						<div className="text-sm opacity-70">Loading node ratio rows...</div>
 					) : weightRowsQuery.isError || nodePolicyQuery.isError ? (
 						<div className="space-y-3">
-							<p className="text-sm text-error">
+							<p className="text-sm text-destructive">
 								{weightRowsQuery.isError
 									? formatError(weightRowsQuery.error)
 									: formatError(nodePolicyQuery.error)}
@@ -1984,34 +2004,34 @@ export function QuotaPolicyPage() {
 							</Button>
 						</div>
 					) : ratioRows.length === 0 ? (
-						<div className="rounded-box border border-base-200 p-4 text-sm opacity-70">
+						<div className="rounded-2xl border border-border/70 p-4 text-sm text-muted-foreground">
 							No allocatable users for this node.
 						</div>
 					) : (
 						<>
-							<div className="rounded-box border border-base-200 p-4 space-y-4">
+							<div className="rounded-2xl border border-border/70 p-4 space-y-4">
 								<div className="flex flex-wrap items-center gap-2">
 									<span className={ratioStatusClass}>
 										Total {formatRatioPercent(totalBasisPoints)}
 									</span>
-									<span className="badge badge-outline">
+									<span className={badgeClass("outline")}>
 										Users {displayRatioRows.length}
 									</span>
-									<span className="badge badge-outline">
+									<span className={badgeClass("outline")}>
 										Unlocked {unlockedCount}
 									</span>
 									{selectedNode ? (
-										<span className="badge badge-outline">
+										<span className={badgeClass("outline")}>
 											{selectedNode.node_name}
 										</span>
 									) : null}
-									<span className="badge badge-outline">
+									<span className={badgeClass("outline")}>
 										{nodeInheritGlobal
 											? "Mode inherit_global"
 											: "Mode node_override"}
 									</span>
 									{totalBasisPoints < RATIO_BASIS_POINTS ? (
-										<span className="text-sm text-warning">
+										<span className="text-sm text-warning-foreground">
 											Remaining{" "}
 											{formatRatioPercent(
 												RATIO_BASIS_POINTS - totalBasisPoints,
@@ -2032,7 +2052,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="96"
-												fill="var(--color-base-200)"
+												fill="var(--color-muted)"
 											/>
 											{pieSegments.length === 1 &&
 											firstPieSegment &&
@@ -2079,7 +2099,7 @@ export function QuotaPolicyPage() {
 												cx="110"
 												cy="110"
 												r="58"
-												fill="var(--color-base-100)"
+												fill="var(--color-card)"
 											/>
 											<text
 												x="110"
@@ -2113,7 +2133,7 @@ export function QuotaPolicyPage() {
 												return (
 													<div
 														key={segment.key}
-														className={`flex items-center justify-between rounded-box border border-base-200 px-3 py-2 ${
+														className={`flex items-center justify-between rounded-2xl border border-border/70 px-3 py-2 ${
 															hoveredUserId && !active ? "opacity-50" : ""
 														}`}
 													>
@@ -2144,7 +2164,7 @@ export function QuotaPolicyPage() {
 								data-panel-tier={nodeRatioEditorLayout.panelTier}
 								ref={setNodeRatioEditorContainer}
 								className={[
-									"rounded-box border border-base-200 p-4 space-y-4",
+									"rounded-2xl border border-border/70 p-4 space-y-4",
 									`layout-${nodeRatioEditorListLayout ? "list" : "table"}`,
 									`width-tier-${nodeRatioEditorLayout.viewportTier}`,
 									`panel-tier-${nodeRatioEditorLayout.panelTier}`,
@@ -2163,7 +2183,7 @@ export function QuotaPolicyPage() {
 											return (
 												<div
 													key={row.userId}
-													className={`rounded-box border border-base-200 p-3 space-y-3 ${rowClass}`}
+													className={`rounded-2xl border border-border/70 p-3 space-y-3 ${rowClass}`}
 													onMouseEnter={() => setHoveredUserId(row.userId)}
 													onMouseLeave={() => setHoveredUserId(null)}
 												>
@@ -2179,7 +2199,14 @@ export function QuotaPolicyPage() {
 																Endpoints {row.endpointIds.length}
 															</div>
 														</div>
-														<span className="badge badge-ghost uppercase shrink-0">
+														<span
+															className={badgeClass(
+																"ghost",
+																"default",
+																"uppercase",
+																"shrink-0",
+															)}
+														>
 															{row.priorityTier}
 														</span>
 													</div>
@@ -2189,7 +2216,7 @@ export function QuotaPolicyPage() {
 															<div className="text-xs opacity-70">Slider</div>
 															<input
 																type="range"
-																className="range range-primary range-sm w-full"
+																className={rangeInputClass}
 																min={0}
 																max={100}
 																step={0.1}
@@ -2251,7 +2278,7 @@ export function QuotaPolicyPage() {
 														</div>
 													</div>
 
-													<div className="flex items-center justify-between gap-2 border-t border-base-200 pt-3">
+													<div className="flex items-center justify-between gap-2 border-t border-border/70 pt-3">
 														<div className="min-w-0">
 															<div className="text-xs opacity-70">
 																Computed weight
@@ -2267,20 +2294,21 @@ export function QuotaPolicyPage() {
 																		: "explicit"}
 															</div>
 														</div>
-														<label className="label cursor-pointer justify-start gap-2 py-0">
-															<input
-																type="checkbox"
-																className="checkbox checkbox-sm"
+														<div className="flex items-center gap-2">
+															<Checkbox
+																aria-label="Lock"
 																checked={row.locked}
 																disabled={
 																	isSavingRatio ||
 																	nodeInheritGlobal ||
 																	isUpdatingNodePolicy
 																}
-																onChange={() => toggleRowLock(row.userId)}
+																onCheckedChange={() =>
+																	toggleRowLock(row.userId)
+																}
 															/>
-															<span className="label-text text-xs">Lock</span>
-														</label>
+															<span className="text-xs">Lock</span>
+														</div>
 													</div>
 												</div>
 											);
@@ -2290,10 +2318,13 @@ export function QuotaPolicyPage() {
 									<div className="overflow-x-auto">
 										<table
 											data-testid="ratio-editor-table"
-											className="table table-fixed w-full"
+											className={tableClass(
+												nodeRatioTableCompact,
+												"table-fixed w-full",
+											)}
 										>
 											<thead>
-												<tr className="bg-base-200/50">
+												<tr className="bg-muted/50">
 													<th
 														className={
 															nodeRatioTableCompact ? "w-[28%]" : "w-[30%]"
@@ -2354,14 +2385,20 @@ export function QuotaPolicyPage() {
 																</div>
 															</td>
 															<td className="align-top">
-																<span className="badge badge-ghost uppercase">
+																<span
+																	className={badgeClass(
+																		"ghost",
+																		"default",
+																		"uppercase",
+																	)}
+																>
 																	{row.priorityTier}
 																</span>
 															</td>
 															<td className="align-top">
 																<input
 																	type="range"
-																	className="range range-primary range-sm"
+																	className={rangeInputClass}
 																	min={0}
 																	max={100}
 																	step={0.1}
@@ -2422,20 +2459,20 @@ export function QuotaPolicyPage() {
 																	nodeRatioTableCompact ? "pl-1" : "pl-2",
 																].join(" ")}
 															>
-																<label className="label cursor-pointer justify-center py-0">
-																	<input
-																		type="checkbox"
-																		className="checkbox checkbox-sm"
+																<div className="flex justify-center">
+																	<Checkbox
 																		checked={row.locked}
 																		disabled={
 																			isSavingRatio ||
 																			nodeInheritGlobal ||
 																			isUpdatingNodePolicy
 																		}
-																		onChange={() => toggleRowLock(row.userId)}
+																		onCheckedChange={() =>
+																			toggleRowLock(row.userId)
+																		}
+																		aria-label="Lock"
 																	/>
-																	<span className="sr-only">Lock</span>
-																</label>
+																</div>
 															</td>
 														</tr>
 													);
@@ -2446,11 +2483,11 @@ export function QuotaPolicyPage() {
 								)}
 
 								{ratioError ? (
-									<p className="text-sm text-error">{ratioError}</p>
+									<p className="text-sm text-destructive">{ratioError}</p>
 								) : null}
 								{failedRows.length > 0 ? (
-									<div className="rounded-box border border-error/40 bg-error/5 p-3 space-y-2">
-										<p className="text-sm font-medium text-error">
+									<div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+										<p className="text-sm font-medium text-destructive">
 											Failed rows ({failedRows.length})
 										</p>
 										<ul className="text-xs space-y-1">

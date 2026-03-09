@@ -55,7 +55,7 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await clashDialog.locator("[data-sub-preview-close]").click();
 
 	await page.getByRole("button", { name: "Delete user" }).click();
-	const confirm = page.locator("dialog[open]");
+	const confirm = page.getByRole("alertdialog");
 	await expect(confirm).toBeVisible();
 	await confirm.getByRole("button", { name: "Delete" }).click();
 

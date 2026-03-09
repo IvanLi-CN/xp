@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { AccessMatrix, type AccessMatrixCellState } from "./AccessMatrix";
 
 const NODES = [
@@ -251,31 +253,35 @@ function HifiDemo() {
 
 	return (
 		<div className="p-6">
-			<div className="rounded-box border border-base-200 bg-base-100 p-4 space-y-4">
-				<div className="flex items-baseline gap-4">
-					<span className="text-sm font-semibold">Matrix</span>
-					<span className="text-xs opacity-60">
-						Batch rule: if any selected, clear; else select all (no invert)
-					</span>
-				</div>
-				<AccessMatrix
-					nodes={NODES.map((node) => ({
-						...node,
-						details: renderNodeDetails(node.nodeId),
-					}))}
-					protocols={PROTOCOLS}
-					cells={cells}
-					onToggleCell={toggleCell}
-					onToggleRow={toggleRow}
-					onToggleColumn={toggleColumn}
-					onToggleAll={toggleAll}
-					onToggleCellEndpoint={toggleCellEndpoint}
-				/>
-				<p className="text-xs opacity-60">
-					Tip: header checkboxes can show indeterminate state, but clicking
-					never inverts.
-				</p>
-			</div>
+			<Card className="space-y-4 p-4">
+				<CardHeader className="p-0">
+					<div className="flex items-baseline gap-4">
+						<CardTitle className="text-sm">Matrix</CardTitle>
+						<span className="text-xs text-muted-foreground">
+							Batch rule: if any selected, clear; else select all (no invert)
+						</span>
+					</div>
+				</CardHeader>
+				<CardContent className="space-y-4 p-0">
+					<AccessMatrix
+						nodes={NODES.map((node) => ({
+							...node,
+							details: renderNodeDetails(node.nodeId),
+						}))}
+						protocols={PROTOCOLS}
+						cells={cells}
+						onToggleCell={toggleCell}
+						onToggleRow={toggleRow}
+						onToggleColumn={toggleColumn}
+						onToggleAll={toggleAll}
+						onToggleCellEndpoint={toggleCellEndpoint}
+					/>
+					<p className="text-xs text-muted-foreground">
+						Tip: header checkboxes can show indeterminate state, but clicking
+						never inverts.
+					</p>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
@@ -283,6 +289,7 @@ function HifiDemo() {
 const meta: Meta<typeof HifiDemo> = {
 	title: "Design/Components/AccessMatrix",
 	component: HifiDemo,
+	tags: ["autodocs", "coverage-ui"],
 	parameters: {
 		layout: "fullscreen",
 	},

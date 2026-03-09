@@ -1,20 +1,31 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
+import { Badge } from "@/components/ui/badge";
+
 import { Button } from "./Button";
 import { PageHeader } from "./PageHeader";
 
-const meta: Meta<typeof PageHeader> = {
+const meta = {
 	title: "Components/PageHeader",
 	component: PageHeader,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		title: "Nodes",
 		description: "Inspect cluster nodes and issue join tokens.",
 	},
-};
+	parameters: {
+		docs: {
+			description: {
+				component:
+					"Section header used across app pages. Stories focus on the reusable visual contract: title, supporting description, metadata badges, and right-aligned action groups.",
+			},
+		},
+	},
+} satisfies Meta<typeof PageHeader>;
 
 export default meta;
 
-type Story = StoryObj<typeof PageHeader>;
+type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
@@ -28,10 +39,12 @@ export const WithActions: Story = {
 		),
 		meta: (
 			<div className="flex flex-wrap items-center gap-2">
-				<span className="badge badge-success badge-sm font-mono">
+				<Badge variant="success" size="sm" className="font-mono">
 					health ok
-				</span>
-				<span className="badge badge-sm font-mono">role leader</span>
+				</Badge>
+				<Badge variant="outline" size="sm" className="font-mono">
+					role leader
+				</Badge>
 			</div>
 		),
 	},

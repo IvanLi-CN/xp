@@ -15,9 +15,11 @@
 - 包管理与脚本：Bun（版本由仓库根 `.bun-version` 固定；命令统一使用 `bun` / `bunx --no-install`）
 - 数据校验：Zod（对 API 请求/响应做运行时校验，并可从 schema 推导 TypeScript 类型）
 - 数据请求与缓存：TanStack Query（统一管理 server-state：缓存、去重、重试、刷新、失效）
-- 样式：Tailwind CSS + daisyUI v5（组件 + 主题）
-  - 主题：`xp-light` / `xp-dark`（通过在 `<html>` 上设置 `data-theme` 生效）
+- 样式：Tailwind CSS v4 + shadcn/ui（Radix primitives + 本地组件库）
+  - 主题：`xp-light` / `xp-dark`（通过 `UiPrefs` 同步 `<html data-theme>` 与 `dark` class 生效）
   - 偏好配置：`xp_ui_theme`（system/light/dark）与 `xp_ui_density`（comfortable/compact）存储在 `localStorage`
+  - 表单：统一使用 `react-hook-form + zod + @hookform/resolvers` 组织校验与提交
+  - 通知：统一使用 Sonner；危险操作统一走 AlertDialog
 - 图标：Iconify（默认使用 `tabler:` 图标集）
   - 统一入口：前端仅允许通过 `Icon` 组件渲染图标，避免页面散落引入
 - E2E：Playwright

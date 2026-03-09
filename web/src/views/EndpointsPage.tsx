@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 
+import { buttonVariants } from "@/components/ui/button";
+
 import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -63,7 +65,7 @@ export function EndpointsPage() {
 
 	const actions =
 		adminToken.length === 0 ? (
-			<Link className="btn btn-primary" to="/login">
+			<Link className={buttonVariants()} to="/login">
 				Go to login
 			</Link>
 		) : (
@@ -75,7 +77,7 @@ export function EndpointsPage() {
 				>
 					Test all now
 				</Button>
-				<Link className="btn btn-primary" to="/endpoints/new">
+				<Link className={buttonVariants()} to="/endpoints/new">
 					New endpoint
 				</Link>
 				<Button
@@ -136,7 +138,7 @@ export function EndpointsPage() {
 					title="No endpoints yet"
 					description="Create your first endpoint to start serving traffic."
 					action={
-						<Link className="btn btn-primary" to="/endpoints/new">
+						<Link className={buttonVariants()} to="/endpoints/new">
 							Create endpoint
 						</Link>
 					}

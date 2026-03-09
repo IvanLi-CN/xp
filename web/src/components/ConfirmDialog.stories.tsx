@@ -5,6 +5,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 const meta: Meta<typeof ConfirmDialog> = {
 	title: "Components/ConfirmDialog",
 	component: ConfirmDialog,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		open: true,
 		title: "Are you sure?",

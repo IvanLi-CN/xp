@@ -24,7 +24,8 @@ test("theme preference persists after reload", async ({ page }) => {
 	).toBeVisible();
 
 	await page.getByRole("button", { name: "Open settings" }).click();
-	await page.getByLabel("Theme").selectOption("dark");
+	await page.getByRole("combobox", { name: "Theme" }).click();
+	await page.getByRole("option", { name: "dark" }).click();
 	await expect(page.locator("html")).toHaveAttribute("data-theme", "xp-dark");
 
 	await page.reload();

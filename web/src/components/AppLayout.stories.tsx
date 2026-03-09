@@ -5,6 +5,7 @@ import { AppLayout } from "./AppLayout";
 const meta: Meta<typeof AppLayout> = {
 	title: "Components/AppLayout",
 	component: AppLayout,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		children: (
 			<div className="space-y-2">

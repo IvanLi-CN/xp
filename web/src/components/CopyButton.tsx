@@ -46,7 +46,7 @@ export function CopyButton({
 		state === "copied"
 			? "text-success"
 			: state === "error"
-				? "text-error"
+				? "text-destructive"
 				: "opacity-70";
 
 	return (

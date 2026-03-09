@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
+import { buttonVariants } from "@/components/ui/button";
+
 import {
 	type AdminEndpointProbeRunNodeStatus,
 	AdminEndpointProbeRunSseEndpointSampleSchema,
@@ -26,6 +28,7 @@ import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { badgeClass } from "../components/ui-helpers";
 import { computeEndpointProbeStatus } from "../utils/endpointProbeStatus";
 
 function formatErrorMessage(error: unknown): string {
@@ -40,17 +43,17 @@ function formatErrorMessage(error: unknown): string {
 function statusBadgeClass(status: AdminEndpointProbeRunNodeStatus): string {
 	switch (status) {
 		case "running":
-			return "badge badge-info";
+			return badgeClass("info", "sm");
 		case "finished":
-			return "badge badge-success";
+			return badgeClass("success", "sm");
 		case "failed":
-			return "badge badge-error";
+			return badgeClass("error", "sm");
 		case "busy":
-			return "badge badge-warning";
+			return badgeClass("warning", "sm");
 		case "not_found":
-			return "badge";
+			return badgeClass("outline", "sm");
 		case "unknown":
-			return "badge badge-neutral";
+			return badgeClass("neutral", "sm");
 	}
 }
 
@@ -74,13 +77,13 @@ function statusLabel(status: AdminEndpointProbeRunNodeStatus): string {
 function endpointStatusBadgeClass(status: EndpointProbeStatus): string {
 	switch (status) {
 		case "up":
-			return "badge badge-success";
+			return badgeClass("success", "sm");
 		case "degraded":
-			return "badge badge-warning";
+			return badgeClass("warning", "sm");
 		case "down":
-			return "badge badge-error";
+			return badgeClass("error", "sm");
 		case "missing":
-			return "badge badge-neutral";
+			return badgeClass("neutral", "sm");
 	}
 }
 
@@ -347,7 +350,7 @@ export function EndpointProbeRunPage() {
 				title="Admin token required"
 				description="Set an admin token to view probe progress."
 				action={
-					<Link className="btn btn-primary" to="/login">
+					<Link className={buttonVariants()} to="/login">
 						Go to login
 					</Link>
 				}
@@ -439,14 +442,14 @@ export function EndpointProbeRunPage() {
 
 	const overallBadgeClass =
 		overallStatus === "running"
-			? "badge badge-info"
+			? badgeClass("info", "sm")
 			: overallStatus === "finished"
-				? "badge badge-success"
+				? badgeClass("success", "sm")
 				: overallStatus === "failed"
-					? "badge badge-error"
+					? badgeClass("error", "sm")
 					: overallStatus === "unknown"
-						? "badge badge-neutral"
-						: "badge";
+						? badgeClass("neutral", "sm")
+						: badgeClass("outline", "sm");
 
 	const overallLabel =
 		overallStatus === "running"
@@ -465,7 +468,7 @@ export function EndpointProbeRunPage() {
 	const resultsContent = (() => {
 		if (endpointsQuery.isLoading) {
 			return (
-				<div className="text-sm opacity-70">
+				<div className="text-sm text-muted-foreground">
 					Loading endpoint results (status/latency)...
 				</div>
 			);
@@ -473,7 +476,7 @@ export function EndpointProbeRunPage() {
 
 		if (endpointsQuery.isError) {
 			return (
-				<div className="text-sm text-error">
+				<div className="text-sm text-destructive">
 					Failed to load endpoint results:{" "}
 					{formatErrorMessage(endpointsQuery.error)}
 				</div>
@@ -483,7 +486,7 @@ export function EndpointProbeRunPage() {
 		const endpoints = endpointsQuery.data?.items ?? [];
 		if (endpoints.length === 0) {
 			return (
-				<div className="text-sm opacity-70">
+				<div className="text-sm text-muted-foreground">
 					No endpoints found for this cluster.
 				</div>
 			);
@@ -539,7 +542,7 @@ export function EndpointProbeRunPage() {
 						<tr key={endpoint.endpoint_id}>
 							<td className="space-y-1">
 								<Link
-									className="link link-primary font-mono text-xs"
+									className="xp-link font-mono text-xs"
 									to="/endpoints/$endpointId"
 									params={{ endpointId: endpoint.endpoint_id }}
 								>
@@ -549,7 +552,7 @@ export function EndpointProbeRunPage() {
 									{endpoint.endpoint_id}
 								</div>
 								<Link
-									className="link link-secondary text-xs"
+									className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
 									to="/endpoints/$endpointId/probe"
 									params={{ endpointId: endpoint.endpoint_id }}
 								>
@@ -613,20 +616,25 @@ export function EndpointProbeRunPage() {
 						</td>
 						<td className="min-w-48">
 							<div className="space-y-1">
-								<div className="font-mono text-xs opacity-70">
+								<div className="font-mono text-xs text-muted-foreground">
 									{progressLabel}
 								</div>
-								<progress
-									className="progress progress-primary"
-									value={done}
-									max={progressMax}
-								/>
+								<div className="h-2 overflow-hidden rounded-full bg-muted">
+									<div
+										className="h-full rounded-full bg-primary transition-[width]"
+										style={{
+											width: `${Math.max(0, Math.min(100, (done / progressMax) * 100))}%`,
+										}}
+									/>
+								</div>
 							</div>
 						</td>
 						<td className="font-mono text-xs opacity-70">
 							{progress?.updated_at ?? "-"}
 						</td>
-						<td className="font-mono text-xs text-error">{error || "-"}</td>
+						<td className="font-mono text-xs text-destructive">
+							{error || "-"}
+						</td>
 					</tr>
 				);
 			})}
@@ -642,10 +650,12 @@ export function EndpointProbeRunPage() {
 					<div className="flex flex-wrap items-center gap-2">
 						<span className={overallBadgeClass}>{overallLabel}</span>
 						{sseConnected ? (
-							<span className="badge badge-ghost text-xs">live</span>
+							<span className={badgeClass("ghost", "sm")}>live</span>
 						) : null}
-						<span className="badge badge-ghost font-mono text-xs">{hour}</span>
-						<span className="badge badge-ghost font-mono text-xs">
+						<span className={badgeClass("ghost", "sm", "font-mono")}>
+							{hour}
+						</span>
+						<span className={badgeClass("ghost", "sm", "font-mono")}>
 							cfg {configHashShort}
 						</span>
 					</div>
@@ -653,25 +663,25 @@ export function EndpointProbeRunPage() {
 				actions={<div className="flex flex-wrap gap-2">{actions}</div>}
 			/>
 
-			<div className="rounded-box border border-base-300 bg-base-100 p-4 shadow-sm">
+			<div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
 				<div className="grid gap-3 md:grid-cols-2">
 					<div>
-						<div className="text-sm opacity-70">Run ID</div>
+						<div className="text-sm text-muted-foreground">Run ID</div>
 						<div className="font-mono text-xs break-all">{data.run_id}</div>
 					</div>
 					<div>
-						<div className="text-sm opacity-70">Note</div>
-						<div className="text-sm opacity-70">
+						<div className="text-sm text-muted-foreground">Note</div>
+						<div className="text-sm text-muted-foreground">
 							This page updates live via SSE while the run is running.
 						</div>
 					</div>
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Endpoints (live)</h2>
-					<p className="text-sm opacity-70">
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Endpoints (live)</h2>
+					<p className="text-sm text-muted-foreground">
 						This run tests endpoints. Status/latency is aggregated from node
 						samples as they are reported.
 					</p>
@@ -679,11 +689,11 @@ export function EndpointProbeRunPage() {
 				</div>
 			</div>
 
-			<details className="collapse collapse-arrow border border-base-300 bg-base-100 shadow-sm">
-				<summary className="collapse-title text-sm font-medium">
+			<details className="group overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+				<summary className="cursor-pointer list-none px-6 py-4 text-sm font-medium [&::-webkit-details-marker]:hidden">
 					Node runners (progress)
 				</summary>
-				<div className="collapse-content pt-0">{nodeRunnersContent}</div>
+				<div className="px-6 pb-6 pt-0">{nodeRunnersContent}</div>
 			</details>
 		</div>
 	);

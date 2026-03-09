@@ -1,5 +1,9 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+
+import { cn } from "@/lib/utils";
+
 import { Icon } from "./Icon";
+import { tableClass } from "./ui-helpers";
 
 export type AccessMatrixNode = {
 	nodeId: string;
@@ -115,7 +119,7 @@ function IndeterminateCheckbox(props: {
 		<input
 			ref={ref}
 			type="checkbox"
-			className="checkbox checkbox-xs checkbox-primary rounded"
+			className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
 			checked={checked}
 			disabled={disabled}
 			aria-label={ariaLabel}
@@ -204,9 +208,9 @@ export function AccessMatrix(props: AccessMatrixProps) {
 	const matrixMinWidthRem = 16.5 + protocols.length * 11;
 
 	return (
-		<div className="overflow-x-auto">
+		<div className="xp-table-wrap">
 			<table
-				className="table table-zebra table-sm table-fixed w-full"
+				className={tableClass(true, "table-fixed w-full")}
 				style={{ minWidth: `${matrixMinWidthRem}rem` }}
 			>
 				<colgroup>
@@ -285,7 +289,7 @@ export function AccessMatrix(props: AccessMatrixProps) {
 									return (
 										<td key={`${node.nodeId}::${protocol.protocolId}`}>
 											{cell.value === "disabled" ? (
-												<span className="text-xs opacity-60">
+												<span className="text-xs text-muted-foreground">
 													{cell.reason ?? "Disabled"}
 												</span>
 											) : (
@@ -380,7 +384,7 @@ function AccessMatrixCellLabel(props: {
 				</div>
 				<button
 					type="button"
-					className="flex min-h-6 min-w-0 items-center gap-1 text-left opacity-80 hover:opacity-100"
+					className="flex min-h-6 min-w-0 items-center gap-1 text-left opacity-80 transition-opacity hover:opacity-100"
 					aria-expanded={expanded}
 					aria-label={`Toggle endpoint tree for ${nodeId} ${protocolId}`}
 					onClick={() => setExpanded((value) => !value)}
@@ -389,32 +393,28 @@ function AccessMatrixCellLabel(props: {
 						<Icon
 							name="tabler:folder"
 							size={16}
-							className={[
+							className={cn(
 								"absolute transition-all duration-200 ease-out",
 								expanded
-									? "opacity-0 scale-90 -rotate-6"
-									: "opacity-80 scale-100 rotate-0",
-							]
-								.filter(Boolean)
-								.join(" ")}
+									? "-rotate-6 scale-90 opacity-0"
+									: "rotate-0 scale-100 opacity-80",
+							)}
 						/>
 						<Icon
 							name="tabler:folder-open"
 							size={16}
-							className={[
+							className={cn(
 								"absolute transition-all duration-200 ease-out",
 								expanded
-									? "opacity-90 scale-100 rotate-0"
-									: "opacity-0 scale-90 rotate-6",
-							]
-								.filter(Boolean)
-								.join(" ")}
+									? "rotate-0 scale-100 opacity-90"
+									: "scale-90 rotate-6 opacity-0",
+							)}
 						/>
 					</span>
-					<span className="font-mono text-sm font-medium truncate">
+					<span className="truncate font-mono text-sm font-medium">
 						endpoint tree
 					</span>
-					<span className="ml-auto font-mono text-xs opacity-60 truncate">
+					<span className="ml-auto truncate font-mono text-xs text-muted-foreground">
 						{selectedLabel}
 					</span>
 				</button>
@@ -438,31 +438,29 @@ function AccessMatrixCellLabel(props: {
 									{!isFirst ? (
 										<span
 											aria-hidden="true"
-											className="pointer-events-none absolute left-2 top-0 h-1/2 w-px bg-base-content opacity-25"
+											className="pointer-events-none absolute left-2 top-0 h-1/2 w-px bg-foreground/20"
 										/>
 									) : null}
 									{!isLast ? (
 										<span
 											aria-hidden="true"
-											className="pointer-events-none absolute left-2 top-1/2 h-1/2 w-px bg-base-content opacity-25"
+											className="pointer-events-none absolute left-2 top-1/2 h-1/2 w-px bg-foreground/20"
 										/>
 									) : null}
 									<span
 										aria-hidden="true"
-										className="pointer-events-none absolute left-2 top-1/2 h-px w-2 -translate-y-1/2 bg-base-content opacity-25"
+										className="pointer-events-none absolute left-2 top-1/2 h-px w-2 -translate-y-1/2 bg-foreground/20"
 									/>
 									<label
-										className={[
-											"flex items-center gap-1 rounded px-1 py-0.5",
+										className={cn(
+											"flex items-center gap-1 rounded-lg px-1 py-0.5 transition-colors",
 											disabled ? "opacity-60" : "cursor-pointer",
-											selected ? "bg-primary/15" : "hover:bg-base-200/60",
-										]
-											.filter(Boolean)
-											.join(" ")}
+											selected ? "bg-primary/10" : "hover:bg-muted/60",
+										)}
 									>
 										<input
 											type="checkbox"
-											className="checkbox checkbox-xs checkbox-primary rounded"
+											className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
 											checked={selected}
 											disabled={disabled}
 											aria-label={`Select endpoint ${opt.tag} for ${nodeId} ${protocolId}`}
@@ -475,13 +473,13 @@ function AccessMatrixCellLabel(props: {
 												)
 											}
 										/>
-										<span className="min-w-0 flex-1 font-mono text-xs truncate">
+										<span className="min-w-0 flex-1 truncate font-mono text-xs">
 											{opt.tag}
 										</span>
-										<span className="font-mono text-xs opacity-70">
+										<span className="font-mono text-xs text-muted-foreground">
 											:{opt.port}
 										</span>
-										<span className="font-mono text-[10px] opacity-60">
+										<span className="font-mono text-[10px] text-muted-foreground">
 											{shortId(opt.endpointId)}
 										</span>
 									</label>
@@ -491,11 +489,11 @@ function AccessMatrixCellLabel(props: {
 					</ul>
 				) : null}
 				{selectedCount === 1 ? (
-					<span className="col-start-2 font-mono text-xs opacity-60 truncate block">
+					<span className="col-start-2 block truncate font-mono text-xs text-muted-foreground">
 						port {meta.port ?? "?"} - endpoint {shortId(selectedEndpointIds[0])}
 					</span>
 				) : selectedCount > 1 ? (
-					<span className="col-start-2 font-mono text-xs opacity-60 truncate block">
+					<span className="col-start-2 block truncate font-mono text-xs text-muted-foreground">
 						{selectedCount} endpoints selected
 					</span>
 				) : null}
@@ -508,26 +506,24 @@ function AccessMatrixCellLabel(props: {
 
 	return (
 		<label
-			className={[
-				"flex items-center gap-2 rounded px-1 py-0.5",
-				disabled ? "opacity-60" : "cursor-pointer hover:bg-base-200/60",
-			]
-				.filter(Boolean)
-				.join(" ")}
+			className={cn(
+				"flex items-center gap-2 rounded-lg px-1 py-0.5 transition-colors",
+				disabled ? "opacity-60" : "cursor-pointer hover:bg-muted/60",
+			)}
 		>
 			<input
 				type="checkbox"
-				className="checkbox checkbox-xs checkbox-primary rounded"
+				className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
 				checked={selected}
 				disabled={disabled}
 				aria-label={`Toggle ${nodeLabel} ${protocolLabel}`}
 				onChange={() => onToggleCell?.()}
 			/>
-			<span className="font-mono text-sm opacity-70 truncate block">
+			<span className="block truncate font-mono text-sm text-muted-foreground">
 				port {meta.port ?? "?"}
 			</span>
 			{meta.endpointId ? (
-				<span className="font-mono text-[10px] opacity-60">
+				<span className="font-mono text-[10px] text-muted-foreground">
 					{shortId(meta.endpointId)}
 				</span>
 			) : null}

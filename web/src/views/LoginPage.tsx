@@ -1,16 +1,27 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
-import { useUiPrefs } from "../components/UiPrefs";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
 	clearAdminToken,
 	readAdminToken,
 	writeAdminToken,
 } from "../components/auth";
+import {
+	Form,
+	FormControl,
+	FormField,
+	FormItem,
+	FormLabel,
+	FormMessage,
+} from "../components/ui/form";
+import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
 
 function formatError(err: unknown): string {
@@ -22,13 +33,60 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
+const loginSchema = z.object({
+	token: z
+		.string()
+		.min(1, "Token is required.")
+		.superRefine((value, ctx) => {
+			const parsed = parseAdminTokenInput(value);
+			if ("error" in parsed) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: parsed.error,
+				});
+			}
+		}),
+});
+
+type LoginValues = z.infer<typeof loginSchema>;
+
 export function LoginPage() {
 	const navigate = useNavigate();
-	const prefs = useUiPrefs();
-	const [token, setToken] = useState(() => readAdminToken());
-	const [draft, setDraft] = useState(() => readAdminToken());
+	const storedToken = useMemo(() => readAdminToken(), []);
+	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const [serverError, setServerError] = useState<string | null>(null);
+	const form = useForm<LoginValues>({
+		resolver: zodResolver(loginSchema),
+		defaultValues: {
+			token: storedToken,
+		},
+	});
+
+	const submitToken = useCallback(
+		async (rawToken: string) => {
+			const parsed = parseAdminTokenInput(rawToken);
+			if ("error" in parsed) {
+				form.setError("token", { message: parsed.error });
+				return;
+			}
+
+			setIsVerifying(true);
+			setServerError(null);
+			try {
+				await verifyAdminToken(parsed.token);
+				writeAdminToken(parsed.token);
+				setTokenLength(parsed.token.length);
+				form.reset({ token: parsed.token });
+				navigate({ to: "/" });
+			} catch (err) {
+				setServerError(formatError(err));
+			} finally {
+				setIsVerifying(false);
+			}
+		},
+		[form, navigate],
+	);
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
@@ -42,34 +100,14 @@ export function LoginPage() {
 		}${window.location.hash ?? ""}`;
 		window.history.replaceState(null, "", nextUrl);
 
-		setDraft(loginToken);
-		setIsVerifying(true);
-		setError(null);
-
-		verifyAdminToken(loginToken)
-			.then(() => {
-				writeAdminToken(loginToken);
-				setToken(loginToken);
-				setDraft(loginToken);
-				navigate({ to: "/" });
-			})
-			.catch((err) => {
-				setError(formatError(err));
-			})
-			.finally(() => {
-				setIsVerifying(false);
-			});
-	}, [navigate]);
-
-	const inputClass =
-		prefs.density === "compact"
-			? "input input-bordered input-sm font-mono w-full"
-			: "input input-bordered font-mono w-full";
+		form.reset({ token: loginToken });
+		void submitToken(loginToken);
+	}, [form, submitToken]);
 
 	return (
-		<div className="min-h-screen bg-base-200 flex items-center justify-center px-6">
-			<div className="card bg-base-100 shadow w-full max-w-lg">
-				<div className="card-body space-y-4">
+		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
+			<div className="xp-card w-full max-w-lg">
+				<div className="xp-card-body space-y-5">
 					<div className="flex items-start gap-3">
 						<img
 							src="/xp-mark.png"
@@ -77,91 +115,99 @@ export function LoginPage() {
 							aria-hidden="true"
 							className="size-12 shrink-0"
 						/>
-						<div>
-							<h1 className="text-2xl font-bold">Admin login</h1>
-							<p className="text-sm opacity-70">
+						<div className="space-y-1">
+							<h1 className="text-2xl font-semibold tracking-tight">
+								Admin login
+							</h1>
+							<p className="text-sm text-muted-foreground">
 								Enter the admin token to access the admin UI.
 							</p>
 						</div>
 					</div>
+
 					<div className="space-y-2">
-						<p className="text-xs uppercase tracking-wide opacity-50">
+						<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
 							Stored in localStorage key
 						</p>
-						<div className="rounded-box border border-base-200 bg-base-200/60 px-4 py-2 w-full">
+						<div className="rounded-2xl border border-border/70 bg-muted/55 px-4 py-3">
 							<p className="font-mono text-sm">{ADMIN_TOKEN_STORAGE_KEY}</p>
 						</div>
 					</div>
-					<label className="form-control">
-						<div className="label">
-							<span className="label-text">Token</span>
-						</div>
-						<input
-							type="password"
-							className={inputClass}
-							placeholder="e.g. admin-token"
-							value={draft}
-							onChange={(event) => {
-								setDraft(event.target.value);
-								setError(null);
-							}}
-						/>
-					</label>
-					{token.length === 0 ? (
-						<div className="space-y-1">
-							<p className="text-warning">
-								No token set. Please add a token to continue.
-							</p>
-							<p className="text-xs opacity-70">
-								Ask an administrator for a token or a temporary login link.
-							</p>
-						</div>
-					) : (
-						<p className="text-sm opacity-70">
-							Token stored (length {token.length}).
-						</p>
-					)}
-					{error ? <p className="text-sm text-error">{error}</p> : null}
-					<div className="card-actions justify-end gap-2">
-						<Button
-							variant="ghost"
-							onClick={() => {
-								clearAdminToken();
-								setToken("");
-								setDraft("");
-								setError(null);
-							}}
+
+					<Form {...form}>
+						<form
+							className="space-y-4"
+							onSubmit={form.handleSubmit((values) =>
+								submitToken(values.token),
+							)}
 						>
-							Clear
-						</Button>
-						<Button
-							variant="secondary"
-							loading={isVerifying}
-							disabled={isVerifying}
-							onClick={async () => {
-								const parsed = parseAdminTokenInput(draft);
-								if ("error" in parsed) {
-									setError(parsed.error);
-									return;
-								}
-								setIsVerifying(true);
-								setError(null);
-								try {
-									await verifyAdminToken(parsed.token);
-									writeAdminToken(parsed.token);
-									setToken(parsed.token);
-									setDraft(parsed.token);
-									navigate({ to: "/" });
-								} catch (err) {
-									setError(formatError(err));
-								} finally {
-									setIsVerifying(false);
-								}
-							}}
-						>
-							Save & Continue
-						</Button>
-					</div>
+							<FormField
+								control={form.control}
+								name="token"
+								render={({ field }) => (
+									<FormItem>
+										<FormLabel>Token</FormLabel>
+										<FormControl>
+											<Input
+												{...field}
+												type="password"
+												placeholder="e.g. admin-token"
+												className="font-mono"
+												onChange={(event) => {
+													setServerError(null);
+													field.onChange(event);
+												}}
+											/>
+										</FormControl>
+										<FormMessage />
+									</FormItem>
+								)}
+							/>
+
+							{tokenLength === 0 ? (
+								<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+									<p className="font-medium text-warning-foreground">
+										No token set.
+									</p>
+									<p className="mt-1 text-muted-foreground">
+										Ask an administrator for a token or a temporary login link.
+									</p>
+								</div>
+							) : (
+								<p className="text-sm text-muted-foreground">
+									Token stored (length {tokenLength}).
+								</p>
+							)}
+
+							{serverError ? (
+								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+									{serverError}
+								</div>
+							) : null}
+
+							<div className="flex flex-wrap justify-end gap-2">
+								<Button
+									variant="ghost"
+									onClick={() => {
+										clearAdminToken();
+										setTokenLength(0);
+										setServerError(null);
+										form.reset({ token: "" });
+									}}
+								>
+									Clear
+								</Button>
+								<Button
+									type="submit"
+									variant="secondary"
+									loading={isVerifying}
+									disabled={isVerifying}
+								>
+									Save &amp; Continue
+								</Button>
+							</div>
+						</form>
+					</Form>
 				</div>
 			</div>
 		</div>
