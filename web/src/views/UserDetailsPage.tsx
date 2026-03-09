@@ -309,6 +309,30 @@ export function UserDetailsPage() {
 
 	const user = userQuery.data;
 	const usageGroups = ipUsageQuery.data?.groups ?? [];
+	const usageTabLabels = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const group of usageGroups) {
+			counts.set(
+				group.node.node_name,
+				(counts.get(group.node.node_name) ?? 0) + 1,
+			);
+		}
+		return new Map(
+			usageGroups.map((group) => {
+				const hasDuplicateName = (counts.get(group.node.node_name) ?? 0) > 1;
+				const disambiguator =
+					group.node.access_host ||
+					group.node.api_base_url ||
+					group.node.node_id.slice(0, 8);
+				return [
+					group.node.node_id,
+					hasDuplicateName
+						? `${group.node.node_name} · ${disambiguator}`
+						: group.node.node_name,
+				] as const;
+			}),
+		);
+	}, [usageGroups]);
 	const activeUsageGroup = useMemo<AdminUserIpUsageNodeGroup | null>(() => {
 		if (usageGroups.length === 0) return null;
 		return (
@@ -1243,18 +1267,22 @@ export function UserDetailsPage() {
 										{usageGroups.map((group) => {
 											const selected =
 												group.node.node_id === activeUsageGroup?.node.node_id;
+											const label =
+												usageTabLabels.get(group.node.node_id) ??
+												group.node.node_name;
 											return (
 												<button
 													key={group.node.node_id}
 													type="button"
 													role="tab"
 													aria-selected={selected}
+													title={`${group.node.node_name} · ${group.node.node_id}`}
 													className={`btn btn-sm whitespace-nowrap ${selected ? "btn-primary" : "btn-ghost"}`}
 													onClick={() =>
 														setActiveUsageNodeId(group.node.node_id)
 													}
 												>
-													{group.node.node_name}
+													{label}
 												</button>
 											);
 										})}

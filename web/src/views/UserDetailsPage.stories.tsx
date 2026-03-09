@@ -143,6 +143,89 @@ export const UsageDetailsTab: Story = {
 	},
 };
 
+export const UsageDetailsDuplicateNames: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [
+					{
+						node_id: "dup-node-a",
+						node_name: "tokyo",
+						access_host: "tokyo-a.example.com",
+						api_base_url: "https://tokyo-a.example.com",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+					{
+						node_id: "dup-node-b",
+						node_name: "tokyo",
+						access_host: "tokyo-b.example.com",
+						api_base_url: "https://tokyo-b.example.com",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+				],
+				userIpUsageByUserId: {
+					[USER_ID_1]: {
+						...buildDenseUserIpUsageStories(
+							{
+								user_id: USER_ID_1,
+								display_name: "Alice",
+							},
+							[
+								{
+									node_id: "dup-node-a",
+									node_name: "tokyo",
+									access_host: "tokyo-a.example.com",
+									api_base_url: "https://tokyo-a.example.com",
+									quota_limit_bytes: 0,
+									quota_reset: {
+										policy: "monthly",
+										day_of_month: 1,
+										tz_offset_minutes: null,
+									},
+								},
+								{
+									node_id: "dup-node-b",
+									node_name: "tokyo",
+									access_host: "tokyo-b.example.com",
+									api_base_url: "https://tokyo-b.example.com",
+									quota_limit_bytes: 0,
+									quota_reset: {
+										policy: "monthly",
+										day_of_month: 1,
+										tz_offset_minutes: null,
+									},
+								},
+							],
+						),
+					},
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Usage details" }),
+		);
+		await expect(
+			await canvas.findByRole("tab", { name: "tokyo · tokyo-a.example.com" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("tab", { name: "tokyo · tokyo-b.example.com" }),
+		).toBeInTheDocument();
+	},
+};
+
 export const UsageDetailsTab7d: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

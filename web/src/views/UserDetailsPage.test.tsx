@@ -848,6 +848,75 @@ rules: []
 		});
 	});
 
+	it("disambiguates usage detail node tabs when node names repeat", async () => {
+		setupMocks({
+			ipUsage: {
+				user: {
+					user_id: "u_01HUSERAAAAAA",
+					display_name: "Ivan",
+				},
+				window: "24h",
+				partial: false,
+				unreachable_nodes: [],
+				warnings: [],
+				groups: [
+					{
+						node: {
+							node_id: "node-tokyo-a",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo-a.example.com",
+							access_host: "tokyo-a.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [],
+					},
+					{
+						node: {
+							node_id: "node-tokyo-b",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo-b.example.com",
+							access_host: "tokyo-b.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [],
+					},
+				],
+			},
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Usage details"));
+
+		await waitFor(() => {
+			expect(
+				screen.getByRole("tab", { name: "Tokyo · tokyo-a.example.com" }),
+			).toBeInTheDocument();
+		});
+		expect(
+			screen.getByRole("tab", { name: "Tokyo · tokyo-b.example.com" }),
+		).toBeInTheDocument();
+	});
+
 	it("shows unreachable-only empty state when all usage nodes fail", async () => {
 		setupMocks({
 			ipUsage: {
