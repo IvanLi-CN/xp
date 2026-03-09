@@ -40,7 +40,8 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	);
 	await rawDialog.locator("[data-sub-preview-close]").click();
 
-	await page.getByTestId("subscription-format").selectOption("clash");
+	await page.getByTestId("subscription-format").click();
+	await page.getByRole("option", { name: "clash" }).click();
 	await page.getByTestId("subscription-fetch").click();
 	const clashDialog = page.getByRole("dialog");
 	await expect(clashDialog).toBeVisible();

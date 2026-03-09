@@ -25,6 +25,14 @@ import {
 	selectClass as selectControlClass,
 } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
@@ -481,13 +489,14 @@ export function EndpointDetailsPage() {
 							<div className="space-y-4 border-t border-border/70 pt-4">
 								<h3 className="text-lg font-semibold">VLESS settings</h3>
 								<div className="grid gap-4">
-									<label className="xp-field-stack">
+									<div className="xp-field-stack">
 										<div className="flex items-center justify-between gap-2">
 											<span className="text-sm font-medium font-mono">
 												port
 											</span>
 										</div>
-										<input
+										<Input
+											aria-label="port"
 											type="number"
 											className={inputClass}
 											value={port}
@@ -497,26 +506,33 @@ export function EndpointDetailsPage() {
 										<p className="text-xs opacity-70">
 											The inbound listen port on this node.
 										</p>
-									</label>
-									<label className="xp-field-stack">
+									</div>
+									<div className="xp-field-stack">
 										<div className="flex items-center justify-between gap-2">
 											<span className="text-sm font-medium font-mono">
 												serverNamesSource
 											</span>
 										</div>
-										<select
-											className={selectClass}
+										<Select
 											value={realityServerNamesSource}
-											onChange={(event) =>
+											onValueChange={(value) =>
 												setRealityServerNamesSource(
-													event.target.value as "manual" | "global",
+													value as "manual" | "global",
 												)
 											}
 											disabled={patchMutation.isPending}
 										>
-											<option value="global">global</option>
-											<option value="manual">manual</option>
-										</select>
+											<SelectTrigger
+												className={selectClass}
+												aria-label="serverNamesSource"
+											>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="global">global</SelectItem>
+												<SelectItem value="manual">manual</SelectItem>
+											</SelectContent>
+										</Select>
 										<p className="text-xs opacity-70">
 											<span className="font-mono">global</span> derives
 											serverNames from{" "}
@@ -526,7 +542,7 @@ export function EndpointDetailsPage() {
 											. <span className="font-mono">manual</span> stores the
 											list on this endpoint.
 										</p>
-									</label>
+									</div>
 
 									{realityServerNamesSource === "manual" ? (
 										<TagInput
@@ -592,13 +608,13 @@ export function EndpointDetailsPage() {
 											Advanced (optional)
 										</summary>
 										<div className="space-y-4 border-t border-border/70 px-4 py-4">
-											<label className="xp-field-stack">
+											<div className="xp-field-stack">
 												<div className="flex items-center justify-between gap-2">
 													<span className="text-sm font-medium font-mono">
 														fingerprint
 													</span>
 												</div>
-												<input
+												<Input
 													type="text"
 													className={inputClass}
 													value={realityFingerprint}
@@ -610,7 +626,7 @@ export function EndpointDetailsPage() {
 												<p className="text-xs opacity-70">
 													Defaults to <span className="font-mono">chrome</span>.
 												</p>
-											</label>
+											</div>
 										</div>
 									</details>
 								</div>
@@ -619,13 +635,14 @@ export function EndpointDetailsPage() {
 							<div className="space-y-4 border-t border-border/70 pt-4">
 								<h3 className="text-lg font-semibold">SS2022 settings</h3>
 								<div className="grid gap-4 md:grid-cols-2">
-									<label className="xp-field-stack">
+									<div className="xp-field-stack">
 										<div className="flex items-center justify-between gap-2">
 											<span className="text-sm font-medium font-mono">
 												port
 											</span>
 										</div>
-										<input
+										<Input
+											aria-label="port"
 											type="number"
 											className={inputClass}
 											value={port}
@@ -635,7 +652,7 @@ export function EndpointDetailsPage() {
 										<p className="text-xs opacity-70">
 											The inbound listen port on this node.
 										</p>
-									</label>
+									</div>
 								</div>
 							</div>
 						)}

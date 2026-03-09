@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
@@ -42,6 +43,13 @@ import {
 	selectClass as selectControlClass,
 	tableClass,
 } from "../components/ui-helpers";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import {
 	RATIO_BASIS_POINTS,
 	basisPointsToWeights,
@@ -449,7 +457,7 @@ function TablePercentInlineEditor({
 
 	if (isEditing) {
 		return (
-			<input
+			<Input
 				type="number"
 				min={0}
 				max={100}
@@ -1616,7 +1624,7 @@ export function QuotaPolicyPage() {
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>
-															<input
+															<Input
 																type="number"
 																min={0}
 																max={100}
@@ -1915,11 +1923,10 @@ export function QuotaPolicyPage() {
 								</div>
 							</td>
 							<td className="align-top">
-								<select
-									className={selectClass}
+								<Select
 									value={user.priority_tier}
-									onChange={async (event) => {
-										const next = event.target.value as "p1" | "p2" | "p3";
+									onValueChange={async (value) => {
+										const next = value as "p1" | "p2" | "p3";
 										try {
 											await patchAdminUser(adminToken, user.user_id, {
 												priority_tier: next,
@@ -1942,10 +1949,18 @@ export function QuotaPolicyPage() {
 										}
 									}}
 								>
-									<option value="p1">p1</option>
-									<option value="p2">p2</option>
-									<option value="p3">p3</option>
-								</select>
+									<SelectTrigger
+										className={selectClass}
+										aria-label={`Priority tier for ${user.display_name}`}
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="p1">p1</SelectItem>
+										<SelectItem value="p2">p2</SelectItem>
+										<SelectItem value="p3">p3</SelectItem>
+									</SelectContent>
+								</Select>
 							</td>
 						</tr>
 					))}
@@ -2243,7 +2258,7 @@ export function QuotaPolicyPage() {
 															<div className="text-xs opacity-70">
 																Input (%)
 															</div>
-															<input
+															<Input
 																type="number"
 																min={0}
 																max={100}

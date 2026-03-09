@@ -51,6 +51,14 @@ import {
 	inputClass as inputControlClass,
 	selectClass as selectControlClass,
 } from "../components/ui-helpers";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
 const PROTOCOLS = [
@@ -941,35 +949,41 @@ export function UserDetailsPage() {
 			{tab === "user" ? (
 				<div className="space-y-6">
 					<div className="xp-card p-4 space-y-3">
-						<label className="xp-field-stack gap-2">
+						<div className="xp-field-stack gap-2">
 							<span className="text-sm font-medium">Display name</span>
-							<input
+							<Input
+								aria-label="Display name"
 								className={inputClassName}
 								value={displayName}
 								onChange={(event) => setDisplayName(event.target.value)}
 							/>
-						</label>
+						</div>
 
 						<div className="grid gap-3 md:grid-cols-3">
-							<label className="xp-field-stack gap-2">
+							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">Quota reset policy</span>
-								<select
-									className={selectClassName}
+								<Select
 									value={resetPolicy}
-									onChange={(event) =>
-										setResetPolicy(
-											event.target.value as "monthly" | "unlimited",
-										)
+									onValueChange={(value) =>
+										setResetPolicy(value as "monthly" | "unlimited")
 									}
 								>
-									<option value="monthly">monthly</option>
-									<option value="unlimited">unlimited</option>
-								</select>
-							</label>
+									<SelectTrigger
+										className={selectClassName}
+										aria-label="Quota reset policy"
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="monthly">monthly</SelectItem>
+										<SelectItem value="unlimited">unlimited</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
 
-							<label className="xp-field-stack gap-2">
+							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">Day of month</span>
-								<input
+								<Input
 									type="number"
 									className={inputClassName}
 									min={1}
@@ -980,11 +994,11 @@ export function UserDetailsPage() {
 										setResetDay(Number(event.target.value || "1"))
 									}
 								/>
-							</label>
+							</div>
 
-							<label className="xp-field-stack gap-2">
+							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">TZ offset (minutes)</span>
-								<input
+								<Input
 									type="number"
 									className={inputClassName}
 									value={resetTzOffsetMinutes}
@@ -992,7 +1006,7 @@ export function UserDetailsPage() {
 										setResetTzOffsetMinutes(Number(event.target.value || "0"))
 									}
 								/>
-							</label>
+							</div>
 						</div>
 
 						<div className="flex items-center gap-3 text-sm">
@@ -1007,23 +1021,30 @@ export function UserDetailsPage() {
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
-								<label className="xp-field-stack gap-2">
+								<div className="xp-field-stack gap-2">
 									<span className="text-sm font-medium">
 										Subscription format
 									</span>
-									<select
-										className={selectClassName}
-										data-testid="subscription-format"
+									<Select
 										value={subFormat}
-										onChange={(event) =>
-											setSubFormat(event.target.value as SubscriptionFormat)
+										onValueChange={(value) =>
+											setSubFormat(value as SubscriptionFormat)
 										}
 									>
-										<option value="raw">raw</option>
-										<option value="clash">clash</option>
-										<option value="mihomo">mihomo</option>
-									</select>
-								</label>
+										<SelectTrigger
+											aria-label="Subscription format"
+											className={selectClassName}
+											data-testid="subscription-format"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="raw">raw</SelectItem>
+											<SelectItem value="clash">clash</SelectItem>
+											<SelectItem value="mihomo">mihomo</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
 								<CopyButton
 									text={subscriptionUrl}
 									label="Copy URL"

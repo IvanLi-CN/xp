@@ -17,6 +17,7 @@ import {
 } from "../utils/quota";
 import { Button } from "./Button";
 import { inputClass as inputControlClass } from "./ui-helpers";
+import { Input } from "./ui/input";
 
 export type NodeQuotaEditorValue = number | "mixed";
 
@@ -198,7 +199,7 @@ export function NodeQuotaEditor(props: {
 							}}
 						>
 							<div className="flex flex-col gap-2">
-								<input
+								<Input
 									ref={inputRef}
 									className={inputControlClass(
 										"compact",

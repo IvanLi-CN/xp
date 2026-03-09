@@ -77,3 +77,20 @@ export const Disabled: Story = {
 		/>
 	),
 };
+
+export const Indeterminate: Story = {
+	render: () => (
+		<div className="flex items-start gap-3 rounded-2xl border border-border/70 p-4">
+			<Checkbox id="storybook-checkbox-indeterminate" checked="indeterminate" />
+			<div className="space-y-1">
+				<Label htmlFor="storybook-checkbox-indeterminate">
+					Partially applied
+				</Label>
+				<p className="text-sm text-muted-foreground">
+					Mixed selections surface the indeterminate affordance used by access
+					matrices and bulk actions.
+				</p>
+			</div>
+		</div>
+	),
+};

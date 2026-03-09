@@ -23,6 +23,7 @@ import {
 	alertClass,
 	inputClass as inputControlClass,
 } from "../components/ui-helpers";
+import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
 
 function formatError(err: unknown): string {
@@ -161,9 +162,10 @@ export function HomePage() {
 					Stored in localStorage key{" "}
 					<span className="font-mono">{ADMIN_TOKEN_STORAGE_KEY}</span>.
 				</p>
-				<label className="xp-field-stack">
+				<div className="xp-field-stack">
 					<span className="text-sm font-medium">Token</span>
-					<input
+					<Input
+						aria-label="Token"
 						type="password"
 						className={inputControlClass(prefs.density, "font-mono")}
 						placeholder="e.g. testtoken"
@@ -173,7 +175,7 @@ export function HomePage() {
 							setAdminTokenError(null);
 						}}
 					/>
-				</label>
+				</div>
 				{adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token to query nodes.</p>
 				) : (

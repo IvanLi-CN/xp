@@ -5,6 +5,7 @@ import { useId, useMemo } from "react";
 
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
+import { Textarea } from "./ui/textarea";
 
 type YamlCodeEditorProps = {
 	label: string;
@@ -49,16 +50,17 @@ export function YamlCodeEditor({
 
 	if (IS_TEST_MODE) {
 		return (
-			<label className="space-y-2">
+			<div className="space-y-2">
 				<span className="text-sm font-medium text-foreground">{label}</span>
-				<textarea
+				<Textarea
+					aria-label={label}
 					className={textareaClass("font-mono")}
 					rows={minRows}
 					value={value}
 					onChange={(event) => onChange(event.target.value)}
 					placeholder={placeholder}
 				/>
-			</label>
+			</div>
 		);
 	}
 

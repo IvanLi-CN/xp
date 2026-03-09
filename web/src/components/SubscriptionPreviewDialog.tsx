@@ -7,6 +7,7 @@ import {
 	DialogDescription,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 import type { SubscriptionFormat } from "../api/subscription";
 import { useUiPrefsOptional } from "./UiPrefs";
@@ -950,7 +951,7 @@ export function SubscriptionPreviewDialog({
 							>
 								Search
 							</span>
-							<input
+							<Input
 								className={[
 									"flex-1 min-w-[240px] h-9 rounded-xl border px-4 font-mono text-[12px] !shadow-none outline-none",
 									mutedPlaceholderClass,

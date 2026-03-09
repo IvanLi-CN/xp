@@ -21,6 +21,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
 	Select,
 	SelectContent,
@@ -351,7 +352,7 @@ export function AppShell({
 
 							<div className="hidden items-center justify-center lg:flex">
 								<div className="relative w-full max-w-md">
-									<input
+									<Input
 										type="text"
 										readOnly
 										placeholder="Search / command palette"

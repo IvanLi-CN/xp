@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { badgeClass } from "./ui-helpers";
+import { Input } from "./ui/input";
 
 type TagInputProps = {
 	label: string;
@@ -195,11 +196,11 @@ export function TagInput({
 					))}
 
 					<div className="flex min-w-[16ch] grow items-center gap-2">
-						<input
+						<Input
 							ref={inputRef}
 							type="text"
 							className={cn(
-								"min-w-0 grow bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground",
+								"h-auto min-w-0 grow border-0 bg-transparent px-0 py-0 font-mono text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0",
 								disabled && "opacity-60",
 							)}
 							id={inputId}

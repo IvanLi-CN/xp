@@ -14,6 +14,7 @@ import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 import { inputClass as inputControlClass } from "../components/ui-helpers";
+import { Input } from "../components/ui/input";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -231,9 +232,10 @@ export function NodesPage() {
 						</p>
 					</div>
 					<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-						<label className="xp-field-stack">
+						<div className="xp-field-stack">
 							<span className="text-sm font-medium">TTL (seconds)</span>
-							<input
+							<Input
+								aria-label="TTL (seconds)"
 								type="number"
 								min={60}
 								step={60}
@@ -244,7 +246,7 @@ export function NodesPage() {
 									setTtlSeconds(Number.isFinite(next) ? next : 0);
 								}}
 							/>
-						</label>
+						</div>
 						<div className="flex md:justify-end">
 							<Button
 								variant="secondary"

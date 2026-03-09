@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import {
 	AlertDialog,
-	AlertDialogAction,
 	AlertDialogCancel,
 	AlertDialogContent,
 	AlertDialogDescription,
@@ -10,6 +9,8 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+import { Button } from "./Button";
 
 type ConfirmDialogProps = {
 	open: boolean;
@@ -39,16 +40,22 @@ export function ConfirmDialog({
 					<AlertDialogTitle>{title}</AlertDialogTitle>
 					{description ? (
 						<AlertDialogDescription>{description}</AlertDialogDescription>
-					) : null}
+					) : (
+						<AlertDialogDescription className="sr-only">
+							Confirm this action.
+						</AlertDialogDescription>
+					)}
 				</AlertDialogHeader>
 				{footer ?? (
 					<AlertDialogFooter>
-						<AlertDialogCancel onClick={onCancel}>
-							{cancelLabel}
+						<AlertDialogCancel asChild>
+							<Button type="button" variant="ghost">
+								{cancelLabel}
+							</Button>
 						</AlertDialogCancel>
-						<AlertDialogAction onClick={onConfirm}>
+						<Button type="button" onClick={onConfirm}>
 							{confirmLabel}
-						</AlertDialogAction>
+						</Button>
 					</AlertDialogFooter>
 				)}
 			</AlertDialogContent>

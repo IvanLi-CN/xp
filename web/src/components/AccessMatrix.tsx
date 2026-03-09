@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 import { Icon } from "./Icon";
@@ -109,21 +110,13 @@ function IndeterminateCheckbox(props: {
 	onChange?: () => void;
 }) {
 	const { checked, indeterminate, disabled, ariaLabel, onChange } = props;
-	const ref = useRef<HTMLInputElement | null>(null);
-	useEffect(() => {
-		if (!ref.current) return;
-		ref.current.indeterminate = indeterminate && !checked;
-	}, [checked, indeterminate]);
 
 	return (
-		<input
-			ref={ref}
-			type="checkbox"
-			className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
-			checked={checked}
+		<Checkbox
+			checked={indeterminate && !checked ? "indeterminate" : checked}
 			disabled={disabled}
 			aria-label={ariaLabel}
-			onChange={() => onChange?.()}
+			onCheckedChange={() => onChange?.()}
 		/>
 	);
 }
@@ -451,25 +444,23 @@ function AccessMatrixCellLabel(props: {
 										aria-hidden="true"
 										className="pointer-events-none absolute left-2 top-1/2 h-px w-2 -translate-y-1/2 bg-foreground/20"
 									/>
-									<label
+									<div
 										className={cn(
 											"flex items-center gap-1 rounded-lg px-1 py-0.5 transition-colors",
 											disabled ? "opacity-60" : "cursor-pointer",
 											selected ? "bg-primary/10" : "hover:bg-muted/60",
 										)}
 									>
-										<input
-											type="checkbox"
-											className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
+										<Checkbox
 											checked={selected}
 											disabled={disabled}
 											aria-label={`Select endpoint ${opt.tag} for ${nodeId} ${protocolId}`}
-											onChange={(event) =>
+											onCheckedChange={(checked) =>
 												onToggleCellEndpoint?.(
 													nodeId,
 													protocolId,
 													opt.endpointId,
-													event.target.checked,
+													checked === true,
 												)
 											}
 										/>
@@ -482,7 +473,7 @@ function AccessMatrixCellLabel(props: {
 										<span className="font-mono text-[10px] text-muted-foreground">
 											{shortId(opt.endpointId)}
 										</span>
-									</label>
+									</div>
 								</li>
 							);
 						})}
@@ -505,19 +496,17 @@ function AccessMatrixCellLabel(props: {
 	const selected = cell.value === "on" || selectedEndpointIds.length > 0;
 
 	return (
-		<label
+		<div
 			className={cn(
 				"flex items-center gap-2 rounded-lg px-1 py-0.5 transition-colors",
 				disabled ? "opacity-60" : "cursor-pointer hover:bg-muted/60",
 			)}
 		>
-			<input
-				type="checkbox"
-				className="size-4 shrink-0 rounded border-input bg-background accent-primary shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
+			<Checkbox
 				checked={selected}
 				disabled={disabled}
 				aria-label={`Toggle ${nodeLabel} ${protocolLabel}`}
-				onChange={() => onToggleCell?.()}
+				onCheckedChange={() => onToggleCell?.()}
 			/>
 			<span className="block truncate font-mono text-sm text-muted-foreground">
 				port {meta.port ?? "?"}
@@ -527,6 +516,6 @@ function AccessMatrixCellLabel(props: {
 					{shortId(meta.endpointId)}
 				</span>
 			) : null}
-		</label>
+		</div>
 	);
 }
