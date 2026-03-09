@@ -18,7 +18,7 @@
 
 - 在每个节点本地记录 membership 级别的 source IP 分钟 presence，保留最近 7 天。
 - 在节点详情新增 `IP usage` tab，支持最近 `24h` / `7d` 的 unique-IP 趋势、IP 占用时间线与 IP 列表。
-- 在用户详情新增 `Usage details` tab，按节点分组展示最近 `24h` / `7d` 的同类信息。
+- 在用户详情新增 `Usage details` tab，以节点 tabs 切换展示最近 `24h` / `7d` 的同类信息。
 - 通过 Xray 官方 `statsUserOnline` + `GetStatsOnlineIpList` 做每分钟在线快照，不解析 access log。
 - 使用本地 GeoLite2 City + ASN 解析地区与运营商信息，并对首次出现 IP 做缓存。
 
@@ -33,7 +33,7 @@
 ### In scope
 
 - Backend：Xray online IP 采集、本地持久化 `inbound_ip_usage.json`、Geo 解析缓存、node/user usage admin APIs、internal local fan-out APIs、删除/快照安装清理逻辑。
-- Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点分组的 `Usage details` tab；24h/7d 切换、面积折线图、泳道时间图、IP 列表、warning/empty/error 空态。
+- Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点 tabs 切换的 `Usage details` tab；24h/7d 切换、ECharts 面积折线图、泳道时间图、IP 列表、warning/empty/error 空态，以及图表/列表跨视图高亮联动。
 - Ops / config：新增 `XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH`；Xray 静态配置开启 `statsUserOnline=true`。
 - Docs：规格、HTTP API、文件格式、CLI/env、设计文档同步。
 
@@ -55,7 +55,9 @@
   - `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
   - `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`
 - 节点详情 unique-IP 图必须按“节点内所有 membership 去重后的每分钟不同 IP 数”计算。
-- 用户详情必须按节点分组；每个分组内 unique-IP 图按“该用户在该节点所有 membership 去重后的每分钟不同 IP 数”计算。
+- 用户详情必须按节点 tabs 切换展示；每个节点视图内的 unique-IP 图按“该用户在该节点所有 membership 去重后的每分钟不同 IP 数”计算。
+- 用户详情在切换 `24h` / `7d` 窗口时，必须保持当前选中的节点 tab，不得重置到首个节点。
+- unique-IP 面积图、泳道图与 IP 列表必须共享 IP / 时间高亮状态；hover 或 click 任一 IP/时间后，其余视图同步高亮对应数据。
 - 占用时间图必须按 `endpoint_tag / IP` 输出已合并的连续时间段。
 - IP 列表必须返回 `ip`、`minutes`、`endpoint_tags`、`region`、`operator`、`last_seen_at`，并按 `minutes desc` 排序。
 - 首次见到新 IP 时必须尝试 GeoLite2 City + ASN 解析，并缓存到本地文件；缺库或未命中时不阻断采集/API。
@@ -79,7 +81,7 @@
 - quota worker 在常规流量采样循环中枚举 active memberships；若 UTC 分钟未变化，仅更新字节使用量，不重复抓 online IP。
 - 当分钟发生变化时，worker 对每个 membership 调用 Xray online IP stats，记录当前在线 IP 到该分钟位图，并更新每个 IP 的 `last_seen_at` 与 Geo 缓存。
 - 管理员打开节点详情 `IP usage` tab：前端请求 node usage API，渲染范围切换器、unique-IP 面积图、泳道图、IP 列表。
-- 管理员打开用户详情 `Usage details` tab：前端请求 user usage API，按节点分组渲染同样三块内容。
+- 管理员打开用户详情 `Usage details` tab：前端请求 user usage API，以节点 tabs 切换渲染同样三块内容，并在窗口切换后保持当前选中的节点。
 - 查询远端节点详情时，leader/follower 通过 internal signature 调用远端 local node usage API。
 - 查询用户详情时，本地节点先返回 local user usage，再 fan-out 其余节点的 internal local user usage API，并聚合为按节点分组结果。
 
@@ -114,7 +116,8 @@
 - Given 某个 membership 在最近 7 天内持续有在线 IP，When quota worker 每分钟推进，Then `inbound_ip_usage.json` 仅保留最近 10080 个分钟位且旧窗口外数据被裁掉。
 - Given 节点详情打开 `IP usage` tab，When 选择 `24h` 或 `7d`，Then 页面显示对应窗口的 unique-IP 面积图、`endpoint_tag / IP` 泳道图与 IP 列表。
 - Given 某节点下同一 IP 同时占用多个 endpoint，When 渲染泳道图，Then 行维度按 `endpoint_tag / IP` 区分，连续分钟先合并为时间段。
-- Given 用户详情打开 `Usage details` tab，When 选择任一窗口，Then 页面按节点分组展示该用户的 unique-IP 图、时间线与列表。
+- Given 用户详情打开 `Usage details` tab，When 选择任一窗口，Then 页面以节点 tabs 展示该用户的 unique-IP 图、时间线与列表，且切换窗口后保持当前节点 tab 不变。
+- Given 管理员在面积图、泳道图或 IP 列表中 hover / click 任一 IP 或时间位置，When 交互触发，Then 其余视图同步高亮对应的 IP / 时间数据。
 - Given 远端节点不可达，When 请求用户 usage API，Then 返回 `partial=true` 且 `unreachable_nodes` 包含对应 `node_id`，可达节点数据仍返回。
 - Given Xray 未开启 `statsUserOnline`，When collector 运行或页面加载，Then 返回 warning，而不是把图表展示成正常的全零无数据。
 - Given Geo DB 缺失，When 页面渲染 IP 列表，Then `region/operator` 显示 `Unknown`，并展示 Geo 数据缺失 warning。
@@ -124,7 +127,7 @@
 
 - 采集语义已冻结为 `statsUserOnline` 每分钟快照。
 - 公开 API 的时间窗口仅允许 `24h` / `7d`，且 UTC 分钟起点口径已冻结。
-- 用户详情按节点分组的展示语义已冻结。
+- 用户详情按节点 tabs 切换的展示语义已冻结。
 - Geo 数据源固定为 operator-supplied GeoLite2 City + ASN，本计划不负责分发数据库文件。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
@@ -213,7 +216,7 @@ None.
 
 - 2026-03-08: 创建规格并冻结采集口径、窗口策略、API/UI 语义与 Geo 数据源。
 - 2026-03-08: 根据当前实现回写 M1-M3 进度，并同步 API / Xray / ops 文档与运维示例。
-- 2026-03-09: 完成 fast-track 收敛，补齐 Storybook 回归修复、用户节点 tab 切窗保持选中、PR 截图引用、CI 全绿与最终状态回写。
+- 2026-03-09: 完成 fast-track 收敛，补齐 Storybook 回归修复、用户节点 tab 切窗保持选中、IP/时间跨视图高亮联动、PR 截图引用、CI 全绿与最终状态回写。
 
 ## 参考（References）
 
