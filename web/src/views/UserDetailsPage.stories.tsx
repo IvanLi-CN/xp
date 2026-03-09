@@ -132,6 +132,9 @@ export const UsageDetailsTab: Story = {
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
 		await expect(
+			await canvas.findByRole("tab", { name: "tokyo-1" }),
+		).toHaveAttribute("aria-selected", "true");
+		await expect(
 			await canvas.findByText("Usage details · tokyo-1"),
 		).toBeInTheDocument();
 		await expect(
@@ -146,15 +149,9 @@ export const UsageDetailsTab7d: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
-		const [firstSwitchButton] = await canvas.findAllByRole("button", {
-			name: "7d",
-		});
-		if (!firstSwitchButton) throw new Error("expected at least one 7d switch");
-		await userEvent.click(firstSwitchButton);
-		const switchButtons = await canvas.findAllByRole("button", { name: "7d" });
-		for (const button of switchButtons) {
-			await expect(button).toHaveClass("btn-primary");
-		}
+		const switchButton = await canvas.findByRole("button", { name: "7d" });
+		await userEvent.click(switchButton);
+		await expect(switchButton).toHaveClass("btn-primary");
 		await expect(
 			await canvas.findByText("198.51.100.99", { selector: "td" }),
 		).toBeInTheDocument();

@@ -820,9 +820,22 @@ rules: []
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getAllByText(/Usage details ·/i)).toHaveLength(2);
+			expect(screen.getByText("Usage details · Tokyo")).toBeInTheDocument();
 		});
+		expect(screen.getByRole("tab", { name: "Tokyo" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		expect(screen.queryByText("Usage details · Osaka")).not.toBeInTheDocument();
 
+		fireEvent.click(screen.getByRole("tab", { name: "Osaka" }));
+		await waitFor(() => {
+			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+		});
+		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 		const windowButtons = screen.getAllByRole("button", { name: "7d" });
 		fireEvent.click(windowButtons[0]);
 		await waitFor(() => {

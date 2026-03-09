@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import {
 	type AdminIpUsageWindow,
+	type AdminUserIpUsageNodeGroup,
 	fetchAdminUserIpUsage,
 } from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -214,6 +215,9 @@ export function UserDetailsPage() {
 		"user" | "access" | "quotaStatus" | "usageDetails"
 	>("user");
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
+	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
+		null,
+	);
 	const [displayName, setDisplayName] = useState("");
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -304,6 +308,32 @@ export function UserDetailsPage() {
 	});
 
 	const user = userQuery.data;
+	const usageGroups = ipUsageQuery.data?.groups ?? [];
+	const activeUsageGroup = useMemo<AdminUserIpUsageNodeGroup | null>(() => {
+		if (usageGroups.length === 0) return null;
+		return (
+			usageGroups.find((group) => group.node.node_id === activeUsageNodeId) ??
+			usageGroups[0] ??
+			null
+		);
+	}, [activeUsageNodeId, usageGroups]);
+
+	useEffect(() => {
+		if (usageGroups.length === 0) {
+			setActiveUsageNodeId(null);
+			return;
+		}
+		setActiveUsageNodeId((current) => {
+			if (
+				current &&
+				usageGroups.some((group) => group.node.node_id === current)
+			) {
+				return current;
+			}
+			return usageGroups[0]?.node.node_id ?? null;
+		});
+	}, [usageGroups]);
+
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
 		if (!subscriptionToken) return "";
@@ -1202,19 +1232,46 @@ export function UserDetailsPage() {
 						</div>
 					) : null}
 					{ipUsageQuery.data ? (
-						ipUsageQuery.data.groups.length > 0 ? (
-							ipUsageQuery.data.groups.map((group) => (
-								<IpUsageView
-									key={group.node.node_id}
-									title={`Usage details · ${group.node.node_name}`}
-									description={`${group.node.node_id} · ${group.node.access_host || group.node.api_base_url || "local node"}`}
-									window={ipUsageWindow}
-									onWindowChange={setIpUsageWindow}
-									report={group}
-									isFetching={ipUsageQuery.isFetching}
-									emptyTitle="No inbound IP activity for this node"
-								/>
-							))
+						usageGroups.length > 0 ? (
+							<div className="space-y-4">
+								<div className="overflow-x-auto">
+									<div
+										className="inline-flex min-w-max items-center gap-1 rounded-box border border-base-300 bg-base-100 p-1 shadow-sm"
+										role="tablist"
+										aria-label="Usage detail nodes"
+									>
+										{usageGroups.map((group) => {
+											const selected =
+												group.node.node_id === activeUsageGroup?.node.node_id;
+											return (
+												<button
+													key={group.node.node_id}
+													type="button"
+													role="tab"
+													aria-selected={selected}
+													className={`btn btn-sm whitespace-nowrap ${selected ? "btn-primary" : "btn-ghost"}`}
+													onClick={() =>
+														setActiveUsageNodeId(group.node.node_id)
+													}
+												>
+													{group.node.node_name}
+												</button>
+											);
+										})}
+									</div>
+								</div>
+								{activeUsageGroup ? (
+									<IpUsageView
+										title={`Usage details · ${activeUsageGroup.node.node_name}`}
+										description={`${activeUsageGroup.node.node_id} · ${activeUsageGroup.node.access_host || activeUsageGroup.node.api_base_url || "local node"}`}
+										window={ipUsageWindow}
+										onWindowChange={setIpUsageWindow}
+										report={activeUsageGroup}
+										isFetching={ipUsageQuery.isFetching}
+										emptyTitle="No inbound IP activity for this node"
+									/>
+								) : null}
+							</div>
 						) : ipUsageQuery.data.partial ? (
 							<PageState
 								variant="empty"
