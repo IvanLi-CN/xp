@@ -20,12 +20,12 @@
 - 在节点详情新增 `IP usage` tab，支持最近 `24h` / `7d` 的 unique-IP 趋势、IP 占用时间线与 IP 列表。
 - 在用户详情新增 `Usage details` tab，以节点 tabs 切换展示最近 `24h` / `7d` 的同类信息。
 - 通过 Xray 官方 `statsUserOnline` + `GetStatsOnlineIpList` 做每分钟在线快照，不解析 access log。
-- 使用本地 GeoLite2 City + ASN 解析地区与运营商信息，并对首次出现 IP 做缓存。
+- 使用本地 MMDB 解析地区与运营商信息，并对首次出现 IP 做缓存；默认采用 xp 托管的 DB-IP Lite City + ASN，同时兼容外部路径覆盖。
 
 ### Non-goals
 
 - 不实现 access log 解析、历史回填或更细粒度秒级采样。
-- 不引入外部 IP API 或自动下载 GeoLite2 数据库。图表渲染改为使用 ECharts，本规格不再约束“不得新增图表库”。
+- 不引入外部在线 IP API。Geo DB 托管下载与设置页由后续规格 `xm43j` 承接；图表渲染改为使用 ECharts，本规格不再约束“不得新增图表库”。
 - 不新增跨节点混合总览页，也不做 usage SSE/live streaming。
 
 ## 范围（Scope）
@@ -34,7 +34,7 @@
 
 - Backend：Xray online IP 采集、本地持久化 `inbound_ip_usage.json`、Geo 解析缓存、node/user usage admin APIs、internal local fan-out APIs、删除/快照安装清理逻辑。
 - Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点 tabs 切换的 `Usage details` tab；24h/7d 切换、ECharts 面积折线图、泳道时间图、IP 列表、warning/empty/error 空态，以及图表/列表跨视图高亮联动。
-- Ops / config：新增 `XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH`；Xray 静态配置开启 `statsUserOnline=true`。
+- Ops / config：兼容 `XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH` 外部覆盖；默认托管 DB-IP Lite；Xray 静态配置开启 `statsUserOnline=true`。
 - Docs：规格、HTTP API、文件格式、CLI/env、设计文档同步。
 
 ### Out of scope
@@ -60,7 +60,7 @@
 - unique-IP 面积图、泳道图与 IP 列表必须共享 IP / 时间高亮状态；hover 或 click 任一 IP/时间后，其余视图同步高亮对应数据。
 - 占用时间图必须按 `endpoint_tag / IP` 输出已合并的连续时间段。
 - IP 列表必须返回 `ip`、`minutes`、`endpoint_tags`、`region`、`operator`、`last_seen_at`，并按 `minutes desc` 排序。
-- 首次见到新 IP 时必须尝试 GeoLite2 City + ASN 解析，并缓存到本地文件；缺库或未命中时不阻断采集/API。
+- 首次见到新 IP 时必须尝试本地 City + ASN MMDB 解析，并缓存到本地文件；缺库或未命中时不阻断采集/API。
 - 当 Xray online stats 不可用时，collector/API 必须返回 warning，不得把它误判为“当前没有在线 IP”。
 - membership / user / endpoint 删除，以及 snapshot install 后，必须清理对应 stale IP 历史。
 
@@ -88,7 +88,7 @@
 ### Edge cases / errors
 
 - `statsUserOnline` 未开启或 Xray 不支持 online IP stats：collector 标记 `online_stats_unavailable=true`，API 返回 warning，前端显示 explanation 空态。
-- GeoLite2 City / ASN DB 路径为空、文件不存在或单 IP 解析失败：地区/运营商字段为空，页面显示 `Unknown` 与 warning；采集与图表继续工作。
+- Geo DB 缺失、外部覆盖文件不存在，或单 IP 解析失败：地区/运营商字段为空，页面显示 `Unknown` 与 warning；采集与图表继续工作。
 - Node 详情查询远端节点失败：直接返回错误，不静默回空结果。
 - User 详情查询远端节点失败：返回 `partial=true` 且列出 `unreachable_nodes`，可达节点数据仍正常展示。
 - 两次采样之间出现并断开的极短连接不会被回填；这是固定采样语义的一部分。
@@ -102,7 +102,7 @@
 | Node IP usage admin APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web/admin           | 节点详情与 local internal detail |
 | User IP usage admin APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web/admin           | 用户详情按节点分组聚合           |
 | inbound_ip_usage.json    | File format  | internal      | New            | ./contracts/file-formats.md | backend         | backend             | 本地高频历史与 Geo 缓存          |
-| IP usage config/env      | CLI          | internal      | Modify         | ./contracts/cli.md          | backend/ops     | xp/xp-ops/operators | 新增 GeoLite2 路径配置           |
+| IP usage config/env      | CLI          | internal      | Modify         | ./contracts/cli.md          | backend/ops     | xp/xp-ops/operators | 托管 DB-IP Lite + 外部覆盖配置   |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -128,7 +128,7 @@
 - 采集语义已冻结为 `statsUserOnline` 每分钟快照。
 - 公开 API 的时间窗口仅允许 `24h` / `7d`，且 UTC 分钟起点口径已冻结。
 - 用户详情按节点 tabs 切换的展示语义已冻结。
-- Geo 数据源固定为 operator-supplied GeoLite2 City + ASN，本计划不负责分发数据库文件。
+- Geo 数据源默认由 xp 托管 DB-IP Lite City + ASN；若显式配置外部路径，则进入 external override 模式。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
@@ -153,8 +153,8 @@
 
 - `docs/desgin/api.md`: 新增 node/user IP usage APIs。
 - `docs/desgin/xray.md`: 增加 `statsUserOnline` 要求与采集限制说明。
-- `docs/ops/README.md`: 增加 GeoLite2 数据库部署说明。
-- `docs/ops/env/xp.env.example`: 增加 GeoLite2 路径配置。
+- `docs/ops/README.md`: 增加 DB-IP Lite 托管更新与 external override 说明。
+- `docs/ops/env/xp.env.example`: 增加 DB-IP Lite 外部覆盖路径示例。
 
 ## 计划资产（Plan assets）
 

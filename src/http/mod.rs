@@ -36,12 +36,16 @@ use crate::{
         UserNodeQuota, UserQuotaReset,
     },
     inbound_ip_usage::{
-        GeoResolver, InboundIpUsageListItem as IpListEntry, InboundIpUsageMembershipView,
+        GeoLookup, InboundIpUsageListItem as IpListEntry, InboundIpUsageMembershipView,
         InboundIpUsageSeriesPoint as UniqueIpPoint, InboundIpUsageTimelineLane as TimelineLane,
         InboundIpUsageWarning as IpUsageWarning, InboundIpUsageWindow as IpUsageWindow,
         InboundIpUsageWindowView as IpUsageReport, build_warnings, build_window_view,
     },
     internal_auth,
+    ip_geo_db::{
+        GeoDbLocalMode, GeoDbLocalStatus, GeoDbUpdateHandle, GeoDbUpdateTriggerResult,
+        GeoDbUpdateTriggerStatus, IpGeoSource,
+    },
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -56,7 +60,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
+    state::{DesiredStateCommand, GeoDbUpdateSettings, JsonSnapshotStore, StoreError},
     subscription,
     xray_supervisor::XrayHealthHandle,
 };
@@ -76,6 +80,7 @@ pub struct AppState {
     pub cluster_ca_key_pem: Arc<Option<String>>,
     pub raft: Arc<dyn RaftFacade>,
     pub raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
+    pub geo_db_update: GeoDbUpdateHandle,
     pub version_check_cache: Arc<Mutex<VersionCheckCache>>,
     pub ops_github_repo: Arc<String>,
     pub ops_github_api_base_url: Arc<String>,
@@ -504,6 +509,69 @@ struct AdminServiceConfigResponse {
     admin_token_masked: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminIpGeoDbResponse {
+    settings: GeoDbUpdateSettings,
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    nodes: Vec<AdminIpGeoDbNodeStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminIpGeoDbNodeStatus {
+    node: Node,
+    mode: GeoDbLocalMode,
+    running: bool,
+    city_db_path: String,
+    asn_db_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_success_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_scheduled_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalIpGeoDbLocalResponse {
+    node_id: String,
+    mode: GeoDbLocalMode,
+    running: bool,
+    city_db_path: String,
+    asn_db_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_success_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_scheduled_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PatchIpGeoDbRequest {
+    auto_update_enabled: bool,
+    update_interval_days: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminIpGeoDbUpdateResponse {
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+    nodes: Vec<AdminIpGeoDbUpdateNodeResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminIpGeoDbUpdateNodeResult {
+    node_id: String,
+    status: GeoDbUpdateTriggerStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
@@ -652,6 +720,7 @@ pub fn build_router(
     cluster_ca_key_pem: Option<String>,
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
+    geo_db_update: GeoDbUpdateHandle,
 ) -> Router {
     let cluster_id = cluster.cluster_id.clone();
     let auth_state = AdminAuthState {
@@ -681,6 +750,7 @@ pub fn build_router(
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
         raft,
         raft_rpc: raft_rpc.clone(),
+        geo_db_update,
         version_check_cache: Arc::new(Mutex::new(VersionCheckCache { entry: None })),
         ops_github_repo: Arc::new(ops_github_repo),
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
@@ -702,6 +772,11 @@ pub fn build_router(
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
+        .route(
+            "/ip-geo-db",
+            get(admin_get_ip_geo_db).patch(admin_patch_ip_geo_db),
+        )
+        .route("/ip-geo-db/update", post(admin_post_ip_geo_db_update))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
@@ -843,6 +918,14 @@ pub fn build_router(
         .route(
             "/_internal/users/:user_id/ip-usage/local",
             get(admin_internal_get_local_user_ip_usage),
+        )
+        .route(
+            "/_internal/ip-geo-db/local",
+            get(admin_internal_get_ip_geo_db_local),
+        )
+        .route(
+            "/_internal/ip-geo-db/update",
+            post(admin_internal_post_ip_geo_db_update),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -1755,6 +1838,7 @@ struct IpUsageQuery {
 struct AdminNodeIpUsageResponse {
     node: Node,
     window: IpUsageWindow,
+    geo_source: IpGeoSource,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -1767,6 +1851,7 @@ struct AdminNodeIpUsageResponse {
 struct AdminInternalUserIpUsageLocalResponse {
     node: Node,
     window: IpUsageWindow,
+    geo_source: IpGeoSource,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -1778,6 +1863,7 @@ struct AdminInternalUserIpUsageLocalResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminUserIpUsageNodeGroup {
     node: Node,
+    geo_source: IpGeoSource,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -2065,23 +2151,6 @@ fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError
     IpUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
 }
 
-fn config_ip_usage_geo_db_path(raw: &str) -> Option<std::path::PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(std::path::PathBuf::from(trimmed))
-    }
-}
-
-fn config_ip_usage_geo_db_missing(config: &Config) -> bool {
-    GeoResolver::new(
-        config_ip_usage_geo_db_path(&config.ip_usage_city_db_path),
-        config_ip_usage_geo_db_path(&config.ip_usage_asn_db_path),
-    )
-    .is_missing()
-}
-
 fn build_ip_usage_membership_views(
     store: &JsonSnapshotStore,
     node_id: &str,
@@ -2120,13 +2189,13 @@ fn build_ip_usage_membership_views(
 
 fn build_local_node_ip_usage_report(
     store: &JsonSnapshotStore,
-    config: &Config,
     node_id: &str,
     window: IpUsageWindow,
+    geo_db_missing: bool,
 ) -> IpUsageReport {
     let warnings = build_warnings(
         store.inbound_ip_usage().online_stats_unavailable,
-        config_ip_usage_geo_db_missing(config),
+        geo_db_missing,
     );
     let memberships = build_ip_usage_membership_views(store, node_id, None);
     build_window_view(
@@ -2140,14 +2209,14 @@ fn build_local_node_ip_usage_report(
 
 fn build_local_user_node_ip_usage_report(
     store: &JsonSnapshotStore,
-    config: &Config,
     user_id: &str,
     node_id: &str,
     window: IpUsageWindow,
+    geo_db_missing: bool,
 ) -> IpUsageReport {
     let warnings = build_warnings(
         store.inbound_ip_usage().online_stats_unavailable,
-        config_ip_usage_geo_db_missing(config),
+        geo_db_missing,
     );
     let memberships = build_ip_usage_membership_views(store, node_id, Some(user_id));
     build_window_view(
@@ -2162,11 +2231,13 @@ fn build_local_user_node_ip_usage_report(
 fn node_ip_usage_response_from_report(
     node: Node,
     window: IpUsageWindow,
+    geo_source: IpGeoSource,
     report: IpUsageReport,
 ) -> AdminNodeIpUsageResponse {
     AdminNodeIpUsageResponse {
         node,
         window,
+        geo_source,
         window_start: report.window_start,
         window_end: report.window_end,
         warnings: report.warnings,
@@ -2176,9 +2247,14 @@ fn node_ip_usage_response_from_report(
     }
 }
 
-fn user_ip_usage_group_from_report(node: Node, report: IpUsageReport) -> AdminUserIpUsageNodeGroup {
+fn user_ip_usage_group_from_report(
+    node: Node,
+    geo_source: IpGeoSource,
+    report: IpUsageReport,
+) -> AdminUserIpUsageNodeGroup {
     AdminUserIpUsageNodeGroup {
         node,
+        geo_source,
         window_start: report.window_start,
         window_end: report.window_end,
         warnings: report.warnings,
@@ -2216,12 +2292,14 @@ async fn admin_internal_get_local_node_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
+    let geo_source = state.geo_db_update.ip_geo_source();
+    let geo_db_missing = state.geo_db_update.resolver().is_missing();
     let report = {
         let store = state.store.lock().await;
-        build_local_node_ip_usage_report(&store, state.config.as_ref(), &node.node_id, window)
+        build_local_node_ip_usage_report(&store, &node.node_id, window, geo_db_missing)
     };
     Ok(Json(node_ip_usage_response_from_report(
-        node, window, report,
+        node, window, geo_source, report,
     )))
 }
 
@@ -2239,12 +2317,14 @@ async fn admin_get_node_ip_usage(
     };
 
     if node.node_id == state.cluster.node_id {
+        let geo_source = state.geo_db_update.ip_geo_source();
+        let geo_db_missing = state.geo_db_update.resolver().is_missing();
         let report = {
             let store = state.store.lock().await;
-            build_local_node_ip_usage_report(&store, state.config.as_ref(), &node.node_id, window)
+            build_local_node_ip_usage_report(&store, &node.node_id, window, geo_db_missing)
         };
         return Ok(Json(node_ip_usage_response_from_report(
-            node, window, report,
+            node, window, geo_source, report,
         )));
     }
 
@@ -2317,19 +2397,22 @@ async fn admin_internal_get_local_user_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
+    let geo_source = state.geo_db_update.ip_geo_source();
+    let geo_db_missing = state.geo_db_update.resolver().is_missing();
     let report = {
         let store = state.store.lock().await;
         build_local_user_node_ip_usage_report(
             &store,
-            state.config.as_ref(),
             &user_id,
             &node.node_id,
             window,
+            geo_db_missing,
         )
     };
     Ok(Json(AdminInternalUserIpUsageLocalResponse {
         node,
         window,
+        geo_source,
         window_start: report.window_start,
         window_end: report.window_end,
         warnings: report.warnings,
@@ -2388,21 +2471,23 @@ async fn admin_get_user_ip_usage(
     .parse()
     .map_err(|_| ApiError::invalid_request("invalid window"))?;
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::internal(err.to_string()))?;
 
     for node in relevant_nodes {
         if node.node_id == local_node_id {
+            let geo_source = state.geo_db_update.ip_geo_source();
+            let geo_db_missing = state.geo_db_update.resolver().is_missing();
             let report = {
                 let store = state.store.lock().await;
                 build_local_user_node_ip_usage_report(
                     &store,
-                    state.config.as_ref(),
                     &user_id,
                     &node.node_id,
                     window,
+                    geo_db_missing,
                 )
             };
-            groups.push(user_ip_usage_group_from_report(node, report));
+            groups.push(user_ip_usage_group_from_report(node, geo_source, report));
             continue;
         }
 
@@ -2443,6 +2528,7 @@ async fn admin_get_user_ip_usage(
         {
             Ok(remote) => groups.push(AdminUserIpUsageNodeGroup {
                 node: remote.node,
+                geo_source: remote.geo_source,
                 window_start: remote.window_start,
                 window_end: remote.window_end,
                 warnings: remote.warnings,
@@ -2891,6 +2977,260 @@ async fn admin_get_config(
         quota_auto_unban: state.config.quota_auto_unban,
         admin_token_present,
         admin_token_masked,
+    }))
+}
+
+fn validate_geo_db_update_settings(
+    req: PatchIpGeoDbRequest,
+) -> Result<GeoDbUpdateSettings, ApiError> {
+    if !(1..=30).contains(&req.update_interval_days) {
+        return Err(ApiError::invalid_request(
+            "update_interval_days must be between 1 and 30",
+        ));
+    }
+    Ok(GeoDbUpdateSettings {
+        provider: crate::state::GeoDbProvider::DbipLite,
+        auto_update_enabled: req.auto_update_enabled,
+        update_interval_days: req.update_interval_days,
+    })
+}
+
+fn node_ip_geo_db_status_from_local(
+    node: Node,
+    local: AdminInternalIpGeoDbLocalResponse,
+) -> AdminIpGeoDbNodeStatus {
+    AdminIpGeoDbNodeStatus {
+        node,
+        mode: local.mode,
+        running: local.running,
+        city_db_path: local.city_db_path,
+        asn_db_path: local.asn_db_path,
+        last_started_at: local.last_started_at,
+        last_success_at: local.last_success_at,
+        next_scheduled_at: local.next_scheduled_at,
+        last_error: local.last_error,
+    }
+}
+
+fn local_ip_geo_db_response(
+    node_id: String,
+    status: GeoDbLocalStatus,
+) -> AdminInternalIpGeoDbLocalResponse {
+    AdminInternalIpGeoDbLocalResponse {
+        node_id,
+        mode: status.mode,
+        running: status.running,
+        city_db_path: status.city_db_path,
+        asn_db_path: status.asn_db_path,
+        last_started_at: status.last_started_at,
+        last_success_at: status.last_success_at,
+        next_scheduled_at: status.next_scheduled_at,
+        last_error: status.last_error,
+    }
+}
+
+fn ip_geo_db_update_node_result(
+    node_id: String,
+    result: GeoDbUpdateTriggerResult,
+) -> AdminIpGeoDbUpdateNodeResult {
+    AdminIpGeoDbUpdateNodeResult {
+        node_id,
+        status: result.status,
+        message: result.message,
+    }
+}
+
+async fn admin_internal_get_ip_geo_db_local(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<AdminInternalIpGeoDbLocalResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let status = state
+        .geo_db_update
+        .local_status()
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+    Ok(Json(local_ip_geo_db_response(
+        state.cluster.node_id.clone(),
+        status,
+    )))
+}
+
+async fn admin_internal_post_ip_geo_db_update(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<GeoDbUpdateTriggerResult>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    Ok(Json(state.geo_db_update.trigger_manual_update().await))
+}
+
+async fn admin_get_ip_geo_db(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminIpGeoDbResponse>, ApiError> {
+    let (settings, nodes) = {
+        let store = state.store.lock().await;
+        (
+            store.state().geo_db_update_settings.clone(),
+            store.list_nodes(),
+        )
+    };
+    let local_node_id = state.cluster.node_id.clone();
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let local_uri: axum::http::Uri = "/_internal/ip-geo-db/local"
+        .parse()
+        .map_err(|_| ApiError::invalid_request("invalid internal geo db uri"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    let mut statuses = Vec::new();
+    let mut unreachable_nodes = Vec::new();
+    for node in nodes {
+        if node.node_id == local_node_id {
+            let status = state
+                .geo_db_update
+                .local_status()
+                .await
+                .map_err(|err| ApiError::internal(err.to_string()))?;
+            statuses.push(node_ip_geo_db_status_from_local(
+                node,
+                local_ip_geo_db_response(local_node_id.clone(), status),
+            ));
+            continue;
+        }
+
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+        let request = client
+            .get(format!("{base}/api/admin/_internal/ip-geo-db/local"))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = match tokio::time::timeout(Duration::from_secs(3), request).await {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id.clone());
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+        match response.json::<AdminInternalIpGeoDbLocalResponse>().await {
+            Ok(remote) => statuses.push(node_ip_geo_db_status_from_local(node, remote)),
+            Err(_) => unreachable_nodes.push(node.node_id.clone()),
+        }
+    }
+
+    statuses.sort_by(|a, b| a.node.node_id.cmp(&b.node.node_id));
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    Ok(Json(AdminIpGeoDbResponse {
+        settings,
+        partial: !unreachable_nodes.is_empty(),
+        unreachable_nodes,
+        nodes: statuses,
+    }))
+}
+
+async fn admin_patch_ip_geo_db(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<PatchIpGeoDbRequest>,
+) -> Result<Json<GeoDbUpdateSettings>, ApiError> {
+    let settings = validate_geo_db_update_settings(req)?;
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetGeoDbUpdateSettings {
+            settings: settings.clone(),
+        },
+    )
+    .await?;
+    if settings.auto_update_enabled {
+        let _ = state.geo_db_update.maybe_trigger_auto_update().await;
+    }
+    Ok(Json(settings))
+}
+
+async fn admin_post_ip_geo_db_update(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminIpGeoDbUpdateResponse>, ApiError> {
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let local_uri: axum::http::Uri = "/_internal/ip-geo-db/update"
+        .parse()
+        .map_err(|_| ApiError::invalid_request("invalid internal geo db uri"))?;
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &local_uri)
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    let mut results = Vec::new();
+    let mut unreachable_nodes = Vec::new();
+    for node in nodes {
+        if node.node_id == local_node_id {
+            results.push(ip_geo_db_update_node_result(
+                node.node_id.clone(),
+                state.geo_db_update.trigger_manual_update().await,
+            ));
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+        let request = client
+            .post(format!("{base}/api/admin/_internal/ip-geo-db/update"))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = match tokio::time::timeout(Duration::from_secs(3), request).await {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id.clone());
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+        match response.json::<GeoDbUpdateTriggerResult>().await {
+            Ok(remote) => results.push(ip_geo_db_update_node_result(node.node_id.clone(), remote)),
+            Err(_) => unreachable_nodes.push(node.node_id.clone()),
+        }
+    }
+
+    results.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    Ok(Json(AdminIpGeoDbUpdateResponse {
+        partial: !unreachable_nodes.is_empty(),
+        unreachable_nodes,
+        nodes: results,
     }))
 }
 
@@ -5142,7 +5482,7 @@ async fn admin_list_user_quota_summaries(
         .parse()
         .expect("valid uri");
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::internal(err.to_string()))?;
 
     let mut unreachable_nodes = Vec::new();
 
@@ -5415,7 +5755,7 @@ async fn admin_get_user_node_quota_status(
         .parse()
         .expect("valid uri");
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::internal(err.to_string()))?;
 
     let mut items = local_items;
     let mut unreachable_nodes = Vec::new();
@@ -5832,7 +6172,7 @@ async fn admin_get_alerts(
     // verifier sees a stripped path like `/alerts?...` (not `/api/admin/...`).
     let local_alerts_uri: axum::http::Uri = "/alerts?scope=local".parse().expect("valid uri");
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_alerts_uri)
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::internal(err.to_string()))?;
 
     for node in nodes {
         if node.node_id == local_node_id {

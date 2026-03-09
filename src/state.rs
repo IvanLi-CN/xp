@@ -15,7 +15,7 @@ use crate::{
     },
     id::new_ulid_string,
     inbound_ip_usage::{
-        InboundIpMinuteSample, PersistedInboundIpUsage, PersistedInboundIpUsageGeoDb,
+        GeoLookup, InboundIpMinuteSample, PersistedInboundIpUsage, PersistedInboundIpUsageGeoDb,
     },
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
@@ -25,7 +25,8 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
+const SCHEMA_VERSION_V10: u32 = 10;
 const SCHEMA_VERSION_V9: u32 = 9;
 const SCHEMA_VERSION_V8: u32 = 8;
 const SCHEMA_VERSION_V7: u32 = 7;
@@ -35,7 +36,7 @@ const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 2;
 const USAGE_SCHEMA_VERSION_V1: u32 = 1;
 
-/// Migrate any historical state payload into the latest schema (v10).
+/// Migrate any historical state payload into the latest schema (v11).
 ///
 /// This is used by Raft snapshot installation to support upgrades without requiring operators
 /// to start an older binary for snapshot/purge first.
@@ -49,6 +50,7 @@ pub(crate) fn migrate_state_value_to_latest(
 
     let mut state = match schema_version {
         SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
+        SCHEMA_VERSION_V10 => migrate_v10_to_v11(serde_json::from_value::<PersistedState>(raw)?)?,
         SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7 | SCHEMA_VERSION_V6
         | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
             let mut legacy: PersistedStateV9Compat = serde_json::from_value(raw)?;
@@ -194,6 +196,46 @@ impl From<DomainError> for StoreError {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GeoDbProvider {
+    #[default]
+    DbipLite,
+}
+
+const fn default_geo_db_update_interval_days() -> u8 {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GeoDbUpdateSettings {
+    #[serde(default)]
+    pub provider: GeoDbProvider,
+    #[serde(default)]
+    pub auto_update_enabled: bool,
+    #[serde(default = "default_geo_db_update_interval_days")]
+    pub update_interval_days: u8,
+}
+
+impl Default for GeoDbUpdateSettings {
+    fn default() -> Self {
+        Self {
+            provider: GeoDbProvider::DbipLite,
+            auto_update_enabled: false,
+            update_interval_days: default_geo_db_update_interval_days(),
+        }
+    }
+}
+
+pub fn validate_geo_db_update_settings(settings: &GeoDbUpdateSettings) -> Result<(), DomainError> {
+    if !(1..=30).contains(&settings.update_interval_days) {
+        return Err(DomainError::InvalidGeoDbUpdateIntervalDays {
+            days: settings.update_interval_days,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedState {
     pub schema_version: u32,
@@ -222,6 +264,8 @@ pub struct PersistedState {
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
+    #[serde(default)]
+    pub geo_db_update_settings: GeoDbUpdateSettings,
 }
 
 impl PersistedState {
@@ -239,6 +283,7 @@ impl PersistedState {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
             user_mihomo_profiles: BTreeMap::new(),
+            geo_db_update_settings: GeoDbUpdateSettings::default(),
         }
     }
 }
@@ -859,6 +904,23 @@ struct MigrateV9ToV10Stats {
     user_node_quotas_cleared: usize,
 }
 
+fn migrate_v10_to_v11(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V10 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "expected v10 state during migration, got schema_version {}",
+                input.schema_version
+            ),
+        });
+    }
+    input.schema_version = SCHEMA_VERSION;
+    if input.geo_db_update_settings.update_interval_days == 0 {
+        input.geo_db_update_settings.update_interval_days =
+            GeoDbUpdateSettings::default().update_interval_days;
+    }
+    Ok(input)
+}
+
 fn migrate_v9_compat_to_v10(
     input: PersistedStateV9Compat,
 ) -> Result<
@@ -1442,6 +1504,9 @@ pub enum DesiredStateCommand {
         user_id: String,
         profile: UserMihomoProfile,
     },
+    SetGeoDbUpdateSettings {
+        settings: GeoDbUpdateSettings,
+    },
     /// Replace the user's access set (membership-only hard cut).
     ReplaceUserAccess {
         user_id: String,
@@ -1565,6 +1630,9 @@ enum DesiredStateCommandCompat {
     SetUserMihomoProfile {
         user_id: String,
         profile: UserMihomoProfile,
+    },
+    SetGeoDbUpdateSettings {
+        settings: GeoDbUpdateSettings,
     },
 
     ReplaceUserAccess {
@@ -1692,6 +1760,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             },
             DesiredStateCommandCompat::SetUserMihomoProfile { user_id, profile } => {
                 Self::SetUserMihomoProfile { user_id, profile }
+            }
+            DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => {
+                Self::SetGeoDbUpdateSettings { settings }
             }
             DesiredStateCommandCompat::ReplaceUserAccess {
                 user_id,
@@ -2381,6 +2452,11 @@ impl DesiredStateCommand {
                     .insert(user_id.clone(), profile.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
+            Self::SetGeoDbUpdateSettings { settings } => {
+                validate_geo_db_update_settings(settings)?;
+                state.geo_db_update_settings = settings.clone();
+                Ok(DesiredStateApplyResult::Applied)
+            }
             Self::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
@@ -2656,8 +2732,12 @@ impl JsonSnapshotStore {
 
                 match schema_version {
                     SCHEMA_VERSION => {
+                        let v11: PersistedState = serde_json::from_value(raw)?;
+                        (v11, None, false, false)
+                    }
+                    SCHEMA_VERSION_V10 => {
                         let v10: PersistedState = serde_json::from_value(raw)?;
-                        (v10, None, false, false)
+                        (migrate_v10_to_v11(v10)?, None, false, true)
                     }
                     SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7
                     | SCHEMA_VERSION_V6 | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
@@ -2798,6 +2878,15 @@ impl JsonSnapshotStore {
         let expected_memberships = build_node_user_endpoint_memberships(&state);
         if expected_memberships != state.node_user_endpoint_memberships {
             state.node_user_endpoint_memberships = expected_memberships;
+            migrated = true;
+        }
+
+        if validate_geo_db_update_settings(&state.geo_db_update_settings).is_err() {
+            state.geo_db_update_settings = GeoDbUpdateSettings::default();
+            migrated = true;
+        }
+        if state.geo_db_update_settings.provider != GeoDbUpdateSettings::default().provider {
+            state.geo_db_update_settings.provider = GeoDbUpdateSettings::default().provider;
             migrated = true;
         }
 
@@ -2965,7 +3054,7 @@ impl JsonSnapshotStore {
         geo_db: PersistedInboundIpUsageGeoDb,
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
-        geo_resolver: &crate::inbound_ip_usage::GeoResolver,
+        geo_resolver: &dyn GeoLookup,
     ) -> Result<(), StoreError> {
         let changed = self.inbound_ip_usage.record_minute_samples(
             minute,
@@ -2991,6 +3080,20 @@ impl JsonSnapshotStore {
             self.save_inbound_ip_usage()?;
         }
         Ok(())
+    }
+
+    pub fn refresh_inbound_ip_usage_geo_cache(
+        &mut self,
+        geo_db: PersistedInboundIpUsageGeoDb,
+        geo_resolver: &dyn GeoLookup,
+    ) -> Result<bool, StoreError> {
+        let changed = self
+            .inbound_ip_usage
+            .refresh_geo_cache(geo_db, geo_resolver);
+        if changed {
+            self.save_inbound_ip_usage()?;
+        }
+        Ok(changed)
     }
 
     pub fn update_usage<R>(
@@ -4992,5 +5095,45 @@ rules: []
         assert_eq!(out_user_id, user.user_id);
         assert_eq!(credential_epoch, 1);
         assert_eq!(store.get_user(&user.user_id).unwrap().credential_epoch, 1);
+    }
+    #[test]
+    fn load_or_init_migrates_v10_geo_db_settings_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut legacy = serde_json::to_value(PersistedState::empty()).unwrap();
+        legacy["schema_version"] = serde_json::json!(SCHEMA_VERSION_V10);
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("geo_db_update_settings");
+        std::fs::write(
+            tmp.path().join("state.json"),
+            serde_json::to_vec_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+        assert_eq!(
+            store.state().geo_db_update_settings,
+            GeoDbUpdateSettings::default()
+        );
+    }
+
+    #[test]
+    fn desired_state_apply_set_geo_db_update_settings_validates_interval() {
+        let mut state = PersistedState::empty();
+        let err = DesiredStateCommand::SetGeoDbUpdateSettings {
+            settings: GeoDbUpdateSettings {
+                provider: GeoDbProvider::DbipLite,
+                auto_update_enabled: true,
+                update_interval_days: 0,
+            },
+        }
+        .apply(&mut state)
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            StoreError::Domain(DomainError::InvalidGeoDbUpdateIntervalDays { days: 0 })
+        ));
     }
 }

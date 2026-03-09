@@ -128,6 +128,42 @@ describe("<IpUsageView />", () => {
 		expect(screen.getByText("Time")).toBeInTheDocument();
 	});
 
+	it("shows DB-IP Lite attribution for managed geo DB", () => {
+		render(
+			<IpUsageView
+				title="IP usage"
+				description="Node inbound IP snapshots"
+				window="24h"
+				geoSource="managed_dbip_lite"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+			/>,
+		);
+
+		expect(
+			screen.getByText("Geo enrichment uses DB-IP Lite City + ASN MMDB."),
+		).toBeInTheDocument();
+	});
+
+	it("shows external override notice", () => {
+		render(
+			<IpUsageView
+				title="IP usage"
+				description="Node inbound IP snapshots"
+				window="24h"
+				geoSource="external_override"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+			/>,
+		);
+
+		expect(
+			screen.getByText(
+				"This node uses externally managed Geo DB files; xp skips the managed downloader here.",
+			),
+		).toBeInTheDocument();
+	});
+
 	it("shows blocking online-stats empty state", () => {
 		render(
 			<IpUsageView

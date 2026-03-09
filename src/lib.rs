@@ -11,6 +11,7 @@ pub mod http;
 pub mod id;
 pub mod inbound_ip_usage;
 pub mod internal_auth;
+pub mod ip_geo_db;
 pub mod login_token;
 pub mod node_runtime;
 pub mod ops;

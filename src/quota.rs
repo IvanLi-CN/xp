@@ -8,7 +8,8 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
     domain::{NodeQuotaReset, UserPriorityTier},
-    inbound_ip_usage::{GeoResolver, floor_minute},
+    inbound_ip_usage::{GeoLookup, GeoResolver, floor_minute},
+    ip_geo_db::SharedGeoResolver,
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
@@ -36,6 +37,7 @@ pub fn spawn_quota_worker(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
+    geo_resolver: SharedGeoResolver,
 ) -> QuotaHandle {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = QuotaHandle {
@@ -43,10 +45,6 @@ pub fn spawn_quota_worker(
     };
 
     tokio::spawn(async move {
-        let geo_resolver = GeoResolver::new(
-            config_geo_db_path(&config.ip_usage_city_db_path),
-            config_geo_db_path(&config.ip_usage_asn_db_path),
-        );
         let mut interval =
             tokio::time::interval(Duration::from_secs(config.quota_poll_interval_secs));
         loop {
@@ -158,7 +156,7 @@ async fn run_quota_tick_at_with_geo(
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    geo_resolver: &GeoResolver,
+    geo_resolver: &dyn GeoLookup,
 ) -> anyhow::Result<()> {
     let snapshots: Vec<MembershipQuotaSnapshot> = {
         let store = store.lock().await;

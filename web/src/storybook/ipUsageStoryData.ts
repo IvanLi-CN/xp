@@ -386,6 +386,7 @@ function buildUserGroup(
 		window === "24h" ? "2026-03-07T00:00:00Z" : "2026-03-01T00:00:00Z";
 	return {
 		node,
+		geo_source: "managed_dbip_lite",
 		...buildReportFromLanes(window, start, lanes),
 	};
 }
@@ -397,6 +398,7 @@ export function buildDenseNodeIpUsageStories(
 		"24h": {
 			node,
 			window: "24h",
+			geo_source: "missing",
 			...buildReportFromLanes(
 				"24h",
 				"2026-03-07T00:00:00Z",
@@ -405,7 +407,7 @@ export function buildDenseNodeIpUsageStories(
 					{
 						code: "geo_db_missing",
 						message:
-							"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+							"IP geolocation DB is unavailable; region and operator fields will be empty.",
 					},
 				],
 			),
@@ -413,6 +415,7 @@ export function buildDenseNodeIpUsageStories(
 		"7d": {
 			node,
 			window: "7d",
+			geo_source: "missing",
 			...buildReportFromLanes(
 				"7d",
 				"2026-03-01T00:00:00Z",
@@ -421,7 +424,7 @@ export function buildDenseNodeIpUsageStories(
 					{
 						code: "geo_db_missing",
 						message:
-							"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+							"IP geolocation DB is unavailable; region and operator fields will be empty.",
 					},
 				],
 			),
@@ -670,20 +673,22 @@ export function buildDenseUserIpUsageStories(
 			buildUserGroup(node, buildUserLanes(node, "7d", index), "7d"),
 		);
 	if (groups24h[1]) {
+		groups24h[1].geo_source = "external_override";
 		groups24h[1].warnings = [
 			{
 				code: "geo_db_missing",
 				message:
-					"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+					"IP geolocation DB is unavailable; region and operator fields will be empty.",
 			},
 		];
 	}
 	if (groups7d[1]) {
+		groups7d[1].geo_source = "external_override";
 		groups7d[1].warnings = [
 			{
 				code: "geo_db_missing",
 				message:
-					"GeoLite2 City/ASN DB is missing; region and operator fields will be empty.",
+					"IP geolocation DB is unavailable; region and operator fields will be empty.",
 			},
 		];
 	}

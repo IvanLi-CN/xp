@@ -16,8 +16,8 @@
   "latest_minute": "2026-03-08T10:11:00Z",
   "online_stats_unavailable": false,
   "geo": {
-    "city_db_path": "/opt/geo/GeoLite2-City.mmdb",
-    "asn_db_path": "/opt/geo/GeoLite2-ASN.mmdb"
+    "city_db_path": "/var/lib/xp/geoip/dbip-city-lite.mmdb",
+    "asn_db_path": "/var/lib/xp/geoip/dbip-asn-lite.mmdb"
   },
   "memberships": {
     "u1:ep1": {

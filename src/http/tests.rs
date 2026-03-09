@@ -92,6 +92,15 @@ fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreI
     }
 }
 
+fn test_geo_db_update_handle(
+    config: &Config,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+) -> crate::ip_geo_db::GeoDbUpdateHandle {
+    let (handle, _task) =
+        crate::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store).unwrap();
+    handle
+}
+
 fn app_with(
     tmp: &TempDir,
     reconcile: ReconcileHandle,
@@ -128,6 +137,7 @@ fn app_with(
         "test-probe-secret".to_string(),
         false,
     );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let router = build_router(
         config,
         store.clone(),
@@ -140,6 +150,7 @@ fn app_with(
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
     (router, store)
 }
@@ -1085,6 +1096,7 @@ async fn follower_admin_write_does_not_redirect() {
         "test-probe-secret".to_string(),
         false,
     );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config,
         store,
@@ -1097,6 +1109,7 @@ async fn follower_admin_write_does_not_redirect() {
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
 
     let res = app
@@ -2906,6 +2919,7 @@ async fn grant_usage_includes_warning_fields() {
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
 
     let res = app
@@ -3096,6 +3110,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         "test-probe-secret".to_string(),
         false,
     );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config,
         store.clone(),
@@ -3108,6 +3123,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
 
     let res = app
@@ -4550,7 +4566,8 @@ fn config_ip_usage_geo_db_missing_when_mmdb_files_are_unreadable() {
     config.ip_usage_city_db_path = city_path.display().to_string();
     config.ip_usage_asn_db_path = asn_path.display().to_string();
 
-    assert!(super::config_ip_usage_geo_db_missing(&config));
+    let resolver = crate::ip_geo_db::SharedGeoResolver::new(&config);
+    assert!(crate::inbound_ip_usage::GeoLookup::is_missing(&resolver));
 }
 
 #[tokio::test]
@@ -5071,6 +5088,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         "test-probe-secret".to_string(),
         false,
     );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config.clone(),
         store,
@@ -5083,6 +5101,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
 
     let res = app
@@ -5126,6 +5145,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         "test-probe-secret".to_string(),
         false,
     );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config,
         store,
@@ -5138,6 +5158,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         cluster_ca_key_pem,
         raft,
         None,
+        geo_db_update,
     );
 
     let res = app

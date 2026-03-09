@@ -139,6 +139,7 @@ function setupMocks(args?: {
 			args?.nodeIpUsage ?? {
 				node,
 				window,
+				geo_source: "managed_dbip_lite",
 				window_start:
 					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
 				window_end: "2026-03-08T00:59:00Z",
@@ -237,6 +238,7 @@ describe("<NodeDetailsPage />", () => {
 					},
 				},
 				window: "24h",
+				geo_source: "missing",
 				window_start: "2026-03-07T01:00:00Z",
 				window_end: "2026-03-08T00:59:00Z",
 				warnings: [

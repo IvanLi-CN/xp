@@ -1295,6 +1295,7 @@ export function UserDetailsPage() {
 										title={`Usage details · ${activeUsageGroup.node.node_name}`}
 										description={`${activeUsageGroup.node.node_id} · ${activeUsageGroup.node.access_host || activeUsageGroup.node.api_base_url || "local node"}`}
 										window={ipUsageWindow}
+										geoSource={activeUsageGroup.geo_source}
 										onWindowChange={setIpUsageWindow}
 										report={activeUsageGroup}
 										isFetching={ipUsageQuery.isFetching}

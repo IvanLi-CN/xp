@@ -8,6 +8,7 @@ import { SVGRenderer } from "echarts/renderers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
+	AdminIpGeoSource,
 	AdminIpUsageListEntry,
 	AdminIpUsageTimelineLane,
 	AdminIpUsageWarning,
@@ -68,6 +69,7 @@ type IpUsageViewProps = {
 	title: string;
 	description: string;
 	window: AdminIpUsageWindow;
+	geoSource?: AdminIpGeoSource;
 	onWindowChange: (window: AdminIpUsageWindow) => void;
 	report: SharedIpUsageReport;
 	isFetching?: boolean;
@@ -1589,10 +1591,30 @@ function WarningList({ warnings }: { warnings: AdminIpUsageWarning[] }) {
 	);
 }
 
+function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
+	if (!geoSource || geoSource === "missing") return null;
+	if (geoSource === "external_override") {
+		return (
+			<div className="alert alert-info py-2 text-sm">
+				<span>
+					This node uses externally managed Geo DB files; xp skips the managed
+					downloader here.
+				</span>
+			</div>
+		);
+	}
+	return (
+		<div className="alert alert-info py-2 text-sm">
+			<span>Geo enrichment uses DB-IP Lite City + ASN MMDB.</span>
+		</div>
+	);
+}
+
 export function IpUsageView({
 	title,
 	description,
 	window,
+	geoSource,
 	onWindowChange,
 	report,
 	isFetching = false,
@@ -1743,6 +1765,7 @@ export function IpUsageView({
 				</div>
 
 				<WarningList warnings={report.warnings} />
+				<GeoSourceNotice geoSource={geoSource} />
 
 				{blockingWarning && empty ? (
 					<div className="rounded-2xl border border-warning/40 bg-warning/10 px-4 py-10 text-center">
