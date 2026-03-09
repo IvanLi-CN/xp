@@ -790,7 +790,7 @@ rules: []
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "managed_dbip_lite",
+						geo_source: "external_override",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
@@ -839,6 +839,11 @@ rules: []
 			"aria-selected",
 			"true",
 		);
+		expect(
+			screen.getByText(
+				"This node uses externally managed Geo DB files; xp skips the managed downloader here.",
+			),
+		).toBeInTheDocument();
 		const windowButtons = screen.getAllByRole("button", { name: "7d" });
 		fireEvent.click(windowButtons[0]);
 		await waitFor(() => {
