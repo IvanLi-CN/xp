@@ -138,7 +138,7 @@ export const UsageDetailsTab: Story = {
 			await canvas.findByText("Usage details · tokyo-1"),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText("198.51.100.57", { selector: "td" }),
+			await canvas.findByRole("button", { name: "198.51.100.57" }),
 		).toBeInTheDocument();
 	},
 };
@@ -232,11 +232,16 @@ export const UsageDetailsTab7d: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
-		const switchButton = await canvas.findByRole("button", { name: "7d" });
-		await userEvent.click(switchButton);
-		await expect(switchButton).toHaveClass("btn-primary");
+		await userEvent.click(await canvas.findByRole("tab", { name: "osaka-1" }));
 		await expect(
-			await canvas.findByText("198.51.100.99", { selector: "td" }),
+			await canvas.findByRole("heading", { name: "Usage details · osaka-1" }),
+		).toBeInTheDocument();
+		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
+		await expect(await canvas.findByRole("button", { name: "7d" })).toHaveClass(
+			"btn-primary",
+		);
+		await expect(
+			await canvas.findByRole("button", { name: "198.51.100.99" }),
 		).toBeInTheDocument();
 	},
 };

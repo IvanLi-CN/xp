@@ -56,10 +56,10 @@ export const IpUsageTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await expect(
-			await canvas.findByText("198.51.100.88", { selector: "td" }),
+			await canvas.findByRole("button", { name: "198.51.100.88" }),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText("203.0.113.55", { selector: "td" }),
+			await canvas.findByRole("button", { name: "203.0.113.55" }),
 		).toBeInTheDocument();
 	},
 };
@@ -69,10 +69,11 @@ export const IpUsageTab7d: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
-		const switchButton = await canvas.findByRole("button", { name: "7d" });
-		await expect(switchButton).toHaveClass("btn-primary");
+		await expect(await canvas.findByRole("button", { name: "7d" })).toHaveClass(
+			"btn-primary",
+		);
 		await expect(
-			await canvas.findByText("198.51.100.88", { selector: "td" }),
+			await canvas.findByRole("button", { name: "198.51.100.88" }),
 		).toBeInTheDocument();
 	},
 };

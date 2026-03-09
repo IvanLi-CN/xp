@@ -424,7 +424,12 @@ const renderVerticalBand: CustomSeriesRenderItem = (params, api) => {
 	return {
 		type: "rect",
 		shape: rectShape,
-		style: api.style(),
+		style: {
+			fill:
+				(api.visual("color") as string | undefined) ??
+				"rgba(56, 189, 248, 0.12)",
+			opacity: 1,
+		},
 		transition: ["shape", "style"],
 		enterFrom: {
 			shape: {
@@ -1234,14 +1239,14 @@ function TimelineChart({
 			return {
 				type: "rect",
 				shape: { ...rectShape, r: 4 },
-				style: api.style({
+				style: {
 					fill,
 					opacity: 1,
 					shadowBlur: matchesHighlight && activeHighlight.hasFilter ? 4 : 0,
 					shadowColor: "rgba(15, 23, 42, 0.12)",
 					stroke,
 					lineWidth: matchesHighlight && activeHighlight.hasFilter ? 1.15 : 1,
-				}),
+				},
 				transition: ["shape", "style"],
 			};
 		};
