@@ -209,6 +209,8 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && activeTab === "ipUsage",
 		queryFn: ({ signal }) =>
 			fetchAdminNodeIpUsage(adminToken, nodeId, ipUsageWindow, signal),
+		placeholderData: (previousData) =>
+			previousData?.node.node_id === nodeId ? previousData : undefined,
 	});
 
 	useEffect(() => {

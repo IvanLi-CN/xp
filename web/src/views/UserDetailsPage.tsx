@@ -305,6 +305,8 @@ export function UserDetailsPage() {
 		enabled: adminToken.length > 0 && tab === "usageDetails",
 		queryFn: ({ signal }) =>
 			fetchAdminUserIpUsage(adminToken, userId, ipUsageWindow, signal),
+		placeholderData: (previousData) =>
+			previousData?.user.user_id === userId ? previousData : undefined,
 	});
 
 	const user = userQuery.data;

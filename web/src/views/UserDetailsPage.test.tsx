@@ -846,6 +846,14 @@ rules: []
 				expect.any(AbortSignal),
 			);
 		});
+		await waitFor(() => {
+			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+		});
+		expect(screen.queryByText("Usage details · Tokyo")).not.toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 	});
 
 	it("disambiguates usage detail node tabs when node names repeat", async () => {
