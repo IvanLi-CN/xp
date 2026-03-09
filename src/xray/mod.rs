@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::BTreeSet, net::SocketAddr};
 
 use tonic::transport::{Channel, Endpoint};
 
@@ -9,7 +9,8 @@ use crate::xray::proto::xray::app::proxyman::command::{
 };
 use crate::xray::proto::xray::app::stats::command::stats_service_client::StatsServiceClient;
 use crate::xray::proto::xray::app::stats::command::{
-    GetStatsRequest, GetStatsResponse, QueryStatsRequest, QueryStatsResponse,
+    GetStatsOnlineIpListResponse, GetStatsRequest, GetStatsResponse, QueryStatsRequest,
+    QueryStatsResponse,
 };
 
 pub mod builder;
@@ -90,6 +91,64 @@ impl XrayClient {
     ) -> Result<QueryStatsResponse, tonic::Status> {
         let resp = self.stats.query_stats(req).await?;
         Ok(resp.into_inner())
+    }
+
+    pub async fn get_online_ip_list(
+        &mut self,
+        name: &str,
+    ) -> Result<GetStatsOnlineIpListResponse, tonic::Status> {
+        let resp = self
+            .stats
+            .get_stats_online_ip_list(GetStatsRequest {
+                name: name.to_string(),
+                reset: false,
+            })
+            .await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn get_user_online_ip_list(
+        &mut self,
+        email: &str,
+    ) -> Result<BTreeSet<String>, tonic::Status> {
+        let response = self
+            .get_online_ip_list(&format!("user>>>{email}>>>online"))
+            .await?;
+        Ok(response.ips.into_keys().collect())
+    }
+
+    pub async fn get_online_stat_value(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<u64>, tonic::Status> {
+        let req = GetStatsRequest {
+            name: name.to_string(),
+            reset: false,
+        };
+        let resp = match self.stats.get_stats_online(req).await {
+            Ok(resp) => resp.into_inner(),
+            Err(status) if is_not_found(&status) => return Ok(None),
+            Err(status) => return Err(status),
+        };
+
+        let stat = resp
+            .stat
+            .ok_or_else(|| tonic::Status::internal("missing stat in GetStatsResponse"))?;
+        if stat.value < 0 {
+            return Err(tonic::Status::internal(format!(
+                "xray stat value must be non-negative: name={} value={}",
+                stat.name, stat.value
+            )));
+        }
+        Ok(Some(stat.value as u64))
+    }
+
+    pub async fn get_user_online_count(
+        &mut self,
+        email: &str,
+    ) -> Result<Option<u64>, tonic::Status> {
+        self.get_online_stat_value(&format!("user>>>{email}>>>online"))
+            .await
     }
 
     pub async fn get_stat_value(&mut self, name: &str) -> Result<Option<u64>, tonic::Status> {
@@ -320,7 +379,7 @@ mod tests {
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
 
         let server = tonic::transport::Server::builder()
-            .add_service(HandlerServiceServer::new(TestHandlerService::default()))
+            .add_service(HandlerServiceServer::new(TestHandlerService))
             .serve_with_incoming_shutdown(incoming, async {
                 let _ = shutdown_rx.await;
             });

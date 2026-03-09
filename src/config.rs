@@ -278,6 +278,24 @@ pub struct Config {
         value_parser = clap::builder::BoolishValueParser::new()
     )]
     pub quota_auto_unban: bool,
+
+    #[arg(
+        long = "ip-usage-city-db-path",
+        global = true,
+        env = "XP_IP_USAGE_CITY_DB_PATH",
+        value_name = "PATH",
+        default_value = ""
+    )]
+    pub ip_usage_city_db_path: String,
+
+    #[arg(
+        long = "ip-usage-asn-db-path",
+        global = true,
+        env = "XP_IP_USAGE_ASN_DB_PATH",
+        value_name = "PATH",
+        default_value = ""
+    )]
+    pub ip_usage_asn_db_path: String,
 }
 
 impl Config {
@@ -310,6 +328,8 @@ mod tests {
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
+        assert!(cli.config.ip_usage_city_db_path.is_empty());
+        assert!(cli.config.ip_usage_asn_db_path.is_empty());
     }
 
     #[test]

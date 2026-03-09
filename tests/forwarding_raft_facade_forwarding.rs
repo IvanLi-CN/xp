@@ -141,16 +141,14 @@ async fn wait_for_leader_base_url(
     loop {
         {
             let m = rx.borrow();
-            if m.current_leader == Some(expected_leader) {
-                if let Some((_, node)) = m
+            if m.current_leader == Some(expected_leader)
+                && let Some((_, node)) = m
                     .membership_config
                     .nodes()
                     .find(|(id, _)| **id == expected_leader)
-                {
-                    if !node.api_base_url.is_empty() {
-                        return Ok(node.api_base_url.clone());
-                    }
-                }
+                && !node.api_base_url.is_empty()
+            {
+                return Ok(node.api_base_url.clone());
             }
         }
 
@@ -317,6 +315,8 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
+        ip_usage_city_db_path: String::new(),
+        ip_usage_asn_db_path: String::new(),
     };
 
     let xray_health = xp::xray_supervisor::XrayHealthHandle::new_unknown();

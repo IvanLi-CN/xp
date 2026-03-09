@@ -362,6 +362,53 @@ describe("storybook api mock", () => {
 		);
 	});
 
+	it("supports node and user ip usage endpoints", async () => {
+		const mock = createMockApi();
+
+		const nodesRes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		expect(nodesRes.ok).toBe(true);
+		const nodes = (await nodesRes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId = nodes.items[0]?.node_id ?? "node-1";
+
+		const nodeUsageRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/ip-usage?window=7d`, {
+				method: "GET",
+			}),
+		);
+		expect(nodeUsageRes.ok).toBe(true);
+		const nodeUsage = (await nodeUsageRes.json()) as {
+			window: string;
+			ips: Array<{ ip: string }>;
+		};
+		expect(nodeUsage.window).toBe("7d");
+		expect(nodeUsage.ips.length).toBeGreaterThan(0);
+
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const users = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const userId = users.items[0]?.user_id ?? "";
+		expect(userId.length).toBeGreaterThan(0);
+
+		const userUsageRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${userId}/ip-usage?window=24h`, {
+				method: "GET",
+			}),
+		);
+		expect(userUsageRes.ok).toBe(true);
+		const userUsage = (await userUsageRes.json()) as {
+			groups: Array<{ node: { node_id: string } }>;
+		};
+		expect(userUsage.groups.length).toBeGreaterThan(0);
+	});
+
 	it("supports quota policy global weight rows and node inherit policy", async () => {
 		const mock = createMockApi();
 

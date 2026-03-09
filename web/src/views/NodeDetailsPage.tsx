@@ -3,6 +3,10 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+	type AdminIpUsageWindow,
+	fetchAdminNodeIpUsage,
+} from "../api/adminIpUsage";
+import {
 	type AdminNodeRuntimeDetailResponse,
 	type NodeRuntimeEvent,
 	type NodeRuntimeHistorySlot,
@@ -19,6 +23,7 @@ import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -100,7 +105,7 @@ type RuntimeActivityRow = {
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
 
-type NodeDetailsTab = "runtime" | "metadata" | "quota" | "danger";
+type NodeDetailsTab = "runtime" | "metadata" | "quota" | "ipUsage" | "danger";
 
 function buildRuntimeActivityRows(
 	recentSlots: NodeRuntimeHistorySlot[],
@@ -197,6 +202,16 @@ export function NodeDetailsPage() {
 	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
 	const [runtimeSseError, setRuntimeSseError] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<NodeDetailsTab>("runtime");
+	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
+
+	const ipUsageQuery = useQuery({
+		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
+		enabled: adminToken.length > 0 && activeTab === "ipUsage",
+		queryFn: ({ signal }) =>
+			fetchAdminNodeIpUsage(adminToken, nodeId, ipUsageWindow, signal),
+		placeholderData: (previousData) =>
+			previousData?.node.node_id === nodeId ? previousData : undefined,
+	});
 
 	useEffect(() => {
 		if (!nodeId) return;
@@ -204,6 +219,7 @@ export function NodeDetailsPage() {
 		setRuntimeSseError(null);
 		setRuntimeSseConnected(false);
 		setActiveTab("runtime");
+		setIpUsageWindow("24h");
 	}, [nodeId]);
 
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
@@ -497,6 +513,17 @@ export function NodeDetailsPage() {
 							onClick={() => setActiveTab("quota")}
 						>
 							Quota reset
+						</button>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={activeTab === "ipUsage"}
+							className={`btn btn-sm whitespace-nowrap ${
+								activeTab === "ipUsage" ? "btn-primary" : "btn-ghost"
+							}`}
+							onClick={() => setActiveTab("ipUsage")}
+						>
+							IP usage
 						</button>
 						<button
 							type="button"
@@ -911,6 +938,47 @@ export function NodeDetailsPage() {
 								</Button>
 							</div>
 						</div>
+					</div>
+				) : null}
+
+				{activeTab === "ipUsage" ? (
+					<div className="space-y-4">
+						{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
+							<PageState
+								variant="loading"
+								title="Loading IP usage"
+								description="Fetching minute-level inbound IP usage for this node."
+							/>
+						) : null}
+
+						{ipUsageQuery.isError && !ipUsageQuery.data ? (
+							<PageState
+								variant="error"
+								title="Failed to load IP usage"
+								description={formatErrorMessage(ipUsageQuery.error)}
+								action={
+									<Button
+										variant="secondary"
+										loading={ipUsageQuery.isFetching}
+										onClick={() => ipUsageQuery.refetch()}
+									>
+										Retry
+									</Button>
+								}
+							/>
+						) : null}
+
+						{ipUsageQuery.data ? (
+							<IpUsageView
+								title="IP usage"
+								description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
+								window={ipUsageWindow}
+								onWindowChange={setIpUsageWindow}
+								report={ipUsageQuery.data}
+								isFetching={ipUsageQuery.isFetching}
+								emptyTitle="No inbound IP activity"
+							/>
+						) : null}
 					</div>
 				) : null}
 

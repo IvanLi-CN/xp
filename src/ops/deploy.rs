@@ -1762,6 +1762,24 @@ fn generate_admin_token() -> String {
     hex::encode(buf)
 }
 
+fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
+    let url =
+        reqwest::Url::parse(origin).map_err(|_| ExitError::new(2, "invalid_args: invalid url"))?;
+    if url.scheme() != "https" {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: api-base-url must be https",
+        ));
+    }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: api-base-url must be an origin (no path/query)",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1864,6 +1882,7 @@ XP_XRAY_CUSTOM=keep-me\n",
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn build_plan_cloudflare_token_missing_error_is_actionable() {
         let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
@@ -1919,22 +1938,4 @@ XP_XRAY_CUSTOM=keep-me\n",
             plan.errors
         );
     }
-}
-
-fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
-    let url =
-        reqwest::Url::parse(origin).map_err(|_| ExitError::new(2, "invalid_args: invalid url"))?;
-    if url.scheme() != "https" {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: api-base-url must be https",
-        ));
-    }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: api-base-url must be an origin (no path/query)",
-        ));
-    }
-    Ok(())
 }

@@ -1,8 +1,18 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
+import {
+	type AdminUserIpUsageResponse,
+	fetchAdminUserIpUsage,
+} from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
 import {
 	fetchAdminUserAccess,
@@ -53,9 +63,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminUsers");
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminEndpoints");
+vi.mock("../api/adminIpUsage");
 vi.mock("../api/adminUserAccess");
 vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
+vi.mock("../api/adminIpUsage");
 vi.mock("../api/subscription");
 
 const { mockReadAdminToken } = vi.hoisted(() => ({
@@ -89,6 +101,8 @@ function setupMocks(args?: {
 		endpoint_id: string;
 		node_id: string;
 	}>;
+	ipUsage?: AdminUserIpUsageResponse;
+	userIpUsage?: AdminUserIpUsageResponse;
 	mihomoProfile?: {
 		mixin_yaml: string;
 		extra_proxies_yaml: string;
@@ -180,6 +194,69 @@ function setupMocks(args?: {
 			},
 		],
 	});
+
+	vi.mocked(fetchAdminUserIpUsage).mockImplementation(
+		async (_token, _userId, window) =>
+			args?.ipUsage ??
+			args?.userIpUsage ?? {
+				user: {
+					user_id: "u_01HUSERAAAAAA",
+					display_name: "Ivan",
+				},
+				window,
+				partial: false,
+				unreachable_nodes: [],
+				warnings: [],
+				groups: [
+					{
+						node: {
+							node_id: "node-tokyo",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo.example.com",
+							access_host: "tokyo.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [
+							{ minute: "2026-03-08T00:00:00Z", count: 1 },
+							{ minute: "2026-03-08T00:01:00Z", count: 2 },
+						],
+						timeline: [
+							{
+								lane_key: "edge-tokyo|203.0.113.7",
+								endpoint_id: "endpoint-1",
+								endpoint_tag: "edge-tokyo",
+								ip: "203.0.113.7",
+								minutes: 2,
+								segments: [
+									{
+										start_minute: "2026-03-08T00:00:00Z",
+										end_minute: "2026-03-08T00:01:00Z",
+									},
+								],
+							},
+						],
+						ips: [
+							{
+								ip: "203.0.113.7",
+								minutes: 2,
+								endpoint_tags: ["edge-tokyo"],
+								region: "Japan / Tokyo",
+								operator: "ExampleNet",
+								last_seen_at: "2026-03-08T00:01:00Z",
+							},
+						],
+					},
+				],
+			},
+	);
 
 	vi.mocked(putAdminUserAccess).mockResolvedValue({
 		created: 0,
@@ -655,6 +732,235 @@ rules: []
 		fireEvent.click(await screenByRole("button", "Quota status"));
 		expect(await screenByText("Quota status is partial.")).toBeTruthy();
 		expect(await screenByText("Unreachable nodes: node-osaka")).toBeTruthy();
+	});
+
+	it("renders usage details groups and refetches when the window changes", async () => {
+		setupMocks({
+			ipUsage: {
+				user: {
+					user_id: "u_01HUSERAAAAAA",
+					display_name: "Ivan",
+				},
+				window: "24h",
+				partial: false,
+				unreachable_nodes: [],
+				warnings: [],
+				groups: [
+					{
+						node: {
+							node_id: "node-tokyo",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo.example.com",
+							access_host: "tokyo.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [
+							{
+								ip: "203.0.113.7",
+								minutes: 1,
+								endpoint_tags: ["edge-tokyo"],
+								region: "Japan / Tokyo",
+								operator: "ExampleNet",
+								last_seen_at: "2026-03-08T00:00:00Z",
+							},
+						],
+					},
+					{
+						node: {
+							node_id: "node-osaka",
+							node_name: "Osaka",
+							api_base_url: "https://osaka.example.com",
+							access_host: "osaka.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [
+							{
+								ip: "198.51.100.9",
+								minutes: 1,
+								endpoint_tags: ["edge-osaka"],
+								region: "Japan / Osaka",
+								operator: "CarrierNet",
+								last_seen_at: "2026-03-08T00:00:00Z",
+							},
+						],
+					},
+				],
+			},
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Usage details"));
+
+		await waitFor(() => {
+			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				"24h",
+				expect.any(AbortSignal),
+			);
+		});
+		await waitFor(() => {
+			expect(screen.getByText("Usage details · Tokyo")).toBeInTheDocument();
+		});
+		expect(screen.getByRole("tab", { name: "Tokyo" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		expect(screen.queryByText("Usage details · Osaka")).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("tab", { name: "Osaka" }));
+		await waitFor(() => {
+			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+		});
+		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		const windowButtons = screen.getAllByRole("button", { name: "7d" });
+		fireEvent.click(windowButtons[0]);
+		await waitFor(() => {
+			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				"7d",
+				expect.any(AbortSignal),
+			);
+		});
+		await waitFor(() => {
+			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+		});
+		expect(screen.queryByText("Usage details · Tokyo")).not.toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+	});
+
+	it("disambiguates usage detail node tabs when node names repeat", async () => {
+		setupMocks({
+			ipUsage: {
+				user: {
+					user_id: "u_01HUSERAAAAAA",
+					display_name: "Ivan",
+				},
+				window: "24h",
+				partial: false,
+				unreachable_nodes: [],
+				warnings: [],
+				groups: [
+					{
+						node: {
+							node_id: "node-tokyo-a",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo-a.example.com",
+							access_host: "tokyo-a.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [],
+					},
+					{
+						node: {
+							node_id: "node-tokyo-b",
+							node_name: "Tokyo",
+							api_base_url: "https://tokyo-b.example.com",
+							access_host: "tokyo-b.example.com",
+							quota_limit_bytes: 0,
+							quota_reset: {
+								policy: "monthly",
+								day_of_month: 1,
+								tz_offset_minutes: null,
+							},
+						},
+						window_start: "2026-03-08T00:00:00Z",
+						window_end: "2026-03-08T00:02:00Z",
+						warnings: [],
+						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						timeline: [],
+						ips: [],
+					},
+				],
+			},
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Usage details"));
+
+		await waitFor(() => {
+			expect(
+				screen.getByRole("tab", { name: "Tokyo · tokyo-a.example.com" }),
+			).toBeInTheDocument();
+		});
+		expect(
+			screen.getByRole("tab", { name: "Tokyo · tokyo-b.example.com" }),
+		).toBeInTheDocument();
+	});
+
+	it("shows unreachable-only empty state when all usage nodes fail", async () => {
+		setupMocks({
+			ipUsage: {
+				user: {
+					user_id: "u_01HUSERAAAAAA",
+					display_name: "Ivan",
+				},
+				window: "24h",
+				partial: true,
+				unreachable_nodes: ["node-osaka"],
+				warnings: [],
+				groups: [],
+			},
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Usage details"));
+		await waitFor(() => {
+			expect(
+				screen.getByText("Usage details are partial."),
+			).toBeInTheDocument();
+		});
+		expect(
+			screen.getByText("Unreachable nodes: node-osaka"),
+		).toBeInTheDocument();
+		expect(screen.getByText("Usage details unavailable")).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"All nodes for this user's inbound IP usage are currently unreachable.",
+			),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(
+				"This user has no active node memberships to aggregate inbound IP usage from.",
+			),
+		).not.toBeInTheDocument();
 	});
 
 	it("shows token-required state when admin token is missing", async () => {

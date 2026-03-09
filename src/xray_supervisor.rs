@@ -608,7 +608,7 @@ mod tests {
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let server = tonic::transport::Server::builder()
-            .add_service(StatsServiceServer::new(TestStats::default()))
+            .add_service(StatsServiceServer::new(TestStats))
             .serve_with_incoming_shutdown(incoming, async {
                 let _ = shutdown_rx.await;
             });
@@ -617,10 +617,10 @@ mod tests {
         // Expect a Full reconcile request after the down -> up edge.
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                if let Some(req) = rx.recv().await {
-                    if req == ReconcileRequest::Full {
-                        break;
-                    }
+                if let Some(req) = rx.recv().await
+                    && req == ReconcileRequest::Full
+                {
+                    break;
                 }
             }
         })
