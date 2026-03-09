@@ -41,7 +41,7 @@ const meta: Meta<typeof TagInputDemo> = {
 	component: TagInputDemo,
 	args: {
 		label: "serverNames",
-		placeholder: "oneclient.sfx.ms",
+		placeholder: "download.example.com",
 		helperText:
 			"Enter a domain and press Enter/Comma to add. First tag is primary. Paste multiple domains to batch add.",
 		disabled: false,
@@ -60,6 +60,6 @@ export const Empty: Story = {
 
 export const Prefilled: Story = {
 	args: {
-		initialValue: ["oneclient.sfx.ms", "public.sn.files.1drv.com"],
+		initialValue: ["download.example.com", "public.sn.files.1drv.com"],
 	},
 };

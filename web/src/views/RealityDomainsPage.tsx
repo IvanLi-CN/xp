@@ -306,7 +306,7 @@ export function RealityDomainsPage() {
 						label="serverNames"
 						value={createServerNames}
 						onChange={setCreateServerNames}
-						placeholder="oneclient.sfx.ms"
+						placeholder="download.example.com"
 						disabled={createMutation.isPending}
 						inputClass={inputClass}
 						validateTag={validateRealityServerName}

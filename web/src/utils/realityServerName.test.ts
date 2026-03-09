@@ -5,7 +5,7 @@ import { validateRealityServerName } from "./realityServerName";
 describe("validateRealityServerName", () => {
 	it("accepts typical hostnames used as SNI", () => {
 		expect(validateRealityServerName("public.sn.files.1drv.com")).toBeNull();
-		expect(validateRealityServerName("oneclient.sfx.ms")).toBeNull();
+		expect(validateRealityServerName("download.example.com")).toBeNull();
 		expect(
 			validateRealityServerName("  public.sn.files.1drv.com  "),
 		).toBeNull();

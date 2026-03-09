@@ -139,19 +139,21 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 系统节点：
     - reality direct：`<node_slug>-reality`
     - ss direct：`<node_slug>-ss`
-    - ss chain：`<node_slug>-JP|HK|KR`，并设置 `dialer-proxy` 到 `🛣️ Japan|HongKong|Korea`
+    - ss chain：`<node_slug>-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
   - 用户扩展：
     - 追加 `extra_proxies_yaml` 到最终 `proxies`
     - 以 `extra_proxy_providers_yaml` 作为最终 `proxy-providers`
 - 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
-- 所有 provider 名称会注入固定 relay 组 `🛣️ Japan|🛣️ HongKong|🛣️ Korea` 的 `use` 列表。
+- 所有 provider 名称会注入固定外层候选组 `🛣️ JP/HK/TW` 的 `use` 列表，并用单一 filter 在日本/香港/台湾节点中选最低延迟的外层入口。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
-  - relay 组：`🛣️ Japan|🛣️ HongKong|🛣️ Korea`
-  - 稳定地区入口组：`🌟/🔒/🤯 Japan|HongKong|Korea`（仅首批三区；候选来自所有 provider，provider 为空时回退到 `include-all-proxies`）
-  - 落地组：`🛬 {base}`（按 `base-reality/base-ss` 与链式节点动态生成）与落地池 `🔒 落地`
+  - 外层候选组：`🛣️ JP/HK/TW`
+  - 兼容地区组：`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
+  - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 落地组生成策略：
-  - 若存在 `{base}-reality`：仅使用 `{base}-reality`（不使用 SS 及其链式）
-  - 否则若存在 `{base}-ss`：优先 `{base}-JP|HK|KR`，并以 `{base}-ss` 兜底
+  - 若存在 `{base}-ss`：只放 `{base}-chain` 与 `{base}-ss`，允许在连接失败后通过 Mihomo 的 health check 机制做主动回落
+  - 否则若存在 `{base}-reality`：仅使用 `{base}-reality`
+- 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
+- Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
 
 ### 6.3 缺失混入配置回退
 
