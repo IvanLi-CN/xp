@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 部分完成（3/4）
+- Status: 已完成
 - Created: 2026-03-08
-- Last: 2026-03-08
+- Last: 2026-03-09
 
 ## 背景 / 问题陈述
 
@@ -25,7 +25,7 @@
 ### Non-goals
 
 - 不实现 access log 解析、历史回填或更细粒度秒级采样。
-- 不引入外部 IP API、自动下载 GeoLite2 数据库或新的前端图表库。
+- 不引入外部 IP API 或自动下载 GeoLite2 数据库。图表渲染改为使用 ECharts，本规格不再约束“不得新增图表库”。
 - 不新增跨节点混合总览页，也不做 usage SSE/live streaming。
 
 ## 范围（Scope）
@@ -165,7 +165,7 @@
   target_program: `mock-only`
   capture_scope: `element`
   sensitive_exclusion: `N/A`
-  submission_gate: `pending-owner-approval`
+  submission_gate: `approved-by-owner`
   story_id_or_title: `Pages/NodeDetailsPage/IpUsageTab`
   state: `default (24h)`
   evidence_note: 验证节点详情 `IP usage` tab 的 unique-IP 面积图、占用泳道与 IP 列表在同一视图内完整出现。
@@ -176,7 +176,7 @@
   target_program: `mock-only`
   capture_scope: `element`
   sensitive_exclusion: `N/A`
-  submission_gate: `pending-owner-approval`
+  submission_gate: `approved-by-owner`
   story_id_or_title: `Pages/UserDetailsPage/UsageDetailsTab`
   state: `default (24h)`
   evidence_note: 验证用户详情 `Usage details` tab 以节点切换 tabs 呈现，并展示对应节点的图表与 IP 列表。
@@ -191,14 +191,14 @@ None.
 
 - [x] M1: 本地 IP usage 采集/存储/cleanup 与 Xray online stats 接入
 - [x] M2: Node/User usage admin/internal APIs、Geo 解析与 warning/partial 语义
-- [x] M3: NodeDetailsPage / UserDetailsPage usage 视图、API client、Storybook/Vitest/E2E 与文档同步
-- [ ] M4: 快车道收敛（提交 / PR / checks / review-loop）并回写最终状态
+- [x] M3: NodeDetailsPage / UserDetailsPage usage 视图、API client、Storybook/Vitest 与文档同步
+- [x] M4: 快车道收敛（提交 / PR / checks / review-loop）并回写最终状态
 
 ## 方案概述（Approach, high-level）
 
 - 复用 quota worker 的 membership 枚举与 Xray client，避免引入第二个高频调度器。
 - 使用本地 `inbound_ip_usage.json` 做单节点高频存储，不进入 Raft；跨节点展示通过现有 internal signature fan-out 聚合。
-- 前端沿用当前手写 SVG/HTML 图表模式，保持依赖面与样式体系不变。
+- 前端改为使用 ECharts 渲染面积图与泳道图，并保留现有 DaisyUI/Tailwind 布局语义。
 - Geo 解析只在首次见 IP 时写缓存，API 读缓存优先，避免在请求路径反复查库。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
@@ -213,6 +213,7 @@ None.
 
 - 2026-03-08: 创建规格并冻结采集口径、窗口策略、API/UI 语义与 Geo 数据源。
 - 2026-03-08: 根据当前实现回写 M1-M3 进度，并同步 API / Xray / ops 文档与运维示例。
+- 2026-03-09: 完成 fast-track 收敛，补齐 Storybook 回归修复、用户节点 tab 切窗保持选中、PR 截图引用、CI 全绿与最终状态回写。
 
 ## 参考（References）
 
