@@ -335,6 +335,9 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), leader_store.clone())
+            .unwrap();
     let router = build_router(
         config,
         leader_store.clone(),
@@ -347,6 +350,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         cluster_ca_key_pem.clone(),
         raft_facade,
         None,
+        geo_db_update,
     );
 
     let admin_server = spawn_server(admin_listener, router)

@@ -6,10 +6,10 @@
 
 - `XP_IP_USAGE_CITY_DB_PATH`
   - 默认：空字符串
-  - 语义：GeoLite2 City mmdb 文件路径
+  - 语义：外部覆盖的 City MMDB 文件路径；为空时使用 xp 托管的 DB-IP Lite City 库
 - `XP_IP_USAGE_ASN_DB_PATH`
   - 默认：空字符串
-  - 语义：GeoLite2 ASN mmdb 文件路径
+  - 语义：外部覆盖的 ASN MMDB 文件路径；为空时使用 xp 托管的 DB-IP Lite ASN 库
 
 ## Xray static config requirement
 

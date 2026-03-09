@@ -10,6 +10,12 @@ export const AdminIpUsageWarningSchema = z.object({
 	message: z.string(),
 });
 
+export const AdminIpGeoSourceSchema = z.enum([
+	"managed_dbip_lite",
+	"external_override",
+	"missing",
+]);
+
 export const AdminIpUsageSeriesPointSchema = z.object({
 	minute: z.string(),
 	count: z.number().int().nonnegative(),
@@ -41,6 +47,7 @@ export const AdminIpUsageListEntrySchema = z.object({
 export const AdminNodeIpUsageResponseSchema = z.object({
 	node: AdminNodeSchema,
 	window: AdminIpUsageWindowSchema,
+	geo_source: AdminIpGeoSourceSchema,
 	window_start: z.string(),
 	window_end: z.string(),
 	warnings: z.array(AdminIpUsageWarningSchema),
@@ -51,6 +58,7 @@ export const AdminNodeIpUsageResponseSchema = z.object({
 
 export const AdminUserIpUsageNodeGroupSchema = z.object({
 	node: AdminNodeSchema,
+	geo_source: AdminIpGeoSourceSchema,
 	window_start: z.string(),
 	window_end: z.string(),
 	warnings: z.array(AdminIpUsageWarningSchema),
@@ -73,6 +81,7 @@ export const AdminUserIpUsageResponseSchema = z.object({
 
 export type AdminIpUsageWindow = z.infer<typeof AdminIpUsageWindowSchema>;
 export type AdminIpUsageWarning = z.infer<typeof AdminIpUsageWarningSchema>;
+export type AdminIpGeoSource = z.infer<typeof AdminIpGeoSourceSchema>;
 export type AdminIpUsageSeriesPoint = z.infer<
 	typeof AdminIpUsageSeriesPointSchema
 >;

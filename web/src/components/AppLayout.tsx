@@ -38,6 +38,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 							icon: "tabler:world",
 						},
 						{
+							label: "IP geolocation",
+							to: "/ip-geo-db",
+							icon: "tabler:map-search",
+						},
+						{
 							label: "Service config",
 							to: "/service-config",
 							icon: "tabler:settings",

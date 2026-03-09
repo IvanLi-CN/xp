@@ -270,8 +270,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    let _quota =
-        xp::quota::spawn_quota_worker(config_arc.clone(), store.clone(), reconcile.clone());
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
+    let _quota = xp::quota::spawn_quota_worker(
+        config_arc.clone(),
+        store.clone(),
+        reconcile.clone(),
+        geo_db_update.resolver(),
+    );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
     let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(
@@ -294,6 +300,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         Some(cluster_ca_key_pem_required),
         raft_facade,
         Some(raft.raft()),
+        geo_db_update,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

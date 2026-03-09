@@ -197,6 +197,12 @@ pub struct InboundIpUsageMembershipView {
     pub endpoint_tag: String,
 }
 
+pub trait GeoLookup: Send + Sync {
+    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb;
+    fn is_missing(&self) -> bool;
+    fn lookup(&self, ip: &str) -> PersistedInboundIpGeo;
+}
+
 #[derive(Debug)]
 pub struct GeoResolver {
     city_db_path: Option<PathBuf>,
@@ -275,6 +281,20 @@ impl GeoResolver {
     }
 }
 
+impl GeoLookup for GeoResolver {
+    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
+        GeoResolver::geo_db(self)
+    }
+
+    fn is_missing(&self) -> bool {
+        GeoResolver::is_missing(self)
+    }
+
+    fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
+        GeoResolver::lookup(self, ip)
+    }
+}
+
 impl PersistedInboundIpUsage {
     pub fn latest_minute_dt(&self) -> Option<DateTime<Utc>> {
         self.latest_minute.as_deref().and_then(parse_minute)
@@ -333,13 +353,35 @@ impl PersistedInboundIpUsage {
         self.memberships.remove(membership_key).is_some()
     }
 
+    pub fn refresh_geo_cache(
+        &mut self,
+        geo_db: PersistedInboundIpUsageGeoDb,
+        geo_resolver: &dyn GeoLookup,
+    ) -> bool {
+        let mut changed = false;
+        if self.geo != geo_db {
+            self.geo = geo_db;
+            changed = true;
+        }
+        for membership in self.memberships.values_mut() {
+            for (ip, record) in membership.ips.iter_mut() {
+                let next_geo = geo_resolver.lookup(ip);
+                if record.geo != next_geo {
+                    record.geo = next_geo;
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
     pub fn record_minute_samples(
         &mut self,
         minute: DateTime<Utc>,
         geo_db: PersistedInboundIpUsageGeoDb,
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
-        geo_resolver: &GeoResolver,
+        geo_resolver: &dyn GeoLookup,
     ) -> bool {
         let minute = floor_minute(minute);
         let minute_str = rfc3339_minute(minute);
@@ -607,7 +649,7 @@ pub fn build_warnings(
     if geo_db_missing {
         warnings.push(InboundIpUsageWarning {
             code: "geo_db_missing".to_string(),
-            message: "GeoLite2 City/ASN DB is missing; region and operator fields will be empty."
+            message: "IP geolocation DB is unavailable; region and operator fields will be empty."
                 .to_string(),
         });
     }

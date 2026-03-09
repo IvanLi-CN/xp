@@ -488,4 +488,46 @@ describe("storybook api mock", () => {
 		};
 		expect(policyAfter.inherit_global).toBe(false);
 	});
+
+	it("supports IP geo DB status, settings, and manual trigger routes", async () => {
+		const mock = createMockApi();
+
+		const getRes = await mock.handle(
+			jsonRequest("/api/admin/ip-geo-db", { method: "GET" }),
+		);
+		expect(getRes.ok).toBe(true);
+		const getData = (await getRes.json()) as {
+			settings: { auto_update_enabled: boolean; update_interval_days: number };
+			nodes: Array<{ mode: string }>;
+		};
+		expect(getData.nodes.length).toBeGreaterThan(0);
+
+		const patchRes = await mock.handle(
+			jsonRequest("/api/admin/ip-geo-db", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					auto_update_enabled: !getData.settings.auto_update_enabled,
+					update_interval_days: 5,
+				}),
+			}),
+		);
+		expect(patchRes.ok).toBe(true);
+		const patchData = (await patchRes.json()) as {
+			auto_update_enabled: boolean;
+			update_interval_days: number;
+		};
+		expect(patchData.update_interval_days).toBe(5);
+
+		const updateRes = await mock.handle(
+			jsonRequest("/api/admin/ip-geo-db/update", { method: "POST" }),
+		);
+		expect(updateRes.ok).toBe(true);
+		const updateData = (await updateRes.json()) as {
+			nodes: Array<{ status: string }>;
+		};
+		expect(updateData.nodes.some((node) => node.status === "accepted")).toBe(
+			true,
+		);
+	});
 });

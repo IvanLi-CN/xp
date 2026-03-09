@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{net::SocketAddr, path::PathBuf};
 
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -302,6 +303,8 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
         config,
         store.clone(),
@@ -314,6 +317,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         Some(cluster_ca_key_pem),
         raft.clone(),
         None,
+        geo_db_update,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
@@ -500,6 +504,8 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
         config.clone(),
         store.clone(),
@@ -512,6 +518,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
+        geo_db_update,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };

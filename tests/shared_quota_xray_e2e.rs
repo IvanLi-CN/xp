@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::BTreeMap, net::SocketAddr, path::PathBuf};
 
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -282,6 +283,8 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
         config.clone(),
         store.clone(),
@@ -294,6 +297,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
+        geo_db_update,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
@@ -537,6 +541,8 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
         config.clone(),
         store.clone(),
@@ -549,6 +555,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
+        geo_db_update,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
@@ -797,6 +804,8 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         "test-probe-secret".to_string(),
         false,
     );
+    let (geo_db_update, _geo_db_update_task) =
+        xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
         config.clone(),
         store.clone(),
@@ -809,6 +818,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         Some(cluster_ca_key_pem.clone()),
         raft.clone(),
         None,
+        geo_db_update,
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };

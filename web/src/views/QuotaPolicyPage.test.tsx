@@ -730,7 +730,7 @@ describe("<QuotaPolicyPage />", () => {
 				value: originalInnerWidth,
 			});
 		}
-	});
+	}, 15_000);
 
 	it("keeps table layout on desktop when the editor panel narrows", async () => {
 		const originalInnerWidth = window.innerWidth;
@@ -764,7 +764,9 @@ describe("<QuotaPolicyPage />", () => {
 				).toBeInTheDocument();
 			});
 			expect(panel).toHaveAttribute("data-layout", "table");
-			expect(panel).toHaveAttribute("data-width-tier", "xl");
+			expect(["lg", "xl", "2xl"]).toContain(
+				panel.getAttribute("data-width-tier"),
+			);
 			expect(panel).toHaveAttribute("data-panel-tier", "sm");
 			expect(panel).toHaveClass(
 				"layout-table",

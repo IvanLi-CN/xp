@@ -973,6 +973,7 @@ export function NodeDetailsPage() {
 								title="IP usage"
 								description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
 								window={ipUsageWindow}
+								geoSource={ipUsageQuery.data.geo_source}
 								onWindowChange={setIpUsageWindow}
 								report={ipUsageQuery.data}
 								isFetching={ipUsageQuery.isFetching}
