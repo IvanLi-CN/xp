@@ -1,0 +1,116 @@
+@layer base {
+	html.dark
+		:is(
+			.sbdocs.sbdocs-wrapper,
+			.sbdocs.sbdocs-content,
+			.sb-preparing-docs.sb-wrapper
+		) {
+		background: radial-gradient(
+				circle at top,
+				color-mix(in oklab, white 4%, transparent),
+				transparent 28rem
+			),
+			linear-gradient(
+				180deg,
+				color-mix(in oklab, var(--card) 72%, black 28%) 0%,
+				color-mix(in oklab, var(--background) 86%, black 14%) 38%,
+				color-mix(in oklab, var(--background) 94%, black 6%) 100%
+			) !important;
+		background-color: var(--background) !important;
+		color: var(--foreground);
+	}
+
+	html.dark .sbdocs,
+	html.dark
+		:is(.sbdocs, .sb-preparing-docs)
+		:is(
+			h1,
+			h2,
+			h3,
+			h4,
+			h5,
+			h6,
+			p,
+			li,
+			dt,
+			dd,
+			span,
+			div,
+			a,
+			code,
+			pre,
+			th,
+			td
+		) {
+		color: var(--foreground);
+	}
+
+	html.dark :is(.sbdocs, .sb-preparing-docs) a {
+		color: color-mix(in oklab, var(--primary) 78%, white 22%);
+	}
+
+	html.dark .sbdocs-content > :is(h1, h2, h3, h4, h5, h6) {
+		color: var(--foreground) !important;
+	}
+
+	html.dark .sbdocs-content > :is(p, ul, ol, li) {
+		color: color-mix(in oklab, var(--foreground) 88%, transparent) !important;
+	}
+
+	html.dark :is(.sb-errordisplay, .sb-errordisplay_main) {
+		background: color-mix(in oklab, var(--card) 90%, black 10%) !important;
+		background-color: color-mix(in oklab, var(--card) 90%, black 10%) !important;
+		border-color: color-mix(in oklab, var(--border) 82%, transparent) !important;
+		color: var(--foreground) !important;
+	}
+
+	html.dark
+		:is(.sb-errordisplay, .sb-errordisplay_main)
+		:is(h1, p, li, a, code, pre) {
+		color: var(--foreground) !important;
+	}
+
+	html.dark :is(.sb-preparing-docs, .sb-preparing-story) {
+		background-color: var(--background) !important;
+	}
+
+	html.dark
+		:is(.sbdocs, .sb-preparing-docs)
+		:is(.sb-previewBlock, .sbdocs-preview, .sb-bar, .docs-story > div) {
+		background: color-mix(in oklab, var(--card) 88%, black 12%) !important;
+		background-color: color-mix(in oklab, var(--card) 88%, black 12%) !important;
+		border-color: color-mix(in oklab, var(--border) 82%, transparent) !important;
+		box-shadow: 0 18px 36px rgba(4, 10, 24, 0.24);
+	}
+
+	html.dark
+		:is(.sbdocs, .sb-preparing-docs)
+		:is(.docblock-code-toggle, .docblock-argstable-head button) {
+		background: color-mix(in oklab, var(--card) 92%, black 8%) !important;
+		background-color: color-mix(in oklab, var(--card) 92%, black 8%) !important;
+		border-color: color-mix(in oklab, var(--border) 82%, transparent) !important;
+		color: var(--foreground) !important;
+	}
+
+	html.dark
+		:is(.sbdocs, .sb-preparing-docs)
+		:is(table, thead, tbody, tr, td, th) {
+		border-color: color-mix(in oklab, var(--border) 82%, transparent) !important;
+	}
+
+	html.dark :is(.sbdocs, .sb-preparing-docs) :is(td, th) {
+		background: color-mix(in oklab, var(--card) 94%, black 6%) !important;
+		background-color: color-mix(in oklab, var(--card) 94%, black 6%) !important;
+	}
+
+	html.dark
+		:is(.sbdocs, .sb-preparing-docs)
+		:is(tr:nth-of-type(even) td, tr:nth-of-type(even) th) {
+		background: color-mix(in oklab, var(--card) 82%, var(--background) 18%) !important;
+		background-color: color-mix(
+			in oklab,
+			var(--card) 82%,
+			var(--background) 18%
+		) !important;
+	}
+}

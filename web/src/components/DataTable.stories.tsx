@@ -1,76 +1,86 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { useEffect } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { TableCell, TableRow } from "@/components/ui/table";
 
 import { DataTable } from "./DataTable";
-import { useUiPrefs } from "./UiPrefs";
 
-function SetDensity({ density }: { density: "comfortable" | "compact" }) {
-	const prefs = useUiPrefs();
-	useEffect(() => {
-		prefs.setDensity(density);
-	}, [density, prefs]);
-	return null;
-}
+const headers = [
+	{ key: "id", label: "ID" },
+	{ key: "name", label: "Name" },
+	{ key: "status", label: "Status", align: "right" as const },
+];
 
-const meta: Meta<typeof DataTable> = {
+const meta = {
 	title: "Components/DataTable",
 	component: DataTable,
-};
+	tags: ["autodocs", "coverage-ui"],
+	args: {
+		headers,
+		children: null,
+		density: "comfortable",
+		caption: <span>2 items</span>,
+		tableClassName: undefined,
+	},
+	parameters: {
+		docs: {
+			description: {
+				component:
+					"Shared data table wrapper built on the shadcn table primitives. Use the `density` prop to verify comfortable vs compact spacing while verifying density differences with the shared table surface.",
+			},
+		},
+	},
+} satisfies Meta<typeof DataTable>;
 
 export default meta;
 
-type Story = StoryObj<typeof DataTable>;
+type Story = StoryObj<typeof meta>;
 
 export const Comfortable: Story = {
 	render: () => (
-		<>
-			<SetDensity density="comfortable" />
-			<DataTable
-				headers={[
-					{ key: "id", label: "ID" },
-					{ key: "name", label: "Name" },
-					{ key: "status", label: "Status", align: "right" },
-				]}
-				caption={<span>3 items</span>}
-			>
-				<tr>
-					<td className="font-mono text-xs">node-1</td>
-					<td>alpha</td>
-					<td className="text-right">
-						<span className="badge badge-success badge-sm">ready</span>
-					</td>
-				</tr>
-				<tr>
-					<td className="font-mono text-xs">node-2</td>
-					<td>beta</td>
-					<td className="text-right">
-						<span className="badge badge-warning badge-sm">degraded</span>
-					</td>
-				</tr>
-			</DataTable>
-		</>
+		<DataTable
+			headers={headers}
+			density="comfortable"
+			caption={<span>2 items</span>}
+		>
+			<TableRow>
+				<TableCell className="font-mono text-xs">node-1</TableCell>
+				<TableCell>alpha</TableCell>
+				<TableCell className="text-right">
+					<Badge variant="success" size="sm">
+						ready
+					</Badge>
+				</TableCell>
+			</TableRow>
+			<TableRow>
+				<TableCell className="font-mono text-xs">node-2</TableCell>
+				<TableCell>beta</TableCell>
+				<TableCell className="text-right">
+					<Badge variant="warning" size="sm">
+						degraded
+					</Badge>
+				</TableCell>
+			</TableRow>
+		</DataTable>
 	),
 };
 
 export const Compact: Story = {
+	args: {
+		density: "compact",
+		caption: undefined,
+	},
 	render: () => (
-		<>
-			<SetDensity density="compact" />
-			<DataTable
-				headers={[
-					{ key: "id", label: "ID" },
-					{ key: "name", label: "Name" },
-					{ key: "status", label: "Status", align: "right" },
-				]}
-			>
-				<tr>
-					<td className="font-mono text-xs">node-1</td>
-					<td>alpha</td>
-					<td className="text-right">
-						<span className="badge badge-success badge-sm">ready</span>
-					</td>
-				</tr>
-			</DataTable>
-		</>
+		<DataTable headers={headers} density="compact">
+			<TableRow>
+				<TableCell className="font-mono text-xs">node-1</TableCell>
+				<TableCell>alpha</TableCell>
+				<TableCell className="text-right">
+					<Badge variant="success" size="sm">
+						ready
+					</Badge>
+				</TableCell>
+			</TableRow>
+		</DataTable>
 	),
 };

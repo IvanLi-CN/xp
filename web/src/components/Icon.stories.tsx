@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 const meta: Meta<typeof Icon> = {
 	title: "Components/Icon",
 	component: Icon,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		name: "tabler:layout-dashboard",
 	},

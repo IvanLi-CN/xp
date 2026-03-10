@@ -44,8 +44,21 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
+import { useUiPrefs } from "../components/UiPrefs";
 import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
+import {
+	inputClass as inputControlClass,
+	selectClass as selectControlClass,
+} from "../components/ui-helpers";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
 const PROTOCOLS = [
@@ -210,6 +223,7 @@ export function UserDetailsPage() {
 	const navigate = useNavigate();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
+	const prefs = useUiPrefs();
 
 	const [tab, setTab] = useState<
 		"user" | "access" | "quotaStatus" | "usageDetails"
@@ -253,6 +267,8 @@ export function UserDetailsPage() {
 	>(null);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const inputClassName = inputControlClass(prefs.density);
+	const selectClassName = selectControlClass(prefs.density);
 
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
@@ -906,71 +922,70 @@ export function UserDetailsPage() {
 				}
 			/>
 
-			<div className="tabs tabs-boxed">
-				<button
-					type="button"
-					className={`tab ${tab === "user" ? "tab-active" : ""}`}
-					onClick={() => setTab("user")}
-				>
-					User
-				</button>
-				<button
-					type="button"
-					className={`tab ${tab === "access" ? "tab-active" : ""}`}
-					onClick={() => setTab("access")}
-				>
-					Access
-				</button>
-				<button
-					type="button"
-					className={`tab ${tab === "quotaStatus" ? "tab-active" : ""}`}
-					onClick={() => setTab("quotaStatus")}
-				>
-					Quota status
-				</button>
-				<button
-					type="button"
-					className={`tab ${tab === "usageDetails" ? "tab-active" : ""}`}
-					onClick={() => setTab("usageDetails")}
-				>
-					Usage details
-				</button>
+			<div className="overflow-x-auto">
+				<div className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm">
+					{(["user", "access", "quotaStatus", "usageDetails"] as const).map(
+						(item) => (
+							<Button
+								key={item}
+								type="button"
+								size="sm"
+								variant={tab === item ? "primary" : "ghost"}
+								onClick={() => setTab(item)}
+							>
+								{item === "user"
+									? "User"
+									: item === "access"
+										? "Access"
+										: item === "quotaStatus"
+											? "Quota status"
+											: "Usage details"}
+							</Button>
+						),
+					)}
+				</div>
 			</div>
 
 			{tab === "user" ? (
 				<div className="space-y-6">
-					<div className="rounded-box border border-base-300 bg-base-100 p-4 space-y-3">
-						<label className="form-control gap-2">
-							<span className="label-text">Display name</span>
-							<input
-								className="input input-bordered"
+					<div className="xp-card p-4 space-y-3">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Display name</span>
+							<Input
+								aria-label="Display name"
+								className={inputClassName}
 								value={displayName}
 								onChange={(event) => setDisplayName(event.target.value)}
 							/>
-						</label>
+						</div>
 
 						<div className="grid gap-3 md:grid-cols-3">
-							<label className="form-control gap-2">
-								<span className="label-text">Quota reset policy</span>
-								<select
-									className="select select-bordered"
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Quota reset policy</span>
+								<Select
 									value={resetPolicy}
-									onChange={(event) =>
-										setResetPolicy(
-											event.target.value as "monthly" | "unlimited",
-										)
+									onValueChange={(value) =>
+										setResetPolicy(value as "monthly" | "unlimited")
 									}
 								>
-									<option value="monthly">monthly</option>
-									<option value="unlimited">unlimited</option>
-								</select>
-							</label>
+									<SelectTrigger
+										className={selectClassName}
+										aria-label="Quota reset policy"
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="monthly">monthly</SelectItem>
+										<SelectItem value="unlimited">unlimited</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
 
-							<label className="form-control gap-2">
-								<span className="label-text">Day of month</span>
-								<input
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Day of month</span>
+								<Input
 									type="number"
-									className="input input-bordered"
+									className={inputClassName}
 									min={1}
 									max={31}
 									disabled={resetPolicy !== "monthly"}
@@ -979,19 +994,19 @@ export function UserDetailsPage() {
 										setResetDay(Number(event.target.value || "1"))
 									}
 								/>
-							</label>
+							</div>
 
-							<label className="form-control gap-2">
-								<span className="label-text">TZ offset (minutes)</span>
-								<input
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">TZ offset (minutes)</span>
+								<Input
 									type="number"
-									className="input input-bordered"
+									className={inputClassName}
 									value={resetTzOffsetMinutes}
 									onChange={(event) =>
 										setResetTzOffsetMinutes(Number(event.target.value || "0"))
 									}
 								/>
-							</label>
+							</div>
 						</div>
 
 						<div className="flex items-center gap-3 text-sm">
@@ -1004,23 +1019,32 @@ export function UserDetailsPage() {
 								{user.subscription_token}
 							</span>
 						</div>
-						<div className="rounded-box border border-base-200 p-3 space-y-3">
+						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
-								<label className="form-control gap-2">
-									<span className="label-text">Subscription format</span>
-									<select
-										className="select select-bordered"
-										data-testid="subscription-format"
+								<div className="xp-field-stack gap-2">
+									<span className="text-sm font-medium">
+										Subscription format
+									</span>
+									<Select
 										value={subFormat}
-										onChange={(event) =>
-											setSubFormat(event.target.value as SubscriptionFormat)
+										onValueChange={(value) =>
+											setSubFormat(value as SubscriptionFormat)
 										}
 									>
-										<option value="raw">raw</option>
-										<option value="clash">clash</option>
-										<option value="mihomo">mihomo</option>
-									</select>
-								</label>
+										<SelectTrigger
+											aria-label="Subscription format"
+											className={selectClassName}
+											data-testid="subscription-format"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="raw">raw</SelectItem>
+											<SelectItem value="clash">clash</SelectItem>
+											<SelectItem value="mihomo">mihomo</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
 								<CopyButton
 									text={subscriptionUrl}
 									label="Copy URL"
@@ -1039,20 +1063,22 @@ export function UserDetailsPage() {
 									Fetch
 								</Button>
 							</div>
-							<div className="text-xs opacity-70">
+							<div className="text-xs text-muted-foreground">
 								Preview opens in a modal and keeps subscription formatting
 								unchanged.
 							</div>
 						</div>
-						<div className="rounded-box border border-base-200 p-3 space-y-3">
+						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="font-medium text-sm">
 								Mihomo mixin config (per user)
 							</div>
 							{mihomoProfileQuery.isLoading ? (
-								<div className="text-xs opacity-70">Loading profile…</div>
+								<div className="text-xs text-muted-foreground">
+									Loading profile…
+								</div>
 							) : null}
 							{mihomoProfileQuery.isError ? (
-								<div className="alert alert-error py-2 text-sm">
+								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
 									{formatError(mihomoProfileQuery.error)}
 								</div>
 							) : null}
@@ -1078,7 +1104,7 @@ export function UserDetailsPage() {
 								minRows={8}
 							/>
 							{mihomoProfileSaveError ? (
-								<div className="alert alert-error py-2 text-sm">
+								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
 									{mihomoProfileSaveError}
 								</div>
 							) : null}
@@ -1093,7 +1119,7 @@ export function UserDetailsPage() {
 						</div>
 
 						{userSaveError ? (
-							<div className="alert alert-error py-2 text-sm">
+							<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
 								{userSaveError}
 							</div>
 						) : null}
@@ -1104,9 +1130,9 @@ export function UserDetailsPage() {
 						</div>
 					</div>
 
-					<div className="rounded-box border border-base-300 bg-base-100 p-4 space-y-3">
+					<div className="xp-card p-4 space-y-3">
 						<h3 className="font-semibold">Node quotas</h3>
-						<div className="alert py-2 text-sm">
+						<div className="rounded-xl border border-border/70 bg-muted/35 px-4 py-2 text-sm">
 							Node quota editing is currently unavailable in this view.
 						</div>
 						{nodesQuery.isLoading ? (
@@ -1135,7 +1161,7 @@ export function UserDetailsPage() {
 									return (
 										<div
 											key={node.node_id}
-											className="flex items-center justify-between rounded-box border border-base-200 p-3"
+											className="flex items-center justify-between rounded-2xl border border-border/70 p-3"
 										>
 											<div>
 												<div className="font-medium">{node.node_name}</div>
@@ -1172,7 +1198,9 @@ export function UserDetailsPage() {
 					</div>
 
 					{accessError ? (
-						<div className="alert alert-error py-2 text-sm">{accessError}</div>
+						<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+							{accessError}
+						</div>
 					) : null}
 					{isAccessDataLoading ? (
 						<PageState variant="loading" title="Loading access matrix" />
@@ -1197,7 +1225,7 @@ export function UserDetailsPage() {
 								label: node.node_name,
 								details: (
 									<div className="space-y-0.5">
-										<div className="text-xs opacity-70">
+										<div className="text-xs text-muted-foreground">
 											{accessNodeRemainingText(node.node_id)}
 										</div>
 									</div>
@@ -1247,7 +1275,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{ipUsageQuery.data?.partial ? (
-						<div className="alert alert-warning py-2 text-sm">
+						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
 							<div className="space-y-1">
 								<div>Usage details are partial.</div>
 								<div className="font-mono text-xs">
@@ -1262,7 +1290,7 @@ export function UserDetailsPage() {
 							<div className="space-y-4">
 								<div className="overflow-x-auto">
 									<div
-										className="inline-flex min-w-max items-center gap-1 rounded-box border border-base-300 bg-base-100 p-1 shadow-sm"
+										className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
 										role="tablist"
 										aria-label="Usage detail nodes"
 									>
@@ -1273,19 +1301,20 @@ export function UserDetailsPage() {
 												usageTabLabels.get(group.node.node_id) ??
 												group.node.node_name;
 											return (
-												<button
+												<Button
 													key={group.node.node_id}
 													type="button"
+													size="sm"
+													variant={selected ? "primary" : "ghost"}
 													role="tab"
 													aria-selected={selected}
 													title={`${group.node.node_name} · ${group.node.node_id}`}
-													className={`btn btn-sm whitespace-nowrap ${selected ? "btn-primary" : "btn-ghost"}`}
 													onClick={() =>
 														setActiveUsageNodeId(group.node.node_id)
 													}
 												>
 													{label}
-												</button>
+												</Button>
 											);
 										})}
 									</div>
@@ -1321,7 +1350,7 @@ export function UserDetailsPage() {
 			) : null}
 
 			{tab === "quotaStatus" ? (
-				<div className="rounded-box border border-base-300 bg-base-100 p-4 space-y-3">
+				<div className="xp-card p-4 space-y-3">
 					{nodeQuotaStatusQuery.isLoading ? (
 						<PageState variant="loading" title="Loading quota status" />
 					) : null}
@@ -1333,7 +1362,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{nodeQuotaStatusQuery.data?.partial ? (
-						<div className="alert alert-warning py-2 text-sm">
+						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
 							<div className="space-y-1">
 								<div>Quota status is partial.</div>
 								<div className="font-mono text-xs">
@@ -1354,7 +1383,7 @@ export function UserDetailsPage() {
 						return (
 							<div
 								key={`${item.node_id}::${item.user_id}`}
-								className="rounded-box border border-base-200 p-3 space-y-1"
+								className="rounded-2xl border border-border/70 p-3 space-y-1"
 							>
 								<div className="font-medium">{item.node_id}</div>
 								<div className="text-sm">
@@ -1407,34 +1436,32 @@ export function UserDetailsPage() {
 				cancelLabel="Cancel"
 				onCancel={() => setDeleteOpen(false)}
 				footer={
-					<div className="modal-action">
-						<button
-							type="button"
-							className="btn"
+					<div className="flex justify-end gap-2">
+						<Button
+							variant="secondary"
 							disabled={isDeleting}
 							onClick={() => setDeleteOpen(false)}
 						>
 							Cancel
-						</button>
-						<button
-							type="button"
-							className="btn btn-error"
+						</Button>
+						<Button
+							variant="danger"
 							disabled={isDeleting}
 							onClick={confirmDeleteUser}
 						>
 							{isDeleting ? "Deleting..." : "Delete"}
-						</button>
+						</Button>
 					</div>
 				}
 			/>
 
-			<div className="text-xs opacity-60">
+			<div className="text-xs text-muted-foreground">
 				Tip: use the Access tab to control endpoint membership directly in
 				user/node/endpoint mode.
 			</div>
-			<Link to="/users" className="btn btn-ghost btn-sm">
-				Back to users
-			</Link>
+			<Button asChild variant="ghost" size="sm">
+				<Link to="/users">Back to users</Link>
+			</Button>
 		</div>
 	);
 }

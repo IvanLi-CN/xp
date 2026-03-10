@@ -5,6 +5,7 @@ import { AppShell } from "./AppShell";
 const meta: Meta<typeof AppShell> = {
 	title: "Components/AppShell",
 	component: AppShell,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		brand: { name: "xp", subtitle: "cluster manager" },
 		navItems: [

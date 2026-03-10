@@ -19,6 +19,20 @@ import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import {
+	badgeClass,
+	inputClass as inputControlClass,
+	selectClass as selectControlClass,
+} from "../components/ui-helpers";
+import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
@@ -91,10 +105,8 @@ export function EndpointDetailsPage() {
 	const adminToken = readAdminToken();
 	const prefs = useUiPrefs();
 
-	const inputClass =
-		prefs.density === "compact"
-			? "input input-bordered input-sm"
-			: "input input-bordered";
+	const inputClass = inputControlClass(prefs.density);
+	const selectClass = selectControlClass(prefs.density);
 
 	const endpointQuery = useQuery({
 		queryKey: ["adminEndpoint", adminToken, endpointId],
@@ -303,9 +315,9 @@ export function EndpointDetailsPage() {
 				title="Admin token required"
 				description="Set an admin token to load endpoint details."
 				action={
-					<Link className="btn btn-primary" to="/login">
-						Go to login
-					</Link>
+					<Button asChild>
+						<Link to="/login">Go to login</Link>
+					</Button>
 				}
 			/>
 		);
@@ -346,9 +358,9 @@ export function EndpointDetailsPage() {
 				title="Endpoint not found"
 				description="The requested endpoint does not exist."
 				action={
-					<Link className="btn btn-primary" to="/endpoints">
-						Back to endpoints
-					</Link>
+					<Button asChild>
+						<Link to="/endpoints">Back to endpoints</Link>
+					</Button>
 				}
 			/>
 		);
@@ -370,9 +382,9 @@ export function EndpointDetailsPage() {
 				description={`Endpoint ${endpoint.endpoint_id}`}
 				actions={
 					<div className="flex gap-2">
-						<Link className="btn btn-ghost btn-sm" to="/endpoints">
-							Back
-						</Link>
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/endpoints">Back</Link>
+						</Button>
 						<Button
 							variant="secondary"
 							loading={endpointQuery.isFetching}
@@ -385,9 +397,9 @@ export function EndpointDetailsPage() {
 			/>
 
 			<div className="grid gap-6 lg:grid-cols-2">
-				<div className="card bg-base-100 shadow">
-					<div className="card-body">
-						<h2 className="card-title">Overview</h2>
+				<div className="xp-card">
+					<div className="xp-card-body">
+						<h2 className="xp-card-title">Overview</h2>
 						<div className="space-y-2 text-sm">
 							<p>
 								Kind: <span className="font-mono">{endpoint.kind}</span>
@@ -409,9 +421,9 @@ export function EndpointDetailsPage() {
 					</div>
 				</div>
 
-				<div className="card bg-base-100 shadow">
-					<div className="card-body">
-						<h2 className="card-title">Configuration</h2>
+				<div className="xp-card">
+					<div className="xp-card-body">
+						<h2 className="xp-card-title">Configuration</h2>
 						{endpoint.kind === "vless_reality_vision_tcp" && vlessMeta ? (
 							<div className="space-y-2 text-sm">
 								<p>
@@ -428,10 +440,11 @@ export function EndpointDetailsPage() {
 										vlessMeta.realityServerNames.map((name, idx) => (
 											<span
 												key={`${idx}:${name}`}
-												className={[
-													"badge font-mono gap-2",
-													idx === 0 ? "badge-primary" : "badge-ghost",
-												].join(" ")}
+												className={badgeClass(
+													idx === 0 ? "primary" : "ghost",
+													"default",
+													"font-mono gap-2",
+												)}
 												title={
 													idx === 0 ? "Primary (used for dest / probe)" : name
 												}
@@ -454,7 +467,7 @@ export function EndpointDetailsPage() {
 								</p>
 							</div>
 						) : (
-							<p className="text-sm opacity-70">
+							<p className="text-sm text-muted-foreground">
 								SS2022 endpoints do not have VLESS Reality configuration.
 							</p>
 						)}
@@ -462,9 +475,9 @@ export function EndpointDetailsPage() {
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Update endpoint</h2>
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Update endpoint</h2>
 					<form
 						className="space-y-4"
 						onSubmit={(event) => {
@@ -473,14 +486,17 @@ export function EndpointDetailsPage() {
 						}}
 					>
 						{endpoint.kind === "vless_reality_vision_tcp" ? (
-							<div className="space-y-4 border-t border-base-200 pt-4">
+							<div className="space-y-4 border-t border-border/70 pt-4">
 								<h3 className="text-lg font-semibold">VLESS settings</h3>
 								<div className="grid gap-4">
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">port</span>
+									<div className="xp-field-stack">
+										<div className="flex items-center justify-between gap-2">
+											<span className="text-sm font-medium font-mono">
+												port
+											</span>
 										</div>
-										<input
+										<Input
+											aria-label="port"
 											type="number"
 											className={inputClass}
 											value={port}
@@ -490,40 +506,43 @@ export function EndpointDetailsPage() {
 										<p className="text-xs opacity-70">
 											The inbound listen port on this node.
 										</p>
-									</label>
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">
+									</div>
+									<div className="xp-field-stack">
+										<div className="flex items-center justify-between gap-2">
+											<span className="text-sm font-medium font-mono">
 												serverNamesSource
 											</span>
 										</div>
-										<select
-											className={
-												prefs.density === "compact"
-													? "select select-bordered select-sm"
-													: "select select-bordered"
-											}
+										<Select
 											value={realityServerNamesSource}
-											onChange={(event) =>
+											onValueChange={(value) =>
 												setRealityServerNamesSource(
-													event.target.value as "manual" | "global",
+													value as "manual" | "global",
 												)
 											}
 											disabled={patchMutation.isPending}
 										>
-											<option value="global">global</option>
-											<option value="manual">manual</option>
-										</select>
+											<SelectTrigger
+												className={selectClass}
+												aria-label="serverNamesSource"
+											>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="global">global</SelectItem>
+												<SelectItem value="manual">manual</SelectItem>
+											</SelectContent>
+										</Select>
 										<p className="text-xs opacity-70">
 											<span className="font-mono">global</span> derives
 											serverNames from{" "}
-											<Link className="link link-primary" to="/reality-domains">
+											<Link className="xp-link" to="/reality-domains">
 												Settings &gt; Reality domains
 											</Link>
 											. <span className="font-mono">manual</span> stores the
 											list on this endpoint.
 										</p>
-									</label>
+									</div>
 
 									{realityServerNamesSource === "manual" ? (
 										<TagInput
@@ -537,19 +556,19 @@ export function EndpointDetailsPage() {
 											helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
 										/>
 									) : (
-										<div className="form-control">
-											<div className="label">
-												<span className="label-text font-mono">
+										<div className="xp-field-stack">
+											<div className="flex items-center justify-between gap-2">
+												<span className="text-sm font-medium font-mono">
 													derived serverNames
 												</span>
 											</div>
-											<div className="rounded-lg border border-base-300 bg-base-200 px-3 py-3 text-sm">
+											<div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
 												{realityDomainsQuery.isLoading ? (
 													<span className="opacity-70">
 														Loading reality domains...
 													</span>
 												) : realityDomainsQuery.isError ? (
-													<span className="text-error">
+													<span className="text-destructive">
 														Failed to load reality domains.
 													</span>
 												) : effectiveGlobalServerNames.length === 0 ? (
@@ -559,12 +578,10 @@ export function EndpointDetailsPage() {
 												) : (
 													<div className="flex flex-wrap gap-2">
 														{effectiveGlobalServerNames.map((name, idx) => (
-															<span
+															<Badge
 																key={`${idx}:${name}`}
-																className={[
-																	"badge font-mono gap-2",
-																	idx === 0 ? "badge-primary" : "badge-ghost",
-																].join(" ")}
+																variant={idx === 0 ? "default" : "ghost"}
+																className="gap-2 font-mono"
 																title={
 																	idx === 0
 																		? "Primary (used for dest / probe)"
@@ -575,7 +592,7 @@ export function EndpointDetailsPage() {
 																{idx === 0 ? (
 																	<span className="opacity-80">primary</span>
 																) : null}
-															</span>
+															</Badge>
 														))}
 													</div>
 												)}
@@ -586,18 +603,18 @@ export function EndpointDetailsPage() {
 											</p>
 										</div>
 									)}
-									<details className="collapse collapse-arrow border border-base-200 bg-base-200/40">
-										<summary className="collapse-title text-sm font-medium">
+									<details className="rounded-xl border border-border/70 bg-muted/35">
+										<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
 											Advanced (optional)
 										</summary>
-										<div className="collapse-content space-y-4">
-											<label className="form-control">
-												<div className="label">
-													<span className="label-text font-mono">
+										<div className="space-y-4 border-t border-border/70 px-4 py-4">
+											<div className="xp-field-stack">
+												<div className="flex items-center justify-between gap-2">
+													<span className="text-sm font-medium font-mono">
 														fingerprint
 													</span>
 												</div>
-												<input
+												<Input
 													type="text"
 													className={inputClass}
 													value={realityFingerprint}
@@ -609,20 +626,23 @@ export function EndpointDetailsPage() {
 												<p className="text-xs opacity-70">
 													Defaults to <span className="font-mono">chrome</span>.
 												</p>
-											</label>
+											</div>
 										</div>
 									</details>
 								</div>
 							</div>
 						) : (
-							<div className="space-y-4 border-t border-base-200 pt-4">
+							<div className="space-y-4 border-t border-border/70 pt-4">
 								<h3 className="text-lg font-semibold">SS2022 settings</h3>
 								<div className="grid gap-4 md:grid-cols-2">
-									<label className="form-control">
-										<div className="label">
-											<span className="label-text font-mono">port</span>
+									<div className="xp-field-stack">
+										<div className="flex items-center justify-between gap-2">
+											<span className="text-sm font-medium font-mono">
+												port
+											</span>
 										</div>
-										<input
+										<Input
+											aria-label="port"
 											type="number"
 											className={inputClass}
 											value={port}
@@ -632,12 +652,12 @@ export function EndpointDetailsPage() {
 										<p className="text-xs opacity-70">
 											The inbound listen port on this node.
 										</p>
-									</label>
+									</div>
 								</div>
 							</div>
 						)}
 
-						<div className="card-actions justify-end">
+						<div className="xp-card-actions justify-end">
 							<Button loading={patchMutation.isPending} type="submit">
 								Save changes
 							</Button>
@@ -646,14 +666,14 @@ export function EndpointDetailsPage() {
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Probe</h2>
-					<p className="text-sm opacity-70">
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Probe</h2>
+					<p className="text-sm text-muted-foreground">
 						Run a cluster-wide probe for all endpoints. Results are stored
 						hourly and shown in the endpoint list.
 					</p>
-					<div className="card-actions justify-end">
+					<div className="xp-card-actions justify-end">
 						<Button
 							variant="secondary"
 							loading={probeRunMutation.isPending}
@@ -666,10 +686,10 @@ export function EndpointDetailsPage() {
 			</div>
 
 			{endpoint.kind === "vless_reality_vision_tcp" ? (
-				<div className="card bg-base-100 shadow">
-					<div className="card-body space-y-4">
-						<h2 className="card-title">Rotate shortId</h2>
-						<p className="text-sm opacity-70">
+				<div className="xp-card">
+					<div className="xp-card-body space-y-4">
+						<h2 className="xp-card-title">Rotate shortId</h2>
+						<p className="text-sm text-muted-foreground">
 							Generate a new shortId for this VLESS endpoint.
 						</p>
 						<div>
@@ -685,20 +705,19 @@ export function EndpointDetailsPage() {
 				</div>
 			) : null}
 
-			<div className="card bg-base-100 shadow border border-error/30">
-				<div className="card-body space-y-4">
-					<h2 className="card-title text-error">Danger zone</h2>
-					<p className="text-sm opacity-70">
+			<div className="xp-card border border-destructive/30">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title text-destructive">Danger zone</h2>
+					<p className="text-sm text-muted-foreground">
 						Deleting an endpoint will remove it from the cluster configuration.
 					</p>
-					<button
-						type="button"
-						className="btn btn-error"
+					<Button
+						variant="danger"
 						onClick={() => setConfirmDeleteOpen(true)}
 						disabled={deleteMutation.isPending}
 					>
 						Delete endpoint
-					</button>
+					</Button>
 				</div>
 			</div>
 

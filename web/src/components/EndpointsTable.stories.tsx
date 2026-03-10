@@ -98,6 +98,7 @@ function Frame(props: { width: number; label: string; children: ReactNode }) {
 const meta: Meta<typeof EndpointsTable> = {
 	title: "Components/EndpointsTable",
 	component: EndpointsTable,
+	tags: ["autodocs", "coverage-ui"],
 };
 
 export default meta;

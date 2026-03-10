@@ -7,6 +7,9 @@ import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 import type {
 	AdminIpGeoSource,
 	AdminIpUsageListEntry,
@@ -16,6 +19,7 @@ import type {
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageNodeGroup,
 } from "../api/adminIpUsage";
+import { alertClass, badgeClass, tableClass } from "./ui-helpers";
 
 const SVG_RENDERER = { renderer: "svg" } as const;
 const AREA_CHART_HEIGHT = 224;
@@ -457,12 +461,16 @@ function WindowSwitch({
 	onWindowChange,
 }: Pick<IpUsageViewProps, "window" | "onWindowChange">) {
 	return (
-		<div className="join">
+		<div className="flex flex-wrap items-center gap-1 rounded-xl border border-border/70 bg-muted/30 p-1">
 			{(["24h", "7d"] as const).map((option) => (
 				<button
 					key={option}
 					type="button"
-					className={`btn join-item btn-sm ${window === option ? "btn-primary" : "btn-ghost"}`}
+					className={buttonVariants({
+						variant: window === option ? "default" : "ghost",
+						size: "sm",
+					})}
+					aria-pressed={window === option}
 					onClick={() => onWindowChange(option)}
 				>
 					{option}
@@ -494,7 +502,7 @@ function ChartSurface({
 			<div
 				role="img"
 				aria-label={ariaLabel}
-				className="w-full rounded-xl border border-base-300 bg-base-100/80"
+				className="w-full rounded-xl border border-border/70 bg-card/80"
 				style={{ height }}
 			/>
 		);
@@ -526,20 +534,20 @@ function HighlightSummary({
 	onClearPinned: () => void;
 }) {
 	return (
-		<div className="grid min-h-10 gap-2 rounded-xl border border-base-300 bg-base-200/40 px-3 py-1.5 text-xs md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+		<div className="grid min-h-10 gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-1.5 text-xs md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
 			<span className="min-w-0 opacity-70">
 				Hover or click any IP or time to highlight matching data across the
 				chart and table.
 			</span>
 			<div className="flex min-h-6 flex-wrap items-center gap-2 md:justify-self-end">
 				{activeHighlight.ip ? (
-					<span className="badge badge-info badge-outline gap-1">
+					<span className={badgeClass("info", "default", "gap-1")}>
 						<span className="opacity-70">IP</span>
 						<span className="font-mono">{activeHighlight.ip}</span>
 					</span>
 				) : null}
 				{activeHighlight.timeRange ? (
-					<span className="badge badge-warning badge-outline gap-1">
+					<span className={badgeClass("warning", "default", "gap-1")}>
 						<span className="opacity-70">Time</span>
 						<span>{formatTimeRange(activeHighlight.timeRange)}</span>
 					</span>
@@ -547,7 +555,10 @@ function HighlightSummary({
 				{hasPinnedHighlight ? (
 					<button
 						type="button"
-						className="btn btn-ghost btn-xs"
+						className={cn(
+							buttonVariants({ variant: "ghost", size: "sm" }),
+							"h-7 px-2 text-[11px]",
+						)}
 						onClick={onClearPinned}
 					>
 						Clear pinned highlight
@@ -870,7 +881,7 @@ function UniqueIpAreaChart({
 	]);
 
 	return (
-		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
+		<div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
 			<div className="mb-3 flex items-center justify-between gap-2">
 				<div>
 					<p className="text-sm font-semibold">Unique IPs per minute</p>
@@ -878,9 +889,9 @@ function UniqueIpAreaChart({
 						Exact minute series without downsampling.
 					</p>
 				</div>
-				<div className="badge badge-outline">max {maxCount}</div>
+				<div className={badgeClass("outline")}>max {maxCount}</div>
 			</div>
-			<div className="rounded-xl border border-base-300 bg-base-100/80 p-1">
+			<div className="rounded-xl border border-border/70 bg-card/80 p-1">
 				<div ref={chartFrameRef} className="relative">
 					<ChartSurface
 						ariaLabel="Unique IPs per minute"
@@ -994,19 +1005,19 @@ function TimelineChart({
 				LANE_FILL_FALLBACK,
 			),
 			label: resolveCssColor(
-				"color-mix(in srgb, var(--color-base-content) 82%, transparent)",
+				"color-mix(in srgb, var(--color-foreground) 82%, transparent)",
 				LANE_LABEL_FALLBACK,
 			),
 			labelMuted: resolveCssColor(
-				"color-mix(in srgb, var(--color-base-content) 42%, transparent)",
+				"color-mix(in srgb, var(--color-foreground) 42%, transparent)",
 				LANE_LABEL_MUTED_FALLBACK,
 			),
 			mutedBorder: resolveCssColor(
-				"color-mix(in srgb, var(--color-info) 24%, var(--color-base-content) 16%)",
+				"color-mix(in srgb, var(--color-info) 24%, var(--color-foreground) 16%)",
 				LANE_MUTED_BORDER_FALLBACK,
 			),
 			mutedFill: resolveCssColor(
-				"color-mix(in srgb, var(--color-info) 14%, var(--color-base-200) 26%)",
+				"color-mix(in srgb, var(--color-info) 14%, var(--color-muted) 26%)",
 				LANE_MUTED_FILL_FALLBACK,
 			),
 			timeBand: resolveCssColor(
@@ -1379,7 +1390,7 @@ function TimelineChart({
 	]);
 
 	return (
-		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
+		<div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
 			<div className="mb-3 flex items-center justify-between gap-2">
 				<div>
 					<p className="text-sm font-semibold">IP occupancy lanes</p>
@@ -1388,14 +1399,14 @@ function TimelineChart({
 						time slice.
 					</p>
 				</div>
-				<div className="badge badge-outline">{lanes.length} lanes</div>
+				<div className={badgeClass("outline")}>{lanes.length} lanes</div>
 			</div>
 			{lanes.length === 0 ? (
-				<div className="rounded-xl border border-dashed border-base-300 px-4 py-8 text-center text-sm opacity-70">
+				<div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
 					No occupancy lanes in this window.
 				</div>
 			) : (
-				<div className="rounded-xl border border-base-300 bg-base-100/80 p-1">
+				<div className="rounded-xl border border-border/70 bg-card/80 p-1">
 					<div ref={chartFrameRef} className="relative">
 						<ChartSurface
 							ariaLabel="IP occupancy lanes"
@@ -1474,7 +1485,7 @@ function IpListTable({
 	selectedTimeRange: TimeRange | null;
 }) {
 	return (
-		<div className="rounded-2xl border border-base-300 bg-base-200/60 p-4">
+		<div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
 			<div className="mb-3 flex items-center justify-between gap-2">
 				<div>
 					<p className="text-sm font-semibold">IP list</p>
@@ -1483,10 +1494,10 @@ function IpListTable({
 						rows and chart regions.
 					</p>
 				</div>
-				<div className="badge badge-outline">{ips.length} IPs</div>
+				<div className={badgeClass("outline")}>{ips.length} IPs</div>
 			</div>
-			<div className="overflow-x-auto rounded-xl border border-base-300 bg-base-100">
-				<table className="table table-sm">
+			<div className="overflow-x-auto rounded-xl border border-border/70 bg-card">
+				<table className={tableClass(true)}>
 					<thead>
 						<tr>
 							<th>IP</th>
@@ -1530,7 +1541,7 @@ function IpListTable({
 										<td>
 											<button
 												type="button"
-												className={`rounded px-1.5 py-0.5 font-mono text-xs transition-colors ${ipButtonActive ? "bg-info/15 text-info" : "hover:bg-base-200"}`}
+												className={`rounded px-1.5 py-0.5 font-mono text-xs transition-colors ${ipButtonActive ? "bg-info/15 text-info" : "hover:bg-muted"}`}
 												onMouseEnter={() => onHoverIp(entry.ip)}
 												onMouseLeave={() => onLeaveIp(entry.ip)}
 												onFocus={() => onHoverIp(entry.ip)}
@@ -1550,7 +1561,7 @@ function IpListTable({
 										<td className="text-xs">
 											<button
 												type="button"
-												className={`rounded px-1.5 py-0.5 text-left transition-colors ${timeButtonActive ? "bg-warning/15 text-warning" : "hover:bg-base-200"}`}
+												className={`rounded px-1.5 py-0.5 text-left transition-colors ${timeButtonActive ? "bg-warning/15 text-warning" : "hover:bg-muted"}`}
 												onMouseEnter={() => onHoverTimeRange(timeButtonRange)}
 												onMouseLeave={() => onLeaveTimeRange(timeButtonRange)}
 												onFocus={() => onHoverTimeRange(timeButtonRange)}
@@ -1582,7 +1593,9 @@ function WarningList({ warnings }: { warnings: AdminIpUsageWarning[] }) {
 			{warnings.map((warning) => (
 				<div
 					key={warning.code}
-					className={`alert py-2 text-sm ${warning.code === "online_stats_unavailable" ? "alert-warning" : "alert-info"}`}
+					className={alertClass(
+						warning.code === "online_stats_unavailable" ? "warning" : "info",
+					)}
 				>
 					<span>{warning.message}</span>
 				</div>
@@ -1595,7 +1608,7 @@ function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
 	if (!geoSource || geoSource === "missing") return null;
 	if (geoSource === "external_override") {
 		return (
-			<div className="alert alert-info py-2 text-sm">
+			<div className={alertClass("info")}>
 				<span>
 					This node uses externally managed Geo DB files; xp skips the managed
 					downloader here.
@@ -1604,7 +1617,7 @@ function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
 		);
 	}
 	return (
-		<div className="alert alert-info py-2 text-sm">
+		<div className={alertClass("info")}>
 			<span>Geo enrichment uses DB-IP Lite City + ASN MMDB.</span>
 		</div>
 	);
@@ -1745,11 +1758,11 @@ export function IpUsageView({
 	);
 
 	return (
-		<div className="card bg-base-100 shadow">
-			<div className="card-body space-y-4">
+		<div className="rounded-2xl border border-border/70 bg-card shadow-sm">
+			<div className="space-y-4 p-6">
 				<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 					<div>
-						<h2 className="card-title">{title}</h2>
+						<h2 className="text-lg font-semibold tracking-tight">{title}</h2>
 						<p className="text-sm opacity-70">{description}</p>
 						<p className="mt-1 text-xs opacity-60">
 							Window: {formatDateTime(report.window_start)} {"->"}{" "}
@@ -1758,7 +1771,7 @@ export function IpUsageView({
 					</div>
 					<div className="flex items-center gap-2">
 						{isFetching ? (
-							<span className="badge badge-ghost">refreshing</span>
+							<span className={badgeClass("ghost")}>refreshing</span>
 						) : null}
 						<WindowSwitch window={window} onWindowChange={onWindowChange} />
 					</div>
@@ -1778,7 +1791,7 @@ export function IpUsageView({
 						</p>
 					</div>
 				) : empty ? (
-					<div className="rounded-2xl border border-dashed border-base-300 px-4 py-10 text-center">
+					<div className="rounded-2xl border border-dashed border-border/70 px-4 py-10 text-center">
 						<p className="text-base font-semibold">{emptyTitle}</p>
 						<p className="mt-2 text-sm opacity-70">
 							No unique IPs were seen in the selected time window.

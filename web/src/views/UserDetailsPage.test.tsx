@@ -333,7 +333,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		const checkbox = await screenByLabel("Toggle Tokyo VLESS");
-		expect((checkbox as HTMLInputElement).checked).toBe(true);
+		expect(checkbox).toBeChecked();
 	});
 
 	it("shows per-node remaining quota without node id text in access matrix", async () => {
@@ -447,20 +447,16 @@ describe("<UserDetailsPage />", () => {
 			),
 		);
 
-		const allToggle = (await screenByLabel("Toggle all")) as HTMLInputElement;
-		const rowToggle = (await screenByLabel(
-			"Toggle row Tokyo",
-		)) as HTMLInputElement;
-		const columnToggle = (await screenByLabel(
-			"Toggle SS2022",
-		)) as HTMLInputElement;
+		const allToggle = await screenByLabel("Toggle all");
+		const rowToggle = await screenByLabel("Toggle row Tokyo");
+		const columnToggle = await screenByLabel("Toggle SS2022");
 
-		expect(allToggle.checked).toBe(false);
-		expect(allToggle.indeterminate).toBe(true);
-		expect(rowToggle.checked).toBe(false);
-		expect(rowToggle.indeterminate).toBe(true);
-		expect(columnToggle.checked).toBe(false);
-		expect(columnToggle.indeterminate).toBe(true);
+		expect(allToggle).not.toBeChecked();
+		expect(allToggle).toHaveAttribute("aria-checked", "mixed");
+		expect(rowToggle).not.toBeChecked();
+		expect(rowToggle).toHaveAttribute("aria-checked", "mixed");
+		expect(columnToggle).not.toBeChecked();
+		expect(columnToggle).toHaveAttribute("aria-checked", "mixed");
 	});
 
 	it("does not render legacy outer checkbox for multi-endpoint cell", async () => {
@@ -489,19 +485,15 @@ describe("<UserDetailsPage />", () => {
 		);
 
 		expect(
-			(
-				(await screenByLabel(
-					"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
-				)) as HTMLInputElement
-			).checked,
-		).toBe(true);
+			await screenByLabel(
+				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		).toBeChecked();
 		expect(
-			(
-				(await screenByLabel(
-					"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
-				)) as HTMLInputElement
-			).checked,
-		).toBe(true);
+			await screenByLabel(
+				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		).toBeChecked();
 
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
@@ -564,19 +556,15 @@ describe("<UserDetailsPage />", () => {
 		);
 
 		expect(
-			(
-				(await screenByLabel(
-					"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
-				)) as HTMLInputElement
-			).checked,
-		).toBe(true);
+			await screenByLabel(
+				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		).toBeChecked();
 		expect(
-			(
-				(await screenByLabel(
-					"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
-				)) as HTMLInputElement
-			).checked,
-		).toBe(true);
+			await screenByLabel(
+				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			),
+		).toBeChecked();
 	});
 
 	it("saves edited user profile", async () => {
@@ -608,9 +596,8 @@ describe("<UserDetailsPage />", () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.change(await screenByLabel("Subscription format"), {
-			target: { value: "mihomo" },
-		});
+		fireEvent.click(await screenByLabel("Subscription format"));
+		fireEvent.click(await screen.findByText("mihomo"));
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {

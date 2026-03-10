@@ -1,195 +1,298 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-neutral: var(--neutral);
+	--color-neutral-foreground: var(--neutral-foreground);
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+	--background: oklch(98.5% 0.01 205);
+	--foreground: oklch(20% 0.03 240);
+	--card: oklch(100% 0 0);
+	--card-foreground: oklch(20% 0.03 240);
+	--popover: oklch(100% 0 0);
+	--popover-foreground: oklch(20% 0.03 240);
+	--primary: oklch(63% 0.22 205);
+	--primary-foreground: oklch(98% 0.01 205);
+	--secondary: oklch(93% 0.04 44);
+	--secondary-foreground: oklch(25% 0.02 45);
+	--muted: oklch(95% 0.01 215);
+	--muted-foreground: oklch(45% 0.03 240);
+	--accent: oklch(96% 0.02 205);
+	--accent-foreground: oklch(24% 0.03 240);
+	--destructive: oklch(59% 0.22 25);
+	--destructive-foreground: oklch(98% 0.01 25);
+	--border: oklch(89% 0.01 240);
+	--input: oklch(86% 0.01 240);
+	--ring: oklch(63% 0.22 205);
+	--info: oklch(66% 0.14 230);
+	--info-foreground: oklch(98% 0.01 230);
+	--success: oklch(69% 0.17 150);
+	--success-foreground: oklch(18% 0.02 150);
+	--warning: oklch(78% 0.16 85);
+	--warning-foreground: oklch(22% 0.02 85);
+	--neutral: oklch(72% 0.03 250);
+	--neutral-foreground: oklch(20% 0.03 250);
+	--radius: 1rem;
+	--xp-page-padding: 1.5rem;
+	--xp-card-padding: 1.5rem;
+	--xp-table-padding-y: 0.75rem;
+	--xp-table-padding-x: 0.75rem;
+	--xp-form-label-gap: 0.5rem;
+}
+
+.dark {
+	--background: oklch(18% 0.02 250);
+	--foreground: oklch(95% 0.01 205);
+	--card: oklch(22% 0.02 250);
+	--card-foreground: oklch(95% 0.01 205);
+	--popover: oklch(22% 0.02 250);
+	--popover-foreground: oklch(95% 0.01 205);
+	--primary: oklch(70% 0.18 205);
+	--primary-foreground: oklch(16% 0.02 205);
+	--secondary: oklch(29% 0.03 250);
+	--secondary-foreground: oklch(95% 0.01 205);
+	--muted: oklch(26% 0.02 250);
+	--muted-foreground: oklch(74% 0.03 230);
+	--accent: oklch(28% 0.02 240);
+	--accent-foreground: oklch(95% 0.01 205);
+	--destructive: oklch(66% 0.18 25);
+	--destructive-foreground: oklch(16% 0.02 25);
+	--border: oklch(30% 0.02 250);
+	--input: oklch(32% 0.02 250);
+	--ring: oklch(70% 0.18 205);
+	--info: oklch(74% 0.11 230);
+	--info-foreground: oklch(16% 0.02 230);
+	--success: oklch(74% 0.13 150);
+	--success-foreground: oklch(16% 0.02 150);
+	--warning: oklch(80% 0.14 85);
+	--warning-foreground: oklch(18% 0.02 85);
+	--neutral: oklch(76% 0.03 250);
+	--neutral-foreground: oklch(15% 0.02 250);
+}
+
+html[data-density="compact"] {
+	--xp-page-padding: 1rem;
+	--xp-card-padding: 1rem;
+	--xp-table-padding-y: 0.5rem;
+	--xp-table-padding-x: 0.5rem;
+	--xp-form-label-gap: 0.375rem;
+}
 
 @layer base {
-	:root {
-		--xp-page-padding: 1.5rem;
-		--xp-card-padding: 1.5rem;
-		--xp-table-padding-y: 0.75rem;
-		--xp-table-padding-x: 0.75rem;
-		--xp-form-label-gap: 0.5rem;
+	* {
+		@apply border-border;
 	}
 
-	html[data-density="compact"] {
-		--xp-page-padding: 1rem;
-		--xp-card-padding: 1rem;
-		--xp-table-padding-y: 0.5rem;
-		--xp-table-padding-x: 0.5rem;
-		--xp-form-label-gap: 0.375rem;
+	html,
+	body,
+	#root {
+		min-height: 100%;
+	}
+
+	body {
+		@apply bg-background text-foreground antialiased;
 	}
 }
 
 @layer components {
-	.form-control {
+	.xp-field-stack {
 		display: flex;
 		flex-direction: column;
-		align-items: stretch;
 		width: 100%;
 		gap: var(--xp-form-label-gap);
 	}
 
-	.form-control > .label {
-		display: flex;
-		width: 100%;
+	.xp-card {
+		@apply rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm;
 	}
 
-	.form-control > :where(.input, .select, .textarea) {
-		width: 100%;
+	.xp-card-body {
+		padding: var(--xp-card-padding);
+		@apply flex flex-col gap-4;
 	}
 
-	/* daisyUI v5: btn-outline relies on --btn-color; provide a sensible default. */
-	:where(.btn-outline):not(
-			:where(
-					.btn-primary,
-					.btn-secondary,
-					.btn-accent,
-					.btn-neutral,
-					.btn-info,
-					.btn-success,
-					.btn-warning,
-					.btn-error
-				)
-		) {
-		--btn-color: var(--color-base-content);
+	.xp-card-title {
+		@apply text-lg font-semibold leading-none tracking-tight;
 	}
 
-	:where(.xp-btn-outline) {
-		--btn-color: var(--color-base-content);
-		--btn-fg: var(--color-base-content);
-		--btn-border: color-mix(
-			in oklab,
-			var(--color-base-content) 22%,
-			transparent
-		);
-		--btn-shadow: "";
+	.xp-card-actions {
+		@apply flex flex-wrap items-center gap-2;
 	}
 
-	:where(.xp-btn-outline):hover {
-		--btn-bg: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+	.xp-panel {
+		@apply rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm;
 	}
-}
 
-/*
-Tailwind v3 preflight ships unlayered resets (padding: 0; border-width: 0).
-daisyUI v5 styles are inside CSS cascade layers and lose to unlayered rules.
-Re-assert core daisyUI sizing/border props unlayered so buttons/inputs render correctly.
-*/
+	.xp-panel-muted {
+		@apply rounded-2xl border border-border/70 bg-muted/35;
+	}
 
-.btn {
-	border-width: var(--border);
-	border-style: solid;
-	border-color: var(--btn-border);
-	background-color: var(--btn-bg);
-	color: var(--btn-fg);
-	/*
-	Use physical paddings to override Tailwind preflight's physical `padding: 0`,
-	which otherwise wins over logical `padding-inline` on <button>.
-	*/
-	padding-left: var(--btn-p);
-	padding-right: var(--btn-p);
-}
+	.xp-input,
+	.xp-select,
+	.xp-textarea {
+		@apply w-full rounded-xl border border-input bg-background text-sm shadow-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50;
+	}
 
-.btn-disabled,
-.btn:disabled,
-.btn[disabled] {
-	pointer-events: none;
-	--btn-border: #0000;
-	--btn-noise: none;
-	--btn-fg: color-mix(in oklch, var(--color-base-content) 20%, #0000);
-}
+	.xp-input,
+	.xp-select {
+		@apply h-10 px-3 py-2;
+	}
 
-.btn-disabled:not(.btn-link, .btn-ghost),
-.btn:disabled:not(.btn-link, .btn-ghost),
-.btn[disabled]:not(.btn-link, .btn-ghost) {
-	background-color: color-mix(
-		in oklab,
-		var(--color-base-content) 10%,
-		transparent
-	);
-	box-shadow: none;
-}
+	.xp-input-sm,
+	.xp-select-sm {
+		@apply h-8 rounded-lg px-3 text-xs;
+	}
 
-.input {
-	border-width: var(--border);
-	border-style: solid;
-	border-color: var(--input-color);
-	padding-left: 0.75rem;
-	padding-right: 0.75rem;
-}
+	.xp-textarea {
+		@apply min-h-24 px-3 py-2;
+	}
 
-.select {
-	border-width: var(--border);
-	border-style: solid;
-	padding-left: 0.75rem;
-	padding-right: 0.75rem;
-}
+	.xp-checkbox {
+		@apply size-4 rounded border border-input bg-background text-primary shadow-xs outline-none transition-all focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50;
+	}
 
-.textarea {
-	border-width: var(--border);
-	border-style: solid;
-	padding: 0.75rem;
-}
+	.xp-link {
+		@apply text-primary underline-offset-4 hover:underline;
+	}
 
-.checkbox {
-	border-width: var(--border);
-	border-style: solid;
-	border-color: var(
-		--input-color,
-		color-mix(in oklab, var(--color-base-content) 20%, #0000)
-	);
-	padding: 0.25rem;
-}
+	.xp-kbd {
+		@apply inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground shadow-xs;
+	}
 
-/* daisyUI v5: ensure checkbox variant foreground colors win over unlayered resets. */
-.checkbox-xs {
-	padding: 0.125rem;
-}
+	.xp-badge {
+		@apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium;
+	}
 
-.checkbox-sm {
-	padding: 0.1875rem;
-}
+	.xp-badge-sm {
+		@apply h-5 px-2 text-[11px];
+	}
 
-.checkbox-md {
-	padding: 0.25rem;
-}
+	.xp-badge-ghost {
+		@apply border-border bg-background text-foreground;
+	}
 
-.checkbox-lg {
-	padding: 0.3125rem;
-}
+	.xp-badge-outline {
+		@apply border-border bg-transparent text-foreground;
+	}
 
-.checkbox-xl {
-	padding: 0.375rem;
-}
+	.xp-badge-primary,
+	.xp-badge-info {
+		@apply border-transparent bg-info/14 text-info;
+	}
 
-.checkbox-primary {
-	color: var(--color-primary-content);
-}
+	.xp-badge-success {
+		@apply border-transparent bg-success/14 text-success;
+	}
 
-.checkbox-secondary {
-	color: var(--color-secondary-content);
-}
+	.xp-badge-warning {
+		@apply border-transparent bg-warning/18 text-warning-foreground;
+	}
 
-.checkbox-accent {
-	color: var(--color-accent-content);
-}
+	.xp-badge-error {
+		@apply border-transparent bg-destructive/14 text-destructive;
+	}
 
-.checkbox-neutral {
-	color: var(--color-neutral-content);
-}
+	.xp-badge-neutral {
+		@apply border-transparent bg-secondary text-secondary-foreground;
+	}
 
-.checkbox-info {
-	color: var(--color-info-content);
-}
+	.xp-alert {
+		@apply flex items-start gap-3 rounded-xl border px-3 py-2 text-sm;
+	}
 
-.checkbox-success {
-	color: var(--color-success-content);
-}
+	.xp-alert-info {
+		@apply border-info/30 bg-info/10 text-foreground;
+	}
 
-.checkbox-warning {
-	color: var(--color-warning-content);
-}
+	.xp-alert-warning {
+		@apply border-warning/30 bg-warning/10 text-foreground;
+	}
 
-.checkbox-error {
-	color: var(--color-error-content);
+	.xp-alert-error {
+		@apply border-destructive/30 bg-destructive/10 text-foreground;
+	}
+
+	.xp-table-wrap {
+		@apply overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-sm;
+	}
+
+	.xp-table {
+		@apply w-full text-sm;
+	}
+
+	.xp-table th {
+		padding: var(--xp-table-padding-y) var(--xp-table-padding-x);
+		@apply text-left font-medium text-muted-foreground;
+	}
+
+	.xp-table td {
+		padding: var(--xp-table-padding-y) var(--xp-table-padding-x);
+		@apply align-middle;
+	}
+
+	.xp-table tbody tr {
+		@apply border-t border-border/60;
+	}
+
+	.xp-table-zebra tbody tr:nth-child(even) {
+		@apply bg-muted/25;
+	}
+
+	.xp-table-compact th,
+	.xp-table-compact td {
+		padding: 0.5rem 0.625rem;
+	}
+
+	.xp-loading-spinner {
+		@apply inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent;
+	}
+
+	.xp-loading-spinner-xs {
+		@apply size-3;
+	}
+
+	.xp-loading-spinner-sm {
+		@apply size-4;
+	}
+
+	.xp-chip-group {
+		@apply inline-flex flex-wrap items-center gap-1;
+	}
+
+	.xp-chip-action {
+		@apply inline-flex items-center;
+	}
 }

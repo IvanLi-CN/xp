@@ -1,6 +1,11 @@
 import { useId, useMemo, useRef, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
+import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { badgeClass } from "./ui-helpers";
+import { Input } from "./ui/input";
 
 type TagInputProps = {
 	label: string;
@@ -47,7 +52,7 @@ export function TagInput({
 	placeholder,
 	helperText,
 	disabled = false,
-	inputClass = "input input-bordered",
+	inputClass = "xp-input",
 	validateTag = defaultValidateTag,
 }: TagInputProps) {
 	const inputId = useId();
@@ -112,28 +117,24 @@ export function TagInput({
 	}
 
 	return (
-		<div className="form-control">
-			<div className="label">
-				<label
-					className="label-text font-mono cursor-pointer"
-					htmlFor={inputId}
-				>
-					{label}
-				</label>
-			</div>
+		<div className="space-y-2">
+			<label
+				className="block cursor-pointer font-mono text-sm font-medium text-foreground"
+				htmlFor={inputId}
+			>
+				{label}
+			</label>
 
 			<div className="space-y-2">
 				<div
-					className={[
-						// A custom tag input that looks/behaves like a single "input" control.
-						// We reuse DaisyUI's input classes passed from the page so density is consistent.
+					className={cn(
 						inputClass,
-						"w-full !h-auto min-h-12 flex flex-wrap items-center gap-2 py-2",
-						disabled ? "opacity-60" : null,
-						error ? "input-error" : null,
-						// Focus ring to match other inputs.
-						"focus-within:outline focus-within:outline-2 focus-within:outline-primary/30",
-					].join(" ")}
+						"flex h-auto min-h-12 w-full flex-wrap items-center gap-2 py-2",
+						disabled && "opacity-60",
+						error
+							? "border-destructive focus-within:border-destructive focus-within:ring-[3px] focus-within:ring-destructive/20"
+							: "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20",
+					)}
 					onMouseDown={(event) => {
 						if (disabled) return;
 						// Clicking empty space should focus the input (chips UIs usually behave this way).
@@ -147,12 +148,13 @@ export function TagInput({
 					}}
 				>
 					{tags.map((tag, idx) => (
-						<div key={tag} className="join">
+						<div key={tag} className="xp-chip-group">
 							<span
-								className={[
-									"badge join-item gap-2 font-mono",
-									idx === 0 ? "badge-primary" : "badge-ghost",
-								].join(" ")}
+								className={badgeClass(
+									idx === 0 ? "primary" : "ghost",
+									"default",
+									"gap-2 font-mono xp-chip-action",
+								)}
 								title={idx === 0 ? "Primary (used for dest / probe)" : tag}
 							>
 								{idx === 0 ? (
@@ -166,40 +168,41 @@ export function TagInput({
 							</span>
 
 							{idx !== 0 ? (
-								<button
+								<Button
 									type="button"
-									className="btn join-item btn-ghost btn-xs"
+									variant="ghost"
+									size="sm"
+									className="h-7 px-2 xp-chip-action"
 									onClick={() => makePrimaryAt(idx)}
 									disabled={disabled}
 									title="Make primary"
 								>
 									<Icon name="tabler:star" size={14} ariaLabel="Make primary" />
-								</button>
+								</Button>
 							) : null}
 
-							<button
+							<Button
 								type="button"
-								className="btn join-item btn-ghost btn-xs"
+								variant="ghost"
+								size="sm"
+								className="h-7 px-2 xp-chip-action"
 								onClick={() => removeAt(idx)}
 								disabled={disabled}
 								title="Remove"
 							>
 								<Icon name="tabler:x" size={14} ariaLabel="Remove" />
-							</button>
+							</Button>
 						</div>
 					))}
 
 					<div className="flex min-w-[16ch] grow items-center gap-2">
-						<input
+						<Input
 							ref={inputRef}
 							type="text"
-							className={[
-								// Keep visual parity with other fields while allowing chips to wrap.
-								"grow bg-transparent font-mono outline-none",
-								disabled ? "opacity-60" : null,
-							]
-								.filter(Boolean)
-								.join(" ")}
+							className={cn(
+								"h-auto min-w-0 grow border-0 bg-transparent px-0 py-0 font-mono text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0",
+								disabled && "opacity-60",
+							)}
 							id={inputId}
 							value={draft}
 							placeholder={placeholder}
@@ -240,20 +243,22 @@ export function TagInput({
 							}}
 						/>
 
-						<button
+						<Button
 							type="button"
-							className="btn btn-ghost btn-sm btn-square"
+							variant="ghost"
+							size="sm"
+							className="size-8 shrink-0 px-0"
 							onClick={() => commitDraft()}
 							disabled={disabled || draft.trim().length === 0}
 							aria-label="Add"
 							title="Add"
 						>
 							<Icon name="tabler:plus" size={16} ariaLabel="Add" />
-						</button>
+						</Button>
 					</div>
 				</div>
 
-				<p className="text-xs opacity-70" id={helperTextId}>
+				<p className="text-xs text-muted-foreground" id={helperTextId}>
 					{helperText ? helperText : null}
 					{primary ? (
 						<span className="ml-2 font-mono opacity-70">
@@ -263,7 +268,7 @@ export function TagInput({
 				</p>
 
 				{error ? (
-					<p className="text-xs text-error" role="alert" id={errorTextId}>
+					<p className="text-xs text-destructive" role="alert" id={errorTextId}>
 						{error}
 					</p>
 				) : null}

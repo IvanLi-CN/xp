@@ -1,11 +1,17 @@
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import type { ReactNode } from "react";
+
+import {
+	Button as UiButton,
+	type ButtonProps as UiButtonProps,
+} from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 import { useUiPrefsOptional } from "./UiPrefs";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "md" | "sm";
 
-export interface ButtonProps extends ComponentPropsWithoutRef<"button"> {
+export interface ButtonProps extends Omit<UiButtonProps, "variant" | "size"> {
 	variant?: ButtonVariant;
 	size?: ButtonSize;
 	loading?: boolean;
@@ -17,6 +23,8 @@ export function Button({
 	size,
 	loading = false,
 	iconLeft,
+	asChild,
+	type,
 	disabled,
 	children,
 	className,
@@ -26,32 +34,43 @@ export function Button({
 	const effectiveSize: ButtonSize =
 		size ?? (prefs?.density === "compact" ? "sm" : "md");
 
-	const variantClass =
-		variant === "danger"
-			? "btn-error"
-			: variant === "secondary"
-				? "btn-outline xp-btn-outline"
-				: variant === "ghost"
-					? "btn-ghost"
-					: "btn-primary";
+	const variantMap = {
+		primary: "default",
+		secondary: "outline",
+		ghost: "ghost",
+		danger: "destructive",
+	} as const;
+
+	if (asChild) {
+		return (
+			<UiButton
+				asChild
+				variant={variantMap[variant]}
+				size={effectiveSize === "sm" ? "sm" : "default"}
+				className={cn(className)}
+				disabled={disabled || loading}
+				{...rest}
+			>
+				{children}
+			</UiButton>
+		);
+	}
 
 	return (
-		<button
-			type="button"
-			className={[
-				"btn",
-				variantClass,
-				effectiveSize === "sm" ? "btn-sm" : "",
-				loading ? "btn-disabled" : "",
-				className,
-			]
-				.filter(Boolean)
-				.join(" ")}
+		<UiButton
+			type={type ?? "button"}
+			variant={variantMap[variant]}
+			size={effectiveSize === "sm" ? "sm" : "default"}
+			className={cn(className)}
 			disabled={disabled || loading}
 			{...rest}
 		>
-			{loading ? <span className="loading loading-spinner" /> : iconLeft}
+			{loading ? (
+				<span className="xp-loading-spinner xp-loading-spinner-sm" />
+			) : (
+				iconLeft
+			)}
 			{children}
-		</button>
+		</UiButton>
 	);
 }

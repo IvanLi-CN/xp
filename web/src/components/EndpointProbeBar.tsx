@@ -8,9 +8,9 @@ function statusClass(status: EndpointProbeStatus): string {
 		case "degraded":
 			return "bg-warning";
 		case "down":
-			return "bg-error";
+			return "bg-destructive";
 		default:
-			return "bg-base-300";
+			return "bg-muted";
 	}
 }
 

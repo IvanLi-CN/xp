@@ -5,6 +5,7 @@ import { PageState } from "./PageState";
 const meta: Meta<typeof PageState> = {
 	title: "Components/PageState",
 	component: PageState,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		title: "Title",
 		description: "Description",

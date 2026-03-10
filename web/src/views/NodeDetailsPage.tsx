@@ -1,6 +1,9 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 
 import {
 	type AdminIpUsageWindow,
@@ -28,8 +31,27 @@ import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
-import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { alertClass } from "../components/ui-helpers";
+import { Badge } from "../components/ui/badge";
+import {
+	Form,
+	FormControl,
+	FormDescription,
+	FormField,
+	FormItem,
+	FormLabel,
+	FormMessage,
+} from "../components/ui/form";
+import { Input } from "../components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -39,44 +61,50 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function summaryBadgeClass(status: string): string {
+function summaryBadgeVariant(
+	status: string,
+): "success" | "warning" | "destructive" | "ghost" {
 	switch (status) {
 		case "up":
-			return "badge badge-success";
+			return "success";
 		case "degraded":
-			return "badge badge-warning";
+			return "warning";
 		case "down":
-			return "badge badge-error";
+			return "destructive";
 		default:
-			return "badge badge-ghost";
+			return "ghost";
 	}
 }
 
-function componentBadgeClass(status: string): string {
+function componentBadgeVariant(
+	status: string,
+): "success" | "destructive" | "ghost" | "outline" {
 	switch (status) {
 		case "up":
-			return "badge badge-success badge-sm";
+			return "success";
 		case "down":
-			return "badge badge-error badge-sm";
+			return "destructive";
 		case "disabled":
-			return "badge badge-ghost badge-sm";
+			return "ghost";
 		default:
-			return "badge badge-outline badge-sm";
+			return "outline";
 	}
 }
 
-function eventBadgeClass(kind: NodeRuntimeEvent["kind"]): string {
+function eventBadgeVariant(
+	kind: NodeRuntimeEvent["kind"],
+): "warning" | "info" | "success" | "destructive" | "ghost" {
 	switch (kind) {
 		case "status_changed":
-			return "badge badge-warning badge-sm";
+			return "warning";
 		case "restart_requested":
-			return "badge badge-info badge-sm";
+			return "info";
 		case "restart_succeeded":
-			return "badge badge-success badge-sm";
+			return "success";
 		case "restart_failed":
-			return "badge badge-error badge-sm";
+			return "destructive";
 		default:
-			return "badge badge-ghost badge-sm";
+			return "ghost";
 	}
 }
 
@@ -87,16 +115,46 @@ function historySlotClass(status: string): string {
 		case "degraded":
 			return "bg-warning";
 		case "down":
-			return "bg-error";
+			return "bg-destructive";
 		case "unknown":
 			return "bg-info";
 		default:
-			return "bg-base-300";
+			return "bg-muted";
 	}
 }
 
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
+
+const quotaResetSchema = z
+	.object({
+		resetPolicy: z.enum(["monthly", "unlimited"]),
+		resetDay: z.coerce
+			.number({
+				invalid_type_error: "Reset day must be an integer between 1 and 31.",
+			})
+			.int("Reset day must be an integer between 1 and 31."),
+		resetTzOffsetMinutes: z
+			.string()
+			.trim()
+			.refine((value) => value === "" || /^-?\d+$/.test(value), {
+				message: "tz_offset_minutes must be an integer (or empty).",
+			}),
+	})
+	.superRefine((values, ctx) => {
+		if (
+			values.resetPolicy === "monthly" &&
+			(values.resetDay < 1 || values.resetDay > 31)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["resetDay"],
+				message: "Reset day must be an integer between 1 and 31.",
+			});
+		}
+	});
+
+type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 
 type RuntimeActivityRow = {
 	key: string;
@@ -181,7 +239,6 @@ export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
-	const prefs = useUiPrefs();
 	const navigate = useNavigate();
 
 	const nodeQuery = useQuery({
@@ -222,34 +279,35 @@ export function NodeDetailsPage() {
 		setIpUsageWindow("24h");
 	}, [nodeId]);
 
-	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
-		"monthly",
-	);
-	const [resetDay, setResetDay] = useState(1);
-	const [resetTzOffsetMinutes, setResetTzOffsetMinutes] = useState<string>("");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
+	const quotaForm = useForm<QuotaResetFormValues>({
+		resolver: zodResolver(quotaResetSchema),
+		defaultValues: {
+			resetPolicy: "monthly",
+			resetDay: 1,
+			resetTzOffsetMinutes: "",
+		},
+	});
+
+	const resetQuotaForm = quotaForm.reset;
+
 	useEffect(() => {
-		if (nodeQuery.data) {
-			const q = nodeQuery.data.quota_reset;
-			if (q.policy === "monthly") {
-				setResetPolicy("monthly");
-				setResetDay(q.day_of_month);
-			} else {
-				setResetPolicy("unlimited");
-				setResetDay(1);
-			}
-			const tz =
+		if (!nodeQuery.data) return;
+		const q = nodeQuery.data.quota_reset;
+		resetQuotaForm({
+			resetPolicy: q.policy === "monthly" ? "monthly" : "unlimited",
+			resetDay: q.policy === "monthly" ? q.day_of_month : 1,
+			resetTzOffsetMinutes:
 				q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
 					? ""
-					: String(q.tz_offset_minutes);
-			setResetTzOffsetMinutes(tz);
-			setSaveError(null);
-		}
-	}, [nodeQuery.data]);
+					: String(q.tz_offset_minutes),
+		});
+		setSaveError(null);
+	}, [nodeQuery.data, resetQuotaForm]);
 
 	useEffect(() => {
 		if (runtimeQuery.data) {
@@ -330,25 +388,26 @@ export function NodeDetailsPage() {
 		return () => window.clearInterval(timer);
 	}, [adminToken, runtimeSseConnected, runtimeQuery.refetch]);
 
+	const quotaValues = quotaForm.watch();
+
 	const desiredQuotaReset: NodeQuotaReset = useMemo(() => {
-		const raw = resetTzOffsetMinutes.trim();
-		const tz =
-			raw.length === 0
-				? undefined
-				: Number.isFinite(Number(raw))
-					? Number(raw)
-					: undefined;
-		return resetPolicy === "monthly"
+		const raw = quotaValues.resetTzOffsetMinutes.trim();
+		const tz = raw.length === 0 ? undefined : Number(raw);
+		return quotaValues.resetPolicy === "monthly"
 			? {
 					policy: "monthly",
-					day_of_month: resetDay,
+					day_of_month: quotaValues.resetDay,
 					...(tz === undefined ? {} : { tz_offset_minutes: tz }),
 				}
 			: {
 					policy: "unlimited",
 					...(tz === undefined ? {} : { tz_offset_minutes: tz }),
 				};
-	}, [resetDay, resetPolicy, resetTzOffsetMinutes]);
+	}, [
+		quotaValues.resetDay,
+		quotaValues.resetPolicy,
+		quotaValues.resetTzOffsetMinutes,
+	]);
 
 	const isDirty = useMemo(() => {
 		if (!nodeQuery.data) return false;
@@ -360,34 +419,23 @@ export function NodeDetailsPage() {
 				? ""
 				: String(q.tz_offset_minutes);
 		return (
-			resetPolicy !== currentPolicy ||
-			(resetPolicy === "monthly" && resetDay !== currentDay) ||
-			resetTzOffsetMinutes.trim() !== currentTz
+			quotaValues.resetPolicy !== currentPolicy ||
+			(quotaValues.resetPolicy === "monthly" &&
+				quotaValues.resetDay !== currentDay) ||
+			quotaValues.resetTzOffsetMinutes.trim() !== currentTz
 		);
-	}, [nodeQuery.data, resetDay, resetPolicy, resetTzOffsetMinutes]);
+	}, [
+		nodeQuery.data,
+		quotaValues.resetDay,
+		quotaValues.resetPolicy,
+		quotaValues.resetTzOffsetMinutes,
+	]);
 
-	const handleSaveQuotaReset = async () => {
+	const handleSaveQuotaReset = quotaForm.handleSubmit(async () => {
 		if (!nodeQuery.data) return;
 		if (!isDirty) {
 			pushToast({ variant: "info", message: "No changes to save." });
 			return;
-		}
-
-		if (
-			resetPolicy === "monthly" &&
-			(!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31)
-		) {
-			setSaveError("Reset day must be an integer between 1 and 31.");
-			return;
-		}
-
-		const tzRaw = resetTzOffsetMinutes.trim();
-		if (tzRaw.length > 0) {
-			const tz = Number(tzRaw);
-			if (!Number.isFinite(tz) || !Number.isInteger(tz)) {
-				setSaveError("tz_offset_minutes must be an integer (or empty).");
-				return;
-			}
 		}
 
 		setIsSaving(true);
@@ -411,7 +459,7 @@ export function NodeDetailsPage() {
 		} finally {
 			setIsSaving(false);
 		}
-	};
+	});
 
 	const content = (() => {
 		if (adminToken.length === 0) {
@@ -463,221 +511,203 @@ export function NodeDetailsPage() {
 			);
 		}
 
-		const inputClass =
-			prefs.density === "compact"
-				? "input input-bordered input-sm"
-				: "input input-bordered";
-		const selectClass =
-			prefs.density === "compact"
-				? "select select-bordered select-sm"
-				: "select select-bordered";
 		const runtime = runtimeLive ?? runtimeQuery.data;
+		const quotaPolicy = quotaForm.watch("resetPolicy");
 
 		return (
 			<div className="space-y-4">
-				<div className="overflow-x-auto">
-					<div
-						className="inline-flex min-w-max items-center gap-1 rounded-box border border-base-300 bg-base-100 p-1 shadow-sm"
-						role="tablist"
-						aria-label="Node details sections"
-					>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={activeTab === "runtime"}
-							className={`btn btn-sm whitespace-nowrap ${
-								activeTab === "runtime" ? "btn-primary" : "btn-ghost"
-							}`}
-							onClick={() => setActiveTab("runtime")}
+				<Tabs
+					value={activeTab}
+					onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
+				>
+					<div className="overflow-x-auto">
+						<TabsList
+							className="h-auto min-w-max justify-start gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
+							aria-label="Node details sections"
 						>
-							Service runtime
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={activeTab === "metadata"}
-							className={`btn btn-sm whitespace-nowrap ${
-								activeTab === "metadata" ? "btn-primary" : "btn-ghost"
-							}`}
-							onClick={() => setActiveTab("metadata")}
-						>
-							Node metadata
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={activeTab === "quota"}
-							className={`btn btn-sm whitespace-nowrap ${
-								activeTab === "quota" ? "btn-primary" : "btn-ghost"
-							}`}
-							onClick={() => setActiveTab("quota")}
-						>
-							Quota reset
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={activeTab === "ipUsage"}
-							className={`btn btn-sm whitespace-nowrap ${
-								activeTab === "ipUsage" ? "btn-primary" : "btn-ghost"
-							}`}
-							onClick={() => setActiveTab("ipUsage")}
-						>
-							IP usage
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={activeTab === "danger"}
-							className={`btn btn-sm whitespace-nowrap ${
-								activeTab === "danger" ? "btn-primary" : "btn-ghost"
-							}`}
-							onClick={() => setActiveTab("danger")}
-						>
-							Danger zone
-						</button>
+							<TabsTrigger
+								value="runtime"
+								className="whitespace-nowrap"
+								onClick={() => setActiveTab("runtime")}
+							>
+								Service runtime
+							</TabsTrigger>
+							<TabsTrigger
+								value="metadata"
+								className="whitespace-nowrap"
+								onClick={() => setActiveTab("metadata")}
+							>
+								Node metadata
+							</TabsTrigger>
+							<TabsTrigger
+								value="quota"
+								className="whitespace-nowrap"
+								onClick={() => setActiveTab("quota")}
+							>
+								Quota reset
+							</TabsTrigger>
+							<TabsTrigger
+								value="ipUsage"
+								className="whitespace-nowrap"
+								onClick={() => setActiveTab("ipUsage")}
+							>
+								IP usage
+							</TabsTrigger>
+							<TabsTrigger
+								value="danger"
+								className="whitespace-nowrap"
+								onClick={() => setActiveTab("danger")}
+							>
+								Danger zone
+							</TabsTrigger>
+						</TabsList>
 					</div>
-				</div>
 
-				{activeTab === "runtime" ? (
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-4">
-							<div className="flex items-center justify-between gap-3">
-								<div>
-									<h2 className="card-title">Service runtime</h2>
-									<p className="text-sm opacity-70">
-										Live status of xp/xray/cloudflared with 7-day history and
-										key events.
-									</p>
-								</div>
-								<div className="flex items-center gap-2">
-									{runtime ? (
-										<span className={summaryBadgeClass(runtime.summary.status)}>
-											{runtime.summary.status}
-										</span>
-									) : null}
-									<span
-										className={
-											runtimeSseConnected
-												? "badge badge-success badge-outline"
-												: "badge badge-ghost"
-										}
-									>
-										{runtimeSseConnected ? "live" : "polling"}
-									</span>
-								</div>
-							</div>
-
-							{runtimeQuery.isLoading && !runtime ? (
-								<PageState
-									variant="loading"
-									title="Loading runtime"
-									description="Fetching service runtime details."
-								/>
-							) : null}
-
-							{runtimeQuery.isError && !runtime ? (
-								<PageState
-									variant="error"
-									title="Failed to load runtime"
-									description={formatErrorMessage(runtimeQuery.error)}
-									action={
-										<Button
-											variant="secondary"
-											loading={runtimeQuery.isFetching}
-											onClick={() => runtimeQuery.refetch()}
-										>
-											Retry
-										</Button>
-									}
-								/>
-							) : null}
-
-							{runtime ? (
-								<>
-									{runtimeSseError ? (
-										<div className="alert alert-warning py-2 text-sm">
-											<span>Realtime stream degraded: {runtimeSseError}</span>
-										</div>
-									) : null}
-
-									<div className="grid gap-3 lg:grid-cols-3">
-										{runtime.components.map((component) => (
-											<div
-												key={component.component}
-												className="rounded-box border border-base-300 bg-base-200 p-3 space-y-2"
+					{activeTab === "runtime" ? (
+						<div className="xp-card">
+							<div className="xp-card-body space-y-4">
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<h2 className="xp-card-title">Service runtime</h2>
+										<p className="text-sm text-muted-foreground">
+											Live status of xp/xray/cloudflared with 7-day history and
+											key events.
+										</p>
+									</div>
+									<div className="flex items-center gap-2">
+										{runtime ? (
+											<Badge
+												variant={summaryBadgeVariant(runtime.summary.status)}
 											>
-												<div className="flex items-center justify-between gap-2">
-													<p className="font-semibold">{component.component}</p>
-													<span
-														className={componentBadgeClass(component.status)}
-													>
-														{component.status}
+												{runtime.summary.status}
+											</Badge>
+										) : null}
+										<Badge variant={runtimeSseConnected ? "success" : "ghost"}>
+											{runtimeSseConnected ? "live" : "polling"}
+										</Badge>
+									</div>
+								</div>
+
+								{runtimeQuery.isLoading && !runtime ? (
+									<PageState
+										variant="loading"
+										title="Loading runtime"
+										description="Fetching service runtime details."
+									/>
+								) : null}
+
+								{runtimeQuery.isError && !runtime ? (
+									<PageState
+										variant="error"
+										title="Failed to load runtime"
+										description={formatErrorMessage(runtimeQuery.error)}
+										action={
+											<Button
+												variant="secondary"
+												loading={runtimeQuery.isFetching}
+												onClick={() => runtimeQuery.refetch()}
+											>
+												Retry
+											</Button>
+										}
+									/>
+								) : null}
+
+								{runtime ? (
+									<>
+										{runtimeSseError ? (
+											<div className={alertClass("warning", "py-2")}>
+												<span>Realtime stream degraded: {runtimeSseError}</span>
+											</div>
+										) : null}
+
+										<div className="grid gap-3 lg:grid-cols-3">
+											{runtime.components.map((component) => (
+												<div
+													key={component.component}
+													className="space-y-2 rounded-2xl border border-border/70 bg-muted/35 p-3"
+												>
+													<div className="flex items-center justify-between gap-2">
+														<p className="font-semibold">
+															{component.component}
+														</p>
+														<Badge
+															variant={componentBadgeVariant(component.status)}
+															size="sm"
+														>
+															{component.status}
+														</Badge>
+													</div>
+													<div className="space-y-1 font-mono text-xs opacity-80">
+														<p>last_ok: {formatTime(component.last_ok_at)}</p>
+														<p>
+															last_fail: {formatTime(component.last_fail_at)}
+														</p>
+														<p>
+															down_since: {formatTime(component.down_since)}
+														</p>
+														<p>fails: {component.consecutive_failures}</p>
+														<p>recoveries: {component.recoveries_observed}</p>
+														<p>
+															restart_attempts: {component.restart_attempts}
+														</p>
+														<p>
+															last_restart:{" "}
+															{formatTime(component.last_restart_at)}
+														</p>
+													</div>
+												</div>
+											))}
+										</div>
+
+										<div>
+											<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+												<p className="text-xs uppercase tracking-wide text-muted-foreground">
+													7-day activity (30-minute slots)
+												</p>
+												<div className="flex items-center gap-3 text-[11px] opacity-70">
+													<span className="inline-flex items-center gap-1">
+														<span className="size-2 rounded-[2px] bg-success" />
+														up
+													</span>
+													<span className="inline-flex items-center gap-1">
+														<span className="size-2 rounded-[2px] bg-warning" />
+														degraded
+													</span>
+													<span className="inline-flex items-center gap-1">
+														<span className="size-2 rounded-[2px] bg-destructive" />
+														down
+													</span>
+													<span className="inline-flex items-center gap-1">
+														<span className="size-2 rounded-[2px] bg-info" />
+														unknown
 													</span>
 												</div>
-												<div className="space-y-1 text-xs font-mono opacity-80">
-													<p>last_ok: {formatTime(component.last_ok_at)}</p>
-													<p>last_fail: {formatTime(component.last_fail_at)}</p>
-													<p>down_since: {formatTime(component.down_since)}</p>
-													<p>fails: {component.consecutive_failures}</p>
-													<p>recoveries: {component.recoveries_observed}</p>
-													<p>restart_attempts: {component.restart_attempts}</p>
-													<p>
-														last_restart:{" "}
-														{formatTime(component.last_restart_at)}
-													</p>
-												</div>
 											</div>
-										))}
-									</div>
 
-									<div>
-										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-											<p className="text-xs uppercase tracking-wide opacity-60">
-												7-day activity (30-minute slots)
-											</p>
-											<div className="flex items-center gap-3 text-[11px] opacity-70">
-												<span className="inline-flex items-center gap-1">
-													<span className="size-2 rounded-[2px] bg-success" />
-													up
-												</span>
-												<span className="inline-flex items-center gap-1">
-													<span className="size-2 rounded-[2px] bg-warning" />
-													degraded
-												</span>
-												<span className="inline-flex items-center gap-1">
-													<span className="size-2 rounded-[2px] bg-error" />
-													down
-												</span>
-												<span className="inline-flex items-center gap-1">
-													<span className="size-2 rounded-[2px] bg-info" />
-													unknown
-												</span>
-											</div>
-										</div>
-
-										<div className="rounded-box border border-base-300 bg-base-200 p-3">
-											<div className="overflow-x-auto">
-												<div className="min-w-[28rem]">
-													<div
-														className="mb-1 grid items-center gap-2 text-[10px] opacity-60"
-														style={{
-															gridTemplateColumns: "4.5rem minmax(0,1fr)",
-														}}
-													>
-														<span />
-														<div className="flex items-center justify-between">
-															<span>00:00</span>
-															<span>06:00</span>
-															<span>12:00</span>
-															<span>18:00</span>
-															<span>24:00</span>
+											<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+												<div className="overflow-x-auto">
+													<div className="min-w-[28rem]">
+														<div
+															className="mb-1 grid items-center gap-2 text-[10px] text-muted-foreground"
+															style={{
+																gridTemplateColumns: "4.5rem minmax(0,1fr)",
+															}}
+														>
+															<span />
+															<div className="flex items-center justify-between">
+																<span>00:00</span>
+																<span>06:00</span>
+																<span>12:00</span>
+																<span>18:00</span>
+																<span>24:00</span>
+															</div>
 														</div>
-													</div>
 
-													<div className="space-y-1.5">
-														{buildRuntimeActivityRows(runtime.recent_slots).map(
-															(row) => (
+														<div className="space-y-1.5">
+															{buildRuntimeActivityRows(
+																runtime.recent_slots,
+															).map((row) => (
 																<div
 																	key={row.key}
 																	className="grid items-center gap-2"
@@ -685,7 +715,7 @@ export function NodeDetailsPage() {
 																		gridTemplateColumns: "4.5rem minmax(0,1fr)",
 																	}}
 																>
-																	<span className="truncate text-[11px] font-mono opacity-70">
+																	<span className="truncate font-mono text-[11px] text-muted-foreground">
 																		{row.label}
 																	</span>
 																	<div
@@ -701,7 +731,7 @@ export function NodeDetailsPage() {
 																				className={`rounded-[1px] ${
 																					slot
 																						? historySlotClass(slot.status)
-																						: "bg-base-300/40"
+																						: "bg-muted/60"
 																				}`}
 																				title={
 																					slot
@@ -712,298 +742,346 @@ export function NodeDetailsPage() {
 																		))}
 																	</div>
 																</div>
-															),
-														)}
+															))}
+														</div>
 													</div>
 												</div>
 											</div>
 										</div>
-									</div>
 
-									<div className="space-y-2">
-										<div className="flex items-center justify-between gap-2">
-											<p className="text-xs uppercase tracking-wide opacity-60">
-												Key events
-											</p>
+										<div className="space-y-2">
+											<div className="flex items-center justify-between gap-2">
+												<p className="text-xs uppercase tracking-wide text-muted-foreground">
+													Key events
+												</p>
+												<Button
+													variant="secondary"
+													loading={runtimeQuery.isFetching}
+													onClick={() => runtimeQuery.refetch()}
+												>
+													Refresh runtime
+												</Button>
+											</div>
+											<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+												<table className="xp-table xp-table-compact">
+													<thead>
+														<tr>
+															<th>Time</th>
+															<th>Component</th>
+															<th>Kind</th>
+															<th>Message</th>
+														</tr>
+													</thead>
+													<tbody>
+														{runtime.events.length === 0 ? (
+															<tr>
+																<td colSpan={4} className="opacity-60">
+																	No runtime events in window.
+																</td>
+															</tr>
+														) : (
+															runtime.events.map((event) => (
+																<tr key={event.event_id}>
+																	<td className="font-mono text-xs">
+																		{formatTime(event.occurred_at)}
+																	</td>
+																	<td className="font-mono text-xs">
+																		{event.component}
+																	</td>
+																	<td>
+																		<Badge
+																			variant={eventBadgeVariant(event.kind)}
+																			size="sm"
+																		>
+																			{event.kind}
+																		</Badge>
+																	</td>
+																	<td className="text-xs">{event.message}</td>
+																</tr>
+															))
+														)}
+													</tbody>
+												</table>
+											</div>
+										</div>
+									</>
+								) : null}
+							</div>
+						</div>
+					) : null}
+
+					{activeTab === "metadata" ? (
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h2 className="xp-card-title">Node metadata</h2>
+									<p className="text-sm text-muted-foreground">
+										Read-only. Managed via xp-ops config file.
+									</p>
+								</div>
+								<div className="rounded-2xl bg-muted/35 p-4 space-y-2">
+									<div className="text-xs uppercase tracking-wide text-muted-foreground">
+										Node ID
+									</div>
+									<div className="font-mono text-sm break-all">{nodeId}</div>
+									<div className="grid gap-2 md:grid-cols-2 pt-3">
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Node name
+											</div>
+											<div className="font-mono text-sm break-all">
+												{nodeQuery.data.node_name || "(empty)"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Access host
+											</div>
+											<div className="font-mono text-sm break-all">
+												{nodeQuery.data.access_host || "(empty)"}
+											</div>
+										</div>
+										<div className="md:col-span-2">
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												API base URL
+											</div>
+											<div className="font-mono text-sm break-all">
+												{nodeQuery.data.api_base_url || "(empty)"}
+											</div>
+										</div>
+									</div>
+								</div>
+								<div className="text-sm text-muted-foreground">
+									To change node meta, edit{" "}
+									<span className="font-mono">/etc/xp/xp.env</span> and run{" "}
+									<span className="font-mono">
+										sudo xp-ops xp sync-node-meta
+									</span>
+									.
+								</div>
+							</div>
+						</div>
+					) : null}
+
+					{activeTab === "quota" ? (
+						<div className="xp-card">
+							<div className="xp-card-body space-y-4">
+								<div>
+									<h2 className="xp-card-title">Quota reset</h2>
+									<p className="text-sm text-muted-foreground">
+										Runtime admin setting. Safe to edit via the admin API.
+									</p>
+								</div>
+								<div className="rounded-2xl bg-muted/35 p-4 space-y-1">
+									<div className="text-xs uppercase tracking-wide text-muted-foreground">
+										Quota budget
+									</div>
+									<div className="text-sm text-muted-foreground">
+										Total bytes per cycle for this node. Set to{" "}
+										<span className="font-mono">0</span> to disable shared quota
+										enforcement (unlimited).
+									</div>
+									<NodeQuotaEditor
+										value={nodeQuery.data.quota_limit_bytes}
+										disabled={isSaving}
+										onApply={async (nextBytes: number) => {
+											try {
+												await patchAdminNode(adminToken, nodeId, {
+													quota_limit_bytes: nextBytes,
+												});
+												pushToast({
+													variant: "success",
+													message: "Node quota budget updated.",
+												});
+												await nodeQuery.refetch();
+											} catch (error) {
+												const message = formatErrorMessage(error);
+												pushToast({
+													variant: "error",
+													message: `Failed to update node quota budget: ${message}`,
+												});
+												throw new Error(message);
+											}
+										}}
+									/>
+								</div>
+								<Form {...quotaForm}>
+									<form className="space-y-4" onSubmit={handleSaveQuotaReset}>
+										<div className="grid gap-4 md:grid-cols-3">
+											<FormField
+												control={quotaForm.control}
+												name="resetPolicy"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>Policy</FormLabel>
+														<Select
+															value={field.value}
+															onValueChange={(value) => {
+																field.onChange(value);
+																if (value !== "monthly") {
+																	quotaForm.setValue("resetDay", 1, {
+																		shouldDirty: true,
+																		shouldValidate: false,
+																	});
+																	quotaForm.clearErrors("resetDay");
+																}
+															}}
+														>
+															<FormControl>
+																<SelectTrigger>
+																	<SelectValue />
+																</SelectTrigger>
+															</FormControl>
+															<SelectContent>
+																<SelectItem value="monthly">monthly</SelectItem>
+																<SelectItem value="unlimited">
+																	unlimited
+																</SelectItem>
+															</SelectContent>
+														</Select>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={quotaForm.control}
+												name="resetDay"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>Day of month</FormLabel>
+														<FormControl>
+															<Input
+																{...field}
+																type="number"
+																min={1}
+																max={31}
+																step={1}
+																disabled={quotaPolicy !== "monthly"}
+																onChange={(event) =>
+																	field.onChange(event.target.value)
+																}
+															/>
+														</FormControl>
+														<FormDescription>
+															Used when the policy is monthly.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={quotaForm.control}
+												name="resetTzOffsetMinutes"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>tz_offset_minutes</FormLabel>
+														<FormControl>
+															<Input
+																{...field}
+																type="text"
+																placeholder="(empty)"
+															/>
+														</FormControl>
+														<FormDescription>
+															Leave empty to follow node-local defaults.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+										</div>
+
+										{saveError ? (
+											<p className="text-sm text-destructive">{saveError}</p>
+										) : null}
+
+										<div className="flex justify-end gap-2">
 											<Button
 												variant="secondary"
-												loading={runtimeQuery.isFetching}
-												onClick={() => runtimeQuery.refetch()}
+												type="button"
+												loading={nodeQuery.isFetching}
+												onClick={() => nodeQuery.refetch()}
 											>
-												Refresh runtime
+												Refresh
+											</Button>
+											<Button
+												type="submit"
+												loading={isSaving}
+												disabled={!isDirty}
+											>
+												Save changes
 											</Button>
 										</div>
-										<div className="rounded-box border border-base-300 bg-base-200 max-h-72 overflow-auto">
-											<table className="table table-sm">
-												<thead>
-													<tr>
-														<th>Time</th>
-														<th>Component</th>
-														<th>Kind</th>
-														<th>Message</th>
-													</tr>
-												</thead>
-												<tbody>
-													{runtime.events.length === 0 ? (
-														<tr>
-															<td colSpan={4} className="opacity-60">
-																No runtime events in window.
-															</td>
-														</tr>
-													) : (
-														runtime.events.map((event) => (
-															<tr key={event.event_id}>
-																<td className="font-mono text-xs">
-																	{formatTime(event.occurred_at)}
-																</td>
-																<td className="font-mono text-xs">
-																	{event.component}
-																</td>
-																<td>
-																	<span className={eventBadgeClass(event.kind)}>
-																		{event.kind}
-																	</span>
-																</td>
-																<td className="text-xs">{event.message}</td>
-															</tr>
-														))
-													)}
-												</tbody>
-											</table>
-										</div>
-									</div>
-								</>
-							) : null}
-						</div>
-					</div>
-				) : null}
-
-				{activeTab === "metadata" ? (
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-3">
-							<div>
-								<h2 className="card-title">Node metadata</h2>
-								<p className="text-sm opacity-70">
-									Read-only. Managed via xp-ops config file.
-								</p>
-							</div>
-							<div className="rounded-box bg-base-200 p-4 space-y-2">
-								<div className="text-xs uppercase tracking-wide opacity-60">
-									Node ID
-								</div>
-								<div className="font-mono text-sm break-all">{nodeId}</div>
-								<div className="grid gap-2 md:grid-cols-2 pt-3">
-									<div>
-										<div className="text-xs uppercase tracking-wide opacity-60">
-											Node name
-										</div>
-										<div className="font-mono text-sm break-all">
-											{nodeQuery.data.node_name || "(empty)"}
-										</div>
-									</div>
-									<div>
-										<div className="text-xs uppercase tracking-wide opacity-60">
-											Access host
-										</div>
-										<div className="font-mono text-sm break-all">
-											{nodeQuery.data.access_host || "(empty)"}
-										</div>
-									</div>
-									<div className="md:col-span-2">
-										<div className="text-xs uppercase tracking-wide opacity-60">
-											API base URL
-										</div>
-										<div className="font-mono text-sm break-all">
-											{nodeQuery.data.api_base_url || "(empty)"}
-										</div>
-									</div>
-								</div>
-							</div>
-							<div className="text-sm opacity-70">
-								To change node meta, edit{" "}
-								<span className="font-mono">/etc/xp/xp.env</span> and run{" "}
-								<span className="font-mono">sudo xp-ops xp sync-node-meta</span>
-								.
+									</form>
+								</Form>
 							</div>
 						</div>
-					</div>
-				) : null}
+					) : null}
 
-				{activeTab === "quota" ? (
-					<div className="card bg-base-100 shadow">
-						<div className="card-body space-y-4">
-							<div>
-								<h2 className="card-title">Quota reset</h2>
-								<p className="text-sm opacity-70">
-									Runtime admin setting. Safe to edit via the admin API.
-								</p>
-							</div>
-							<div className="rounded-box bg-base-200 p-4 space-y-1">
-								<div className="text-xs uppercase tracking-wide opacity-60">
-									Quota budget
-								</div>
-								<div className="text-sm opacity-70">
-									Total bytes per cycle for this node. Set to{" "}
-									<span className="font-mono">0</span> to disable shared quota
-									enforcement (unlimited).
-								</div>
-								<NodeQuotaEditor
-									value={nodeQuery.data.quota_limit_bytes}
-									disabled={isSaving}
-									onApply={async (nextBytes: number) => {
-										try {
-											await patchAdminNode(adminToken, nodeId, {
-												quota_limit_bytes: nextBytes,
-											});
-											pushToast({
-												variant: "success",
-												message: "Node quota budget updated.",
-											});
-											await nodeQuery.refetch();
-										} catch (error) {
-											const message = formatErrorMessage(error);
-											pushToast({
-												variant: "error",
-												message: `Failed to update node quota budget: ${message}`,
-											});
-											throw new Error(message);
-										}
-									}}
+					{activeTab === "ipUsage" ? (
+						<div className="space-y-4">
+							{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
+								<PageState
+									variant="loading"
+									title="Loading IP usage"
+									description="Fetching minute-level inbound IP usage for this node."
 								/>
-							</div>
-							<div className="grid gap-4 md:grid-cols-3">
-								<label className="form-control">
-									<div className="label">
-										<span className="label-text">Policy</span>
-									</div>
-									<select
-										className={selectClass}
-										value={resetPolicy}
-										onChange={(e) =>
-											setResetPolicy(e.target.value as "monthly" | "unlimited")
-										}
-									>
-										<option value="monthly">monthly</option>
-										<option value="unlimited">unlimited</option>
-									</select>
-								</label>
-								<label className="form-control">
-									<div className="label">
-										<span className="label-text">Day of month</span>
-									</div>
-									<input
-										className={inputClass}
-										type="number"
-										min={1}
-										max={31}
-										step={1}
-										disabled={resetPolicy !== "monthly"}
-										value={resetDay}
-										onChange={(e) => setResetDay(Number(e.target.value))}
-									/>
-								</label>
-								<label className="form-control">
-									<div className="label">
-										<span className="label-text">tz_offset_minutes</span>
-									</div>
-									<input
-										className={inputClass}
-										type="text"
-										value={resetTzOffsetMinutes}
-										onChange={(e) => setResetTzOffsetMinutes(e.target.value)}
-										placeholder="(empty)"
-									/>
-								</label>
-							</div>
-
-							{saveError ? (
-								<p className="text-sm text-error">{saveError}</p>
 							) : null}
 
-							<div className="flex justify-end gap-2">
-								<Button
-									variant="secondary"
-									loading={nodeQuery.isFetching}
-									onClick={() => nodeQuery.refetch()}
-								>
-									Refresh
-								</Button>
-								<Button
-									variant="primary"
-									loading={isSaving}
-									disabled={!isDirty}
-									onClick={handleSaveQuotaReset}
-								>
-									Save changes
-								</Button>
-							</div>
+							{ipUsageQuery.isError && !ipUsageQuery.data ? (
+								<PageState
+									variant="error"
+									title="Failed to load IP usage"
+									description={formatErrorMessage(ipUsageQuery.error)}
+									action={
+										<Button
+											variant="secondary"
+											loading={ipUsageQuery.isFetching}
+											onClick={() => ipUsageQuery.refetch()}
+										>
+											Retry
+										</Button>
+									}
+								/>
+							) : null}
+
+							{ipUsageQuery.data ? (
+								<IpUsageView
+									title="IP usage"
+									description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
+									window={ipUsageWindow}
+									geoSource={ipUsageQuery.data.geo_source}
+									onWindowChange={setIpUsageWindow}
+									report={ipUsageQuery.data}
+									isFetching={ipUsageQuery.isFetching}
+									emptyTitle="No inbound IP activity"
+								/>
+							) : null}
 						</div>
-					</div>
-				) : null}
+					) : null}
 
-				{activeTab === "ipUsage" ? (
-					<div className="space-y-4">
-						{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
-							<PageState
-								variant="loading"
-								title="Loading IP usage"
-								description="Fetching minute-level inbound IP usage for this node."
-							/>
-						) : null}
-
-						{ipUsageQuery.isError && !ipUsageQuery.data ? (
-							<PageState
-								variant="error"
-								title="Failed to load IP usage"
-								description={formatErrorMessage(ipUsageQuery.error)}
-								action={
+					{activeTab === "danger" ? (
+						<div className="xp-card border border-destructive/30">
+							<div className="xp-card-body space-y-4">
+								<h2 className="xp-card-title text-destructive">Danger zone</h2>
+								<p className="text-sm text-muted-foreground">
+									Deleting a node removes it from the cluster membership and
+									inventory. This action cannot be undone. Only delete nodes
+									that have no endpoints.
+								</p>
+								<div>
 									<Button
-										variant="secondary"
-										loading={ipUsageQuery.isFetching}
-										onClick={() => ipUsageQuery.refetch()}
+										variant="danger"
+										onClick={() => setDeleteOpen(true)}
+										disabled={isDeleting}
 									>
-										Retry
+										Delete node
 									</Button>
-								}
-							/>
-						) : null}
-
-						{ipUsageQuery.data ? (
-							<IpUsageView
-								title="IP usage"
-								description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
-								window={ipUsageWindow}
-								geoSource={ipUsageQuery.data.geo_source}
-								onWindowChange={setIpUsageWindow}
-								report={ipUsageQuery.data}
-								isFetching={ipUsageQuery.isFetching}
-								emptyTitle="No inbound IP activity"
-							/>
-						) : null}
-					</div>
-				) : null}
-
-				{activeTab === "danger" ? (
-					<div className="card bg-base-100 shadow border border-error/30">
-						<div className="card-body space-y-4">
-							<h2 className="card-title text-error">Danger zone</h2>
-							<p className="text-sm opacity-70">
-								Deleting a node removes it from the cluster membership and
-								inventory. This action cannot be undone. Only delete nodes that
-								have no endpoints.
-							</p>
-							<div>
-								<Button
-									variant="danger"
-									onClick={() => setDeleteOpen(true)}
-									disabled={isDeleting}
-								>
-									Delete node
-								</Button>
+								</div>
 							</div>
 						</div>
-					</div>
-				) : null}
+					) : null}
+				</Tabs>
 
 				<ConfirmDialog
 					open={deleteOpen}
@@ -1011,7 +1089,7 @@ export function NodeDetailsPage() {
 					description="This action cannot be undone. The node must have no endpoints."
 					onCancel={() => setDeleteOpen(false)}
 					footer={
-						<div className="modal-action">
+						<div className="flex justify-end gap-2">
 							<Button
 								variant="secondary"
 								onClick={() => setDeleteOpen(false)}
@@ -1057,9 +1135,9 @@ export function NodeDetailsPage() {
 				title="Node details"
 				description="Manage node metadata and routing configuration."
 				actions={
-					<Link to="/nodes" className="btn btn-ghost btn-sm">
-						Back
-					</Link>
+					<Button asChild variant="ghost" size="sm">
+						<Link to="/nodes">Back</Link>
+					</Button>
 				}
 			/>
 			{content}

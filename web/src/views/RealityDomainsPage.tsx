@@ -1,5 +1,10 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+import { cn } from "@/lib/utils";
 
 import type { AdminNode } from "../api/adminNodes";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -14,13 +19,26 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { TableCell } from "../components/DataTable";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import {
+	ResourceTable,
+	type ResourceTableHeader,
+} from "../components/ResourceTable";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
-import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
+import { badgeClass } from "../components/ui-helpers";
+import {
+	Form,
+	FormControl,
+	FormDescription,
+	FormField,
+	FormItem,
+	FormMessage,
+} from "../components/ui/form";
 import {
 	normalizeRealityServerName,
 	validateRealityServerName,
@@ -61,16 +79,44 @@ type DomainDeleteTarget = {
 	serverName: string;
 };
 
+const createDomainsSchema = z.object({
+	serverNames: z
+		.array(z.string())
+		.min(1, "Add at least one domain.")
+		.superRefine((values, ctx) => {
+			for (const [index, value] of values.entries()) {
+				const normalized = normalizeRealityServerName(value);
+				const error = validateRealityServerName(normalized);
+				if (error) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						path: [index],
+						message: error,
+					});
+				}
+			}
+		}),
+});
+
+type CreateDomainsValues = z.infer<typeof createDomainsSchema>;
+
+const tableHeaders: ResourceTableHeader[] = [
+	{ key: "order", label: "Order", className: "w-24" },
+	{ key: "serverName", label: "serverName" },
+	{ key: "nodes", label: "Nodes" },
+	{ key: "actions", label: "Actions", align: "right", className: "w-24" },
+];
+
 export function RealityDomainsPage() {
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
-	const prefs = useUiPrefs();
 	const adminToken = readAdminToken();
-
-	const inputClass =
-		prefs.density === "compact"
-			? "input input-bordered input-sm"
-			: "input input-bordered";
+	const createForm = useForm<CreateDomainsValues>({
+		resolver: zodResolver(createDomainsSchema),
+		defaultValues: {
+			serverNames: [],
+		},
+	});
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -86,8 +132,6 @@ export function RealityDomainsPage() {
 
 	const nodes = nodesQuery.data?.items ?? [];
 	const domains = domainsQuery.data?.items ?? [];
-
-	const [createServerNames, setCreateServerNames] = useState<string[]>([]);
 	const [deleteTarget, setDeleteTarget] = useState<DomainDeleteTarget | null>(
 		null,
 	);
@@ -118,7 +162,7 @@ export function RealityDomainsPage() {
 			return created;
 		},
 		onSuccess: (created) => {
-			setCreateServerNames([]);
+			createForm.reset({ serverNames: [] });
 			queryClient.setQueryData(
 				["adminRealityDomains", adminToken],
 				(prev: unknown) => {
@@ -142,10 +186,7 @@ export function RealityDomainsPage() {
 			});
 		},
 		onError: (error) => {
-			pushToast({
-				variant: "error",
-				message: formatErrorMessage(error),
-			});
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
 
@@ -180,10 +221,7 @@ export function RealityDomainsPage() {
 			);
 		},
 		onError: (error) => {
-			pushToast({
-				variant: "error",
-				message: formatErrorMessage(error),
-			});
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
 
@@ -210,23 +248,21 @@ export function RealityDomainsPage() {
 			pushToast({ variant: "success", message: "Domain deleted." });
 		},
 		onError: (error) => {
-			pushToast({
-				variant: "error",
-				message: formatErrorMessage(error),
-			});
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
 
 	const reorderMutation = useMutation({
-		mutationFn: async (domainIds: string[]) => {
+		mutationFn: async (orderedIds: string[]) => {
 			if (adminToken.length === 0) throw new Error("Missing admin token.");
-			await reorderAdminRealityDomains(adminToken, domainIds);
+			return reorderAdminRealityDomains(adminToken, orderedIds);
+		},
+		onSuccess: () => {
+			void domainsQuery.refetch();
 		},
 		onError: (error) => {
-			pushToast({
-				variant: "error",
-				message: formatErrorMessage(error),
-			});
+			void domainsQuery.refetch();
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
 
@@ -235,7 +271,7 @@ export function RealityDomainsPage() {
 			<PageState
 				variant="empty"
 				title="Admin token required"
-				description="Set an admin token to manage global REALITY domains."
+				description="Please provide an admin token to manage reality domains."
 			/>
 		);
 	}
@@ -244,8 +280,8 @@ export function RealityDomainsPage() {
 		return (
 			<PageState
 				variant="loading"
-				title="Loading settings"
-				description="Fetching nodes and reality domains."
+				title="Loading reality domains"
+				description="Fetching nodes and domain registry data."
 			/>
 		);
 	}
@@ -290,8 +326,8 @@ export function RealityDomainsPage() {
 						variant="secondary"
 						loading={domainsQuery.isFetching || nodesQuery.isFetching}
 						onClick={() => {
-							nodesQuery.refetch();
-							domainsQuery.refetch();
+							void nodesQuery.refetch();
+							void domainsQuery.refetch();
 						}}
 					>
 						Refresh
@@ -299,42 +335,66 @@ export function RealityDomainsPage() {
 				}
 			/>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Add domains</h2>
-					<TagInput
-						label="serverNames"
-						value={createServerNames}
-						onChange={setCreateServerNames}
-						placeholder="download.example.com"
-						disabled={createMutation.isPending}
-						inputClass={inputClass}
-						validateTag={validateRealityServerName}
-						helperText="Paste or type one or more hostnames. Order matters: the first enabled domain becomes primary for global endpoints."
-					/>
-
-					<div className="card-actions justify-end">
-						<Button
-							loading={createMutation.isPending}
-							disabled={
-								createMutation.isPending || createServerNames.length === 0
-							}
-							onClick={() => createMutation.mutate(createServerNames)}
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Add domains</h2>
+					<Form {...createForm}>
+						<form
+							className="space-y-4"
+							onSubmit={createForm.handleSubmit((values) =>
+								createMutation.mutate(values.serverNames),
+							)}
 						>
-							Add
-						</Button>
-					</div>
+							<FormField
+								control={createForm.control}
+								name="serverNames"
+								render={({ field }) => (
+									<FormItem>
+										<FormControl>
+											<TagInput
+												label="serverNames"
+												value={field.value}
+												onChange={field.onChange}
+												placeholder="download.example.com"
+												disabled={createMutation.isPending}
+												validateTag={validateRealityServerName}
+												helperText="Paste or type one or more hostnames. Order matters: the first enabled domain becomes primary for global endpoints."
+											/>
+										</FormControl>
+										<FormDescription>
+											Paste or type one or more hostnames. Order matters: the
+											first enabled domain becomes primary for global endpoints.
+										</FormDescription>
+										<FormMessage />
+									</FormItem>
+								)}
+							/>
+
+							<div className="flex justify-end">
+								<Button
+									type="submit"
+									loading={createMutation.isPending}
+									disabled={
+										createMutation.isPending ||
+										createForm.watch("serverNames").length === 0
+									}
+								>
+									Add
+								</Button>
+							</div>
+						</form>
+					</Form>
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
 					<div className="flex items-start justify-between gap-3">
 						<div>
-							<h2 className="card-title">Domain list</h2>
-							<p className="text-sm opacity-70">
+							<h2 className="xp-card-title">Domain list</h2>
+							<p className="text-sm text-muted-foreground">
 								{domains.length} domain{domains.length === 1 ? "" : "s"} total.
-								Click node chips to enable/disable a domain per node.
+								Click node chips to enable or disable a domain per node.
 							</p>
 						</div>
 						<Button
@@ -353,152 +413,136 @@ export function RealityDomainsPage() {
 							description="Add at least one domain to use serverNamesSource=global."
 						/>
 					) : (
-						<div className="overflow-x-auto">
-							<table className="table table-zebra">
-								<thead>
-									<tr>
-										<th className="w-20">Order</th>
-										<th>serverName</th>
-										<th>Nodes</th>
-										<th className="w-24 text-right">Actions</th>
-									</tr>
-								</thead>
-								<tbody>
-									{domains.map((domain, idx) => {
-										const disabled = domain.disabled_node_ids ?? [];
-										const canMoveUp = idx > 0;
-										const canMoveDown = idx < domains.length - 1;
-										return (
-											<tr key={domain.domain_id}>
-												<td>
-													<div className="flex items-center gap-1">
+						<ResourceTable headers={tableHeaders}>
+							{domains.map((domain, idx) => {
+								const disabled = domain.disabled_node_ids ?? [];
+								const canMoveUp = idx > 0;
+								const canMoveDown = idx < domains.length - 1;
+								return (
+									<tr key={domain.domain_id}>
+										<TableCell>
+											<div className="flex items-center gap-1">
+												<Button
+													variant="ghost"
+													size="sm"
+													className="size-7 p-0"
+													disabled={reorderMutation.isPending || !canMoveUp}
+													onClick={() => {
+														const next = moveItem(domains, idx, idx - 1);
+														queryClient.setQueryData(
+															["adminRealityDomains", adminToken],
+															{ items: next },
+														);
+														reorderMutation.mutate(
+															next.map((d) => d.domain_id),
+														);
+													}}
+													title="Move up"
+												>
+													<Icon
+														name="tabler:chevron-up"
+														size={16}
+														ariaLabel="Move up"
+													/>
+												</Button>
+												<Button
+													variant="ghost"
+													size="sm"
+													className="size-7 p-0"
+													disabled={reorderMutation.isPending || !canMoveDown}
+													onClick={() => {
+														const next = moveItem(domains, idx, idx + 1);
+														queryClient.setQueryData(
+															["adminRealityDomains", adminToken],
+															{ items: next },
+														);
+														reorderMutation.mutate(
+															next.map((d) => d.domain_id),
+														);
+													}}
+													title="Move down"
+												>
+													<Icon
+														name="tabler:chevron-down"
+														size={16}
+														ariaLabel="Move down"
+													/>
+												</Button>
+												<span className="text-xs text-muted-foreground">
+													{idx + 1}
+												</span>
+											</div>
+										</TableCell>
+										<TableCell className="font-mono text-sm">
+											{domain.server_name}
+										</TableCell>
+										<TableCell>
+											<div className="flex flex-wrap gap-2">
+												{nodes.map((node) => {
+													const isDisabled = disabled.includes(node.node_id);
+													return (
 														<button
+															key={node.node_id}
 															type="button"
-															className="btn btn-ghost btn-xs btn-square"
-															disabled={reorderMutation.isPending || !canMoveUp}
-															onClick={() => {
-																const next = moveItem(domains, idx, idx - 1);
-																queryClient.setQueryData(
-																	["adminRealityDomains", adminToken],
-																	{ items: next },
-																);
-																reorderMutation.mutate(
-																	next.map((d) => d.domain_id),
-																);
-															}}
-															title="Move up"
-														>
-															<Icon
-																name="tabler:chevron-up"
-																size={16}
-																ariaLabel="Move up"
-															/>
-														</button>
-														<button
-															type="button"
-															className="btn btn-ghost btn-xs btn-square"
-															disabled={
-																reorderMutation.isPending || !canMoveDown
+															className={cn(
+																badgeClass(
+																	isDisabled ? "ghost" : "primary",
+																	"default",
+																	"gap-2 transition-opacity",
+																),
+																isDisabled && "opacity-60",
+																patchMutation.isPending && "cursor-wait",
+															)}
+															disabled={patchMutation.isPending}
+															title={
+																isDisabled
+																	? "Disabled on this node (click to enable)"
+																	: "Enabled on this node (click to disable)"
 															}
 															onClick={() => {
-																const next = moveItem(domains, idx, idx + 1);
-																queryClient.setQueryData(
-																	["adminRealityDomains", adminToken],
-																	{ items: next },
-																);
-																reorderMutation.mutate(
-																	next.map((d) => d.domain_id),
-																);
+																patchMutation.mutate({
+																	domainId: domain.domain_id,
+																	disabledNodeIds: toggleNodeId(
+																		disabled,
+																		node.node_id,
+																	),
+																});
 															}}
-															title="Move down"
 														>
-															<Icon
-																name="tabler:chevron-down"
-																size={16}
-																ariaLabel="Move down"
-															/>
+															<span>{nodeLabel(node)}</span>
+															<span className="font-mono text-xs opacity-70">
+																{node.node_id}
+															</span>
 														</button>
-														<span className="text-xs opacity-60">
-															{idx + 1}
-														</span>
-													</div>
-												</td>
-												<td className="font-mono text-sm">
-													{domain.server_name}
-												</td>
-												<td>
-													<div className="flex flex-wrap gap-2">
-														{nodes.map((node) => {
-															const isDisabled = disabled.includes(
-																node.node_id,
-															);
-															return (
-																<button
-																	key={node.node_id}
-																	type="button"
-																	className={[
-																		"badge gap-2",
-																		isDisabled
-																			? "badge-ghost opacity-60"
-																			: "badge-primary",
-																		patchMutation.isPending
-																			? "cursor-wait"
-																			: null,
-																	]
-																		.filter(Boolean)
-																		.join(" ")}
-																	disabled={patchMutation.isPending}
-																	title={
-																		isDisabled
-																			? "Disabled on this node (click to enable)"
-																			: "Enabled on this node (click to disable)"
-																	}
-																	onClick={() => {
-																		const nextDisabled = toggleNodeId(
-																			disabled,
-																			node.node_id,
-																		);
-																		patchMutation.mutate({
-																			domainId: domain.domain_id,
-																			disabledNodeIds: nextDisabled,
-																		});
-																	}}
-																>
-																	<span>{nodeLabel(node)}</span>
-																	<span className="font-mono text-xs opacity-70">
-																		{node.node_id}
-																	</span>
-																</button>
-															);
-														})}
-													</div>
-												</td>
-												<td className="text-right">
-													<button
-														type="button"
-														className="btn btn-ghost btn-xs btn-square"
-														disabled={deleteMutation.isPending}
-														onClick={() =>
-															setDeleteTarget({
-																domainId: domain.domain_id,
-																serverName: domain.server_name,
-															})
-														}
-														title="Delete"
-													>
-														<Icon
-															name="tabler:trash"
-															size={16}
-															ariaLabel="Delete"
-														/>
-													</button>
-												</td>
-											</tr>
-										);
-									})}
-								</tbody>
-							</table>
-						</div>
+													);
+												})}
+											</div>
+										</TableCell>
+										<TableCell className="text-right">
+											<Button
+												variant="ghost"
+												size="sm"
+												className="size-7 p-0"
+												disabled={deleteMutation.isPending}
+												onClick={() =>
+													setDeleteTarget({
+														domainId: domain.domain_id,
+														serverName: domain.server_name,
+													})
+												}
+												title="Delete"
+											>
+												<Icon
+													name="tabler:trash"
+													size={16}
+													ariaLabel="Delete"
+												/>
+											</Button>
+										</TableCell>
+									</tr>
+								);
+							})}
+						</ResourceTable>
 					)}
 				</div>
 			</div>

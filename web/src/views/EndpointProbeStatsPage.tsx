@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
+import { buttonVariants } from "@/components/ui/button";
+
 import { fetchAdminEndpointProbeHistory } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoint } from "../api/adminEndpoints";
 import type { EndpointProbeStatus } from "../api/adminEndpoints";
@@ -11,6 +13,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
+import { badgeClass } from "../components/ui-helpers";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -28,9 +31,9 @@ function statusClass(status: EndpointProbeStatus): string {
 		case "degraded":
 			return "bg-warning";
 		case "down":
-			return "bg-error";
+			return "bg-destructive";
 		default:
-			return "bg-base-300";
+			return "bg-border";
 	}
 }
 
@@ -45,6 +48,11 @@ function statusLabel(status: EndpointProbeStatus): string {
 		default:
 			return "Missing";
 	}
+}
+
+function sampleBadgeClass(sample: { ok: boolean; skipped?: boolean | null }) {
+	if (sample.skipped === true) return badgeClass("neutral", "sm");
+	return sample.ok ? badgeClass("success", "sm") : badgeClass("error", "sm");
 }
 
 export function EndpointProbeStatsPage() {
@@ -70,7 +78,6 @@ export function EndpointProbeStatsPage() {
 	const expectedNodes = historyQuery.data?.expected_nodes ?? 0;
 
 	const defaultSelectedHour = useMemo(() => {
-		// Pick the latest slot with data; fall back to the last slot.
 		const withData = [...slots].reverse().find((slot) => slot.sample_count > 0);
 		return withData?.hour ?? slots[slots.length - 1]?.hour ?? null;
 	}, [slots]);
@@ -95,7 +102,7 @@ export function EndpointProbeStatsPage() {
 				title="Admin token required"
 				description="Set an admin token to load probe stats."
 				action={
-					<Link className="btn btn-primary" to="/login">
+					<Link className={buttonVariants()} to="/login">
 						Go to login
 					</Link>
 				}
@@ -145,7 +152,7 @@ export function EndpointProbeStatsPage() {
 				title="Endpoint not found"
 				description="The requested endpoint does not exist."
 				action={
-					<Link className="btn btn-primary" to="/endpoints">
+					<Link className={buttonVariants()} to="/endpoints">
 						Back to endpoints
 					</Link>
 				}
@@ -160,7 +167,10 @@ export function EndpointProbeStatsPage() {
 				description={`Endpoint ${endpoint.tag} (${endpoint.endpoint_id})`}
 				actions={
 					<div className="flex gap-2">
-						<Link className="btn btn-ghost btn-sm" to="/endpoints">
+						<Link
+							className={buttonVariants({ variant: "ghost", size: "sm" })}
+							to="/endpoints"
+						>
 							Back
 						</Link>
 						<Button
@@ -174,10 +184,10 @@ export function EndpointProbeStatsPage() {
 				}
 			/>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Last 24 hours</h2>
-					<p className="text-sm opacity-70">
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Last 24 hours</h2>
+					<p className="text-sm text-muted-foreground">
 						Each bar represents one hour bucket (UTC). Click a bar to inspect
 						per-node results.
 					</p>
@@ -187,7 +197,7 @@ export function EndpointProbeStatsPage() {
 							const isSelected = slot.hour === selectedHour;
 							const skippedCount =
 								slot.skipped_count ??
-								slot.by_node.filter((s) => s.skipped === true).length;
+								slot.by_node.filter((sample) => sample.skipped === true).length;
 							const testedCount =
 								slot.tested_count ??
 								Math.max(0, slot.sample_count - skippedCount);
@@ -201,11 +211,11 @@ export function EndpointProbeStatsPage() {
 									title={`${slot.hour} • ${statusLabel(slot.status)} • OK (tested): ${slot.ok_count}/${testedCount} • Skipped: ${skippedCount} • Reported: ${reportedLabel}`}
 									onClick={() => setSelectedHour(slot.hour)}
 									className={[
-										"h-6 w-2 rounded-sm",
+										"h-6 w-2 rounded-sm transition-shadow",
 										statusClass(slot.status),
 										slot.status === "missing" ? "opacity-50" : "",
 										isSelected
-											? "ring ring-primary ring-offset-2 ring-offset-base-100"
+											? "ring-2 ring-primary ring-offset-2 ring-offset-background"
 											: "",
 									]
 										.filter(Boolean)
@@ -218,14 +228,15 @@ export function EndpointProbeStatsPage() {
 			</div>
 
 			<div className="grid gap-6 lg:grid-cols-2">
-				<div className="card bg-base-100 shadow">
-					<div className="card-body space-y-2">
-						<h2 className="card-title">Selected hour</h2>
+				<div className="xp-card">
+					<div className="xp-card-body space-y-2">
+						<h2 className="xp-card-title">Selected hour</h2>
 						{selected ? (
 							(() => {
 								const skippedCount =
 									selected.skipped_count ??
-									selected.by_node.filter((s) => s.skipped === true).length;
+									selected.by_node.filter((sample) => sample.skipped === true)
+										.length;
 								const testedCount =
 									selected.tested_count ??
 									Math.max(0, selected.sample_count - skippedCount);
@@ -273,15 +284,15 @@ export function EndpointProbeStatsPage() {
 								);
 							})()
 						) : (
-							<p className="text-sm opacity-70">No slot selected.</p>
+							<p className="text-sm text-muted-foreground">No slot selected.</p>
 						)}
 					</div>
 				</div>
 
-				<div className="card bg-base-100 shadow">
-					<div className="card-body space-y-2">
-						<h2 className="card-title">Probe config</h2>
-						<p className="text-sm opacity-70">
+				<div className="xp-card">
+					<div className="xp-card-body space-y-2">
+						<h2 className="xp-card-title">Probe config</h2>
+						<p className="text-sm text-muted-foreground">
 							Probe config hash is recorded per node sample.
 						</p>
 						<p className="text-sm">
@@ -294,12 +305,14 @@ export function EndpointProbeStatsPage() {
 				</div>
 			</div>
 
-			<div className="card bg-base-100 shadow">
-				<div className="card-body space-y-4">
-					<h2 className="card-title">Per-node results</h2>
+			<div className="xp-card">
+				<div className="xp-card-body space-y-4">
+					<h2 className="xp-card-title">Per-node results</h2>
 					{selected ? (
 						selected.by_node.length === 0 ? (
-							<p className="text-sm opacity-70">No samples for this hour.</p>
+							<p className="text-sm text-muted-foreground">
+								No samples for this hour.
+							</p>
 						) : (
 							<ResourceTable
 								headers={[
@@ -314,16 +327,7 @@ export function EndpointProbeStatsPage() {
 									<tr key={sample.node_id}>
 										<td className="font-mono text-xs">{sample.node_id}</td>
 										<td>
-											<span
-												className={[
-													"badge badge-sm",
-													sample.skipped === true
-														? "badge-neutral"
-														: sample.ok
-															? "badge-success"
-															: "badge-error",
-												].join(" ")}
-											>
+											<span className={sampleBadgeClass(sample)}>
 												{sample.skipped === true
 													? "SKIP"
 													: sample.ok
@@ -341,7 +345,7 @@ export function EndpointProbeStatsPage() {
 							</ResourceTable>
 						)
 					) : (
-						<p className="text-sm opacity-70">
+						<p className="text-sm text-muted-foreground">
 							Select an hour slot to view results.
 						</p>
 					)}

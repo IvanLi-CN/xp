@@ -109,6 +109,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 const meta: Meta<typeof NodeInventoryList> = {
 	title: "Components/NodeInventoryList",
 	component: NodeInventoryList,
+	tags: ["autodocs", "coverage-ui"],
 	parameters: {
 		layout: "padded",
 	},

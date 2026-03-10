@@ -7,6 +7,7 @@ import { SubscriptionPreviewDialog } from "./SubscriptionPreviewDialog";
 const meta: Meta<typeof SubscriptionPreviewDialog> = {
 	title: "Components/SubscriptionPreviewDialog",
 	component: SubscriptionPreviewDialog,
+	tags: ["autodocs", "coverage-ui"],
 };
 
 export default meta;

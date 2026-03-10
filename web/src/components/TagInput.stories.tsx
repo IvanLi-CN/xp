@@ -39,6 +39,7 @@ function TagInputDemo({
 const meta: Meta<typeof TagInputDemo> = {
 	title: "Components/TagInput",
 	component: TagInputDemo,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		label: "serverNames",
 		placeholder: "download.example.com",

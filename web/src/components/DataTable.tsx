@@ -1,13 +1,21 @@
 import type { ReactNode } from "react";
 
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+
 import { useUiPrefs } from "./UiPrefs";
 
 export type DataTableHeader = {
 	key: string;
 	label: ReactNode;
 	align?: "left" | "center" | "right";
-	// Extra Tailwind classes applied to the <th>. Useful for fixed table layouts
-	// where column widths should be explicitly controlled.
 	className?: string;
 };
 
@@ -29,45 +37,43 @@ export function DataTable({
 	const prefs = useUiPrefs();
 	const effectiveDensity = density ?? prefs.density;
 
-	const tableSizeClass = effectiveDensity === "compact" ? "table-sm" : "";
-
 	return (
-		<div className="rounded-box border border-base-300 bg-base-100 shadow-sm">
+		<div className="xp-table-wrap">
 			{caption ? (
-				<div className="border-b border-base-200 px-4 py-3 text-sm opacity-70">
+				<div className="border-b border-border/70 px-4 py-3 text-sm text-muted-foreground">
 					{caption}
 				</div>
 			) : null}
-			<div className="overflow-x-auto">
-				<table
-					className={["table table-zebra", tableSizeClass, tableClassName]
-						.filter(Boolean)
-						.join(" ")}
-				>
-					<thead>
-						<tr>
-							{headers.map((header) => (
-								<th
-									key={header.key}
-									className={[
-										header.align === "right"
-											? "text-right"
-											: header.align === "center"
-												? "text-center"
-												: "text-left",
-										header.className,
-									]
-										.filter(Boolean)
-										.join(" ")}
-								>
-									{header.label}
-								</th>
-							))}
-						</tr>
-					</thead>
-					<tbody>{children}</tbody>
-				</table>
-			</div>
+			<Table
+				className={cn(
+					"xp-table xp-table-zebra",
+					effectiveDensity === "compact" && "xp-table-compact",
+					tableClassName,
+				)}
+			>
+				<TableHeader>
+					<TableRow>
+						{headers.map((header) => (
+							<TableHead
+								key={header.key}
+								className={cn(
+									header.align === "right"
+										? "text-right"
+										: header.align === "center"
+											? "text-center"
+											: "text-left",
+									header.className,
+								)}
+							>
+								{header.label}
+							</TableHead>
+						))}
+					</TableRow>
+				</TableHeader>
+				<TableBody>{children}</TableBody>
+			</Table>
 		</div>
 	);
 }
+
+export { TableCell };

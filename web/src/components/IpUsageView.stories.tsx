@@ -23,6 +23,7 @@ const reports = buildDenseNodeIpUsageStories(demoNode);
 const meta = {
 	title: "Components/IpUsageView",
 	component: IpUsageView,
+	tags: ["autodocs", "coverage-ui"],
 	args: {
 		onWindowChange: () => {},
 		title: "IP usage",

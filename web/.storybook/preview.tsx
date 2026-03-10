@@ -34,6 +34,7 @@ import { UserNewPage } from "../src/views/UserNewPage";
 import { UsersPage } from "../src/views/UsersPage";
 
 import "../src/styles.css";
+import "./docs-theme.css";
 import {
 	type StorybookApiMockConfig,
 	configureStorybookApiMock,
@@ -87,6 +88,19 @@ export const initialGlobals = {
 } as const;
 
 const preview: Preview = {
+	tags: ["autodocs"],
+	parameters: {
+		actions: { argTypesRegex: "^on[A-Z].*" },
+		controls: {
+			matchers: {
+				color: /(background|color)$/i,
+				date: /Date$/,
+			},
+		},
+		docs: {
+			toc: true,
+		},
+	},
 	decorators: [
 		(Story, context) => {
 			const queryClient = createQueryClient();
