@@ -34,6 +34,7 @@ import { UserNewPage } from "../src/views/UserNewPage";
 import { UsersPage } from "../src/views/UsersPage";
 
 import "../src/styles.css";
+import "./docs-theme.css";
 import {
 	type StorybookApiMockConfig,
 	configureStorybookApiMock,
