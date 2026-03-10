@@ -52,7 +52,7 @@ export const Unchecked: Story = {
 	render: () => (
 		<CheckboxField
 			label="Automatic updates"
-			description="Run the managed DB-IP Lite refresh worker on every node."
+			description="Run the refresh worker on every node."
 		/>
 	),
 };
