@@ -279,6 +279,26 @@ pub struct Config {
         value_parser = clap::builder::BoolishValueParser::new()
     )]
     pub quota_auto_unban: bool,
+
+    #[arg(
+        long = "ip-geo-enabled",
+        global = true,
+        env = "XP_IP_GEO_ENABLED",
+        value_name = "BOOL",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub ip_geo_enabled: bool,
+
+    #[arg(
+        long = "ip-geo-origin",
+        global = true,
+        env = "XP_IP_GEO_ORIGIN",
+        value_name = "ORIGIN",
+        default_value = "https://api.country.is"
+    )]
+    pub ip_geo_origin: String,
 }
 
 impl Config {
@@ -311,6 +331,8 @@ mod tests {
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
+        assert!(cli.config.ip_geo_enabled);
+        assert_eq!(cli.config.ip_geo_origin, "https://api.country.is");
     }
 
     #[test]

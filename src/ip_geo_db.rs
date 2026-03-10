@@ -21,6 +21,8 @@ const COUNTRY_IS_BATCH_SIZE: usize = 100;
 const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const COUNTRY_IS_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(5);
 const COUNTRY_IS_FAILURE_BACKOFF: StdDuration = StdDuration::from_secs(15 * 60);
+const COUNTRY_IS_RATE_LIMIT_BACKOFF_DEFAULT: StdDuration = StdDuration::from_secs(60);
+const COUNTRY_IS_MIN_REQUEST_INTERVAL: StdDuration = StdDuration::from_millis(200);
 const COUNTRY_IS_CACHE_TTL: StdDuration = StdDuration::from_secs(24 * 60 * 60);
 const COUNTRY_IS_CACHE_PRUNE_INTERVAL: StdDuration = StdDuration::from_secs(5 * 60);
 const COUNTRY_IS_GEO_CACHE_MAX_ENTRIES: usize = 50_000;
@@ -135,17 +137,30 @@ impl ResolverCache {
 
 #[derive(Debug, Clone)]
 pub struct SharedGeoResolver {
+    enabled: bool,
     batch_url: Arc<String>,
     client: reqwest::Client,
     cache: Arc<RwLock<ResolverCache>>,
+    last_request_at: Arc<Mutex<Instant>>,
 }
 
 impl SharedGeoResolver {
-    pub fn new(_config: &Config) -> Self {
-        Self::with_origin(COUNTRY_IS_ORIGIN).expect("country.is resolver init")
+    pub fn new(config: &Config) -> Self {
+        let origin = config.ip_geo_origin.trim();
+        let origin = if origin.is_empty() {
+            COUNTRY_IS_ORIGIN
+        } else {
+            origin
+        };
+        Self::with_origin_and_enabled(origin, config.ip_geo_enabled)
+            .expect("country.is resolver init")
     }
 
     pub fn with_origin(origin: &str) -> anyhow::Result<Self> {
+        Self::with_origin_and_enabled(origin, true)
+    }
+
+    fn with_origin_and_enabled(origin: &str, enabled: bool) -> anyhow::Result<Self> {
         let origin = origin.trim_end_matches('/');
         let batch_url = format!("{origin}/{COUNTRY_IS_BATCH_FIELDS}");
         let client = reqwest::Client::builder()
@@ -154,20 +169,29 @@ impl SharedGeoResolver {
             .build()
             .context("build country.is client")?;
         Ok(Self {
+            enabled,
             batch_url: Arc::new(batch_url),
             client,
             cache: Arc::new(RwLock::new(ResolverCache::default())),
+            last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
         })
     }
 
     pub fn ip_geo_source(&self) -> IpGeoSource {
-        IpGeoSource::CountryIs
+        if self.enabled {
+            IpGeoSource::CountryIs
+        } else {
+            IpGeoSource::Missing
+        }
     }
 
     pub async fn prime_ips<I>(&self, ips: I) -> anyhow::Result<()>
     where
         I: IntoIterator<Item = String>,
     {
+        if !self.enabled {
+            return Ok(());
+        }
         let now = Instant::now();
         {
             let mut cache = self.cache.write().expect("geo resolver write lock");
@@ -209,7 +233,21 @@ impl SharedGeoResolver {
         Ok(())
     }
 
+    async fn wait_for_rate_limit(&self) {
+        let mut last = self.last_request_at.lock().await;
+        let now = Instant::now();
+        let next_allowed = *last + COUNTRY_IS_MIN_REQUEST_INTERVAL;
+        if next_allowed > now {
+            tokio::time::sleep(next_allowed - now).await;
+        }
+        *last = Instant::now();
+    }
+
     async fn fetch_batch(&self, batch: &[String]) -> anyhow::Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        self.wait_for_rate_limit().await;
         let request_ips = batch.iter().cloned().collect::<BTreeSet<_>>();
         let response = self
             .client
@@ -227,13 +265,19 @@ impl SharedGeoResolver {
             }
         };
 
-        let response = match response.error_for_status() {
-            Ok(response) => response,
-            Err(err) => {
-                self.mark_retry_after(&request_ips);
-                return Err(err).context("country.is returned error status");
-            }
-        };
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let backoff = Self::retry_after_from_headers(response.headers())
+                .unwrap_or(COUNTRY_IS_RATE_LIMIT_BACKOFF_DEFAULT);
+            self.mark_retry_after_with_backoff(&request_ips, backoff);
+            return Err(anyhow::anyhow!("country.is rate limited (429)"));
+        }
+        if !status.is_success() {
+            self.mark_retry_after(&request_ips);
+            return Err(anyhow::anyhow!(
+                "country.is returned error status: {status}"
+            ));
+        }
 
         let entries = match response.json::<Vec<CountryIsBatchEntry>>().await {
             Ok(entries) => entries,
@@ -294,9 +338,15 @@ impl SharedGeoResolver {
         Ok(())
     }
 
-    fn mark_retry_after(&self, ips: &BTreeSet<String>) {
+    fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<StdDuration> {
+        let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+        let secs = raw.parse::<u64>().ok()?;
+        Some(StdDuration::from_secs(secs))
+    }
+
+    fn mark_retry_after_with_backoff(&self, ips: &BTreeSet<String>, backoff: StdDuration) {
         let now = Instant::now();
-        let retry_after = now + COUNTRY_IS_FAILURE_BACKOFF;
+        let retry_after = now + backoff;
         let mut cache = self.cache.write().expect("geo resolver write lock");
         cache.prune_if_needed(now);
         for ip in ips {
@@ -309,10 +359,17 @@ impl SharedGeoResolver {
             );
         }
     }
+
+    fn mark_retry_after(&self, ips: &BTreeSet<String>) {
+        self.mark_retry_after_with_backoff(ips, COUNTRY_IS_FAILURE_BACKOFF);
+    }
 }
 
 impl GeoLookup for SharedGeoResolver {
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
+        if !self.enabled {
+            return PersistedInboundIpGeo::default();
+        }
         let Some(ip) = normalize_ip_string(ip) else {
             return PersistedInboundIpGeo::default();
         };
@@ -337,7 +394,11 @@ pub fn spawn_geo_db_update_worker(
     cfg: Arc<Config>,
     _store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
-    spawn_geo_db_update_worker_with_origin(cfg, COUNTRY_IS_ORIGIN.to_string())
+    let handle = GeoDbUpdateHandle {
+        resolver: SharedGeoResolver::new(cfg.as_ref()),
+    };
+    let task = tokio::spawn(async {});
+    Ok((handle, task))
 }
 
 pub fn spawn_geo_db_update_worker_with_origin(
@@ -345,7 +406,7 @@ pub fn spawn_geo_db_update_worker_with_origin(
     origin: String,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
     let handle = GeoDbUpdateHandle {
-        resolver: SharedGeoResolver::with_origin(&origin)
+        resolver: SharedGeoResolver::with_origin_and_enabled(&origin, cfg.ip_geo_enabled)
             .unwrap_or_else(|_| SharedGeoResolver::new(cfg.as_ref())),
     };
     let task = tokio::spawn(async {});

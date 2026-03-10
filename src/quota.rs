@@ -1369,6 +1369,8 @@ mod tests {
             endpoint_probe_skip_self_test: false,
             quota_poll_interval_secs: 10,
             quota_auto_unban,
+            ip_geo_enabled: true,
+            ip_geo_origin: "https://api.country.is".to_string(),
         };
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {
