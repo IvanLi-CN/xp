@@ -1,8 +1,8 @@
 @layer base {
 	html.dark :is(.sbdocs.sbdocs-wrapper, .sbdocs.sbdocs-content, .sb-preparing-docs.sb-wrapper) {
 		background:
-			radial-gradient(circle at top, color-mix(in oklab, var(--primary) 14%, transparent), transparent 34rem),
-			linear-gradient(180deg, color-mix(in oklab, var(--card) 78%, black), var(--background)) !important;
+			radial-gradient(circle at top, color-mix(in oklab, white 4%, transparent), transparent 28rem),
+			linear-gradient(180deg, color-mix(in oklab, var(--card) 72%, black 28%) 0%, color-mix(in oklab, var(--background) 86%, black 14%) 38%, color-mix(in oklab, var(--background) 94%, black 6%) 100%) !important;
 		background-color: var(--background) !important;
 		color: var(--foreground);
 	}
