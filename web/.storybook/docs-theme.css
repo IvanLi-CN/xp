@@ -16,6 +16,25 @@
 		color: color-mix(in oklab, var(--primary) 78%, white 22%);
 	}
 
+	html.dark .sbdocs-content > :is(h1, h2, h3, h4, h5, h6) {
+		color: var(--foreground) !important;
+	}
+
+	html.dark .sbdocs-content > :is(p, ul, ol, li) {
+		color: color-mix(in oklab, var(--foreground) 88%, transparent) !important;
+	}
+
+	html.dark :is(.sb-errordisplay, .sb-errordisplay_main) {
+		background: color-mix(in oklab, var(--card) 90%, black 10%) !important;
+		background-color: color-mix(in oklab, var(--card) 90%, black 10%) !important;
+		border-color: color-mix(in oklab, var(--border) 82%, transparent) !important;
+		color: var(--foreground) !important;
+	}
+
+	html.dark :is(.sb-errordisplay, .sb-errordisplay_main) :is(h1, p, li, a, code, pre) {
+		color: var(--foreground) !important;
+	}
+
 	html.dark :is(.sb-preparing-docs, .sb-preparing-story) {
 		background-color: var(--background) !important;
 	}

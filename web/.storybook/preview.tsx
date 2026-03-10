@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/react";
+import { themes } from "@storybook/theming";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
 	Outlet,
@@ -99,6 +100,7 @@ const preview: Preview = {
 		},
 		docs: {
 			toc: true,
+			theme: themes.dark,
 		},
 	},
 	decorators: [
