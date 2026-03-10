@@ -302,24 +302,29 @@ async fn run_quota_tick_at_with_geo(
                 store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
             };
         if !lookup_candidates.is_empty() {
-            // Best-effort: do not block quota sampling/enforcement on external geo lookups.
-            let store = store.clone();
-            let geo_resolver = geo_resolver.clone();
-            let task = tokio::spawn(async move {
-                if let Err(err) = geo_resolver.prime_ips(lookup_candidates.clone()).await {
-                    warn!(%err, "quota tick: country.is lookup failed");
-                }
+            // Avoid piling up overlapping geo lookup tasks when the upstream is slow or failing.
+            // Geo enrichment is best-effort; we'll try again on a later tick.
+            if let Some(prime_guard) = geo_resolver.begin_prime() {
+                // Best-effort: do not block quota sampling/enforcement on external geo lookups.
+                let store = store.clone();
+                let geo_resolver = geo_resolver.clone();
+                let task = tokio::spawn(async move {
+                    let _prime_guard = prime_guard;
+                    if let Err(err) = geo_resolver.prime_ips(lookup_candidates.clone()).await {
+                        warn!(%err, "quota tick: country.is lookup failed");
+                    }
 
-                // Backfill geo for short-lived IPs that were persisted before the async prime
-                // completed. This keeps geo enrichment best-effort without blocking quota ticks.
-                let mut store = store.lock().await;
-                if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
-                    usage.backfill_geo_for_ips(&lookup_candidates, &geo_resolver)
-                }) {
-                    warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
-                }
-            });
-            let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
+                    // Backfill geo for short-lived IPs that were persisted before the async prime
+                    // completed. This keeps geo enrichment best-effort without blocking quota ticks.
+                    let mut store = store.lock().await;
+                    if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
+                        usage.backfill_geo_for_ips(&lookup_candidates, &geo_resolver)
+                    }) {
+                        warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
+                    }
+                });
+                let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
+            }
         }
 
         let mut store = store.lock().await;

@@ -27,6 +27,10 @@
     {
       "code": "online_stats_unavailable",
       "message": "string"
+    },
+    {
+      "code": "ip_geo_lookup_failed",
+      "message": "string"
     }
   ],
   "unique_ip_series": [
@@ -108,6 +112,6 @@
 
 - `404 not_found`: node / user 不存在。
 - `400 invalid_request`: `window` 非法。
-- `geo_db_missing` warning 已移除；Geo 查询失败时仅留下空的 `region/operator` 字段。
+- `geo_db_missing` warning 已移除；Geo 查询失败时会返回 `ip_geo_lookup_failed` warning，且 `region/operator` 字段可能为空。
 - Node detail 公开 API 访问远端节点失败时：返回 `500 internal`，消息需指明 unreachable/timeout。
 - User detail 公开 API 聚合远端节点失败时：该节点加入 `unreachable_nodes`，其余节点结果继续返回，`partial=true`。

@@ -4823,6 +4823,101 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(group["ips"].as_array().unwrap()[0]["ip"], "203.0.113.9");
 }
 
+#[tokio::test]
+async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstream_errors() {
+    let tmp = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let mut config = test_config(tmp.path().to_path_buf());
+    config.ip_geo_enabled = true;
+    config.ip_geo_origin = server.uri();
+
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+        false,
+    );
+
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
+    geo_db_update
+        .resolver()
+        .prime_ips(["8.8.8.8".to_string()])
+        .await
+        .unwrap_err();
+
+    let app = build_router(
+        config,
+        store.clone(),
+        ReconcileHandle::noop(),
+        xray_health,
+        node_runtime,
+        endpoint_probe,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+        geo_db_update,
+    );
+
+    let node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node")
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/ip-usage?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["geo_source"], "country_is");
+    assert_eq!(
+        warning_codes(&json["warnings"]),
+        vec!["ip_geo_lookup_failed".to_string()]
+    );
+}
+
 #[test]
 fn normalize_ip_usage_warnings_filters_legacy_geo_db_missing() {
     let warnings = vec![

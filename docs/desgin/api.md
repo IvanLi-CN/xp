@@ -661,7 +661,9 @@ SSE 事件类型：
 - `timeline` 以 `endpoint_tag / IP` 为行维度，连续分钟已合并成时间段；默认仅返回占用分钟数最高的前 20 行。
 - `ips` 以 IP 聚合，`minutes` 表示当前窗口内该 IP 的去重分钟数。
 - `geo_source`：当节点启用 IP Geo（`XP_IP_GEO_ENABLED=true`）时为 `country_is`，否则为 `missing`；用于前端展示 attribution 与可用性提示。
-- `warnings` 目前仅包含 `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
+- `warnings` 可能包含：
+  - `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
+  - `ip_geo_lookup_failed`：启用 IP Geo 后，上游查询出错；Geo 字段可能为空。
 - 如果目标节点不可达，接口返回错误而不是静默空数据。
 
 ### 6.2 用户视角：查询用户入站 IP 使用详情（管理员）

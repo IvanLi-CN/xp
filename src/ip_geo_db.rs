@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeSet, HashMap},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration as StdDuration, Instant},
 };
 
@@ -155,8 +158,20 @@ pub struct SharedGeoResolver {
     client: reqwest::Client,
     cache: Arc<RwLock<ResolverCache>>,
     last_request_at: Arc<Mutex<Instant>>,
+    prime_in_flight: Arc<AtomicBool>,
     last_error: Arc<RwLock<Option<ResolverLastError>>>,
     last_success_at: Arc<RwLock<Option<Instant>>>,
+}
+
+#[derive(Debug)]
+pub struct GeoPrimeGuard {
+    in_flight: Arc<AtomicBool>,
+}
+
+impl Drop for GeoPrimeGuard {
+    fn drop(&mut self) {
+        self.in_flight.store(false, Ordering::SeqCst);
+    }
 }
 
 impl SharedGeoResolver {
@@ -189,8 +204,18 @@ impl SharedGeoResolver {
             client,
             cache: Arc::new(RwLock::new(ResolverCache::default())),
             last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
+            prime_in_flight: Arc::new(AtomicBool::new(false)),
             last_error: Arc::new(RwLock::new(None)),
             last_success_at: Arc::new(RwLock::new(None)),
+        })
+    }
+
+    pub fn begin_prime(&self) -> Option<GeoPrimeGuard> {
+        self.prime_in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        Some(GeoPrimeGuard {
+            in_flight: self.prime_in_flight.clone(),
         })
     }
 
@@ -639,6 +664,15 @@ mod tests {
             let parsed: IpGeoSource = serde_json::from_str(raw).unwrap();
             assert_eq!(parsed, expected);
         }
+    }
+
+    #[test]
+    fn begin_prime_allows_only_one_in_flight_guard() {
+        let resolver = SharedGeoResolver::with_origin("https://example.com").unwrap();
+        let guard = resolver.begin_prime().expect("prime guard");
+        assert!(resolver.begin_prime().is_none());
+        drop(guard);
+        assert!(resolver.begin_prime().is_some());
     }
 
     #[tokio::test]
