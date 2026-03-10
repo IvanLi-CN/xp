@@ -3024,9 +3024,11 @@ impl JsonSnapshotStore {
 
     pub fn collect_inbound_ip_usage_lookup_candidates(
         &self,
+        minute: chrono::DateTime<chrono::Utc>,
         samples: &[InboundIpMinuteSample],
     ) -> Vec<String> {
-        self.inbound_ip_usage.collect_lookup_candidates(samples)
+        self.inbound_ip_usage
+            .collect_lookup_candidates(minute, samples)
     }
 
     pub fn record_inbound_ip_usage_samples(

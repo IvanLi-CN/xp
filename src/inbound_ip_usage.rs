@@ -193,17 +193,27 @@ impl PersistedInboundIpUsage {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
 
-    fn collect_known_geo_by_ip(&self) -> HashMap<String, PersistedInboundIpGeo> {
+    fn collect_known_geo_by_ip_surviving_shift(
+        &self,
+        shift: usize,
+    ) -> HashMap<String, PersistedInboundIpGeo> {
         let mut out = HashMap::new();
         for membership in self.memberships.values() {
             for (ip, record) in &membership.ips {
                 if geo_is_default(&record.geo) {
                     continue;
                 }
+                if !bitmap_has_any_bit_after_shift(&record.bitmap, shift) {
+                    continue;
+                }
                 out.entry(ip.clone()).or_insert_with(|| record.geo.clone());
             }
         }
         out
+    }
+
+    fn collect_known_geo_by_ip(&self) -> HashMap<String, PersistedInboundIpGeo> {
+        self.collect_known_geo_by_ip_surviving_shift(0)
     }
 
     pub fn normalize(&mut self, allowed_membership_keys: &BTreeSet<String>) -> bool {
@@ -259,8 +269,18 @@ impl PersistedInboundIpUsage {
         self.memberships.remove(membership_key).is_some()
     }
 
-    pub fn collect_lookup_candidates(&self, samples: &[InboundIpMinuteSample]) -> Vec<String> {
-        let known_geo_by_ip = self.collect_known_geo_by_ip();
+    pub fn collect_lookup_candidates(
+        &self,
+        minute: DateTime<Utc>,
+        samples: &[InboundIpMinuteSample],
+    ) -> Vec<String> {
+        let minute = floor_minute(minute);
+        let shift = self
+            .latest_minute_dt()
+            .map(|previous| minute.signed_duration_since(previous).num_minutes())
+            .unwrap_or(0);
+        let shift = usize::try_from(shift.max(0)).unwrap_or(0);
+        let known_geo_by_ip = self.collect_known_geo_by_ip_surviving_shift(shift);
         let mut out = BTreeSet::new();
         for sample in samples {
             let existing = self.memberships.get(&sample.membership_key);
@@ -610,6 +630,27 @@ fn count_bitmap_bits(bitmap: &[u8]) -> usize {
     bitmap.iter().map(|byte| byte.count_ones() as usize).sum()
 }
 
+fn bitmap_has_any_bit_after_shift(bitmap: &[u8], shift: usize) -> bool {
+    if shift == 0 {
+        return bitmap.iter().any(|byte| *byte != 0);
+    }
+    if shift >= MINUTES_WINDOW {
+        return false;
+    }
+    let start_byte = shift / 8;
+    let start_bit = shift % 8;
+    for (index, byte) in bitmap.iter().enumerate().skip(start_byte) {
+        let mut value = *byte;
+        if index == start_byte && start_bit != 0 {
+            value &= !((1u8 << start_bit) - 1);
+        }
+        if value != 0 {
+            return true;
+        }
+    }
+    false
+}
+
 fn shift_bitmap(bitmap: &mut Vec<u8>, shift: usize) {
     normalize_bitmap(bitmap);
     if shift == 0 {
@@ -815,14 +856,10 @@ mod tests {
         // reuse the persisted geo from the existing record.
         assert!(
             usage
-                .collect_lookup_candidates(&[sample(
-                    "u2::e2",
-                    "u2",
-                    "n1",
-                    "e2",
-                    "ep-2",
-                    &["203.0.113.7"],
-                )])
+                .collect_lookup_candidates(
+                    minute1,
+                    &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"],)]
+                )
                 .is_empty()
         );
 

@@ -302,7 +302,7 @@ async fn run_quota_tick_at_with_geo(
             Vec::new()
         } else {
             let store = store.lock().await;
-            store.collect_inbound_ip_usage_lookup_candidates(&online_samples)
+            store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
         };
         if let Err(err) = geo_resolver.prime_ips(lookup_candidates).await {
             warn!(%err, "quota tick: country.is lookup failed");
