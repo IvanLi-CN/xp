@@ -158,6 +158,7 @@ pub struct SharedGeoResolver {
     client: reqwest::Client,
     cache: Arc<RwLock<ResolverCache>>,
     last_request_at: Arc<Mutex<Instant>>,
+    pending_ips: Arc<Mutex<BTreeSet<String>>>,
     prime_in_flight: Arc<AtomicBool>,
     last_error: Arc<RwLock<Option<ResolverLastError>>>,
     last_success_at: Arc<RwLock<Option<Instant>>>,
@@ -211,6 +212,7 @@ impl SharedGeoResolver {
             client,
             cache: Arc::new(RwLock::new(ResolverCache::default())),
             last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
+            pending_ips: Arc::new(Mutex::new(BTreeSet::new())),
             prime_in_flight: Arc::new(AtomicBool::new(false)),
             last_error: Arc::new(RwLock::new(None)),
             last_success_at: Arc::new(RwLock::new(None)),
@@ -226,6 +228,27 @@ impl SharedGeoResolver {
         })
     }
 
+    pub async fn enqueue_pending_ips(&self, ips: &[String]) {
+        if ips.is_empty() {
+            return;
+        }
+        let mut pending = self.pending_ips.lock().await;
+        for ip in ips {
+            pending.insert(ip.clone());
+        }
+    }
+
+    pub async fn has_pending_ips(&self) -> bool {
+        !self.pending_ips.lock().await.is_empty()
+    }
+
+    pub async fn drain_pending_ips(&self) -> Vec<String> {
+        let mut pending = self.pending_ips.lock().await;
+        let out = pending.iter().cloned().collect::<Vec<_>>();
+        pending.clear();
+        out
+    }
+
     pub fn ip_geo_source(&self) -> IpGeoSource {
         if self.enabled {
             IpGeoSource::CountryIs
@@ -236,12 +259,18 @@ impl SharedGeoResolver {
 
     pub fn last_error_message(&self) -> Option<String> {
         let now = Instant::now();
-        self.last_error
+        let last_error = self
+            .last_error
             .read()
             .expect("geo resolver read lock")
             .as_ref()
             .filter(|entry| entry.at + COUNTRY_IS_FAILURE_BACKOFF > now)
-            .map(|entry| entry.message.clone())
+            .cloned()?;
+        let last_success = *self.last_success_at.read().expect("geo resolver read lock");
+        if last_success.is_some_and(|success| success > last_error.at) {
+            return None;
+        }
+        Some(last_error.message)
     }
 
     pub async fn prime_ips<I>(&self, ips: I) -> anyhow::Result<()>
@@ -870,7 +899,7 @@ mod tests {
             cache.retry_after_by_ip.remove("8.8.8.8");
         }
         resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
-        assert!(resolver.last_error_message().is_some());
+        assert!(resolver.last_error_message().is_none());
 
         {
             let mut last_error = resolver

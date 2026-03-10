@@ -312,6 +312,32 @@ impl PersistedInboundIpUsage {
         out.into_iter().collect()
     }
 
+    pub fn collect_missing_geo_for_ips(&self, ips: &[String]) -> Vec<String> {
+        if ips.is_empty() {
+            return Vec::new();
+        }
+        let candidates = ips
+            .iter()
+            .filter_map(|ip| normalize_ip_string(ip))
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        let mut out = BTreeSet::new();
+        for membership in self.memberships.values() {
+            for (ip, record) in &membership.ips {
+                if !candidates.contains(ip) {
+                    continue;
+                }
+                if geo_is_default(&record.geo) {
+                    out.insert(ip.clone());
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
     pub fn backfill_geo_for_ips(&mut self, ips: &[String], geo_resolver: &dyn GeoLookup) -> bool {
         if ips.is_empty() {
             return false;
