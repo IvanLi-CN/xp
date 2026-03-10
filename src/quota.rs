@@ -1,7 +1,4 @@
-use std::{
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use tokio::sync::Mutex;
@@ -297,14 +294,13 @@ async fn run_quota_tick_at_with_geo(
             }
         }
 
-        let lookup_candidates = if online_stats_unavailable
-            || geo_resolver.ip_geo_source() == IpGeoSource::Missing
-        {
-            Vec::new()
-        } else {
-            let store = store.lock().await;
-            store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
-        };
+        let lookup_candidates =
+            if online_stats_unavailable || geo_resolver.ip_geo_source() == IpGeoSource::Missing {
+                Vec::new()
+            } else {
+                let store = store.lock().await;
+                store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
+            };
         if !lookup_candidates.is_empty() {
             // Best-effort: do not block quota sampling/enforcement on external geo lookups.
             let store = store.clone();
