@@ -16,9 +16,6 @@ pub enum DomainError {
     InvalidNodeQuotaConfig {
         reason: String,
     },
-    InvalidGeoDbUpdateIntervalDays {
-        days: u8,
-    },
     MissingUser {
         user_id: String,
     },
@@ -61,10 +58,9 @@ impl DomainError {
             | Self::InvalidCycleDayOfMonth { .. }
             | Self::InvalidTzOffsetMinutes { .. }
             | Self::InvalidNodeQuotaConfig { .. }
-            | Self::InvalidGeoDbUpdateIntervalDays { .. } => "invalid_request",
-            Self::MissingUser { .. } | Self::MissingNode { .. } | Self::MissingEndpoint { .. } => {
-                "invalid_request"
-            }
+            | Self::MissingUser { .. }
+            | Self::MissingNode { .. }
+            | Self::MissingEndpoint { .. } => "invalid_request",
             Self::RealityDomainNotFound { .. } => "not_found",
             Self::NodeInUse { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
@@ -88,9 +84,6 @@ impl std::fmt::Display for DomainError {
             }
             Self::InvalidNodeQuotaConfig { reason } => {
                 write!(f, "invalid node quota config: {reason}")
-            }
-            Self::InvalidGeoDbUpdateIntervalDays { days } => {
-                write!(f, "invalid geo_db update_interval_days: {days}")
             }
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),

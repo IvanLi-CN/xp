@@ -278,7 +278,7 @@ function isReportEmpty(report: SharedIpUsageReport): boolean {
 
 function hasWarning(
 	warnings: AdminIpUsageWarning[],
-	code: "online_stats_unavailable" | "geo_db_missing",
+	code: "online_stats_unavailable",
 ): boolean {
 	return warnings.some((warning) => warning.code === code);
 }
@@ -1605,20 +1605,10 @@ function WarningList({ warnings }: { warnings: AdminIpUsageWarning[] }) {
 }
 
 function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
-	if (!geoSource || geoSource === "missing") return null;
-	if (geoSource === "external_override") {
-		return (
-			<div className={alertClass("info")}>
-				<span>
-					This node uses externally managed Geo DB files; xp skips the managed
-					downloader here.
-				</span>
-			</div>
-		);
-	}
+	if (!geoSource) return null;
 	return (
-		<div className={alertClass("info")}>
-			<span>Geo enrichment uses DB-IP Lite City + ASN MMDB.</span>
+		<div className={alertClass("info", "py-2 text-sm")}>
+			<span>Geo enrichment uses the free country.is hosted API.</span>
 		</div>
 	);
 }

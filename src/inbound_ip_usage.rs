@@ -1,12 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
-    path::{Path, PathBuf},
 };
 
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Duration, Timelike as _, Utc};
-use maxminddb::{Reader, geoip2};
 use serde::{Deserialize, Serialize};
 
 pub const INBOUND_IP_USAGE_SCHEMA_VERSION: u32 = 1;
@@ -44,14 +42,6 @@ impl InboundIpUsageWindow {
             _ => Err("invalid window, expected 24h or 7d"),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct PersistedInboundIpUsageGeoDb {
-    #[serde(default)]
-    pub city_db_path: String,
-    #[serde(default)]
-    pub asn_db_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -113,8 +103,6 @@ pub struct PersistedInboundIpUsage {
     #[serde(default)]
     pub online_stats_unavailable: bool,
     #[serde(default)]
-    pub geo: PersistedInboundIpUsageGeoDb,
-    #[serde(default)]
     pub memberships: BTreeMap<String, PersistedInboundIpMembership>,
 }
 
@@ -126,7 +114,6 @@ impl Default for PersistedInboundIpUsage {
             minutes_window: MINUTES_WINDOW,
             latest_minute: None,
             online_stats_unavailable: false,
-            geo: PersistedInboundIpUsageGeoDb::default(),
             memberships: BTreeMap::new(),
         }
     }
@@ -198,101 +185,7 @@ pub struct InboundIpUsageMembershipView {
 }
 
 pub trait GeoLookup: Send + Sync {
-    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb;
-    fn is_missing(&self) -> bool;
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo;
-}
-
-#[derive(Debug)]
-pub struct GeoResolver {
-    city_db_path: Option<PathBuf>,
-    asn_db_path: Option<PathBuf>,
-    city_reader: Option<Reader<Vec<u8>>>,
-    asn_reader: Option<Reader<Vec<u8>>>,
-}
-
-impl GeoResolver {
-    pub fn new(city_db_path: Option<PathBuf>, asn_db_path: Option<PathBuf>) -> Self {
-        let city_reader = city_db_path
-            .as_ref()
-            .and_then(|path| Reader::open_readfile(path).ok());
-        let asn_reader = asn_db_path
-            .as_ref()
-            .and_then(|path| Reader::open_readfile(path).ok());
-        Self {
-            city_db_path,
-            asn_db_path,
-            city_reader,
-            asn_reader,
-        }
-    }
-
-    pub fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
-        PersistedInboundIpUsageGeoDb {
-            city_db_path: self
-                .city_db_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            asn_db_path: self
-                .asn_db_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-        }
-    }
-
-    pub fn is_missing(&self) -> bool {
-        self.city_reader.is_none() || self.asn_reader.is_none()
-    }
-
-    pub fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        let Ok(address) = ip.parse::<IpAddr>() else {
-            return PersistedInboundIpGeo::default();
-        };
-
-        let mut out = PersistedInboundIpGeo::default();
-
-        if let Some(reader) = &self.city_reader
-            && let Ok(result) = reader.lookup(address)
-            && let Ok(Some(city)) = result.decode::<geoip2::City>()
-        {
-            out.country = city.country.iso_code.unwrap_or_default().to_string();
-            out.region = city
-                .subdivisions
-                .first()
-                .and_then(|sub| sub.names.english.or(sub.iso_code))
-                .unwrap_or_default()
-                .to_string();
-            out.city = city.city.names.english.unwrap_or_default().to_string();
-        }
-
-        if let Some(reader) = &self.asn_reader
-            && let Ok(result) = reader.lookup(address)
-            && let Ok(Some(asn)) = result.decode::<geoip2::Asn>()
-        {
-            out.operator = asn
-                .autonomous_system_organization
-                .unwrap_or_default()
-                .to_string();
-        }
-
-        out
-    }
-}
-
-impl GeoLookup for GeoResolver {
-    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
-        GeoResolver::geo_db(self)
-    }
-
-    fn is_missing(&self) -> bool {
-        GeoResolver::is_missing(self)
-    }
-
-    fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        GeoResolver::lookup(self, ip)
-    }
 }
 
 impl PersistedInboundIpUsage {
@@ -353,32 +246,25 @@ impl PersistedInboundIpUsage {
         self.memberships.remove(membership_key).is_some()
     }
 
-    pub fn refresh_geo_cache(
-        &mut self,
-        geo_db: PersistedInboundIpUsageGeoDb,
-        geo_resolver: &dyn GeoLookup,
-    ) -> bool {
-        let mut changed = false;
-        if self.geo != geo_db {
-            self.geo = geo_db;
-            changed = true;
-        }
-        for membership in self.memberships.values_mut() {
-            for (ip, record) in membership.ips.iter_mut() {
-                let next_geo = geo_resolver.lookup(ip);
-                if record.geo != next_geo {
-                    record.geo = next_geo;
-                    changed = true;
+    pub fn collect_lookup_candidates(&self, samples: &[InboundIpMinuteSample]) -> Vec<String> {
+        let mut out = BTreeSet::new();
+        for sample in samples {
+            let existing = self.memberships.get(&sample.membership_key);
+            for ip in sample.ips.iter().filter_map(|ip| normalize_ip_string(ip)) {
+                let needs_lookup = existing
+                    .and_then(|membership| membership.ips.get(&ip))
+                    .is_none_or(|record| record.geo == PersistedInboundIpGeo::default());
+                if needs_lookup {
+                    out.insert(ip);
                 }
             }
         }
-        changed
+        out.into_iter().collect()
     }
 
     pub fn record_minute_samples(
         &mut self,
         minute: DateTime<Utc>,
-        geo_db: PersistedInboundIpUsageGeoDb,
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
         geo_resolver: &dyn GeoLookup,
@@ -393,10 +279,6 @@ impl PersistedInboundIpUsage {
         }
         if self.minutes_window != MINUTES_WINDOW {
             self.minutes_window = MINUTES_WINDOW;
-            changed = true;
-        }
-        if self.geo != geo_db {
-            self.geo = geo_db;
             changed = true;
         }
         if self.online_stats_unavailable != online_stats_unavailable {
@@ -635,10 +517,7 @@ pub fn build_window_view(
     }
 }
 
-pub fn build_warnings(
-    online_stats_unavailable: bool,
-    geo_db_missing: bool,
-) -> Vec<InboundIpUsageWarning> {
+pub fn build_warnings(online_stats_unavailable: bool) -> Vec<InboundIpUsageWarning> {
     let mut warnings = Vec::new();
     if online_stats_unavailable {
         warnings.push(InboundIpUsageWarning {
@@ -646,19 +525,7 @@ pub fn build_warnings(
             message: "Xray online IP stats are unavailable; enable statsUserOnline to collect inbound IP usage.".to_string(),
         });
     }
-    if geo_db_missing {
-        warnings.push(InboundIpUsageWarning {
-            code: "geo_db_missing".to_string(),
-            message: "IP geolocation DB is unavailable; region and operator fields will be empty."
-                .to_string(),
-        });
-    }
     warnings
-}
-
-pub fn geo_db_missing(city_db_path: Option<&Path>, asn_db_path: Option<&Path>) -> bool {
-    !matches!(city_db_path, Some(path) if path.is_file())
-        || !matches!(asn_db_path, Some(path) if path.is_file())
 }
 
 pub fn floor_minute(now: DateTime<Utc>) -> DateTime<Utc> {
@@ -689,7 +556,7 @@ fn normalize_bitmap(bitmap: &mut Vec<u8>) {
     }
 }
 
-fn normalize_ip_string(raw: &str) -> Option<String> {
+pub(crate) fn normalize_ip_string(raw: &str) -> Option<String> {
     raw.trim().parse::<IpAddr>().ok().map(|ip| ip.to_string())
 }
 
@@ -847,6 +714,15 @@ mod bitmap_b64 {
 mod tests {
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct TestGeoLookup;
+
+    impl GeoLookup for TestGeoLookup {
+        fn lookup(&self, _ip: &str) -> PersistedInboundIpGeo {
+            PersistedInboundIpGeo::default()
+        }
+    }
+
     fn sample(
         membership_key: &str,
         user_id: &str,
@@ -868,8 +744,7 @@ mod tests {
     #[test]
     fn record_and_shift_bitmap_window() {
         let mut usage = PersistedInboundIpUsage::default();
-        let geo = GeoResolver::new(None, None).geo_db();
-        let resolver = GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -877,7 +752,6 @@ mod tests {
 
         assert!(usage.record_minute_samples(
             minute0,
-            geo.clone(),
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,
@@ -886,7 +760,6 @@ mod tests {
 
         assert!(usage.record_minute_samples(
             minute1,
-            geo,
             false,
             &[sample(
                 "u1::e1",
@@ -947,8 +820,7 @@ mod tests {
     #[test]
     fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
         let mut usage = PersistedInboundIpUsage::default();
-        let geo_db = GeoResolver::new(None, None).geo_db();
-        let resolver = GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -957,7 +829,6 @@ mod tests {
 
         usage.record_minute_samples(
             minute0,
-            geo_db.clone(),
             false,
             &[
                 sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"]),
@@ -967,7 +838,6 @@ mod tests {
         );
         usage.record_minute_samples(
             minute1,
-            geo_db.clone(),
             false,
             &[
                 sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"]),
@@ -977,7 +847,6 @@ mod tests {
         );
         usage.record_minute_samples(
             minute2,
-            geo_db,
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,

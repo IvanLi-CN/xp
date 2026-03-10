@@ -64,12 +64,19 @@ fn test_config(data_dir: PathBuf) -> Config {
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
-        ip_usage_city_db_path: String::new(),
-        ip_usage_asn_db_path: String::new(),
     }
 }
 
 const TEST_ADMIN_TOKEN: &str = "testtoken";
+
+#[derive(Debug, Default)]
+struct TestGeoLookup;
+
+impl crate::inbound_ip_usage::GeoLookup for TestGeoLookup {
+    fn lookup(&self, _ip: &str) -> crate::inbound_ip_usage::PersistedInboundIpGeo {
+        crate::inbound_ip_usage::PersistedInboundIpGeo::default()
+    }
+}
 
 fn test_admin_token_hash() -> String {
     // Keep tests fast: use a deterministic, low-cost argon2id hash.
@@ -437,15 +444,9 @@ async fn record_inbound_ip_usage_samples(
     samples: Vec<crate::inbound_ip_usage::InboundIpMinuteSample>,
 ) {
     let mut store = store.lock().await;
-    let geo_resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+    let geo_resolver = TestGeoLookup;
     store
-        .record_inbound_ip_usage_samples(
-            minute,
-            crate::inbound_ip_usage::PersistedInboundIpUsageGeoDb::default(),
-            online_stats_unavailable,
-            &samples,
-            &geo_resolver,
-        )
+        .record_inbound_ip_usage_samples(minute, online_stats_unavailable, &samples, &geo_resolver)
         .unwrap();
 }
 
@@ -4554,22 +4555,6 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
     assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
 }
 
-#[test]
-fn config_ip_usage_geo_db_missing_when_mmdb_files_are_unreadable() {
-    let tmp = tempfile::tempdir().unwrap();
-    let city_path = tmp.path().join("GeoLite2-City.mmdb");
-    let asn_path = tmp.path().join("GeoLite2-ASN.mmdb");
-    std::fs::write(&city_path, b"not-a-mmdb").unwrap();
-    std::fs::write(&asn_path, b"not-a-mmdb").unwrap();
-
-    let mut config = test_config(tmp.path().to_path_buf());
-    config.ip_usage_city_db_path = city_path.display().to_string();
-    config.ip_usage_asn_db_path = asn_path.display().to_string();
-
-    let resolver = crate::ip_geo_db::SharedGeoResolver::new(&config);
-    assert!(crate::inbound_ip_usage::GeoLookup::is_missing(&resolver));
-}
-
 #[tokio::test]
 async fn node_ip_usage_returns_series_timeline_and_ip_list() {
     let tmp = tempfile::tempdir().unwrap();
@@ -4622,14 +4607,12 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
         let minute0 = crate::inbound_ip_usage::floor_minute(chrono::Utc::now())
             - chrono::Duration::minutes(1);
         let minute1 = minute0 + chrono::Duration::minutes(1);
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
-        let geo_db = resolver.geo_db();
+        let resolver = TestGeoLookup;
         let membership_one = membership_key(&user.user_id, &endpoint_one.endpoint_id);
         let membership_two = membership_key(&user.user_id, &endpoint_two.endpoint_id);
         store
             .record_inbound_ip_usage_samples(
                 minute0,
-                geo_db.clone(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_one.clone(),
@@ -4645,7 +4628,6 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
         store
             .record_inbound_ip_usage_samples(
                 minute1,
-                geo_db,
                 false,
                 &[
                     crate::inbound_ip_usage::InboundIpMinuteSample {
@@ -4697,10 +4679,7 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
     assert_eq!(json["unique_ip_series"].as_array().unwrap().len(), 24 * 60);
     assert_eq!(series_count_at(&json["unique_ip_series"], &minute0), 1);
     assert_eq!(series_count_at(&json["unique_ip_series"], &minute1), 2);
-    assert_eq!(
-        warning_codes(&json["warnings"]),
-        vec!["geo_db_missing".to_string()]
-    );
+    assert_eq!(warning_codes(&json["warnings"]), Vec::<String>::new());
 
     let timeline = json["timeline"].as_array().unwrap();
     assert_eq!(timeline.len(), 3);
@@ -4771,11 +4750,10 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
 
         let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
         let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         store
             .record_inbound_ip_usage_samples(
                 minute,
-                resolver.geo_db(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership,
@@ -4814,10 +4792,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(json["unreachable_nodes"], json!([]));
     assert_eq!(
         warning_codes(&json["warnings"]),
-        vec![
-            "geo_db_missing".to_string(),
-            "online_stats_unavailable".to_string()
-        ]
+        vec!["online_stats_unavailable".to_string()]
     );
 
     let groups = json["groups"].as_array().unwrap();
@@ -4827,10 +4802,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(group["window_end"], minute);
     assert_eq!(
         warning_codes(&group["warnings"]),
-        vec![
-            "geo_db_missing".to_string(),
-            "online_stats_unavailable".to_string()
-        ]
+        vec!["online_stats_unavailable".to_string()]
     );
     assert_eq!(series_count_at(&group["unique_ip_series"], &minute), 1);
     assert_eq!(
@@ -4894,11 +4866,10 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
         .unwrap();
 
         let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         store
             .record_inbound_ip_usage_samples(
                 minute,
-                resolver.geo_db(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_key(&user.user_id, &local_endpoint.endpoint_id),

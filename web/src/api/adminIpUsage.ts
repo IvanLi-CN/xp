@@ -10,11 +10,7 @@ export const AdminIpUsageWarningSchema = z.object({
 	message: z.string(),
 });
 
-export const AdminIpGeoSourceSchema = z.enum([
-	"managed_dbip_lite",
-	"external_override",
-	"missing",
-]);
+export const AdminIpGeoSourceSchema = z.literal("country_is");
 
 export const AdminIpUsageSeriesPointSchema = z.object({
 	minute: z.string(),

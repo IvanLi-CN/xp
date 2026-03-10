@@ -5,11 +5,6 @@ import type {
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
 import type {
-	AdminIpGeoDbResponse,
-	AdminIpGeoDbUpdateResponse,
-	GeoDbUpdateSettings,
-} from "../../src/api/adminIpGeoDb";
-import type {
 	AdminIpUsageWindow,
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageResponse,
@@ -79,7 +74,6 @@ type MockStateSeed = {
 	nodeQuotas: AdminUserNodeQuota[];
 	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
-	ipGeoDb: AdminIpGeoDbResponse;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
 	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
@@ -417,16 +411,10 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 	return {
 		node,
 		window: "24h",
-		geo_source: "managed_dbip_lite",
+		geo_source: "country_is",
 		window_start: "2026-03-08T00:00:00Z",
 		window_end: "2026-03-08T00:02:00Z",
-		warnings: [
-			{
-				code: "geo_db_missing",
-				message:
-					"IP geolocation DB is unavailable; region and operator fields will be empty.",
-			},
-		],
+		warnings: [],
 		unique_ip_series: [
 			{ minute: "2026-03-08T00:00:00Z", count: 1 },
 			{ minute: "2026-03-08T00:01:00Z", count: 2 },
@@ -470,19 +458,10 @@ function buildDefaultUserIpUsage(
 			const endpointTag = `${node.node_name || node.node_id}-edge-${index + 1}`;
 			return {
 				node,
-				geo_source: index === 0 ? "managed_dbip_lite" : "external_override",
+				geo_source: index === 0 ? "country_is" : "country_is",
 				window_start: "2026-03-08T00:00:00Z",
 				window_end: "2026-03-08T00:02:00Z",
-				warnings:
-					index === 0
-						? []
-						: [
-								{
-									code: "geo_db_missing",
-									message:
-										"IP geolocation DB is unavailable; region and operator fields will be empty.",
-								},
-							],
+				warnings: [],
 				unique_ip_series: [
 					{ minute: "2026-03-08T00:00:00Z", count: 1 },
 					{ minute: "2026-03-08T00:01:00Z", count: 1 },
@@ -695,35 +674,6 @@ node-2`,
 	const userIpUsageByUserId = Object.fromEntries(
 		users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
 	) satisfies Record<string, AdminUserIpUsageResponse>;
-	const ipGeoDb: AdminIpGeoDbResponse = {
-		settings: {
-			provider: "dbip_lite",
-			auto_update_enabled: false,
-			update_interval_days: 1,
-		},
-		partial: false,
-		unreachable_nodes: [],
-		nodes: nodes.map((node, index) => ({
-			node,
-			mode: index === 0 ? "managed" : "external_override",
-			running: false,
-			city_db_path:
-				index === 0
-					? "/var/lib/xp/geoip/dbip-city-lite.mmdb"
-					: "/opt/geo/custom-city.mmdb",
-			asn_db_path:
-				index === 0
-					? "/var/lib/xp/geoip/dbip-asn-lite.mmdb"
-					: "/opt/geo/custom-asn.mmdb",
-			last_started_at: null,
-			last_success_at: "2026-03-08T00:00:00Z",
-			next_scheduled_at: "2026-03-09T00:00:00Z",
-			last_error:
-				index === 0
-					? null
-					: "Managed downloader is skipped because env override is present.",
-		})),
-	};
 
 	return {
 		health: { status: "ok" },
@@ -756,7 +706,6 @@ node-2`,
 		nodeQuotas: [],
 		nodeIpUsageByNodeId,
 		userIpUsageByUserId,
-		ipGeoDb,
 		userNodeWeights,
 		userGlobalWeights,
 		nodeWeightPolicies,
@@ -790,7 +739,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...base.userIpUsageByUserId,
 			...(overrides?.userIpUsageByUserId ?? {}),
 		},
-		ipGeoDb: overrides?.ipGeoDb ?? base.ipGeoDb,
 		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
 		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
 		nodeWeightPolicies:
@@ -901,85 +849,6 @@ async function handleRequest(
 			admin_token_present: true,
 			admin_token_masked: "*".repeat(token.length),
 		});
-	}
-
-	if (path === "/api/admin/ip-geo-db" && method === "GET") {
-		return jsonResponse(clone(state.ipGeoDb));
-	}
-
-	if (path === "/api/admin/ip-geo-db" && method === "PATCH") {
-		const payload =
-			await readJson<
-				Partial<
-					Pick<
-						GeoDbUpdateSettings,
-						"auto_update_enabled" | "update_interval_days"
-					>
-				>
-			>(req);
-		if (
-			!payload ||
-			typeof payload.auto_update_enabled !== "boolean" ||
-			typeof payload.update_interval_days !== "number" ||
-			!Number.isInteger(payload.update_interval_days) ||
-			payload.update_interval_days < 1 ||
-			payload.update_interval_days > 30
-		) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"invalid Geo DB update settings",
-			);
-		}
-		state.ipGeoDb.settings = {
-			...state.ipGeoDb.settings,
-			auto_update_enabled: payload.auto_update_enabled,
-			update_interval_days: payload.update_interval_days,
-		};
-		return jsonResponse(clone(state.ipGeoDb.settings));
-	}
-
-	if (path === "/api/admin/ip-geo-db/update" && method === "POST") {
-		const now = new Date().toISOString();
-		const unreachable = new Set(state.ipGeoDb.unreachable_nodes);
-		const results: AdminIpGeoDbUpdateResponse["nodes"] =
-			state.ipGeoDb.nodes.map((node) => {
-				if (unreachable.has(node.node.node_id)) {
-					return {
-						node_id: node.node.node_id,
-						status: "error",
-						message: "node unreachable",
-					};
-				}
-				if (node.mode === "external_override") {
-					return {
-						node_id: node.node.node_id,
-						status: "skipped",
-						message: "external override is active",
-					};
-				}
-				if (node.running) {
-					return {
-						node_id: node.node.node_id,
-						status: "already_running",
-						message: "update already running",
-					};
-				}
-				node.running = true;
-				node.last_started_at = now;
-				node.last_error = null;
-				node.next_scheduled_at = null;
-				return {
-					node_id: node.node.node_id,
-					status: "accepted",
-					message: null,
-				};
-			});
-		return jsonResponse({
-			partial: state.ipGeoDb.partial,
-			unreachable_nodes: clone(state.ipGeoDb.unreachable_nodes),
-			nodes: clone(results),
-		} satisfies AdminIpGeoDbUpdateResponse);
 	}
 
 	if (path === "/api/admin/nodes" && method === "GET") {

@@ -617,15 +617,10 @@ SSE 事件类型：
     "api_base_url": "https://node-1.internal:8443"
   },
   "window": "24h",
-  "geo_source": "managed_dbip_lite",
+  "geo_source": "country_is",
   "window_start": "2026-03-07T12:00:00Z",
   "window_end": "2026-03-08T11:59:00Z",
-  "warnings": [
-    {
-      "code": "geo_db_missing",
-      "message": "IP geolocation DB is unavailable; region and operator fields will be empty."
-    }
-  ],
+  "warnings": [],
   "unique_ip_series": [
     {
       "minute": "2026-03-08T11:57:00Z",
@@ -665,10 +660,8 @@ SSE 事件类型：
 - `unique_ip_series` 为节点内所有 membership 按分钟去重后的不同 source IP 数量。
 - `timeline` 以 `endpoint_tag / IP` 为行维度，连续分钟已合并成时间段；默认仅返回占用分钟数最高的前 20 行。
 - `ips` 以 IP 聚合，`minutes` 表示当前窗口内该 IP 的去重分钟数。
-- `geo_source`：`managed_dbip_lite | external_override | missing`，用于前端展示 DB-IP Lite attribution、external override 提示或缺库 warning。
-- `warnings` 目前包含：
-  - `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
-  - `geo_db_missing`：Geo DB 不可用，地区与运营商字段返回空字符串。
+- `geo_source`：固定为 `country_is`，用于前端展示 `country.is` attribution。
+- `warnings` 目前仅包含 `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
 - 如果目标节点不可达，接口返回错误而不是静默空数据。
 
 ### 6.2 用户视角：查询用户入站 IP 使用详情（管理员）
@@ -702,7 +695,7 @@ SSE 事件类型：
       },
       "window_start": "2026-03-01T12:00:00Z",
       "window_end": "2026-03-08T11:59:00Z",
-      "geo_source": "external_override",
+      "geo_source": "country_is",
       "warnings": [],
       "unique_ip_series": [],
       "timeline": [],
@@ -724,35 +717,3 @@ SSE 事件类型：
 
 - `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
 - `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`
-
-## 7. Geo DB 自动更新设置
-
-### 7.1 查询 Geo DB 设置与节点状态
-
-`GET /api/admin/ip-geo-db`
-
-返回集群统一设置、`partial` / `unreachable_nodes`，以及每个节点的 `mode`、`running`、DB 路径与最近运行状态。
-
-### 7.2 更新 Geo DB 设置
-
-`PATCH /api/admin/ip-geo-db`
-
-请求体：
-
-```json
-{
-  "auto_update_enabled": true,
-  "update_interval_days": 1
-}
-```
-
-说明：
-
-- `provider` 固定为 `dbip_lite`，不允许通过 API 修改。
-- `update_interval_days` 仅允许 `1..=30`。
-
-### 7.3 手动触发 Geo DB 更新
-
-`POST /api/admin/ip-geo-db/update`
-
-返回每个节点的启动结果：`accepted | already_running | skipped | error`。

@@ -2,14 +2,7 @@
 
 ## xp runtime config
 
-新增只读配置项：
-
-- `XP_IP_USAGE_CITY_DB_PATH`
-  - 默认：空字符串
-  - 语义：外部覆盖的 City MMDB 文件路径；为空时使用 xp 托管的 DB-IP Lite City 库
-- `XP_IP_USAGE_ASN_DB_PATH`
-  - 默认：空字符串
-  - 语义：外部覆盖的 ASN MMDB 文件路径；为空时使用 xp 托管的 DB-IP Lite ASN 库
+Inbound IP usage Geo enrichment no longer exposes dedicated Geo DB env vars. Runtime only requires the existing xp base config plus outbound HTTPS access to `https://api.country.is/`.
 
 ## Xray static config requirement
 

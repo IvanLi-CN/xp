@@ -21,16 +21,10 @@ describe("admin IP usage schemas", () => {
 				},
 			},
 			window: "24h",
-			geo_source: "managed_dbip_lite",
+			geo_source: "country_is",
 			window_start: "2026-03-07T01:00:00Z",
 			window_end: "2026-03-08T00:59:00Z",
-			warnings: [
-				{
-					code: "geo_db_missing",
-					message:
-						"IP geolocation DB is unavailable; region and operator fields will be empty.",
-				},
-			],
+			warnings: [],
 			unique_ip_series: [{ minute: "2026-03-08T00:59:00Z", count: 2 }],
 			timeline: [
 				{
@@ -92,7 +86,7 @@ describe("admin IP usage schemas", () => {
 							tz_offset_minutes: null,
 						},
 					},
-					geo_source: "external_override",
+					geo_source: "country_is",
 					window_start: "2026-03-01T01:00:00Z",
 					window_end: "2026-03-08T00:59:00Z",
 					warnings: [],
