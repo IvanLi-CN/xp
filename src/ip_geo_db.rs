@@ -189,12 +189,9 @@ impl SharedGeoResolver {
                         .is_none_or(|entry| entry.cached_at + COUNTRY_IS_CACHE_TTL <= now)
                 })
                 .filter(|ip| {
-                    cache
-                        .retry_after_by_ip
-                        .get(ip)
-                        .is_none_or(|entry| {
-                            entry.cached_at + COUNTRY_IS_CACHE_TTL <= now || entry.retry_after <= now
-                        })
+                    cache.retry_after_by_ip.get(ip).is_none_or(|entry| {
+                        entry.cached_at + COUNTRY_IS_CACHE_TTL <= now || entry.retry_after <= now
+                    })
                 })
                 .collect::<Vec<_>>()
         };
@@ -589,9 +586,6 @@ mod tests {
             );
             cache.prune(now + COUNTRY_IS_CACHE_TTL + StdDuration::from_secs(1));
         }
-        assert_eq!(
-            resolver.lookup("8.8.8.8"),
-            PersistedInboundIpGeo::default()
-        );
+        assert_eq!(resolver.lookup("8.8.8.8"), PersistedInboundIpGeo::default());
     }
 }
