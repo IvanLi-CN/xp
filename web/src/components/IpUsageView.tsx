@@ -1606,9 +1606,21 @@ function WarningList({ warnings }: { warnings: AdminIpUsageWarning[] }) {
 
 function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
 	if (!geoSource) return null;
+	const message = (() => {
+		switch (geoSource) {
+			case "country_is":
+				return "Geo enrichment uses the free country.is hosted API.";
+			case "managed_dbip_lite":
+				return "Geo enrichment uses legacy managed DB-IP Lite MMDB data.";
+			case "external_override":
+				return "Geo enrichment uses a legacy external MMDB override.";
+			case "missing":
+				return "Geo enrichment is currently unavailable on this node.";
+		}
+	})();
 	return (
 		<div className={alertClass("info", "py-2 text-sm")}>
-			<span>Geo enrichment uses the free country.is hosted API.</span>
+			<span>{message}</span>
 		</div>
 	);
 }

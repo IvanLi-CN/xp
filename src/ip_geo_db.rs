@@ -30,6 +30,9 @@ const COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES: usize = 50_000;
 #[serde(rename_all = "snake_case")]
 pub enum IpGeoSource {
     CountryIs,
+    ManagedDbipLite,
+    ExternalOverride,
+    Missing,
 }
 
 impl<'de> serde::Deserialize<'de> for IpGeoSource {
@@ -37,21 +40,22 @@ impl<'de> serde::Deserialize<'de> for IpGeoSource {
     where
         D: serde::Deserializer<'de>,
     {
-        // Compatibility: allow rolling upgrades where the leader still receives legacy
-        // geo_source values from older nodes, but always report `country_is` upstream.
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        enum Compat {
-            CountryIs,
-            ManagedDbipLite,
-            ExternalOverride,
-            Missing,
-            #[serde(other)]
-            Unknown,
-        }
+        // Compatibility: tolerate unknown values during rolling upgrades instead of failing the
+        // entire response parsing.
+        let raw = String::deserialize(deserializer)?;
+        Ok(IpGeoSource::from_legacy_str(raw.as_str()))
+    }
+}
 
-        let _ = Compat::deserialize(deserializer)?;
-        Ok(IpGeoSource::CountryIs)
+impl IpGeoSource {
+    pub fn from_legacy_str(raw: &str) -> Self {
+        match raw {
+            "country_is" => Self::CountryIs,
+            "managed_dbip_lite" => Self::ManagedDbipLite,
+            "external_override" => Self::ExternalOverride,
+            "missing" => Self::Missing,
+            _ => Self::Missing,
+        }
     }
 }
 
@@ -253,6 +257,22 @@ impl SharedGeoResolver {
         let retry_after = now + COUNTRY_IS_FAILURE_BACKOFF;
         for ip in request_ips {
             if let Some(geo) = resolved.get(&ip) {
+                if geo.country.is_empty()
+                    && geo.region.is_empty()
+                    && geo.city.is_empty()
+                    && geo.operator.is_empty()
+                {
+                    // country.is can return rows without any geo fields for some IPs. Treat that as a
+                    // temporary miss so we can retry later instead of caching an empty geo for a day.
+                    cache.retry_after_by_ip.insert(
+                        ip,
+                        ResolverCacheRetryEntry {
+                            retry_after,
+                            cached_at: now,
+                        },
+                    );
+                    continue;
+                }
                 cache.geo_by_ip.insert(
                     ip.clone(),
                     ResolverCacheGeoEntry {
@@ -457,25 +477,16 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
-    fn ip_geo_source_deserializes_legacy_values_as_country_is() {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "snake_case")]
-        enum LegacyGeoSource {
-            ManagedDbipLite,
-            ExternalOverride,
-            Missing,
-        }
-
-        for legacy in [
-            serde_json::to_string(&IpGeoSource::CountryIs).unwrap(),
-            serde_json::to_string(&LegacyGeoSource::ManagedDbipLite).unwrap(),
-            serde_json::to_string(&LegacyGeoSource::ExternalOverride).unwrap(),
-            serde_json::to_string(&LegacyGeoSource::Missing).unwrap(),
-            "\"future_value\"".to_string(),
+    fn ip_geo_source_deserializes_known_values_and_defaults_unknown_to_missing() {
+        for (raw, expected) in [
+            ("\"country_is\"", IpGeoSource::CountryIs),
+            ("\"managed_dbip_lite\"", IpGeoSource::ManagedDbipLite),
+            ("\"external_override\"", IpGeoSource::ExternalOverride),
+            ("\"missing\"", IpGeoSource::Missing),
+            ("\"future_value\"", IpGeoSource::Missing),
         ] {
-            let parsed: IpGeoSource = serde_json::from_str(&legacy).unwrap();
-            assert_eq!(parsed, IpGeoSource::CountryIs);
-            assert_eq!(serde_json::to_string(&parsed).unwrap(), "\"country_is\"");
+            let parsed: IpGeoSource = serde_json::from_str(raw).unwrap();
+            assert_eq!(parsed, expected);
         }
     }
 
@@ -564,6 +575,34 @@ mod tests {
             PersistedInboundIpGeo::default()
         );
         assert_eq!(resolver.lookup("8.8.8.8").country, "US");
+    }
+
+    #[tokio::test]
+    async fn batch_lookup_treats_empty_geo_rows_as_miss_and_sets_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": null,
+                    "city": null,
+                    "subdivision": null,
+                    "asn": null
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+
+        assert_eq!(resolver.lookup("8.8.8.8"), PersistedInboundIpGeo::default());
+
+        let cache = resolver.cache.read().expect("geo resolver read lock");
+        assert!(!cache.geo_by_ip.contains_key("8.8.8.8"));
+        assert!(cache.retry_after_by_ip.contains_key("8.8.8.8"));
     }
 
     #[test]

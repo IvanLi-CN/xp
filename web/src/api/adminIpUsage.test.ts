@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	AdminIpGeoSourceSchema,
 	AdminNodeIpUsageResponseSchema,
 	AdminUserIpUsageResponseSchema,
 } from "./adminIpUsage";
@@ -99,5 +100,15 @@ describe("admin IP usage schemas", () => {
 
 		expect(parsed.partial).toBe(true);
 		expect(parsed.unreachable_nodes).toEqual(["node-2"]);
+	});
+
+	it("accepts legacy geo_source values for rolling upgrades", () => {
+		expect(AdminIpGeoSourceSchema.parse("managed_dbip_lite")).toBe(
+			"managed_dbip_lite",
+		);
+		expect(AdminIpGeoSourceSchema.parse("external_override")).toBe(
+			"external_override",
+		);
+		expect(AdminIpGeoSourceSchema.parse("missing")).toBe("missing");
 	});
 });

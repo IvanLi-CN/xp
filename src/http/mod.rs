@@ -1773,6 +1773,8 @@ struct AdminInternalNodeIpUsageLocalResponse {
     node: Node,
     window: IpUsageWindow,
     geo_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geo_source_v2: Option<IpGeoSource>,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -1786,6 +1788,8 @@ struct AdminInternalUserIpUsageLocalResponse {
     node: Node,
     window: IpUsageWindow,
     geo_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geo_source_v2: Option<IpGeoSource>,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -2229,6 +2233,7 @@ async fn admin_internal_get_local_node_ip_usage(
         })?
     };
     let geo_source = "managed_dbip_lite".to_string();
+    let geo_source_v2 = Some(state.geo_db_update.ip_geo_source());
     let report = {
         let store = state.store.lock().await;
         build_local_node_ip_usage_report(&store, &node.node_id, window)
@@ -2237,6 +2242,7 @@ async fn admin_internal_get_local_node_ip_usage(
         node,
         window,
         geo_source,
+        geo_source_v2,
         window_start: report.window_start,
         window_end: report.window_end,
         warnings: report.warnings,
@@ -2317,17 +2323,29 @@ async fn admin_get_node_ip_usage(
         .json::<AdminInternalNodeIpUsageLocalResponse>()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let geo_source = state.geo_db_update.ip_geo_source();
-    Ok(Json(AdminNodeIpUsageResponse {
-        node: remote.node,
-        window: remote.window,
+    let AdminInternalNodeIpUsageLocalResponse {
+        node,
+        window,
         geo_source,
-        window_start: remote.window_start,
-        window_end: remote.window_end,
-        warnings: normalize_ip_usage_warnings(remote.warnings),
-        unique_ip_series: remote.unique_ip_series,
-        timeline: remote.timeline,
-        ips: remote.ips,
+        geo_source_v2,
+        window_start,
+        window_end,
+        warnings,
+        unique_ip_series,
+        timeline,
+        ips,
+    } = remote;
+    let geo_source = geo_source_v2.unwrap_or_else(|| IpGeoSource::from_legacy_str(&geo_source));
+    Ok(Json(AdminNodeIpUsageResponse {
+        node,
+        window,
+        geo_source,
+        window_start,
+        window_end,
+        warnings: normalize_ip_usage_warnings(warnings),
+        unique_ip_series,
+        timeline,
+        ips,
     }))
 }
 
@@ -2351,6 +2369,7 @@ async fn admin_internal_get_local_user_ip_usage(
         })?
     };
     let geo_source = "managed_dbip_lite".to_string();
+    let geo_source_v2 = Some(state.geo_db_update.ip_geo_source());
     let report = {
         let store = state.store.lock().await;
         build_local_user_node_ip_usage_report(&store, &user_id, &node.node_id, window)
@@ -2359,6 +2378,7 @@ async fn admin_internal_get_local_user_ip_usage(
         node,
         window,
         geo_source,
+        geo_source_v2,
         window_start: report.window_start,
         window_end: report.window_end,
         warnings: report.warnings,
@@ -2465,16 +2485,31 @@ async fn admin_get_user_ip_usage(
             .json::<AdminInternalUserIpUsageLocalResponse>()
             .await
         {
-            Ok(remote) => groups.push(AdminUserIpUsageNodeGroup {
-                node: remote.node,
-                geo_source: state.geo_db_update.ip_geo_source(),
-                window_start: remote.window_start,
-                window_end: remote.window_end,
-                warnings: normalize_ip_usage_warnings(remote.warnings),
-                unique_ip_series: remote.unique_ip_series,
-                timeline: remote.timeline,
-                ips: remote.ips,
-            }),
+            Ok(remote) => {
+                let AdminInternalUserIpUsageLocalResponse {
+                    node,
+                    window: _,
+                    geo_source,
+                    geo_source_v2,
+                    window_start,
+                    window_end,
+                    warnings,
+                    unique_ip_series,
+                    timeline,
+                    ips,
+                } = remote;
+                groups.push(AdminUserIpUsageNodeGroup {
+                    node,
+                    geo_source: geo_source_v2
+                        .unwrap_or_else(|| IpGeoSource::from_legacy_str(&geo_source)),
+                    window_start,
+                    window_end,
+                    warnings: normalize_ip_usage_warnings(warnings),
+                    unique_ip_series,
+                    timeline,
+                    ips,
+                });
+            }
             Err(_) => unreachable_nodes.push(node.node_id.clone()),
         }
     }
