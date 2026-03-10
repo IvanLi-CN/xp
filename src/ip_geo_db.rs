@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{Arc, RwLock},
     time::{Duration as StdDuration, Instant},
 };
@@ -21,6 +21,10 @@ const COUNTRY_IS_BATCH_SIZE: usize = 100;
 const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const COUNTRY_IS_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(5);
 const COUNTRY_IS_FAILURE_BACKOFF: StdDuration = StdDuration::from_secs(15 * 60);
+const COUNTRY_IS_CACHE_TTL: StdDuration = StdDuration::from_secs(24 * 60 * 60);
+const COUNTRY_IS_CACHE_PRUNE_INTERVAL: StdDuration = StdDuration::from_secs(5 * 60);
+const COUNTRY_IS_GEO_CACHE_MAX_ENTRIES: usize = 50_000;
+const COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES: usize = 50_000;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -51,10 +55,78 @@ impl<'de> serde::Deserialize<'de> for IpGeoSource {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
+struct ResolverCacheGeoEntry {
+    geo: PersistedInboundIpGeo,
+    cached_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ResolverCacheRetryEntry {
+    retry_after: Instant,
+    cached_at: Instant,
+}
+
+#[derive(Debug)]
 struct ResolverCache {
-    geo_by_ip: HashMap<String, PersistedInboundIpGeo>,
-    retry_after_by_ip: HashMap<String, Instant>,
+    geo_by_ip: HashMap<String, ResolverCacheGeoEntry>,
+    retry_after_by_ip: HashMap<String, ResolverCacheRetryEntry>,
+    last_pruned_at: Instant,
+}
+
+impl Default for ResolverCache {
+    fn default() -> Self {
+        Self {
+            geo_by_ip: HashMap::new(),
+            retry_after_by_ip: HashMap::new(),
+            last_pruned_at: Instant::now(),
+        }
+    }
+}
+
+impl ResolverCache {
+    fn prune_if_needed(&mut self, now: Instant) {
+        if self.last_pruned_at + COUNTRY_IS_CACHE_PRUNE_INTERVAL > now {
+            return;
+        }
+        self.prune(now);
+        self.last_pruned_at = now;
+    }
+
+    fn prune(&mut self, now: Instant) {
+        self.geo_by_ip
+            .retain(|_, entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now);
+        self.retry_after_by_ip
+            .retain(|_, entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now);
+
+        // Bound memory growth even if a node sees a huge volume of unique IPs in a short time.
+        // The eviction policy is intentionally simple (arbitrary drops) since persisted IP usage
+        // retains geo for the reporting window.
+        if self.geo_by_ip.len() > COUNTRY_IS_GEO_CACHE_MAX_ENTRIES {
+            let overflow = self.geo_by_ip.len() - COUNTRY_IS_GEO_CACHE_MAX_ENTRIES;
+            let keys = self
+                .geo_by_ip
+                .keys()
+                .take(overflow)
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in keys {
+                self.geo_by_ip.remove(&key);
+            }
+        }
+        if self.retry_after_by_ip.len() > COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES {
+            let overflow = self.retry_after_by_ip.len() - COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES;
+            let keys = self
+                .retry_after_by_ip
+                .keys()
+                .take(overflow)
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in keys {
+                self.retry_after_by_ip.remove(&key);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +165,10 @@ impl SharedGeoResolver {
         I: IntoIterator<Item = String>,
     {
         let now = Instant::now();
+        {
+            let mut cache = self.cache.write().expect("geo resolver write lock");
+            cache.prune_if_needed(now);
+        }
         let candidates = ips
             .into_iter()
             .filter_map(|ip| normalize_ip_string(&ip))
@@ -106,12 +182,19 @@ impl SharedGeoResolver {
             let cache = self.cache.read().expect("geo resolver read lock");
             candidates
                 .into_iter()
-                .filter(|ip| !cache.geo_by_ip.contains_key(ip))
+                .filter(|ip| {
+                    cache
+                        .geo_by_ip
+                        .get(ip)
+                        .is_none_or(|entry| entry.cached_at + COUNTRY_IS_CACHE_TTL <= now)
+                })
                 .filter(|ip| {
                     cache
                         .retry_after_by_ip
                         .get(ip)
-                        .is_none_or(|retry_after| *retry_after <= now)
+                        .is_none_or(|entry| {
+                            entry.cached_at + COUNTRY_IS_CACHE_TTL <= now || entry.retry_after <= now
+                        })
                 })
                 .collect::<Vec<_>>()
         };
@@ -167,24 +250,46 @@ impl SharedGeoResolver {
             })
             .collect::<HashMap<_, _>>();
 
+        let now = Instant::now();
         let mut cache = self.cache.write().expect("geo resolver write lock");
-        let retry_after = Instant::now() + COUNTRY_IS_FAILURE_BACKOFF;
+        cache.prune_if_needed(now);
+        let retry_after = now + COUNTRY_IS_FAILURE_BACKOFF;
         for ip in request_ips {
             if let Some(geo) = resolved.get(&ip) {
-                cache.geo_by_ip.insert(ip.clone(), geo.clone());
+                cache.geo_by_ip.insert(
+                    ip.clone(),
+                    ResolverCacheGeoEntry {
+                        geo: geo.clone(),
+                        cached_at: now,
+                    },
+                );
                 cache.retry_after_by_ip.remove(&ip);
             } else {
-                cache.retry_after_by_ip.insert(ip, retry_after);
+                cache.retry_after_by_ip.insert(
+                    ip,
+                    ResolverCacheRetryEntry {
+                        retry_after,
+                        cached_at: now,
+                    },
+                );
             }
         }
         Ok(())
     }
 
     fn mark_retry_after(&self, ips: &BTreeSet<String>) {
-        let retry_after = Instant::now() + COUNTRY_IS_FAILURE_BACKOFF;
+        let now = Instant::now();
+        let retry_after = now + COUNTRY_IS_FAILURE_BACKOFF;
         let mut cache = self.cache.write().expect("geo resolver write lock");
+        cache.prune_if_needed(now);
         for ip in ips {
-            cache.retry_after_by_ip.insert(ip.clone(), retry_after);
+            cache.retry_after_by_ip.insert(
+                ip.clone(),
+                ResolverCacheRetryEntry {
+                    retry_after,
+                    cached_at: now,
+                },
+            );
         }
     }
 }
@@ -194,12 +299,14 @@ impl GeoLookup for SharedGeoResolver {
         let Some(ip) = normalize_ip_string(ip) else {
             return PersistedInboundIpGeo::default();
         };
+        let now = Instant::now();
         self.cache
             .read()
             .expect("geo resolver read lock")
             .geo_by_ip
             .get(&ip)
-            .cloned()
+            .filter(|entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now)
+            .map(|entry| entry.geo.clone())
             .unwrap_or_default()
     }
 }
@@ -282,27 +389,68 @@ fn trim_or_empty(value: Option<String>) -> String {
 
 fn is_global_ip(raw: &str) -> bool {
     match raw.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => {
-            !ip.is_private()
-                && !ip.is_loopback()
-                && !ip.is_link_local()
-                && !ip.is_broadcast()
-                && !ip.is_documentation()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-        }
-        Ok(IpAddr::V6(ip)) => {
-            let segments = ip.segments();
-            let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
-            !ip.is_loopback()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-                && !ip.is_unique_local()
-                && !ip.is_unicast_link_local()
-                && !is_documentation
-        }
+        Ok(IpAddr::V4(ip)) => is_public_ipv4(ip),
+        Ok(IpAddr::V6(ip)) => is_public_ipv6(ip),
         Err(_) => false,
     }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+    {
+        return false;
+    }
+
+    let [a, b, c, _d] = ip.octets();
+
+    // 0.0.0.0/8 (also includes 0.0.0.0/32)
+    if a == 0 {
+        return false;
+    }
+
+    // RFC 6598 carrier-grade NAT: 100.64.0.0/10
+    if a == 100 && (64..=127).contains(&b) {
+        return false;
+    }
+
+    // RFC 6890 IETF Protocol Assignments: 192.0.0.0/24
+    if a == 192 && b == 0 && c == 0 {
+        return false;
+    }
+
+    // RFC 2544 benchmarking: 198.18.0.0/15
+    if a == 198 && (b == 18 || b == 19) {
+        return false;
+    }
+
+    // Reserved for future use: 240.0.0.0/4
+    if a >= 240 {
+        return false;
+    }
+
+    true
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    // Treat IPv4-mapped/compatible addresses as IPv4 for public range checks.
+    if let Some(v4) = ip.to_ipv4() {
+        return is_public_ipv4(v4);
+    }
+
+    let segments = ip.segments();
+    let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && !ip.is_unique_local()
+        && !ip.is_unicast_link_local()
+        && !is_documentation
 }
 
 #[cfg(test)]
@@ -399,16 +547,51 @@ mod tests {
             .prime_ips([
                 "8.8.8.8".to_string(),
                 "192.168.1.10".to_string(),
+                "100.64.0.1".to_string(),
+                "198.18.0.1".to_string(),
+                "::ffff:192.168.1.1".to_string(),
+                "2001:db8::1".to_string(),
                 "8.8.8.8".to_string(),
             ])
             .await
             .unwrap();
         resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
 
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body, serde_json::json!(["8.8.8.8"]));
+
         assert_eq!(
             resolver.lookup("192.168.1.10"),
             PersistedInboundIpGeo::default()
         );
         assert_eq!(resolver.lookup("8.8.8.8").country, "US");
+    }
+
+    #[test]
+    fn lookup_ignores_expired_cache_entries() {
+        let resolver = SharedGeoResolver::with_origin("http://127.0.0.1").unwrap();
+        let now = Instant::now();
+        {
+            let mut cache = resolver.cache.write().expect("geo resolver write lock");
+            cache.geo_by_ip.insert(
+                "8.8.8.8".to_string(),
+                ResolverCacheGeoEntry {
+                    geo: PersistedInboundIpGeo {
+                        country: "US".to_string(),
+                        region: String::new(),
+                        city: String::new(),
+                        operator: String::new(),
+                    },
+                    cached_at: now,
+                },
+            );
+            cache.prune(now + COUNTRY_IS_CACHE_TTL + StdDuration::from_secs(1));
+        }
+        assert_eq!(
+            resolver.lookup("8.8.8.8"),
+            PersistedInboundIpGeo::default()
+        );
     }
 }

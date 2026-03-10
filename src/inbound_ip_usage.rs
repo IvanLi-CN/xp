@@ -290,7 +290,10 @@ impl PersistedInboundIpUsage {
                 }
                 let needs_lookup = existing
                     .and_then(|membership| membership.ips.get(&ip))
-                    .is_none_or(|record| geo_is_default(&record.geo));
+                    .is_none_or(|record| {
+                        geo_is_default(&record.geo)
+                            || !bitmap_has_any_bit_after_shift(&record.bitmap, shift)
+                    });
                 if needs_lookup {
                     out.insert(ip);
                 }
@@ -870,6 +873,36 @@ mod tests {
             &noop,
         );
         assert_eq!(usage.memberships["u2::e2"].ips["203.0.113.7"].geo, cached);
+    }
+
+    #[test]
+    fn collect_lookup_candidates_includes_geo_after_full_window_shift() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute_far = minute0 + Duration::minutes(MINUTES_WINDOW as i64);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+            &seed,
+        );
+        assert!(!geo_is_default(
+            &usage.memberships["u1::e1"].ips["203.0.113.7"].geo
+        ));
+
+        // After shifting a full window, the old bitmap drops out and the record will be pruned
+        // during `advance_to_minute()`. Candidate selection must treat the geo as missing and
+        // request a fresh prime for the new minute.
+        let candidates = usage.collect_lookup_candidates(
+            minute_far,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+        );
+        assert_eq!(candidates, vec!["203.0.113.7".to_string()]);
     }
 
     #[test]
