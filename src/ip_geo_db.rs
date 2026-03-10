@@ -22,10 +22,33 @@ const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const COUNTRY_IS_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(5);
 const COUNTRY_IS_FAILURE_BACKOFF: StdDuration = StdDuration::from_secs(15 * 60);
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IpGeoSource {
     CountryIs,
+}
+
+impl<'de> serde::Deserialize<'de> for IpGeoSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Compatibility: allow rolling upgrades where the leader still receives legacy
+        // geo_source values from older nodes, but always report `country_is` upstream.
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Compat {
+            CountryIs,
+            ManagedDbipLite,
+            ExternalOverride,
+            Missing,
+            #[serde(other)]
+            Unknown,
+        }
+
+        let _ = Compat::deserialize(deserializer)?;
+        Ok(IpGeoSource::CountryIs)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -287,6 +310,29 @@ mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn ip_geo_source_deserializes_legacy_values_as_country_is() {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "snake_case")]
+        enum LegacyGeoSource {
+            ManagedDbipLite,
+            ExternalOverride,
+            Missing,
+        }
+
+        for legacy in [
+            serde_json::to_string(&IpGeoSource::CountryIs).unwrap(),
+            serde_json::to_string(&LegacyGeoSource::ManagedDbipLite).unwrap(),
+            serde_json::to_string(&LegacyGeoSource::ExternalOverride).unwrap(),
+            serde_json::to_string(&LegacyGeoSource::Missing).unwrap(),
+            "\"future_value\"".to_string(),
+        ] {
+            let parsed: IpGeoSource = serde_json::from_str(&legacy).unwrap();
+            assert_eq!(parsed, IpGeoSource::CountryIs);
+            assert_eq!(serde_json::to_string(&parsed).unwrap(), "\"country_is\"");
+        }
+    }
 
     #[tokio::test]
     async fn batch_lookup_maps_country_is_fields() {

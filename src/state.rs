@@ -194,14 +194,32 @@ impl From<DomainError> for StoreError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+const fn default_geo_db_update_interval_days_compat() -> u8 {
+    1
+}
+
+fn default_geo_db_provider_compat() -> String {
+    "dbip_lite".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeoDbUpdateSettingsCompat {
-    #[serde(default)]
+    #[serde(default = "default_geo_db_provider_compat")]
     pub provider: String,
     #[serde(default)]
     pub auto_update_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_geo_db_update_interval_days_compat")]
     pub update_interval_days: u8,
+}
+
+impl Default for GeoDbUpdateSettingsCompat {
+    fn default() -> Self {
+        Self {
+            provider: default_geo_db_provider_compat(),
+            auto_update_enabled: false,
+            update_interval_days: default_geo_db_update_interval_days_compat(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,6 +250,10 @@ pub struct PersistedState {
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
+    /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
+    /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
+    #[serde(default, rename = "geo_db_update_settings")]
+    pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
 }
 
 impl PersistedState {
@@ -249,6 +271,7 @@ impl PersistedState {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
             user_mihomo_profiles: BTreeMap::new(),
+            geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
 }
