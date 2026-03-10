@@ -203,10 +203,12 @@ impl SharedGeoResolver {
     }
 
     pub fn last_error_message(&self) -> Option<String> {
+        let now = Instant::now();
         self.last_error
             .read()
             .expect("geo resolver read lock")
             .as_ref()
+            .filter(|entry| entry.at + COUNTRY_IS_FAILURE_BACKOFF > now)
             .map(|entry| entry.message.clone())
     }
 
@@ -261,7 +263,10 @@ impl SharedGeoResolver {
     fn mark_last_error(&self, msg: &str) {
         let msg = sanitize_error_message(msg);
         let mut last_error = self.last_error.write().expect("geo resolver write lock");
-        *last_error = Some(ResolverLastError { message: msg });
+        *last_error = Some(ResolverLastError {
+            message: msg,
+            at: Instant::now(),
+        });
     }
 
     fn clear_last_error(&self) {
@@ -459,6 +464,7 @@ impl GeoLookup for SharedGeoResolver {
 #[derive(Debug, Clone)]
 struct ResolverLastError {
     message: String,
+    at: Instant,
 }
 
 fn sanitize_error_message(raw: &str) -> String {

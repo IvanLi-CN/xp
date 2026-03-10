@@ -128,7 +128,7 @@
 - 采集语义已冻结为 `statsUserOnline` 每分钟快照。
 - 公开 API 的时间窗口仅允许 `24h` / `7d`，且 UTC 分钟起点口径已冻结。
 - 用户详情按节点 tabs 切换的展示语义已冻结。
-- Geo 数据源固定为 `country.is` Hosted API。
+- Geo 数据源为 `country.is` Hosted API（通过 `XP_IP_GEO_ENABLED` 开关启用；关闭时 `geo_source=missing`）。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 

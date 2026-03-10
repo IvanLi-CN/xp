@@ -142,19 +142,28 @@ Optional quota knobs:
 - `XP_QUOTA_POLL_INTERVAL_SECS` (default: `10`, allowed range `5..=30`)
 - `XP_QUOTA_AUTO_UNBAN` (default: `true`)
 
+Optional inbound IP geo knobs:
+
+- `XP_IP_GEO_ENABLED` (default: `false`)
+  - When enabled, `xp` resolves newly-seen inbound public IPs via the free `country.is` hosted API.
+  - Note: this sends observed client IPs to a third-party service.
+- `XP_IP_GEO_ORIGIN` (default: `https://api.country.is`)
+  - Override the hosted API origin (e.g. self-hosting the same interface or special network environments).
+
 An example env file is provided at `docs/ops/env/xp.env.example`.
 
 ## Inbound IP usage prerequisites
 
-To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. Geo enrichment now uses the free `country.is` hosted API by default and no longer requires local MMDB files or a dedicated Geo settings page.
+To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. Geo enrichment can optionally use the free `country.is` hosted API (`XP_IP_GEO_ENABLED=true`) and no longer requires local MMDB files or a dedicated Geo settings page.
 
 1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats.
-2. Nodes need outbound HTTPS access to `https://api.country.is/` so new公网 IP can be resolved on first sight.
-3. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection.
+2. When `XP_IP_GEO_ENABLED=true`, nodes need outbound HTTPS access to `https://api.country.is/` so new public IPs can be resolved on first sight.
+3. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection (the admin UI will show an `ip_geo_lookup_failed` warning after failed lookups).
 
 Operational notes:
 
 - No local Geo DB download/update job runs anymore, so `${XP_DATA_DIR}/geoip` is not used by the default IP usage pipeline.
+- Upgrades from releases that used managed DB-IP geo enrichment must opt in again via `XP_IP_GEO_ENABLED=true`; otherwise `geo_source=missing` and geo fields stay empty.
 - `statsUserOnline` is required for the online IP snapshot itself. If it is missing, `xp` keeps quota collection running and returns an `online_stats_unavailable` warning to the admin UI.
 - `xp-ops init` now writes `/etc/xray/config.json` with `statsUserOnline=true` by default; nodes provisioned before this change should verify their static config before rollout.
 

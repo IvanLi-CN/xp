@@ -660,7 +660,7 @@ SSE 事件类型：
 - `unique_ip_series` 为节点内所有 membership 按分钟去重后的不同 source IP 数量。
 - `timeline` 以 `endpoint_tag / IP` 为行维度，连续分钟已合并成时间段；默认仅返回占用分钟数最高的前 20 行。
 - `ips` 以 IP 聚合，`minutes` 表示当前窗口内该 IP 的去重分钟数。
-- `geo_source`：固定为 `country_is`，用于前端展示 `country.is` attribution。
+- `geo_source`：当节点启用 IP Geo（`XP_IP_GEO_ENABLED=true`）时为 `country_is`，否则为 `missing`；用于前端展示 attribution 与可用性提示。
 - `warnings` 目前仅包含 `online_stats_unavailable`：Xray 未开启 `statsUserOnline`，collector 不会把它误当成“当前无 IP”。
 - 如果目标节点不可达，接口返回错误而不是静默空数据。
 

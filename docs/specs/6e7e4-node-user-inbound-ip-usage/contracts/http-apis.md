@@ -10,7 +10,7 @@
 
 ## GET /api/admin/nodes/{node_id}/ip-usage?window=24h|7d
 
-返回单节点视图；`geo_source` 固定为 `country_is`：
+返回单节点视图；`geo_source` 表示当前节点的 IP Geo 数据源（启用时为 `country_is`，禁用时为 `missing`）：
 
 ```json
 {
@@ -69,7 +69,7 @@
 
 ## GET /api/admin/users/{user_id}/ip-usage?window=24h|7d
 
-返回按节点分组的用户视图；每个 `groups[].geo_source` 固定为 `country_is`：
+返回按节点分组的用户视图；每个 `groups[].geo_source` 表示该节点的 IP Geo 数据源：
 
 ```json
 {
