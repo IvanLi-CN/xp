@@ -52,6 +52,7 @@ pub struct Config {
     #[arg(
         long,
         global = true,
+        env = "XP_BIND",
         value_name = "ADDR",
         default_value = "127.0.0.1:62416"
     )]

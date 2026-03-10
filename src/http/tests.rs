@@ -4812,6 +4812,23 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(group["ips"].as_array().unwrap()[0]["ip"], "203.0.113.9");
 }
 
+#[test]
+fn normalize_ip_usage_warnings_filters_legacy_geo_db_missing() {
+    let warnings = vec![
+        crate::inbound_ip_usage::InboundIpUsageWarning {
+            code: "geo_db_missing".to_string(),
+            message: "legacy".to_string(),
+        },
+        crate::inbound_ip_usage::InboundIpUsageWarning {
+            code: "online_stats_unavailable".to_string(),
+            message: "xray is missing".to_string(),
+        },
+    ];
+    let out = super::normalize_ip_usage_warnings(warnings);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].code, "online_stats_unavailable");
+}
+
 #[tokio::test]
 async fn user_ip_usage_marks_remote_nodes_as_partial() {
     let tmp = tempfile::tempdir().unwrap();

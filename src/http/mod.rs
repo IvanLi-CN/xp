@@ -2177,11 +2177,21 @@ fn user_ip_usage_group_from_report(
     }
 }
 
+fn normalize_ip_usage_warnings(mut warnings: Vec<IpUsageWarning>) -> Vec<IpUsageWarning> {
+    // Rolling upgrade compatibility: older nodes may still emit legacy warning codes that are no
+    // longer meaningful after the country.is hard cut.
+    warnings.retain(|warning| warning.code != "geo_db_missing");
+    warnings
+}
+
 fn merge_ip_usage_warnings(groups: &[AdminUserIpUsageNodeGroup]) -> Vec<IpUsageWarning> {
     let mut warnings = Vec::<IpUsageWarning>::new();
     let mut seen = BTreeSet::<String>::new();
     for group in groups {
         for warning in &group.warnings {
+            if warning.code == "geo_db_missing" {
+                continue;
+            }
             if seen.insert(warning.code.clone()) {
                 warnings.push(warning.clone());
             }
@@ -2282,10 +2292,11 @@ async fn admin_get_node_ip_usage(
         )));
     }
 
-    let remote = response
+    let mut remote = response
         .json::<AdminNodeIpUsageResponse>()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    remote.warnings = normalize_ip_usage_warnings(remote.warnings);
     Ok(Json(remote))
 }
 
@@ -2428,7 +2439,7 @@ async fn admin_get_user_ip_usage(
                 geo_source: remote.geo_source,
                 window_start: remote.window_start,
                 window_end: remote.window_end,
-                warnings: remote.warnings,
+                warnings: normalize_ip_usage_warnings(remote.warnings),
                 unique_ip_series: remote.unique_ip_series,
                 timeline: remote.timeline,
                 ips: remote.ips,

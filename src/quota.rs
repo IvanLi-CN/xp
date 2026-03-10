@@ -304,8 +304,15 @@ async fn run_quota_tick_at_with_geo(
             let store = store.lock().await;
             store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
         };
-        if let Err(err) = geo_resolver.prime_ips(lookup_candidates).await {
-            warn!(%err, "quota tick: country.is lookup failed");
+        if !lookup_candidates.is_empty() {
+            // Best-effort: do not block quota sampling/enforcement on external geo lookups.
+            let geo_resolver = geo_resolver.clone();
+            let task = tokio::spawn(async move {
+                if let Err(err) = geo_resolver.prime_ips(lookup_candidates).await {
+                    warn!(%err, "quota tick: country.is lookup failed");
+                }
+            });
+            let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
         }
 
         let mut store = store.lock().await;
