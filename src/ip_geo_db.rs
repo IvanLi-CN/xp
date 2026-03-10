@@ -192,7 +192,14 @@ impl SharedGeoResolver {
 
     fn with_origin_and_enabled(origin: &str, enabled: bool) -> anyhow::Result<Self> {
         let origin = origin.trim_end_matches('/');
-        let batch_url = format!("{origin}/{COUNTRY_IS_BATCH_FIELDS}");
+        let batch_url = if origin.contains('?') {
+            format!(
+                "{origin}&{}",
+                COUNTRY_IS_BATCH_FIELDS.trim_start_matches('?')
+            )
+        } else {
+            format!("{origin}{COUNTRY_IS_BATCH_FIELDS}")
+        };
         let client = reqwest::Client::builder()
             .connect_timeout(COUNTRY_IS_CONNECT_TIMEOUT)
             .timeout(COUNTRY_IS_HTTP_TIMEOUT)
@@ -292,11 +299,6 @@ impl SharedGeoResolver {
             message: msg,
             at: Instant::now(),
         });
-    }
-
-    fn clear_last_error(&self) {
-        let mut last_error = self.last_error.write().expect("geo resolver write lock");
-        *last_error = None;
     }
 
     fn mark_last_success(&self) {
@@ -419,7 +421,6 @@ impl SharedGeoResolver {
             }
         }
         self.mark_last_success();
-        self.clear_last_error();
         Ok(())
     }
 
@@ -833,7 +834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn last_error_is_set_on_failure_and_cleared_on_success() {
+    async fn last_error_is_set_on_failure_and_expires_after_backoff() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/"))
@@ -869,6 +870,16 @@ mod tests {
             cache.retry_after_by_ip.remove("8.8.8.8");
         }
         resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+        assert!(resolver.last_error_message().is_some());
+
+        {
+            let mut last_error = resolver
+                .last_error
+                .write()
+                .expect("geo resolver write lock");
+            let entry = last_error.as_mut().expect("last error entry");
+            entry.at = Instant::now() - COUNTRY_IS_FAILURE_BACKOFF - StdDuration::from_secs(1);
+        }
         assert!(resolver.last_error_message().is_none());
     }
 }
