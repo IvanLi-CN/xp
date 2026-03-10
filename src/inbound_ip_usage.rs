@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 use base64::engine::general_purpose::STANDARD;
@@ -285,6 +285,9 @@ impl PersistedInboundIpUsage {
         for sample in samples {
             let existing = self.memberships.get(&sample.membership_key);
             for ip in sample.ips.iter().filter_map(|ip| normalize_ip_string(ip)) {
+                if !is_global_geo_ip(&ip) {
+                    continue;
+                }
                 if known_geo_by_ip.contains_key(&ip) {
                     continue;
                 }
@@ -640,6 +643,75 @@ pub(crate) fn normalize_ip_string(raw: &str) -> Option<String> {
     raw.trim().parse::<IpAddr>().ok().map(|ip| ip.to_string())
 }
 
+// Keep geo lookups restricted to globally routable IPs. This prevents repeatedly scheduling
+// best-effort async lookups for RFC1918/CGNAT/documentation/etc addresses that can never be
+// enriched by the external geo provider.
+fn is_global_geo_ip(raw: &str) -> bool {
+    match raw.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => is_public_ipv4(ip),
+        Ok(IpAddr::V6(ip)) => is_public_ipv6(ip),
+        Err(_) => false,
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+    {
+        return false;
+    }
+
+    let [a, b, c, _d] = ip.octets();
+
+    // 0.0.0.0/8 (also includes 0.0.0.0/32)
+    if a == 0 {
+        return false;
+    }
+
+    // RFC 6598 carrier-grade NAT: 100.64.0.0/10
+    if a == 100 && (64..=127).contains(&b) {
+        return false;
+    }
+
+    // RFC 6890 IETF Protocol Assignments: 192.0.0.0/24
+    if a == 192 && b == 0 && c == 0 {
+        return false;
+    }
+
+    // RFC 2544 benchmarking: 198.18.0.0/15
+    if a == 198 && (b == 18 || b == 19) {
+        return false;
+    }
+
+    // Reserved for future use: 240.0.0.0/4
+    if a >= 240 {
+        return false;
+    }
+
+    true
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    // Treat IPv4-mapped/compatible addresses as IPv4 for public range checks.
+    if let Some(v4) = ip.to_ipv4() {
+        return is_public_ipv4(v4);
+    }
+
+    let segments = ip.segments();
+    let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && !ip.is_unique_local()
+        && !ip.is_unicast_link_local()
+        && !is_documentation
+}
+
 fn get_bit(bitmap: &[u8], index: usize) -> bool {
     let byte_index = index / 8;
     let bit_index = index % 8;
@@ -854,7 +926,7 @@ mod tests {
 
     impl GeoLookup for FixedGeoLookup {
         fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-            if ip == "203.0.113.7" {
+            if ip == "8.8.8.8" {
                 PersistedInboundIpGeo {
                     country: "US".to_string(),
                     region: "CA".to_string(),
@@ -881,10 +953,10 @@ mod tests {
         usage.record_minute_samples(
             minute0,
             false,
-            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
             &seed,
         );
-        let cached = usage.memberships["u1::e1"].ips["203.0.113.7"].geo.clone();
+        let cached = usage.memberships["u1::e1"].ips["8.8.8.8"].geo.clone();
         assert!(!geo_is_default(&cached));
 
         // The same IP seen under a new membership should not trigger another lookup, and should
@@ -893,7 +965,7 @@ mod tests {
             usage
                 .collect_lookup_candidates(
                     minute1,
-                    &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"],)]
+                    &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"],)]
                 )
                 .is_empty()
         );
@@ -901,10 +973,10 @@ mod tests {
         usage.record_minute_samples(
             minute1,
             false,
-            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"])],
+            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"])],
             &noop,
         );
-        assert_eq!(usage.memberships["u2::e2"].ips["203.0.113.7"].geo, cached);
+        assert_eq!(usage.memberships["u2::e2"].ips["8.8.8.8"].geo, cached);
     }
 
     #[test]
@@ -920,11 +992,11 @@ mod tests {
         usage.record_minute_samples(
             minute0,
             false,
-            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
             &seed,
         );
         assert!(!geo_is_default(
-            &usage.memberships["u1::e1"].ips["203.0.113.7"].geo
+            &usage.memberships["u1::e1"].ips["8.8.8.8"].geo
         ));
 
         // After shifting a full window, the old bitmap drops out and the record will be pruned
@@ -932,9 +1004,30 @@ mod tests {
         // request a fresh prime for the new minute.
         let candidates = usage.collect_lookup_candidates(
             minute_far,
-            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
         );
-        assert_eq!(candidates, vec!["203.0.113.7".to_string()]);
+        assert_eq!(candidates, vec!["8.8.8.8".to_string()]);
+    }
+
+    #[test]
+    fn collect_lookup_candidates_filters_non_global_ips() {
+        let usage = PersistedInboundIpUsage::default();
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let candidates = usage.collect_lookup_candidates(
+            minute0,
+            &[sample(
+                "u1::e1",
+                "u1",
+                "n1",
+                "e1",
+                "ep-1",
+                &["10.0.0.1", "203.0.113.7", "8.8.8.8"],
+            )],
+        );
+        assert_eq!(candidates, vec!["8.8.8.8".to_string()]);
     }
 
     #[test]
