@@ -3008,6 +3008,17 @@ impl JsonSnapshotStore {
         Ok(out)
     }
 
+    pub fn maybe_update_inbound_ip_usage(
+        &mut self,
+        f: impl FnOnce(&mut PersistedInboundIpUsage) -> bool,
+    ) -> Result<bool, StoreError> {
+        let changed = f(&mut self.inbound_ip_usage);
+        if changed {
+            self.save_inbound_ip_usage()?;
+        }
+        Ok(changed)
+    }
+
     pub fn latest_inbound_ip_usage_minute(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.inbound_ip_usage.latest_minute_dt()
     }

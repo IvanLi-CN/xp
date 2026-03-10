@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::Duration,
 };
 
@@ -138,9 +138,8 @@ pub async fn run_quota_tick_at(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
 ) -> anyhow::Result<()> {
-    static GEO_RESOLVER: OnceLock<SharedGeoResolver> = OnceLock::new();
-    let geo_resolver = GEO_RESOLVER.get_or_init(|| SharedGeoResolver::new(config));
-    run_quota_tick_at_with_geo(now, config, store, reconcile, geo_resolver).await
+    let geo_resolver = SharedGeoResolver::new(config);
+    run_quota_tick_at_with_geo(now, config, store, reconcile, &geo_resolver).await
 }
 
 async fn run_quota_tick_at_with_geo(
@@ -318,7 +317,7 @@ async fn run_quota_tick_at_with_geo(
                 // Backfill geo for short-lived IPs that were persisted before the async prime
                 // completed. This keeps geo enrichment best-effort without blocking quota ticks.
                 let mut store = store.lock().await;
-                if let Err(err) = store.update_inbound_ip_usage(|usage| {
+                if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
                     usage.backfill_geo_for_ips(&lookup_candidates, &geo_resolver)
                 }) {
                     warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
