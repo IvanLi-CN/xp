@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use chrono::Utc;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
@@ -27,6 +28,7 @@ const COUNTRY_IS_CACHE_TTL: StdDuration = StdDuration::from_secs(24 * 60 * 60);
 const COUNTRY_IS_CACHE_PRUNE_INTERVAL: StdDuration = StdDuration::from_secs(5 * 60);
 const COUNTRY_IS_GEO_CACHE_MAX_ENTRIES: usize = 50_000;
 const COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES: usize = 50_000;
+const COUNTRY_IS_LAST_ERROR_MAX_CHARS: usize = 300;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +155,8 @@ pub struct SharedGeoResolver {
     client: reqwest::Client,
     cache: Arc<RwLock<ResolverCache>>,
     last_request_at: Arc<Mutex<Instant>>,
+    last_error: Arc<RwLock<Option<ResolverLastError>>>,
+    last_success_at: Arc<RwLock<Option<Instant>>>,
 }
 
 impl SharedGeoResolver {
@@ -185,6 +189,8 @@ impl SharedGeoResolver {
             client,
             cache: Arc::new(RwLock::new(ResolverCache::default())),
             last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
+            last_error: Arc::new(RwLock::new(None)),
+            last_success_at: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -194,6 +200,14 @@ impl SharedGeoResolver {
         } else {
             IpGeoSource::Missing
         }
+    }
+
+    pub fn last_error_message(&self) -> Option<String> {
+        self.last_error
+            .read()
+            .expect("geo resolver read lock")
+            .as_ref()
+            .map(|entry| entry.message.clone())
     }
 
     pub async fn prime_ips<I>(&self, ips: I) -> anyhow::Result<()>
@@ -244,6 +258,25 @@ impl SharedGeoResolver {
         Ok(())
     }
 
+    fn mark_last_error(&self, msg: &str) {
+        let msg = sanitize_error_message(msg);
+        let mut last_error = self.last_error.write().expect("geo resolver write lock");
+        *last_error = Some(ResolverLastError { message: msg });
+    }
+
+    fn clear_last_error(&self) {
+        let mut last_error = self.last_error.write().expect("geo resolver write lock");
+        *last_error = None;
+    }
+
+    fn mark_last_success(&self) {
+        let mut last_success = self
+            .last_success_at
+            .write()
+            .expect("geo resolver write lock");
+        *last_success = Some(Instant::now());
+    }
+
     async fn wait_for_rate_limit(&self) {
         let mut last = self.last_request_at.lock().await;
         let now = Instant::now();
@@ -272,6 +305,8 @@ impl SharedGeoResolver {
             Ok(response) => response,
             Err(err) => {
                 self.mark_retry_after(&request_ips);
+                let msg = err.to_string();
+                self.mark_last_error(msg.as_str());
                 return Err(err);
             }
         };
@@ -281,10 +316,12 @@ impl SharedGeoResolver {
             let backoff = Self::retry_after_from_headers(response.headers())
                 .unwrap_or(COUNTRY_IS_RATE_LIMIT_BACKOFF_DEFAULT);
             self.mark_retry_after_with_backoff(&request_ips, backoff);
+            self.mark_last_error("country.is rate limited (429)");
             return Err(anyhow::anyhow!("country.is rate limited (429)"));
         }
         if !status.is_success() {
             self.mark_retry_after(&request_ips);
+            self.mark_last_error(format!("country.is returned error status: {status}").as_str());
             return Err(anyhow::anyhow!(
                 "country.is returned error status: {status}"
             ));
@@ -294,7 +331,12 @@ impl SharedGeoResolver {
             Ok(entries) => entries,
             Err(err) => {
                 self.mark_retry_after(&request_ips);
-                return Err(err).context("decode country.is batch response");
+                let err = Result::<(), _>::Err(err)
+                    .context("decode country.is batch response")
+                    .unwrap_err();
+                let msg = err.to_string();
+                self.mark_last_error(msg.as_str());
+                return Err(err);
             }
         };
 
@@ -346,13 +388,31 @@ impl SharedGeoResolver {
                 );
             }
         }
+        self.mark_last_success();
+        self.clear_last_error();
         Ok(())
     }
 
     fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<StdDuration> {
-        let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
-        let secs = raw.parse::<u64>().ok()?;
-        Some(StdDuration::from_secs(secs))
+        let raw = headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .trim();
+        if let Ok(secs) = raw.parse::<u64>() {
+            return Some(StdDuration::from_secs(secs));
+        }
+
+        // RFC 9110 allows HTTP-date values for Retry-After.
+        let parsed = chrono::DateTime::parse_from_rfc2822(raw).ok()?;
+        let target = parsed.with_timezone(&Utc);
+        let now = Utc::now();
+        let delta = target - now;
+        let secs = delta.num_seconds();
+        if secs <= 0 {
+            return Some(StdDuration::from_secs(0));
+        }
+        Some(StdDuration::from_secs(secs as u64))
     }
 
     fn mark_retry_after_with_backoff(&self, ips: &BTreeSet<String>, backoff: StdDuration) {
@@ -394,6 +454,19 @@ impl GeoLookup for SharedGeoResolver {
             .map(|entry| entry.geo.clone())
             .unwrap_or_default()
     }
+}
+
+#[derive(Debug, Clone)]
+struct ResolverLastError {
+    message: String,
+}
+
+fn sanitize_error_message(raw: &str) -> String {
+    let mut out = raw.replace(['\n', '\r'], " ");
+    if out.chars().count() > COUNTRY_IS_LAST_ERROR_MAX_CHARS {
+        out = out.chars().take(COUNTRY_IS_LAST_ERROR_MAX_CHARS).collect();
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -698,5 +771,64 @@ mod tests {
             cache.prune(now + COUNTRY_IS_CACHE_TTL + StdDuration::from_secs(1));
         }
         assert_eq!(resolver.lookup("8.8.8.8"), PersistedInboundIpGeo::default());
+    }
+
+    #[test]
+    fn retry_after_parses_seconds_and_http_date_values() {
+        use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("120"));
+        assert_eq!(
+            SharedGeoResolver::retry_after_from_headers(&headers),
+            Some(StdDuration::from_secs(120))
+        );
+
+        let target = chrono::Utc::now() + chrono::Duration::seconds(60);
+        let http_date = target.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        headers.insert(RETRY_AFTER, HeaderValue::from_str(&http_date).unwrap());
+        let out = SharedGeoResolver::retry_after_from_headers(&headers).unwrap();
+        assert!(out >= StdDuration::from_secs(55));
+        assert!(out <= StdDuration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn last_error_is_set_on_failure_and_cleared_on_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        assert!(resolver.prime_ips(["8.8.8.8".to_string()]).await.is_err());
+        assert!(
+            resolver
+                .last_error_message()
+                .expect("last error is set")
+                .contains("country.is")
+        );
+
+        server.reset().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": "US",
+                    "city": null,
+                    "subdivision": null,
+                    "asn": null
+                }
+            ])))
+            .mount(&server)
+            .await;
+        {
+            let mut cache = resolver.cache.write().expect("geo resolver write lock");
+            cache.retry_after_by_ip.remove("8.8.8.8");
+        }
+        resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+        assert!(resolver.last_error_message().is_none());
     }
 }

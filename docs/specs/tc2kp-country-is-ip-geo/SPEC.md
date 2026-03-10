@@ -18,7 +18,7 @@
 
 ## 关键行为
 
-- `geo_source` 默认为 `country_is`；当 `XP_IP_GEO_ENABLED=false` 时为 `missing`。
+- `geo_source` 默认为 `missing`；当 `XP_IP_GEO_ENABLED=true` 时为 `country_is`（启用后会把入站公网 IP 发送到第三方 `country.is` 做解析）。
 - `XP_IP_GEO_ORIGIN` 可覆盖默认 `https://api.country.is`（用于自建同接口实现或特殊网络环境）。
 - Geo 查询仅针对当前分钟新出现、且本地持久化记录尚无 Geo 的公网 IP；结果写入缓存后不重复查询。
 - `country.is` 查询做本地节流，避免触发托管端限流；遇到 `429` 时按 `Retry-After`（或默认 60s）退避；其他失败退避 15 分钟。采集主流程继续运行。

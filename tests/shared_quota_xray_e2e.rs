@@ -75,7 +75,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
-        ip_geo_enabled: true,
+        ip_geo_enabled: false,
         ip_geo_origin: "https://api.country.is".to_string(),
     }
 }

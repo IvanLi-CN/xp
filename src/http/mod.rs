@@ -2158,6 +2158,19 @@ fn build_local_user_node_ip_usage_report(
     )
 }
 
+fn ip_geo_lookup_warning(state: &AppState) -> Option<IpUsageWarning> {
+    if state.geo_db_update.ip_geo_source() == IpGeoSource::Missing {
+        return None;
+    }
+    let msg = state.geo_db_update.resolver().last_error_message()?;
+    Some(IpUsageWarning {
+        code: "ip_geo_lookup_failed".to_string(),
+        message: format!(
+            "IP geo enrichment is enabled but the upstream provider returned errors; geo fields may be empty. Last error: {msg}"
+        ),
+    })
+}
+
 fn node_ip_usage_response_from_report(
     node: Node,
     window: IpUsageWindow,
@@ -2235,10 +2248,13 @@ async fn admin_internal_get_local_node_ip_usage(
     let geo_source_v2 = state.geo_db_update.ip_geo_source();
     let geo_source = geo_source_v2.as_legacy_str().to_string();
     let geo_source_v2 = Some(geo_source_v2);
-    let report = {
+    let mut report = {
         let store = state.store.lock().await;
         build_local_node_ip_usage_report(&store, &node.node_id, window)
     };
+    if let Some(warning) = ip_geo_lookup_warning(&state) {
+        report.warnings.push(warning);
+    }
     Ok(Json(AdminInternalNodeIpUsageLocalResponse {
         node,
         window,
@@ -2268,10 +2284,13 @@ async fn admin_get_node_ip_usage(
 
     if node.node_id == state.cluster.node_id {
         let geo_source = state.geo_db_update.ip_geo_source();
-        let report = {
+        let mut report = {
             let store = state.store.lock().await;
             build_local_node_ip_usage_report(&store, &node.node_id, window)
         };
+        if let Some(warning) = ip_geo_lookup_warning(&state) {
+            report.warnings.push(warning);
+        }
         return Ok(Json(node_ip_usage_response_from_report(
             node, window, geo_source, report,
         )));
@@ -2372,10 +2391,13 @@ async fn admin_internal_get_local_user_ip_usage(
     let geo_source_v2 = state.geo_db_update.ip_geo_source();
     let geo_source = geo_source_v2.as_legacy_str().to_string();
     let geo_source_v2 = Some(geo_source_v2);
-    let report = {
+    let mut report = {
         let store = state.store.lock().await;
         build_local_user_node_ip_usage_report(&store, &user_id, &node.node_id, window)
     };
+    if let Some(warning) = ip_geo_lookup_warning(&state) {
+        report.warnings.push(warning);
+    }
     Ok(Json(AdminInternalUserIpUsageLocalResponse {
         node,
         window,
@@ -2444,10 +2466,13 @@ async fn admin_get_user_ip_usage(
     for node in relevant_nodes {
         if node.node_id == local_node_id {
             let geo_source = state.geo_db_update.ip_geo_source();
-            let report = {
+            let mut report = {
                 let store = state.store.lock().await;
                 build_local_user_node_ip_usage_report(&store, &user_id, &node.node_id, window)
             };
+            if let Some(warning) = ip_geo_lookup_warning(&state) {
+                report.warnings.push(warning);
+            }
             groups.push(user_ip_usage_group_from_report(node, geo_source, report));
             continue;
         }
