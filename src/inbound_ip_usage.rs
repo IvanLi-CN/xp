@@ -302,6 +302,38 @@ impl PersistedInboundIpUsage {
         out.into_iter().collect()
     }
 
+    pub fn backfill_geo_for_ips(&mut self, ips: &[String], geo_resolver: &dyn GeoLookup) -> bool {
+        if ips.is_empty() {
+            return false;
+        }
+        let candidates = ips
+            .iter()
+            .filter_map(|ip| normalize_ip_string(ip))
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        for membership in self.memberships.values_mut() {
+            for (ip, record) in membership.ips.iter_mut() {
+                if !candidates.contains(ip) {
+                    continue;
+                }
+                if !geo_is_default(&record.geo) {
+                    continue;
+                }
+                let geo = geo_resolver.lookup(ip);
+                if geo_is_default(&geo) {
+                    continue;
+                }
+                record.geo = geo;
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn record_minute_samples(
         &mut self,
         minute: DateTime<Utc>,

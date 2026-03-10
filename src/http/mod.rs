@@ -1769,10 +1769,23 @@ struct AdminNodeIpUsageResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalNodeIpUsageLocalResponse {
+    node: Node,
+    window: IpUsageWindow,
+    geo_source: String,
+    window_start: String,
+    window_end: String,
+    warnings: Vec<IpUsageWarning>,
+    unique_ip_series: Vec<UniqueIpPoint>,
+    timeline: Vec<TimelineLane>,
+    ips: Vec<IpListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminInternalUserIpUsageLocalResponse {
     node: Node,
     window: IpUsageWindow,
-    geo_source: IpGeoSource,
+    geo_source: String,
     window_start: String,
     window_end: String,
     warnings: Vec<IpUsageWarning>,
@@ -2204,7 +2217,7 @@ async fn admin_internal_get_local_node_ip_usage(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
     Query(query): Query<IpUsageQuery>,
-) -> Result<Json<AdminNodeIpUsageResponse>, ApiError> {
+) -> Result<Json<AdminInternalNodeIpUsageLocalResponse>, ApiError> {
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
@@ -2215,14 +2228,22 @@ async fn admin_internal_get_local_node_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
-    let geo_source = state.geo_db_update.ip_geo_source();
+    let geo_source = "managed_dbip_lite".to_string();
     let report = {
         let store = state.store.lock().await;
         build_local_node_ip_usage_report(&store, &node.node_id, window)
     };
-    Ok(Json(node_ip_usage_response_from_report(
-        node, window, geo_source, report,
-    )))
+    Ok(Json(AdminInternalNodeIpUsageLocalResponse {
+        node,
+        window,
+        geo_source,
+        window_start: report.window_start,
+        window_end: report.window_end,
+        warnings: report.warnings,
+        unique_ip_series: report.unique_ip_series,
+        timeline: report.timeline,
+        ips: report.ips,
+    }))
 }
 
 async fn admin_get_node_ip_usage(
@@ -2292,12 +2313,22 @@ async fn admin_get_node_ip_usage(
         )));
     }
 
-    let mut remote = response
-        .json::<AdminNodeIpUsageResponse>()
+    let remote = response
+        .json::<AdminInternalNodeIpUsageLocalResponse>()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    remote.warnings = normalize_ip_usage_warnings(remote.warnings);
-    Ok(Json(remote))
+    let geo_source = state.geo_db_update.ip_geo_source();
+    Ok(Json(AdminNodeIpUsageResponse {
+        node: remote.node,
+        window: remote.window,
+        geo_source,
+        window_start: remote.window_start,
+        window_end: remote.window_end,
+        warnings: normalize_ip_usage_warnings(remote.warnings),
+        unique_ip_series: remote.unique_ip_series,
+        timeline: remote.timeline,
+        ips: remote.ips,
+    }))
 }
 
 async fn admin_internal_get_local_user_ip_usage(
@@ -2319,7 +2350,7 @@ async fn admin_internal_get_local_user_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
-    let geo_source = state.geo_db_update.ip_geo_source();
+    let geo_source = "managed_dbip_lite".to_string();
     let report = {
         let store = state.store.lock().await;
         build_local_user_node_ip_usage_report(&store, &user_id, &node.node_id, window)
@@ -2436,7 +2467,7 @@ async fn admin_get_user_ip_usage(
         {
             Ok(remote) => groups.push(AdminUserIpUsageNodeGroup {
                 node: remote.node,
-                geo_source: remote.geo_source,
+                geo_source: state.geo_db_update.ip_geo_source(),
                 window_start: remote.window_start,
                 window_end: remote.window_end,
                 warnings: normalize_ip_usage_warnings(remote.warnings),
