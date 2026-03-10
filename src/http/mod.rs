@@ -2232,8 +2232,9 @@ async fn admin_internal_get_local_node_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
-    let geo_source = "managed_dbip_lite".to_string();
-    let geo_source_v2 = Some(state.geo_db_update.ip_geo_source());
+    let geo_source_v2 = state.geo_db_update.ip_geo_source();
+    let geo_source = geo_source_v2.as_legacy_str().to_string();
+    let geo_source_v2 = Some(geo_source_v2);
     let report = {
         let store = state.store.lock().await;
         build_local_node_ip_usage_report(&store, &node.node_id, window)
@@ -2368,8 +2369,9 @@ async fn admin_internal_get_local_user_ip_usage(
             ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
         })?
     };
-    let geo_source = "managed_dbip_lite".to_string();
-    let geo_source_v2 = Some(state.geo_db_update.ip_geo_source());
+    let geo_source_v2 = state.geo_db_update.ip_geo_source();
+    let geo_source = geo_source_v2.as_legacy_str().to_string();
+    let geo_source_v2 = Some(geo_source_v2);
     let report = {
         let store = state.store.lock().await;
         build_local_user_node_ip_usage_report(&store, &user_id, &node.node_id, window)

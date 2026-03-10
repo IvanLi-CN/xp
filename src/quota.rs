@@ -12,7 +12,7 @@ use crate::{
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
     domain::{NodeQuotaReset, UserPriorityTier},
     inbound_ip_usage::floor_minute,
-    ip_geo_db::SharedGeoResolver,
+    ip_geo_db::{IpGeoSource, SharedGeoResolver},
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
@@ -298,7 +298,9 @@ async fn run_quota_tick_at_with_geo(
             }
         }
 
-        let lookup_candidates = if online_stats_unavailable {
+        let lookup_candidates = if online_stats_unavailable
+            || geo_resolver.ip_geo_source() == IpGeoSource::Missing
+        {
             Vec::new()
         } else {
             let store = store.lock().await;
@@ -311,7 +313,6 @@ async fn run_quota_tick_at_with_geo(
             let task = tokio::spawn(async move {
                 if let Err(err) = geo_resolver.prime_ips(lookup_candidates.clone()).await {
                     warn!(%err, "quota tick: country.is lookup failed");
-                    return;
                 }
 
                 // Backfill geo for short-lived IPs that were persisted before the async prime

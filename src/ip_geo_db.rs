@@ -59,6 +59,17 @@ impl IpGeoSource {
             _ => Self::Missing,
         }
     }
+
+    /// Map to the legacy string values used by older binaries. `country_is` is reported as
+    /// `managed_dbip_lite` so mixed-version clusters keep parsing the field, while `missing`
+    /// remains distinguishable when geo is disabled.
+    pub fn as_legacy_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::ExternalOverride => "external_override",
+            Self::CountryIs | Self::ManagedDbipLite => "managed_dbip_lite",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
