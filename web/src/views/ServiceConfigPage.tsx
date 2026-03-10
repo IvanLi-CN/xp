@@ -310,6 +310,29 @@ export function ServiceConfigPage() {
 					<div className="xp-card">
 						<div className="xp-card-body space-y-3">
 							<div>
+								<h2 className="text-base font-semibold">IP Geo</h2>
+								<p className="text-sm text-muted-foreground">
+									入站 IP Geo enrichment 与 upstream 设置。
+								</p>
+							</div>
+							<div className="space-y-3">
+								<FieldBlock
+									label="IP GEO ENABLED"
+									value={data.ip_geo_enabled ? "true" : "false"}
+									copyText={data.ip_geo_enabled ? "true" : "false"}
+								/>
+								<FieldBlock
+									label="IP GEO ORIGIN"
+									value={data.ip_geo_origin}
+									copyText={data.ip_geo_origin}
+								/>
+							</div>
+						</div>
+					</div>
+
+					<div className="xp-card">
+						<div className="xp-card-body space-y-3">
+							<div>
 								<h2 className="text-base font-semibold">Security</h2>
 								<p className="text-sm text-muted-foreground">
 									仅展示可公开信息，敏感字段全量脱敏。

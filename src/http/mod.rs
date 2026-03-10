@@ -502,6 +502,8 @@ struct AdminServiceConfigResponse {
     api_base_url: String,
     quota_poll_interval_secs: u64,
     quota_auto_unban: bool,
+    ip_geo_enabled: bool,
+    ip_geo_origin: String,
     admin_token_present: bool,
     admin_token_masked: String,
 }
@@ -2976,6 +2978,8 @@ async fn admin_get_config(
         api_base_url: state.config.api_base_url.clone(),
         quota_poll_interval_secs: state.config.quota_poll_interval_secs,
         quota_auto_unban: state.config.quota_auto_unban,
+        ip_geo_enabled: state.config.ip_geo_enabled,
+        ip_geo_origin: state.config.ip_geo_origin.clone(),
         admin_token_present,
         admin_token_masked,
     }))

@@ -846,6 +846,8 @@ async function handleRequest(
 			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
+			ip_geo_enabled: false,
+			ip_geo_origin: "https://api.country.is",
 			admin_token_present: true,
 			admin_token_masked: "*".repeat(token.length),
 		});

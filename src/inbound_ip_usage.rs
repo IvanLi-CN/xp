@@ -828,11 +828,25 @@ fn format_region(geo: &PersistedInboundIpGeo) -> String {
         parts.push(geo.country.clone());
     }
     if !geo.region.is_empty() {
-        parts.push(geo.region.clone());
+        if looks_like_subdivision_code(&geo.region) && !geo.city.is_empty() {
+            parts.push(format!("{} ({})", geo.city, geo.region));
+        } else {
+            parts.push(geo.region.clone());
+        }
     } else if parts.is_empty() && !geo.city.is_empty() {
         parts.push(geo.city.clone());
     }
     parts.join(" ")
+}
+
+fn looks_like_subdivision_code(raw: &str) -> bool {
+    let raw = raw.trim();
+    let len = raw.len();
+    if !(2..=3).contains(&len) {
+        return false;
+    }
+    raw.chars()
+        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
 fn geo_is_default(geo: &PersistedInboundIpGeo) -> bool {
@@ -937,6 +951,25 @@ mod tests {
                 PersistedInboundIpGeo::default()
             }
         }
+    }
+
+    #[test]
+    fn format_region_prefers_city_when_region_is_only_a_subdivision_code() {
+        let geo = PersistedInboundIpGeo {
+            country: "DE".to_string(),
+            region: "HH".to_string(),
+            city: "Hamburg".to_string(),
+            operator: String::new(),
+        };
+        assert_eq!(format_region(&geo), "DE Hamburg (HH)");
+
+        let geo = PersistedInboundIpGeo {
+            country: "US".to_string(),
+            region: "California".to_string(),
+            city: "Mountain View".to_string(),
+            operator: String::new(),
+        };
+        assert_eq!(format_region(&geo), "US California");
     }
 
     #[test]

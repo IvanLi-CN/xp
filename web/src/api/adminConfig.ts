@@ -11,6 +11,8 @@ export const AdminConfigResponseSchema = z.object({
 	api_base_url: z.string(),
 	quota_poll_interval_secs: z.number(),
 	quota_auto_unban: z.boolean(),
+	ip_geo_enabled: z.boolean(),
+	ip_geo_origin: z.string(),
 	admin_token_present: z.boolean(),
 	admin_token_masked: z.string(),
 });
