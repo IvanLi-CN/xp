@@ -16,7 +16,7 @@ use crate::{
     state::JsonSnapshotStore,
 };
 
-const COUNTRY_IS_ORIGIN: &str = "https://api.country.is";
+pub const COUNTRY_IS_ORIGIN: &str = "https://api.country.is";
 const COUNTRY_IS_BATCH_FIELDS: &str = "?fields=city,subdivision,asn";
 const COUNTRY_IS_BATCH_SIZE: usize = 100;
 const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);

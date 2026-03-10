@@ -448,7 +448,13 @@ async fn record_inbound_ip_usage_samples(
     let mut store = store.lock().await;
     let geo_resolver = TestGeoLookup;
     store
-        .record_inbound_ip_usage_samples(minute, online_stats_unavailable, &samples, &geo_resolver)
+        .record_inbound_ip_usage_samples(
+            minute,
+            online_stats_unavailable,
+            &samples,
+            &geo_resolver,
+            true,
+        )
         .unwrap();
 }
 
@@ -4625,6 +4631,7 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                     ips: vec!["203.0.113.7".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
         store
@@ -4650,6 +4657,7 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                     },
                 ],
                 &resolver,
+                true,
             )
             .unwrap();
 
@@ -4766,6 +4774,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
                     ips: vec!["203.0.113.9".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
         store
@@ -4899,6 +4908,7 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
                     ips: vec!["203.0.113.20".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
 

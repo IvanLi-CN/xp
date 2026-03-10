@@ -332,6 +332,7 @@ async fn run_quota_tick_at_with_geo(
                 &online_samples
             },
             geo_resolver,
+            geo_resolver.ip_geo_source() != IpGeoSource::Missing,
         ) {
             warn!(%err, "quota tick: failed to persist inbound ip usage snapshot");
         }

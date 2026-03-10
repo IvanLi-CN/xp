@@ -40,9 +40,10 @@ use crate::{
         InboundIpUsageSeriesPoint as UniqueIpPoint, InboundIpUsageTimelineLane as TimelineLane,
         InboundIpUsageWarning as IpUsageWarning, InboundIpUsageWindow as IpUsageWindow,
         InboundIpUsageWindowView as IpUsageReport, build_warnings, build_window_view,
+        scrub_geo_fields,
     },
     internal_auth,
-    ip_geo_db::{GeoDbUpdateHandle, IpGeoSource},
+    ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -2257,6 +2258,9 @@ async fn admin_internal_get_local_node_ip_usage(
     if let Some(warning) = ip_geo_lookup_warning(&state) {
         report.warnings.push(warning);
     }
+    if geo_source_v2 == Some(IpGeoSource::Missing) {
+        scrub_geo_fields(&mut report.ips);
+    }
     Ok(Json(AdminInternalNodeIpUsageLocalResponse {
         node,
         window,
@@ -2292,6 +2296,9 @@ async fn admin_get_node_ip_usage(
         };
         if let Some(warning) = ip_geo_lookup_warning(&state) {
             report.warnings.push(warning);
+        }
+        if geo_source == IpGeoSource::Missing {
+            scrub_geo_fields(&mut report.ips);
         }
         return Ok(Json(node_ip_usage_response_from_report(
             node, window, geo_source, report,
@@ -2358,6 +2365,10 @@ async fn admin_get_node_ip_usage(
         ips,
     } = remote;
     let geo_source = geo_source_v2.unwrap_or_else(|| IpGeoSource::from_legacy_str(&geo_source));
+    let mut ips = ips;
+    if geo_source == IpGeoSource::Missing {
+        scrub_geo_fields(&mut ips);
+    }
     Ok(Json(AdminNodeIpUsageResponse {
         node,
         window,
@@ -2399,6 +2410,9 @@ async fn admin_internal_get_local_user_ip_usage(
     };
     if let Some(warning) = ip_geo_lookup_warning(&state) {
         report.warnings.push(warning);
+    }
+    if geo_source_v2 == Some(IpGeoSource::Missing) {
+        scrub_geo_fields(&mut report.ips);
     }
     Ok(Json(AdminInternalUserIpUsageLocalResponse {
         node,
@@ -2475,6 +2489,9 @@ async fn admin_get_user_ip_usage(
             if let Some(warning) = ip_geo_lookup_warning(&state) {
                 report.warnings.push(warning);
             }
+            if geo_source == IpGeoSource::Missing {
+                scrub_geo_fields(&mut report.ips);
+            }
             groups.push(user_ip_usage_group_from_report(node, geo_source, report));
             continue;
         }
@@ -2527,10 +2544,15 @@ async fn admin_get_user_ip_usage(
                     timeline,
                     ips,
                 } = remote;
+                let geo_source =
+                    geo_source_v2.unwrap_or_else(|| IpGeoSource::from_legacy_str(&geo_source));
+                let mut ips = ips;
+                if geo_source == IpGeoSource::Missing {
+                    scrub_geo_fields(&mut ips);
+                }
                 groups.push(AdminUserIpUsageNodeGroup {
                     node,
-                    geo_source: geo_source_v2
-                        .unwrap_or_else(|| IpGeoSource::from_legacy_str(&geo_source)),
+                    geo_source,
                     window_start,
                     window_end,
                     warnings: normalize_ip_usage_warnings(warnings),
@@ -2968,6 +2990,13 @@ async fn admin_get_config(
     } else {
         String::new()
     };
+    let ip_geo_origin = state.config.ip_geo_origin.trim();
+    let ip_geo_origin = if ip_geo_origin.is_empty() {
+        COUNTRY_IS_ORIGIN
+    } else {
+        ip_geo_origin
+    };
+    let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
 
     Ok(Json(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
@@ -2979,7 +3008,7 @@ async fn admin_get_config(
         quota_poll_interval_secs: state.config.quota_poll_interval_secs,
         quota_auto_unban: state.config.quota_auto_unban,
         ip_geo_enabled: state.config.ip_geo_enabled,
-        ip_geo_origin: state.config.ip_geo_origin.clone(),
+        ip_geo_origin,
         admin_token_present,
         admin_token_masked,
     }))

@@ -188,6 +188,13 @@ pub trait GeoLookup: Send + Sync {
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo;
 }
 
+pub fn scrub_geo_fields(items: &mut [InboundIpUsageListItem]) {
+    for item in items {
+        item.region.clear();
+        item.operator.clear();
+    }
+}
+
 impl PersistedInboundIpUsage {
     pub fn latest_minute_dt(&self) -> Option<DateTime<Utc>> {
         self.latest_minute.as_deref().and_then(parse_minute)
@@ -343,6 +350,7 @@ impl PersistedInboundIpUsage {
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
         geo_resolver: &dyn GeoLookup,
+        allow_geo_reuse: bool,
     ) -> bool {
         let minute = floor_minute(minute);
         let minute_str = rfc3339_minute(minute);
@@ -363,7 +371,11 @@ impl PersistedInboundIpUsage {
 
         changed |= self.advance_to_minute(minute);
 
-        let mut known_geo_by_ip = self.collect_known_geo_by_ip();
+        let mut known_geo_by_ip = if allow_geo_reuse {
+            self.collect_known_geo_by_ip()
+        } else {
+            HashMap::new()
+        };
 
         for sample in samples {
             let unique_ips = sample
@@ -421,7 +433,7 @@ impl PersistedInboundIpUsage {
                     changed = true;
                 }
                 if geo_is_default(&record.geo) {
-                    if let Some(existing) = known_geo_by_ip.get(&ip) {
+                    if allow_geo_reuse && let Some(existing) = known_geo_by_ip.get(&ip) {
                         record.geo = existing.clone();
                         changed = true;
                         continue;
@@ -988,6 +1000,7 @@ mod tests {
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
             &seed,
+            true,
         );
         let cached = usage.memberships["u1::e1"].ips["8.8.8.8"].geo.clone();
         assert!(!geo_is_default(&cached));
@@ -1008,8 +1021,44 @@ mod tests {
             false,
             &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"])],
             &noop,
+            true,
         );
         assert_eq!(usage.memberships["u2::e2"].ips["8.8.8.8"].geo, cached);
+    }
+
+    #[test]
+    fn geo_lookup_can_be_disabled_to_avoid_reusing_persisted_geo() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+        let noop = TestGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute1 = minute0 + Duration::minutes(1);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
+            &seed,
+            true,
+        );
+        assert!(!geo_is_default(
+            &usage.memberships["u1::e1"].ips["8.8.8.8"].geo
+        ));
+
+        // When geo is disabled, new memberships should not copy persisted geo.
+        usage.record_minute_samples(
+            minute1,
+            false,
+            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"])],
+            &noop,
+            false,
+        );
+        assert!(geo_is_default(
+            &usage.memberships["u2::e2"].ips["8.8.8.8"].geo
+        ));
     }
 
     #[test]
@@ -1027,6 +1076,7 @@ mod tests {
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
             &seed,
+            true,
         );
         assert!(!geo_is_default(
             &usage.memberships["u1::e1"].ips["8.8.8.8"].geo
@@ -1077,6 +1127,7 @@ mod tests {
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,
+            true,
         ));
         assert_eq!(usage.memberships["u1::e1"].ips["203.0.113.7"].minutes, 1);
 
@@ -1092,6 +1143,7 @@ mod tests {
                 &["203.0.113.7", "203.0.113.8"],
             )],
             &resolver,
+            true,
         ));
         let record = &usage.memberships["u1::e1"].ips["203.0.113.7"];
         assert_eq!(record.minutes, 2);
@@ -1157,6 +1209,7 @@ mod tests {
                 sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"]),
             ],
             &resolver,
+            true,
         );
         usage.record_minute_samples(
             minute1,
@@ -1166,12 +1219,14 @@ mod tests {
                 sample("u2::e2", "u2", "n1", "e2", "ep-2", &["198.51.100.9"]),
             ],
             &resolver,
+            true,
         );
         usage.record_minute_samples(
             minute2,
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,
+            true,
         );
 
         let view = build_window_view(

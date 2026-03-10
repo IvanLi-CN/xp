@@ -3048,12 +3048,14 @@ impl JsonSnapshotStore {
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
         geo_resolver: &dyn GeoLookup,
+        allow_geo_reuse: bool,
     ) -> Result<(), StoreError> {
         let changed = self.inbound_ip_usage.record_minute_samples(
             minute,
             online_stats_unavailable,
             samples,
             geo_resolver,
+            allow_geo_reuse,
         );
         if changed {
             self.save_inbound_ip_usage()?;
@@ -4723,6 +4725,7 @@ rules: []
                         ips: vec!["203.0.113.7".to_string()],
                     }],
                     &resolver,
+                    true,
                 )
                 .unwrap();
             (membership_key, minute.to_rfc3339())
@@ -4786,6 +4789,7 @@ rules: []
                     },
                 ],
                 &resolver,
+                true,
             )
             .unwrap();
 
