@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use tokio::sync::Mutex;
@@ -135,8 +138,9 @@ pub async fn run_quota_tick_at(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
 ) -> anyhow::Result<()> {
-    let geo_resolver = SharedGeoResolver::new(config);
-    run_quota_tick_at_with_geo(now, config, store, reconcile, &geo_resolver).await
+    static GEO_RESOLVER: OnceLock<SharedGeoResolver> = OnceLock::new();
+    let geo_resolver = GEO_RESOLVER.get_or_init(|| SharedGeoResolver::new(config));
+    run_quota_tick_at_with_geo(now, config, store, reconcile, geo_resolver).await
 }
 
 async fn run_quota_tick_at_with_geo(

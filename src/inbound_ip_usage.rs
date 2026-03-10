@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     net::IpAddr,
 };
 
@@ -193,6 +193,19 @@ impl PersistedInboundIpUsage {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
 
+    fn collect_known_geo_by_ip(&self) -> HashMap<String, PersistedInboundIpGeo> {
+        let mut out = HashMap::new();
+        for membership in self.memberships.values() {
+            for (ip, record) in &membership.ips {
+                if geo_is_default(&record.geo) {
+                    continue;
+                }
+                out.entry(ip.clone()).or_insert_with(|| record.geo.clone());
+            }
+        }
+        out
+    }
+
     pub fn normalize(&mut self, allowed_membership_keys: &BTreeSet<String>) -> bool {
         let mut changed = false;
         if self.schema_version != INBOUND_IP_USAGE_SCHEMA_VERSION {
@@ -247,13 +260,17 @@ impl PersistedInboundIpUsage {
     }
 
     pub fn collect_lookup_candidates(&self, samples: &[InboundIpMinuteSample]) -> Vec<String> {
+        let known_geo_by_ip = self.collect_known_geo_by_ip();
         let mut out = BTreeSet::new();
         for sample in samples {
             let existing = self.memberships.get(&sample.membership_key);
             for ip in sample.ips.iter().filter_map(|ip| normalize_ip_string(ip)) {
+                if known_geo_by_ip.contains_key(&ip) {
+                    continue;
+                }
                 let needs_lookup = existing
                     .and_then(|membership| membership.ips.get(&ip))
-                    .is_none_or(|record| record.geo == PersistedInboundIpGeo::default());
+                    .is_none_or(|record| geo_is_default(&record.geo));
                 if needs_lookup {
                     out.insert(ip);
                 }
@@ -287,6 +304,8 @@ impl PersistedInboundIpUsage {
         }
 
         changed |= self.advance_to_minute(minute);
+
+        let mut known_geo_by_ip = self.collect_known_geo_by_ip();
 
         for sample in samples {
             let unique_ips = sample
@@ -343,11 +362,19 @@ impl PersistedInboundIpUsage {
                     record.last_seen_at = minute_str.clone();
                     changed = true;
                 }
-                if record.geo == PersistedInboundIpGeo::default() {
+                if geo_is_default(&record.geo) {
+                    if let Some(existing) = known_geo_by_ip.get(&ip) {
+                        record.geo = existing.clone();
+                        changed = true;
+                        continue;
+                    }
                     let geo = geo_resolver.lookup(&ip);
                     if geo != record.geo {
                         record.geo = geo;
                         changed = true;
+                        if !geo_is_default(&record.geo) {
+                            known_geo_by_ip.insert(ip.clone(), record.geo.clone());
+                        }
                     }
                 }
             }
@@ -446,9 +473,7 @@ pub fn build_window_view(
             if record.last_seen_at > ip_entry.last_seen_at {
                 ip_entry.last_seen_at = record.last_seen_at.clone();
             }
-            if ip_entry.geo == PersistedInboundIpGeo::default()
-                && record.geo != PersistedInboundIpGeo::default()
-            {
+            if geo_is_default(&ip_entry.geo) && !geo_is_default(&record.geo) {
                 ip_entry.geo = record.geo.clone();
             }
 
@@ -662,6 +687,13 @@ fn format_region(geo: &PersistedInboundIpGeo) -> String {
     parts.join(" ")
 }
 
+fn geo_is_default(geo: &PersistedInboundIpGeo) -> bool {
+    geo.country.is_empty()
+        && geo.region.is_empty()
+        && geo.city.is_empty()
+        && geo.operator.is_empty()
+}
+
 #[derive(Debug, Clone)]
 struct AggregatedIp {
     flags: Vec<bool>,
@@ -739,6 +771,68 @@ mod tests {
             endpoint_tag: endpoint_tag.to_string(),
             ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct FixedGeoLookup;
+
+    impl GeoLookup for FixedGeoLookup {
+        fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
+            if ip == "203.0.113.7" {
+                PersistedInboundIpGeo {
+                    country: "US".to_string(),
+                    region: "CA".to_string(),
+                    city: "Mountain View".to_string(),
+                    operator: "Google LLC".to_string(),
+                }
+            } else {
+                PersistedInboundIpGeo::default()
+            }
+        }
+    }
+
+    #[test]
+    fn geo_lookup_reuses_persisted_geo_across_memberships() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+        let noop = TestGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute1 = minute0 + Duration::minutes(1);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+            &seed,
+        );
+        let cached = usage.memberships["u1::e1"].ips["203.0.113.7"].geo.clone();
+        assert!(!geo_is_default(&cached));
+
+        // The same IP seen under a new membership should not trigger another lookup, and should
+        // reuse the persisted geo from the existing record.
+        assert!(
+            usage
+                .collect_lookup_candidates(&[sample(
+                    "u2::e2",
+                    "u2",
+                    "n1",
+                    "e2",
+                    "ep-2",
+                    &["203.0.113.7"],
+                )])
+                .is_empty()
+        );
+
+        usage.record_minute_samples(
+            minute1,
+            false,
+            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"])],
+            &noop,
+        );
+        assert_eq!(usage.memberships["u2::e2"].ips["203.0.113.7"].geo, cached);
     }
 
     #[test]
