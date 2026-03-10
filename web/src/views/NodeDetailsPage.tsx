@@ -126,20 +126,33 @@ function historySlotClass(status: string): string {
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
 
-const quotaResetSchema = z.object({
-	resetPolicy: z.enum(["monthly", "unlimited"]),
-	resetDay: z.coerce
-		.number()
-		.int("Reset day must be an integer between 1 and 31.")
-		.min(1, "Reset day must be an integer between 1 and 31.")
-		.max(31, "Reset day must be an integer between 1 and 31."),
-	resetTzOffsetMinutes: z
-		.string()
-		.trim()
-		.refine((value) => value === "" || /^-?\d+$/.test(value), {
-			message: "tz_offset_minutes must be an integer (or empty).",
-		}),
-});
+const quotaResetSchema = z
+	.object({
+		resetPolicy: z.enum(["monthly", "unlimited"]),
+		resetDay: z.coerce
+			.number({
+				invalid_type_error: "Reset day must be an integer between 1 and 31.",
+			})
+			.int("Reset day must be an integer between 1 and 31."),
+		resetTzOffsetMinutes: z
+			.string()
+			.trim()
+			.refine((value) => value === "" || /^-?\d+$/.test(value), {
+				message: "tz_offset_minutes must be an integer (or empty).",
+			}),
+	})
+	.superRefine((values, ctx) => {
+		if (
+			values.resetPolicy === "monthly" &&
+			(values.resetDay < 1 || values.resetDay > 31)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["resetDay"],
+				message: "Reset day must be an integer between 1 and 31.",
+			});
+		}
+	});
 
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 
@@ -903,7 +916,16 @@ export function NodeDetailsPage() {
 														<FormLabel>Policy</FormLabel>
 														<Select
 															value={field.value}
-															onValueChange={field.onChange}
+															onValueChange={(value) => {
+																field.onChange(value);
+																if (value !== "monthly") {
+																	quotaForm.setValue("resetDay", 1, {
+																		shouldDirty: true,
+																		shouldValidate: false,
+																	});
+																	quotaForm.clearErrors("resetDay");
+																}
+															}}
 														>
 															<FormControl>
 																<SelectTrigger>

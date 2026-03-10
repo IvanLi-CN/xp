@@ -42,7 +42,11 @@ const createUserSchema = z
 	.object({
 		displayName: z.string().trim().min(1, "Display name is required."),
 		resetPolicy: z.enum(["monthly", "unlimited"]),
-		resetDay: z.coerce.number().int().min(1).max(31),
+		resetDay: z.coerce
+			.number({
+				invalid_type_error: "Reset day must be an integer between 1 and 31.",
+			})
+			.int("Reset day must be an integer between 1 and 31."),
 		resetTzOffsetMinutes: z.coerce
 			.number({ invalid_type_error: "tz_offset_minutes must be a number." })
 			.int("tz_offset_minutes must be an integer."),
@@ -55,7 +59,7 @@ const createUserSchema = z
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["resetDay"],
-				message: "Reset day must be between 1 and 31.",
+				message: "Reset day must be an integer between 1 and 31.",
 			});
 		}
 	});
@@ -159,8 +163,15 @@ export function UserNewPage() {
 												onValueChange={(value) => {
 													setServerError(null);
 													field.onChange(value);
+													if (value !== "monthly") {
+														form.setValue("resetDay", 1, {
+															shouldDirty: true,
+															shouldValidate: false,
+														});
+														form.clearErrors("resetDay");
+													}
 												}}
-												defaultValue={field.value}
+												value={field.value}
 											>
 												<FormControl>
 													<SelectTrigger>

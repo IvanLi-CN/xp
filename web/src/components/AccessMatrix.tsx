@@ -1,4 +1,10 @@
-import { type ReactNode, useMemo, useState } from "react";
+import {
+	type KeyboardEvent,
+	type MouseEvent,
+	type ReactNode,
+	useMemo,
+	useState,
+} from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -102,6 +108,24 @@ function aggregateCheckboxState(states: CellSelectionState[]): CheckboxState {
 	};
 }
 
+const ACCESS_MATRIX_CHECKBOX_SELECTOR = "[data-access-matrix-checkbox]";
+
+function isCheckboxClick(event: MouseEvent<HTMLElement>): boolean {
+	const target = event.target;
+	return (
+		target instanceof Element &&
+		target.closest(ACCESS_MATRIX_CHECKBOX_SELECTOR) !== null
+	);
+}
+
+function shouldToggleOnKey(event: KeyboardEvent<HTMLElement>): boolean {
+	if (event.key !== "Enter" && event.key !== " ") {
+		return false;
+	}
+	event.preventDefault();
+	return true;
+}
+
 function IndeterminateCheckbox(props: {
 	checked: boolean;
 	indeterminate: boolean;
@@ -115,6 +139,7 @@ function IndeterminateCheckbox(props: {
 		<Checkbox
 			checked={indeterminate && !checked ? "indeterminate" : checked}
 			disabled={disabled}
+			data-access-matrix-checkbox="true"
 			aria-label={ariaLabel}
 			onCheckedChange={() => onChange?.()}
 		/>
@@ -450,10 +475,29 @@ function AccessMatrixCellLabel(props: {
 											disabled ? "opacity-60" : "cursor-pointer",
 											selected ? "bg-primary/10" : "hover:bg-muted/60",
 										)}
+										onClick={(event) => {
+											if (disabled || isCheckboxClick(event)) return;
+											onToggleCellEndpoint?.(
+												nodeId,
+												protocolId,
+												opt.endpointId,
+												!selected,
+											);
+										}}
+										onKeyDown={(event) => {
+											if (disabled || !shouldToggleOnKey(event)) return;
+											onToggleCellEndpoint?.(
+												nodeId,
+												protocolId,
+												opt.endpointId,
+												!selected,
+											);
+										}}
 									>
 										<Checkbox
 											checked={selected}
 											disabled={disabled}
+											data-access-matrix-checkbox="true"
 											aria-label={`Select endpoint ${opt.tag} for ${nodeId} ${protocolId}`}
 											onCheckedChange={(checked) =>
 												onToggleCellEndpoint?.(
@@ -501,10 +545,19 @@ function AccessMatrixCellLabel(props: {
 				"flex items-center gap-2 rounded-lg px-1 py-0.5 transition-colors",
 				disabled ? "opacity-60" : "cursor-pointer hover:bg-muted/60",
 			)}
+			onClick={(event) => {
+				if (disabled || isCheckboxClick(event)) return;
+				onToggleCell?.();
+			}}
+			onKeyDown={(event) => {
+				if (disabled || !shouldToggleOnKey(event)) return;
+				onToggleCell?.();
+			}}
 		>
 			<Checkbox
 				checked={selected}
 				disabled={disabled}
+				data-access-matrix-checkbox="true"
 				aria-label={`Toggle ${nodeLabel} ${protocolLabel}`}
 				onCheckedChange={() => onToggleCell?.()}
 			/>

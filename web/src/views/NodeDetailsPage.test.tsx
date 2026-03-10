@@ -222,6 +222,30 @@ describe("<NodeDetailsPage />", () => {
 		});
 	});
 
+	it("allows saving unlimited quota reset after entering an invalid monthly day", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Quota reset"));
+		fireEvent.change(await screenByLabel("Day of month"), {
+			target: { value: "99" },
+		});
+		fireEvent.click(await screenByLabel("Policy"));
+		fireEvent.click(await screenByRole("option", "unlimited"));
+		fireEvent.click(await screenByRole("button", "Save changes"));
+
+		await waitFor(() => {
+			expect(patchAdminNode).toHaveBeenCalledWith("admintoken", "node-tokyo", {
+				quota_reset: {
+					policy: "unlimited",
+				},
+			});
+		});
+		expect(
+			screen.queryByText("Reset day must be an integer between 1 and 31."),
+		).toBeNull();
+	});
+
 	it("shows online stats warning state when snapshots are unavailable", async () => {
 		setupMocks({
 			nodeIpUsage: {
@@ -263,6 +287,11 @@ describe("<NodeDetailsPage />", () => {
 async function screenByRole(role: string, name: string): Promise<HTMLElement> {
 	const { findByRole } = await import("@testing-library/react");
 	return findByRole(document.body, role as never, { name });
+}
+
+async function screenByLabel(label: string): Promise<HTMLElement> {
+	const { findByLabelText } = await import("@testing-library/react");
+	return findByLabelText(document.body, label);
 }
 
 async function screenByText(text: string): Promise<HTMLElement> {
