@@ -75,7 +75,10 @@ export function EndpointProbeStatsPage() {
 	});
 
 	const slots = historyQuery.data?.slots ?? [];
-	const expectedNodes = historyQuery.data?.expected_nodes ?? 0;
+	const latestParticipatingNodes =
+		historyQuery.data?.participating_nodes ??
+		historyQuery.data?.expected_nodes ??
+		0;
 
 	const defaultSelectedHour = useMemo(() => {
 		const withData = [...slots].reverse().find((slot) => slot.sample_count > 0);
@@ -201,8 +204,9 @@ export function EndpointProbeStatsPage() {
 							const testedCount =
 								slot.tested_count ??
 								Math.max(0, slot.sample_count - skippedCount);
-							const reportedLabel = expectedNodes
-								? `${slot.sample_count}/${expectedNodes}`
+							const participatingNodes = slot.participating_nodes;
+							const reportedLabel = participatingNodes
+								? `${slot.sample_count}/${participatingNodes}`
 								: String(slot.sample_count);
 							return (
 								<button
@@ -263,8 +267,8 @@ export function EndpointProbeStatsPage() {
 										<p>
 											Reported:{" "}
 											<span className="font-mono">
-												{expectedNodes
-													? `${selected.sample_count}/${expectedNodes}`
+												{selected.participating_nodes
+													? `${selected.sample_count}/${selected.participating_nodes}`
 													: String(selected.sample_count)}
 											</span>
 										</p>
@@ -296,9 +300,9 @@ export function EndpointProbeStatsPage() {
 							Probe config hash is recorded per node sample.
 						</p>
 						<p className="text-sm">
-							Expected nodes:{" "}
+							Participating nodes:{" "}
 							<span className="font-mono">
-								{historyQuery.data?.expected_nodes}
+								{selected?.participating_nodes ?? latestParticipatingNodes}
 							</span>
 						</p>
 					</div>

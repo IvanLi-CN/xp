@@ -119,6 +119,24 @@ function pickNewestByUpdatedAt<T extends HasUpdatedAt>(
 	return aTs >= bTs ? a : b;
 }
 
+export function countParticipatingRunNodes(
+	nodes: NodeRunner[],
+	endpointSamplesById: Record<
+		string,
+		Record<string, EndpointProbeAppendSample>
+	>,
+): number {
+	const participantIds = new Set(
+		nodes.filter((node) => node.progress).map((node) => node.node_id),
+	);
+	for (const samplesByNode of Object.values(endpointSamplesById)) {
+		for (const nodeId of Object.keys(samplesByNode)) {
+			participantIds.add(nodeId);
+		}
+	}
+	return participantIds.size;
+}
+
 function percentile(values: number[], p: number): number | null {
 	if (values.length === 0) return null;
 	const sorted = [...values].sort((a, b) => a - b);
@@ -462,7 +480,10 @@ export function EndpointProbeRunPage() {
 						? "Unknown"
 						: "Not found";
 
-	const expectedNodes = data.nodes.length;
+	const participatingNodes = countParticipatingRunNodes(
+		nodesForUi,
+		endpointSamplesById,
+	);
 	const runHourKey = liveHour ?? data.hour ?? null;
 
 	const resultsContent = (() => {
@@ -526,7 +547,7 @@ export function EndpointProbeRunPage() {
 					const hourStatus: EndpointProbeStatus =
 						sampleCount > 0
 							? computeEndpointProbeStatus({
-									expectedNodes,
+									participatingNodes,
 									sampleCount,
 									okCount,
 									skippedCount,

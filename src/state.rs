@@ -33,6 +33,7 @@ const SCHEMA_VERSION_V5: u32 = 5;
 const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 2;
 const USAGE_SCHEMA_VERSION_V1: u32 = 1;
+const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
 /// Migrate any historical state payload into the latest schema (v11).
 ///
@@ -234,6 +235,12 @@ pub struct PersistedState {
     /// Keyed by `endpoint_id`.
     #[serde(default)]
     pub endpoint_probe_history: BTreeMap<String, EndpointProbeHistory>,
+    /// Endpoint probe participants keyed by hour bucket.
+    ///
+    /// Keyed by an hour key like `2026-02-07T12:00:00Z`; values are the `node_id`s that
+    /// accepted/started that hour's probe run.
+    #[serde(default)]
+    pub endpoint_probe_participants_by_hour: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
@@ -263,6 +270,7 @@ impl PersistedState {
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
+            endpoint_probe_participants_by_hour: BTreeMap::new(),
             users: BTreeMap::new(),
             reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
@@ -379,6 +387,15 @@ pub struct EndpointProbeAppendSample {
     #[serde(default)]
     pub error: Option<String>,
     pub config_hash: String,
+}
+
+fn prune_endpoint_probe_hour_map<T>(hours: &mut BTreeMap<String, T>) {
+    while hours.len() > ENDPOINT_PROBE_HOUR_BUCKET_LIMIT {
+        let Some(oldest) = hours.keys().next().cloned() else {
+            break;
+        };
+        hours.remove(&oldest);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2541,6 +2558,13 @@ impl DesiredStateCommand {
                 from_node_id,
                 samples,
             } => {
+                state
+                    .endpoint_probe_participants_by_hour
+                    .entry(hour.clone())
+                    .or_default()
+                    .insert(from_node_id.clone());
+                prune_endpoint_probe_hour_map(&mut state.endpoint_probe_participants_by_hour);
+
                 for sample in samples {
                     if !state.endpoints.contains_key(&sample.endpoint_id) {
                         // Endpoints can be deleted concurrently with a probe run. Ignore samples
@@ -2566,14 +2590,7 @@ impl DesiredStateCommand {
                             config_hash: sample.config_hash.clone(),
                         },
                     );
-
-                    // Keep the latest 24 hour buckets to bound Raft state growth.
-                    while history.hours.len() > 24 {
-                        let Some(oldest) = history.hours.keys().next().cloned() else {
-                            break;
-                        };
-                        history.hours.remove(&oldest);
-                    }
+                    prune_endpoint_probe_hour_map(&mut history.hours);
                 }
 
                 Ok(DesiredStateApplyResult::Applied)
@@ -2975,6 +2992,21 @@ impl JsonSnapshotStore {
 
     pub fn state_mut(&mut self) -> &mut PersistedState {
         &mut self.state
+    }
+
+    pub fn endpoint_probe_participants_for_hour(&self, hour: &str) -> BTreeSet<String> {
+        let mut participants = self
+            .state
+            .endpoint_probe_participants_by_hour
+            .get(hour)
+            .cloned()
+            .unwrap_or_default();
+        for history in self.state.endpoint_probe_history.values() {
+            if let Some(bucket) = history.hours.get(hour) {
+                participants.extend(bucket.by_node.keys().cloned());
+            }
+        }
+        participants
     }
 
     pub fn save(&self) -> Result<(), StoreError> {
@@ -5102,6 +5134,179 @@ rules: []
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_when_empty() {
+        let mut state = PersistedState::empty();
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: "2026-03-11T11:00:00Z".to_string(),
+            from_node_id: "node_2".to_string(),
+            samples: Vec::new(),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_2".to_string()])),
+        );
+        assert!(state.endpoint_probe_history.is_empty());
+    }
+
+    #[test]
+    fn desired_state_apply_append_endpoint_probe_samples_prunes_participants_and_history() {
+        let mut state = PersistedState::empty();
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        for hour_idx in 0..25 {
+            let hour = format!("2026-03-{:02}T00:00:00Z", hour_idx + 1);
+            DesiredStateCommand::AppendEndpointProbeSamples {
+                hour: hour.clone(),
+                from_node_id: format!("node_{}", hour_idx + 1),
+                samples: vec![EndpointProbeAppendSample {
+                    endpoint_id: "endpoint_1".to_string(),
+                    ok: true,
+                    skipped: false,
+                    checked_at: format!("2026-03-{:02}T00:30:00Z", hour_idx + 1),
+                    latency_ms: Some(100 + hour_idx as u32),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                }],
+            }
+            .apply(&mut state)
+            .unwrap();
+        }
+
+        let history = state
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .expect("endpoint history");
+        assert_eq!(history.hours.len(), ENDPOINT_PROBE_HOUR_BUCKET_LIMIT);
+        assert_eq!(
+            state.endpoint_probe_participants_by_hour.len(),
+            ENDPOINT_PROBE_HOUR_BUCKET_LIMIT
+        );
+        assert!(!history.hours.contains_key("2026-03-01T00:00:00Z"));
+        assert!(history.hours.contains_key("2026-03-25T00:00:00Z"));
+        assert!(
+            !state
+                .endpoint_probe_participants_by_hour
+                .contains_key("2026-03-01T00:00:00Z")
+        );
+        assert!(
+            state
+                .endpoint_probe_participants_by_hour
+                .contains_key("2026-03-25T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_samples() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let endpoint = store
+            .create_endpoint(
+                node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let second_endpoint = store
+            .create_endpoint(
+                endpoint.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8443,
+                json!({}),
+            )
+            .unwrap();
+
+        let hour = "2026-03-11T11:00:00Z".to_string();
+        store
+            .state_mut()
+            .endpoint_probe_participants_by_hour
+            .insert(hour.clone(), BTreeSet::from(["node_explicit".to_string()]));
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(endpoint.endpoint_id)
+            .or_default()
+            .hours
+            .entry(hour.clone())
+            .or_default()
+            .by_node
+            .insert(
+                "node_from_history_a".to_string(),
+                EndpointProbeNodeSample {
+                    ok: true,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:10:00Z".to_string(),
+                    latency_ms: Some(123),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                },
+            );
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(second_endpoint.endpoint_id)
+            .or_default()
+            .hours
+            .entry(hour.clone())
+            .or_default()
+            .by_node
+            .insert(
+                "node_from_history_b".to_string(),
+                EndpointProbeNodeSample {
+                    ok: false,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:12:00Z".to_string(),
+                    latency_ms: None,
+                    target_id: None,
+                    target_url: None,
+                    error: Some("dial failed".to_string()),
+                    config_hash: "cfg".to_string(),
+                },
+            );
+
+        assert_eq!(
+            store.endpoint_probe_participants_for_hour(&hour),
+            BTreeSet::from([
+                "node_explicit".to_string(),
+                "node_from_history_a".to_string(),
+                "node_from_history_b".to_string(),
+            ])
+        );
     }
 
     #[test]

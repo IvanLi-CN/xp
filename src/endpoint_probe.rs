@@ -575,6 +575,16 @@ async fn run_probe_once_inner(
     )
     .await?;
 
+    raft_write_best_effort(
+        &inner.raft,
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: req.hour.clone(),
+            from_node_id: inner.local_node_id.clone(),
+            samples: Vec::new(),
+        },
+    )
+    .await?;
+
     // Refresh nodes snapshot after the bootstrap step; node list can change during a run.
     let nodes = {
         let store = inner.store.lock().await;

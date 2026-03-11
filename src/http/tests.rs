@@ -33,7 +33,9 @@ use crate::{
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
     },
     reconcile::{ReconcileHandle, ReconcileRequest},
-    state::{JsonSnapshotStore, StoreInit, membership_key},
+    state::{
+        DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, StoreInit, membership_key,
+    },
     xray_supervisor::XrayHealthHandle,
 };
 
@@ -456,6 +458,46 @@ async fn record_inbound_ip_usage_samples(
             true,
         )
         .unwrap();
+}
+
+fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: &str) {
+    DesiredStateCommand::UpsertNode {
+        node: Node {
+            node_id: node_id.to_string(),
+            node_name: node_name.to_string(),
+            access_host: format!("{node_id}.example.com"),
+            api_base_url: format!("https://{node_id}.example.com"),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    }
+    .apply(store.state_mut())
+    .unwrap();
+}
+
+fn probe_hour_now() -> String {
+    crate::endpoint_probe::format_hour_key(chrono::Utc::now())
+}
+
+fn endpoint_probe_sample(
+    ok: bool,
+    skipped: bool,
+    latency_ms: Option<u32>,
+) -> EndpointProbeNodeSample {
+    EndpointProbeNodeSample {
+        ok,
+        skipped,
+        checked_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        latency_ms,
+        target_id: None,
+        target_url: None,
+        error: if ok || skipped {
+            None
+        } else {
+            Some("probe failed".to_string())
+        },
+        config_hash: "cfg".to_string(),
+    }
 }
 
 fn extract_asset_paths_from_index_html(html: &str) -> Vec<String> {
@@ -5817,6 +5859,205 @@ async fn user_node_quota_status_returns_404_for_missing_user() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_complete() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        add_cluster_node(&mut store, "node_2", "node-2");
+        add_cluster_node(&mut store, "node_3", "node-3");
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let hour = probe_hour_now();
+        store
+            .state_mut()
+            .endpoint_probe_participants_by_hour
+            .insert(
+                hour.clone(),
+                std::collections::BTreeSet::from(["node_2".to_string(), "node_3".to_string()]),
+            );
+        let bucket = store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(endpoint.endpoint_id.clone())
+            .or_default()
+            .hours
+            .entry(hour)
+            .or_default();
+        bucket.by_node.insert(
+            "node_2".to_string(),
+            endpoint_probe_sample(true, false, Some(120)),
+        );
+        bucket.by_node.insert(
+            "node_3".to_string(),
+            endpoint_probe_sample(true, false, Some(140)),
+        );
+        store.save().unwrap();
+        endpoint.endpoint_id
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/endpoints"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let items = body["items"].as_array().unwrap();
+    let endpoint = items
+        .iter()
+        .find(|item| item["endpoint_id"] == endpoint_id)
+        .expect("endpoint listed");
+    let slots = endpoint["probe"]["slots"].as_array().unwrap();
+    let latest = slots.last().expect("latest slot");
+    assert_eq!(latest["status"], "up");
+    assert_eq!(endpoint["probe"]["latest_latency_ms_p50"], 140);
+}
+
+#[tokio::test]
+async fn admin_get_endpoint_probe_history_returns_participant_counts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        add_cluster_node(&mut store, "node_2", "node-2");
+        add_cluster_node(&mut store, "node_3", "node-3");
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let hour = probe_hour_now();
+        store
+            .state_mut()
+            .endpoint_probe_participants_by_hour
+            .insert(
+                hour.clone(),
+                std::collections::BTreeSet::from([local_node_id.clone(), "node_2".to_string()]),
+            );
+        let bucket = store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(endpoint.endpoint_id.clone())
+            .or_default()
+            .hours
+            .entry(hour)
+            .or_default();
+        bucket
+            .by_node
+            .insert(local_node_id, endpoint_probe_sample(true, false, Some(111)));
+        bucket.by_node.insert(
+            "node_2".to_string(),
+            endpoint_probe_sample(false, false, None),
+        );
+        store.save().unwrap();
+        endpoint.endpoint_id
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/endpoints/{endpoint_id}/probe-history?hours=1"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["participating_nodes"], 2);
+    assert_eq!(body["expected_nodes"], 2);
+    let slot = &body["slots"][0];
+    assert_eq!(slot["participating_nodes"], 2);
+    assert_eq!(slot["sample_count"], 2);
+    assert_eq!(slot["status"], "degraded");
+}
+
+#[tokio::test]
+async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_wide_samples() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        add_cluster_node(&mut store, "node_2", "node-2");
+        add_cluster_node(&mut store, "node_3", "node-3");
+        let endpoint = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let sibling = store
+            .create_endpoint(
+                local_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8443,
+                json!({}),
+            )
+            .unwrap();
+        let hour = probe_hour_now();
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(endpoint.endpoint_id.clone())
+            .or_default()
+            .hours
+            .entry(hour.clone())
+            .or_default()
+            .by_node
+            .insert(local_node_id, endpoint_probe_sample(true, false, Some(101)));
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(sibling.endpoint_id)
+            .or_default()
+            .hours
+            .entry(hour)
+            .or_default()
+            .by_node
+            .insert(
+                "node_2".to_string(),
+                endpoint_probe_sample(true, false, Some(102)),
+            );
+        store.save().unwrap();
+        endpoint.endpoint_id
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/endpoints/{endpoint_id}/probe-history?hours=1"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["participating_nodes"], 2);
+    assert_eq!(body["expected_nodes"], 2);
+    let slot = &body["slots"][0];
+    assert_eq!(slot["participating_nodes"], 2);
+    assert_eq!(slot["sample_count"], 1);
+    assert_eq!(slot["status"], "missing");
 }
 
 #[tokio::test]
