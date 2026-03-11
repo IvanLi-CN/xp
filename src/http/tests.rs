@@ -64,12 +64,21 @@ fn test_config(data_dir: PathBuf) -> Config {
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
-        ip_usage_city_db_path: String::new(),
-        ip_usage_asn_db_path: String::new(),
+        ip_geo_enabled: false,
+        ip_geo_origin: "https://api.country.is".to_string(),
     }
 }
 
 const TEST_ADMIN_TOKEN: &str = "testtoken";
+
+#[derive(Debug, Default)]
+struct TestGeoLookup;
+
+impl crate::inbound_ip_usage::GeoLookup for TestGeoLookup {
+    fn lookup(&self, _ip: &str) -> crate::inbound_ip_usage::PersistedInboundIpGeo {
+        crate::inbound_ip_usage::PersistedInboundIpGeo::default()
+    }
+}
 
 fn test_admin_token_hash() -> String {
     // Keep tests fast: use a deterministic, low-cost argon2id hash.
@@ -437,14 +446,14 @@ async fn record_inbound_ip_usage_samples(
     samples: Vec<crate::inbound_ip_usage::InboundIpMinuteSample>,
 ) {
     let mut store = store.lock().await;
-    let geo_resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+    let geo_resolver = TestGeoLookup;
     store
         .record_inbound_ip_usage_samples(
             minute,
-            crate::inbound_ip_usage::PersistedInboundIpUsageGeoDb::default(),
             online_stats_unavailable,
             &samples,
             &geo_resolver,
+            true,
         )
         .unwrap();
 }
@@ -4554,22 +4563,6 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
     assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
 }
 
-#[test]
-fn config_ip_usage_geo_db_missing_when_mmdb_files_are_unreadable() {
-    let tmp = tempfile::tempdir().unwrap();
-    let city_path = tmp.path().join("GeoLite2-City.mmdb");
-    let asn_path = tmp.path().join("GeoLite2-ASN.mmdb");
-    std::fs::write(&city_path, b"not-a-mmdb").unwrap();
-    std::fs::write(&asn_path, b"not-a-mmdb").unwrap();
-
-    let mut config = test_config(tmp.path().to_path_buf());
-    config.ip_usage_city_db_path = city_path.display().to_string();
-    config.ip_usage_asn_db_path = asn_path.display().to_string();
-
-    let resolver = crate::ip_geo_db::SharedGeoResolver::new(&config);
-    assert!(crate::inbound_ip_usage::GeoLookup::is_missing(&resolver));
-}
-
 #[tokio::test]
 async fn node_ip_usage_returns_series_timeline_and_ip_list() {
     let tmp = tempfile::tempdir().unwrap();
@@ -4622,14 +4615,12 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
         let minute0 = crate::inbound_ip_usage::floor_minute(chrono::Utc::now())
             - chrono::Duration::minutes(1);
         let minute1 = minute0 + chrono::Duration::minutes(1);
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
-        let geo_db = resolver.geo_db();
+        let resolver = TestGeoLookup;
         let membership_one = membership_key(&user.user_id, &endpoint_one.endpoint_id);
         let membership_two = membership_key(&user.user_id, &endpoint_two.endpoint_id);
         store
             .record_inbound_ip_usage_samples(
                 minute0,
-                geo_db.clone(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_one.clone(),
@@ -4640,12 +4631,12 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                     ips: vec!["203.0.113.7".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
         store
             .record_inbound_ip_usage_samples(
                 minute1,
-                geo_db,
                 false,
                 &[
                     crate::inbound_ip_usage::InboundIpMinuteSample {
@@ -4666,6 +4657,7 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                     },
                 ],
                 &resolver,
+                true,
             )
             .unwrap();
 
@@ -4697,10 +4689,7 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
     assert_eq!(json["unique_ip_series"].as_array().unwrap().len(), 24 * 60);
     assert_eq!(series_count_at(&json["unique_ip_series"], &minute0), 1);
     assert_eq!(series_count_at(&json["unique_ip_series"], &minute1), 2);
-    assert_eq!(
-        warning_codes(&json["warnings"]),
-        vec!["geo_db_missing".to_string()]
-    );
+    assert_eq!(warning_codes(&json["warnings"]), Vec::<String>::new());
 
     let timeline = json["timeline"].as_array().unwrap();
     assert_eq!(timeline.len(), 3);
@@ -4771,11 +4760,10 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
 
         let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
         let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         store
             .record_inbound_ip_usage_samples(
                 minute,
-                resolver.geo_db(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership,
@@ -4786,6 +4774,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
                     ips: vec!["203.0.113.9".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
         store
@@ -4814,10 +4803,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(json["unreachable_nodes"], json!([]));
     assert_eq!(
         warning_codes(&json["warnings"]),
-        vec![
-            "geo_db_missing".to_string(),
-            "online_stats_unavailable".to_string()
-        ]
+        vec!["online_stats_unavailable".to_string()]
     );
 
     let groups = json["groups"].as_array().unwrap();
@@ -4827,10 +4813,7 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
     assert_eq!(group["window_end"], minute);
     assert_eq!(
         warning_codes(&group["warnings"]),
-        vec![
-            "geo_db_missing".to_string(),
-            "online_stats_unavailable".to_string()
-        ]
+        vec!["online_stats_unavailable".to_string()]
     );
     assert_eq!(series_count_at(&group["unique_ip_series"], &minute), 1);
     assert_eq!(
@@ -4838,6 +4821,118 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
         endpoint_tag
     );
     assert_eq!(group["ips"].as_array().unwrap()[0]["ip"], "203.0.113.9");
+}
+
+#[tokio::test]
+async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstream_errors() {
+    let tmp = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let mut config = test_config(tmp.path().to_path_buf());
+    config.ip_geo_enabled = true;
+    config.ip_geo_origin = server.uri();
+
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
+
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let raft = leader_raft(store.clone(), &cluster);
+    let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+        false,
+    );
+
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
+    geo_db_update
+        .resolver()
+        .prime_ips(["8.8.8.8".to_string()])
+        .await
+        .unwrap_err();
+
+    let app = build_router(
+        config,
+        store.clone(),
+        ReconcileHandle::noop(),
+        xray_health,
+        node_runtime,
+        endpoint_probe,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+        geo_db_update,
+    );
+
+    let node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node")
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/ip-usage?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["geo_source"], "country_is");
+    assert_eq!(
+        warning_codes(&json["warnings"]),
+        vec!["ip_geo_lookup_failed".to_string()]
+    );
+}
+
+#[test]
+fn normalize_ip_usage_warnings_filters_legacy_geo_db_missing() {
+    let warnings = vec![
+        crate::inbound_ip_usage::InboundIpUsageWarning {
+            code: "geo_db_missing".to_string(),
+            message: "legacy".to_string(),
+        },
+        crate::inbound_ip_usage::InboundIpUsageWarning {
+            code: "online_stats_unavailable".to_string(),
+            message: "xray is missing".to_string(),
+        },
+    ];
+    let out = super::normalize_ip_usage_warnings(warnings);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].code, "online_stats_unavailable");
 }
 
 #[tokio::test]
@@ -4894,11 +4989,10 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
         .unwrap();
 
         let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         store
             .record_inbound_ip_usage_samples(
                 minute,
-                resolver.geo_db(),
                 false,
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_key(&user.user_id, &local_endpoint.endpoint_id),
@@ -4909,6 +5003,7 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
                     ips: vec!["203.0.113.20".to_string()],
                 }],
                 &resolver,
+                true,
             )
             .unwrap();
 

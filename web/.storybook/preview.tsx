@@ -22,7 +22,6 @@ import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
 import { EndpointsPage } from "../src/views/EndpointsPage";
 import { HomePage } from "../src/views/HomePage";
-import { IpGeoDbPage } from "../src/views/IpGeoDbPage";
 import { LoginPage } from "../src/views/LoginPage";
 import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
 import { NodesPage } from "../src/views/NodesPage";
@@ -224,12 +223,6 @@ const preview: Preview = {
 				component: RealityDomainsPage,
 			});
 
-			const ipGeoDbRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/ip-geo-db",
-				component: IpGeoDbPage,
-			});
-
 			const appRouteTree = appRoute.addChildren([
 				dashboardRoute,
 				nodesRoute,
@@ -242,7 +235,6 @@ const preview: Preview = {
 				userDetailsRoute,
 				quotaPolicyRoute,
 				serviceConfigRoute,
-				ipGeoDbRoute,
 				realityDomainsRoute,
 			]);
 

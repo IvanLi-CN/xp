@@ -221,7 +221,7 @@ function setupMocks(args?: {
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "managed_dbip_lite",
+						geo_source: "country_is",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
@@ -747,7 +747,7 @@ rules: []
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "managed_dbip_lite",
+						geo_source: "country_is",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
@@ -777,7 +777,7 @@ rules: []
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "external_override",
+						geo_source: "country_is",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
@@ -827,9 +827,7 @@ rules: []
 			"true",
 		);
 		expect(
-			screen.getByText(
-				"This node uses externally managed Geo DB files; xp skips the managed downloader here.",
-			),
+			screen.getByText("Geo enrichment uses the free country.is hosted API."),
 		).toBeInTheDocument();
 		const windowButtons = screen.getAllByRole("button", { name: "7d" });
 		fireEvent.click(windowButtons[0]);
@@ -876,7 +874,7 @@ rules: []
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "managed_dbip_lite",
+						geo_source: "country_is",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
@@ -897,7 +895,7 @@ rules: []
 								tz_offset_minutes: null,
 							},
 						},
-						geo_source: "managed_dbip_lite",
+						geo_source: "country_is",
 						window_start: "2026-03-08T00:00:00Z",
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],

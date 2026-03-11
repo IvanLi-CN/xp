@@ -52,6 +52,7 @@ pub struct Config {
     #[arg(
         long,
         global = true,
+        env = "XP_BIND",
         value_name = "ADDR",
         default_value = "127.0.0.1:62416"
     )]
@@ -280,22 +281,24 @@ pub struct Config {
     pub quota_auto_unban: bool,
 
     #[arg(
-        long = "ip-usage-city-db-path",
+        long = "ip-geo-enabled",
         global = true,
-        env = "XP_IP_USAGE_CITY_DB_PATH",
-        value_name = "PATH",
-        default_value = ""
+        env = "XP_IP_GEO_ENABLED",
+        value_name = "BOOL",
+        default_value_t = false,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
     )]
-    pub ip_usage_city_db_path: String,
+    pub ip_geo_enabled: bool,
 
     #[arg(
-        long = "ip-usage-asn-db-path",
+        long = "ip-geo-origin",
         global = true,
-        env = "XP_IP_USAGE_ASN_DB_PATH",
-        value_name = "PATH",
-        default_value = ""
+        env = "XP_IP_GEO_ORIGIN",
+        value_name = "ORIGIN",
+        default_value = "https://api.country.is"
     )]
-    pub ip_usage_asn_db_path: String,
+    pub ip_geo_origin: String,
 }
 
 impl Config {
@@ -328,8 +331,8 @@ mod tests {
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
-        assert!(cli.config.ip_usage_city_db_path.is_empty());
-        assert!(cli.config.ip_usage_asn_db_path.is_empty());
+        assert!(!cli.config.ip_geo_enabled);
+        assert_eq!(cli.config.ip_geo_origin, "https://api.country.is");
     }
 
     #[test]

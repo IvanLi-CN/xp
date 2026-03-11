@@ -1344,8 +1344,8 @@ mod tests {
             endpoint_probe_skip_self_test: false,
             quota_poll_interval_secs: 10,
             quota_auto_unban: true,
-            ip_usage_city_db_path: String::new(),
-            ip_usage_asn_db_path: String::new(),
+            ip_geo_enabled: false,
+            ip_geo_origin: "https://api.country.is".to_string(),
         });
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {

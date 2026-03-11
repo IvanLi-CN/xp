@@ -14,9 +14,7 @@ use crate::{
         validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
-    inbound_ip_usage::{
-        GeoLookup, InboundIpMinuteSample, PersistedInboundIpUsage, PersistedInboundIpUsageGeoDb,
-    },
+    inbound_ip_usage::{GeoLookup, InboundIpMinuteSample, PersistedInboundIpUsage},
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
@@ -196,44 +194,32 @@ impl From<DomainError> for StoreError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GeoDbProvider {
-    #[default]
-    DbipLite,
-}
-
-const fn default_geo_db_update_interval_days() -> u8 {
+const fn default_geo_db_update_interval_days_compat() -> u8 {
     1
 }
 
+fn default_geo_db_provider_compat() -> String {
+    "dbip_lite".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GeoDbUpdateSettings {
-    #[serde(default)]
-    pub provider: GeoDbProvider,
+pub struct GeoDbUpdateSettingsCompat {
+    #[serde(default = "default_geo_db_provider_compat")]
+    pub provider: String,
     #[serde(default)]
     pub auto_update_enabled: bool,
-    #[serde(default = "default_geo_db_update_interval_days")]
+    #[serde(default = "default_geo_db_update_interval_days_compat")]
     pub update_interval_days: u8,
 }
 
-impl Default for GeoDbUpdateSettings {
+impl Default for GeoDbUpdateSettingsCompat {
     fn default() -> Self {
         Self {
-            provider: GeoDbProvider::DbipLite,
+            provider: default_geo_db_provider_compat(),
             auto_update_enabled: false,
-            update_interval_days: default_geo_db_update_interval_days(),
+            update_interval_days: default_geo_db_update_interval_days_compat(),
         }
     }
-}
-
-pub fn validate_geo_db_update_settings(settings: &GeoDbUpdateSettings) -> Result<(), DomainError> {
-    if !(1..=30).contains(&settings.update_interval_days) {
-        return Err(DomainError::InvalidGeoDbUpdateIntervalDays {
-            days: settings.update_interval_days,
-        });
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -264,8 +250,10 @@ pub struct PersistedState {
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
-    #[serde(default)]
-    pub geo_db_update_settings: GeoDbUpdateSettings,
+    /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
+    /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
+    #[serde(default, rename = "geo_db_update_settings")]
+    pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
 }
 
 impl PersistedState {
@@ -283,7 +271,7 @@ impl PersistedState {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
             user_mihomo_profiles: BTreeMap::new(),
-            geo_db_update_settings: GeoDbUpdateSettings::default(),
+            geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
 }
@@ -914,10 +902,6 @@ fn migrate_v10_to_v11(mut input: PersistedState) -> Result<PersistedState, Store
         });
     }
     input.schema_version = SCHEMA_VERSION;
-    if input.geo_db_update_settings.update_interval_days == 0 {
-        input.geo_db_update_settings.update_interval_days =
-            GeoDbUpdateSettings::default().update_interval_days;
-    }
     Ok(input)
 }
 
@@ -1505,7 +1489,7 @@ pub enum DesiredStateCommand {
         profile: UserMihomoProfile,
     },
     SetGeoDbUpdateSettings {
-        settings: GeoDbUpdateSettings,
+        settings: GeoDbUpdateSettingsCompat,
     },
     /// Replace the user's access set (membership-only hard cut).
     ReplaceUserAccess {
@@ -1632,7 +1616,7 @@ enum DesiredStateCommandCompat {
         profile: UserMihomoProfile,
     },
     SetGeoDbUpdateSettings {
-        settings: GeoDbUpdateSettings,
+        settings: GeoDbUpdateSettingsCompat,
     },
 
     ReplaceUserAccess {
@@ -1761,9 +1745,12 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::SetUserMihomoProfile { user_id, profile } => {
                 Self::SetUserMihomoProfile { user_id, profile }
             }
-            DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => {
-                Self::SetGeoDbUpdateSettings { settings }
-            }
+            DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => Self::CompatNoop {
+                note: format!(
+                    "ignored legacy geo_db settings command: {}",
+                    settings.provider
+                ),
+            },
             DesiredStateCommandCompat::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
@@ -2452,11 +2439,7 @@ impl DesiredStateCommand {
                     .insert(user_id.clone(), profile.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
-            Self::SetGeoDbUpdateSettings { settings } => {
-                validate_geo_db_update_settings(settings)?;
-                state.geo_db_update_settings = settings.clone();
-                Ok(DesiredStateApplyResult::Applied)
-            }
+            Self::SetGeoDbUpdateSettings { .. } => Ok(DesiredStateApplyResult::Applied),
             Self::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
@@ -2881,15 +2864,6 @@ impl JsonSnapshotStore {
             migrated = true;
         }
 
-        if validate_geo_db_update_settings(&state.geo_db_update_settings).is_err() {
-            state.geo_db_update_settings = GeoDbUpdateSettings::default();
-            migrated = true;
-        }
-        if state.geo_db_update_settings.provider != GeoDbUpdateSettings::default().provider {
-            state.geo_db_update_settings.provider = GeoDbUpdateSettings::default().provider;
-            migrated = true;
-        }
-
         let allowed_membership_keys = state
             .node_user_endpoint_memberships
             .iter()
@@ -3034,6 +3008,17 @@ impl JsonSnapshotStore {
         Ok(out)
     }
 
+    pub fn maybe_update_inbound_ip_usage(
+        &mut self,
+        f: impl FnOnce(&mut PersistedInboundIpUsage) -> bool,
+    ) -> Result<bool, StoreError> {
+        let changed = f(&mut self.inbound_ip_usage);
+        if changed {
+            self.save_inbound_ip_usage()?;
+        }
+        Ok(changed)
+    }
+
     pub fn latest_inbound_ip_usage_minute(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.inbound_ip_usage.latest_minute_dt()
     }
@@ -3048,20 +3033,29 @@ impl JsonSnapshotStore {
         Ok(())
     }
 
+    pub fn collect_inbound_ip_usage_lookup_candidates(
+        &self,
+        minute: chrono::DateTime<chrono::Utc>,
+        samples: &[InboundIpMinuteSample],
+    ) -> Vec<String> {
+        self.inbound_ip_usage
+            .collect_lookup_candidates(minute, samples)
+    }
+
     pub fn record_inbound_ip_usage_samples(
         &mut self,
         minute: chrono::DateTime<chrono::Utc>,
-        geo_db: PersistedInboundIpUsageGeoDb,
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
         geo_resolver: &dyn GeoLookup,
+        allow_geo_reuse: bool,
     ) -> Result<(), StoreError> {
         let changed = self.inbound_ip_usage.record_minute_samples(
             minute,
-            geo_db,
             online_stats_unavailable,
             samples,
             geo_resolver,
+            allow_geo_reuse,
         );
         if changed {
             self.save_inbound_ip_usage()?;
@@ -3080,20 +3074,6 @@ impl JsonSnapshotStore {
             self.save_inbound_ip_usage()?;
         }
         Ok(())
-    }
-
-    pub fn refresh_inbound_ip_usage_geo_cache(
-        &mut self,
-        geo_db: PersistedInboundIpUsageGeoDb,
-        geo_resolver: &dyn GeoLookup,
-    ) -> Result<bool, StoreError> {
-        let changed = self
-            .inbound_ip_usage
-            .refresh_geo_cache(geo_db, geo_resolver);
-        if changed {
-            self.save_inbound_ip_usage()?;
-        }
-        Ok(changed)
     }
 
     pub fn update_usage<R>(
@@ -3759,6 +3739,15 @@ mod tests {
             RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
         },
     };
+
+    #[derive(Debug, Default)]
+    struct TestGeoLookup;
+
+    impl crate::inbound_ip_usage::GeoLookup for TestGeoLookup {
+        fn lookup(&self, _ip: &str) -> crate::inbound_ip_usage::PersistedInboundIpGeo {
+            crate::inbound_ip_usage::PersistedInboundIpGeo::default()
+        }
+    }
 
     fn test_init(tmp_dir: &Path) -> StoreInit {
         StoreInit {
@@ -4722,11 +4711,10 @@ rules: []
             .unwrap();
             store.save().unwrap();
             let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-            let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+            let resolver = TestGeoLookup;
             store
                 .record_inbound_ip_usage_samples(
                     minute,
-                    resolver.geo_db(),
                     true,
                     &[crate::inbound_ip_usage::InboundIpMinuteSample {
                         membership_key: membership_key.clone(),
@@ -4737,6 +4725,7 @@ rules: []
                         ips: vec!["203.0.113.7".to_string()],
                     }],
                     &resolver,
+                    true,
                 )
                 .unwrap();
             (membership_key, minute.to_rfc3339())
@@ -4776,11 +4765,10 @@ rules: []
         store.save().unwrap();
 
         let minute = crate::inbound_ip_usage::floor_minute(chrono::Utc::now());
-        let resolver = crate::inbound_ip_usage::GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         store
             .record_inbound_ip_usage_samples(
                 minute,
-                resolver.geo_db(),
                 false,
                 &[
                     crate::inbound_ip_usage::InboundIpMinuteSample {
@@ -4801,6 +4789,7 @@ rules: []
                     },
                 ],
                 &resolver,
+                true,
             )
             .unwrap();
 
@@ -5113,27 +5102,22 @@ rules: []
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert_eq!(store.state().schema_version, SCHEMA_VERSION);
-        assert_eq!(
-            store.state().geo_db_update_settings,
-            GeoDbUpdateSettings::default()
-        );
     }
 
     #[test]
-    fn desired_state_apply_set_geo_db_update_settings_validates_interval() {
+    fn desired_state_apply_set_geo_db_update_settings_is_noop() {
         let mut state = PersistedState::empty();
-        let err = DesiredStateCommand::SetGeoDbUpdateSettings {
-            settings: GeoDbUpdateSettings {
-                provider: GeoDbProvider::DbipLite,
+        let before = state.clone();
+        let result = DesiredStateCommand::SetGeoDbUpdateSettings {
+            settings: GeoDbUpdateSettingsCompat {
+                provider: "legacy".to_string(),
                 auto_update_enabled: true,
-                update_interval_days: 0,
+                update_interval_days: 7,
             },
         }
         .apply(&mut state)
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            StoreError::Domain(DomainError::InvalidGeoDbUpdateIntervalDays { days: 0 })
-        ));
+        .unwrap();
+        assert_eq!(result, DesiredStateApplyResult::Applied);
+        assert_eq!(state, before);
     }
 }

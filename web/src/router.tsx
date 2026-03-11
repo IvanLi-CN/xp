@@ -16,7 +16,6 @@ import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
 import { EndpointProbeStatsPage } from "./views/EndpointProbeStatsPage";
 import { EndpointsPage } from "./views/EndpointsPage";
 import { HomePage } from "./views/HomePage";
-import { IpGeoDbPage } from "./views/IpGeoDbPage";
 import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
@@ -125,12 +124,6 @@ const serviceConfigRoute = createRoute({
 	component: ServiceConfigPage,
 });
 
-const ipGeoDbRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/ip-geo-db",
-	component: IpGeoDbPage,
-});
-
 const realityDomainsRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/reality-domains",
@@ -151,7 +144,6 @@ const appRouteTree = appRoute.addChildren([
 	userDetailsRoute,
 	quotaPolicyRoute,
 	serviceConfigRoute,
-	ipGeoDbRoute,
 	realityDomainsRoute,
 ]);
 

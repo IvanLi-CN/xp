@@ -8,8 +8,8 @@ use crate::{
     config::Config,
     cycle::{CycleTimeZone, CycleWindowError, current_cycle_window_at},
     domain::{NodeQuotaReset, UserPriorityTier},
-    inbound_ip_usage::{GeoLookup, GeoResolver, floor_minute},
-    ip_geo_db::SharedGeoResolver,
+    inbound_ip_usage::floor_minute,
+    ip_geo_db::{IpGeoSource, SharedGeoResolver},
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
@@ -92,15 +92,6 @@ fn map_cycle_error(subject: &str, err: CycleWindowError) -> anyhow::Error {
     anyhow::anyhow!("{subject} cycle window error: {err}")
 }
 
-fn config_geo_db_path(raw: &str) -> Option<std::path::PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(std::path::PathBuf::from(trimmed))
-    }
-}
-
 fn resolve_node_quota_reset(
     store: &JsonSnapshotStore,
     node_id: &str,
@@ -144,10 +135,7 @@ pub async fn run_quota_tick_at(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
 ) -> anyhow::Result<()> {
-    let geo_resolver = GeoResolver::new(
-        config_geo_db_path(&config.ip_usage_city_db_path),
-        config_geo_db_path(&config.ip_usage_asn_db_path),
-    );
+    let geo_resolver = SharedGeoResolver::new(config);
     run_quota_tick_at_with_geo(now, config, store, reconcile, &geo_resolver).await
 }
 
@@ -156,7 +144,7 @@ async fn run_quota_tick_at_with_geo(
     config: &Config,
     store: &Arc<Mutex<JsonSnapshotStore>>,
     reconcile: &ReconcileHandle,
-    geo_resolver: &dyn GeoLookup,
+    geo_resolver: &SharedGeoResolver,
 ) -> anyhow::Result<()> {
     let snapshots: Vec<MembershipQuotaSnapshot> = {
         let store = store.lock().await;
@@ -306,11 +294,58 @@ async fn run_quota_tick_at_with_geo(
             }
         }
 
-        let geo_db = geo_resolver.geo_db();
+        let lookup_candidates =
+            if online_stats_unavailable || geo_resolver.ip_geo_source() == IpGeoSource::Missing {
+                Vec::new()
+            } else {
+                let store = store.lock().await;
+                store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
+            };
+        if !lookup_candidates.is_empty() {
+            geo_resolver.enqueue_pending_ips(&lookup_candidates).await;
+        }
+        if geo_resolver.ip_geo_source() != IpGeoSource::Missing
+            && geo_resolver.has_pending_ips().await
+        {
+            // Avoid piling up overlapping geo lookup tasks when the upstream is slow or failing.
+            // Geo enrichment is best-effort; queued candidates will be processed on later ticks.
+            if let Some(prime_guard) = geo_resolver.begin_prime() {
+                // Best-effort: do not block quota sampling/enforcement on external geo lookups.
+                let store = store.clone();
+                let geo_resolver = geo_resolver.clone();
+                let task = tokio::spawn(async move {
+                    let _prime_guard = prime_guard;
+                    let candidates = geo_resolver.drain_pending_ips().await;
+                    if candidates.is_empty() {
+                        return;
+                    }
+                    if let Err(err) = geo_resolver.prime_ips(candidates.clone()).await {
+                        warn!(%err, "quota tick: country.is lookup failed");
+                    }
+
+                    // Backfill geo for short-lived IPs that were persisted before the async prime
+                    // completed. This keeps geo enrichment best-effort without blocking quota ticks.
+                    let mut store = store.lock().await;
+                    if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
+                        usage.backfill_geo_for_ips(&candidates, &geo_resolver)
+                    }) {
+                        warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
+                    }
+                    let unresolved = store
+                        .inbound_ip_usage()
+                        .collect_missing_geo_for_ips(&candidates);
+                    drop(store);
+                    if !unresolved.is_empty() {
+                        geo_resolver.enqueue_pending_ips(&unresolved).await;
+                    }
+                });
+                let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
+            }
+        }
+
         let mut store = store.lock().await;
         if let Err(err) = store.record_inbound_ip_usage_samples(
             sample_minute,
-            geo_db,
             online_stats_unavailable,
             if online_stats_unavailable {
                 &[]
@@ -318,6 +353,7 @@ async fn run_quota_tick_at_with_geo(
                 &online_samples
             },
             geo_resolver,
+            geo_resolver.ip_geo_source() != IpGeoSource::Missing,
         ) {
             warn!(%err, "quota tick: failed to persist inbound ip usage snapshot");
         }
@@ -1351,8 +1387,8 @@ mod tests {
             endpoint_probe_skip_self_test: false,
             quota_poll_interval_secs: 10,
             quota_auto_unban,
-            ip_usage_city_db_path: String::new(),
-            ip_usage_asn_db_path: String::new(),
+            ip_geo_enabled: false,
+            ip_geo_origin: "https://api.country.is".to_string(),
         };
 
         let store = JsonSnapshotStore::load_or_init(StoreInit {

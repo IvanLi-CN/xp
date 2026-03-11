@@ -11,6 +11,7 @@ export const AdminIpUsageWarningSchema = z.object({
 });
 
 export const AdminIpGeoSourceSchema = z.enum([
+	"country_is",
 	"managed_dbip_lite",
 	"external_override",
 	"missing",

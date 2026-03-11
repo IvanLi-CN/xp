@@ -141,35 +141,38 @@ Optional quota knobs:
 
 - `XP_QUOTA_POLL_INTERVAL_SECS` (default: `10`, allowed range `5..=30`)
 - `XP_QUOTA_AUTO_UNBAN` (default: `true`)
-- `XP_IP_USAGE_CITY_DB_PATH` (default: empty)
-  - Optional external override path to a city MMDB file. When set together with / without the ASN path, this node enters `external_override` mode and skips xp-managed DB-IP Lite updates.
-- `XP_IP_USAGE_ASN_DB_PATH` (default: empty)
-  - Optional external override path to an ASN MMDB file.
+
+Optional inbound IP geo knobs:
+
+- `XP_IP_GEO_ENABLED` (default: `false`)
+  - When enabled, `xp` resolves newly-seen inbound public IPs via the free `country.is` hosted API.
+  - Note: this sends observed client IPs to a third-party service.
+- `XP_IP_GEO_ORIGIN` (default: `https://api.country.is`)
+  - Override the hosted API origin (e.g. self-hosting the same interface or special network environments).
 
 An example env file is provided at `docs/ops/env/xp.env.example`.
 
 ## Inbound IP usage prerequisites
 
-To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. Geo enrichment now defaults to xp-managed `DB-IP Lite City + ASN MMDB`, while `XP_IP_USAGE_CITY_DB_PATH` / `XP_IP_USAGE_ASN_DB_PATH` remain as optional external overrides.
+To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. Geo enrichment can optionally use the free `country.is` hosted API (`XP_IP_GEO_ENABLED=true`) and no longer requires local MMDB files or a dedicated Geo settings page.
 
 1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats.
-2. Default managed mode: leave both env vars empty and configure updates in `Settings / IP geolocation`; xp downloads DB-IP Lite into `${XP_DATA_DIR}/geoip/` and tracks runtime state in `${XP_DATA_DIR}/geoip_update_runtime.json`.
-3. Optional external override: if either env var is set, xp reads those files read-only, skips managed updates for that node, and marks the node as `external_override` in the UI.
+2. When `XP_IP_GEO_ENABLED=true`, nodes need outbound HTTPS access to `https://api.country.is/` so new public IPs can be resolved on first sight.
+3. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection (the admin UI will show an `ip_geo_lookup_failed` warning after failed lookups).
 
 Operational notes:
 
-- Geo DB files are optional for collection; if missing, `xp` still records IP occupancy but returns empty `region` / `operator` fields plus a warning.
+- No local Geo DB download/update job runs anymore, so `${XP_DATA_DIR}/geoip` is not used by the default IP usage pipeline.
+- Upgrades from releases that used managed DB-IP geo enrichment must opt in again via `XP_IP_GEO_ENABLED=true`; otherwise `geo_source=missing` and geo fields stay empty.
 - `statsUserOnline` is required for the online IP snapshot itself. If it is missing, `xp` keeps quota collection running and returns an `online_stats_unavailable` warning to the admin UI.
-- Managed DB-IP Lite updates require outbound HTTPS access to `download.db-ip.com`.
-- Successful managed updates hot-reload the resolver and backfill cached IP geo/operator fields without restarting `xp`.
 - `xp-ops init` now writes `/etc/xray/config.json` with `statsUserOnline=true` by default; nodes provisioned before this change should verify their static config before rollout.
 
 Quick checks on a node:
 
 ```
 jq '.policy.levels["0"]' /etc/xray/config.json
-ls -l "${XP_DATA_DIR}/geoip" || true
-cat "${XP_DATA_DIR}/geoip_update_runtime.json" 2>/dev/null || true
+ls -l "${XP_DATA_DIR}/inbound_ip_usage.json" || true
+jq '.online_stats_unavailable' "${XP_DATA_DIR}/inbound_ip_usage.json" 2>/dev/null || true
 ```
 
 ## Data directory layout (`XP_DATA_DIR`)
@@ -195,10 +198,6 @@ ${XP_DATA_DIR}/
   state.json
   usage.json
   inbound_ip_usage.json
-  geoip/
-    dbip-city-lite.mmdb
-    dbip-asn-lite.mmdb
-  geoip_update_runtime.json
   service_runtime.json
 ```
 
@@ -209,6 +208,7 @@ Notes:
 - `state.json` and `usage.json` are raft-backed JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
 - `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
+- Geo enrichment uses a hosted API (`https://api.country.is/`); there are no local Geo DB files under `XP_DATA_DIR`.
 
 ## Service examples
 

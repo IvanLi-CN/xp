@@ -1,306 +1,560 @@
 use std::{
-    fs,
-    io::{self, Write},
-    net::IpAddr,
-    path::{Path, PathBuf},
-    sync::{Arc, RwLock},
-    time::Duration as StdDuration,
+    collections::{BTreeSet, HashMap},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration as StdDuration, Instant},
 };
 
-use anyhow::{Context, anyhow};
-use chrono::{DateTime, Datelike, Days, SecondsFormat, Utc};
-use flate2::read::GzDecoder;
-use maxminddb::{Reader, geoip2};
-use serde::{Deserialize, Serialize};
+use anyhow::Context;
+use chrono::Utc;
+use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
 
 use crate::{
     config::Config,
-    inbound_ip_usage::{
-        GeoLookup, GeoResolver, PersistedInboundIpGeo, PersistedInboundIpUsageGeoDb,
-    },
-    state::{GeoDbProvider, GeoDbUpdateSettings, JsonSnapshotStore},
+    inbound_ip_usage::{GeoLookup, PersistedInboundIpGeo, normalize_ip_string},
+    state::JsonSnapshotStore,
 };
 
-const GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION: u32 = 1;
-const DBIP_LITE_DOWNLOAD_BASE_URL: &str = "https://download.db-ip.com/free";
-const CITY_FILE_NAME: &str = "dbip-city-lite.mmdb";
-const ASN_FILE_NAME: &str = "dbip-asn-lite.mmdb";
-const RUNTIME_FILE_NAME: &str = "geoip_update_runtime.json";
-const GEO_DB_UPDATE_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
-const GEO_DB_UPDATE_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
-const GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES: i64 = 15;
+pub const COUNTRY_IS_ORIGIN: &str = "https://api.country.is";
+const COUNTRY_IS_BATCH_FIELDS: &str = "?fields=city,subdivision,asn";
+const COUNTRY_IS_BATCH_SIZE: usize = 100;
+const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);
+const COUNTRY_IS_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(5);
+const COUNTRY_IS_FAILURE_BACKOFF: StdDuration = StdDuration::from_secs(15 * 60);
+const COUNTRY_IS_RATE_LIMIT_BACKOFF_DEFAULT: StdDuration = StdDuration::from_secs(60);
+const COUNTRY_IS_MIN_REQUEST_INTERVAL: StdDuration = StdDuration::from_millis(200);
+const COUNTRY_IS_CACHE_TTL: StdDuration = StdDuration::from_secs(24 * 60 * 60);
+const COUNTRY_IS_CACHE_PRUNE_INTERVAL: StdDuration = StdDuration::from_secs(5 * 60);
+const COUNTRY_IS_GEO_CACHE_MAX_ENTRIES: usize = 50_000;
+const COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES: usize = 50_000;
+const COUNTRY_IS_LAST_ERROR_MAX_CHARS: usize = 300;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GeoDbLocalMode {
-    Managed,
-    ExternalOverride,
-    Missing,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IpGeoSource {
+    CountryIs,
     ManagedDbipLite,
     ExternalOverride,
     Missing,
 }
 
-impl From<GeoDbLocalMode> for IpGeoSource {
-    fn from(value: GeoDbLocalMode) -> Self {
-        match value {
-            GeoDbLocalMode::Managed => Self::ManagedDbipLite,
-            GeoDbLocalMode::ExternalOverride => Self::ExternalOverride,
-            GeoDbLocalMode::Missing => Self::Missing,
-        }
+impl<'de> serde::Deserialize<'de> for IpGeoSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Compatibility: tolerate unknown values during rolling upgrades instead of failing the
+        // entire response parsing.
+        let raw = String::deserialize(deserializer)?;
+        Ok(IpGeoSource::from_legacy_str(raw.as_str()))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GeoDbLocalStatus {
-    pub mode: GeoDbLocalMode,
-    pub running: bool,
-    pub city_db_path: String,
-    pub asn_db_path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_success_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_scheduled_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-}
+impl IpGeoSource {
+    pub fn from_legacy_str(raw: &str) -> Self {
+        match raw {
+            "country_is" => Self::CountryIs,
+            "managed_dbip_lite" => Self::ManagedDbipLite,
+            "external_override" => Self::ExternalOverride,
+            "missing" => Self::Missing,
+            _ => Self::Missing,
+        }
+    }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GeoDbUpdateTriggerResult {
-    pub status: GeoDbUpdateTriggerStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GeoDbUpdateTriggerStatus {
-    Accepted,
-    AlreadyRunning,
-    Skipped,
-    Error,
+    /// Map to the legacy string values used by older binaries. `country_is` is reported as
+    /// `managed_dbip_lite` so mixed-version clusters keep parsing the field, while `missing`
+    /// remains distinguishable when geo is disabled.
+    pub fn as_legacy_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::ExternalOverride => "external_override",
+            Self::CountryIs | Self::ManagedDbipLite => "managed_dbip_lite",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
-struct ManagedGeoDbPaths {
-    dir: PathBuf,
-    city: PathBuf,
-    asn: PathBuf,
-    runtime: PathBuf,
+struct ResolverCacheGeoEntry {
+    geo: PersistedInboundIpGeo,
+    cached_at: Instant,
 }
 
-impl ManagedGeoDbPaths {
-    fn from_data_dir(data_dir: &Path) -> Self {
-        let dir = data_dir.join("geoip");
-        Self {
-            city: dir.join(CITY_FILE_NAME),
-            asn: dir.join(ASN_FILE_NAME),
-            runtime: data_dir.join(RUNTIME_FILE_NAME),
-            dir,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct GeoDbOverridePaths {
-    city: Option<PathBuf>,
-    asn: Option<PathBuf>,
-}
-
-impl GeoDbOverridePaths {
-    fn from_config(config: &Config) -> Self {
-        Self {
-            city: config_path(&config.ip_usage_city_db_path),
-            asn: config_path(&config.ip_usage_asn_db_path),
-        }
-    }
-
-    fn any(&self) -> bool {
-        self.city.is_some() || self.asn.is_some()
-    }
+#[derive(Debug, Clone)]
+struct ResolverCacheRetryEntry {
+    retry_after: Instant,
+    cached_at: Instant,
 }
 
 #[derive(Debug)]
-pub struct SharedGeoResolver {
-    inner: Arc<RwLock<GeoResolver>>,
-    overrides: GeoDbOverridePaths,
-    managed: ManagedGeoDbPaths,
+struct ResolverCache {
+    geo_by_ip: HashMap<String, ResolverCacheGeoEntry>,
+    retry_after_by_ip: HashMap<String, ResolverCacheRetryEntry>,
+    last_pruned_at: Instant,
 }
 
-impl Clone for SharedGeoResolver {
-    fn clone(&self) -> Self {
+impl Default for ResolverCache {
+    fn default() -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
-            overrides: self.overrides.clone(),
-            managed: self.managed.clone(),
+            geo_by_ip: HashMap::new(),
+            retry_after_by_ip: HashMap::new(),
+            last_pruned_at: Instant::now(),
         }
+    }
+}
+
+impl ResolverCache {
+    fn prune_if_needed(&mut self, now: Instant) {
+        if self.last_pruned_at + COUNTRY_IS_CACHE_PRUNE_INTERVAL > now {
+            return;
+        }
+        self.prune(now);
+        self.last_pruned_at = now;
+    }
+
+    fn prune(&mut self, now: Instant) {
+        self.geo_by_ip
+            .retain(|_, entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now);
+        self.retry_after_by_ip
+            .retain(|_, entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now);
+
+        // Bound memory growth even if a node sees a huge volume of unique IPs in a short time.
+        // The eviction policy is intentionally simple (arbitrary drops) since persisted IP usage
+        // retains geo for the reporting window.
+        if self.geo_by_ip.len() > COUNTRY_IS_GEO_CACHE_MAX_ENTRIES {
+            let overflow = self.geo_by_ip.len() - COUNTRY_IS_GEO_CACHE_MAX_ENTRIES;
+            let keys = self
+                .geo_by_ip
+                .keys()
+                .take(overflow)
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in keys {
+                self.geo_by_ip.remove(&key);
+            }
+        }
+        if self.retry_after_by_ip.len() > COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES {
+            let overflow = self.retry_after_by_ip.len() - COUNTRY_IS_RETRY_CACHE_MAX_ENTRIES;
+            let keys = self
+                .retry_after_by_ip
+                .keys()
+                .take(overflow)
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in keys {
+                self.retry_after_by_ip.remove(&key);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SharedGeoResolver {
+    enabled: bool,
+    batch_url: Arc<String>,
+    client: reqwest::Client,
+    cache: Arc<RwLock<ResolverCache>>,
+    last_request_at: Arc<Mutex<Instant>>,
+    pending_ips: Arc<Mutex<BTreeSet<String>>>,
+    prime_in_flight: Arc<AtomicBool>,
+    last_error: Arc<RwLock<Option<ResolverLastError>>>,
+    last_success_at: Arc<RwLock<Option<Instant>>>,
+}
+
+#[derive(Debug)]
+pub struct GeoPrimeGuard {
+    in_flight: Arc<AtomicBool>,
+}
+
+impl Drop for GeoPrimeGuard {
+    fn drop(&mut self) {
+        self.in_flight.store(false, Ordering::SeqCst);
     }
 }
 
 impl SharedGeoResolver {
     pub fn new(config: &Config) -> Self {
-        let overrides = GeoDbOverridePaths::from_config(config);
-        let managed = ManagedGeoDbPaths::from_data_dir(&config.data_dir);
-        let resolver = Self::build_resolver(&overrides, &managed);
-        Self {
-            inner: Arc::new(RwLock::new(resolver)),
-            overrides,
-            managed,
+        let origin = config.ip_geo_origin.trim();
+        let origin = if origin.is_empty() {
+            COUNTRY_IS_ORIGIN
+        } else {
+            origin
+        };
+        Self::with_origin_and_enabled(origin, config.ip_geo_enabled)
+            .expect("country.is resolver init")
+    }
+
+    pub fn with_origin(origin: &str) -> anyhow::Result<Self> {
+        Self::with_origin_and_enabled(origin, true)
+    }
+
+    fn with_origin_and_enabled(origin: &str, enabled: bool) -> anyhow::Result<Self> {
+        let origin = origin.trim_end_matches('/');
+        let batch_url = if origin.contains('?') {
+            format!(
+                "{origin}&{}",
+                COUNTRY_IS_BATCH_FIELDS.trim_start_matches('?')
+            )
+        } else {
+            format!("{origin}{COUNTRY_IS_BATCH_FIELDS}")
+        };
+        let client = reqwest::Client::builder()
+            .connect_timeout(COUNTRY_IS_CONNECT_TIMEOUT)
+            .timeout(COUNTRY_IS_HTTP_TIMEOUT)
+            .build()
+            .context("build country.is client")?;
+        Ok(Self {
+            enabled,
+            batch_url: Arc::new(batch_url),
+            client,
+            cache: Arc::new(RwLock::new(ResolverCache::default())),
+            last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
+            pending_ips: Arc::new(Mutex::new(BTreeSet::new())),
+            prime_in_flight: Arc::new(AtomicBool::new(false)),
+            last_error: Arc::new(RwLock::new(None)),
+            last_success_at: Arc::new(RwLock::new(None)),
+        })
+    }
+
+    pub fn begin_prime(&self) -> Option<GeoPrimeGuard> {
+        self.prime_in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        Some(GeoPrimeGuard {
+            in_flight: self.prime_in_flight.clone(),
+        })
+    }
+
+    pub async fn enqueue_pending_ips(&self, ips: &[String]) {
+        if ips.is_empty() {
+            return;
+        }
+        let mut pending = self.pending_ips.lock().await;
+        for ip in ips {
+            pending.insert(ip.clone());
         }
     }
 
-    fn build_resolver(overrides: &GeoDbOverridePaths, managed: &ManagedGeoDbPaths) -> GeoResolver {
-        let (city_path, asn_path) = resolve_active_paths(overrides, managed);
-        GeoResolver::new(city_path, asn_path)
+    pub async fn has_pending_ips(&self) -> bool {
+        !self.pending_ips.lock().await.is_empty()
     }
 
-    pub fn reload_from_disk(&self) {
-        let resolver = Self::build_resolver(&self.overrides, &self.managed);
-        let mut guard = self.inner.write().expect("geo resolver write lock");
-        *guard = resolver;
-    }
-
-    pub fn local_mode(&self) -> GeoDbLocalMode {
-        resolve_local_mode(&self.overrides, &self.managed)
+    pub async fn drain_pending_ips(&self) -> Vec<String> {
+        let mut pending = self.pending_ips.lock().await;
+        let out = pending.iter().cloned().collect::<Vec<_>>();
+        pending.clear();
+        out
     }
 
     pub fn ip_geo_source(&self) -> IpGeoSource {
-        self.local_mode().into()
-    }
-
-    fn managed_paths(&self) -> ManagedGeoDbPaths {
-        self.managed.clone()
-    }
-
-    fn display_paths(&self) -> PersistedInboundIpUsageGeoDb {
-        match self.local_mode() {
-            GeoDbLocalMode::ExternalOverride => PersistedInboundIpUsageGeoDb {
-                city_db_path: self
-                    .overrides
-                    .city
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
-                asn_db_path: self
-                    .overrides
-                    .asn
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
-            },
-            GeoDbLocalMode::Managed | GeoDbLocalMode::Missing => PersistedInboundIpUsageGeoDb {
-                city_db_path: self.managed.city.display().to_string(),
-                asn_db_path: self.managed.asn.display().to_string(),
-            },
+        if self.enabled {
+            IpGeoSource::CountryIs
+        } else {
+            IpGeoSource::Missing
         }
+    }
+
+    pub fn last_error_message(&self) -> Option<String> {
+        let now = Instant::now();
+        let last_error = self
+            .last_error
+            .read()
+            .expect("geo resolver read lock")
+            .as_ref()
+            .filter(|entry| entry.at + COUNTRY_IS_FAILURE_BACKOFF > now)
+            .cloned()?;
+        let last_success = *self.last_success_at.read().expect("geo resolver read lock");
+        if last_success.is_some_and(|success| success > last_error.at) {
+            return None;
+        }
+        Some(last_error.message)
+    }
+
+    pub async fn prime_ips<I>(&self, ips: I) -> anyhow::Result<()>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        if !self.enabled {
+            return Ok(());
+        }
+        let now = Instant::now();
+        {
+            let mut cache = self.cache.write().expect("geo resolver write lock");
+            cache.prune_if_needed(now);
+        }
+        let candidates = ips
+            .into_iter()
+            .filter_map(|ip| normalize_ip_string(&ip))
+            .filter(|ip| is_global_ip(ip))
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            return Ok(());
+        }
+
+        let pending = {
+            let cache = self.cache.read().expect("geo resolver read lock");
+            candidates
+                .into_iter()
+                .filter(|ip| {
+                    cache
+                        .geo_by_ip
+                        .get(ip)
+                        .is_none_or(|entry| entry.cached_at + COUNTRY_IS_CACHE_TTL <= now)
+                })
+                .filter(|ip| {
+                    cache.retry_after_by_ip.get(ip).is_none_or(|entry| {
+                        entry.cached_at + COUNTRY_IS_CACHE_TTL <= now || entry.retry_after <= now
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        for chunk in pending.chunks(COUNTRY_IS_BATCH_SIZE) {
+            self.fetch_batch(chunk).await?;
+        }
+        Ok(())
+    }
+
+    fn mark_last_error(&self, msg: &str) {
+        let msg = sanitize_error_message(msg);
+        let mut last_error = self.last_error.write().expect("geo resolver write lock");
+        *last_error = Some(ResolverLastError {
+            message: msg,
+            at: Instant::now(),
+        });
+    }
+
+    fn mark_last_success(&self) {
+        let mut last_success = self
+            .last_success_at
+            .write()
+            .expect("geo resolver write lock");
+        *last_success = Some(Instant::now());
+    }
+
+    async fn wait_for_rate_limit(&self) {
+        let mut last = self.last_request_at.lock().await;
+        let now = Instant::now();
+        let next_allowed = *last + COUNTRY_IS_MIN_REQUEST_INTERVAL;
+        if next_allowed > now {
+            tokio::time::sleep(next_allowed - now).await;
+        }
+        *last = Instant::now();
+    }
+
+    async fn fetch_batch(&self, batch: &[String]) -> anyhow::Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        self.wait_for_rate_limit().await;
+        let request_ips = batch.iter().cloned().collect::<BTreeSet<_>>();
+        let response = self
+            .client
+            .post(self.batch_url.as_str())
+            .json(batch)
+            .send()
+            .await
+            .with_context(|| format!("request country.is batch for {} ip(s)", batch.len()));
+
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                self.mark_retry_after(&request_ips);
+                let msg = err.to_string();
+                self.mark_last_error(msg.as_str());
+                return Err(err);
+            }
+        };
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let backoff = Self::retry_after_from_headers(response.headers())
+                .unwrap_or(COUNTRY_IS_RATE_LIMIT_BACKOFF_DEFAULT);
+            self.mark_retry_after_with_backoff(&request_ips, backoff);
+            self.mark_last_error("country.is rate limited (429)");
+            return Err(anyhow::anyhow!("country.is rate limited (429)"));
+        }
+        if !status.is_success() {
+            self.mark_retry_after(&request_ips);
+            self.mark_last_error(format!("country.is returned error status: {status}").as_str());
+            return Err(anyhow::anyhow!(
+                "country.is returned error status: {status}"
+            ));
+        }
+
+        let entries = match response.json::<Vec<CountryIsBatchEntry>>().await {
+            Ok(entries) => entries,
+            Err(err) => {
+                self.mark_retry_after(&request_ips);
+                let err = Result::<(), _>::Err(err)
+                    .context("decode country.is batch response")
+                    .unwrap_err();
+                let msg = err.to_string();
+                self.mark_last_error(msg.as_str());
+                return Err(err);
+            }
+        };
+
+        let resolved = entries
+            .into_iter()
+            .filter_map(|entry| {
+                let ip = normalize_ip_string(&entry.ip)?;
+                Some((ip, entry.into_geo()))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let now = Instant::now();
+        let mut cache = self.cache.write().expect("geo resolver write lock");
+        cache.prune_if_needed(now);
+        let retry_after = now + COUNTRY_IS_FAILURE_BACKOFF;
+        for ip in request_ips {
+            if let Some(geo) = resolved.get(&ip) {
+                if geo.country.is_empty()
+                    && geo.region.is_empty()
+                    && geo.city.is_empty()
+                    && geo.operator.is_empty()
+                {
+                    // country.is can return rows without any geo fields for some IPs. Treat that as a
+                    // temporary miss so we can retry later instead of caching an empty geo for a day.
+                    cache.retry_after_by_ip.insert(
+                        ip,
+                        ResolverCacheRetryEntry {
+                            retry_after,
+                            cached_at: now,
+                        },
+                    );
+                    continue;
+                }
+                cache.geo_by_ip.insert(
+                    ip.clone(),
+                    ResolverCacheGeoEntry {
+                        geo: geo.clone(),
+                        cached_at: now,
+                    },
+                );
+                cache.retry_after_by_ip.remove(&ip);
+            } else {
+                cache.retry_after_by_ip.insert(
+                    ip,
+                    ResolverCacheRetryEntry {
+                        retry_after,
+                        cached_at: now,
+                    },
+                );
+            }
+        }
+        self.mark_last_success();
+        Ok(())
+    }
+
+    fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<StdDuration> {
+        let raw = headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .trim();
+        if let Ok(secs) = raw.parse::<u64>() {
+            return Some(StdDuration::from_secs(secs));
+        }
+
+        // RFC 9110 allows HTTP-date values for Retry-After.
+        let parsed = chrono::DateTime::parse_from_rfc2822(raw).ok()?;
+        let target = parsed.with_timezone(&Utc);
+        let now = Utc::now();
+        let delta = target - now;
+        let secs = delta.num_seconds();
+        if secs <= 0 {
+            return Some(StdDuration::from_secs(0));
+        }
+        Some(StdDuration::from_secs(secs as u64))
+    }
+
+    fn mark_retry_after_with_backoff(&self, ips: &BTreeSet<String>, backoff: StdDuration) {
+        let now = Instant::now();
+        let retry_after = now + backoff;
+        let mut cache = self.cache.write().expect("geo resolver write lock");
+        cache.prune_if_needed(now);
+        for ip in ips {
+            cache.retry_after_by_ip.insert(
+                ip.clone(),
+                ResolverCacheRetryEntry {
+                    retry_after,
+                    cached_at: now,
+                },
+            );
+        }
+    }
+
+    fn mark_retry_after(&self, ips: &BTreeSet<String>) {
+        self.mark_retry_after_with_backoff(ips, COUNTRY_IS_FAILURE_BACKOFF);
     }
 }
 
 impl GeoLookup for SharedGeoResolver {
-    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
-        let guard = self.inner.read().expect("geo resolver read lock");
-        GeoResolver::geo_db(&guard)
-    }
-
-    fn is_missing(&self) -> bool {
-        let guard = self.inner.read().expect("geo resolver read lock");
-        GeoResolver::is_missing(&guard)
-    }
-
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        let guard = self.inner.read().expect("geo resolver read lock");
-        GeoResolver::lookup(&guard, ip)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct PersistedGeoDbUpdateRuntime {
-    schema_version: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_success_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_error: Option<String>,
-}
-
-impl Default for PersistedGeoDbUpdateRuntime {
-    fn default() -> Self {
-        Self {
-            schema_version: GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION,
-            last_started_at: None,
-            last_success_at: None,
-            last_error: None,
+        if !self.enabled {
+            return PersistedInboundIpGeo::default();
         }
+        let Some(ip) = normalize_ip_string(ip) else {
+            return PersistedInboundIpGeo::default();
+        };
+        let now = Instant::now();
+        self.cache
+            .read()
+            .expect("geo resolver read lock")
+            .geo_by_ip
+            .get(&ip)
+            .filter(|entry| entry.cached_at + COUNTRY_IS_CACHE_TTL > now)
+            .map(|entry| entry.geo.clone())
+            .unwrap_or_default()
     }
 }
 
-#[derive(Debug, Default)]
-struct GeoDbUpdateRuntimeState {
-    persisted: PersistedGeoDbUpdateRuntime,
-    running: bool,
+#[derive(Debug, Clone)]
+struct ResolverLastError {
+    message: String,
+    at: Instant,
+}
+
+fn sanitize_error_message(raw: &str) -> String {
+    let mut out = raw.replace(['\n', '\r'], " ");
+    if out.chars().count() > COUNTRY_IS_LAST_ERROR_MAX_CHARS {
+        out = out.chars().take(COUNTRY_IS_LAST_ERROR_MAX_CHARS).collect();
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
 pub struct GeoDbUpdateHandle {
-    store: Arc<Mutex<JsonSnapshotStore>>,
     resolver: SharedGeoResolver,
-    runtime: Arc<Mutex<GeoDbUpdateRuntimeState>>,
-    download_base_url: Arc<String>,
-    client: reqwest::Client,
 }
 
 pub fn spawn_geo_db_update_worker(
     cfg: Arc<Config>,
-    store: Arc<Mutex<JsonSnapshotStore>>,
+    _store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
-    spawn_geo_db_update_worker_with_origin(cfg, store, DBIP_LITE_DOWNLOAD_BASE_URL.to_string())
+    let handle = GeoDbUpdateHandle {
+        resolver: SharedGeoResolver::new(cfg.as_ref()),
+    };
+    let task = tokio::spawn(async {});
+    Ok((handle, task))
 }
 
 pub fn spawn_geo_db_update_worker_with_origin(
     cfg: Arc<Config>,
-    store: Arc<Mutex<JsonSnapshotStore>>,
-    download_base_url: String,
+    origin: String,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
-    let resolver = SharedGeoResolver::new(cfg.as_ref());
-    let runtime_path = ManagedGeoDbPaths::from_data_dir(&cfg.data_dir).runtime;
-    let persisted = load_runtime(&runtime_path)?;
     let handle = GeoDbUpdateHandle {
-        client: reqwest::Client::builder()
-            .connect_timeout(GEO_DB_UPDATE_CONNECT_TIMEOUT)
-            .timeout(GEO_DB_UPDATE_HTTP_TIMEOUT)
-            .build()
-            .context("build geo db update reqwest client")?,
-        store,
-        resolver,
-        runtime: Arc::new(Mutex::new(GeoDbUpdateRuntimeState {
-            persisted,
-            running: false,
-        })),
-        download_base_url: Arc::new(download_base_url),
+        resolver: SharedGeoResolver::with_origin_and_enabled(&origin, cfg.ip_geo_enabled)
+            .unwrap_or_else(|_| SharedGeoResolver::new(cfg.as_ref())),
     };
-    handle.resolver.reload_from_disk();
-
-    let worker = handle.clone();
-    let task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-        loop {
-            interval.tick().await;
-            if let Err(err) = worker.maybe_trigger_auto_update().await {
-                warn!(%err, "geo db auto update tick failed");
-            }
-        }
-    });
-
+    let task = tokio::spawn(async {});
     Ok((handle, task))
 }
 
@@ -312,583 +566,349 @@ impl GeoDbUpdateHandle {
     pub fn ip_geo_source(&self) -> IpGeoSource {
         self.resolver.ip_geo_source()
     }
+}
 
-    pub async fn local_status(&self) -> anyhow::Result<GeoDbLocalStatus> {
-        let settings = {
-            let store = self.store.lock().await;
-            store.state().geo_db_update_settings.clone()
-        };
-        self.local_status_with_settings(&settings).await
-    }
+#[derive(Debug, Deserialize)]
+struct CountryIsBatchEntry {
+    ip: String,
+    #[serde(default)]
+    country: Option<String>,
+    #[serde(default)]
+    city: Option<String>,
+    #[serde(default)]
+    subdivision: Option<String>,
+    #[serde(default)]
+    asn: Option<CountryIsAsn>,
+}
 
-    pub async fn trigger_manual_update(&self) -> GeoDbUpdateTriggerResult {
-        let settings = {
-            let store = self.store.lock().await;
-            store.state().geo_db_update_settings.clone()
-        };
-        match self.try_start_update(settings, true).await {
-            Ok(result) => result,
-            Err(err) => GeoDbUpdateTriggerResult {
-                status: GeoDbUpdateTriggerStatus::Error,
-                message: Some(err.to_string()),
-            },
+impl CountryIsBatchEntry {
+    fn into_geo(self) -> PersistedInboundIpGeo {
+        PersistedInboundIpGeo {
+            country: trim_or_empty(self.country),
+            region: trim_or_empty(self.subdivision),
+            city: trim_or_empty(self.city),
+            operator: self
+                .asn
+                .and_then(|asn| asn.organization.or(asn.name))
+                .map(|value| value.trim().to_string())
+                .unwrap_or_default(),
         }
     }
+}
 
-    pub async fn maybe_trigger_auto_update(&self) -> anyhow::Result<()> {
-        let settings = {
-            let store = self.store.lock().await;
-            store.state().geo_db_update_settings.clone()
-        };
-        if !settings.auto_update_enabled {
-            return Ok(());
-        }
-        let due = {
-            let runtime = self.runtime.lock().await;
-            is_auto_update_due(
-                &settings,
-                self.resolver.local_mode(),
-                &runtime.persisted,
-                Utc::now(),
-            )
-        };
-        if !due {
-            return Ok(());
-        }
-        let _ = self.try_start_update(settings, false).await?;
-        Ok(())
-    }
+#[derive(Debug, Deserialize)]
+struct CountryIsAsn {
+    #[serde(default)]
+    organization: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
 
-    async fn local_status_with_settings(
-        &self,
-        settings: &GeoDbUpdateSettings,
-    ) -> anyhow::Result<GeoDbLocalStatus> {
-        let mode = self.resolver.local_mode();
-        let display_paths = self.resolver.display_paths();
-        let runtime = self.runtime.lock().await;
-        Ok(GeoDbLocalStatus {
-            mode,
-            running: runtime.running,
-            city_db_path: display_paths.city_db_path,
-            asn_db_path: display_paths.asn_db_path,
-            last_started_at: runtime.persisted.last_started_at.clone(),
-            last_success_at: runtime.persisted.last_success_at.clone(),
-            next_scheduled_at: next_scheduled_at(settings, mode, &runtime.persisted, Utc::now()),
-            last_error: runtime.persisted.last_error.clone(),
-        })
-    }
+fn trim_or_empty(value: Option<String>) -> String {
+    value
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default()
+}
 
-    async fn try_start_update(
-        &self,
-        settings: GeoDbUpdateSettings,
-        manual: bool,
-    ) -> anyhow::Result<GeoDbUpdateTriggerResult> {
-        if settings.provider != GeoDbProvider::DbipLite {
-            return Ok(GeoDbUpdateTriggerResult {
-                status: GeoDbUpdateTriggerStatus::Error,
-                message: Some("unsupported geo db provider".to_string()),
-            });
-        }
-
-        let mode = self.resolver.local_mode();
-        if mode == GeoDbLocalMode::ExternalOverride {
-            return Ok(GeoDbUpdateTriggerResult {
-                status: GeoDbUpdateTriggerStatus::Skipped,
-                message: Some("node uses externally managed Geo DB files".to_string()),
-            });
-        }
-
-        let started_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-        {
-            let mut runtime = self.runtime.lock().await;
-            if runtime.running {
-                return Ok(GeoDbUpdateTriggerResult {
-                    status: GeoDbUpdateTriggerStatus::AlreadyRunning,
-                    message: None,
-                });
-            }
-            let mut persisted = runtime.persisted.clone();
-            persisted.schema_version = GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION;
-            persisted.last_started_at = Some(started_at.clone());
-            persisted.last_error = None;
-            save_runtime(&self.resolver.managed_paths().runtime, &persisted)?;
-            runtime.persisted = persisted;
-            runtime.running = true;
-        }
-
-        let handle = self.clone();
-        tokio::spawn(async move {
-            handle.finish_update(settings, manual).await;
-        });
-
-        Ok(GeoDbUpdateTriggerResult {
-            status: GeoDbUpdateTriggerStatus::Accepted,
-            message: None,
-        })
-    }
-
-    async fn finish_update(&self, settings: GeoDbUpdateSettings, manual: bool) {
-        let outcome = self.run_update(settings, manual).await;
-        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-        let mut runtime = self.runtime.lock().await;
-        runtime.running = false;
-        match outcome {
-            Ok(()) => {
-                runtime.persisted.last_success_at = Some(now);
-                runtime.persisted.last_error = None;
-            }
-            Err(err) => {
-                warn!(%err, "geo db update failed");
-                runtime.persisted.last_error = Some(err.to_string());
-            }
-        }
-        if let Err(err) = save_runtime(&self.resolver.managed_paths().runtime, &runtime.persisted) {
-            warn!(%err, "failed to persist geo db runtime state");
-        }
-    }
-
-    async fn run_update(&self, _settings: GeoDbUpdateSettings, manual: bool) -> anyhow::Result<()> {
-        let managed = self.resolver.managed_paths();
-        fs::create_dir_all(&managed.dir).with_context(|| {
-            format!("create geo db managed directory {}", managed.dir.display())
-        })?;
-
-        let (city_gz, asn_gz, release_tag) =
-            download_dbip_lite_pair(&self.client, self.download_base_url.as_str(), Utc::now())
-                .await?;
-
-        let staging_prefix = if manual { "manual" } else { "auto" };
-        let staging_id = format!(
-            "{}-{}",
-            staging_prefix,
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        );
-        let city_stage = managed
-            .dir
-            .join(format!("{CITY_FILE_NAME}.{staging_id}.tmp"));
-        let asn_stage = managed
-            .dir
-            .join(format!("{ASN_FILE_NAME}.{staging_id}.tmp"));
-
-        write_gzip_payload(&city_stage, &city_gz)
-            .with_context(|| format!("write staged city mmdb {}", city_stage.display()))?;
-        write_gzip_payload(&asn_stage, &asn_gz)
-            .with_context(|| format!("write staged asn mmdb {}", asn_stage.display()))?;
-
-        validate_city_db(&city_stage)?;
-        validate_asn_db(&asn_stage)?;
-
-        fs::rename(&city_stage, &managed.city)
-            .with_context(|| format!("replace managed city mmdb {}", managed.city.display()))?;
-        fs::rename(&asn_stage, &managed.asn)
-            .with_context(|| format!("replace managed asn mmdb {}", managed.asn.display()))?;
-
-        self.resolver.reload_from_disk();
-        let geo_db = self.resolver.geo_db();
-        {
-            let mut store = self.store.lock().await;
-            let _ = store.refresh_inbound_ip_usage_geo_cache(geo_db, &self.resolver)?;
-        }
-
-        info!(release_tag, "geo db update applied successfully");
-        Ok(())
+fn is_global_ip(raw: &str) -> bool {
+    match raw.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => is_public_ipv4(ip),
+        Ok(IpAddr::V6(ip)) => is_public_ipv6(ip),
+        Err(_) => false,
     }
 }
 
-fn config_path(raw: &str) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
-}
-
-fn resolve_local_mode(
-    overrides: &GeoDbOverridePaths,
-    managed: &ManagedGeoDbPaths,
-) -> GeoDbLocalMode {
-    if overrides.any() {
-        return GeoDbLocalMode::ExternalOverride;
-    }
-    if managed.city.is_file() && managed.asn.is_file() {
-        GeoDbLocalMode::Managed
-    } else {
-        GeoDbLocalMode::Missing
-    }
-}
-
-fn resolve_active_paths(
-    overrides: &GeoDbOverridePaths,
-    managed: &ManagedGeoDbPaths,
-) -> (Option<PathBuf>, Option<PathBuf>) {
-    match resolve_local_mode(overrides, managed) {
-        GeoDbLocalMode::ExternalOverride => (overrides.city.clone(), overrides.asn.clone()),
-        GeoDbLocalMode::Managed => (Some(managed.city.clone()), Some(managed.asn.clone())),
-        GeoDbLocalMode::Missing => (None, None),
-    }
-}
-
-fn auto_update_due_at(
-    settings: &GeoDbUpdateSettings,
-    mode: GeoDbLocalMode,
-    runtime: &PersistedGeoDbUpdateRuntime,
-    now: DateTime<Utc>,
-) -> Option<DateTime<Utc>> {
-    if !settings.auto_update_enabled || mode == GeoDbLocalMode::ExternalOverride {
-        return None;
-    }
-
-    let scheduled_from_success = runtime
-        .last_success_at
-        .as_deref()
-        .and_then(parse_timestamp)
-        .map(|last| last + chrono::Duration::days(i64::from(settings.update_interval_days)))
-        .unwrap_or(now);
-
-    let retry_after_failure = runtime
-        .last_error
-        .as_ref()
-        .and(runtime.last_started_at.as_deref())
-        .and_then(parse_timestamp)
-        .map(|last| last + chrono::Duration::minutes(GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES));
-
-    Some(match retry_after_failure {
-        Some(retry_at) if retry_at > scheduled_from_success => retry_at,
-        _ => scheduled_from_success,
-    })
-}
-
-fn is_auto_update_due(
-    settings: &GeoDbUpdateSettings,
-    mode: GeoDbLocalMode,
-    runtime: &PersistedGeoDbUpdateRuntime,
-    now: DateTime<Utc>,
-) -> bool {
-    auto_update_due_at(settings, mode, runtime, now).is_some_and(|due_at| now >= due_at)
-}
-
-fn next_scheduled_at(
-    settings: &GeoDbUpdateSettings,
-    mode: GeoDbLocalMode,
-    runtime: &PersistedGeoDbUpdateRuntime,
-    now: DateTime<Utc>,
-) -> Option<String> {
-    auto_update_due_at(settings, mode, runtime, now)
-        .map(|due_at| due_at.to_rfc3339_opts(SecondsFormat::Secs, true))
-}
-
-fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc))
-}
-
-fn load_runtime(path: &Path) -> anyhow::Result<PersistedGeoDbUpdateRuntime> {
-    if !path.exists() {
-        return Ok(PersistedGeoDbUpdateRuntime::default());
-    }
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            warn!(path = %path.display(), %err, "ignoring unreadable geo db runtime state");
-            return Ok(PersistedGeoDbUpdateRuntime::default());
-        }
-    };
-    let mut runtime: PersistedGeoDbUpdateRuntime = match serde_json::from_slice(&bytes) {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            warn!(path = %path.display(), %err, "ignoring invalid geo db runtime state");
-            backup_invalid_runtime(path);
-            return Ok(PersistedGeoDbUpdateRuntime::default());
-        }
-    };
-    if runtime.schema_version != GEO_DB_UPDATE_RUNTIME_SCHEMA_VERSION {
-        runtime = PersistedGeoDbUpdateRuntime::default();
-    }
-    Ok(runtime)
-}
-
-fn backup_invalid_runtime(path: &Path) {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(RUNTIME_FILE_NAME);
-    let backup = path.with_file_name(format!("{file_name}.corrupt-{}", Utc::now().timestamp()));
-    if let Err(err) = fs::rename(path, &backup) {
-        warn!(
-            path = %path.display(),
-            backup = %backup.display(),
-            %err,
-            "failed to quarantine invalid geo db runtime state"
-        );
-    }
-}
-
-fn save_runtime(path: &Path, runtime: &PersistedGeoDbUpdateRuntime) -> anyhow::Result<()> {
-    let bytes = serde_json::to_vec_pretty(runtime)?;
-    write_atomic(path, &bytes).with_context(|| format!("write {}", path.display()))
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("json")
-    ));
-    let mut file = fs::File::create(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(tmp, path)?;
-    Ok(())
-}
-
-fn write_gzip_payload(path: &Path, payload: &[u8]) -> anyhow::Result<()> {
-    let mut decoder = GzDecoder::new(payload);
-    let mut output = fs::File::create(path)?;
-    io::copy(&mut decoder, &mut output)?;
-    output.sync_all()?;
-    Ok(())
-}
-
-fn validate_city_db(path: &Path) -> anyhow::Result<()> {
-    let reader =
-        Reader::open_readfile(path).with_context(|| format!("open city db {}", path.display()))?;
-    let result = reader.lookup("8.8.8.8".parse::<IpAddr>()?)?;
-    let _: Option<geoip2::City> = result.decode()?;
-    Ok(())
-}
-
-fn validate_asn_db(path: &Path) -> anyhow::Result<()> {
-    let reader =
-        Reader::open_readfile(path).with_context(|| format!("open asn db {}", path.display()))?;
-    let result = reader.lookup("8.8.8.8".parse::<IpAddr>()?)?;
-    let _: Option<geoip2::Asn> = result.decode()?;
-    Ok(())
-}
-
-async fn download_dbip_lite_pair(
-    client: &reqwest::Client,
-    base_url: &str,
-    now: DateTime<Utc>,
-) -> anyhow::Result<(Vec<u8>, Vec<u8>, String)> {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push((now.year(), now.month()));
-    if let Some(previous) = now
-        .date_naive()
-        .checked_sub_days(Days::new(now.day0() as u64 + 1))
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || ip.is_multicast()
     {
-        let previous = previous.and_hms_opt(0, 0, 0).unwrap().and_utc();
-        if (previous.year(), previous.month()) != (now.year(), now.month()) {
-            candidates.push((previous.year(), previous.month()));
-        }
+        return false;
     }
 
-    let base_url = base_url.trim_end_matches('/');
-    let mut last_err: Option<anyhow::Error> = None;
-    for (year, month) in candidates {
-        let release_tag = format!("{year:04}-{month:02}");
-        let city_url = format!("{base_url}/dbip-city-lite-{release_tag}.mmdb.gz");
-        let asn_url = format!("{base_url}/dbip-asn-lite-{release_tag}.mmdb.gz");
-        match download_release_pair(client, &city_url, &asn_url).await {
-            Ok((city, asn)) => return Ok((city, asn, release_tag)),
-            Err(err) => last_err = Some(err),
-        }
+    let [a, b, c, _d] = ip.octets();
+
+    // 0.0.0.0/8 (also includes 0.0.0.0/32)
+    if a == 0 {
+        return false;
     }
-    Err(last_err.unwrap_or_else(|| anyhow!("dbip lite download failed")))
+
+    // RFC 6598 carrier-grade NAT: 100.64.0.0/10
+    if a == 100 && (64..=127).contains(&b) {
+        return false;
+    }
+
+    // RFC 6890 IETF Protocol Assignments: 192.0.0.0/24
+    if a == 192 && b == 0 && c == 0 {
+        return false;
+    }
+
+    // RFC 2544 benchmarking: 198.18.0.0/15
+    if a == 198 && (b == 18 || b == 19) {
+        return false;
+    }
+
+    // Reserved for future use: 240.0.0.0/4
+    if a >= 240 {
+        return false;
+    }
+
+    true
 }
 
-async fn download_release_pair(
-    client: &reqwest::Client,
-    city_url: &str,
-    asn_url: &str,
-) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let city = download_bytes(client, city_url).await?;
-    let asn = download_bytes(client, asn_url).await?;
-    Ok((city, asn))
-}
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    // Treat IPv4-mapped/compatible addresses as IPv4 for public range checks.
+    if let Some(v4) = ip.to_ipv4() {
+        return is_public_ipv4(v4);
+    }
 
-async fn download_bytes(client: &reqwest::Client, url: &str) -> anyhow::Result<Vec<u8>> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("download {url}"))?;
-    let response = response
-        .error_for_status()
-        .with_context(|| format!("download {url}"))?;
-    let bytes = response
-        .bytes()
-        .await
-        .with_context(|| format!("read {url}"))?;
-    Ok(bytes.to_vec())
+    let segments = ip.segments();
+    let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && !ip.is_unique_local()
+        && !ip.is_unicast_link_local()
+        && !is_documentation
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use clap::Parser as _;
-    use tokio::sync::Mutex;
-
     use super::*;
-    use crate::{
-        config::Cli,
-        state::{JsonSnapshotStore, StoreInit},
-    };
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn test_config(data_dir: &Path) -> Config {
-        let mut config = Cli::try_parse_from(["xp"]).unwrap().config;
-        config.data_dir = data_dir.to_path_buf();
-        config
-    }
-
-    fn test_store(data_dir: &Path) -> JsonSnapshotStore {
-        JsonSnapshotStore::load_or_init(StoreInit {
-            data_dir: data_dir.to_path_buf(),
-            bootstrap_node_id: Some("node-1".to_string()),
-            bootstrap_node_name: "node-1".to_string(),
-            bootstrap_access_host: String::new(),
-            bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
-        })
-        .unwrap()
+    #[test]
+    fn ip_geo_source_deserializes_known_values_and_defaults_unknown_to_missing() {
+        for (raw, expected) in [
+            ("\"country_is\"", IpGeoSource::CountryIs),
+            ("\"managed_dbip_lite\"", IpGeoSource::ManagedDbipLite),
+            ("\"external_override\"", IpGeoSource::ExternalOverride),
+            ("\"missing\"", IpGeoSource::Missing),
+            ("\"future_value\"", IpGeoSource::Missing),
+        ] {
+            let parsed: IpGeoSource = serde_json::from_str(raw).unwrap();
+            assert_eq!(parsed, expected);
+        }
     }
 
     #[test]
-    fn auto_update_due_without_previous_success() {
-        let settings = GeoDbUpdateSettings {
-            auto_update_enabled: true,
-            update_interval_days: 7,
-            ..GeoDbUpdateSettings::default()
-        };
-        assert!(is_auto_update_due(
-            &settings,
-            GeoDbLocalMode::Missing,
-            &PersistedGeoDbUpdateRuntime::default(),
-            Utc::now(),
-        ));
-    }
-
-    #[test]
-    fn external_override_disables_schedule() {
-        let settings = GeoDbUpdateSettings {
-            auto_update_enabled: true,
-            update_interval_days: 3,
-            ..GeoDbUpdateSettings::default()
-        };
-        let runtime = PersistedGeoDbUpdateRuntime::default();
-        assert!(!is_auto_update_due(
-            &settings,
-            GeoDbLocalMode::ExternalOverride,
-            &runtime,
-            Utc::now(),
-        ));
-        assert!(
-            next_scheduled_at(
-                &settings,
-                GeoDbLocalMode::ExternalOverride,
-                &runtime,
-                Utc::now(),
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn auto_update_backoff_throttles_failed_runs() {
-        let settings = GeoDbUpdateSettings {
-            auto_update_enabled: true,
-            update_interval_days: 1,
-            ..GeoDbUpdateSettings::default()
-        };
-        let started_at = Utc::now() - chrono::Duration::minutes(5);
-        let runtime = PersistedGeoDbUpdateRuntime {
-            last_started_at: Some(started_at.to_rfc3339_opts(SecondsFormat::Secs, true)),
-            last_error: Some("download failed".to_string()),
-            ..PersistedGeoDbUpdateRuntime::default()
-        };
-
-        assert!(!is_auto_update_due(
-            &settings,
-            GeoDbLocalMode::Missing,
-            &runtime,
-            Utc::now(),
-        ));
-        assert_eq!(
-            next_scheduled_at(&settings, GeoDbLocalMode::Missing, &runtime, Utc::now()),
-            Some(
-                (started_at + chrono::Duration::minutes(GEO_DB_UPDATE_RETRY_BACKOFF_MINUTES))
-                    .to_rfc3339_opts(SecondsFormat::Secs, true)
-            )
-        );
-    }
-
-    #[test]
-    fn load_runtime_ignores_invalid_json_and_quarantines_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let runtime_path = tmp.path().join(RUNTIME_FILE_NAME);
-        fs::write(&runtime_path, b"{not-json").unwrap();
-
-        let runtime = load_runtime(&runtime_path).unwrap();
-
-        assert_eq!(runtime, PersistedGeoDbUpdateRuntime::default());
-        assert!(!runtime_path.exists());
-        let quarantined = fs::read_dir(tmp.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .any(|name| name.starts_with(&format!("{RUNTIME_FILE_NAME}.corrupt-")));
-        assert!(quarantined);
+    fn begin_prime_allows_only_one_in_flight_guard() {
+        let resolver = SharedGeoResolver::with_origin("https://example.com").unwrap();
+        let guard = resolver.begin_prime().expect("prime guard");
+        assert!(resolver.begin_prime().is_none());
+        drop(guard);
+        assert!(resolver.begin_prime().is_some());
     }
 
     #[tokio::test]
-    async fn try_start_update_save_failure_does_not_latch_running() {
-        let workspace = tempfile::tempdir().unwrap();
-        let blocked_data_dir = workspace.path().join("blocked-data-dir");
-        fs::write(&blocked_data_dir, b"not-a-directory").unwrap();
-        let store_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(Mutex::new(test_store(store_dir.path())));
-        let (handle, worker) = spawn_geo_db_update_worker_with_origin(
-            Arc::new(test_config(&blocked_data_dir)),
-            store,
-            "https://example.invalid".to_string(),
-        )
-        .unwrap();
-
-        let err = handle
-            .try_start_update(
-                GeoDbUpdateSettings {
-                    auto_update_enabled: true,
-                    ..GeoDbUpdateSettings::default()
+    async fn batch_lookup_maps_country_is_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": "US",
+                    "city": "Mountain View",
+                    "subdivision": "California",
+                    "asn": { "organization": "Google LLC" }
                 },
-                true,
-            )
-            .await
-            .expect_err("runtime persistence should fail");
+                {
+                    "ip": "1.1.1.1",
+                    "country": "AU",
+                    "city": null,
+                    "subdivision": null,
+                    "asn": { "organization": "Cloudflare, Inc." }
+                }
+            ])))
+            .mount(&server)
+            .await;
 
-        assert!(err.to_string().contains("write"));
-        let runtime = handle.runtime.lock().await;
-        assert!(!runtime.running);
-        assert_eq!(runtime.persisted, PersistedGeoDbUpdateRuntime::default());
-        worker.abort();
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        resolver
+            .prime_ips(["8.8.8.8".to_string(), "1.1.1.1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolver.lookup("8.8.8.8"),
+            PersistedInboundIpGeo {
+                country: "US".to_string(),
+                region: "California".to_string(),
+                city: "Mountain View".to_string(),
+                operator: "Google LLC".to_string(),
+            }
+        );
+        assert_eq!(resolver.lookup("1.1.1.1").operator, "Cloudflare, Inc.");
+    }
+
+    #[tokio::test]
+    async fn prime_ips_skips_private_and_cached_entries() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": "US",
+                    "city": null,
+                    "subdivision": null,
+                    "asn": { "organization": "Google LLC" }
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        resolver
+            .prime_ips([
+                "8.8.8.8".to_string(),
+                "192.168.1.10".to_string(),
+                "100.64.0.1".to_string(),
+                "198.18.0.1".to_string(),
+                "::ffff:192.168.1.1".to_string(),
+                "2001:db8::1".to_string(),
+                "8.8.8.8".to_string(),
+            ])
+            .await
+            .unwrap();
+        resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body, serde_json::json!(["8.8.8.8"]));
+
+        assert_eq!(
+            resolver.lookup("192.168.1.10"),
+            PersistedInboundIpGeo::default()
+        );
+        assert_eq!(resolver.lookup("8.8.8.8").country, "US");
+    }
+
+    #[tokio::test]
+    async fn batch_lookup_treats_empty_geo_rows_as_miss_and_sets_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": null,
+                    "city": null,
+                    "subdivision": null,
+                    "asn": null
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+
+        assert_eq!(resolver.lookup("8.8.8.8"), PersistedInboundIpGeo::default());
+
+        let cache = resolver.cache.read().expect("geo resolver read lock");
+        assert!(!cache.geo_by_ip.contains_key("8.8.8.8"));
+        assert!(cache.retry_after_by_ip.contains_key("8.8.8.8"));
     }
 
     #[test]
-    fn local_mode_prefers_external_override() {
-        let tmp = tempfile::tempdir().unwrap();
-        let managed = ManagedGeoDbPaths::from_data_dir(tmp.path());
-        let overrides = GeoDbOverridePaths {
-            city: Some(PathBuf::from("/opt/geo/city.mmdb")),
-            asn: None,
-        };
+    fn lookup_ignores_expired_cache_entries() {
+        let resolver = SharedGeoResolver::with_origin("http://127.0.0.1").unwrap();
+        let now = Instant::now();
+        {
+            let mut cache = resolver.cache.write().expect("geo resolver write lock");
+            cache.geo_by_ip.insert(
+                "8.8.8.8".to_string(),
+                ResolverCacheGeoEntry {
+                    geo: PersistedInboundIpGeo {
+                        country: "US".to_string(),
+                        region: String::new(),
+                        city: String::new(),
+                        operator: String::new(),
+                    },
+                    cached_at: now,
+                },
+            );
+            cache.prune(now + COUNTRY_IS_CACHE_TTL + StdDuration::from_secs(1));
+        }
+        assert_eq!(resolver.lookup("8.8.8.8"), PersistedInboundIpGeo::default());
+    }
+
+    #[test]
+    fn retry_after_parses_seconds_and_http_date_values() {
+        use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("120"));
         assert_eq!(
-            resolve_local_mode(&overrides, &managed),
-            GeoDbLocalMode::ExternalOverride
+            SharedGeoResolver::retry_after_from_headers(&headers),
+            Some(StdDuration::from_secs(120))
         );
+
+        let target = chrono::Utc::now() + chrono::Duration::seconds(60);
+        let http_date = target.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        headers.insert(RETRY_AFTER, HeaderValue::from_str(&http_date).unwrap());
+        let out = SharedGeoResolver::retry_after_from_headers(&headers).unwrap();
+        assert!(out >= StdDuration::from_secs(55));
+        assert!(out <= StdDuration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn last_error_is_set_on_failure_and_expires_after_backoff() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let resolver = SharedGeoResolver::with_origin(&server.uri()).unwrap();
+        assert!(resolver.prime_ips(["8.8.8.8".to_string()]).await.is_err());
+        assert!(
+            resolver
+                .last_error_message()
+                .expect("last error is set")
+                .contains("country.is")
+        );
+
+        server.reset().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "ip": "8.8.8.8",
+                    "country": "US",
+                    "city": null,
+                    "subdivision": null,
+                    "asn": null
+                }
+            ])))
+            .mount(&server)
+            .await;
+        {
+            let mut cache = resolver.cache.write().expect("geo resolver write lock");
+            cache.retry_after_by_ip.remove("8.8.8.8");
+        }
+        resolver.prime_ips(["8.8.8.8".to_string()]).await.unwrap();
+        assert!(resolver.last_error_message().is_none());
+
+        {
+            let mut last_error = resolver
+                .last_error
+                .write()
+                .expect("geo resolver write lock");
+            let entry = last_error.as_mut().expect("last error entry");
+            entry.at = Instant::now() - COUNTRY_IS_FAILURE_BACKOFF - StdDuration::from_secs(1);
+        }
+        assert!(resolver.last_error_message().is_none());
     }
 }

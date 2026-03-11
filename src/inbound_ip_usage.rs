@@ -1,12 +1,10 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::IpAddr,
-    path::{Path, PathBuf},
+    collections::{BTreeMap, BTreeSet, HashMap},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Duration, Timelike as _, Utc};
-use maxminddb::{Reader, geoip2};
 use serde::{Deserialize, Serialize};
 
 pub const INBOUND_IP_USAGE_SCHEMA_VERSION: u32 = 1;
@@ -44,14 +42,6 @@ impl InboundIpUsageWindow {
             _ => Err("invalid window, expected 24h or 7d"),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct PersistedInboundIpUsageGeoDb {
-    #[serde(default)]
-    pub city_db_path: String,
-    #[serde(default)]
-    pub asn_db_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -113,8 +103,6 @@ pub struct PersistedInboundIpUsage {
     #[serde(default)]
     pub online_stats_unavailable: bool,
     #[serde(default)]
-    pub geo: PersistedInboundIpUsageGeoDb,
-    #[serde(default)]
     pub memberships: BTreeMap<String, PersistedInboundIpMembership>,
 }
 
@@ -126,7 +114,6 @@ impl Default for PersistedInboundIpUsage {
             minutes_window: MINUTES_WINDOW,
             latest_minute: None,
             online_stats_unavailable: false,
-            geo: PersistedInboundIpUsageGeoDb::default(),
             memberships: BTreeMap::new(),
         }
     }
@@ -198,106 +185,42 @@ pub struct InboundIpUsageMembershipView {
 }
 
 pub trait GeoLookup: Send + Sync {
-    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb;
-    fn is_missing(&self) -> bool;
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo;
 }
 
-#[derive(Debug)]
-pub struct GeoResolver {
-    city_db_path: Option<PathBuf>,
-    asn_db_path: Option<PathBuf>,
-    city_reader: Option<Reader<Vec<u8>>>,
-    asn_reader: Option<Reader<Vec<u8>>>,
-}
-
-impl GeoResolver {
-    pub fn new(city_db_path: Option<PathBuf>, asn_db_path: Option<PathBuf>) -> Self {
-        let city_reader = city_db_path
-            .as_ref()
-            .and_then(|path| Reader::open_readfile(path).ok());
-        let asn_reader = asn_db_path
-            .as_ref()
-            .and_then(|path| Reader::open_readfile(path).ok());
-        Self {
-            city_db_path,
-            asn_db_path,
-            city_reader,
-            asn_reader,
-        }
-    }
-
-    pub fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
-        PersistedInboundIpUsageGeoDb {
-            city_db_path: self
-                .city_db_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            asn_db_path: self
-                .asn_db_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-        }
-    }
-
-    pub fn is_missing(&self) -> bool {
-        self.city_reader.is_none() || self.asn_reader.is_none()
-    }
-
-    pub fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        let Ok(address) = ip.parse::<IpAddr>() else {
-            return PersistedInboundIpGeo::default();
-        };
-
-        let mut out = PersistedInboundIpGeo::default();
-
-        if let Some(reader) = &self.city_reader
-            && let Ok(result) = reader.lookup(address)
-            && let Ok(Some(city)) = result.decode::<geoip2::City>()
-        {
-            out.country = city.country.iso_code.unwrap_or_default().to_string();
-            out.region = city
-                .subdivisions
-                .first()
-                .and_then(|sub| sub.names.english.or(sub.iso_code))
-                .unwrap_or_default()
-                .to_string();
-            out.city = city.city.names.english.unwrap_or_default().to_string();
-        }
-
-        if let Some(reader) = &self.asn_reader
-            && let Ok(result) = reader.lookup(address)
-            && let Ok(Some(asn)) = result.decode::<geoip2::Asn>()
-        {
-            out.operator = asn
-                .autonomous_system_organization
-                .unwrap_or_default()
-                .to_string();
-        }
-
-        out
-    }
-}
-
-impl GeoLookup for GeoResolver {
-    fn geo_db(&self) -> PersistedInboundIpUsageGeoDb {
-        GeoResolver::geo_db(self)
-    }
-
-    fn is_missing(&self) -> bool {
-        GeoResolver::is_missing(self)
-    }
-
-    fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        GeoResolver::lookup(self, ip)
+pub fn scrub_geo_fields(items: &mut [InboundIpUsageListItem]) {
+    for item in items {
+        item.region.clear();
+        item.operator.clear();
     }
 }
 
 impl PersistedInboundIpUsage {
     pub fn latest_minute_dt(&self) -> Option<DateTime<Utc>> {
         self.latest_minute.as_deref().and_then(parse_minute)
+    }
+
+    fn collect_known_geo_by_ip_surviving_shift(
+        &self,
+        shift: usize,
+    ) -> HashMap<String, PersistedInboundIpGeo> {
+        let mut out = HashMap::new();
+        for membership in self.memberships.values() {
+            for (ip, record) in &membership.ips {
+                if geo_is_default(&record.geo) {
+                    continue;
+                }
+                if !bitmap_has_any_bit_after_shift(&record.bitmap, shift) {
+                    continue;
+                }
+                out.entry(ip.clone()).or_insert_with(|| record.geo.clone());
+            }
+        }
+        out
+    }
+
+    fn collect_known_geo_by_ip(&self) -> HashMap<String, PersistedInboundIpGeo> {
+        self.collect_known_geo_by_ip_surviving_shift(0)
     }
 
     pub fn normalize(&mut self, allowed_membership_keys: &BTreeSet<String>) -> bool {
@@ -353,23 +276,95 @@ impl PersistedInboundIpUsage {
         self.memberships.remove(membership_key).is_some()
     }
 
-    pub fn refresh_geo_cache(
-        &mut self,
-        geo_db: PersistedInboundIpUsageGeoDb,
-        geo_resolver: &dyn GeoLookup,
-    ) -> bool {
-        let mut changed = false;
-        if self.geo != geo_db {
-            self.geo = geo_db;
-            changed = true;
+    pub fn collect_lookup_candidates(
+        &self,
+        minute: DateTime<Utc>,
+        samples: &[InboundIpMinuteSample],
+    ) -> Vec<String> {
+        let minute = floor_minute(minute);
+        let shift = self
+            .latest_minute_dt()
+            .map(|previous| minute.signed_duration_since(previous).num_minutes())
+            .unwrap_or(0);
+        let shift = usize::try_from(shift.max(0)).unwrap_or(0);
+        let known_geo_by_ip = self.collect_known_geo_by_ip_surviving_shift(shift);
+        let mut out = BTreeSet::new();
+        for sample in samples {
+            let existing = self.memberships.get(&sample.membership_key);
+            for ip in sample.ips.iter().filter_map(|ip| normalize_ip_string(ip)) {
+                if !is_global_geo_ip(&ip) {
+                    continue;
+                }
+                if known_geo_by_ip.contains_key(&ip) {
+                    continue;
+                }
+                let needs_lookup = existing
+                    .and_then(|membership| membership.ips.get(&ip))
+                    .is_none_or(|record| {
+                        geo_is_default(&record.geo)
+                            || !bitmap_has_any_bit_after_shift(&record.bitmap, shift)
+                    });
+                if needs_lookup {
+                    out.insert(ip);
+                }
+            }
         }
+        out.into_iter().collect()
+    }
+
+    pub fn collect_missing_geo_for_ips(&self, ips: &[String]) -> Vec<String> {
+        if ips.is_empty() {
+            return Vec::new();
+        }
+        let candidates = ips
+            .iter()
+            .filter_map(|ip| normalize_ip_string(ip))
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        let mut out = BTreeSet::new();
+        for membership in self.memberships.values() {
+            for (ip, record) in &membership.ips {
+                if !candidates.contains(ip) {
+                    continue;
+                }
+                if geo_is_default(&record.geo) {
+                    out.insert(ip.clone());
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    pub fn backfill_geo_for_ips(&mut self, ips: &[String], geo_resolver: &dyn GeoLookup) -> bool {
+        if ips.is_empty() {
+            return false;
+        }
+        let candidates = ips
+            .iter()
+            .filter_map(|ip| normalize_ip_string(ip))
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
         for membership in self.memberships.values_mut() {
             for (ip, record) in membership.ips.iter_mut() {
-                let next_geo = geo_resolver.lookup(ip);
-                if record.geo != next_geo {
-                    record.geo = next_geo;
-                    changed = true;
+                if !candidates.contains(ip) {
+                    continue;
                 }
+                if !geo_is_default(&record.geo) {
+                    continue;
+                }
+                let geo = geo_resolver.lookup(ip);
+                if geo_is_default(&geo) {
+                    continue;
+                }
+                record.geo = geo;
+                changed = true;
             }
         }
         changed
@@ -378,10 +373,10 @@ impl PersistedInboundIpUsage {
     pub fn record_minute_samples(
         &mut self,
         minute: DateTime<Utc>,
-        geo_db: PersistedInboundIpUsageGeoDb,
         online_stats_unavailable: bool,
         samples: &[InboundIpMinuteSample],
         geo_resolver: &dyn GeoLookup,
+        allow_geo_reuse: bool,
     ) -> bool {
         let minute = floor_minute(minute);
         let minute_str = rfc3339_minute(minute);
@@ -395,16 +390,18 @@ impl PersistedInboundIpUsage {
             self.minutes_window = MINUTES_WINDOW;
             changed = true;
         }
-        if self.geo != geo_db {
-            self.geo = geo_db;
-            changed = true;
-        }
         if self.online_stats_unavailable != online_stats_unavailable {
             self.online_stats_unavailable = online_stats_unavailable;
             changed = true;
         }
 
         changed |= self.advance_to_minute(minute);
+
+        let mut known_geo_by_ip = if allow_geo_reuse {
+            self.collect_known_geo_by_ip()
+        } else {
+            HashMap::new()
+        };
 
         for sample in samples {
             let unique_ips = sample
@@ -461,11 +458,19 @@ impl PersistedInboundIpUsage {
                     record.last_seen_at = minute_str.clone();
                     changed = true;
                 }
-                if record.geo == PersistedInboundIpGeo::default() {
+                if geo_is_default(&record.geo) {
+                    if allow_geo_reuse && let Some(existing) = known_geo_by_ip.get(&ip) {
+                        record.geo = existing.clone();
+                        changed = true;
+                        continue;
+                    }
                     let geo = geo_resolver.lookup(&ip);
                     if geo != record.geo {
                         record.geo = geo;
                         changed = true;
+                        if !geo_is_default(&record.geo) {
+                            known_geo_by_ip.insert(ip.clone(), record.geo.clone());
+                        }
                     }
                 }
             }
@@ -564,9 +569,7 @@ pub fn build_window_view(
             if record.last_seen_at > ip_entry.last_seen_at {
                 ip_entry.last_seen_at = record.last_seen_at.clone();
             }
-            if ip_entry.geo == PersistedInboundIpGeo::default()
-                && record.geo != PersistedInboundIpGeo::default()
-            {
+            if geo_is_default(&ip_entry.geo) && !geo_is_default(&record.geo) {
                 ip_entry.geo = record.geo.clone();
             }
 
@@ -635,10 +638,7 @@ pub fn build_window_view(
     }
 }
 
-pub fn build_warnings(
-    online_stats_unavailable: bool,
-    geo_db_missing: bool,
-) -> Vec<InboundIpUsageWarning> {
+pub fn build_warnings(online_stats_unavailable: bool) -> Vec<InboundIpUsageWarning> {
     let mut warnings = Vec::new();
     if online_stats_unavailable {
         warnings.push(InboundIpUsageWarning {
@@ -646,19 +646,7 @@ pub fn build_warnings(
             message: "Xray online IP stats are unavailable; enable statsUserOnline to collect inbound IP usage.".to_string(),
         });
     }
-    if geo_db_missing {
-        warnings.push(InboundIpUsageWarning {
-            code: "geo_db_missing".to_string(),
-            message: "IP geolocation DB is unavailable; region and operator fields will be empty."
-                .to_string(),
-        });
-    }
     warnings
-}
-
-pub fn geo_db_missing(city_db_path: Option<&Path>, asn_db_path: Option<&Path>) -> bool {
-    !matches!(city_db_path, Some(path) if path.is_file())
-        || !matches!(asn_db_path, Some(path) if path.is_file())
 }
 
 pub fn floor_minute(now: DateTime<Utc>) -> DateTime<Utc> {
@@ -689,8 +677,77 @@ fn normalize_bitmap(bitmap: &mut Vec<u8>) {
     }
 }
 
-fn normalize_ip_string(raw: &str) -> Option<String> {
+pub(crate) fn normalize_ip_string(raw: &str) -> Option<String> {
     raw.trim().parse::<IpAddr>().ok().map(|ip| ip.to_string())
+}
+
+// Keep geo lookups restricted to globally routable IPs. This prevents repeatedly scheduling
+// best-effort async lookups for RFC1918/CGNAT/documentation/etc addresses that can never be
+// enriched by the external geo provider.
+fn is_global_geo_ip(raw: &str) -> bool {
+    match raw.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => is_public_ipv4(ip),
+        Ok(IpAddr::V6(ip)) => is_public_ipv6(ip),
+        Err(_) => false,
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+    {
+        return false;
+    }
+
+    let [a, b, c, _d] = ip.octets();
+
+    // 0.0.0.0/8 (also includes 0.0.0.0/32)
+    if a == 0 {
+        return false;
+    }
+
+    // RFC 6598 carrier-grade NAT: 100.64.0.0/10
+    if a == 100 && (64..=127).contains(&b) {
+        return false;
+    }
+
+    // RFC 6890 IETF Protocol Assignments: 192.0.0.0/24
+    if a == 192 && b == 0 && c == 0 {
+        return false;
+    }
+
+    // RFC 2544 benchmarking: 198.18.0.0/15
+    if a == 198 && (b == 18 || b == 19) {
+        return false;
+    }
+
+    // Reserved for future use: 240.0.0.0/4
+    if a >= 240 {
+        return false;
+    }
+
+    true
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    // Treat IPv4-mapped/compatible addresses as IPv4 for public range checks.
+    if let Some(v4) = ip.to_ipv4() {
+        return is_public_ipv4(v4);
+    }
+
+    let segments = ip.segments();
+    let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && !ip.is_unique_local()
+        && !ip.is_unicast_link_local()
+        && !is_documentation
 }
 
 fn get_bit(bitmap: &[u8], index: usize) -> bool {
@@ -716,6 +773,27 @@ fn set_bit(bitmap: &mut [u8], index: usize, value: bool) {
 
 fn count_bitmap_bits(bitmap: &[u8]) -> usize {
     bitmap.iter().map(|byte| byte.count_ones() as usize).sum()
+}
+
+fn bitmap_has_any_bit_after_shift(bitmap: &[u8], shift: usize) -> bool {
+    if shift == 0 {
+        return bitmap.iter().any(|byte| *byte != 0);
+    }
+    if shift >= MINUTES_WINDOW {
+        return false;
+    }
+    let start_byte = shift / 8;
+    let start_bit = shift % 8;
+    for (index, byte) in bitmap.iter().enumerate().skip(start_byte) {
+        let mut value = *byte;
+        if index == start_byte && start_bit != 0 {
+            value &= !((1u8 << start_bit) - 1);
+        }
+        if value != 0 {
+            return true;
+        }
+    }
+    false
 }
 
 fn shift_bitmap(bitmap: &mut Vec<u8>, shift: usize) {
@@ -788,11 +866,32 @@ fn format_region(geo: &PersistedInboundIpGeo) -> String {
         parts.push(geo.country.clone());
     }
     if !geo.region.is_empty() {
-        parts.push(geo.region.clone());
+        if looks_like_subdivision_code(&geo.region) && !geo.city.is_empty() {
+            parts.push(format!("{} ({})", geo.city, geo.region));
+        } else {
+            parts.push(geo.region.clone());
+        }
     } else if parts.is_empty() && !geo.city.is_empty() {
         parts.push(geo.city.clone());
     }
     parts.join(" ")
+}
+
+fn looks_like_subdivision_code(raw: &str) -> bool {
+    let raw = raw.trim();
+    let len = raw.len();
+    if !(2..=3).contains(&len) {
+        return false;
+    }
+    raw.chars()
+        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+}
+
+fn geo_is_default(geo: &PersistedInboundIpGeo) -> bool {
+    geo.country.is_empty()
+        && geo.region.is_empty()
+        && geo.city.is_empty()
+        && geo.operator.is_empty()
 }
 
 #[derive(Debug, Clone)]
@@ -847,6 +946,15 @@ mod bitmap_b64 {
 mod tests {
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct TestGeoLookup;
+
+    impl GeoLookup for TestGeoLookup {
+        fn lookup(&self, _ip: &str) -> PersistedInboundIpGeo {
+            PersistedInboundIpGeo::default()
+        }
+    }
+
     fn sample(
         membership_key: &str,
         user_id: &str,
@@ -865,11 +973,176 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct FixedGeoLookup;
+
+    impl GeoLookup for FixedGeoLookup {
+        fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
+            if ip == "8.8.8.8" {
+                PersistedInboundIpGeo {
+                    country: "US".to_string(),
+                    region: "CA".to_string(),
+                    city: "Mountain View".to_string(),
+                    operator: "Google LLC".to_string(),
+                }
+            } else {
+                PersistedInboundIpGeo::default()
+            }
+        }
+    }
+
+    #[test]
+    fn format_region_prefers_city_when_region_is_only_a_subdivision_code() {
+        let geo = PersistedInboundIpGeo {
+            country: "DE".to_string(),
+            region: "HH".to_string(),
+            city: "Hamburg".to_string(),
+            operator: String::new(),
+        };
+        assert_eq!(format_region(&geo), "DE Hamburg (HH)");
+
+        let geo = PersistedInboundIpGeo {
+            country: "US".to_string(),
+            region: "California".to_string(),
+            city: "Mountain View".to_string(),
+            operator: String::new(),
+        };
+        assert_eq!(format_region(&geo), "US California");
+    }
+
+    #[test]
+    fn geo_lookup_reuses_persisted_geo_across_memberships() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+        let noop = TestGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute1 = minute0 + Duration::minutes(1);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
+            &seed,
+            true,
+        );
+        let cached = usage.memberships["u1::e1"].ips["8.8.8.8"].geo.clone();
+        assert!(!geo_is_default(&cached));
+
+        // The same IP seen under a new membership should not trigger another lookup, and should
+        // reuse the persisted geo from the existing record.
+        assert!(
+            usage
+                .collect_lookup_candidates(
+                    minute1,
+                    &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"],)]
+                )
+                .is_empty()
+        );
+
+        usage.record_minute_samples(
+            minute1,
+            false,
+            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"])],
+            &noop,
+            true,
+        );
+        assert_eq!(usage.memberships["u2::e2"].ips["8.8.8.8"].geo, cached);
+    }
+
+    #[test]
+    fn geo_lookup_can_be_disabled_to_avoid_reusing_persisted_geo() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+        let noop = TestGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute1 = minute0 + Duration::minutes(1);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
+            &seed,
+            true,
+        );
+        assert!(!geo_is_default(
+            &usage.memberships["u1::e1"].ips["8.8.8.8"].geo
+        ));
+
+        // When geo is disabled, new memberships should not copy persisted geo.
+        usage.record_minute_samples(
+            minute1,
+            false,
+            &[sample("u2::e2", "u2", "n1", "e2", "ep-2", &["8.8.8.8"])],
+            &noop,
+            false,
+        );
+        assert!(geo_is_default(
+            &usage.memberships["u2::e2"].ips["8.8.8.8"].geo
+        ));
+    }
+
+    #[test]
+    fn collect_lookup_candidates_includes_geo_after_full_window_shift() {
+        let mut usage = PersistedInboundIpUsage::default();
+        let seed = FixedGeoLookup;
+
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let minute_far = minute0 + Duration::minutes(MINUTES_WINDOW as i64);
+
+        usage.record_minute_samples(
+            minute0,
+            false,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
+            &seed,
+            true,
+        );
+        assert!(!geo_is_default(
+            &usage.memberships["u1::e1"].ips["8.8.8.8"].geo
+        ));
+
+        // After shifting a full window, the old bitmap drops out and the record will be pruned
+        // during `advance_to_minute()`. Candidate selection must treat the geo as missing and
+        // request a fresh prime for the new minute.
+        let candidates = usage.collect_lookup_candidates(
+            minute_far,
+            &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["8.8.8.8"])],
+        );
+        assert_eq!(candidates, vec!["8.8.8.8".to_string()]);
+    }
+
+    #[test]
+    fn collect_lookup_candidates_filters_non_global_ips() {
+        let usage = PersistedInboundIpUsage::default();
+        let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let candidates = usage.collect_lookup_candidates(
+            minute0,
+            &[sample(
+                "u1::e1",
+                "u1",
+                "n1",
+                "e1",
+                "ep-1",
+                &["10.0.0.1", "203.0.113.7", "8.8.8.8"],
+            )],
+        );
+        assert_eq!(candidates, vec!["8.8.8.8".to_string()]);
+    }
+
     #[test]
     fn record_and_shift_bitmap_window() {
         let mut usage = PersistedInboundIpUsage::default();
-        let geo = GeoResolver::new(None, None).geo_db();
-        let resolver = GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -877,16 +1150,15 @@ mod tests {
 
         assert!(usage.record_minute_samples(
             minute0,
-            geo.clone(),
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,
+            true,
         ));
         assert_eq!(usage.memberships["u1::e1"].ips["203.0.113.7"].minutes, 1);
 
         assert!(usage.record_minute_samples(
             minute1,
-            geo,
             false,
             &[sample(
                 "u1::e1",
@@ -897,6 +1169,7 @@ mod tests {
                 &["203.0.113.7", "203.0.113.8"],
             )],
             &resolver,
+            true,
         ));
         let record = &usage.memberships["u1::e1"].ips["203.0.113.7"];
         assert_eq!(record.minutes, 2);
@@ -947,8 +1220,7 @@ mod tests {
     #[test]
     fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
         let mut usage = PersistedInboundIpUsage::default();
-        let geo_db = GeoResolver::new(None, None).geo_db();
-        let resolver = GeoResolver::new(None, None);
+        let resolver = TestGeoLookup;
         let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -957,30 +1229,30 @@ mod tests {
 
         usage.record_minute_samples(
             minute0,
-            geo_db.clone(),
             false,
             &[
                 sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"]),
                 sample("u2::e2", "u2", "n1", "e2", "ep-2", &["203.0.113.7"]),
             ],
             &resolver,
+            true,
         );
         usage.record_minute_samples(
             minute1,
-            geo_db.clone(),
             false,
             &[
                 sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"]),
                 sample("u2::e2", "u2", "n1", "e2", "ep-2", &["198.51.100.9"]),
             ],
             &resolver,
+            true,
         );
         usage.record_minute_samples(
             minute2,
-            geo_db,
             false,
             &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
             &resolver,
+            true,
         );
 
         let view = build_window_view(
