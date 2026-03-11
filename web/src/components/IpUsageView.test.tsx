@@ -126,8 +126,8 @@ describe("<IpUsageView />", () => {
 		expect(ipBadge).toBeTruthy();
 		const ipBadgeTokens = ipBadge?.className.split(/\s+/) ?? [];
 		expect(ipBadgeTokens).toContain("text-info");
-		expect(ipBadgeTokens).toContain("dark:text-info-foreground");
 		expect(ipBadgeTokens).not.toContain("text-info-foreground");
+		expect(ipBadgeTokens).not.toContain("dark:text-info-foreground");
 
 		const lastSeenButton = within(tokyoRow as HTMLTableRowElement).getAllByRole(
 			"button",

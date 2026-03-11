@@ -539,7 +539,7 @@ function HighlightSummary({
 			"default",
 			"border shadow-sm",
 			tone === "info"
-				? "border-info/32 bg-info/24 text-info dark:text-info-foreground"
+				? "border-info/32 bg-info/24 text-info"
 				: "border-warning/45 bg-warning/40 text-warning-foreground",
 		);
 
