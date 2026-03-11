@@ -49,9 +49,9 @@
 
 ## 验收标准（Acceptance Criteria）
 
-- Given 某远端节点在 `3s` 内未返回但可在更短暂扩展窗口内返回，  When 请求 `/api/admin/nodes/runtime`，  Then 该节点不应因瞬时高延迟被过早归入 `unreachable_nodes`。
-- Given 节点详情、alerts、quota、IP usage 与 endpoint probe 仍使用既有快速失败口径，  When 远端节点不可达，  Then 这些路径的错误返回时延不因本补丁明显增加。
-- Given 历史 `9vmap` 已完成，  When 本补丁落地，  Then 变更记录应写入新的补丁 spec，而不是回写旧 spec。
+- Given 某远端节点在 `3s` 内未返回但可在更短暂扩展窗口内返回， When 请求 `/api/admin/nodes/runtime`， Then 该节点不应因瞬时高延迟被过早归入 `unreachable_nodes`。
+- Given 节点详情、alerts、quota、IP usage 与 endpoint probe 仍使用既有快速失败口径， When 远端节点不可达， Then 这些路径的错误返回时延不因本补丁明显增加。
+- Given 历史 `9vmap` 已完成， When 本补丁落地， Then 变更记录应写入新的补丁 spec，而不是回写旧 spec。
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
