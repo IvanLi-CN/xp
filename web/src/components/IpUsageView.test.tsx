@@ -125,7 +125,10 @@ describe("<IpUsageView />", () => {
 		)[1];
 		fireEvent.click(lastSeenButton);
 		expect(lastSeenButton).toHaveAttribute("aria-pressed", "true");
-		expect(screen.getByText("Time")).toBeInTheDocument();
+		const timeBadge = screen.getByText("Time").closest(".xp-badge");
+		expect(timeBadge).not.toBeNull();
+		expect(timeBadge?.className).toContain("bg-warning/40");
+		expect(timeBadge?.className).toContain("border-warning/45");
 	});
 
 	it("shows country.is attribution", () => {

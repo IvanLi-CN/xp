@@ -533,6 +533,16 @@ function HighlightSummary({
 	hasPinnedHighlight: boolean;
 	onClearPinned: () => void;
 }) {
+	const highlightBadgeClass = (tone: "info" | "warning") =>
+		badgeClass(
+			tone,
+			"default",
+			"border shadow-sm",
+			tone === "info"
+				? "border-info/32 bg-info/24 text-info-foreground"
+				: "border-warning/45 bg-warning/40 text-warning-foreground",
+		);
+
 	return (
 		<div className="grid min-h-10 gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-1.5 text-xs md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
 			<span className="min-w-0 opacity-70">
@@ -541,13 +551,13 @@ function HighlightSummary({
 			</span>
 			<div className="flex min-h-6 flex-wrap items-center gap-2 md:justify-self-end">
 				{activeHighlight.ip ? (
-					<span className={badgeClass("info", "default", "gap-1")}>
+					<span className={highlightBadgeClass("info")}>
 						<span className="opacity-70">IP</span>
 						<span className="font-mono">{activeHighlight.ip}</span>
 					</span>
 				) : null}
 				{activeHighlight.timeRange ? (
-					<span className={badgeClass("warning", "default", "gap-1")}>
+					<span className={highlightBadgeClass("warning")}>
 						<span className="opacity-70">Time</span>
 						<span>{formatTimeRange(activeHighlight.timeRange)}</span>
 					</span>
