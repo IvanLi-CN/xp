@@ -61,7 +61,7 @@
 
 - 事件应包含状态变更与重启请求结果（成功/失败）。
 - 远端节点不可达时列表应返回 `partial=true` 且填充 `unreachable_nodes`。
-- 跨节点 admin fan-out 应容忍短时边缘网络抖动，避免因瞬时高延迟过早把健康节点判成 unreachable。
+- 跨节点 runtime fan-out 应容忍短时边缘网络抖动，避免因瞬时高延迟过早把健康节点判成 unreachable。
 
 ### COULD
 
@@ -172,7 +172,7 @@ None
 
 - 2026-02-26: 创建规格并冻结首版接口、状态枚举、窗口策略。
 - 2026-02-26: 完成后端运行态聚合/持久化、前端 Nodes/NodeDetails 改造、cloudflared 运维配置与文档同步。
-- 2026-03-11: 调整跨节点 runtime/admin fan-out 超时容忍度，减少 Cloudflare 边缘短时高延迟导致的误判 unreachable。
+- 2026-03-11: 调整跨节点 runtime fan-out 超时容忍度，减少 Cloudflare 边缘短时高延迟导致的误判 unreachable。
 
 ## 参考（References）
 
