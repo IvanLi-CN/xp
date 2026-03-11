@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-02-26
-- Last: 2026-02-26
+- Last: 2026-03-11
 
 ## 背景 / 问题陈述
 
@@ -61,6 +61,7 @@
 
 - 事件应包含状态变更与重启请求结果（成功/失败）。
 - 远端节点不可达时列表应返回 `partial=true` 且填充 `unreachable_nodes`。
+- 跨节点 runtime fan-out 应容忍短时边缘网络抖动，避免因瞬时高延迟过早把健康节点判成 unreachable。
 
 ### COULD
 
@@ -77,6 +78,7 @@
 ### Edge cases / errors
 
 - 远端节点超时/证书错误：汇总结果降级为 `partial`，本地与可达节点仍返回。
+- 若远端节点仍可在短时间内返回 local runtime，聚合层应优先等待该结果，而不是把暂时高延迟直接渲染成整段 unknown。
 - SSE 远端断流：发送 `node_error`；前端展示连接错误并保留最后快照。
 - cloudflared 配置为 `none`：组件状态固定 `disabled`。
 
@@ -170,6 +172,7 @@ None
 
 - 2026-02-26: 创建规格并冻结首版接口、状态枚举、窗口策略。
 - 2026-02-26: 完成后端运行态聚合/持久化、前端 Nodes/NodeDetails 改造、cloudflared 运维配置与文档同步。
+- 2026-03-11: 调整跨节点 runtime fan-out 超时容忍度，减少 Cloudflare 边缘短时高延迟导致的误判 unreachable。
 
 ## 参考（References）
 
