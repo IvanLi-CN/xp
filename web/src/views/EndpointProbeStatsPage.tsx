@@ -97,6 +97,8 @@ export function EndpointProbeStatsPage() {
 		if (!selectedHour) return null;
 		return slots.find((slot) => slot.hour === selectedHour) ?? null;
 	}, [slots, selectedHour]);
+	const selectedParticipatingNodes =
+		selected?.participating_nodes ?? latestParticipatingNodes;
 
 	if (adminToken.length === 0) {
 		return (
@@ -204,7 +206,8 @@ export function EndpointProbeStatsPage() {
 							const testedCount =
 								slot.tested_count ??
 								Math.max(0, slot.sample_count - skippedCount);
-							const participatingNodes = slot.participating_nodes;
+							const participatingNodes =
+								slot.participating_nodes ?? latestParticipatingNodes;
 							const reportedLabel = participatingNodes
 								? `${slot.sample_count}/${participatingNodes}`
 								: String(slot.sample_count);
@@ -267,8 +270,8 @@ export function EndpointProbeStatsPage() {
 										<p>
 											Reported:{" "}
 											<span className="font-mono">
-												{selected.participating_nodes
-													? `${selected.sample_count}/${selected.participating_nodes}`
+												{selectedParticipatingNodes
+													? `${selected.sample_count}/${selectedParticipatingNodes}`
 													: String(selected.sample_count)}
 											</span>
 										</p>
@@ -301,9 +304,7 @@ export function EndpointProbeStatsPage() {
 						</p>
 						<p className="text-sm">
 							Participating nodes:{" "}
-							<span className="font-mono">
-								{selected?.participating_nodes ?? latestParticipatingNodes}
-							</span>
+							<span className="font-mono">{selectedParticipatingNodes}</span>
 						</p>
 					</div>
 				</div>

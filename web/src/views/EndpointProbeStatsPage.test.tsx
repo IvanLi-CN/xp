@@ -128,4 +128,48 @@ describe("<EndpointProbeStatsPage />", () => {
 		expect(screen.getAllByText("2/2").length).toBeGreaterThan(0);
 		expect(screen.queryByText(/Expected nodes:/i)).toBeNull();
 	});
+
+	it("falls back to expected_nodes for legacy probe-history payloads", async () => {
+		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValueOnce({
+			endpoint_id: "endpoint-1",
+			expected_nodes: 2,
+			slots: [
+				{
+					hour: "2026-03-11T11:00:00Z",
+					status: "up",
+					ok_count: 2,
+					sample_count: 2,
+					skipped_count: 0,
+					tested_count: 2,
+					latency_ms_p50: 111,
+					latency_ms_p95: 123,
+					by_node: [
+						{
+							node_id: "node-1",
+							ok: true,
+							skipped: false,
+							checked_at: "2026-03-11T11:05:00Z",
+							latency_ms: 111,
+							config_hash: "cfg",
+						},
+						{
+							node_id: "node-2",
+							ok: true,
+							skipped: false,
+							checked_at: "2026-03-11T11:05:01Z",
+							latency_ms: 123,
+							config_hash: "cfg",
+						},
+					],
+				},
+			],
+		});
+
+		renderPage();
+
+		expect(
+			await screen.findByText(/Participating nodes:/i),
+		).toBeInTheDocument();
+		expect(screen.getAllByText("2/2").length).toBeGreaterThan(0);
+	});
 });

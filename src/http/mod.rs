@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     convert::Infallible,
     sync::Arc,
 };
@@ -3061,12 +3061,19 @@ async fn admin_list_endpoints(
 ) -> Result<Json<Items<AdminEndpointWithProbe>>, ApiError> {
     let store = state.store.lock().await;
     let now = Utc::now();
+    let participant_counts = endpoint_probe_participant_counts_for_window(&store, now, 24);
     Ok(Json(Items {
         items: store
             .list_endpoints()
             .into_iter()
             .map(|endpoint| AdminEndpointWithProbe {
-                probe: build_endpoint_probe_summary(&store, &endpoint.endpoint_id, now, 24),
+                probe: build_endpoint_probe_summary_with_participant_counts(
+                    &store,
+                    &endpoint.endpoint_id,
+                    now,
+                    24,
+                    &participant_counts,
+                ),
                 endpoint,
             })
             .collect(),
@@ -3228,11 +3235,53 @@ fn endpoint_probe_participant_count_for_hour(store: &JsonSnapshotStore, hour: &s
     store.endpoint_probe_participants_for_hour(hour).len()
 }
 
+fn endpoint_probe_participant_counts_for_window(
+    store: &JsonSnapshotStore,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+) -> BTreeMap<String, usize> {
+    let now_hour = now
+        .with_minute(0)
+        .and_then(|v| v.with_second(0))
+        .and_then(|v| v.with_nanosecond(0))
+        .unwrap_or(now);
+    let start = now_hour - chrono::Duration::hours(hours.saturating_sub(1) as i64);
+    let mut counts = BTreeMap::new();
+
+    for i in 0..hours {
+        let hour_dt = start + chrono::Duration::hours(i as i64);
+        let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+        counts.insert(
+            hour_key.clone(),
+            endpoint_probe_participant_count_for_hour(store, &hour_key),
+        );
+    }
+
+    counts
+}
+
 fn build_endpoint_probe_summary(
     store: &JsonSnapshotStore,
     endpoint_id: &str,
     now: chrono::DateTime<Utc>,
     hours: usize,
+) -> AdminEndpointProbeSummary {
+    let participant_counts = endpoint_probe_participant_counts_for_window(store, now, hours);
+    build_endpoint_probe_summary_with_participant_counts(
+        store,
+        endpoint_id,
+        now,
+        hours,
+        &participant_counts,
+    )
+}
+
+fn build_endpoint_probe_summary_with_participant_counts(
+    store: &JsonSnapshotStore,
+    endpoint_id: &str,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+    participant_counts: &BTreeMap<String, usize>,
 ) -> AdminEndpointProbeSummary {
     let history = store.state().endpoint_probe_history.get(endpoint_id);
 
@@ -3250,7 +3299,10 @@ fn build_endpoint_probe_summary(
     for i in 0..hours {
         let hour_dt = start + chrono::Duration::hours(i as i64);
         let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
-        let participating_nodes = endpoint_probe_participant_count_for_hour(store, &hour_key);
+        let participating_nodes = participant_counts
+            .get(&hour_key)
+            .copied()
+            .unwrap_or_else(|| endpoint_probe_participant_count_for_hour(store, &hour_key));
 
         let bucket = history.and_then(|h| h.hours.get(&hour_key));
 

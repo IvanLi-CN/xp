@@ -575,7 +575,7 @@ async fn run_probe_once_inner(
     )
     .await?;
 
-    raft_write_best_effort(
+    if let Err(error) = raft_write_best_effort(
         &inner.raft,
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: req.hour.clone(),
@@ -583,7 +583,15 @@ async fn run_probe_once_inner(
             samples: Vec::new(),
         },
     )
-    .await?;
+    .await
+    {
+        warn!(
+            hour = %req.hour,
+            node_id = %inner.local_node_id,
+            error = %error,
+            "endpoint probe participant registration failed; continuing with probe fanout"
+        );
+    }
 
     // Refresh nodes snapshot after the bootstrap step; node list can change during a run.
     let nodes = {
