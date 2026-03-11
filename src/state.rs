@@ -119,6 +119,7 @@ pub(crate) fn migrate_state_value_to_latest(
             let _ = meta.remove("public_domain");
         }
     }
+    let _ = prune_deleted_nodes_from_endpoint_probe_tracking(&mut state);
 
     state.user_global_weights =
         normalize_user_global_weights(&state, state.user_global_weights.clone());
@@ -820,6 +821,44 @@ fn normalize_node_user_endpoint_memberships(
 
 fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(state);
+}
+
+fn prune_deleted_nodes_from_endpoint_probe_tracking(state: &mut PersistedState) -> bool {
+    let known_node_ids = state.nodes.keys().cloned().collect::<BTreeSet<_>>();
+    let mut changed = false;
+
+    for history in state.endpoint_probe_history.values_mut() {
+        for bucket in history.hours.values_mut() {
+            let before = bucket.by_node.len();
+            bucket
+                .by_node
+                .retain(|node_id, _sample| known_node_ids.contains(node_id));
+            changed |= before != bucket.by_node.len();
+        }
+        let before = history.hours.len();
+        history
+            .hours
+            .retain(|_hour, bucket| !bucket.by_node.is_empty());
+        changed |= before != history.hours.len();
+    }
+    let before = state.endpoint_probe_history.len();
+    state
+        .endpoint_probe_history
+        .retain(|_endpoint_id, history| !history.hours.is_empty());
+    changed |= before != state.endpoint_probe_history.len();
+
+    for participants in state.endpoint_probe_participants_by_hour.values_mut() {
+        let before = participants.len();
+        participants.retain(|node_id| known_node_ids.contains(node_id));
+        changed |= before != participants.len();
+    }
+    let before = state.endpoint_probe_participants_by_hour.len();
+    state
+        .endpoint_probe_participants_by_hour
+        .retain(|_hour, participants| !participants.is_empty());
+    changed |= before != state.endpoint_probe_participants_by_hour.len();
+
+    changed
 }
 
 fn build_node_user_endpoint_memberships_from_legacy_grants(
@@ -2857,6 +2896,9 @@ impl JsonSnapshotStore {
                 migrated = true;
             }
         }
+        if prune_deleted_nodes_from_endpoint_probe_tracking(&mut state) {
+            migrated = true;
+        }
 
         let normalized_global_weights =
             normalize_user_global_weights(&state, state.user_global_weights.clone());
@@ -3797,6 +3839,70 @@ mod tests {
         }
     }
 
+    fn probe_state_with_stale_deleted_node() -> PersistedState {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_keep".to_string(),
+            Node {
+                node_id: "node_keep".to_string(),
+                node_name: "keep".to_string(),
+                access_host: "keep.example.com".to_string(),
+                api_base_url: "https://keep.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_keep".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+        state.endpoint_probe_participants_by_hour.insert(
+            "2026-03-11T11:00:00Z".to_string(),
+            BTreeSet::from(["node_keep".to_string(), "node_drop".to_string()]),
+        );
+        let bucket = state
+            .endpoint_probe_history
+            .entry("endpoint_1".to_string())
+            .or_default()
+            .hours
+            .entry("2026-03-11T11:00:00Z".to_string())
+            .or_default();
+        bucket.by_node.insert(
+            "node_keep".to_string(),
+            EndpointProbeNodeSample {
+                ok: true,
+                skipped: false,
+                checked_at: "2026-03-11T11:05:00Z".to_string(),
+                latency_ms: Some(120),
+                target_id: None,
+                target_url: None,
+                error: None,
+                config_hash: "cfg".to_string(),
+            },
+        );
+        bucket.by_node.insert(
+            "node_drop".to_string(),
+            EndpointProbeNodeSample {
+                ok: true,
+                skipped: false,
+                checked_at: "2026-03-11T11:06:00Z".to_string(),
+                latency_ms: Some(140),
+                target_id: None,
+                target_url: None,
+                error: None,
+                config_hash: "cfg".to_string(),
+            },
+        );
+        state
+    }
+
     #[test]
     fn bootstrap_creates_state_json_with_one_node() {
         let tmp = tempfile::tempdir().unwrap();
@@ -4296,6 +4402,29 @@ rules: []
             "port: 0
 rules: []
 "
+        );
+    }
+
+    #[test]
+    fn migrate_state_value_to_latest_prunes_deleted_probe_nodes_from_current_schema_state() {
+        let raw = serde_json::to_value(probe_state_with_stale_deleted_node()).unwrap();
+
+        let state = migrate_state_value_to_latest(raw).expect("current-schema state should load");
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        let bucket = state
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .and_then(|history| history.hours.get("2026-03-11T11:00:00Z"))
+            .expect("endpoint probe bucket should survive for the kept node");
+        assert_eq!(
+            bucket.by_node.keys().cloned().collect::<Vec<_>>(),
+            vec!["node_keep".to_string()],
         );
     }
 
@@ -5140,6 +5269,45 @@ rules: []
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn load_or_init_prunes_deleted_probe_nodes_from_current_schema_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let raw = probe_state_with_stale_deleted_node();
+        std::fs::write(
+            tmp.path().join("state.json"),
+            serde_json::to_vec_pretty(&raw).unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert_eq!(
+            store
+                .state()
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        let bucket = store
+            .state()
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .and_then(|history| history.hours.get("2026-03-11T11:00:00Z"))
+            .expect("endpoint probe bucket should survive for the kept node");
+        assert_eq!(
+            bucket.by_node.keys().cloned().collect::<Vec<_>>(),
+            vec!["node_keep".to_string()],
+        );
+
+        let saved: PersistedState =
+            serde_json::from_slice(&fs::read(tmp.path().join("state.json")).unwrap()).unwrap();
+        assert_eq!(
+            saved
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
     }
 
     #[test]
