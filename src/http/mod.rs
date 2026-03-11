@@ -1076,7 +1076,6 @@ struct VersionCheckCacheEntry {
 }
 
 const VERSION_CHECK_TTL: Duration = Duration::from_secs(60 * 60);
-const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Serialize)]
 struct VersionCheckResponse {
@@ -1984,7 +1983,7 @@ async fn admin_list_nodes_runtime(
             )
             .send();
 
-        let response = tokio::time::timeout(CLUSTER_RUNTIME_FANOUT_TIMEOUT, request).await;
+        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
