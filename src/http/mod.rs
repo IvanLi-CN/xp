@@ -1076,6 +1076,7 @@ struct VersionCheckCacheEntry {
 }
 
 const VERSION_CHECK_TTL: Duration = Duration::from_secs(60 * 60);
+const CLUSTER_ADMIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Serialize)]
 struct VersionCheckResponse {
@@ -1983,7 +1984,7 @@ async fn admin_list_nodes_runtime(
             )
             .send();
 
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
@@ -2069,7 +2070,7 @@ async fn admin_get_node_runtime(
             sig,
         )
         .send();
-    let response = tokio::time::timeout(Duration::from_secs(3), request)
+    let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request)
         .await
         .map_err(|_| ApiError::internal("request timeout"))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -2336,7 +2337,7 @@ async fn admin_get_node_ip_usage(
             sig,
         )
         .send();
-    let response = tokio::time::timeout(Duration::from_secs(3), request)
+    let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request)
         .await
         .map_err(|_| ApiError::internal("request timeout"))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -2513,7 +2514,7 @@ async fn admin_get_user_ip_usage(
                 sig.clone(),
             )
             .send();
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
@@ -3511,7 +3512,7 @@ async fn admin_run_endpoint_probe_run(
                 .json(&req_body)
                 .send();
 
-            let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
+            let resp = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
             let resp = match resp {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(err)) => {
@@ -3751,7 +3752,7 @@ async fn admin_get_endpoint_probe_run_status(
                 )
                 .send();
 
-            let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
+            let resp = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
             let resp = match resp {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(err)) => {
@@ -5290,7 +5291,7 @@ async fn admin_list_user_quota_summaries(
                 sig.clone(),
             )
             .send();
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
@@ -5557,7 +5558,7 @@ async fn admin_get_user_node_quota_status(
                 sig.clone(),
             )
             .send();
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
@@ -5971,7 +5972,7 @@ async fn admin_get_alerts(
                 sig.clone(),
             )
             .send();
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
+        let response = tokio::time::timeout(CLUSTER_ADMIN_REQUEST_TIMEOUT, request).await;
         let response = match response {
             Ok(Ok(response)) => response,
             _ => {
