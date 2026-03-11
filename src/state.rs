@@ -2035,7 +2035,7 @@ impl DesiredStateCommand {
                     .retain(|_user_id, nodes| !nodes.is_empty());
                 state.node_weight_policies.remove(node_id);
 
-                // Cleanup endpoint probe samples for the removed node.
+                // Cleanup endpoint probe samples and participation for the removed node.
                 for (_endpoint_id, history) in state.endpoint_probe_history.iter_mut() {
                     for (_hour, bucket) in history.hours.iter_mut() {
                         bucket.by_node.remove(node_id);
@@ -2047,6 +2047,12 @@ impl DesiredStateCommand {
                 state
                     .endpoint_probe_history
                     .retain(|_endpoint_id, history| !history.hours.is_empty());
+                for participants in state.endpoint_probe_participants_by_hour.values_mut() {
+                    participants.remove(node_id);
+                }
+                state
+                    .endpoint_probe_participants_by_hour
+                    .retain(|_hour, participants| !participants.is_empty());
 
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::NodeDeleted { deleted: true })
@@ -5307,6 +5313,83 @@ rules: []
                 "node_from_history_b".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node() {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_keep".to_string(),
+            Node {
+                node_id: "node_keep".to_string(),
+                node_name: "keep".to_string(),
+                access_host: "keep.example.com".to_string(),
+                api_base_url: "https://keep.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.nodes.insert(
+            "node_drop".to_string(),
+            Node {
+                node_id: "node_drop".to_string(),
+                node_name: "drop".to_string(),
+                access_host: "drop.example.com".to_string(),
+                api_base_url: "https://drop.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_keep".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+        state.endpoint_probe_participants_by_hour.insert(
+            "2026-03-11T11:00:00Z".to_string(),
+            BTreeSet::from(["node_keep".to_string(), "node_drop".to_string()]),
+        );
+        state
+            .endpoint_probe_history
+            .entry("endpoint_1".to_string())
+            .or_default()
+            .hours
+            .entry("2026-03-11T11:00:00Z".to_string())
+            .or_default()
+            .by_node
+            .insert(
+                "node_drop".to_string(),
+                EndpointProbeNodeSample {
+                    ok: true,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:10:00Z".to_string(),
+                    latency_ms: Some(123),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                },
+            );
+
+        DesiredStateCommand::DeleteNode {
+            node_id: "node_drop".to_string(),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        assert!(state.endpoint_probe_history.is_empty());
     }
 
     #[test]
