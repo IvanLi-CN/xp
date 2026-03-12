@@ -3785,6 +3785,23 @@ rules: []
         }),
         "expected subscription output to include custom-direct"
     );
+
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    let auto_group = groups
+        .iter()
+        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Auto"))
+        .expect("Auto group should exist in rendered subscription");
+    let auto_refs = auto_group
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("Auto proxies must exist")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(auto_refs, vec!["DIRECT", "🌟 Japan"]);
 }
 
 #[tokio::test]
