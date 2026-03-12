@@ -419,6 +419,7 @@ pub fn build_mihomo_yaml(
     merge_extra_proxy_reference_rename_map(&mut proxy_ref_rename_map, extra_proxy_rename_map);
     remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
     dedupe_proxy_refs_in_mapping(&mut root);
+    let proxy_group_order_hints = collect_mihomo_proxy_group_order_hints(&root);
     prune_template_reference_helper_blocks(&mut root);
 
     let provider_map = parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
@@ -446,7 +447,12 @@ pub fn build_mihomo_yaml(
     prune_unknown_proxy_provider_names_in_use_fields(&mut root, &provider_name_set);
     let proxy_group_name_set = collect_proxy_group_names(&root);
     prune_unknown_proxy_names_in_proxies_fields(&mut root, &proxy_name_set, &proxy_group_name_set);
-    normalize_visible_proxy_group_region_options(&mut root, &proxy_group_name_set);
+    normalize_user_proxy_group_order(
+        &mut root,
+        &proxy_group_name_set,
+        &generated_proxy_name_set,
+        &proxy_group_order_hints,
+    );
     dedupe_proxy_refs_in_mapping(&mut root);
     ensure_proxy_groups_have_candidates(&mut root, &provider_name_set);
 
@@ -460,6 +466,9 @@ pub fn build_mihomo_yaml(
 const MIHOMO_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|台湾|台灣|🇹🇼|Taiwan|TW)";
+const MIHOMO_PROXY_GROUP_HELPER_KEY: &str = "proxy-group";
+const MIHOMO_PROXY_GROUP_WITH_RELAY_HELPER_KEY: &str = "proxy-group_with_relay";
+const MIHOMO_APP_PROXY_GROUP_HELPER_KEY: &str = "app-proxy-group";
 const MIHOMO_REGION_GROUP_NAMES: [&str; 16] = [
     "🌟 Japan",
     "🔒 Japan",
@@ -510,16 +519,17 @@ const MIHOMO_REGION_GROUPS: [MihomoRegionGroup; 4] = [
 ];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
-const MIHOMO_VISIBLE_REGION_OPTION_ORDER: [&str; 6] = [
-    "🌟 Japan",
-    "🌟 Korea",
-    "🌟 Singapore",
-    "🌟 HongKong",
-    "🌟 Taiwan",
-    "🌟 US",
-];
 const MIHOMO_OUTER_VISIBLE_REGION_OPTIONS: [&str; 4] =
     ["🌟 Japan", "🌟 Korea", "🌟 HongKong", "🌟 Taiwan"];
+const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 4] =
+    ["💎 节点选择", "🗽 大流量", "🎯 全球直连", "🛑 全球拦截"];
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct MihomoProxyGroupOrderHints {
+    basic: Vec<String>,
+    relay: Vec<String>,
+    app: Vec<String>,
+}
 
 fn collect_mihomo_base_names(
     proxy_names: &std::collections::BTreeSet<String>,
@@ -832,17 +842,184 @@ fn canonical_system_visible_region_option(name: &str) -> Option<&'static str> {
     }
 }
 
-fn is_visible_region_option_in_order(name: &str) -> bool {
-    MIHOMO_VISIBLE_REGION_OPTION_ORDER.contains(&name)
+fn is_managed_region_proxy_reference(name: &str) -> bool {
+    name == MIHOMO_OUTER_GROUP || canonical_system_visible_region_option(name).is_some()
 }
 
-fn is_legacy_system_visible_region_option(name: &str) -> bool {
-    canonical_system_visible_region_option(name).is_some() && !name.starts_with("🌟 ")
+fn helper_proxy_order_sequence(root: &serde_yaml::Mapping, key: &str) -> Vec<String> {
+    let Some(serde_yaml::Value::Mapping(map)) =
+        root.get(serde_yaml::Value::String(key.to_string()))
+    else {
+        return Vec::new();
+    };
+    let Some(serde_yaml::Value::Sequence(seq)) =
+        map.get(serde_yaml::Value::String("proxies".to_string()))
+    else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::<String>::new();
+    for value in seq {
+        let Some(name) = value.as_str() else {
+            continue;
+        };
+        if seen.insert(name.to_string()) {
+            out.push(name.to_string());
+        }
+    }
+    out
 }
 
-fn normalize_visible_proxy_group_region_options(
+fn collect_mihomo_proxy_group_order_hints(
+    root: &serde_yaml::Mapping,
+) -> MihomoProxyGroupOrderHints {
+    MihomoProxyGroupOrderHints {
+        basic: helper_proxy_order_sequence(root, MIHOMO_PROXY_GROUP_HELPER_KEY),
+        relay: helper_proxy_order_sequence(root, MIHOMO_PROXY_GROUP_WITH_RELAY_HELPER_KEY),
+        app: helper_proxy_order_sequence(root, MIHOMO_APP_PROXY_GROUP_HELPER_KEY),
+    }
+}
+
+fn proxy_group_contains_managed_region(proxy_names: &[String], canonical_name: &str) -> bool {
+    proxy_names.iter().any(|name| {
+        (name == MIHOMO_OUTER_GROUP
+            && MIHOMO_OUTER_VISIBLE_REGION_OPTIONS.contains(&canonical_name))
+            || canonical_system_visible_region_option(name) == Some(canonical_name)
+    })
+}
+
+fn has_relay_proxy_group_shape(
+    proxy_names: &[String],
+    generated_proxy_names: &std::collections::BTreeSet<String>,
+) -> bool {
+    proxy_names.iter().any(|name| {
+        name == MIHOMO_LANDING_POOL_GROUP
+            || name.starts_with("🛬 ")
+            || (generated_proxy_names.contains(name) && classify_proxy_ref_name(name).is_some())
+    })
+}
+
+fn has_app_proxy_group_shape(proxy_names: &[String]) -> bool {
+    proxy_names
+        .iter()
+        .any(|name| MIHOMO_APP_PROXY_GROUP_MATCHERS.contains(&name.as_str()))
+}
+
+fn select_mihomo_proxy_group_order_hint<'a>(
+    proxy_names: &[String],
+    generated_proxy_names: &std::collections::BTreeSet<String>,
+    hints: &'a MihomoProxyGroupOrderHints,
+) -> Option<&'a [String]> {
+    if has_relay_proxy_group_shape(proxy_names, generated_proxy_names) {
+        return (!hints.relay.is_empty()).then_some(hints.relay.as_slice());
+    }
+    if has_app_proxy_group_shape(proxy_names) {
+        return (!hints.app.is_empty()).then_some(hints.app.as_slice());
+    }
+    if !hints.basic.is_empty() {
+        return Some(&hints.basic);
+    }
+    None
+}
+
+fn normalize_proxy_names_in_place(
+    proxy_names: &[String],
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let mut out = Vec::with_capacity(proxy_names.len());
+    let mut emitted_regions = std::collections::BTreeSet::<String>::new();
+
+    for proxy_name in proxy_names {
+        if proxy_name == MIHOMO_OUTER_GROUP {
+            for region_name in MIHOMO_OUTER_VISIBLE_REGION_OPTIONS {
+                if proxy_group_names.contains(region_name)
+                    && emitted_regions.insert(region_name.to_string())
+                {
+                    out.push(region_name.to_string());
+                }
+            }
+            continue;
+        }
+        if let Some(canonical_name) = canonical_system_visible_region_option(proxy_name) {
+            if proxy_group_names.contains(canonical_name)
+                && emitted_regions.insert(canonical_name.to_string())
+            {
+                out.push(canonical_name.to_string());
+            }
+            continue;
+        }
+        out.push(proxy_name.clone());
+    }
+
+    out
+}
+
+fn normalize_proxy_names_from_helper(
+    proxy_names: &[String],
+    helper_order: &[String],
+    proxy_group_names: &std::collections::BTreeSet<String>,
+) -> Option<Vec<String>> {
+    let mut out = Vec::with_capacity(proxy_names.len());
+    let mut used_literals = std::collections::BTreeSet::<String>::new();
+    let mut emitted_regions = std::collections::BTreeSet::<String>::new();
+    let mut matched_any = false;
+
+    for helper_name in helper_order {
+        if helper_name == MIHOMO_OUTER_GROUP {
+            if proxy_names.iter().any(|name| name == MIHOMO_OUTER_GROUP) {
+                for region_name in MIHOMO_OUTER_VISIBLE_REGION_OPTIONS {
+                    if proxy_group_names.contains(region_name)
+                        && emitted_regions.insert(region_name.to_string())
+                    {
+                        out.push(region_name.to_string());
+                        matched_any = true;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if let Some(canonical_name) = canonical_system_visible_region_option(helper_name) {
+            if proxy_group_names.contains(canonical_name)
+                && proxy_group_contains_managed_region(proxy_names, canonical_name)
+                && emitted_regions.insert(canonical_name.to_string())
+            {
+                out.push(canonical_name.to_string());
+                matched_any = true;
+            }
+            continue;
+        }
+
+        if proxy_names.iter().any(|name| name == helper_name)
+            && used_literals.insert(helper_name.to_string())
+        {
+            out.push(helper_name.to_string());
+            matched_any = true;
+        }
+    }
+
+    if !matched_any {
+        return None;
+    }
+
+    for proxy_name in proxy_names {
+        if is_managed_region_proxy_reference(proxy_name) {
+            continue;
+        }
+        if used_literals.insert(proxy_name.clone()) {
+            out.push(proxy_name.clone());
+        }
+    }
+
+    Some(out)
+}
+
+fn normalize_user_proxy_group_order(
     root: &mut serde_yaml::Mapping,
     proxy_group_names: &std::collections::BTreeSet<String>,
+    generated_proxy_names: &std::collections::BTreeSet<String>,
+    hints: &MihomoProxyGroupOrderHints,
 ) {
     let Some(serde_yaml::Value::Sequence(groups)) =
         root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
@@ -864,9 +1041,9 @@ fn normalize_visible_proxy_group_region_options(
             continue;
         }
         if map
-            .get(serde_yaml::Value::String("hidden".to_string()))
-            .and_then(|value| value.as_bool())
-            == Some(true)
+            .get(serde_yaml::Value::String("type".to_string()))
+            .and_then(|value| value.as_str())
+            != Some("select")
         {
             continue;
         }
@@ -876,63 +1053,34 @@ fn normalize_visible_proxy_group_region_options(
         else {
             continue;
         };
-        let needs_normalization = proxies.iter().any(|proxy| {
-            proxy.as_str().is_some_and(|proxy_name| {
-                proxy_name == MIHOMO_OUTER_GROUP
-                    || is_legacy_system_visible_region_option(proxy_name)
-            })
-        });
-        if !needs_normalization {
-            continue;
-        }
-
-        let mut desired_regions = std::collections::BTreeSet::<String>::new();
-        let mut saw_outer = false;
-        let mut insert_at = None;
-        let mut normalized = Vec::<serde_yaml::Value>::with_capacity(proxies.len());
-
-        for proxy in proxies.iter() {
-            let Some(proxy_name) = proxy.as_str() else {
-                normalized.push(proxy.clone());
-                continue;
-            };
-            if proxy_name == MIHOMO_OUTER_GROUP {
-                saw_outer = true;
-                insert_at.get_or_insert(normalized.len());
-                continue;
-            }
-            if let Some(canonical) = canonical_system_visible_region_option(proxy_name) {
-                desired_regions.insert(canonical.to_string());
-                insert_at.get_or_insert(normalized.len());
-                continue;
-            }
-            if is_visible_region_option_in_order(proxy_name) {
-                desired_regions.insert(proxy_name.to_string());
-                insert_at.get_or_insert(normalized.len());
-                continue;
-            }
-            normalized.push(proxy.clone());
-        }
-
-        if !saw_outer && desired_regions.is_empty() {
-            continue;
-        }
-
-        if saw_outer {
-            for region_name in MIHOMO_OUTER_VISIBLE_REGION_OPTIONS {
-                desired_regions.insert(region_name.to_string());
-            }
-        }
-
-        let region_values = MIHOMO_VISIBLE_REGION_OPTION_ORDER
+        let Some(proxy_names) = proxies
             .iter()
-            .filter(|name| desired_regions.contains(**name) && proxy_group_names.contains(**name))
-            .map(|name| serde_yaml::Value::String((*name).to_string()))
-            .collect::<Vec<_>>();
+            .map(|value| value.as_str().map(ToString::to_string))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        if !proxy_names
+            .iter()
+            .any(|name| is_managed_region_proxy_reference(name))
+        {
+            continue;
+        }
 
-        let insert_at = insert_at.unwrap_or(normalized.len());
-        normalized.splice(insert_at..insert_at, region_values);
-        *proxies = normalized;
+        let normalized_names =
+            select_mihomo_proxy_group_order_hint(&proxy_names, generated_proxy_names, hints)
+                .and_then(|helper_order| {
+                    normalize_proxy_names_from_helper(&proxy_names, helper_order, proxy_group_names)
+                })
+                .unwrap_or_else(|| normalize_proxy_names_in_place(&proxy_names, proxy_group_names));
+        if normalized_names == proxy_names {
+            continue;
+        }
+
+        *proxies = normalized_names
+            .into_iter()
+            .map(serde_yaml::Value::String)
+            .collect();
     }
 }
 
@@ -2870,7 +3018,7 @@ rules: []
     }
 
     #[test]
-    fn build_mihomo_yaml_rewrites_visible_groups_to_star_region_options() {
+    fn build_mihomo_yaml_reorders_user_groups_using_helper_template_order() {
         let u = user("u1", "alice");
         let n = node("n1", "Tokyo A", "example.com");
         let endpoints = vec![
@@ -2891,6 +3039,40 @@ rules: []
         let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
         let profile = UserMihomoProfile {
             mixin_yaml: r#"
+proxy-group:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 💎 高质量
+proxy-group_with_relay:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 🌟 Korea
+    - 🛬 Tokyo-A
+    - 💎 高质量
+    - Tokyo-A-reality
+app-proxy-group:
+  proxies:
+    - 💎 节点选择
+    - 💎 高质量
+    - 🗽 大流量
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 🎯 全球直连
+    - 🛑 全球拦截
 port: 0
 proxy-groups:
   - name: "🌟 Singapore"
@@ -2913,33 +3095,59 @@ proxy-groups:
   - name: "🛑 全球拦截"
     type: select
     proxies: ["REJECT"]
+  - name: "🤯 All"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "💎 节点选择"
+    type: select
+    proxies: ["🚀 节点选择", "🤯 All"]
+  - name: "Simple Auto"
+    type: select
+    proxies:
+      - 💎 高质量
+      - 🛣️ JP/HK/TW
+      - 🌟 US
+      - 🌟 Singapore
   - name: "🚀 节点选择"
     type: select
     proxies:
+      - 🛬 Tokyo-A
+      - 💎 高质量
       - 🛣️ JP/HK/TW
       - 🌟 Singapore
       - 🌟 US
-      - 🛬 Tokyo-A
-      - 💎 高质量
       - Tokyo-A-reality
   - name: "🐟 漏网之鱼"
     type: select
     proxies:
-      - 🚀 节点选择
-      - 💎 高质量
-      - 🗽 大流量
-      - 🛣️ JP/HK/TW
-      - 🌟 Singapore
-      - 🌟 US
-      - 🎯 全球直连
       - 🛑 全球拦截
+      - 🗽 大流量
+      - 🌟 US
+      - 💎 节点选择
+      - 🛣️ JP/HK/TW
+      - 🎯 全球直连
+      - 💎 高质量
+      - 🌟 Singapore
   - name: "🤖 AI"
     type: select
     proxies:
-      - 💎 高质量
-      - 🛣️ JP/HK/TW
-      - 🌟 Singapore
       - 🌟 US
+      - 🎯 全球直连
+      - 🛣️ JP/HK/TW
+      - 🗽 大流量
+      - 💎 节点选择
+      - 💎 高质量
+      - 🌟 Singapore
+  - name: "Relay Hidden"
+    type: select
+    hidden: true
+    proxies:
+      - Tokyo-A-reality
+      - 🔒 落地
+      - 🌟 US
+      - 🛣️ JP/HK/TW
+      - 🛬 Tokyo-A
+      - 🌟 Singapore
       - 🎯 全球直连
 rules: []
 "#
@@ -2982,9 +3190,21 @@ rules: []
             ]
         );
         assert_eq!(
+            group_proxies("Simple Auto"),
+            vec![
+                "🌟 Japan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 US",
+                "💎 高质量",
+            ]
+        );
+        assert_eq!(
             group_proxies("🐟 漏网之鱼"),
             vec![
-                "🚀 节点选择",
+                "💎 节点选择",
                 "💎 高质量",
                 "🗽 大流量",
                 "🌟 Japan",
@@ -3000,7 +3220,9 @@ rules: []
         assert_eq!(
             group_proxies("🤖 AI"),
             vec![
+                "💎 节点选择",
                 "💎 高质量",
+                "🗽 大流量",
                 "🌟 Japan",
                 "🌟 Korea",
                 "🌟 Singapore",
@@ -3010,8 +3232,29 @@ rules: []
                 "🎯 全球直连",
             ]
         );
+        assert_eq!(
+            group_proxies("Relay Hidden"),
+            vec![
+                "🌟 Japan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 US",
+                "🛬 Tokyo-A",
+                "Tokyo-A-reality",
+                "🔒 落地",
+                "🎯 全球直连",
+            ]
+        );
 
-        for visible_group in ["🚀 节点选择", "🐟 漏网之鱼", "🤖 AI"] {
+        for visible_group in [
+            "🚀 节点选择",
+            "Simple Auto",
+            "🐟 漏网之鱼",
+            "🤖 AI",
+            "Relay Hidden",
+        ] {
             let refs = group_proxies(visible_group);
             assert!(!refs.contains(&MIHOMO_OUTER_GROUP));
             assert!(!refs.iter().any(|name| {
@@ -3093,6 +3336,248 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(refs, vec!["DIRECT", "🌟 US", "Manual", "🌟 Singapore"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_falls_back_to_in_place_order_when_specialized_helper_missing() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+proxy-group:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 💎 高质量
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "💎 高质量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🗽 大流量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🎯 全球直连"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🛑 全球拦截"
+    type: select
+    proxies: ["REJECT"]
+  - name: "🐟 漏网之鱼"
+    type: select
+    proxies:
+      - 🛑 全球拦截
+      - 🗽 大流量
+      - 🌟 US
+      - 💎 高质量
+      - 🛣️ JP/HK/TW
+      - 🎯 全球直连
+      - 🌟 Singapore
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("🐟 漏网之鱼"))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("🐟 漏网之鱼 proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refs,
+            vec![
+                "🛑 全球拦截",
+                "🗽 大流量",
+                "🌟 US",
+                "💎 高质量",
+                "🌟 Japan",
+                "🌟 Korea",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🎯 全球直连",
+                "🌟 Singapore",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_mihomo_yaml_does_not_treat_extra_suffix_proxies_as_relay_groups() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+        )];
+        let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+proxy-group:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - Manual
+proxy-group_with_relay:
+  proxies:
+    - Manual
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "Manual"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "Auto"
+    type: select
+    proxies:
+      - Tokyo-A-reality
+      - Manual
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+      - 🌟 US
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: Tokyo-A-reality
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &memberships, &endpoints, &[n], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("Auto"))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Auto proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refs,
+            vec![
+                "🌟 Japan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 US",
+                "Manual",
+                "Tokyo-A-reality",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_mihomo_yaml_leaves_hidden_non_select_groups_unchanged() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+proxy-group:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "Hidden Fallback"
+    type: fallback
+    hidden: true
+    proxies:
+      - 🌟 US
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let refs = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups.iter().find(|group| {
+                    group.get("name").and_then(Value::as_str) == Some("Hidden Fallback")
+                })
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Hidden Fallback proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["🌟 US", "🛣️ JP/HK/TW", "🌟 Singapore"]);
     }
 
     #[test]

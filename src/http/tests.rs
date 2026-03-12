@@ -4265,6 +4265,193 @@ rules: []
 }
 
 #[tokio::test]
+async fn mihomo_subscription_replays_helper_template_order_for_user_groups() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": r#"proxy-group:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 💎 高质量
+app-proxy-group:
+  proxies:
+    - 🚀 节点选择
+    - 💎 高质量
+    - 🗽 大流量
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 🎯 全球直连
+    - 🛑 全球拦截
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "💎 高质量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🗽 大流量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🎯 全球直连"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🛑 全球拦截"
+    type: select
+    proxies: ["REJECT"]
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - 💎 高质量
+      - 🌟 US
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+  - name: "🐟 漏网之鱼"
+    type: select
+    proxies:
+      - 🛑 全球拦截
+      - 🗽 大流量
+      - 🌟 US
+      - 🚀 节点选择
+      - 🛣️ JP/HK/TW
+      - 🎯 全球直连
+      - 💎 高质量
+      - 🌟 Singapore
+  - name: "🤖 AI"
+    type: select
+    proxies:
+      - 🌟 US
+      - 🎯 全球直连
+      - 🛣️ JP/HK/TW
+      - 🗽 大流量
+      - 🚀 节点选择
+      - 💎 高质量
+      - 🌟 Singapore
+  - name: "Hidden Auto"
+    type: select
+    hidden: true
+    proxies:
+      - 💎 高质量
+      - 🌟 US
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+
+    let group_refs = |name: &str| {
+        groups
+            .iter()
+            .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
+            .and_then(|group| group.get("proxies"))
+            .and_then(YamlValue::as_sequence)
+            .expect("proxy refs must exist")
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        group_refs("🚀 节点选择"),
+        vec![
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "💎 高质量",
+        ]
+    );
+    assert_eq!(
+        group_refs("🐟 漏网之鱼"),
+        vec![
+            "🚀 节点选择",
+            "💎 高质量",
+            "🗽 大流量",
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "🎯 全球直连",
+            "🛑 全球拦截",
+        ]
+    );
+    assert_eq!(
+        group_refs("🤖 AI"),
+        vec![
+            "🚀 节点选择",
+            "💎 高质量",
+            "🗽 大流量",
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "🎯 全球直连",
+        ]
+    );
+    assert_eq!(
+        group_refs("Hidden Auto"),
+        vec![
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "💎 高质量",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

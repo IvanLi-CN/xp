@@ -149,7 +149,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 外层候选组：`🛣️ JP/HK/TW`
   - 兼容地区组：`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
-- 对非隐藏的可见业务组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会把该地区选项段改写为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan}`，并保留模板中已有的 `🌟 Singapore` / `🌟 US`；`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
+- 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan}`，模板中已有的 `🌟 Singapore` / `🌟 US` 会按模板原位保留；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
 - 落地组生成策略：
   - 若存在 `{base}-ss`：只放 `{base}-chain` 与 `{base}-ss`，允许在连接失败后通过 Mihomo 的 health check 机制做主动回落
   - 否则若存在 `{base}-reality`：仅使用 `{base}-reality`
