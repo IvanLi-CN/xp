@@ -127,6 +127,7 @@
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then 外层候选组 `🛣️ JP/HK/TW` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then `🛣️ JP/HK/TW` 仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
 - Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
+- Given 可见业务组的 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，When 拉取 `format=mihomo`，Then 这些可见组选项会规范化为 `🌟 {Japan|Korea|HongKong|Taiwan}` 与模板中已有的 `🌟 Singapore` / `🌟 US`，且不会直接暴露 `🔒/🤯/🛣️ {Region}`。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-chain` 与 `base-ss`。
