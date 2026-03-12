@@ -820,24 +820,24 @@ fn is_mihomo_system_proxy_group(name: &str) -> bool {
         || MIHOMO_REGION_GROUP_NAMES.contains(&name)
 }
 
-fn canonical_visible_region_option(name: &str) -> Option<&'static str> {
+fn canonical_system_visible_region_option(name: &str) -> Option<&'static str> {
     match name {
         "🌟 Japan" | "🔒 Japan" | "🤯 Japan" | "🛣️ Japan" => Some("🌟 Japan"),
         "🌟 Korea" | "🔒 Korea" | "🤯 Korea" | "🛣️ Korea" => Some("🌟 Korea"),
-        "🌟 Singapore" | "🔒 Singapore" | "🤯 Singapore" | "🛣️ Singapore" => {
-            Some("🌟 Singapore")
-        }
         "🌟 HongKong" | "🔒 HongKong" | "🤯 HongKong" | "🛣️ HongKong" => {
             Some("🌟 HongKong")
         }
         "🌟 Taiwan" | "🔒 Taiwan" | "🤯 Taiwan" | "🛣️ Taiwan" => Some("🌟 Taiwan"),
-        "🌟 US" | "🔒 US" | "🤯 US" | "🛣️ US" => Some("🌟 US"),
         _ => None,
     }
 }
 
-fn is_legacy_visible_region_option(name: &str) -> bool {
-    canonical_visible_region_option(name).is_some() && !name.starts_with("🌟 ")
+fn is_visible_region_option_in_order(name: &str) -> bool {
+    MIHOMO_VISIBLE_REGION_OPTION_ORDER.contains(&name)
+}
+
+fn is_legacy_system_visible_region_option(name: &str) -> bool {
+    canonical_system_visible_region_option(name).is_some() && !name.starts_with("🌟 ")
 }
 
 fn normalize_visible_proxy_group_region_options(
@@ -878,7 +878,8 @@ fn normalize_visible_proxy_group_region_options(
         };
         let needs_normalization = proxies.iter().any(|proxy| {
             proxy.as_str().is_some_and(|proxy_name| {
-                proxy_name == MIHOMO_OUTER_GROUP || is_legacy_visible_region_option(proxy_name)
+                proxy_name == MIHOMO_OUTER_GROUP
+                    || is_legacy_system_visible_region_option(proxy_name)
             })
         });
         if !needs_normalization {
@@ -900,8 +901,13 @@ fn normalize_visible_proxy_group_region_options(
                 insert_at.get_or_insert(normalized.len());
                 continue;
             }
-            if let Some(canonical) = canonical_visible_region_option(proxy_name) {
+            if let Some(canonical) = canonical_system_visible_region_option(proxy_name) {
                 desired_regions.insert(canonical.to_string());
+                insert_at.get_or_insert(normalized.len());
+                continue;
+            }
+            if is_visible_region_option_in_order(proxy_name) {
+                desired_regions.insert(proxy_name.to_string());
                 insert_at.get_or_insert(normalized.len());
                 continue;
             }
@@ -3087,6 +3093,71 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(refs, vec!["DIRECT", "🌟 US", "Manual", "🌟 Singapore"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_preserves_non_managed_legacy_region_refs() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["DIRECT", "🛣️ JP/HK/TW", "🔒 US", "Alpha-reality"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: 🔒 US
+  type: ss
+  server: us.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "us:def"
+  udp: true
+- name: Alpha-reality
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let auto = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("Auto"))
+            })
+            .expect("Auto group should exist");
+        let refs = auto
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("Auto proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refs,
+            vec![
+                "DIRECT",
+                "🌟 Japan",
+                "🌟 Korea",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🔒 US",
+                "Alpha-reality",
+            ]
+        );
     }
 
     #[test]
