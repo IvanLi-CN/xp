@@ -109,6 +109,7 @@ function contrastRatio(foreground: SrgbColor, background: SrgbColor): number {
 function summaryBadgeContrast(
 	theme: ThemeName,
 	tone: SummaryHighlightTone,
+	target: "label" | "value",
 ): number {
 	const contract = SUMMARY_HIGHLIGHT_BADGE_STYLE[tone].contrast;
 	const cardBackground = oklchToSrgb(themeToken(theme, "card"));
@@ -126,10 +127,12 @@ function summaryBadgeContrast(
 	);
 	const textToken =
 		theme === "light" ? contract.lightTextToken : contract.darkTextToken;
-	return contrastRatio(
-		oklchToSrgb(themeToken(theme, textToken)),
-		badgeBackground,
-	);
+	const textColor = oklchToSrgb(themeToken(theme, textToken));
+	const foreground =
+		target === "label"
+			? blendSrgb(textColor, contract.labelOpacity, badgeBackground)
+			: textColor;
+	return contrastRatio(foreground, badgeBackground);
 }
 
 const baseReport: Pick<
@@ -256,6 +259,9 @@ describe("<IpUsageView />", () => {
 		expect(ipBadge?.className).toContain("text-foreground");
 		expect(ipBadge?.className).toContain("dark:bg-info/80");
 		expect(ipBadge?.className).toContain("dark:text-info-foreground");
+		expect(within(ipBadge as HTMLElement).getByText("IP")).toHaveClass(
+			"opacity-90",
+		);
 
 		const lastSeenButton = within(tokyoRow as HTMLTableRowElement).getAllByRole(
 			"button",
@@ -267,6 +273,9 @@ describe("<IpUsageView />", () => {
 		expect(timeBadge?.className).toContain("bg-warning/12");
 		expect(timeBadge?.className).toContain("dark:bg-warning/70");
 		expect(timeBadge?.className).toContain("dark:text-warning-foreground");
+		expect(within(timeBadge as HTMLElement).getByText("Time")).toHaveClass(
+			"opacity-90",
+		);
 	});
 
 	it("keeps summary highlight badges above AA contrast in light and dark themes", () => {
@@ -274,9 +283,12 @@ describe("<IpUsageView />", () => {
 			for (const tone of Object.keys(
 				SUMMARY_HIGHLIGHT_BADGE_STYLE,
 			) as SummaryHighlightTone[]) {
-				expect(summaryBadgeContrast(theme, tone)).toBeGreaterThanOrEqual(
-					minBadgeContrast,
-				);
+				expect(
+					summaryBadgeContrast(theme, tone, "value"),
+				).toBeGreaterThanOrEqual(minBadgeContrast);
+				expect(
+					summaryBadgeContrast(theme, tone, "label"),
+				).toBeGreaterThanOrEqual(minBadgeContrast);
 			}
 		}
 	});

@@ -287,6 +287,7 @@ export const SUMMARY_HIGHLIGHT_BADGE_STYLE = {
 			darkBackgroundAlpha: 0.8,
 			lightTextToken: "foreground",
 			darkTextToken: "info-foreground",
+			labelOpacity: 0.9,
 		},
 	},
 	warning: {
@@ -297,6 +298,7 @@ export const SUMMARY_HIGHLIGHT_BADGE_STYLE = {
 			darkBackgroundAlpha: 0.7,
 			lightTextToken: "foreground",
 			darkTextToken: "warning-foreground",
+			labelOpacity: 0.9,
 		},
 	},
 } as const satisfies Record<
@@ -308,6 +310,7 @@ export const SUMMARY_HIGHLIGHT_BADGE_STYLE = {
 			darkBackgroundAlpha: number;
 			lightTextToken: HighlightBadgeTextToken;
 			darkTextToken: HighlightBadgeTextToken;
+			labelOpacity: number;
 		};
 	}
 >;
@@ -590,13 +593,13 @@ function HighlightSummary({
 			<div className="flex min-h-6 flex-wrap items-center gap-2 md:justify-self-end">
 				{activeHighlight.ip ? (
 					<span className={highlightBadgeClass("info")}>
-						<span className="opacity-70">IP</span>
+						<span className="opacity-90">IP</span>
 						<span className="font-mono">{activeHighlight.ip}</span>
 					</span>
 				) : null}
 				{activeHighlight.timeRange ? (
 					<span className={highlightBadgeClass("warning")}>
-						<span className="opacity-70">Time</span>
+						<span className="opacity-90">Time</span>
 						<span>{formatTimeRange(activeHighlight.timeRange)}</span>
 					</span>
 				) : null}
