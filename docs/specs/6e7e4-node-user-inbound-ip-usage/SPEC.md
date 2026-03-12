@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-08
-- Last: 2026-03-09
+- Last: 2026-03-12
 
 ## 背景 / 问题陈述
 
@@ -186,6 +186,17 @@
   image:
   ![User details usage details tab](./assets/user-details-usage-details-tab.png)
 
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved-by-owner`
+  story_id_or_title: `Components/IpUsageView/Default`
+  state: `pinned IP + time highlight (24h)`
+  evidence_note: 验证 IP usage 顶部摘要区的 pinned IP 与 Time badge 在深色主题下具备足够对比度，并与图表中的时间高亮保持联动。
+  image:
+  ![IP usage highlight summary badges](./assets/ip-usage-highlight-summary-time.png)
+
 ## 资产晋升（Asset promotion）
 
 None.
@@ -217,6 +228,9 @@ None.
 - 2026-03-08: 创建规格并冻结采集口径、窗口策略、API/UI 语义与 Geo 数据源。
 - 2026-03-08: 根据当前实现回写 M1-M3 进度，并同步 API / Xray / ops 文档与运维示例。
 - 2026-03-09: 完成 fast-track 收敛，补齐 Storybook 回归修复、用户节点 tab 切窗保持选中、IP/时间跨视图高亮联动、PR 截图引用、CI 全绿与最终状态回写。
+- 2026-03-11: PR #110 跟进修正 IP usage 顶部高亮摘要 badge 的对比度与边界，让深色面板上的 pinned IP / Time 标签不再发虚，并在 review 后统一补正 light/dark 主题下的 IP badge 前景色与组件级样式回归测试。
+- 2026-03-12: 为 PR #110 补充 pinned IP + Time 高亮摘要的 Storybook 截图证据，并同步到规格证据区与 PR 正文。
+- 2026-03-12: 根据最新 review 修复顶部摘要 badge 的 light/dark 主题感知配色，并补上基于主题 token 的 AA 对比度回归测试，覆盖 pinned IP / Time 的前缀文案与数值文案，避免“看起来修了但仍然发虚”的回归。
 
 ## 参考（References）
 

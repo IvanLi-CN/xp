@@ -272,6 +272,49 @@ function formatTimeRange(range: TimeRange): string {
 	return `${new Date(range.startMs).toLocaleString()} -> ${inclusiveEnd.toLocaleString()}`;
 }
 
+type HighlightBadgeTone = "info" | "warning";
+type HighlightBadgeTextToken =
+	| "foreground"
+	| "info-foreground"
+	| "warning-foreground";
+
+export const SUMMARY_HIGHLIGHT_BADGE_STYLE = {
+	info: {
+		className:
+			"border-info/28 bg-info/12 text-foreground dark:border-info/72 dark:bg-info/80 dark:text-info-foreground",
+		contrast: {
+			lightBackgroundAlpha: 0.12,
+			darkBackgroundAlpha: 0.8,
+			lightTextToken: "foreground",
+			darkTextToken: "info-foreground",
+			labelOpacity: 0.9,
+		},
+	},
+	warning: {
+		className:
+			"border-warning/30 bg-warning/12 text-foreground dark:border-warning/70 dark:bg-warning/70 dark:text-warning-foreground",
+		contrast: {
+			lightBackgroundAlpha: 0.12,
+			darkBackgroundAlpha: 0.7,
+			lightTextToken: "foreground",
+			darkTextToken: "warning-foreground",
+			labelOpacity: 0.9,
+		},
+	},
+} as const satisfies Record<
+	HighlightBadgeTone,
+	{
+		className: string;
+		contrast: {
+			lightBackgroundAlpha: number;
+			darkBackgroundAlpha: number;
+			lightTextToken: HighlightBadgeTextToken;
+			darkTextToken: HighlightBadgeTextToken;
+			labelOpacity: number;
+		};
+	}
+>;
+
 function isReportEmpty(report: SharedIpUsageReport): boolean {
 	return report.ips.length === 0 && report.timeline.length === 0;
 }
@@ -533,6 +576,14 @@ function HighlightSummary({
 	hasPinnedHighlight: boolean;
 	onClearPinned: () => void;
 }) {
+	const highlightBadgeClass = (tone: HighlightBadgeTone) =>
+		badgeClass(
+			tone,
+			"default",
+			"border shadow-sm",
+			SUMMARY_HIGHLIGHT_BADGE_STYLE[tone].className,
+		);
+
 	return (
 		<div className="grid min-h-10 gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-1.5 text-xs md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
 			<span className="min-w-0 opacity-70">
@@ -541,14 +592,14 @@ function HighlightSummary({
 			</span>
 			<div className="flex min-h-6 flex-wrap items-center gap-2 md:justify-self-end">
 				{activeHighlight.ip ? (
-					<span className={badgeClass("info", "default", "gap-1")}>
-						<span className="opacity-70">IP</span>
+					<span className={highlightBadgeClass("info")}>
+						<span className="opacity-90">IP</span>
 						<span className="font-mono">{activeHighlight.ip}</span>
 					</span>
 				) : null}
 				{activeHighlight.timeRange ? (
-					<span className={badgeClass("warning", "default", "gap-1")}>
-						<span className="opacity-70">Time</span>
+					<span className={highlightBadgeClass("warning")}>
+						<span className="opacity-90">Time</span>
 						<span>{formatTimeRange(activeHighlight.timeRange)}</span>
 					</span>
 				) : null}
