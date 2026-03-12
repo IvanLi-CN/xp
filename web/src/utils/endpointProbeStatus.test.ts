@@ -3,19 +3,10 @@ import { describe, expect, it } from "vitest";
 import { computeEndpointProbeStatus } from "./endpointProbeStatus";
 
 describe("computeEndpointProbeStatus", () => {
-	it("treats incomplete buckets as missing", () => {
+	it("returns missing when participating nodes do not all report", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 2,
-				okCount: 0,
-				skippedCount: 0,
-			}),
-		).toBe("missing");
-
-		expect(
-			computeEndpointProbeStatus({
-				expectedNodes: 3,
+				participatingNodes: 3,
 				sampleCount: 2,
 				okCount: 1,
 				skippedCount: 0,
@@ -23,43 +14,43 @@ describe("computeEndpointProbeStatus", () => {
 		).toBe("missing");
 	});
 
-	it("returns down when all tested samples fail", () => {
+	it("ignores offline nodes that never participated", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 3,
+				participatingNodes: 2,
+				sampleCount: 2,
+				okCount: 2,
+				skippedCount: 0,
+			}),
+		).toBe("up");
+	});
+
+	it("returns down when all tested participant samples fail", () => {
+		expect(
+			computeEndpointProbeStatus({
+				participatingNodes: 2,
+				sampleCount: 2,
 				okCount: 0,
 				skippedCount: 0,
 			}),
 		).toBe("down");
 	});
 
-	it("returns up when all tested samples are ok", () => {
+	it("returns degraded when participant results are mixed", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 3,
-				okCount: 3,
-				skippedCount: 0,
-			}),
-		).toBe("up");
-	});
-
-	it("returns degraded when tested samples are mixed", () => {
-		expect(
-			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 3,
-				okCount: 2,
+				participatingNodes: 2,
+				sampleCount: 2,
+				okCount: 1,
 				skippedCount: 0,
 			}),
 		).toBe("degraded");
 	});
 
-	it("allows skipped samples when all tested samples are ok", () => {
+	it("allows skipped samples when all tested participant samples are ok", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 3,
+				participatingNodes: 3,
 				sampleCount: 3,
 				okCount: 2,
 				skippedCount: 1,
@@ -70,7 +61,7 @@ describe("computeEndpointProbeStatus", () => {
 	it("returns missing when all samples are skipped", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 1,
+				participatingNodes: 1,
 				sampleCount: 1,
 				okCount: 0,
 				skippedCount: 1,
@@ -78,25 +69,14 @@ describe("computeEndpointProbeStatus", () => {
 		).toBe("missing");
 	});
 
-	it("returns degraded when tested samples are mixed even with skips", () => {
+	it("returns missing when no nodes participated", () => {
 		expect(
 			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 3,
-				okCount: 1,
-				skippedCount: 1,
-			}),
-		).toBe("degraded");
-	});
-
-	it("returns down when all tested samples fail even with skips", () => {
-		expect(
-			computeEndpointProbeStatus({
-				expectedNodes: 3,
-				sampleCount: 3,
+				participatingNodes: 0,
+				sampleCount: 0,
 				okCount: 0,
-				skippedCount: 1,
+				skippedCount: 0,
 			}),
-		).toBe("down");
+		).toBe("missing");
 	});
 });

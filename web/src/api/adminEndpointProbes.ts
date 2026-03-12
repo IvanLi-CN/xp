@@ -44,6 +44,7 @@ export type AdminEndpointProbeHistoryNode = z.infer<
 export const AdminEndpointProbeHistorySlotSchema = z.object({
 	hour: z.string(),
 	status: EndpointProbeStatusSchema,
+	participating_nodes: z.number().int().nonnegative().optional(),
 	ok_count: z.number().int().nonnegative(),
 	sample_count: z.number().int().nonnegative(),
 	skipped_count: z.number().int().nonnegative().optional(),
@@ -59,7 +60,8 @@ export type AdminEndpointProbeHistorySlot = z.infer<
 
 export const AdminEndpointProbeHistoryResponseSchema = z.object({
 	endpoint_id: z.string(),
-	expected_nodes: z.number().int().nonnegative(),
+	participating_nodes: z.number().int().nonnegative().optional(),
+	expected_nodes: z.number().int().nonnegative().optional(),
 	slots: z.array(AdminEndpointProbeHistorySlotSchema),
 });
 

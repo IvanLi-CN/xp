@@ -33,6 +33,7 @@ const SCHEMA_VERSION_V5: u32 = 5;
 const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 2;
 const USAGE_SCHEMA_VERSION_V1: u32 = 1;
+const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
 /// Migrate any historical state payload into the latest schema (v11).
 ///
@@ -118,6 +119,7 @@ pub(crate) fn migrate_state_value_to_latest(
             let _ = meta.remove("public_domain");
         }
     }
+    let _ = prune_deleted_nodes_from_endpoint_probe_tracking(&mut state);
 
     state.user_global_weights =
         normalize_user_global_weights(&state, state.user_global_weights.clone());
@@ -234,6 +236,12 @@ pub struct PersistedState {
     /// Keyed by `endpoint_id`.
     #[serde(default)]
     pub endpoint_probe_history: BTreeMap<String, EndpointProbeHistory>,
+    /// Endpoint probe participants keyed by hour bucket.
+    ///
+    /// Keyed by an hour key like `2026-02-07T12:00:00Z`; values are the `node_id`s that
+    /// accepted/started that hour's probe run.
+    #[serde(default)]
+    pub endpoint_probe_participants_by_hour: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
@@ -263,6 +271,7 @@ impl PersistedState {
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
+            endpoint_probe_participants_by_hour: BTreeMap::new(),
             users: BTreeMap::new(),
             reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
@@ -379,6 +388,15 @@ pub struct EndpointProbeAppendSample {
     #[serde(default)]
     pub error: Option<String>,
     pub config_hash: String,
+}
+
+fn prune_endpoint_probe_hour_map<T>(hours: &mut BTreeMap<String, T>) {
+    while hours.len() > ENDPOINT_PROBE_HOUR_BUCKET_LIMIT {
+        let Some(oldest) = hours.keys().next().cloned() else {
+            break;
+        };
+        hours.remove(&oldest);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -803,6 +821,44 @@ fn normalize_node_user_endpoint_memberships(
 
 fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(state);
+}
+
+fn prune_deleted_nodes_from_endpoint_probe_tracking(state: &mut PersistedState) -> bool {
+    let known_node_ids = state.nodes.keys().cloned().collect::<BTreeSet<_>>();
+    let mut changed = false;
+
+    for history in state.endpoint_probe_history.values_mut() {
+        for bucket in history.hours.values_mut() {
+            let before = bucket.by_node.len();
+            bucket
+                .by_node
+                .retain(|node_id, _sample| known_node_ids.contains(node_id));
+            changed |= before != bucket.by_node.len();
+        }
+        let before = history.hours.len();
+        history
+            .hours
+            .retain(|_hour, bucket| !bucket.by_node.is_empty());
+        changed |= before != history.hours.len();
+    }
+    let before = state.endpoint_probe_history.len();
+    state
+        .endpoint_probe_history
+        .retain(|_endpoint_id, history| !history.hours.is_empty());
+    changed |= before != state.endpoint_probe_history.len();
+
+    for participants in state.endpoint_probe_participants_by_hour.values_mut() {
+        let before = participants.len();
+        participants.retain(|node_id| known_node_ids.contains(node_id));
+        changed |= before != participants.len();
+    }
+    let before = state.endpoint_probe_participants_by_hour.len();
+    state
+        .endpoint_probe_participants_by_hour
+        .retain(|_hour, participants| !participants.is_empty());
+    changed |= before != state.endpoint_probe_participants_by_hour.len();
+
+    changed
 }
 
 fn build_node_user_endpoint_memberships_from_legacy_grants(
@@ -2018,7 +2074,7 @@ impl DesiredStateCommand {
                     .retain(|_user_id, nodes| !nodes.is_empty());
                 state.node_weight_policies.remove(node_id);
 
-                // Cleanup endpoint probe samples for the removed node.
+                // Cleanup endpoint probe samples and participation for the removed node.
                 for (_endpoint_id, history) in state.endpoint_probe_history.iter_mut() {
                     for (_hour, bucket) in history.hours.iter_mut() {
                         bucket.by_node.remove(node_id);
@@ -2030,6 +2086,12 @@ impl DesiredStateCommand {
                 state
                     .endpoint_probe_history
                     .retain(|_endpoint_id, history| !history.hours.is_empty());
+                for participants in state.endpoint_probe_participants_by_hour.values_mut() {
+                    participants.remove(node_id);
+                }
+                state
+                    .endpoint_probe_participants_by_hour
+                    .retain(|_hour, participants| !participants.is_empty());
 
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::NodeDeleted { deleted: true })
@@ -2541,6 +2603,13 @@ impl DesiredStateCommand {
                 from_node_id,
                 samples,
             } => {
+                state
+                    .endpoint_probe_participants_by_hour
+                    .entry(hour.clone())
+                    .or_default()
+                    .insert(from_node_id.clone());
+                prune_endpoint_probe_hour_map(&mut state.endpoint_probe_participants_by_hour);
+
                 for sample in samples {
                     if !state.endpoints.contains_key(&sample.endpoint_id) {
                         // Endpoints can be deleted concurrently with a probe run. Ignore samples
@@ -2566,14 +2635,7 @@ impl DesiredStateCommand {
                             config_hash: sample.config_hash.clone(),
                         },
                     );
-
-                    // Keep the latest 24 hour buckets to bound Raft state growth.
-                    while history.hours.len() > 24 {
-                        let Some(oldest) = history.hours.keys().next().cloned() else {
-                            break;
-                        };
-                        history.hours.remove(&oldest);
-                    }
+                    prune_endpoint_probe_hour_map(&mut history.hours);
                 }
 
                 Ok(DesiredStateApplyResult::Applied)
@@ -2834,6 +2896,9 @@ impl JsonSnapshotStore {
                 migrated = true;
             }
         }
+        if prune_deleted_nodes_from_endpoint_probe_tracking(&mut state) {
+            migrated = true;
+        }
 
         let normalized_global_weights =
             normalize_user_global_weights(&state, state.user_global_weights.clone());
@@ -2975,6 +3040,21 @@ impl JsonSnapshotStore {
 
     pub fn state_mut(&mut self) -> &mut PersistedState {
         &mut self.state
+    }
+
+    pub fn endpoint_probe_participants_for_hour(&self, hour: &str) -> BTreeSet<String> {
+        let mut participants = self
+            .state
+            .endpoint_probe_participants_by_hour
+            .get(hour)
+            .cloned()
+            .unwrap_or_default();
+        for history in self.state.endpoint_probe_history.values() {
+            if let Some(bucket) = history.hours.get(hour) {
+                participants.extend(bucket.by_node.keys().cloned());
+            }
+        }
+        participants
     }
 
     pub fn save(&self) -> Result<(), StoreError> {
@@ -3759,6 +3839,70 @@ mod tests {
         }
     }
 
+    fn probe_state_with_stale_deleted_node() -> PersistedState {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_keep".to_string(),
+            Node {
+                node_id: "node_keep".to_string(),
+                node_name: "keep".to_string(),
+                access_host: "keep.example.com".to_string(),
+                api_base_url: "https://keep.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_keep".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+        state.endpoint_probe_participants_by_hour.insert(
+            "2026-03-11T11:00:00Z".to_string(),
+            BTreeSet::from(["node_keep".to_string(), "node_drop".to_string()]),
+        );
+        let bucket = state
+            .endpoint_probe_history
+            .entry("endpoint_1".to_string())
+            .or_default()
+            .hours
+            .entry("2026-03-11T11:00:00Z".to_string())
+            .or_default();
+        bucket.by_node.insert(
+            "node_keep".to_string(),
+            EndpointProbeNodeSample {
+                ok: true,
+                skipped: false,
+                checked_at: "2026-03-11T11:05:00Z".to_string(),
+                latency_ms: Some(120),
+                target_id: None,
+                target_url: None,
+                error: None,
+                config_hash: "cfg".to_string(),
+            },
+        );
+        bucket.by_node.insert(
+            "node_drop".to_string(),
+            EndpointProbeNodeSample {
+                ok: true,
+                skipped: false,
+                checked_at: "2026-03-11T11:06:00Z".to_string(),
+                latency_ms: Some(140),
+                target_id: None,
+                target_url: None,
+                error: None,
+                config_hash: "cfg".to_string(),
+            },
+        );
+        state
+    }
+
     #[test]
     fn bootstrap_creates_state_json_with_one_node() {
         let tmp = tempfile::tempdir().unwrap();
@@ -4258,6 +4402,29 @@ rules: []
             "port: 0
 rules: []
 "
+        );
+    }
+
+    #[test]
+    fn migrate_state_value_to_latest_prunes_deleted_probe_nodes_from_current_schema_state() {
+        let raw = serde_json::to_value(probe_state_with_stale_deleted_node()).unwrap();
+
+        let state = migrate_state_value_to_latest(raw).expect("current-schema state should load");
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        let bucket = state
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .and_then(|history| history.hours.get("2026-03-11T11:00:00Z"))
+            .expect("endpoint probe bucket should survive for the kept node");
+        assert_eq!(
+            bucket.by_node.keys().cloned().collect::<Vec<_>>(),
+            vec!["node_keep".to_string()],
         );
     }
 
@@ -5102,6 +5269,295 @@ rules: []
 
         let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
         assert_eq!(store.state().schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn load_or_init_prunes_deleted_probe_nodes_from_current_schema_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let raw = probe_state_with_stale_deleted_node();
+        std::fs::write(
+            tmp.path().join("state.json"),
+            serde_json::to_vec_pretty(&raw).unwrap(),
+        )
+        .unwrap();
+
+        let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        assert_eq!(
+            store
+                .state()
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        let bucket = store
+            .state()
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .and_then(|history| history.hours.get("2026-03-11T11:00:00Z"))
+            .expect("endpoint probe bucket should survive for the kept node");
+        assert_eq!(
+            bucket.by_node.keys().cloned().collect::<Vec<_>>(),
+            vec!["node_keep".to_string()],
+        );
+
+        let saved: PersistedState =
+            serde_json::from_slice(&fs::read(tmp.path().join("state.json")).unwrap()).unwrap();
+        assert_eq!(
+            saved
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+    }
+
+    #[test]
+    fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_when_empty() {
+        let mut state = PersistedState::empty();
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: "2026-03-11T11:00:00Z".to_string(),
+            from_node_id: "node_2".to_string(),
+            samples: Vec::new(),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_2".to_string()])),
+        );
+        assert!(state.endpoint_probe_history.is_empty());
+    }
+
+    #[test]
+    fn desired_state_apply_append_endpoint_probe_samples_prunes_participants_and_history() {
+        let mut state = PersistedState::empty();
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_1".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+
+        for hour_idx in 0..25 {
+            let hour = format!("2026-03-{:02}T00:00:00Z", hour_idx + 1);
+            DesiredStateCommand::AppendEndpointProbeSamples {
+                hour: hour.clone(),
+                from_node_id: format!("node_{}", hour_idx + 1),
+                samples: vec![EndpointProbeAppendSample {
+                    endpoint_id: "endpoint_1".to_string(),
+                    ok: true,
+                    skipped: false,
+                    checked_at: format!("2026-03-{:02}T00:30:00Z", hour_idx + 1),
+                    latency_ms: Some(100 + hour_idx as u32),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                }],
+            }
+            .apply(&mut state)
+            .unwrap();
+        }
+
+        let history = state
+            .endpoint_probe_history
+            .get("endpoint_1")
+            .expect("endpoint history");
+        assert_eq!(history.hours.len(), ENDPOINT_PROBE_HOUR_BUCKET_LIMIT);
+        assert_eq!(
+            state.endpoint_probe_participants_by_hour.len(),
+            ENDPOINT_PROBE_HOUR_BUCKET_LIMIT
+        );
+        assert!(!history.hours.contains_key("2026-03-01T00:00:00Z"));
+        assert!(history.hours.contains_key("2026-03-25T00:00:00Z"));
+        assert!(
+            !state
+                .endpoint_probe_participants_by_hour
+                .contains_key("2026-03-01T00:00:00Z")
+        );
+        assert!(
+            state
+                .endpoint_probe_participants_by_hour
+                .contains_key("2026-03-25T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_samples() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let endpoint = store
+            .create_endpoint(
+                node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                443,
+                json!({}),
+            )
+            .unwrap();
+        let second_endpoint = store
+            .create_endpoint(
+                endpoint.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8443,
+                json!({}),
+            )
+            .unwrap();
+
+        let hour = "2026-03-11T11:00:00Z".to_string();
+        store
+            .state_mut()
+            .endpoint_probe_participants_by_hour
+            .insert(hour.clone(), BTreeSet::from(["node_explicit".to_string()]));
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(endpoint.endpoint_id)
+            .or_default()
+            .hours
+            .entry(hour.clone())
+            .or_default()
+            .by_node
+            .insert(
+                "node_from_history_a".to_string(),
+                EndpointProbeNodeSample {
+                    ok: true,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:10:00Z".to_string(),
+                    latency_ms: Some(123),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                },
+            );
+        store
+            .state_mut()
+            .endpoint_probe_history
+            .entry(second_endpoint.endpoint_id)
+            .or_default()
+            .hours
+            .entry(hour.clone())
+            .or_default()
+            .by_node
+            .insert(
+                "node_from_history_b".to_string(),
+                EndpointProbeNodeSample {
+                    ok: false,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:12:00Z".to_string(),
+                    latency_ms: None,
+                    target_id: None,
+                    target_url: None,
+                    error: Some("dial failed".to_string()),
+                    config_hash: "cfg".to_string(),
+                },
+            );
+
+        assert_eq!(
+            store.endpoint_probe_participants_for_hour(&hour),
+            BTreeSet::from([
+                "node_explicit".to_string(),
+                "node_from_history_a".to_string(),
+                "node_from_history_b".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node() {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_keep".to_string(),
+            Node {
+                node_id: "node_keep".to_string(),
+                node_name: "keep".to_string(),
+                access_host: "keep.example.com".to_string(),
+                api_base_url: "https://keep.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.nodes.insert(
+            "node_drop".to_string(),
+            Node {
+                node_id: "node_drop".to_string(),
+                node_name: "drop".to_string(),
+                access_host: "drop.example.com".to_string(),
+                api_base_url: "https://drop.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_1".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_1".to_string(),
+                node_id: "node_keep".to_string(),
+                tag: "ss2022-endpoint_1".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 443,
+                meta: json!({}),
+            },
+        );
+        state.endpoint_probe_participants_by_hour.insert(
+            "2026-03-11T11:00:00Z".to_string(),
+            BTreeSet::from(["node_keep".to_string(), "node_drop".to_string()]),
+        );
+        state
+            .endpoint_probe_history
+            .entry("endpoint_1".to_string())
+            .or_default()
+            .hours
+            .entry("2026-03-11T11:00:00Z".to_string())
+            .or_default()
+            .by_node
+            .insert(
+                "node_drop".to_string(),
+                EndpointProbeNodeSample {
+                    ok: true,
+                    skipped: false,
+                    checked_at: "2026-03-11T11:10:00Z".to_string(),
+                    latency_ms: Some(123),
+                    target_id: None,
+                    target_url: None,
+                    error: None,
+                    config_hash: "cfg".to_string(),
+                },
+            );
+
+        DesiredStateCommand::DeleteNode {
+            node_id: "node_drop".to_string(),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            state
+                .endpoint_probe_participants_by_hour
+                .get("2026-03-11T11:00:00Z"),
+            Some(&BTreeSet::from(["node_keep".to_string()])),
+        );
+        assert!(state.endpoint_probe_history.is_empty());
     }
 
     #[test]

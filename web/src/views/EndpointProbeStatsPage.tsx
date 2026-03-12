@@ -75,7 +75,10 @@ export function EndpointProbeStatsPage() {
 	});
 
 	const slots = historyQuery.data?.slots ?? [];
-	const expectedNodes = historyQuery.data?.expected_nodes ?? 0;
+	const latestParticipatingNodes =
+		historyQuery.data?.participating_nodes ??
+		historyQuery.data?.expected_nodes ??
+		0;
 
 	const defaultSelectedHour = useMemo(() => {
 		const withData = [...slots].reverse().find((slot) => slot.sample_count > 0);
@@ -94,6 +97,8 @@ export function EndpointProbeStatsPage() {
 		if (!selectedHour) return null;
 		return slots.find((slot) => slot.hour === selectedHour) ?? null;
 	}, [slots, selectedHour]);
+	const selectedParticipatingNodes =
+		selected?.participating_nodes ?? latestParticipatingNodes;
 
 	if (adminToken.length === 0) {
 		return (
@@ -201,8 +206,10 @@ export function EndpointProbeStatsPage() {
 							const testedCount =
 								slot.tested_count ??
 								Math.max(0, slot.sample_count - skippedCount);
-							const reportedLabel = expectedNodes
-								? `${slot.sample_count}/${expectedNodes}`
+							const participatingNodes =
+								slot.participating_nodes ?? latestParticipatingNodes;
+							const reportedLabel = participatingNodes
+								? `${slot.sample_count}/${participatingNodes}`
 								: String(slot.sample_count);
 							return (
 								<button
@@ -263,8 +270,8 @@ export function EndpointProbeStatsPage() {
 										<p>
 											Reported:{" "}
 											<span className="font-mono">
-												{expectedNodes
-													? `${selected.sample_count}/${expectedNodes}`
+												{selectedParticipatingNodes
+													? `${selected.sample_count}/${selectedParticipatingNodes}`
 													: String(selected.sample_count)}
 											</span>
 										</p>
@@ -296,10 +303,8 @@ export function EndpointProbeStatsPage() {
 							Probe config hash is recorded per node sample.
 						</p>
 						<p className="text-sm">
-							Expected nodes:{" "}
-							<span className="font-mono">
-								{historyQuery.data?.expected_nodes}
-							</span>
+							Participating nodes:{" "}
+							<span className="font-mono">{selectedParticipatingNodes}</span>
 						</p>
 					</div>
 				</div>

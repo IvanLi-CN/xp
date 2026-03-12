@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     convert::Infallible,
     sync::Arc,
 };
@@ -256,6 +256,7 @@ struct AdminEndpointProbeHistoryNode {
 struct AdminEndpointProbeHistorySlot {
     hour: String,
     status: EndpointProbeStatus,
+    participating_nodes: usize,
     ok_count: usize,
     sample_count: usize,
     skipped_count: usize,
@@ -270,6 +271,8 @@ struct AdminEndpointProbeHistorySlot {
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointProbeHistoryResponse {
     endpoint_id: String,
+    participating_nodes: usize,
+    // Compatibility alias for one release while the web UI migrates.
     expected_nodes: usize,
     slots: Vec<AdminEndpointProbeHistorySlot>,
 }
@@ -3058,12 +3061,19 @@ async fn admin_list_endpoints(
 ) -> Result<Json<Items<AdminEndpointWithProbe>>, ApiError> {
     let store = state.store.lock().await;
     let now = Utc::now();
+    let participant_counts = endpoint_probe_participant_counts_for_window(&store, now, 24);
     Ok(Json(Items {
         items: store
             .list_endpoints()
             .into_iter()
             .map(|endpoint| AdminEndpointWithProbe {
-                probe: build_endpoint_probe_summary(&store, &endpoint.endpoint_id, now, 24),
+                probe: build_endpoint_probe_summary_with_participant_counts(
+                    &store,
+                    &endpoint.endpoint_id,
+                    now,
+                    24,
+                    &participant_counts,
+                ),
                 endpoint,
             })
             .collect(),
@@ -3086,19 +3096,19 @@ async fn admin_get_endpoint(
 }
 
 fn probe_status_for_counts(
-    expected_nodes: usize,
+    participating_nodes: usize,
     sample_count: usize,
     ok_count: usize,
     skipped_count: usize,
 ) -> EndpointProbeStatus {
-    if expected_nodes == 0 {
+    if participating_nodes == 0 {
         return EndpointProbeStatus::Missing;
     }
     if sample_count == 0 {
         return EndpointProbeStatus::Missing;
     }
     // If not all nodes have reported, treat this hour bucket as incomplete.
-    if sample_count < expected_nodes {
+    if sample_count < participating_nodes {
         return EndpointProbeStatus::Missing;
     }
     let tested_count = sample_count.saturating_sub(skipped_count);
@@ -3142,6 +3152,26 @@ mod endpoint_probe_status_tests {
     #[test]
     fn probe_status_up_when_all_nodes_report_and_all_ok() {
         assert_eq!(probe_status_for_counts(3, 3, 3, 0), EndpointProbeStatus::Up);
+    }
+    #[test]
+    fn probe_status_up_when_offline_nodes_do_not_participate() {
+        assert_eq!(probe_status_for_counts(2, 2, 2, 0), EndpointProbeStatus::Up);
+    }
+
+    #[test]
+    fn probe_status_degraded_when_offline_nodes_do_not_participate() {
+        assert_eq!(
+            probe_status_for_counts(2, 2, 1, 0),
+            EndpointProbeStatus::Degraded
+        );
+    }
+
+    #[test]
+    fn probe_status_down_when_offline_nodes_do_not_participate() {
+        assert_eq!(
+            probe_status_for_counts(2, 2, 0, 0),
+            EndpointProbeStatus::Down
+        );
     }
 
     #[test]
@@ -3201,15 +3231,58 @@ fn compute_latency_p50_p95_ms(samples: impl Iterator<Item = u32>) -> (Option<u32
     (percentile_ms(&values, 0.50), percentile_ms(&values, 0.95))
 }
 
+fn endpoint_probe_participant_count_for_hour(store: &JsonSnapshotStore, hour: &str) -> usize {
+    store.endpoint_probe_participants_for_hour(hour).len()
+}
+
+fn endpoint_probe_participant_counts_for_window(
+    store: &JsonSnapshotStore,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+) -> BTreeMap<String, usize> {
+    let now_hour = now
+        .with_minute(0)
+        .and_then(|v| v.with_second(0))
+        .and_then(|v| v.with_nanosecond(0))
+        .unwrap_or(now);
+    let start = now_hour - chrono::Duration::hours(hours.saturating_sub(1) as i64);
+    let mut counts = BTreeMap::new();
+
+    for i in 0..hours {
+        let hour_dt = start + chrono::Duration::hours(i as i64);
+        let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+        counts.insert(
+            hour_key.clone(),
+            endpoint_probe_participant_count_for_hour(store, &hour_key),
+        );
+    }
+
+    counts
+}
+
 fn build_endpoint_probe_summary(
     store: &JsonSnapshotStore,
     endpoint_id: &str,
     now: chrono::DateTime<Utc>,
     hours: usize,
 ) -> AdminEndpointProbeSummary {
-    let node_ids: std::collections::BTreeSet<String> =
-        store.list_nodes().into_iter().map(|n| n.node_id).collect();
-    let expected_nodes = node_ids.len();
+    let participant_counts = endpoint_probe_participant_counts_for_window(store, now, hours);
+    build_endpoint_probe_summary_with_participant_counts(
+        store,
+        endpoint_id,
+        now,
+        hours,
+        &participant_counts,
+    )
+}
+
+fn build_endpoint_probe_summary_with_participant_counts(
+    store: &JsonSnapshotStore,
+    endpoint_id: &str,
+    now: chrono::DateTime<Utc>,
+    hours: usize,
+    participant_counts: &BTreeMap<String, usize>,
+) -> AdminEndpointProbeSummary {
     let history = store.state().endpoint_probe_history.get(endpoint_id);
 
     let now_hour = now
@@ -3226,67 +3299,37 @@ fn build_endpoint_probe_summary(
     for i in 0..hours {
         let hour_dt = start + chrono::Duration::hours(i as i64);
         let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+        let participating_nodes = participant_counts
+            .get(&hour_key)
+            .copied()
+            .unwrap_or_else(|| endpoint_probe_participant_count_for_hour(store, &hour_key));
 
-        let Some(history) = history else {
-            slots.push(AdminEndpointProbeSlot {
-                hour: hour_key,
-                status: EndpointProbeStatus::Missing,
-                checked_at: None,
-                latency_ms_p50: None,
-            });
-            continue;
-        };
+        let bucket = history.and_then(|h| h.hours.get(&hour_key));
 
-        let Some(bucket) = history.hours.get(&hour_key) else {
-            slots.push(AdminEndpointProbeSlot {
-                hour: hour_key,
-                status: EndpointProbeStatus::Missing,
-                checked_at: None,
-                latency_ms_p50: None,
-            });
-            continue;
-        };
-
-        let sample_count = bucket
-            .by_node
-            .iter()
-            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
-            .count();
+        let sample_count = bucket.map(|b| b.by_node.len()).unwrap_or(0);
         let skipped_count = bucket
-            .by_node
-            .iter()
-            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
-            .map(|(_node_id, sample)| sample)
-            .filter(|s| s.skipped)
-            .count();
+            .map(|b| b.by_node.values().filter(|s| s.skipped).count())
+            .unwrap_or(0);
         let ok_count = bucket
-            .by_node
-            .iter()
-            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
-            .map(|(_node_id, sample)| sample)
-            .filter(|s| s.ok && !s.skipped)
-            .count();
-        let (p50, _p95) = compute_latency_p50_p95_ms(
-            bucket
-                .by_node
-                .iter()
-                .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
-                .map(|(_node_id, sample)| sample)
-                .filter(|s| s.ok && !s.skipped)
-                .filter_map(|s| s.latency_ms),
-        );
+            .map(|b| b.by_node.values().filter(|s| s.ok && !s.skipped).count())
+            .unwrap_or(0);
+        let (p50, _p95) = match bucket {
+            Some(bucket) => compute_latency_p50_p95_ms(
+                bucket
+                    .by_node
+                    .values()
+                    .filter(|s| s.ok && !s.skipped)
+                    .filter_map(|s| s.latency_ms),
+            ),
+            None => (None, None),
+        };
         let checked_at_max = bucket
-            .by_node
-            .iter()
-            .filter(|(node_id, _)| node_ids.contains(node_id.as_str()))
-            .map(|(_node_id, sample)| sample)
-            .map(|s| s.checked_at.as_str())
-            .max()
+            .and_then(|b| b.by_node.values().map(|s| s.checked_at.as_str()).max())
             .map(|s| s.to_string());
 
-        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count, skipped_count);
+        let status =
+            probe_status_for_counts(participating_nodes, sample_count, ok_count, skipped_count);
 
-        // Iterate oldest -> newest. Keep the last seen as the "latest".
         let tested_count = sample_count.saturating_sub(skipped_count);
         if tested_count > 0 {
             latest_checked_at = checked_at_max.clone();
@@ -3314,9 +3357,6 @@ fn build_endpoint_probe_history_response(
     now: chrono::DateTime<Utc>,
     hours: usize,
 ) -> AdminEndpointProbeHistoryResponse {
-    let node_ids: std::collections::BTreeSet<String> =
-        store.list_nodes().into_iter().map(|n| n.node_id).collect();
-    let expected_nodes = node_ids.len();
     let history = store.state().endpoint_probe_history.get(endpoint_id);
 
     let now_hour = now
@@ -3331,15 +3371,13 @@ fn build_endpoint_probe_history_response(
     for i in 0..hours {
         let hour_dt = start + chrono::Duration::hours(i as i64);
         let hour_key = crate::endpoint_probe::format_hour_key(hour_dt);
+        let participating_nodes = endpoint_probe_participant_count_for_hour(store, &hour_key);
 
         let bucket = history.and_then(|h| h.hours.get(&hour_key));
 
         let mut by_node = Vec::new();
         if let Some(bucket) = bucket {
             for (node_id, sample) in &bucket.by_node {
-                if !node_ids.contains(node_id.as_str()) {
-                    continue;
-                }
                 by_node.push(AdminEndpointProbeHistoryNode {
                     node_id: node_id.clone(),
                     ok: sample.ok,
@@ -3366,11 +3404,13 @@ fn build_endpoint_probe_history_response(
                 .filter_map(|s| s.latency_ms),
         );
 
-        let status = probe_status_for_counts(expected_nodes, sample_count, ok_count, skipped_count);
+        let status =
+            probe_status_for_counts(participating_nodes, sample_count, ok_count, skipped_count);
 
         slots.push(AdminEndpointProbeHistorySlot {
             hour: hour_key,
             status,
+            participating_nodes,
             ok_count,
             sample_count,
             skipped_count,
@@ -3381,9 +3421,15 @@ fn build_endpoint_probe_history_response(
         });
     }
 
+    let participating_nodes = slots
+        .last()
+        .map(|slot| slot.participating_nodes)
+        .unwrap_or(0);
+
     AdminEndpointProbeHistoryResponse {
         endpoint_id: endpoint_id.to_string(),
-        expected_nodes,
+        participating_nodes,
+        expected_nodes: participating_nodes,
         slots,
     }
 }

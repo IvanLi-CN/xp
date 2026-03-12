@@ -82,12 +82,16 @@ This can be caused by:
 
 Meaning:
 
-- No samples were recorded for the given hour bucket / endpoint / node.
+- No participating node samples were recorded for the hour bucket, or a node that did participate
+  in that hour failed to report this endpoint.
+- A node that never accepted/started that hour's probe run is treated as offline for that hour and
+  does not count toward the endpoint denominator.
 
 Typical causes:
 
-- The node runner was down during that hour.
-- The cluster was mid-upgrade or temporarily partitioned.
+- No node accepted the hour's probe run.
+- A participating node crashed or lost connectivity before reporting this endpoint.
+- The cluster was mid-upgrade and only part of the cluster had started the hour's probe run.
 
 ## Troubleshooting checklist
 
