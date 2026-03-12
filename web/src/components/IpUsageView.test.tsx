@@ -1,8 +1,139 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
-import { IpUsageView } from "./IpUsageView";
+import { IpUsageView, SUMMARY_HIGHLIGHT_BADGE_STYLE } from "./IpUsageView";
+
+const stylesCss = readFileSync(
+	resolve(process.cwd(), "src/styles.css"),
+	"utf8",
+);
+const rootThemeBlock = stylesCss.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1];
+const darkThemeBlock = stylesCss.match(/\.dark\s*\{([\s\S]*?)\n\}/)?.[1];
+
+if (!rootThemeBlock || !darkThemeBlock) {
+	throw new Error("Failed to load theme tokens from styles.css");
+}
+
+const summaryPanelAlpha = 0.3;
+const minBadgeContrast = 4.5;
+
+type ThemeName = "light" | "dark";
+type SummaryHighlightTone = keyof typeof SUMMARY_HIGHLIGHT_BADGE_STYLE;
+type ThemeToken =
+	| "card"
+	| "muted"
+	| "foreground"
+	| "info"
+	| "info-foreground"
+	| "warning"
+	| "warning-foreground";
+type OklchColor = [number, number, number];
+type SrgbColor = [number, number, number];
+
+const themeBlocks: Record<ThemeName, string> = {
+	light: rootThemeBlock,
+	dark: darkThemeBlock,
+};
+
+function themeToken(theme: ThemeName, token: ThemeToken): OklchColor {
+	const tokenMatch = themeBlocks[theme].match(
+		new RegExp(`--${token}:\\s*oklch\\(([^)]+)\\);`),
+	)?.[1];
+	if (!tokenMatch) {
+		throw new Error(`Missing ${token} token for ${theme} theme`);
+	}
+	const [lightness, chroma, hue] = tokenMatch.trim().split(/\s+/);
+	return [
+		Number.parseFloat(lightness) / 100,
+		Number.parseFloat(chroma),
+		Number.parseFloat(hue),
+	];
+}
+
+function oklchToSrgb([lightness, chroma, hue]: OklchColor): SrgbColor {
+	const hueRadians = (hue * Math.PI) / 180;
+	const a = chroma * Math.cos(hueRadians);
+	const b = chroma * Math.sin(hueRadians);
+	const lPrime = lightness + 0.3963377774 * a + 0.2158037573 * b;
+	const mPrime = lightness - 0.1055613458 * a - 0.0638541728 * b;
+	const sPrime = lightness - 0.0894841775 * a - 1.291485548 * b;
+	const l = lPrime ** 3;
+	const m = mPrime ** 3;
+	const s = sPrime ** 3;
+	const linear = [
+		4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+		-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+		-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+	] as const;
+	return linear.map((channel) => {
+		const clamped = Math.min(1, Math.max(0, channel));
+		if (clamped <= 0.0031308) {
+			return 12.92 * clamped;
+		}
+		return 1.055 * clamped ** (1 / 2.4) - 0.055;
+	}) as SrgbColor;
+}
+
+function blendSrgb(
+	foreground: SrgbColor,
+	alpha: number,
+	background: SrgbColor,
+): SrgbColor {
+	return foreground.map(
+		(channel, index) => alpha * channel + (1 - alpha) * background[index],
+	) as SrgbColor;
+}
+
+function srgbToLinear(channel: number): number {
+	if (channel <= 0.04045) {
+		return channel / 12.92;
+	}
+	return ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+function contrastRatio(foreground: SrgbColor, background: SrgbColor): number {
+	const luminance = (color: SrgbColor) => {
+		const [red, green, blue] = color.map(srgbToLinear);
+		return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+	};
+	const foregroundLuminance = luminance(foreground);
+	const backgroundLuminance = luminance(background);
+	const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+	const darker = Math.min(foregroundLuminance, backgroundLuminance);
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+function summaryBadgeContrast(
+	theme: ThemeName,
+	tone: SummaryHighlightTone,
+	target: "label" | "value",
+): number {
+	const contract = SUMMARY_HIGHLIGHT_BADGE_STYLE[tone].contrast;
+	const cardBackground = oklchToSrgb(themeToken(theme, "card"));
+	const summaryBackground = blendSrgb(
+		oklchToSrgb(themeToken(theme, "muted")),
+		summaryPanelAlpha,
+		cardBackground,
+	);
+	const badgeBackground = blendSrgb(
+		oklchToSrgb(themeToken(theme, tone)),
+		theme === "light"
+			? contract.lightBackgroundAlpha
+			: contract.darkBackgroundAlpha,
+		summaryBackground,
+	);
+	const textToken =
+		theme === "light" ? contract.lightTextToken : contract.darkTextToken;
+	const textColor = oklchToSrgb(themeToken(theme, textToken));
+	const foreground =
+		target === "label"
+			? blendSrgb(textColor, contract.labelOpacity, badgeBackground)
+			: textColor;
+	return contrastRatio(foreground, badgeBackground);
+}
 
 const baseReport: Pick<
 	AdminNodeIpUsageResponse,
@@ -119,13 +250,47 @@ describe("<IpUsageView />", () => {
 		expect(
 			screen.getByRole("button", { name: "Clear pinned highlight" }),
 		).toBeInTheDocument();
+		const ipBadge = screen
+			.getAllByText("203.0.113.7")
+			.map((node) => node.closest(".xp-badge"))
+			.find((node): node is HTMLElement => node !== null);
+		expect(ipBadge).toBeTruthy();
+		expect(ipBadge?.className).toContain("bg-info/12");
+		expect(ipBadge?.className).toContain("text-foreground");
+		expect(ipBadge?.className).toContain("dark:bg-info/80");
+		expect(ipBadge?.className).toContain("dark:text-info-foreground");
+		expect(within(ipBadge as HTMLElement).getByText("IP")).toHaveClass(
+			"opacity-90",
+		);
 
 		const lastSeenButton = within(tokyoRow as HTMLTableRowElement).getAllByRole(
 			"button",
 		)[1];
 		fireEvent.click(lastSeenButton);
 		expect(lastSeenButton).toHaveAttribute("aria-pressed", "true");
-		expect(screen.getByText("Time")).toBeInTheDocument();
+		const timeBadge = screen.getByText("Time").closest(".xp-badge");
+		expect(timeBadge).not.toBeNull();
+		expect(timeBadge?.className).toContain("bg-warning/12");
+		expect(timeBadge?.className).toContain("dark:bg-warning/70");
+		expect(timeBadge?.className).toContain("dark:text-warning-foreground");
+		expect(within(timeBadge as HTMLElement).getByText("Time")).toHaveClass(
+			"opacity-90",
+		);
+	});
+
+	it("keeps summary highlight badges above AA contrast in light and dark themes", () => {
+		for (const theme of ["light", "dark"] as const) {
+			for (const tone of Object.keys(
+				SUMMARY_HIGHLIGHT_BADGE_STYLE,
+			) as SummaryHighlightTone[]) {
+				expect(
+					summaryBadgeContrast(theme, tone, "value"),
+				).toBeGreaterThanOrEqual(minBadgeContrast);
+				expect(
+					summaryBadgeContrast(theme, tone, "label"),
+				).toBeGreaterThanOrEqual(minBadgeContrast);
+			}
+		}
 	});
 
 	it("shows country.is attribution", () => {
