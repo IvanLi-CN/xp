@@ -836,6 +836,10 @@ fn canonical_visible_region_option(name: &str) -> Option<&'static str> {
     }
 }
 
+fn is_legacy_visible_region_option(name: &str) -> bool {
+    canonical_visible_region_option(name).is_some() && !name.starts_with("🌟 ")
+}
+
 fn normalize_visible_proxy_group_region_options(
     root: &mut serde_yaml::Mapping,
     proxy_group_names: &std::collections::BTreeSet<String>,
@@ -872,6 +876,14 @@ fn normalize_visible_proxy_group_region_options(
         else {
             continue;
         };
+        let needs_normalization = proxies.iter().any(|proxy| {
+            proxy.as_str().is_some_and(|proxy_name| {
+                proxy_name == MIHOMO_OUTER_GROUP || is_legacy_visible_region_option(proxy_name)
+            })
+        });
+        if !needs_normalization {
+            continue;
+        }
 
         let mut desired_regions = std::collections::BTreeSet::<String>::new();
         let mut saw_outer = false;
@@ -3026,6 +3038,55 @@ rules: []
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ Japan"))
             .expect("🛣️ Japan group should exist");
         assert_eq!(relay_japan.get("hidden"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn build_mihomo_yaml_preserves_existing_canonical_star_region_order() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "Manual"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "Auto"
+    type: select
+    proxies: ["DIRECT", "🌟 US", "Manual", "🌟 Singapore"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let auto = v
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("Auto"))
+            })
+            .expect("Auto group should exist");
+        let refs = auto
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("Auto proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["DIRECT", "🌟 US", "Manual", "🌟 Singapore"]);
     }
 
     #[test]
