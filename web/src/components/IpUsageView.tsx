@@ -272,6 +272,46 @@ function formatTimeRange(range: TimeRange): string {
 	return `${new Date(range.startMs).toLocaleString()} -> ${inclusiveEnd.toLocaleString()}`;
 }
 
+type HighlightBadgeTone = "info" | "warning";
+type HighlightBadgeTextToken =
+	| "foreground"
+	| "info-foreground"
+	| "warning-foreground";
+
+export const SUMMARY_HIGHLIGHT_BADGE_STYLE = {
+	info: {
+		className:
+			"border-info/28 bg-info/12 text-foreground dark:border-info/72 dark:bg-info/80 dark:text-info-foreground",
+		contrast: {
+			lightBackgroundAlpha: 0.12,
+			darkBackgroundAlpha: 0.8,
+			lightTextToken: "foreground",
+			darkTextToken: "info-foreground",
+		},
+	},
+	warning: {
+		className:
+			"border-warning/30 bg-warning/12 text-foreground dark:border-warning/70 dark:bg-warning/70 dark:text-warning-foreground",
+		contrast: {
+			lightBackgroundAlpha: 0.12,
+			darkBackgroundAlpha: 0.7,
+			lightTextToken: "foreground",
+			darkTextToken: "warning-foreground",
+		},
+	},
+} as const satisfies Record<
+	HighlightBadgeTone,
+	{
+		className: string;
+		contrast: {
+			lightBackgroundAlpha: number;
+			darkBackgroundAlpha: number;
+			lightTextToken: HighlightBadgeTextToken;
+			darkTextToken: HighlightBadgeTextToken;
+		};
+	}
+>;
+
 function isReportEmpty(report: SharedIpUsageReport): boolean {
 	return report.ips.length === 0 && report.timeline.length === 0;
 }
@@ -533,14 +573,12 @@ function HighlightSummary({
 	hasPinnedHighlight: boolean;
 	onClearPinned: () => void;
 }) {
-	const highlightBadgeClass = (tone: "info" | "warning") =>
+	const highlightBadgeClass = (tone: HighlightBadgeTone) =>
 		badgeClass(
 			tone,
 			"default",
 			"border shadow-sm",
-			tone === "info"
-				? "border-info/32 bg-info/24 text-info"
-				: "border-warning/45 bg-warning/40 text-warning-foreground",
+			SUMMARY_HIGHLIGHT_BADGE_STYLE[tone].className,
 		);
 
 	return (
