@@ -60,7 +60,7 @@ Errors:
   - 系统覆盖并注入动态相关的 `proxy-groups`：
     - `🛣️ JP/HK/TW`
     - `🛬 {base}` 与 `🔒 落地`
-  - 对非隐藏的可见业务组，若其 `proxies` 引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则渲染结果会把地区选项段规范化为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan}`，并保留模板中已有的 `🌟 Singapore` / `🌟 US`；`🔒/🤯/🛣️ {Region}` 不直接暴露为这些可见组选项。
+  - 对非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则渲染结果会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放选项，并把系统管理地区名折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan}`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 不直接暴露为这些用户组选项。
   - SS 接入点只生成 `{base}-ss` 与 `{base}-chain`；`{base}-chain` 的 `dialer-proxy` 固定指向 `🛣️ JP/HK/TW`。
   - 旧 `-JP/-HK/-KR/-TW` 代理引用与旧地区组名不做兼容映射；旧系统组定义会在渲染时剔除，最终输出会裁剪悬挂引用。
   - `proxy-providers` 可为空；为空时仍需输出可加载配置。
