@@ -4571,6 +4571,222 @@ rules: []
 }
 
 #[tokio::test]
+async fn mihomo_subscription_remaps_legacy_landing_refs_before_replaying_helper_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": r#"proxy-group_with_relay:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 🛬 Legacy-A
+    - 💎 高质量
+    - Legacy-A-ss
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "💎 高质量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - Legacy-A-ss
+      - 💎 高质量
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+      - 🌟 US
+      - 🛬 Legacy-A
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+
+    let refs = groups
+        .iter()
+        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("🚀 节点选择"))
+        .and_then(|group| group.get("proxies"))
+        .and_then(YamlValue::as_sequence)
+        .expect("🚀 节点选择 refs must exist")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        &refs[..6],
+        &[
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+        ]
+    );
+    assert!(
+        refs.iter().all(|name| *name != "🛬 Legacy-A"),
+        "legacy landing ref should be remapped before final render"
+    );
+
+    let landing_idx = refs
+        .iter()
+        .position(|name| name.starts_with("🛬 "))
+        .expect("expected remapped landing group in final output");
+    let quality_idx = refs
+        .iter()
+        .position(|name| *name == "💎 高质量")
+        .expect("expected 💎 高质量 in final output");
+    let ss_idx = refs
+        .iter()
+        .position(|name| name.ends_with("-ss"))
+        .expect("expected generated ss proxy in final output");
+    assert!(
+        landing_idx < quality_idx && quality_idx < ss_idx,
+        "relay helper order should keep landing before quality before generated proxies: {refs:?}"
+    );
+}
+
+#[tokio::test]
+async fn mihomo_subscription_remaps_landing_only_legacy_refs_before_helper_replay() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+    let token = fixtures.subscription_token;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": r#"proxy-group_with_relay:
+  proxies:
+    - 🌟 Japan
+    - 🌟 Korea
+    - 🌟 Singapore
+    - 🌟 HongKong
+    - 🌟 Taiwan
+    - 🌟 US
+    - 🛬 Legacy-A
+    - 💎 高质量
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 US"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "💎 高质量"
+    type: select
+    proxies: ["DIRECT"]
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - 💎 高质量
+      - 🛣️ JP/HK/TW
+      - 🌟 Singapore
+      - 🌟 US
+      - 🛬 Legacy-A
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sub_text = body_text(res).await;
+    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+
+    let refs = groups
+        .iter()
+        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("🚀 节点选择"))
+        .and_then(|group| group.get("proxies"))
+        .and_then(YamlValue::as_sequence)
+        .expect("🚀 节点选择 refs must exist")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        &refs[..6],
+        &[
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+        ]
+    );
+    assert!(
+        refs.iter().all(|name| *name != "🛬 Legacy-A"),
+        "landing-only legacy ref should be remapped before final render"
+    );
+    assert!(
+        refs.get(6).is_some_and(|name| name.starts_with("🛬 "))
+            && refs.get(7) == Some(&"💎 高质量"),
+        "relay helper order should keep the remapped landing entry before quality: {refs:?}"
+    );
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_put_rejects_invalid_yaml_roots() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
