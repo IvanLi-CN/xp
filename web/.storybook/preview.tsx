@@ -28,6 +28,7 @@ import { NodesPage } from "../src/views/NodesPage";
 import { QuotaPolicyPage } from "../src/views/QuotaPolicyPage";
 import { RealityDomainsPage } from "../src/views/RealityDomainsPage";
 import { ServiceConfigPage } from "../src/views/ServiceConfigPage";
+import { ToolsPage } from "../src/views/ToolsPage";
 import { UserDetailsPage } from "../src/views/UserDetailsPage";
 import { UserNewPage } from "../src/views/UserNewPage";
 import { UsersPage } from "../src/views/UsersPage";
@@ -216,6 +217,11 @@ const preview: Preview = {
 				path: "/service-config",
 				component: ServiceConfigPage,
 			});
+			const toolsRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/tools",
+				component: ToolsPage,
+			});
 
 			const realityDomainsRoute = createRoute({
 				getParentRoute: () => appRoute,
@@ -235,6 +241,7 @@ const preview: Preview = {
 				userDetailsRoute,
 				quotaPolicyRoute,
 				serviceConfigRoute,
+				toolsRoute,
 				realityDomainsRoute,
 			]);
 

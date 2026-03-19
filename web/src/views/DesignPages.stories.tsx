@@ -281,6 +281,7 @@ export const Users: Story = pageStory({ path: "/users" });
 export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });
 export const ServiceConfig: Story = pageStory({ path: "/service-config" });
+export const Tools: Story = pageStory({ path: "/tools" });
 export const ServiceConfigError: Story = pageStory({
 	path: "/service-config",
 	failAdminConfig: true,

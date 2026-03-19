@@ -44,6 +44,7 @@ use crate::{
     },
     internal_auth,
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
+    mihomo_redact,
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -550,6 +551,27 @@ struct AdminUserMihomoProfileResponse {
     extra_proxy_providers_yaml: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AdminMihomoRedactSourceKind {
+    Text,
+    Url,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdminMihomoRedactRequest {
+    source_kind: AdminMihomoRedactSourceKind,
+    source: String,
+    level: mihomo_redact::RedactionLevel,
+    source_format: mihomo_redact::SourceFormat,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminMihomoRedactResponse {
+    redacted_text: String,
+}
+
 impl From<crate::state::UserMihomoProfile> for AdminUserMihomoProfileResponse {
     fn from(profile: crate::state::UserMihomoProfile) -> Self {
         Self {
@@ -712,6 +734,7 @@ pub fn build_router(
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
+        .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
@@ -3016,6 +3039,39 @@ async fn admin_get_config(
         admin_token_present,
         admin_token_masked,
     }))
+}
+
+fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
+    match err.kind {
+        mihomo_redact::RedactErrorKind::InvalidInput => ApiError::invalid_request(err.message),
+        mihomo_redact::RedactErrorKind::Network => {
+            ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, err.message)
+        }
+    }
+}
+
+async fn admin_redact_mihomo_source(
+    ApiJson(req): ApiJson<AdminMihomoRedactRequest>,
+) -> Result<Json<AdminMihomoRedactResponse>, ApiError> {
+    if req.source.trim().is_empty() {
+        return Err(ApiError::invalid_request("source is empty"));
+    }
+
+    let raw = match req.source_kind {
+        AdminMihomoRedactSourceKind::Text => req.source,
+        AdminMihomoRedactSourceKind::Url => mihomo_redact::load_text_from_url(
+            &req.source,
+            15,
+            mihomo_redact::UrlLoadPolicy::PublicOnly,
+        )
+        .await
+        .map_err(map_mihomo_redact_error)?,
+    };
+
+    let redacted_text = mihomo_redact::redact_loaded_text(&raw, req.source_format, req.level)
+        .map_err(map_mihomo_redact_error)?;
+
+    Ok(Json(AdminMihomoRedactResponse { redacted_text }))
 }
 
 async fn admin_create_endpoint(

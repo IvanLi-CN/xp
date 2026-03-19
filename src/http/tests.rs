@@ -431,6 +431,15 @@ fn req_authed(method: &str, uri: &str) -> Request<Body> {
         .unwrap()
 }
 
+fn req_json(method: &str, uri: &str, value: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&value).unwrap()))
+        .unwrap()
+}
+
 fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -1866,6 +1875,116 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["admin_token_present"], true);
     assert_eq!(json["admin_token_masked"], "********");
     assert_ne!(json["admin_token_masked"], "testtoken");
+}
+
+#[tokio::test]
+async fn admin_mihomo_redact_requires_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_json(
+            "POST",
+            "/api/admin/tools/mihomo/redact",
+            json!({
+                "source_kind": "text",
+                "source": "vless://demo@example.com:443",
+                "level": "credentials",
+                "source_format": "raw",
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "unauthorized");
+}
+
+#[tokio::test]
+async fn admin_mihomo_redact_text_mode_supports_base64_auto_decode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let raw = "vless://12345678-1234-1234-1234-123456789abc@example.com:443?pbk=public_key_value&sid=0123456789abcdef#node\n";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/tools/mihomo/redact",
+            json!({
+                "source_kind": "text",
+                "source": encoded,
+                "level": "credentials",
+                "source_format": "auto",
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let redacted = json["redacted_text"].as_str().unwrap();
+    assert!(redacted.contains("example.com:443"));
+    assert!(!redacted.contains("12345678-1234-1234-1234-123456789abc"));
+    assert!(!redacted.contains("public_key_value"));
+    assert!(!redacted.contains("0123456789abcdef"));
+}
+
+#[tokio::test]
+async fn admin_mihomo_redact_text_mode_maps_address_level_for_yaml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/tools/mihomo/redact",
+            json!({
+                "source_kind": "text",
+                "source": "server: edge.example.com\npassword: super-secret\n",
+                "level": "credentials_and_address",
+                "source_format": "yaml",
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let redacted = json["redacted_text"].as_str().unwrap();
+    assert!(!redacted.contains("edge.example.com"));
+    assert!(!redacted.contains("super-secret"));
+}
+
+#[tokio::test]
+async fn admin_mihomo_redact_rejects_loopback_url_targets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/tools/mihomo/redact",
+            json!({
+                "source_kind": "url",
+                "source": "http://127.0.0.1:18080/raw",
+                "level": "credentials",
+                "source_format": "auto",
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("public ip")
+    );
 }
 
 #[tokio::test]
