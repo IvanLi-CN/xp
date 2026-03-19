@@ -89,11 +89,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）               | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                            |
-| -------------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ---------------------------------------- |
-| Mihomo redact admin API    | HTTP API     | internal      | New            | ./contracts/http-apis.md | backend         | web/admin           | admin-only；URL 代拉取含 SSRF guard      |
-| Shared Mihomo redact core  | Rust module  | internal      | New            | ./contracts/http-apis.md | backend         | cli/http            | CLI 与 HTTP 共用逻辑                     |
-| `/tools` page              | Web route    | admin UI      | New            | ./contracts/http-apis.md | web             | admin               | v1 单页，先只承载 Mihomo redact          |
+| 接口（Name）              | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes）                       |
+| ------------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------- | ----------------------------------- |
+| Mihomo redact admin API   | HTTP API     | internal      | New            | ./contracts/http-apis.md | backend         | web/admin           | admin-only；URL 代拉取含 SSRF guard |
+| Shared Mihomo redact core | Rust module  | internal      | New            | ./contracts/http-apis.md | backend         | cli/http            | CLI 与 HTTP 共用逻辑                |
+| `/tools` page             | Web route    | admin UI      | New            | ./contracts/http-apis.md | web             | admin               | v1 单页，先只承载 Mihomo redact     |
 
 ### 契约文档（按 Kind 拆分）
 
