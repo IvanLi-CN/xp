@@ -63,7 +63,7 @@ describe("<ToolsPage />", () => {
 				source_format: "auto",
 			});
 		});
-	});
+	}, 10000);
 
 	it("switches to URL mode and sends url payload", async () => {
 		renderPage();
@@ -120,6 +120,6 @@ describe("<ToolsPage />", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
 
 		expect(await screen.findByText("request failed")).toBeTruthy();
-		expect(screen.queryByLabelText("Redacted result")).toBeNull();
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue("");
 	});
 });

@@ -9,14 +9,15 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import { MihomoSplitEditor } from "../components/MihomoSplitEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useUiPrefs } from "../components/UiPrefs";
+import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
 import {
 	inputClass as inputControlClass,
 	selectClass as selectControlClass,
-	textareaClass,
 } from "../components/ui-helpers";
 import { Input } from "../components/ui/input";
 import {
@@ -26,7 +27,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
-import { Textarea } from "../components/ui/textarea";
 
 const SOURCE_KIND_OPTIONS: Array<{
 	value: AdminMihomoRedactSourceKind;
@@ -134,126 +134,156 @@ export function ToolsPage() {
 				description="Safe admin-side helpers for one-off diagnostics and shareable outputs."
 			/>
 
-			<div className="grid gap-6 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
-				<section className="xp-card">
-					<div className="xp-card-body space-y-4">
-						<div>
-							<h2 className="text-base font-semibold">Mihomo redact</h2>
-							<p className="text-sm text-muted-foreground">
-								Redact Mihomo subscriptions or configs without mutating the
-								original source.
-							</p>
-						</div>
+			<section className="xp-card">
+				<div className="xp-card-body space-y-5">
+					<div>
+						<h2 className="text-base font-semibold">Mihomo redact</h2>
+						<p className="text-sm text-muted-foreground">
+							Redact Mihomo subscriptions or configs without mutating the
+							original source.
+						</p>
+					</div>
 
-						<form className="space-y-4" onSubmit={handleSubmit}>
-							<div className="grid gap-4 md:grid-cols-3">
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">Source kind</span>
-									<Select
-										value={sourceKind}
-										onValueChange={(value) => {
-											setSourceKind(value as AdminMihomoRedactSourceKind);
-											setError(null);
-										}}
+					<form className="space-y-5" onSubmit={handleSubmit}>
+						<div className="grid gap-4 md:grid-cols-3">
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Source kind</span>
+								<Select
+									value={sourceKind}
+									onValueChange={(value) => {
+										setSourceKind(value as AdminMihomoRedactSourceKind);
+										setError(null);
+									}}
+								>
+									<SelectTrigger
+										aria-label="Source kind"
+										className={selectClassName}
 									>
-										<SelectTrigger
-											aria-label="Source kind"
-											className={selectClassName}
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{SOURCE_KIND_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">Source format</span>
-									<Select
-										value={sourceFormat}
-										onValueChange={(value) =>
-											setSourceFormat(value as AdminMihomoSourceFormat)
-										}
-									>
-										<SelectTrigger
-											aria-label="Source format"
-											className={selectClassName}
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{SOURCE_FORMAT_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">Redaction level</span>
-									<Select
-										value={level}
-										onValueChange={(value) =>
-											setLevel(value as AdminMihomoRedactionLevel)
-										}
-									>
-										<SelectTrigger
-											aria-label="Redaction level"
-											className={selectClassName}
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{REDACTION_LEVEL_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{SOURCE_KIND_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 
 							<div className="xp-field-stack gap-2">
-								<label className="text-sm font-medium" htmlFor="mihomo-source">
-									{sourceLabel}
-								</label>
-								{sourceKind === "url" ? (
-									<Input
-										id="mihomo-source"
-										className={inputClassName}
-										value={source}
-										placeholder={sourcePlaceholder}
-										onChange={(event) => setSource(event.target.value)}
-									/>
-								) : (
-									<Textarea
-										id="mihomo-source"
-										className={textareaClass(
-											"min-h-64 font-mono text-sm leading-6",
-										)}
-										value={source}
-										placeholder={sourcePlaceholder}
-										spellCheck={false}
-										onChange={(event) => setSource(event.target.value)}
-									/>
-								)}
-								<p className="text-xs text-muted-foreground">{sourceHint}</p>
+								<span className="text-sm font-medium">Source format</span>
+								<Select
+									value={sourceFormat}
+									onValueChange={(value) =>
+										setSourceFormat(value as AdminMihomoSourceFormat)
+									}
+								>
+									<SelectTrigger
+										aria-label="Source format"
+										className={selectClassName}
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{SOURCE_FORMAT_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 
-							{error ? (
-								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-									{error}
-								</div>
-							) : null}
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Redaction level</span>
+								<Select
+									value={level}
+									onValueChange={(value) =>
+										setLevel(value as AdminMihomoRedactionLevel)
+									}
+								>
+									<SelectTrigger
+										aria-label="Redaction level"
+										className={selectClassName}
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{REDACTION_LEVEL_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
 
+						{error ? (
+							<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+								{error}
+							</div>
+						) : null}
+
+						{sourceKind === "url" ? (
+							<div className="grid gap-5 xl:grid-cols-2">
+								<div className="space-y-3">
+									<div className="space-y-1">
+										<h3 className="text-sm font-semibold">{sourceLabel}</h3>
+										<p className="text-xs text-muted-foreground">
+											{sourceHint}
+										</p>
+									</div>
+									<div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+										<Input
+											id="mihomo-source"
+											aria-label={sourceLabel}
+											className={inputClassName}
+											value={source}
+											placeholder={sourcePlaceholder}
+											onChange={(event) => setSource(event.target.value)}
+										/>
+									</div>
+								</div>
+
+								<div className="space-y-3">
+									<div className="space-y-1">
+										<h3 className="text-sm font-semibold">Preview</h3>
+										<p className="text-xs text-muted-foreground">
+											Read-only output preserves line breaks so you can verify
+											the redaction before sharing it.
+										</p>
+									</div>
+
+									<YamlCodeEditor
+										label="Redacted result"
+										value={redactedText}
+										onChange={() => {}}
+										placeholder="Run the tool to render a sanitized preview here."
+										minRows={18}
+										readOnly
+										hideLabel
+										helperText="Read-only preview · line numbers · fold · Ctrl/Cmd+F"
+									/>
+								</div>
+							</div>
+						) : (
+							<MihomoSplitEditor
+								originalLabel={sourceLabel}
+								originalDescription={sourceHint}
+								originalValue={source}
+								onOriginalChange={setSource}
+								originalPlaceholder={sourcePlaceholder}
+								modifiedLabel="Redacted result"
+								modifiedDescription="Read-only output preserves line breaks so you can verify the redaction before sharing it."
+								modifiedValue={redactedText}
+								modifiedPlaceholder="Run the tool to render a sanitized preview here."
+								minRows={18}
+							/>
+						)}
+
+						<div className="flex flex-wrap items-end justify-between gap-3">
 							<div className="flex flex-wrap items-center gap-3">
 								<Button
 									type="submit"
@@ -267,20 +297,6 @@ export function ToolsPage() {
 									source.
 								</span>
 							</div>
-						</form>
-					</div>
-				</section>
-
-				<section className="xp-card">
-					<div className="xp-card-body space-y-4">
-						<div className="flex flex-wrap items-center justify-between gap-3">
-							<div>
-								<h2 className="text-base font-semibold">Preview</h2>
-								<p className="text-sm text-muted-foreground">
-									Read-only output preserves line breaks so you can verify the
-									redaction before sharing it.
-								</p>
-							</div>
 							{redactedText ? (
 								<CopyButton
 									text={redactedText}
@@ -289,25 +305,9 @@ export function ToolsPage() {
 								/>
 							) : null}
 						</div>
-
-						{redactedText ? (
-							<Textarea
-								readOnly
-								aria-label="Redacted result"
-								className={textareaClass(
-									"min-h-[28rem] font-mono text-sm leading-6",
-								)}
-								value={redactedText}
-								spellCheck={false}
-							/>
-						) : (
-							<div className="rounded-2xl border border-dashed border-border/70 bg-muted/30 px-4 py-8 text-sm text-muted-foreground">
-								Run the tool to render a sanitized preview here.
-							</div>
-						)}
-					</div>
-				</section>
-			</div>
+					</form>
+				</div>
+			</section>
 		</div>
 	);
 }
