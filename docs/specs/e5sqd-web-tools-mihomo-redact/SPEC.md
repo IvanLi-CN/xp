@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 部分完成（3/4）
+- Status: 已完成
 - Created: 2026-03-19
 - Last: 2026-03-19
 
@@ -139,7 +139,7 @@
 - [x] M1: 建立 spec / contract / 索引
 - [x] M2: 抽出共享 Mihomo redact 核心并接入 admin API + SSRF guard
 - [x] M3: 交付 `/tools` 页面、前端 API、测试与 Storybook
-- [ ] M4: 快车道 PR 收敛与 spec sync
+- [x] M4: 快车道 PR 收敛与 spec sync
 
 ## 方案概述（Approach, high-level）
 
@@ -158,3 +158,4 @@
 
 - 2026-03-19: 创建规格，冻结 `/tools` 入口、Mihomo redact admin API、URL 安全边界与 v1 交互范围。
 - 2026-03-19: 完成共享脱敏模块抽取、admin API、`/tools` 页面、前端测试与 Storybook 回归；补上重定向链 SSRF 防护。
+- 2026-03-19: 同步最新 `origin/main` 到 PR 分支，补齐 `type:minor` 标签与 spec 索引状态，收口到 PR #114 的 merge-ready 目标。
