@@ -154,6 +154,21 @@
 - 开放问题：None.
 - 假设：v1 的运维场景以“单次执行 + 复制结果”为主，不需要下载或历史记录。
 
+## Visual Evidence (PR)
+
+### Tools page preview layout
+
+- source_type: storybook_canvas
+- target_program: mock-only
+- capture_scope: element
+- sensitive_exclusion: N/A
+- submission_gate: pending-owner-approval
+- story_id_or_title: Pages/ToolsPage/WithPreview
+- state: preview-success
+- evidence_note: proves the text-mode split editor renders a successful redaction preview and places `Copy result` in the tool card footer at the bottom-right after explicit execution.
+- image:
+![Tools page preview layout](./assets/tools-page-with-preview-storybook-canvas.png)
+
 ## 变更记录（Change log）
 
 - 2026-03-19: 创建规格，冻结 `/tools` 入口、Mihomo redact admin API、URL 安全边界与 v1 交互范围。
