@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import {
 	type AdminMihomoRedactSourceKind,
@@ -80,10 +80,13 @@ export function ToolsPage() {
 	const [redactedText, setRedactedText] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const requestVersionRef = useRef(0);
 
 	function invalidatePreview() {
+		requestVersionRef.current += 1;
 		setRedactedText("");
 		setError(null);
+		setIsSubmitting(false);
 	}
 
 	if (adminToken.length === 0) {
@@ -114,6 +117,8 @@ export function ToolsPage() {
 			return;
 		}
 
+		const requestVersion = requestVersionRef.current + 1;
+		requestVersionRef.current = requestVersion;
 		setIsSubmitting(true);
 		setError(null);
 		try {
@@ -123,12 +128,20 @@ export function ToolsPage() {
 				level,
 				source_format: sourceFormat,
 			});
+			if (requestVersionRef.current !== requestVersion) {
+				return;
+			}
 			setRedactedText(response.redacted_text);
 		} catch (nextError) {
+			if (requestVersionRef.current !== requestVersion) {
+				return;
+			}
 			setRedactedText("");
 			setError(formatErrorMessage(nextError));
 		} finally {
-			setIsSubmitting(false);
+			if (requestVersionRef.current === requestVersion) {
+				setIsSubmitting(false);
+			}
 		}
 	}
 

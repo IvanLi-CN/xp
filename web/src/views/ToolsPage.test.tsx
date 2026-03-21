@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	act,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { redactAdminMihomo } from "../api/adminTools";
@@ -146,6 +152,41 @@ describe("<ToolsPage />", () => {
 		fireEvent.click(
 			await screen.findByRole("option", { name: "credentials + address" }),
 		);
+
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue("");
+		expect(
+			screen.queryByRole("button", { name: "Copy redacted result" }),
+		).toBeNull();
+	});
+
+	it("ignores stale responses after the form changes", async () => {
+		let resolveRequest:
+			| ((value: { redacted_text: string }) => void)
+			| undefined;
+		vi.mocked(redactAdminMihomo).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveRequest = resolve;
+				}),
+		);
+
+		renderPage();
+
+		fireEvent.change(await screen.findByLabelText("Source text"), {
+			target: { value: "server: edge.example.com\npassword: super-secret\n" },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
+
+		fireEvent.change(await screen.findByLabelText("Source text"), {
+			target: { value: "server: next.example.com\npassword: next-secret\n" },
+		});
+
+		await act(async () => {
+			resolveRequest?.({
+				redacted_text: "server: e***.example.com\npassword: supe***cret\n",
+			});
+			await Promise.resolve();
+		});
 
 		expect(await screen.findByLabelText("Redacted result")).toHaveValue("");
 		expect(
