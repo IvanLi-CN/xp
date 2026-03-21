@@ -42,6 +42,8 @@ pub enum UrlLoadPolicy {
     PublicOnly,
 }
 
+const MAX_REMOTE_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedactErrorKind {
     InvalidInput,
@@ -304,10 +306,35 @@ async fn fetch_url_source(
             )));
         }
 
-        return response
-            .text()
+        if response
+            .content_length()
+            .is_some_and(|len| len > MAX_REMOTE_SOURCE_BYTES as u64)
+        {
+            return Err(RedactError::invalid_input(format!(
+                "invalid_input: source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
+            )));
+        }
+
+        let mut response = response;
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| RedactError::network(format!("network_error: read source body: {e}")));
+            .map_err(|e| RedactError::network(format!("network_error: read source body: {e}")))?
+        {
+            if body.len() + chunk.len() > MAX_REMOTE_SOURCE_BYTES {
+                return Err(RedactError::invalid_input(format!(
+                    "invalid_input: source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+
+        return String::from_utf8(body).map_err(|e| {
+            RedactError::invalid_input(format!(
+                "invalid_input: source body is not valid utf-8: {e}"
+            ))
+        });
     }
 
     Err(RedactError::network(
@@ -1572,6 +1599,31 @@ mod tests {
 
         assert_eq!(err.kind, RedactErrorKind::Network);
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn url_loader_rejects_remote_bodies_that_exceed_limit() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/large"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![
+                b'a';
+                MAX_REMOTE_SOURCE_BYTES
+                    + 1
+            ]))
+            .mount(&server)
+            .await;
+
+        let err = load_text_from_url(
+            &format!("{}/large", server.uri()),
+            5,
+            UrlLoadPolicy::AllowAny,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, RedactErrorKind::InvalidInput);
+        assert!(err.message.contains("exceeds"));
     }
 
     #[tokio::test]
