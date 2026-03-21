@@ -101,21 +101,17 @@ pub async fn load_text_from_url(
         ));
     }
 
-    if matches!(policy, UrlLoadPolicy::PublicOnly) {
-        validate_public_url_target(&url).await?;
-    }
-
     fetch_url_source(url, timeout_secs.max(1), policy).await
 }
 
-async fn validate_public_url_target(url: &Url) -> Result<(), RedactError> {
+async fn resolve_public_url_target(url: &Url) -> Result<Vec<SocketAddr>, RedactError> {
     let url = url.clone();
-    tokio::task::spawn_blocking(move || validate_public_url_target_blocking(&url))
+    tokio::task::spawn_blocking(move || resolve_public_url_target_blocking(&url))
         .await
         .map_err(|e| RedactError::network(format!("network_error: resolve source host: {e}")))?
 }
 
-fn validate_public_url_target_blocking(url: &Url) -> Result<(), RedactError> {
+fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, RedactError> {
     let host = url
         .host_str()
         .ok_or_else(|| RedactError::invalid_input("invalid_input: source url host is missing"))?;
@@ -140,7 +136,42 @@ fn validate_public_url_target_blocking(url: &Url) -> Result<(), RedactError> {
         ));
     }
 
-    Ok(())
+    Ok(addrs)
+}
+
+fn build_http_client(timeout_secs: u64) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .redirect(reqwest::redirect::Policy::none())
+}
+
+fn build_pinned_http_client(
+    host: &str,
+    timeout_secs: u64,
+    addrs: &[SocketAddr],
+) -> Result<reqwest::Client, RedactError> {
+    build_http_client(timeout_secs)
+        .resolve_to_addrs(host, addrs)
+        .build()
+        .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
+}
+
+async fn build_http_client_for_url(
+    url: &Url,
+    timeout_secs: u64,
+    policy: UrlLoadPolicy,
+) -> Result<reqwest::Client, RedactError> {
+    if matches!(policy, UrlLoadPolicy::PublicOnly) {
+        let host = url.host_str().ok_or_else(|| {
+            RedactError::invalid_input("invalid_input: source url host is missing")
+        })?;
+        let addrs = resolve_public_url_target(url).await?;
+        return build_pinned_http_client(host, timeout_secs, &addrs);
+    }
+
+    build_http_client(timeout_secs)
+        .build()
+        .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
 }
 
 fn is_public_ip(ip: IpAddr) -> bool {
@@ -202,14 +233,9 @@ async fn fetch_url_source(
     timeout_secs: u64,
     policy: UrlLoadPolicy,
 ) -> Result<String, RedactError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))?;
-
     let mut current = source;
     for _ in 0..10 {
+        let client = build_http_client_for_url(&current, timeout_secs, policy).await?;
         let response = client
             .get(current.clone())
             .send()
@@ -239,10 +265,6 @@ async fn fetch_url_source(
                 return Err(RedactError::invalid_input(
                     "invalid_input: source url must use http or https",
                 ));
-            }
-
-            if matches!(policy, UrlLoadPolicy::PublicOnly) {
-                validate_public_url_target(&current).await?;
             }
 
             continue;
@@ -1482,6 +1504,32 @@ mod tests {
 
         assert_eq!(err.kind, RedactErrorKind::InvalidInput);
         assert!(err.message.contains("public ip"));
+    }
+
+    #[tokio::test]
+    async fn pinned_http_client_uses_validated_socket_addresses() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/raw"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok\n"))
+            .mount(&server)
+            .await;
+
+        let server_url = Url::parse(&server.uri()).unwrap();
+        let port = server_url.port().unwrap();
+        let addrs = [SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)];
+        let client = build_pinned_http_client("example.test", 5, &addrs).unwrap();
+
+        let text = client
+            .get(format!("http://example.test:{port}/raw"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        assert_eq!(text, "ok\n");
     }
 
     #[test]
