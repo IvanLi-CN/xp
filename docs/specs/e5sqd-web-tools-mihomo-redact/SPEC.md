@@ -167,7 +167,7 @@
 - state: preview-success
 - evidence_note: proves the text-mode split editor renders a successful redaction preview and places `Copy result` in the tool card footer at the bottom-right after explicit execution.
 - image:
-![Tools page preview layout](./assets/tools-page-with-preview-storybook-canvas.png)
+  ![Tools page preview layout](./assets/tools-page-with-preview-storybook-canvas.png)
 
 ## 变更记录（Change log）
 
