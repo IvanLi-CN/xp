@@ -42,6 +42,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 							to: "/service-config",
 							icon: "tabler:settings",
 						},
+						{
+							label: "Tools",
+							to: "/tools",
+							icon: "tabler:tool",
+						},
 					],
 				},
 			]}

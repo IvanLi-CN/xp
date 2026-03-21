@@ -1,7 +1,8 @@
 import { yaml } from "@codemirror/lang-yaml";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import CodeMirror from "@uiw/react-codemirror";
-import { useId, useMemo } from "react";
+import type { EditorView } from "@uiw/react-codemirror";
+import { type ReactNode, useId, useMemo } from "react";
 
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
@@ -13,6 +14,10 @@ type YamlCodeEditorProps = {
 	onChange: (value: string) => void;
 	placeholder?: string;
 	minRows?: number;
+	helperText?: ReactNode | null;
+	readOnly?: boolean;
+	hideLabel?: boolean;
+	onCreateEditor?: (view: EditorView) => void;
 };
 
 const CODEMIRROR_BASIC_SETUP = {
@@ -40,6 +45,10 @@ export function YamlCodeEditor({
 	onChange,
 	placeholder,
 	minRows = 8,
+	helperText = "YAML syntax highlight · line numbers · fold · Ctrl/Cmd+F",
+	readOnly = false,
+	hideLabel = false,
+	onCreateEditor,
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
@@ -51,12 +60,19 @@ export function YamlCodeEditor({
 	if (IS_TEST_MODE) {
 		return (
 			<div className="space-y-2">
-				<span className="text-sm font-medium text-foreground">{label}</span>
+				<span
+					className={
+						hideLabel ? "sr-only" : "text-sm font-medium text-foreground"
+					}
+				>
+					{label}
+				</span>
 				<Textarea
 					aria-label={label}
 					className={textareaClass("font-mono")}
 					rows={minRows}
 					value={value}
+					readOnly={readOnly}
 					onChange={(event) => onChange(event.target.value)}
 					placeholder={placeholder}
 				/>
@@ -66,7 +82,12 @@ export function YamlCodeEditor({
 
 	return (
 		<div className="space-y-2">
-			<span className="text-sm font-medium text-foreground" id={labelId}>
+			<span
+				className={
+					hideLabel ? "sr-only" : "text-sm font-medium text-foreground"
+				}
+				id={labelId}
+			>
 				{label}
 			</span>
 			<div className="overflow-hidden rounded-2xl border border-border bg-background">
@@ -77,14 +98,17 @@ export function YamlCodeEditor({
 					theme={editorTheme}
 					extensions={extensions}
 					basicSetup={CODEMIRROR_BASIC_SETUP}
+					readOnly={readOnly}
+					editable={!readOnly}
 					onChange={(nextValue) => onChange(nextValue)}
+					onCreateEditor={(view) => onCreateEditor?.(view)}
 					aria-labelledby={labelId}
 					className="text-sm font-mono"
 				/>
 			</div>
-			<span className="text-xs opacity-70">
-				YAML syntax highlight · line numbers · fold · Ctrl/Cmd+F
-			</span>
+			{helperText ? (
+				<span className="text-xs opacity-70">{helperText}</span>
+			) : null}
 		</div>
 	);
 }

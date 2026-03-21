@@ -253,6 +253,45 @@ describe("storybook api mock", () => {
 		expect(text).toContain(token);
 	});
 
+	it("supports mihomo redact preview endpoint", async () => {
+		const mock = createMockApi();
+		const res = await mock.handle(
+			jsonRequest("/api/admin/tools/mihomo/redact", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					source_kind: "text",
+					source: "server: edge.example.com\npassword: super-secret\n",
+					level: "credentials_and_address",
+					source_format: "yaml",
+				}),
+			}),
+		);
+		expect(res.ok).toBe(true);
+		const payload = (await res.json()) as { redacted_text: string };
+		expect(payload.redacted_text).toContain("e***.example.com");
+		expect(payload.redacted_text).toContain("supe***cret");
+	});
+
+	it("rejects private mihomo redact URLs in storybook mock", async () => {
+		const mock = createMockApi();
+		const res = await mock.handle(
+			jsonRequest("/api/admin/tools/mihomo/redact", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					source_kind: "url",
+					source: "http://127.0.0.1:8080/raw",
+					level: "credentials",
+					source_format: "auto",
+				}),
+			}),
+		);
+		expect(res.status).toBe(400);
+		const payload = (await res.json()) as { error: { code: string } };
+		expect(payload.error.code).toBe("invalid_request");
+	});
+
 	it("supports user node weights", async () => {
 		const mock = createMockApi();
 

@@ -22,6 +22,7 @@ import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { RealityDomainsPage } from "./views/RealityDomainsPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
+import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
 import { UserNewPage } from "./views/UserNewPage";
 import { UsersPage } from "./views/UsersPage";
@@ -124,6 +125,12 @@ const serviceConfigRoute = createRoute({
 	component: ServiceConfigPage,
 });
 
+const toolsRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/tools",
+	component: ToolsPage,
+});
+
 const realityDomainsRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/reality-domains",
@@ -144,6 +151,7 @@ const appRouteTree = appRoute.addChildren([
 	userDetailsRoute,
 	quotaPolicyRoute,
 	serviceConfigRoute,
+	toolsRoute,
 	realityDomainsRoute,
 ]);
 

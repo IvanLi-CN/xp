@@ -21,6 +21,10 @@ import type { AdminQuotaPolicyGlobalWeightRow } from "../../src/api/adminQuotaPo
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
+import type {
+	AdminMihomoRedactRequest,
+	AdminMihomoRedactResponse,
+} from "../../src/api/adminTools";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
@@ -804,6 +808,21 @@ function ensureUserAccessStore(
 	return items;
 }
 
+function mockRedactOutput(payload: AdminMihomoRedactRequest): string {
+	let source = payload.source;
+	if (payload.source_kind === "url") {
+		source = `url: ${payload.source}`;
+	}
+	return source
+		.replaceAll("edge.example.com", "e***.example.com")
+		.replaceAll("super-secret", "supe***cret")
+		.replaceAll(
+			"12345678-1234-1234-1234-123456789abc",
+			"1234************************9abc",
+		)
+		.replaceAll("public_key_value", "publ****alue");
+}
+
 async function handleRequest(
 	state: MockState,
 	req: Request,
@@ -829,6 +848,30 @@ async function handleRequest(
 			return errorResponse(502, "upstream_error", "mock version check failure");
 		}
 		return jsonResponse(clone(state.versionCheck));
+	}
+
+	if (path === "/api/admin/tools/mihomo/redact" && method === "POST") {
+		const payload = await readJson<AdminMihomoRedactRequest>(req);
+		if (!payload || payload.source.trim().length === 0) {
+			return errorResponse(400, "invalid_request", "source is empty");
+		}
+		if (
+			payload.source_kind === "url" &&
+			/^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(
+				payload.source,
+			)
+		) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"source url must resolve to public ip addresses",
+			);
+		}
+
+		const response: AdminMihomoRedactResponse = {
+			redacted_text: mockRedactOutput(payload),
+		};
+		return jsonResponse(response);
 	}
 
 	if (path === "/api/admin/config" && method === "GET") {
