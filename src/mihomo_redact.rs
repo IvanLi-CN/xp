@@ -101,14 +101,32 @@ pub async fn load_text_from_url(
         ));
     }
 
-    fetch_url_source(url, timeout_secs.max(1), policy).await
+    fetch_url_source(url, Duration::from_secs(timeout_secs.max(1)), policy).await
 }
 
-async fn resolve_public_url_target(url: &Url) -> Result<Vec<SocketAddr>, RedactError> {
+fn request_timeout_error() -> RedactError {
+    RedactError::network("network_error: source fetch timed out")
+}
+
+fn remaining_timeout(deadline: tokio::time::Instant) -> Result<Duration, RedactError> {
+    deadline
+        .checked_duration_since(tokio::time::Instant::now())
+        .filter(|timeout| !timeout.is_zero())
+        .ok_or_else(request_timeout_error)
+}
+
+async fn resolve_public_url_target(
+    url: &Url,
+    timeout: Duration,
+) -> Result<Vec<SocketAddr>, RedactError> {
     let url = url.clone();
-    tokio::task::spawn_blocking(move || resolve_public_url_target_blocking(&url))
-        .await
-        .map_err(|e| RedactError::network(format!("network_error: resolve source host: {e}")))?
+    tokio::time::timeout(
+        timeout,
+        tokio::task::spawn_blocking(move || resolve_public_url_target_blocking(&url)),
+    )
+    .await
+    .map_err(|_| request_timeout_error())?
+    .map_err(|e| RedactError::network(format!("network_error: resolve source host: {e}")))?
 }
 
 fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, RedactError> {
@@ -143,18 +161,18 @@ fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, Reda
     Ok(addrs)
 }
 
-fn build_http_client(timeout_secs: u64) -> reqwest::ClientBuilder {
+fn build_http_client(timeout: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
 }
 
 fn build_pinned_http_client(
     host: &str,
-    timeout_secs: u64,
+    timeout: Duration,
     addrs: &[SocketAddr],
 ) -> Result<reqwest::Client, RedactError> {
-    build_http_client(timeout_secs)
+    build_http_client(timeout)
         .resolve_to_addrs(host, addrs)
         .build()
         .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
@@ -162,18 +180,18 @@ fn build_pinned_http_client(
 
 async fn build_http_client_for_url(
     url: &Url,
-    timeout_secs: u64,
+    timeout: Duration,
     policy: UrlLoadPolicy,
 ) -> Result<reqwest::Client, RedactError> {
     if matches!(policy, UrlLoadPolicy::PublicOnly) {
         let host = url.host_str().ok_or_else(|| {
             RedactError::invalid_input("invalid_input: source url host is missing")
         })?;
-        let addrs = resolve_public_url_target(url).await?;
-        return build_pinned_http_client(host, timeout_secs, &addrs);
+        let addrs = resolve_public_url_target(url, timeout).await?;
+        return build_pinned_http_client(host, timeout, &addrs);
     }
 
-    build_http_client(timeout_secs)
+    build_http_client(timeout)
         .build()
         .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
 }
@@ -238,12 +256,14 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
 
 async fn fetch_url_source(
     source: Url,
-    timeout_secs: u64,
+    timeout: Duration,
     policy: UrlLoadPolicy,
 ) -> Result<String, RedactError> {
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut current = source;
     for _ in 0..10 {
-        let client = build_http_client_for_url(&current, timeout_secs, policy).await?;
+        let client_timeout = remaining_timeout(deadline)?;
+        let client = build_http_client_for_url(&current, client_timeout, policy).await?;
         let response = client
             .get(current.clone())
             .send()
@@ -1515,6 +1535,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn url_loader_enforces_total_timeout_across_redirect_chain() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redirect-1"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .set_delay(Duration::from_millis(700))
+                    .insert_header("location", "/redirect-2"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/redirect-2"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .set_delay(Duration::from_millis(700))
+                    .insert_header("location", "/raw"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/raw"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok\n"))
+            .mount(&server)
+            .await;
+
+        let start = std::time::Instant::now();
+        let err = load_text_from_url(
+            &format!("{}/redirect-1", server.uri()),
+            1,
+            UrlLoadPolicy::AllowAny,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, RedactErrorKind::Network);
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
     async fn pinned_http_client_uses_validated_socket_addresses() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1526,7 +1586,8 @@ mod tests {
         let server_url = Url::parse(&server.uri()).unwrap();
         let port = server_url.port().unwrap();
         let addrs = [SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)];
-        let client = build_pinned_http_client("example.test", 5, &addrs).unwrap();
+        let client =
+            build_pinned_http_client("example.test", Duration::from_secs(5), &addrs).unwrap();
 
         let text = client
             .get(format!("http://example.test:{port}/raw"))
