@@ -125,10 +125,14 @@ fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, Reda
         .port_or_known_default()
         .ok_or_else(|| RedactError::invalid_input("invalid_input: source url port is invalid"))?;
     let host = host.to_string();
-    let addrs = (host.as_str(), port)
-        .to_socket_addrs()
-        .map(|iter| iter.collect::<Vec<SocketAddr>>())
-        .map_err(|e| RedactError::network(format!("network_error: resolve source host: {e}")))?;
+    let addrs = if let Ok(ip) = host.parse::<IpAddr>() {
+        vec![SocketAddr::new(ip, port)]
+    } else {
+        (host.as_str(), port)
+            .to_socket_addrs()
+            .map(|iter| iter.collect::<Vec<SocketAddr>>())
+            .map_err(|e| RedactError::network(format!("network_error: resolve source host: {e}")))?
+    };
 
     if addrs.is_empty() || addrs.iter().any(|addr| !is_public_ip(addr.ip())) {
         return Err(RedactError::invalid_input(
@@ -220,12 +224,16 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
 
     let segments = ip.segments();
     let is_documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+    let is_ietf_protocol_assignment = segments[0] == 0x2001 && segments[1] <= 0x01ff;
+    let is_global_unicast = (segments[0] & 0xe000) == 0x2000;
     !ip.is_loopback()
         && !ip.is_unspecified()
         && !ip.is_multicast()
         && !ip.is_unique_local()
         && !ip.is_unicast_link_local()
+        && is_global_unicast
         && !is_documentation
+        && !is_ietf_protocol_assignment
 }
 
 async fn fetch_url_source(
@@ -1530,6 +1538,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(text, "ok\n");
+    }
+
+    #[test]
+    fn public_ipv6_filter_accepts_global_unicast_and_rejects_special_ranges() {
+        assert!(is_public_ipv6("2606:4700:4700::1111".parse().unwrap()));
+        assert!(!is_public_ipv6("fec0::1".parse().unwrap()));
+        assert!(!is_public_ipv6("2001:db8::1".parse().unwrap()));
+        assert!(!is_public_ipv6("2001::1".parse().unwrap()));
     }
 
     #[test]

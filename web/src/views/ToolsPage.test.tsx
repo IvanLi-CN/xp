@@ -108,6 +108,51 @@ describe("<ToolsPage />", () => {
 		});
 	});
 
+	it("invalidates preview when source text changes after a successful run", async () => {
+		renderPage();
+
+		fireEvent.change(await screen.findByLabelText("Source text"), {
+			target: { value: "server: edge.example.com\npassword: super-secret\n" },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
+
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue(
+			"server: e***.example.com\npassword: supe***cret\n",
+		);
+
+		fireEvent.change(await screen.findByLabelText("Source text"), {
+			target: { value: "server: next.example.com\npassword: next-secret\n" },
+		});
+
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue("");
+		expect(
+			screen.queryByRole("button", { name: "Copy redacted result" }),
+		).toBeNull();
+	});
+
+	it("invalidates preview when redaction options change", async () => {
+		renderPage();
+
+		fireEvent.change(await screen.findByLabelText("Source text"), {
+			target: { value: "server: edge.example.com\npassword: super-secret\n" },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
+
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue(
+			"server: e***.example.com\npassword: supe***cret\n",
+		);
+
+		fireEvent.click(await screen.findByLabelText("Redaction level"));
+		fireEvent.click(
+			await screen.findByRole("option", { name: "credentials + address" }),
+		);
+
+		expect(await screen.findByLabelText("Redacted result")).toHaveValue("");
+		expect(
+			screen.queryByRole("button", { name: "Copy redacted result" }),
+		).toBeNull();
+	});
+
 	it("renders inline error state when execution fails", async () => {
 		vi.mocked(redactAdminMihomo).mockRejectedValueOnce(
 			new Error("request failed"),

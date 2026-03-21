@@ -81,6 +81,11 @@ export function ToolsPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
+	function invalidatePreview() {
+		setRedactedText("");
+		setError(null);
+	}
+
 	if (adminToken.length === 0) {
 		return (
 			<PageState
@@ -151,8 +156,8 @@ export function ToolsPage() {
 								<Select
 									value={sourceKind}
 									onValueChange={(value) => {
+										invalidatePreview();
 										setSourceKind(value as AdminMihomoRedactSourceKind);
-										setError(null);
 									}}
 								>
 									<SelectTrigger
@@ -175,9 +180,10 @@ export function ToolsPage() {
 								<span className="text-sm font-medium">Source format</span>
 								<Select
 									value={sourceFormat}
-									onValueChange={(value) =>
-										setSourceFormat(value as AdminMihomoSourceFormat)
-									}
+									onValueChange={(value) => {
+										invalidatePreview();
+										setSourceFormat(value as AdminMihomoSourceFormat);
+									}}
 								>
 									<SelectTrigger
 										aria-label="Source format"
@@ -199,9 +205,10 @@ export function ToolsPage() {
 								<span className="text-sm font-medium">Redaction level</span>
 								<Select
 									value={level}
-									onValueChange={(value) =>
-										setLevel(value as AdminMihomoRedactionLevel)
-									}
+									onValueChange={(value) => {
+										invalidatePreview();
+										setLevel(value as AdminMihomoRedactionLevel);
+									}}
 								>
 									<SelectTrigger
 										aria-label="Redaction level"
@@ -242,7 +249,10 @@ export function ToolsPage() {
 											className={inputClassName}
 											value={source}
 											placeholder={sourcePlaceholder}
-											onChange={(event) => setSource(event.target.value)}
+											onChange={(event) => {
+												invalidatePreview();
+												setSource(event.target.value);
+											}}
 										/>
 									</div>
 								</div>
@@ -273,7 +283,10 @@ export function ToolsPage() {
 								originalLabel={sourceLabel}
 								originalDescription={sourceHint}
 								originalValue={source}
-								onOriginalChange={setSource}
+								onOriginalChange={(value) => {
+									invalidatePreview();
+									setSource(value);
+								}}
 								originalPlaceholder={sourcePlaceholder}
 								modifiedLabel="Redacted result"
 								modifiedDescription="Read-only output preserves line breaks so you can verify the redaction before sharing it."
