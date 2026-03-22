@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-08
-- Last: 2026-03-12
+- Last: 2026-03-22
 
 ## 背景 / 问题陈述
 
@@ -88,6 +88,8 @@
 ### Edge cases / errors
 
 - `statsUserOnline` 未开启或 Xray 不支持 online IP stats：collector 标记 `online_stats_unavailable=true`，API 返回 warning，前端显示 explanation 空态。
+- 若 `GetStatsOnlineIpList` 返回 not found，且 online count 为 `0` 或该分钟根本不存在 online count stat：按“本分钟空样本”处理，不得误报为 `online_stats_unavailable`。
+- 若 `GetStatsOnlineIpList` 返回 not found，且 online count 为非零：仍视为 online stats 异常，collector 标记 `online_stats_unavailable=true` 并返回 warning。
 - 单 IP 在线查询失败时：地区/运营商字段允许为空，页面显示 `Unknown`；采集与图表继续工作。
 - Node 详情查询远端节点失败：直接返回错误，不静默回空结果。
 - User 详情查询远端节点失败：返回 `partial=true` 且列出 `unreachable_nodes`，可达节点数据仍正常展示。
@@ -231,6 +233,7 @@ None.
 - 2026-03-11: PR #110 跟进修正 IP usage 顶部高亮摘要 badge 的对比度与边界，让深色面板上的 pinned IP / Time 标签不再发虚，并在 review 后统一补正 light/dark 主题下的 IP badge 前景色与组件级样式回归测试。
 - 2026-03-12: 为 PR #110 补充 pinned IP + Time 高亮摘要的 Storybook 截图证据，并同步到规格证据区与 PR 正文。
 - 2026-03-12: 根据最新 review 修复顶部摘要 badge 的 light/dark 主题感知配色，并补上基于主题 token 的 AA 对比度回归测试，覆盖 pinned IP / Time 的前缀文案与数值文案，避免“看起来修了但仍然发虚”的回归。
+- 2026-03-22: 跟进修正 online stats 误报边界；当 `GetStatsOnlineIpList` 缺失且该分钟 online count 为 `0` 或未生成时，按空样本处理，仅在 online count 为非零或 stats 能力确实不可用时返回 warning。
 
 ## 参考（References）
 
