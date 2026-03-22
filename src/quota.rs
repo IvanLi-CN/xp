@@ -271,11 +271,10 @@ async fn run_quota_tick_at_with_geo(
                             warn!(membership_key = %snapshot.membership_key, online_count = count, "quota tick: xray online ip list missing while online count is non-zero");
                             break;
                         }
-                        Ok(None) => {
-                            online_stats_unavailable = true;
-                            warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
-                            break;
-                        }
+                        // Xray can omit the online stat entirely when the user currently has no
+                        // active sample. Treat this the same as a zero-count minute instead of
+                        // surfacing a misleading "stats unavailable" warning.
+                        Ok(None) => online_samples.push(empty_sample()),
                         Err(count_status) if count_status.code() == tonic::Code::Unimplemented => {
                             online_stats_unavailable = true;
                             warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray online stats are unavailable");
@@ -4616,7 +4615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_online_stats_marks_ip_usage_unavailable_even_without_traffic() {
+    async fn missing_online_stats_without_online_count_is_treated_as_empty_sample() {
         let state = Arc::new(Mutex::new(RecordingState::default()));
         let (addr, shutdown) = start_server(state.clone()).await;
 
@@ -4668,7 +4667,7 @@ mod tests {
             store_guard.latest_inbound_ip_usage_minute(),
             Some(floor_minute(now))
         );
-        assert!(store_guard.inbound_ip_usage().online_stats_unavailable);
+        assert!(!store_guard.inbound_ip_usage().online_stats_unavailable);
         assert!(
             !store_guard
                 .inbound_ip_usage()
