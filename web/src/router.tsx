@@ -10,6 +10,7 @@ import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
+import { ClusterSettingsPage } from "./views/ClusterSettingsPage";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
@@ -119,6 +120,11 @@ const quotaPolicyRoute = createRoute({
 	path: "/quota-policy",
 	component: QuotaPolicyPage,
 });
+const clusterSettingsRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/cluster-settings",
+	component: ClusterSettingsPage,
+});
 const serviceConfigRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/service-config",
@@ -150,6 +156,7 @@ const appRouteTree = appRoute.addChildren([
 	userNewRoute,
 	userDetailsRoute,
 	quotaPolicyRoute,
+	clusterSettingsRoute,
 	serviceConfigRoute,
 	toolsRoute,
 	realityDomainsRoute,

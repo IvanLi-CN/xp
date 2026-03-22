@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AdminClusterSettingsResponseSchema } from "./adminClusterSettings";
 import {
 	AdminEndpointRotateResponseSchema,
 	AdminEndpointSchema,
@@ -50,6 +51,22 @@ describe("ClusterInfoResponseSchema", () => {
 			leader_api_base_url: "https://127.0.0.1:62416",
 			term: 1,
 			xp_version: "0.0.0",
+		});
+	});
+});
+
+describe("AdminClusterSettingsResponseSchema", () => {
+	it("accepts expected shape", () => {
+		expect(
+			AdminClusterSettingsResponseSchema.parse({
+				ip_geo_enabled: true,
+				ip_geo_origin: "https://api.country.is",
+				legacy_fallback_in_use: false,
+			}),
+		).toEqual({
+			ip_geo_enabled: true,
+			ip_geo_origin: "https://api.country.is",
+			legacy_fallback_in_use: false,
 		});
 	});
 });

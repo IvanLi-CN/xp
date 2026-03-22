@@ -29,6 +29,7 @@ use crate::{
     admin_token::{AdminTokenHash, verify_admin_token},
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
+    cluster_settings::{ClusterIpGeoSettings, normalize_ip_geo_origin},
     config::Config,
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
@@ -43,7 +44,7 @@ use crate::{
         scrub_geo_fields,
     },
     internal_auth,
-    ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
+    ip_geo_db::{GeoDbUpdateHandle, IpGeoSource},
     mihomo_redact,
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
@@ -59,7 +60,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
+    state::{DesiredStateCommand, GeoDbUpdateSettingsCompat, JsonSnapshotStore, StoreError},
     subscription,
     xray_supervisor::XrayHealthHandle,
 };
@@ -513,6 +514,21 @@ struct AdminServiceConfigResponse {
     admin_token_masked: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AdminClusterSettingsResponse {
+    ip_geo_enabled: bool,
+    ip_geo_origin: String,
+    legacy_fallback_in_use: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutAdminClusterSettingsRequest {
+    ip_geo_enabled: bool,
+    #[serde(default)]
+    ip_geo_origin: String,
+}
+
 #[derive(Deserialize)]
 struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
@@ -734,6 +750,10 @@ pub fn build_router(
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
+        .route(
+            "/cluster-settings",
+            get(admin_get_cluster_settings).put(admin_put_cluster_settings),
+        )
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
@@ -1766,6 +1786,8 @@ struct AdminInternalNodeRuntimeLocalResponse {
     components: Vec<ComponentRuntimeStatus>,
     recent_slots: Vec<NodeRuntimeHistorySlot>,
     events: Vec<NodeRuntimeEvent>,
+    #[serde(default)]
+    features: AdminNodeFeatureFlags,
 }
 
 impl From<LocalNodeRuntimeSnapshot> for AdminInternalNodeRuntimeLocalResponse {
@@ -1776,8 +1798,17 @@ impl From<LocalNodeRuntimeSnapshot> for AdminInternalNodeRuntimeLocalResponse {
             components: value.components,
             recent_slots: value.recent_slots,
             events: value.events,
+            features: AdminNodeFeatureFlags {
+                cluster_ip_geo_settings: true,
+            },
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct AdminNodeFeatureFlags {
+    #[serde(default)]
+    cluster_ip_geo_settings: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2268,6 +2299,7 @@ async fn admin_internal_get_local_node_ip_usage(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
+    sync_geo_db_settings(&state).await?;
     let window = parse_ip_usage_window(&query)?;
     let node = {
         let store = state.store.lock().await;
@@ -2307,6 +2339,7 @@ async fn admin_get_node_ip_usage(
     Path(node_id): Path<String>,
     Query(query): Query<IpUsageQuery>,
 ) -> Result<Json<AdminNodeIpUsageResponse>, ApiError> {
+    sync_geo_db_settings(&state).await?;
     let window = parse_ip_usage_window(&query)?;
     let node = {
         let store = state.store.lock().await;
@@ -2418,6 +2451,7 @@ async fn admin_internal_get_local_user_ip_usage(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
+    sync_geo_db_settings(&state).await?;
     let window = parse_ip_usage_window(&query)?;
     let node = {
         let store = state.store.lock().await;
@@ -2460,6 +2494,7 @@ async fn admin_get_user_ip_usage(
     Path(user_id): Path<String>,
     Query(query): Query<IpUsageQuery>,
 ) -> Result<Json<AdminUserIpUsageResponse>, ApiError> {
+    sync_geo_db_settings(&state).await?;
     let window = parse_ip_usage_window(&query)?;
     let (user, relevant_nodes) = {
         let store = state.store.lock().await;
@@ -3017,13 +3052,7 @@ async fn admin_get_config(
     } else {
         String::new()
     };
-    let ip_geo_origin = state.config.ip_geo_origin.trim();
-    let ip_geo_origin = if ip_geo_origin.is_empty() {
-        COUNTRY_IS_ORIGIN
-    } else {
-        ip_geo_origin
-    };
-    let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
+    let ip_geo_origin = normalize_ip_geo_origin(&state.config.ip_geo_origin);
 
     Ok(Json(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
@@ -3039,6 +3068,186 @@ async fn admin_get_config(
         admin_token_present,
         admin_token_masked,
     }))
+}
+
+fn admin_cluster_settings_response(
+    settings: ClusterIpGeoSettings,
+    legacy_fallback_in_use: bool,
+) -> AdminClusterSettingsResponse {
+    AdminClusterSettingsResponse {
+        ip_geo_enabled: settings.enabled,
+        ip_geo_origin: settings.origin,
+        legacy_fallback_in_use,
+    }
+}
+
+async fn sync_geo_db_settings(state: &AppState) -> Result<(), ApiError> {
+    state.geo_db_update.sync_with_cluster_settings().await;
+    Ok(())
+}
+
+fn validate_cluster_ip_geo_origin(raw: &str) -> Result<String, ApiError> {
+    let origin = normalize_ip_geo_origin(raw);
+    let url = reqwest::Url::parse(&origin)
+        .map_err(|_| ApiError::invalid_request("ip_geo_origin must be an absolute http(s) URL"))?;
+    match url.scheme() {
+        "http" | "https" => Ok(origin),
+        _ => Err(ApiError::invalid_request(
+            "ip_geo_origin must use http or https",
+        )),
+    }
+}
+
+async fn admin_get_cluster_settings(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminClusterSettingsResponse>, ApiError> {
+    sync_geo_db_settings(&state).await?;
+    let response = {
+        let store = state.store.lock().await;
+        admin_cluster_settings_response(
+            store
+                .state()
+                .effective_cluster_ip_geo_settings(&state.config),
+            store.state().cluster_ip_geo_uses_legacy_fallback(),
+        )
+    };
+    Ok(Json(response))
+}
+
+fn cluster_settings_write_guard_error(
+    unreachable_nodes: Vec<String>,
+    unsupported_nodes: Vec<String>,
+) -> ApiError {
+    let mut message =
+        "cluster settings save requires every node to be reachable and upgraded".to_string();
+    if !unreachable_nodes.is_empty() {
+        message.push_str(format!("; unreachable: {}", unreachable_nodes.join(", ")).as_str());
+    }
+    if !unsupported_nodes.is_empty() {
+        message.push_str(format!("; unsupported: {}", unsupported_nodes.join(", ")).as_str());
+    }
+    let mut error = ApiError::conflict(message);
+    if !unreachable_nodes.is_empty() {
+        error
+            .details
+            .insert("unreachable_nodes".to_string(), json!(unreachable_nodes));
+    }
+    if !unsupported_nodes.is_empty() {
+        error
+            .details
+            .insert("unsupported_nodes".to_string(), json!(unsupported_nodes));
+    }
+    error
+}
+
+async fn ensure_cluster_settings_write_ready(state: &AppState) -> Result<(), ApiError> {
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+    let mut unreachable_nodes = Vec::<String>::new();
+    let mut unsupported_nodes = Vec::<String>::new();
+
+    let client = build_cluster_http_client(state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri = "/_internal/nodes/runtime/local?events_limit=0"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+
+        let request = client
+            .get(format!(
+                "{base}/api/admin/_internal/nodes/runtime/local?events_limit=0"
+            ))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+            .send();
+        let response = tokio::time::timeout(CLUSTER_RUNTIME_FANOUT_TIMEOUT, request).await;
+        let response = match response {
+            Ok(Ok(response)) => response,
+            _ => {
+                unreachable_nodes.push(node.node_id.clone());
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            unreachable_nodes.push(node.node_id.clone());
+            continue;
+        }
+
+        match response
+            .json::<AdminInternalNodeRuntimeLocalResponse>()
+            .await
+        {
+            Ok(remote) if remote.features.cluster_ip_geo_settings => {}
+            Ok(_) => unsupported_nodes.push(node.node_id.clone()),
+            Err(_) => unreachable_nodes.push(node.node_id.clone()),
+        }
+    }
+
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    unsupported_nodes.sort();
+    unsupported_nodes.dedup();
+
+    if unreachable_nodes.is_empty() && unsupported_nodes.is_empty() {
+        return Ok(());
+    }
+
+    Err(cluster_settings_write_guard_error(
+        unreachable_nodes,
+        unsupported_nodes,
+    ))
+}
+
+async fn admin_put_cluster_settings(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<PutAdminClusterSettingsRequest>,
+) -> Result<Json<AdminClusterSettingsResponse>, ApiError> {
+    let origin = validate_cluster_ip_geo_origin(&req.ip_geo_origin)?;
+    ensure_cluster_settings_write_ready(&state).await?;
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetGeoDbUpdateSettings {
+            settings: GeoDbUpdateSettingsCompat {
+                provider: origin,
+                auto_update_enabled: req.ip_geo_enabled,
+                update_interval_days: 1,
+            },
+        },
+    )
+    .await?;
+    sync_geo_db_settings(&state).await?;
+    let response = {
+        let store = state.store.lock().await;
+        admin_cluster_settings_response(
+            store
+                .state()
+                .effective_cluster_ip_geo_settings(&state.config),
+            store.state().cluster_ip_geo_uses_legacy_fallback(),
+        )
+    };
+    Ok(Json(response))
 }
 
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {

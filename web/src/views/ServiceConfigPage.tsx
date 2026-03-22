@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { fetchAdminConfig } from "../api/adminConfig";
@@ -310,9 +311,10 @@ export function ServiceConfigPage() {
 					<div className="xp-card">
 						<div className="xp-card-body space-y-3">
 							<div>
-								<h2 className="text-base font-semibold">IP Geo</h2>
+								<h2 className="text-base font-semibold">Cluster settings</h2>
 								<p className="text-sm text-muted-foreground">
-									入站 IP Geo enrichment 与 upstream 设置。
+									集群级功能入口已迁移；这里保留本机 legacy fallback
+									的只读诊断视图。
 								</p>
 							</div>
 							<div className="space-y-3">
@@ -326,6 +328,14 @@ export function ServiceConfigPage() {
 									value={data.ip_geo_origin}
 									copyText={data.ip_geo_origin}
 								/>
+								<div className="rounded-2xl border border-border/70 bg-card px-3 py-3 text-sm text-muted-foreground shadow-sm">
+									使用{" "}
+									<Link className="xp-link" to="/cluster-settings">
+										Cluster settings
+									</Link>{" "}
+									编辑集群级 IP
+									Geo；本页仅用于排查当前进程启动时吃到的本地配置。
+								</div>
 							</div>
 						</div>
 					</div>
@@ -366,7 +376,7 @@ export function ServiceConfigPage() {
 		<div className="space-y-5">
 			<PageHeader
 				title="服务配置"
-				description="只读展示当前进程配置与订阅入口，便于部署核对与排障。"
+				description="只读展示当前进程本地配置与订阅入口，便于部署核对与排障。"
 				actions={headerActions}
 			/>
 			{content}

@@ -18,15 +18,17 @@
 
 ## 关键行为
 
-- `geo_source` 默认为 `missing`；当 `XP_IP_GEO_ENABLED=true` 时为 `country_is`（启用后会把入站公网 IP 发送到第三方 `country.is` 做解析）。
-- `XP_IP_GEO_ORIGIN` 可覆盖默认 `https://api.country.is`（用于自建同接口实现或特殊网络环境）。
+- IP Geo 由前端 `Cluster settings` 统一控制；保存后通过 Raft 复制到集群状态，不再要求逐节点修改 env。
+- 在首次保存 `Cluster settings` 之前，leader 当前进程仍使用 legacy fallback `XP_IP_GEO_ENABLED` / `XP_IP_GEO_ORIGIN` 作为 bootstrap seed。
+- `geo_source` 默认为 `missing`；当集群级 `ip_geo.enabled=true` 时为 `country_is`（启用后会把入站公网 IP 发送到第三方 `country.is` 做解析）。
+- 集群级 `ip_geo.origin` 默认 `https://api.country.is`，可覆盖为自建同接口实现或特殊网络环境的 `http(s)` 绝对 URL。
 - Geo 查询仅针对当前分钟新出现、且本地持久化记录尚无 Geo 的公网 IP；结果写入缓存后不重复查询。
 - `country.is` 查询做本地节流，避免触发托管端限流；遇到 `429` 时按 `Retry-After`（或默认 60s）退避；其他失败退避 15 分钟。采集主流程继续运行。
 - `online_stats_unavailable` warning 保留；`geo_db_missing` warning 删除。
-- 旧 `SetGeoDbUpdateSettings` WAL 记录允许反序列化，但运行时按 no-op 处理。
+- 复用旧 `SetGeoDbUpdateSettings` 作为兼容传输载体：当 payload 的 `provider` 是 `http(s)` URL 时按新的集群 IP Geo 设置处理；历史非 URL payload 继续按 no-op 处理。
 
 ## 验收
 
-- 代码与 UI 中不再出现 `/ip-geo-db`、`XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH`。
+- 代码与 UI 中不再出现 `/ip-geo-db`、`XP_IP_USAGE_CITY_DB_PATH`、`XP_IP_USAGE_ASN_DB_PATH`，且前端提供独立的 `Cluster settings` 页面作为 IP Geo 主入口。
 - Node/User IP usage 仍可返回地区与运营商字段；当 `geo_source=country_is` 时展示 `country.is` attribution。
 - `cargo test`、`cargo clippy -- -D warnings`、`cd web && bun run lint`、`cd web && bun run typecheck`、`cd web && bun run test` 通过。

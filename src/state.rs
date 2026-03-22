@@ -8,6 +8,8 @@ use std::{
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 
 use crate::{
+    cluster_settings::{ClusterIpGeoSettings, ClusterSettings},
+    config::Config,
     domain::{
         DomainError, Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain,
         User, UserNodeQuota, UserPriorityTier, UserQuotaReset, validate_cycle_day_of_month,
@@ -130,6 +132,7 @@ pub(crate) fn migrate_state_value_to_latest(
         state.node_user_endpoint_memberships.clone(),
     );
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&state);
+    let _ = sync_cluster_settings_compat(&mut state);
 
     Ok(state)
 }
@@ -224,6 +227,22 @@ impl Default for GeoDbUpdateSettingsCompat {
     }
 }
 
+impl GeoDbUpdateSettingsCompat {
+    fn from_cluster_ip_geo(settings: &ClusterIpGeoSettings) -> Self {
+        Self {
+            provider: settings.origin.clone(),
+            auto_update_enabled: settings.enabled,
+            update_interval_days: default_geo_db_update_interval_days_compat(),
+        }
+    }
+}
+
+impl From<&GeoDbUpdateSettingsCompat> for ClusterIpGeoSettings {
+    fn from(value: &GeoDbUpdateSettingsCompat) -> Self {
+        Self::new(value.auto_update_enabled, &value.provider)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedState {
     pub schema_version: u32,
@@ -258,6 +277,8 @@ pub struct PersistedState {
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
+    #[serde(default)]
+    pub cluster_settings: ClusterSettings,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
@@ -280,8 +301,17 @@ impl PersistedState {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
             user_mihomo_profiles: BTreeMap::new(),
+            cluster_settings: ClusterSettings::default(),
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
+    }
+
+    pub fn effective_cluster_ip_geo_settings(&self, config: &Config) -> ClusterIpGeoSettings {
+        self.cluster_settings.effective_ip_geo(config)
+    }
+
+    pub fn cluster_ip_geo_uses_legacy_fallback(&self) -> bool {
+        self.cluster_settings.ip_geo_uses_legacy_fallback()
     }
 }
 
@@ -859,6 +889,18 @@ fn prune_deleted_nodes_from_endpoint_probe_tracking(state: &mut PersistedState) 
     changed |= before != state.endpoint_probe_participants_by_hour.len();
 
     changed
+}
+
+fn sync_cluster_settings_compat(state: &mut PersistedState) -> bool {
+    let Some(ip_geo) = state.cluster_settings.ip_geo.as_ref() else {
+        return false;
+    };
+    let compat = GeoDbUpdateSettingsCompat::from_cluster_ip_geo(ip_geo);
+    if state.geo_db_update_settings_compat == compat {
+        return false;
+    }
+    state.geo_db_update_settings_compat = compat;
+    true
 }
 
 fn build_node_user_endpoint_memberships_from_legacy_grants(
@@ -1730,6 +1772,11 @@ impl<'de> Deserialize<'de> for DesiredStateCommand {
     }
 }
 
+fn is_cluster_ip_geo_transport_payload(settings: &GeoDbUpdateSettingsCompat) -> bool {
+    let provider = settings.provider.trim();
+    provider.starts_with("http://") || provider.starts_with("https://")
+}
+
 impl From<DesiredStateCommandCompat> for DesiredStateCommand {
     fn from(value: DesiredStateCommandCompat) -> Self {
         match value {
@@ -1800,6 +1847,11 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             },
             DesiredStateCommandCompat::SetUserMihomoProfile { user_id, profile } => {
                 Self::SetUserMihomoProfile { user_id, profile }
+            }
+            DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings }
+                if is_cluster_ip_geo_transport_payload(&settings) =>
+            {
+                Self::SetGeoDbUpdateSettings { settings }
             }
             DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => Self::CompatNoop {
                 note: format!(
@@ -2501,7 +2553,13 @@ impl DesiredStateCommand {
                     .insert(user_id.clone(), profile.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
-            Self::SetGeoDbUpdateSettings { .. } => Ok(DesiredStateApplyResult::Applied),
+            Self::SetGeoDbUpdateSettings { settings } => {
+                let ip_geo = ClusterIpGeoSettings::from(settings);
+                state.cluster_settings.ip_geo = Some(ip_geo.clone());
+                state.geo_db_update_settings_compat =
+                    GeoDbUpdateSettingsCompat::from_cluster_ip_geo(&ip_geo);
+                Ok(DesiredStateApplyResult::Applied)
+            }
             Self::ReplaceUserAccess {
                 user_id,
                 endpoint_ids,
@@ -2926,6 +2984,9 @@ impl JsonSnapshotStore {
         let expected_memberships = build_node_user_endpoint_memberships(&state);
         if expected_memberships != state.node_user_endpoint_memberships {
             state.node_user_endpoint_memberships = expected_memberships;
+            migrated = true;
+        }
+        if sync_cluster_settings_compat(&mut state) {
             migrated = true;
         }
 
@@ -5561,19 +5622,49 @@ rules: []
     }
 
     #[test]
-    fn desired_state_apply_set_geo_db_update_settings_is_noop() {
+    fn desired_state_apply_set_geo_db_update_settings_sets_cluster_ip_geo() {
         let mut state = PersistedState::empty();
-        let before = state.clone();
+        let settings = GeoDbUpdateSettingsCompat {
+            provider: "https://geo.example.test/api/".to_string(),
+            auto_update_enabled: true,
+            update_interval_days: 7,
+        };
         let result = DesiredStateCommand::SetGeoDbUpdateSettings {
-            settings: GeoDbUpdateSettingsCompat {
-                provider: "legacy".to_string(),
-                auto_update_enabled: true,
-                update_interval_days: 7,
-            },
+            settings: settings.clone(),
         }
         .apply(&mut state)
         .unwrap();
         assert_eq!(result, DesiredStateApplyResult::Applied);
-        assert_eq!(state, before);
+        assert_eq!(
+            state.cluster_settings.ip_geo,
+            Some(ClusterIpGeoSettings::new(
+                true,
+                "https://geo.example.test/api"
+            ))
+        );
+        assert_eq!(
+            state.geo_db_update_settings_compat,
+            GeoDbUpdateSettingsCompat::from_cluster_ip_geo(
+                state.cluster_settings.ip_geo.as_ref().unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn legacy_geo_db_update_settings_payload_stays_noop() {
+        let command =
+            DesiredStateCommand::from(DesiredStateCommandCompat::SetGeoDbUpdateSettings {
+                settings: GeoDbUpdateSettingsCompat {
+                    provider: "dbip_lite".to_string(),
+                    auto_update_enabled: false,
+                    update_interval_days: 7,
+                },
+            });
+        match command {
+            DesiredStateCommand::CompatNoop { note } => {
+                assert!(note.contains("ignored legacy geo_db settings command"));
+            }
+            other => panic!("expected CompatNoop, got {other:?}"),
+        }
     }
 }

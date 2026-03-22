@@ -327,6 +327,25 @@ describe("<IpUsageView />", () => {
 		).toBeInTheDocument();
 	});
 
+	it("shows cluster settings notice when geo enrichment is disabled", () => {
+		render(
+			<IpUsageView
+				title="IP usage"
+				description="Node inbound IP snapshots"
+				window="24h"
+				geoSource="missing"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+			/>,
+		);
+
+		expect(
+			screen.getByText(
+				"Geo enrichment is disabled in Cluster settings; enable country.is lookups there.",
+			),
+		).toBeInTheDocument();
+	});
+
 	it("shows blocking online-stats empty state", () => {
 		render(
 			<IpUsageView

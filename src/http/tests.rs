@@ -1878,6 +1878,130 @@ async fn admin_config_returns_safe_view_and_masks_token() {
 }
 
 #[tokio::test]
+async fn admin_cluster_settings_returns_legacy_fallback_before_save() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/cluster-settings"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["ip_geo_enabled"], false);
+    assert_eq!(json["ip_geo_origin"], "https://api.country.is");
+    assert_eq!(json["legacy_fallback_in_use"], true);
+}
+
+#[tokio::test]
+async fn admin_put_cluster_settings_persists_cluster_ip_geo_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/cluster-settings",
+            json!({
+                "ip_geo_enabled": true,
+                "ip_geo_origin": "https://geo.example.test/api/"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["ip_geo_enabled"], true);
+    assert_eq!(json["ip_geo_origin"], "https://geo.example.test/api");
+    assert_eq!(json["legacy_fallback_in_use"], false);
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/cluster-settings"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["ip_geo_enabled"], true);
+    assert_eq!(json["ip_geo_origin"], "https://geo.example.test/api");
+    assert_eq!(json["legacy_fallback_in_use"], false);
+
+    let store = store.lock().await;
+    assert_eq!(
+        store
+            .state()
+            .cluster_settings
+            .ip_geo
+            .as_ref()
+            .map(|settings| (settings.enabled, settings.origin.as_str())),
+        Some((true, "https://geo.example.test/api"))
+    );
+}
+
+#[tokio::test]
+async fn admin_put_cluster_settings_requires_all_nodes_reachable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let unreachable_node_id = {
+        let mut store = store.lock().await;
+        let node_id = new_ulid_string();
+        store
+            .upsert_node(Node {
+                node_id: node_id.clone(),
+                node_name: "node-remote".to_string(),
+                access_host: "".to_string(),
+                api_base_url: "".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .unwrap();
+        node_id
+    };
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/cluster-settings",
+            json!({
+                "ip_geo_enabled": true,
+                "ip_geo_origin": "https://geo.example.test"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+    assert_eq!(
+        json["error"]["details"]["unreachable_nodes"],
+        json!([unreachable_node_id])
+    );
+}
+
+#[test]
+fn admin_internal_node_runtime_local_response_defaults_feature_flags_for_legacy_payloads() {
+    let parsed: super::AdminInternalNodeRuntimeLocalResponse = serde_json::from_value(json!({
+        "node_id": "node-1",
+        "summary": {
+            "status": "up",
+            "updated_at": "2026-03-22T00:00:00Z"
+        },
+        "components": [],
+        "recent_slots": [],
+        "events": []
+    }))
+    .unwrap();
+    assert_eq!(
+        parsed.features,
+        super::AdminNodeFeatureFlags {
+            cluster_ip_geo_settings: false,
+        }
+    );
+}
+
+#[tokio::test]
 async fn admin_mihomo_redact_requires_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

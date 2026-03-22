@@ -146,6 +146,12 @@ async fn run_quota_tick_at_with_geo(
     reconcile: &ReconcileHandle,
     geo_resolver: &SharedGeoResolver,
 ) -> anyhow::Result<()> {
+    let effective_geo_settings = {
+        let store = store.lock().await;
+        store.state().effective_cluster_ip_geo_settings(config)
+    };
+    geo_resolver.apply_settings(effective_geo_settings).await;
+
     let snapshots: Vec<MembershipQuotaSnapshot> = {
         let store = store.lock().await;
         let Some(local_node_id) = crate::reconcile::resolve_local_node_id(config, &store) else {

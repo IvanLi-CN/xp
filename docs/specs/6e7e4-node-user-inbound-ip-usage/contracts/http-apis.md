@@ -8,9 +8,36 @@
 - 未提供时默认 `24h`
 - 其他值返回 `400 invalid_request`
 
+## GET /api/admin/cluster-settings
+
+返回集群级 IP Geo 配置，以及当前是否仍在使用 leader 本机的 legacy env fallback：
+
+```json
+{
+  "ip_geo_enabled": false,
+  "ip_geo_origin": "https://api.country.is",
+  "legacy_fallback_in_use": true
+}
+```
+
+## PUT /api/admin/cluster-settings
+
+保存集群级 IP Geo 配置：
+
+```json
+{
+  "ip_geo_enabled": true,
+  "ip_geo_origin": "https://api.country.is"
+}
+```
+
+- `ip_geo_origin` 允许为空字符串；服务端会归一化为 `https://api.country.is`。
+- 仅接受绝对 `http(s)` URL。
+- 写入前要求所有节点可达且已升级到支持集群级 IP Geo 设置的版本；否则返回 `409 conflict` 并在错误 details 中包含 `unreachable_nodes` 或 `unsupported_nodes`。
+
 ## GET /api/admin/nodes/{node_id}/ip-usage?window=24h|7d
 
-返回单节点视图；`geo_source` 表示当前节点的 IP Geo 数据源（启用时为 `country_is`，禁用时为 `missing`）：
+返回单节点视图；`geo_source` 表示当前节点按集群设置生效后的 IP Geo 数据源（启用时为 `country_is`，禁用时为 `missing`）：
 
 ```json
 {
@@ -73,7 +100,7 @@
 
 ## GET /api/admin/users/{user_id}/ip-usage?window=24h|7d
 
-返回按节点分组的用户视图；每个 `groups[].geo_source` 表示该节点的 IP Geo 数据源：
+返回按节点分组的用户视图；每个 `groups[].geo_source` 表示该节点按集群设置生效后的 IP Geo 数据源：
 
 ```json
 {
@@ -112,6 +139,7 @@
 
 - `404 not_found`: node / user 不存在。
 - `400 invalid_request`: `window` 非法。
+- `409 conflict`: 保存 `PUT /api/admin/cluster-settings` 时，集群中存在 unreachable / unsupported 节点。
 - `geo_db_missing` warning 已移除；Geo 查询失败时会返回 `ip_geo_lookup_failed` warning，且 `region/operator` 字段可能为空。
 - Node detail 公开 API 访问远端节点失败时：返回 `500 internal`，消息需指明 unreachable/timeout。
 - User detail 公开 API 聚合远端节点失败时：该节点加入 `unreachable_nodes`，其余节点结果继续返回，`partial=true`。
