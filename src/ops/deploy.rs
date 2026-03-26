@@ -21,6 +21,8 @@ use std::time::Duration;
 
 const DEFAULT_ORIGIN_URL: &str = "http://127.0.0.1:62416";
 const HOSTNAME_SUFFIX_LEN: usize = 4;
+const PUBLIC_API_PROBE_ATTEMPTS: usize = 60;
+const PUBLIC_API_PROBE_DELAY: Duration = Duration::from_secs(2);
 const HOSTNAME_ALPHABET: &[char] = &[
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
     't', 'u', 'v', 'w', 'x', 'y', 'z',
@@ -1439,7 +1441,13 @@ async fn wait_for_public_api_base_url(
         .build()
         .map_err(|e| ExitError::new(5, format!("http_error: build client: {e}")))?;
     let health_url = format!("{}/health", api_base_url.trim_end_matches('/'));
-    wait_for_public_api_health_with_client(&client, &health_url, 15, Duration::from_secs(1)).await
+    wait_for_public_api_health_with_client(
+        &client,
+        &health_url,
+        PUBLIC_API_PROBE_ATTEMPTS,
+        PUBLIC_API_PROBE_DELAY,
+    )
+    .await
 }
 
 async fn wait_for_public_api_health_with_client(
@@ -1852,7 +1860,10 @@ fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{Router, http::StatusCode, routing::get};
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -2054,5 +2065,41 @@ XP_XRAY_CUSTOM=keep-me\n",
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            let app = Router::new().route(
+                "/health",
+                get(|| async { (StatusCode::BAD_GATEWAY, "edge warming") }),
+            );
+            let listener = TcpListener::bind(addr).await.unwrap();
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = ready_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::builder().build().unwrap();
+        let status = wait_for_public_api_health_with_client(
+            &client,
+            &format!("http://{addr}/health"),
+            10,
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+
+        let _ = ready_tx.send(());
+        assert_eq!(status.as_u16(), 502);
     }
 }
