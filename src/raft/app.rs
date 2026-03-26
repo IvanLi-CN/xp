@@ -1,7 +1,8 @@
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+use std::{any::Any, collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::Context;
 use axum::http::{Method, Uri, header::HeaderName};
+use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
@@ -14,6 +15,26 @@ use crate::{
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        return (*msg).to_string();
+    }
+    if let Some(msg) = payload.downcast_ref::<String>() {
+        return msg.clone();
+    }
+    "unknown panic payload".to_string()
+}
+
+async fn catch_raft_panic<T, F>(label: &'static str, fut: F) -> anyhow::Result<T>
+where
+    F: Future<Output = T> + Send,
+{
+    std::panic::AssertUnwindSafe(fut)
+        .catch_unwind()
+        .await
+        .map_err(|payload| anyhow::anyhow!("{label} panicked: {}", panic_payload_message(payload)))
+}
 
 pub trait RaftFacade: Send + Sync + 'static {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>;
@@ -32,6 +53,69 @@ pub trait RaftFacade: Send + Sync + 'static {
         changes: openraft::ChangeMembers<NodeId, NodeMeta>,
         retain: bool,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
+}
+
+#[derive(Clone)]
+pub struct PanicBoundaryRaft {
+    inner: Arc<dyn RaftFacade>,
+}
+
+impl PanicBoundaryRaft {
+    pub fn wrap(inner: Arc<dyn RaftFacade>) -> Arc<dyn RaftFacade> {
+        Arc::new(Self { inner })
+    }
+}
+
+impl RaftFacade for PanicBoundaryRaft {
+    fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>> {
+        self.inner.metrics()
+    }
+
+    fn client_write(
+        &self,
+        cmd: DesiredStateCommand,
+    ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
+        let inner = self.inner.clone();
+        Box::pin(
+            async move { catch_raft_panic("raft client_write", inner.client_write(cmd)).await? },
+        )
+    }
+
+    fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            catch_raft_panic("raft add_learner", inner.add_learner(node_id, node)).await??;
+            Ok(())
+        })
+    }
+
+    fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            catch_raft_panic(
+                "raft change_membership(add_voters)",
+                inner.add_voters(node_ids),
+            )
+            .await??;
+            Ok(())
+        })
+    }
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+        retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            catch_raft_panic(
+                "raft change_membership",
+                inner.change_membership(changes, retain),
+            )
+            .await??;
+            Ok(())
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -83,10 +167,9 @@ impl RaftFacade for RealRaft {
         cmd: DesiredStateCommand,
     ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
         Box::pin(async move {
-            let resp = self
-                .raft
-                .client_write(cmd)
+            let resp = catch_raft_panic("raft client_write", self.raft.client_write(cmd))
                 .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
                 .map_err(|e| anyhow::anyhow!("raft client_write: {e}"))?;
             Ok(resp.data)
         })
@@ -94,20 +177,27 @@ impl RaftFacade for RealRaft {
 
     fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move {
-            self.raft
-                .add_learner(node_id, node, false)
-                .await
-                .map_err(|e| anyhow::anyhow!("raft add_learner: {e}"))?;
+            catch_raft_panic(
+                "raft add_learner",
+                self.raft.add_learner(node_id, node, false),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(|e| anyhow::anyhow!("raft add_learner: {e}"))?;
             Ok(())
         })
     }
 
     fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move {
-            self.raft
-                .change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true)
-                .await
-                .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
+            catch_raft_panic(
+                "raft change_membership(add_voters)",
+                self.raft
+                    .change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
             Ok(())
         })
     }
@@ -118,10 +208,13 @@ impl RaftFacade for RealRaft {
         retain: bool,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move {
-            self.raft
-                .change_membership(changes, retain)
-                .await
-                .map_err(|e| anyhow::anyhow!("raft change_membership: {e}"))?;
+            catch_raft_panic(
+                "raft change_membership",
+                self.raft.change_membership(changes, retain),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(|e| anyhow::anyhow!("raft change_membership: {e}"))?;
             Ok(())
         })
     }
@@ -178,7 +271,7 @@ impl RaftFacade for ForwardingRaftFacade {
         let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
         Box::pin(async move {
             let cmd_clone = cmd.clone();
-            match raft.client_write(cmd).await {
+            match catch_raft_panic("raft client_write", raft.client_write(cmd)).await? {
                 Ok(resp) => Ok(resp.data),
                 Err(err) => {
                     let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
@@ -201,8 +294,9 @@ impl RaftFacade for ForwardingRaftFacade {
     fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
         let raft = self.raft.clone();
         Box::pin(async move {
-            raft.add_learner(node_id, node, false)
+            catch_raft_panic("raft add_learner", raft.add_learner(node_id, node, false))
                 .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
                 .map_err(|e| anyhow::anyhow!("raft add_learner: {e}"))?;
             Ok(())
         })
@@ -211,9 +305,13 @@ impl RaftFacade for ForwardingRaftFacade {
     fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
         let raft = self.raft.clone();
         Box::pin(async move {
-            raft.change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true)
-                .await
-                .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
+            catch_raft_panic(
+                "raft change_membership(add_voters)",
+                raft.change_membership(openraft::ChangeMembers::AddVoterIds(node_ids), true),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(|e| anyhow::anyhow!("raft change_membership(add_voters): {e}"))?;
             Ok(())
         })
     }
@@ -229,7 +327,12 @@ impl RaftFacade for ForwardingRaftFacade {
         let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
         Box::pin(async move {
             let changes_clone = changes.clone();
-            match raft.change_membership(changes, retain).await {
+            match catch_raft_panic(
+                "raft change_membership",
+                raft.change_membership(changes, retain),
+            )
+            .await?
+            {
                 Ok(_resp) => Ok(()),
                 Err(err) => {
                     let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =

@@ -700,6 +700,8 @@ pub fn build_router(
         .build()
         .expect("build reqwest client");
 
+    let raft = crate::raft::app::PanicBoundaryRaft::wrap(raft);
+
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -1418,10 +1420,6 @@ async fn admin_internal_raft_change_membership(
         return Err(ApiError::invalid_request("not leader"));
     }
 
-    let Some(raft) = state.raft_rpc.clone() else {
-        return Err(ApiError::not_implemented("raft rpc is not available"));
-    };
-
     let changes = match req.changes {
         InternalChangeMembers::RemoveVoters { .. } => {
             openraft::ChangeMembers::RemoveVoters(node_ids)
@@ -1429,7 +1427,9 @@ async fn admin_internal_raft_change_membership(
         InternalChangeMembers::RemoveNodes { .. } => openraft::ChangeMembers::RemoveNodes(node_ids),
     };
 
-    raft.change_membership(changes, req.retain)
+    state
+        .raft
+        .change_membership(changes, req.retain)
         .await
         .map_err(|e| ApiError::internal(format!("change_membership: {e}")))?;
 
@@ -1464,10 +1464,6 @@ async fn admin_internal_raft_set_nodes(
     if !is_leader(&metrics) {
         return Err(ApiError::invalid_request("not leader"));
     }
-
-    let Some(raft) = state.raft_rpc.clone() else {
-        return Err(ApiError::not_implemented("raft rpc is not available"));
-    };
 
     let mut map = std::collections::BTreeMap::new();
     for n in req.nodes {
@@ -1509,7 +1505,9 @@ async fn admin_internal_raft_set_nodes(
         );
     }
 
-    raft.change_membership(openraft::ChangeMembers::SetNodes(map), true)
+    state
+        .raft
+        .change_membership(openraft::ChangeMembers::SetNodes(map), true)
         .await
         .map_err(|e| ApiError::internal(format!("change_membership set_nodes: {e}")))?;
 
