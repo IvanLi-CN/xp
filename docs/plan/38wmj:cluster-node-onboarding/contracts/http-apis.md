@@ -58,10 +58,12 @@ Notes:
 - `xp_admin_token_hash` format (v1): Argon2id PHC string (see `contracts/file-formats.md`).
 - The server MUST NOT log `xp_admin_token_hash` (nor `cluster_ca_key_pem`) in plaintext.
 - Security model note: confidentiality relies on TLS pinned by `cluster_ca_pem` carried in the join token; leaking a join token implies the attacker can join and receive the response secrets.
+- The server MUST validate `join_token.token_id -> raft node id` 和 `api_base_url` 格式 before any Raft write / membership mutation; malformed requests must fail without side effects.
+- Error responses for this endpoint MUST stay inside the standard JSON `ApiError` envelope; the server must not drop the HTTP connection for invalid requests.
 
 ### Errors
 
-- `400 invalid_request`: malformed/expired/used join token; invalid fields; cluster id mismatch
+- `400 invalid_request`: malformed/expired/used join token; invalid fields; invalid `token_id`/`api_base_url`; cluster id mismatch
 - `401 unauthorized`: reserved (if future auth added; currently join is authorized by join token + pinned TLS)
 - `409 conflict`: reserved (if future one-time token collision needs conflict)
 - `500 internal`: unexpected errors

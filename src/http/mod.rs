@@ -1356,6 +1356,17 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn validate_cluster_join_request(
+    node_id: &str,
+    req: &ClusterJoinRequest,
+) -> Result<RaftNodeId, ApiError> {
+    if req.node_name.trim().is_empty() {
+        return Err(ApiError::invalid_request("node_name is empty"));
+    }
+    validate_https_origin(&req.api_base_url)?;
+    raft_node_id_from_ulid(node_id).map_err(|e| ApiError::invalid_request(e.to_string()))
+}
+
 async fn admin_internal_raft_client_write(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -1559,12 +1570,20 @@ async fn cluster_join(
     }
 
     let node_id = token.token_id.clone();
+    let raft_node_id = validate_cluster_join_request(&node_id, &req)?;
     {
         let store = state.store.lock().await;
         if store.get_node(&node_id).is_some() {
             return Err(ApiError::invalid_request("join token already used"));
         }
     }
+
+    let signed_cert_pem = crate::cluster_identity::sign_node_csr(
+        &state.cluster.cluster_id,
+        &ca_key_pem,
+        &req.csr_pem,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     // Ensure the current leader exists in the Raft state machine so joiners can replicate the
     // full node list (including the bootstrap node).
@@ -1589,13 +1608,6 @@ async fn cluster_join(
     )
     .await?;
 
-    let signed_cert_pem = crate::cluster_identity::sign_node_csr(
-        &state.cluster.cluster_id,
-        &ca_key_pem,
-        &req.csr_pem,
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
     let node = Node {
         node_id: node_id.clone(),
         node_name: req.node_name.clone(),
@@ -1605,8 +1617,6 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
-    let raft_node_id =
-        raft_node_id_from_ulid(&node_id).map_err(|e| ApiError::invalid_request(e.to_string()))?;
     state
         .raft
         .add_learner(
@@ -1618,7 +1628,7 @@ async fn cluster_join(
             },
         )
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("join add_learner failed: {e}")))?;
 
     let _ = raft_write(
         &state,

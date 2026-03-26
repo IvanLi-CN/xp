@@ -40,10 +40,12 @@ xp-ops deploy \
   1. 安装依赖（`xray`；`cloudflared` 取决于 `--cloudflare`）
   2. 初始化目录/用户/服务文件（同 `xp-ops init`）
   3. 安装 `xp`（来源/策略沿用现有）
-  4. 执行 join（不得执行 `xp init`）并获取集群 `XP_ADMIN_TOKEN_HASH`（见 `contracts/http-apis.md`）
-  5. 写入 `/etc/xp/xp.env`（必须包含从 leader 同步到的 `XP_ADMIN_TOKEN_HASH`；不得写入明文 token）
-     6.（可选）启用并启动服务（同 `--enable-services`）
+  4. 若启用 `--cloudflare`：先 provision tunnel/DNS；当本次 deploy 同时启用服务并负责启动 `cloudflared` 时，MUST 在 `xp join` 之前确认公共 `api_base_url` 已经“对外存在且可探测”（例如返回 200/404/502；Cloudflare `530` 视为未就绪）
+  5. 执行 join（不得执行 `xp init`）并获取集群 `XP_ADMIN_TOKEN_HASH`（见 `contracts/http-apis.md`）
+  6. 写入 `/etc/xp/xp.env`（必须包含从 leader 同步到的 `XP_ADMIN_TOKEN_HASH`；不得写入明文 token）
+  7.（可选）启用并启动剩余服务（同 `--enable-services`）
 - join 模式不得要求用户额外输入 admin token；token 获取必须在“只提供 join token”的条件下完成。
+- 若 Cloudflare 预检失败，MUST 在执行 `xp join` 之前失败；不得消耗 join token，也不得写入新的 cluster metadata / membership。未启服务的 staged deploy 可跳过该预检，由后续启服务阶段承担入口可达性责任。
 - 当 `/etc/xp/xp.env` 已存在且 `XP_ADMIN_TOKEN_HASH` 与 leader 下发值不一致：
   - 默认 MUST 失败
   - 仅当 `--overwrite-existing` 才允许覆写

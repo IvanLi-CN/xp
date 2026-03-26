@@ -8,6 +8,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bytes::Bytes;
+use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -420,6 +421,50 @@ fn req(method: &str, uri: &str) -> Request<Body> {
         .uri(uri)
         .body(Body::empty())
         .unwrap()
+}
+
+fn issue_signed_join_token_for_tests(
+    cluster_id: &str,
+    leader_api_base_url: &str,
+    cluster_ca_pem: &str,
+    cluster_ca_key_pem: &str,
+    token_id: &str,
+) -> String {
+    #[derive(serde::Serialize)]
+    struct SignedPayload<'a> {
+        cluster_id: &'a str,
+        leader_api_base_url: &'a str,
+        cluster_ca_pem: &'a str,
+        token_id: &'a str,
+        expires_at: String,
+    }
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(900);
+    let expires_at_rfc3339 = expires_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let signed_payload = SignedPayload {
+        cluster_id,
+        leader_api_base_url,
+        cluster_ca_pem,
+        token_id,
+        expires_at: expires_at_rfc3339.clone(),
+    };
+
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(cluster_ca_key_pem.as_bytes()).unwrap();
+    mac.update(&serde_json::to_vec(&signed_payload).unwrap());
+    let secret =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+    let token = json!({
+        "cluster_id": cluster_id,
+        "leader_api_base_url": leader_api_base_url,
+        "cluster_ca_pem": cluster_ca_pem,
+        "token_id": token_id,
+        "one_time_secret": secret,
+        "expires_at": expires_at_rfc3339,
+    });
+
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token).unwrap())
 }
 
 fn req_authed(method: &str, uri: &str) -> Request<Body> {
@@ -1098,6 +1143,112 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
     let got_hash = hex::encode(Sha256::digest(key_pem.as_bytes()));
     let expected_hash = hex::encode(Sha256::digest(expected_key_pem.as_bytes()));
     assert_eq!(got_hash, expected_hash);
+}
+
+#[tokio::test]
+async fn cluster_join_rejects_invalid_token_node_id_with_json_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_pem = meta.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = meta.read_cluster_ca_key_pem(tmp.path()).unwrap().unwrap();
+    let join_token = issue_signed_join_token_for_tests(
+        &meta.cluster_id,
+        &meta.api_base_url,
+        &cluster_ca_pem,
+        &cluster_ca_key_pem,
+        "not-a-ulid",
+    );
+    let csr =
+        crate::cluster_identity::generate_node_keypair_and_csr("01JTESTTOKENID000000000000000")
+            .unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "access_host": "example.com",
+                        "api_base_url": "https://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid ulid"),
+        "unexpected error: {}",
+        body["error"]["message"].as_str().unwrap()
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node("not-a-ulid").is_none());
+}
+
+#[tokio::test]
+async fn cluster_join_rejects_non_https_api_base_url_before_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let join_token = json["join_token"].as_str().unwrap().to_string();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "access_host": "example.com",
+                        "api_base_url": "http://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(body["error"]["message"], "api_base_url must use https");
+
+    let store = store.lock().await;
+    assert!(store.get_node(&decoded.token_id).is_none());
 }
 
 #[tokio::test]
