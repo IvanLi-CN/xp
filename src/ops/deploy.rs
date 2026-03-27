@@ -21,6 +21,8 @@ use std::time::Duration;
 
 const DEFAULT_ORIGIN_URL: &str = "http://127.0.0.1:62416";
 const HOSTNAME_SUFFIX_LEN: usize = 4;
+const PUBLIC_API_PROBE_ATTEMPTS: usize = 60;
+const PUBLIC_API_PROBE_DELAY: Duration = Duration::from_secs(2);
 const HOSTNAME_ALPHABET: &[char] = &[
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
     't', 'u', 'v', 'w', 'x', 'y', 'z',
@@ -250,15 +252,19 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         }
         eprintln!("  - init directories and service files (no enable)");
         eprintln!("  - install xp binary");
+        if plan.cloudflare_enabled {
+            eprintln!("  - cloudflare provision");
+            if plan.join_token_present && plan.enable_services {
+                eprintln!("  - wait for cloudflared service");
+                eprintln!("  - preflight public api_base_url before xp join");
+            }
+        }
         if plan.join_token_present {
             eprintln!("  - xp join (cluster join token)");
             eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH)");
         } else {
             eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH; print token once)");
             eprintln!("  - xp bootstrap (xp init)");
-        }
-        if plan.cloudflare_enabled {
-            eprintln!("  - cloudflare provision");
         }
         if plan.enable_services {
             eprintln!("  - enable and start services");
@@ -335,7 +341,59 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         .await?;
     }
 
+    if let Some(cf) = plan.cloudflare.clone() {
+        let token = cloudflare::load_cloudflare_token_for_deploy(
+            &paths,
+            args.cloudflare_token.as_deref(),
+            args.cloudflare_token_stdin_value.as_deref(),
+        )
+        .map(|(t, _src)| t)
+        .map_err(|e| {
+            if e.message == "token_missing" {
+                ExitError::new(
+                    3,
+                    "cloudflare token missing: provide --cloudflare-token / --cloudflare-token-stdin, or set CLOUDFLARE_API_TOKEN, or write /etc/xp-ops/cloudflare_tunnel/api_token",
+                )
+            } else {
+                e
+            }
+        })?;
+
+        // Ensure deploy uses the exact token resolved for this run (incl. --cloudflare-token-stdin).
+        // `cmd_cloudflare_provision` remains the standalone CLI entry which reads from env/file.
+        cloudflare::cmd_cloudflare_provision_with_token(
+            paths.clone(),
+            crate::ops::cli::CloudflareProvisionArgs {
+                tunnel_name: Some(cf.tunnel_name),
+                account_id: cf.account_id,
+                zone_id: cf.zone_id,
+                hostname: cf.hostname,
+                origin_url: cf.origin_url,
+                dns_record_id_override: cf.dns_override.map(|r| r.id),
+                tunnel_id_override: cf.tunnel_override.map(|t| t.id),
+                enable: plan.enable_services,
+                no_enable: !plan.enable_services,
+                dry_run: mode == Mode::DryRun,
+            },
+            token,
+        )
+        .await?;
+    }
+
     if plan.join_token_present {
+        if plan.cloudflare_enabled && plan.enable_services {
+            if mode == Mode::Real && !is_test_root(paths.root()) {
+                let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
+                let init_system = detect_init_system(distro, None);
+                wait_for_service(init_system, "cloudflared").await?;
+            }
+            if mode == Mode::DryRun {
+                eprintln!("would probe {} before xp join", plan.api_base_url);
+            } else {
+                wait_for_public_api_base_url(&plan.api_base_url).await?;
+            }
+        }
+
         let join_token = args
             .join_token
             .clone()
@@ -378,45 +436,6 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 xp_data_dir: Path::new("/var/lib/xp/data").to_path_buf(),
                 dry_run: mode == Mode::DryRun,
             },
-        )
-        .await?;
-    }
-
-    if let Some(cf) = plan.cloudflare.clone() {
-        let token = cloudflare::load_cloudflare_token_for_deploy(
-            &paths,
-            args.cloudflare_token.as_deref(),
-            args.cloudflare_token_stdin_value.as_deref(),
-        )
-        .map(|(t, _src)| t)
-        .map_err(|e| {
-            if e.message == "token_missing" {
-                ExitError::new(
-                    3,
-                    "cloudflare token missing: provide --cloudflare-token / --cloudflare-token-stdin, or set CLOUDFLARE_API_TOKEN, or write /etc/xp-ops/cloudflare_tunnel/api_token",
-                )
-            } else {
-                e
-            }
-        })?;
-
-        // Ensure deploy uses the exact token resolved for this run (incl. --cloudflare-token-stdin).
-        // `cmd_cloudflare_provision` remains the standalone CLI entry which reads from env/file.
-        cloudflare::cmd_cloudflare_provision_with_token(
-            paths.clone(),
-            crate::ops::cli::CloudflareProvisionArgs {
-                tunnel_name: Some(cf.tunnel_name),
-                account_id: cf.account_id,
-                zone_id: cf.zone_id,
-                hostname: cf.hostname,
-                origin_url: cf.origin_url,
-                dns_record_id_override: cf.dns_override.map(|r| r.id),
-                tunnel_id_override: cf.tunnel_override.map(|t| t.id),
-                enable: plan.enable_services,
-                no_enable: !plan.enable_services,
-                dry_run: mode == Mode::DryRun,
-            },
-            token,
         )
         .await?;
     }
@@ -1408,6 +1427,64 @@ async fn wait_for_service(init_system: InitSystem, name: &str) -> Result<(), Exi
     ))
 }
 
+fn public_api_probe_status_is_ready(status: reqwest::StatusCode) -> bool {
+    status.as_u16() != 530
+}
+
+async fn wait_for_public_api_base_url(
+    api_base_url: &str,
+) -> Result<reqwest::StatusCode, ExitError> {
+    validate_https_origin_no_port(api_base_url)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ExitError::new(5, format!("http_error: build client: {e}")))?;
+    let health_url = format!("{}/health", api_base_url.trim_end_matches('/'));
+    wait_for_public_api_health_with_client(
+        &client,
+        &health_url,
+        PUBLIC_API_PROBE_ATTEMPTS,
+        PUBLIC_API_PROBE_DELAY,
+    )
+    .await
+}
+
+async fn wait_for_public_api_health_with_client(
+    client: &reqwest::Client,
+    health_url: &str,
+    attempts: usize,
+    delay: Duration,
+) -> Result<reqwest::StatusCode, ExitError> {
+    let mut last_observation = "no attempts executed".to_string();
+
+    for attempt in 0..attempts {
+        match client.get(health_url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if public_api_probe_status_is_ready(status) {
+                    return Ok(status);
+                }
+                last_observation = format!("http {}", status.as_u16());
+            }
+            Err(err) => {
+                last_observation = err.to_string();
+            }
+        }
+
+        if attempt + 1 < attempts {
+            tokio::time::sleep(delay).await;
+        }
+    }
+
+    Err(ExitError::new(
+        3,
+        format!(
+            "preflight_failed: public api-base-url is not ready before xp join: {last_observation}"
+        ),
+    ))
+}
+
 fn render_plan_issues(plan: &DeployPlan, suppress_conflicts: bool) {
     if !plan.warnings.is_empty() {
         eprintln!("{}", warn("warnings:"));
@@ -1783,7 +1860,12 @@ fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{Router, http::StatusCode, routing::get};
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const VALID_ADMIN_TOKEN_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
 
@@ -1937,5 +2019,87 @@ XP_XRAY_CUSTOM=keep-me\n",
             "should not emit raw token_missing error string: {:?}",
             plan.errors
         );
+    }
+
+    #[tokio::test]
+    async fn public_api_probe_accepts_non_530_edge_response() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&mock)
+            .await;
+
+        let client = reqwest::Client::builder().build().unwrap();
+        let status = wait_for_public_api_health_with_client(
+            &client,
+            &format!("{}/health", mock.uri()),
+            1,
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status.as_u16(), 502);
+    }
+
+    #[tokio::test]
+    async fn public_api_probe_rejects_cloudflare_530() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(530))
+            .mount(&mock)
+            .await;
+
+        let client = reqwest::Client::builder().build().unwrap();
+        let err = wait_for_public_api_health_with_client(
+            &client,
+            &format!("{}/health", mock.uri()),
+            1,
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.message.contains("preflight_failed") && err.message.contains("http 530"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            let app = Router::new().route(
+                "/health",
+                get(|| async { (StatusCode::BAD_GATEWAY, "edge warming") }),
+            );
+            let listener = TcpListener::bind(addr).await.unwrap();
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = ready_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::builder().build().unwrap();
+        let status = wait_for_public_api_health_with_client(
+            &client,
+            &format!("http://{addr}/health"),
+            10,
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+
+        let _ = ready_tx.send(());
+        assert_eq!(status.as_u16(), 502);
     }
 }

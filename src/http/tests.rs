@@ -8,6 +8,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bytes::Bytes;
+use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -38,6 +39,61 @@ use crate::{
     },
     xray_supervisor::XrayHealthHandle,
 };
+
+#[derive(Clone)]
+struct PanickingRaft {
+    inner: LocalRaft,
+    panic_on_add_learner: bool,
+    panic_on_change_membership: bool,
+}
+
+impl crate::raft::app::RaftFacade for PanickingRaft {
+    fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, crate::raft::types::NodeMeta>> {
+        <LocalRaft as crate::raft::app::RaftFacade>::metrics(&self.inner)
+    }
+
+    fn client_write(
+        &self,
+        cmd: DesiredStateCommand,
+    ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<crate::raft::types::ClientResponse>> {
+        <LocalRaft as crate::raft::app::RaftFacade>::client_write(&self.inner, cmd)
+    }
+
+    fn add_learner(
+        &self,
+        node_id: u64,
+        node: crate::raft::types::NodeMeta,
+    ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+        if self.panic_on_add_learner {
+            return Box::pin(async move {
+                let _ = (node_id, node);
+                panic!("simulated add_learner panic");
+            });
+        }
+        <LocalRaft as crate::raft::app::RaftFacade>::add_learner(&self.inner, node_id, node)
+    }
+
+    fn add_voters(
+        &self,
+        node_ids: std::collections::BTreeSet<u64>,
+    ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+        <LocalRaft as crate::raft::app::RaftFacade>::add_voters(&self.inner, node_ids)
+    }
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<u64, crate::raft::types::NodeMeta>,
+        retain: bool,
+    ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+        if self.panic_on_change_membership {
+            return Box::pin(async move {
+                let _ = (changes, retain);
+                panic!("simulated change_membership panic");
+            });
+        }
+        <LocalRaft as crate::raft::app::RaftFacade>::change_membership(&self.inner, changes, retain)
+    }
+}
 
 fn test_config(data_dir: PathBuf) -> Config {
     let hash = test_admin_token_hash();
@@ -164,6 +220,47 @@ fn app_with(
         geo_db_update,
     );
     (router, store)
+}
+
+fn build_app_with_cluster_store_and_raft(
+    config: Config,
+    cluster: ClusterMetadata,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    raft: Arc<dyn crate::raft::app::RaftFacade>,
+    reconcile: ReconcileHandle,
+) -> axum::Router {
+    let cluster_ca_pem = cluster.read_cluster_ca_pem(&config.data_dir).unwrap();
+    let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(&config.data_dir).unwrap();
+    let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health,
+    );
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+        false,
+    );
+    let geo_db_update = test_geo_db_update_handle(&config, store.clone());
+    build_router(
+        config,
+        store,
+        reconcile,
+        xray_health,
+        node_runtime,
+        endpoint_probe,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        None,
+        geo_db_update,
+    )
 }
 
 #[tokio::test]
@@ -420,6 +517,50 @@ fn req(method: &str, uri: &str) -> Request<Body> {
         .uri(uri)
         .body(Body::empty())
         .unwrap()
+}
+
+fn issue_signed_join_token_for_tests(
+    cluster_id: &str,
+    leader_api_base_url: &str,
+    cluster_ca_pem: &str,
+    cluster_ca_key_pem: &str,
+    token_id: &str,
+) -> String {
+    #[derive(serde::Serialize)]
+    struct SignedPayload<'a> {
+        cluster_id: &'a str,
+        leader_api_base_url: &'a str,
+        cluster_ca_pem: &'a str,
+        token_id: &'a str,
+        expires_at: String,
+    }
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(900);
+    let expires_at_rfc3339 = expires_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let signed_payload = SignedPayload {
+        cluster_id,
+        leader_api_base_url,
+        cluster_ca_pem,
+        token_id,
+        expires_at: expires_at_rfc3339.clone(),
+    };
+
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(cluster_ca_key_pem.as_bytes()).unwrap();
+    mac.update(&serde_json::to_vec(&signed_payload).unwrap());
+    let secret =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+    let token = json!({
+        "cluster_id": cluster_id,
+        "leader_api_base_url": leader_api_base_url,
+        "cluster_ca_pem": cluster_ca_pem,
+        "token_id": token_id,
+        "one_time_secret": secret,
+        "expires_at": expires_at_rfc3339,
+    });
+
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token).unwrap())
 }
 
 fn req_authed(method: &str, uri: &str) -> Request<Body> {
@@ -1098,6 +1239,299 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
     let got_hash = hex::encode(Sha256::digest(key_pem.as_bytes()));
     let expected_hash = hex::encode(Sha256::digest(expected_key_pem.as_bytes()));
     assert_eq!(got_hash, expected_hash);
+}
+
+#[tokio::test]
+async fn cluster_join_rejects_invalid_token_node_id_with_json_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+    let cluster_ca_pem = meta.read_cluster_ca_pem(tmp.path()).unwrap();
+    let cluster_ca_key_pem = meta.read_cluster_ca_key_pem(tmp.path()).unwrap().unwrap();
+    let join_token = issue_signed_join_token_for_tests(
+        &meta.cluster_id,
+        &meta.api_base_url,
+        &cluster_ca_pem,
+        &cluster_ca_key_pem,
+        "not-a-ulid",
+    );
+    let csr =
+        crate::cluster_identity::generate_node_keypair_and_csr("01JTESTTOKENID000000000000000")
+            .unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "access_host": "example.com",
+                        "api_base_url": "https://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid ulid"),
+        "unexpected error: {}",
+        body["error"]["message"].as_str().unwrap()
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node("not-a-ulid").is_none());
+}
+
+#[tokio::test]
+async fn cluster_join_rejects_non_https_api_base_url_before_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let join_token = json["join_token"].as_str().unwrap().to_string();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "access_host": "example.com",
+                        "api_base_url": "http://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(body["error"]["message"], "api_base_url must use https");
+
+    let store = store.lock().await;
+    assert!(store.get_node(&decoded.token_id).is_none());
+}
+
+#[tokio::test]
+async fn cluster_join_returns_json_error_when_add_learner_panics() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        panic_on_add_learner: true,
+        panic_on_change_membership: false,
+    });
+    let app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store.clone(),
+        raft,
+        ReconcileHandle::noop(),
+    );
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/cluster/join-tokens",
+            json!({ "ttl_seconds": 900 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    let join_token = json["join_token"].as_str().unwrap().to_string();
+
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cluster/join")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "join_token": join_token,
+                        "node_name": "node-2",
+                        "access_host": "example.com",
+                        "api_base_url": "https://node-2.internal:8443",
+                        "csr_pem": csr.csr_pem,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "internal");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("join add_learner failed: raft add_learner panicked"),
+        "unexpected error: {}",
+        body["error"]["message"].as_str().unwrap()
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node(&decoded.token_id).is_none());
+}
+
+#[tokio::test]
+async fn delete_node_returns_json_error_when_change_membership_panics() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let extra_node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://node-2.internal:8443".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut locked = store.lock().await;
+        locked.upsert_node(extra_node.clone()).unwrap();
+    }
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let extra_raft_id = raft_node_id_from_ulid(&extra_node.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    nodes.insert(
+        extra_raft_id,
+        RaftNodeMeta {
+            name: extra_node.node_name.clone(),
+            api_base_url: extra_node.api_base_url.clone(),
+            raft_endpoint: extra_node.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        panic_on_add_learner: false,
+        panic_on_change_membership: true,
+    });
+    let app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store.clone(),
+        raft,
+        ReconcileHandle::noop(),
+    );
+
+    let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
+    let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "internal");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("change_membership remove_nodes: raft change_membership panicked"),
+        "unexpected error: {}",
+        body["error"]["message"].as_str().unwrap()
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node(&extra_node.node_id).is_some());
 }
 
 #[tokio::test]
