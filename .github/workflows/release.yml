@@ -33,11 +33,25 @@ jobs:
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - name: resolve release head sha
+        id: release-head
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_sha="${RELEASE_HEAD_SHA}"
+          if [[ ! "${target_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid head_sha: ${target_sha}" >&2
+            exit 1
+          fi
+          echo "release_head_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+          echo "RELEASE_REQUESTED_SHA=${target_sha}"
+          echo "RELEASE_TARGET_SHA=${target_sha}"
+
       - name: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ env.RELEASE_HEAD_SHA }}
+          ref: ${{ steps.release-head.outputs.release_head_sha }}
 
       - name: determine release intent (labels)
         id: intent
