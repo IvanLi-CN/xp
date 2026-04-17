@@ -59,7 +59,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, JsonSnapshotStore, StoreError},
+    state::{DesiredStateCommand, JsonSnapshotStore, MihomoDeliveryMode, StoreError},
     subscription,
     xray_supervisor::XrayHealthHandle,
 };
@@ -497,7 +497,7 @@ struct PatchNodeRequest {
     quota_reset: Option<NodeQuotaReset>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct AdminServiceConfigResponse {
     bind: String,
     xray_api_addr: String,
@@ -511,6 +511,14 @@ struct AdminServiceConfigResponse {
     ip_geo_origin: String,
     admin_token_present: bool,
     admin_token_masked: String,
+    mihomo_delivery_mode: MihomoDeliveryMode,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PatchAdminConfigRequest {
+    #[serde(default)]
+    mihomo_delivery_mode: Option<MihomoDeliveryMode>,
 }
 
 #[derive(Deserialize)]
@@ -735,7 +743,7 @@ pub fn build_router(
             post(admin_internal_raft_set_nodes),
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
-        .route("/config", get(admin_get_config))
+        .route("/config", get(admin_get_config).patch(admin_patch_config))
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
@@ -887,6 +895,18 @@ pub fn build_router(
         .route("/cluster/info", get(cluster_info))
         .route("/version/check", get(api_version_check))
         .route("/cluster/join", post(cluster_join))
+        .route(
+            "/sub/:subscription_token/mihomo/legacy",
+            get(get_subscription_mihomo_legacy),
+        )
+        .route(
+            "/sub/:subscription_token/mihomo/provider",
+            get(get_subscription_mihomo_provider),
+        )
+        .route(
+            "/sub/:subscription_token/mihomo/provider/system",
+            get(get_subscription_mihomo_provider_system),
+        )
         .route("/sub/:subscription_token", get(get_subscription))
         .nest("/admin", admin)
         .fallback(fallback_not_found);
@@ -3016,9 +3036,9 @@ async fn admin_delete_node(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn admin_get_config(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
+async fn build_admin_service_config_response(
+    state: &AppState,
+) -> Result<AdminServiceConfigResponse, ApiError> {
     let admin_token_present = state.config.admin_token_hash().is_some();
     let admin_token_masked = if admin_token_present {
         "********".to_string()
@@ -3032,8 +3052,12 @@ async fn admin_get_config(
         ip_geo_origin
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
+    let mihomo_delivery_mode = {
+        let store = state.store.lock().await;
+        store.mihomo_delivery_mode()
+    };
 
-    Ok(Json(AdminServiceConfigResponse {
+    Ok(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
         xray_api_addr: state.config.xray_api_addr.to_string(),
         data_dir: state.config.data_dir.display().to_string(),
@@ -3046,7 +3070,35 @@ async fn admin_get_config(
         ip_geo_origin,
         admin_token_present,
         admin_token_masked,
-    }))
+        mihomo_delivery_mode,
+    })
+}
+
+async fn admin_get_config(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
+    Ok(Json(build_admin_service_config_response(&state).await?))
+}
+
+async fn admin_patch_config(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<PatchAdminConfigRequest>,
+) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
+    let Some(mihomo_delivery_mode) = req.mihomo_delivery_mode else {
+        return Err(ApiError::invalid_request(
+            "mihomo_delivery_mode is required",
+        ));
+    };
+
+    let _ = raft_write(
+        &state,
+        DesiredStateCommand::SetMihomoDeliveryMode {
+            mode: mihomo_delivery_mode,
+        },
+    )
+    .await?;
+
+    Ok(Json(build_admin_service_config_response(&state).await?))
 }
 
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
@@ -6223,6 +6275,23 @@ struct SubscriptionQuery {
     format: Option<String>,
 }
 
+#[derive(Clone)]
+struct SubscriptionContext {
+    user: User,
+    memberships: Vec<crate::state::NodeUserEndpointMembership>,
+    endpoints: Vec<Endpoint>,
+    nodes: Vec<Node>,
+    mihomo_profile: Option<crate::state::UserMihomoProfile>,
+    mihomo_delivery_mode: MihomoDeliveryMode,
+}
+
+#[derive(Clone, Copy)]
+enum MihomoRenderMode {
+    Legacy,
+    Provider,
+    ProviderSystem,
+}
+
 fn text_plain_utf8(body: String) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -6241,8 +6310,183 @@ fn text_yaml_utf8(body: String) -> Response {
     (headers, body).into_response()
 }
 
+async fn load_subscription_context(
+    state: &AppState,
+    subscription_token: &str,
+) -> Result<SubscriptionContext, ApiError> {
+    let store = state.store.lock().await;
+    let user = store
+        .get_user_by_subscription_token(subscription_token)
+        .ok_or_else(|| ApiError::not_found("not found"))?;
+    let memberships = store
+        .list_user_access(&user.user_id)
+        .map_err(ApiError::from)?;
+    let endpoints = store.list_endpoints();
+    let nodes = store.list_nodes();
+    let mihomo_profile = store.get_user_mihomo_profile(&user.user_id);
+    let mihomo_delivery_mode = store.mihomo_delivery_mode();
+    Ok(SubscriptionContext {
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        mihomo_profile,
+        mihomo_delivery_mode,
+    })
+}
+
+fn map_subscription_render_error(err: subscription::SubscriptionError) -> ApiError {
+    match err {
+        other @ subscription::SubscriptionError::MihomoReservedProxyProviderNameConflict {
+            ..
+        } => ApiError::invalid_request(other.to_string()),
+        other => ApiError::internal(format!("failed to build subscription: {other}")),
+    }
+}
+
+fn first_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn forwarded_pair(value: &str, key: &str) -> Option<String> {
+    value.split(',').next()?.split(';').find_map(|segment| {
+        let (raw_key, raw_value) = segment.trim().split_once('=')?;
+        raw_key
+            .trim()
+            .eq_ignore_ascii_case(key)
+            .then(|| raw_value.trim().trim_matches('"').to_string())
+    })
+}
+
+fn normalized_origin_from_url(value: &str) -> Option<String> {
+    let url = reqwest::Url::parse(value).ok()?;
+    let host = url.host_str()?;
+    let mut origin = format!("{}://{host}", url.scheme());
+    if let Some(port) = url.port() {
+        origin.push(':');
+        origin.push_str(&port.to_string());
+    }
+    Some(origin)
+}
+
+fn resolve_request_origin(headers: &HeaderMap, fallback_api_base_url: &str) -> String {
+    let fallback_origin = normalized_origin_from_url(fallback_api_base_url)
+        .unwrap_or_else(|| fallback_api_base_url.trim_end_matches('/').to_string());
+    let fallback_scheme = fallback_origin
+        .split("://")
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("https");
+
+    if let Some(forwarded) = first_header_value(headers, "forwarded")
+        && let Some(host) = forwarded_pair(&forwarded, "host")
+    {
+        let scheme =
+            forwarded_pair(&forwarded, "proto").unwrap_or_else(|| fallback_scheme.to_string());
+        return format!("{scheme}://{host}");
+    }
+
+    let scheme = first_header_value(headers, "x-forwarded-proto")
+        .unwrap_or_else(|| fallback_scheme.to_string());
+    let forwarded_port = first_header_value(headers, "x-forwarded-port");
+    if let Some(mut host) = first_header_value(headers, "x-forwarded-host")
+        .or_else(|| first_header_value(headers, "host"))
+    {
+        if let Some(port) = forwarded_port
+            && !host.contains(':')
+        {
+            host.push(':');
+            host.push_str(&port);
+        }
+        return format!("{scheme}://{host}");
+    }
+
+    fallback_origin
+}
+
+fn render_mihomo_subscription(
+    ca_key_pem: &str,
+    ctx: &SubscriptionContext,
+    mode: MihomoRenderMode,
+    headers: &HeaderMap,
+    fallback_api_base_url: &str,
+) -> Result<Response, ApiError> {
+    match mode {
+        MihomoRenderMode::ProviderSystem => subscription::build_mihomo_provider_system_yaml(
+            ca_key_pem,
+            &ctx.user,
+            &ctx.memberships,
+            &ctx.endpoints,
+            &ctx.nodes,
+        )
+        .map(text_yaml_utf8)
+        .map_err(map_subscription_render_error),
+        MihomoRenderMode::Legacy => {
+            if let Some(profile) = &ctx.mihomo_profile {
+                subscription::build_mihomo_yaml(
+                    ca_key_pem,
+                    &ctx.user,
+                    &ctx.memberships,
+                    &ctx.endpoints,
+                    &ctx.nodes,
+                    profile,
+                )
+                .map(text_yaml_utf8)
+                .map_err(map_subscription_render_error)
+            } else {
+                subscription::build_clash_yaml(
+                    ca_key_pem,
+                    &ctx.user,
+                    &ctx.memberships,
+                    &ctx.endpoints,
+                    &ctx.nodes,
+                )
+                .map(text_yaml_utf8)
+                .map_err(map_subscription_render_error)
+            }
+        }
+        MihomoRenderMode::Provider => {
+            if let Some(profile) = &ctx.mihomo_profile {
+                let origin = resolve_request_origin(headers, fallback_api_base_url);
+                let system_provider_url = format!(
+                    "{origin}/api/sub/{}/mihomo/provider/system",
+                    ctx.user.subscription_token
+                );
+                subscription::build_mihomo_provider_yaml(
+                    ca_key_pem,
+                    &ctx.user,
+                    &ctx.memberships,
+                    &ctx.endpoints,
+                    &ctx.nodes,
+                    profile,
+                    &system_provider_url,
+                )
+                .map(text_yaml_utf8)
+                .map_err(map_subscription_render_error)
+            } else {
+                subscription::build_clash_yaml(
+                    ca_key_pem,
+                    &ctx.user,
+                    &ctx.memberships,
+                    &ctx.endpoints,
+                    &ctx.nodes,
+                )
+                .map(text_yaml_utf8)
+                .map_err(map_subscription_render_error)
+            }
+        }
+    }
+}
+
 async fn get_subscription(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     Path(subscription_token): Path<String>,
     axum::extract::Query(query): axum::extract::Query<SubscriptionQuery>,
 ) -> Result<Response, ApiError> {
@@ -6264,52 +6508,108 @@ async fn get_subscription(
         .as_ref()
         .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
 
-    let (user, memberships, endpoints, nodes, mihomo_profile) = {
-        let store = state.store.lock().await;
-        let user = store
-            .get_user_by_subscription_token(&subscription_token)
-            .ok_or_else(|| ApiError::not_found("not found"))?;
-        let memberships = store
-            .list_user_access(&user.user_id)
-            .map_err(ApiError::from)?;
-        let endpoints = store.list_endpoints();
-        let nodes = store.list_nodes();
-        let mihomo_profile = store.get_user_mihomo_profile(&user.user_id);
-        (user, memberships, endpoints, nodes, mihomo_profile)
-    };
+    let ctx = load_subscription_context(&state, &subscription_token).await?;
 
     match format {
-        "raw" => subscription::build_raw_text(ca_key_pem, &user, &memberships, &endpoints, &nodes)
-            .map(text_plain_utf8)
-            .map_err(|_e| ApiError::internal("failed to build subscription")),
-        "base64" => subscription::build_base64(ca_key_pem, &user, &memberships, &endpoints, &nodes)
-            .map(text_plain_utf8)
-            .map_err(|_e| ApiError::internal("failed to build subscription")),
-        "clash" => {
-            subscription::build_clash_yaml(ca_key_pem, &user, &memberships, &endpoints, &nodes)
-                .map(text_yaml_utf8)
-                .map_err(|_e| ApiError::internal("failed to build subscription"))
-        }
-        "mihomo" => {
-            if let Some(profile) = mihomo_profile {
-                subscription::build_mihomo_yaml(
-                    ca_key_pem,
-                    &user,
-                    &memberships,
-                    &endpoints,
-                    &nodes,
-                    &profile,
-                )
-                .map(text_yaml_utf8)
-                .map_err(|_e| ApiError::internal("failed to build subscription"))
-            } else {
-                subscription::build_clash_yaml(ca_key_pem, &user, &memberships, &endpoints, &nodes)
-                    .map(text_yaml_utf8)
-                    .map_err(|_e| ApiError::internal("failed to build subscription"))
-            }
-        }
+        "raw" => subscription::build_raw_text(
+            ca_key_pem,
+            &ctx.user,
+            &ctx.memberships,
+            &ctx.endpoints,
+            &ctx.nodes,
+        )
+        .map(text_plain_utf8)
+        .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "base64" => subscription::build_base64(
+            ca_key_pem,
+            &ctx.user,
+            &ctx.memberships,
+            &ctx.endpoints,
+            &ctx.nodes,
+        )
+        .map(text_plain_utf8)
+        .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "clash" => subscription::build_clash_yaml(
+            ca_key_pem,
+            &ctx.user,
+            &ctx.memberships,
+            &ctx.endpoints,
+            &ctx.nodes,
+        )
+        .map(text_yaml_utf8)
+        .map_err(|_e| ApiError::internal("failed to build subscription")),
+        "mihomo" => render_mihomo_subscription(
+            ca_key_pem,
+            &ctx,
+            match ctx.mihomo_delivery_mode {
+                MihomoDeliveryMode::Legacy => MihomoRenderMode::Legacy,
+                MihomoDeliveryMode::Provider => MihomoRenderMode::Provider,
+            },
+            &headers,
+            &state.config.api_base_url,
+        ),
         _ => Err(ApiError::internal("unreachable subscription format")),
     }
+}
+
+async fn get_subscription_mihomo_legacy(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    Path(subscription_token): Path<String>,
+) -> Result<Response, ApiError> {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let ctx = load_subscription_context(&state, &subscription_token).await?;
+    render_mihomo_subscription(
+        ca_key_pem,
+        &ctx,
+        MihomoRenderMode::Legacy,
+        &headers,
+        &state.config.api_base_url,
+    )
+}
+
+async fn get_subscription_mihomo_provider(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    Path(subscription_token): Path<String>,
+) -> Result<Response, ApiError> {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let ctx = load_subscription_context(&state, &subscription_token).await?;
+    render_mihomo_subscription(
+        ca_key_pem,
+        &ctx,
+        MihomoRenderMode::Provider,
+        &headers,
+        &state.config.api_base_url,
+    )
+}
+
+async fn get_subscription_mihomo_provider_system(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    Path(subscription_token): Path<String>,
+) -> Result<Response, ApiError> {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let ctx = load_subscription_context(&state, &subscription_token).await?;
+    render_mihomo_subscription(
+        ca_key_pem,
+        &ctx,
+        MihomoRenderMode::ProviderSystem,
+        &headers,
+        &state.config.api_base_url,
+    )
 }
 
 #[cfg(test)]

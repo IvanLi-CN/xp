@@ -1,6 +1,11 @@
 import { throwIfNotOk } from "./backendError";
 
-export type SubscriptionFormat = "raw" | "clash" | "mihomo";
+export type SubscriptionFormat =
+	| "raw"
+	| "clash"
+	| "mihomo"
+	| "mihomo_legacy"
+	| "mihomo_provider";
 
 export async function fetchSubscription(
 	subscriptionToken: string,
@@ -8,13 +13,18 @@ export async function fetchSubscription(
 	signal?: AbortSignal,
 ): Promise<string> {
 	const params = new URLSearchParams();
-	if (format) {
+	let url = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+	if (format === "mihomo_legacy") {
+		url = `${url}/mihomo/legacy`;
+	} else if (format === "mihomo_provider") {
+		url = `${url}/mihomo/provider`;
+	} else if (format) {
 		params.set("format", format);
 	}
 	const query = params.toString();
-	const url = query
-		? `/api/sub/${encodeURIComponent(subscriptionToken)}?${query}`
-		: `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+	if (query) {
+		url = `${url}?${query}`;
+	}
 
 	const res = await fetch(url, {
 		method: "GET",

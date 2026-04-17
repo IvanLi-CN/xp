@@ -224,6 +224,14 @@ impl Default for GeoDbUpdateSettingsCompat {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MihomoDeliveryMode {
+    #[default]
+    Legacy,
+    Provider,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedState {
     pub schema_version: u32,
@@ -258,6 +266,8 @@ pub struct PersistedState {
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
+    #[serde(default)]
+    pub mihomo_delivery_mode: MihomoDeliveryMode,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
@@ -280,6 +290,7 @@ impl PersistedState {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
             user_mihomo_profiles: BTreeMap::new(),
+            mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
@@ -1544,6 +1555,9 @@ pub enum DesiredStateCommand {
         user_id: String,
         profile: UserMihomoProfile,
     },
+    SetMihomoDeliveryMode {
+        mode: MihomoDeliveryMode,
+    },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
     },
@@ -1670,6 +1684,9 @@ enum DesiredStateCommandCompat {
     SetUserMihomoProfile {
         user_id: String,
         profile: UserMihomoProfile,
+    },
+    SetMihomoDeliveryMode {
+        mode: MihomoDeliveryMode,
     },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
@@ -1800,6 +1817,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             },
             DesiredStateCommandCompat::SetUserMihomoProfile { user_id, profile } => {
                 Self::SetUserMihomoProfile { user_id, profile }
+            }
+            DesiredStateCommandCompat::SetMihomoDeliveryMode { mode } => {
+                Self::SetMihomoDeliveryMode { mode }
             }
             DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => Self::CompatNoop {
                 note: format!(
@@ -2499,6 +2519,10 @@ impl DesiredStateCommand {
                 state
                     .user_mihomo_profiles
                     .insert(user_id.clone(), profile.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetMihomoDeliveryMode { mode } => {
+                state.mihomo_delivery_mode = *mode;
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::SetGeoDbUpdateSettings { .. } => Ok(DesiredStateApplyResult::Applied),
@@ -3645,6 +3669,10 @@ impl JsonSnapshotStore {
 
     pub fn get_user_mihomo_profile(&self, user_id: &str) -> Option<UserMihomoProfile> {
         self.state.user_mihomo_profiles.get(user_id).cloned()
+    }
+
+    pub fn mihomo_delivery_mode(&self) -> MihomoDeliveryMode {
+        self.state.mihomo_delivery_mode
     }
 
     pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {
