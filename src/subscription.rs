@@ -64,6 +64,9 @@ pub enum SubscriptionError {
     MihomoExtraProxyProviderConflict {
         name: String,
     },
+    MihomoReservedProxyProviderNameConflict {
+        name: String,
+    },
     MihomoProxyNameMissing {
         index: usize,
     },
@@ -156,6 +159,12 @@ impl std::fmt::Display for SubscriptionError {
                 write!(
                     f,
                     "mihomo proxy-provider name conflict while normalizing legacy profile: {name}"
+                )
+            }
+            Self::MihomoReservedProxyProviderNameConflict { name } => {
+                write!(
+                    f,
+                    "mihomo proxy-provider name is reserved by system delivery mode: {name}"
                 )
             }
             Self::MihomoProxyNameMissing { index } => {
@@ -466,6 +475,197 @@ pub fn build_mihomo_yaml(
     })
 }
 
+pub fn build_mihomo_provider_yaml(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+    profile: &UserMihomoProfile,
+    system_provider_url: &str,
+) -> Result<String, SubscriptionError> {
+    let profile = normalize_user_mihomo_profile_for_runtime(profile)?;
+    let mut rng = rand::thread_rng();
+    let generated = build_mihomo_generated_proxies(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        &mut rng,
+    )?;
+    let generated_proxy_name_set = collect_top_level_proxy_names(&generated);
+    let (generated_direct_proxies, generated_glue_proxies) =
+        split_mihomo_generated_proxies(generated)?;
+    let mut generated_all_proxies = generated_direct_proxies.clone();
+    generated_all_proxies.extend(generated_glue_proxies.clone());
+
+    let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
+    let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    let preserved_proxy_ref_names = collect_proxy_names(&extra_proxies)?;
+    let mut proxy_ref_rename_map =
+        build_proxy_reference_rename_map(&root, &generated_all_proxies, &preserved_proxy_ref_names);
+    let landing_group_rename_map = build_landing_group_reference_rename_map(
+        &root,
+        &generated_all_proxies,
+        &proxy_ref_rename_map,
+    );
+    let (mut merged_proxies, extra_proxy_rename_map) =
+        merge_and_rename_proxies(generated_glue_proxies, extra_proxies)?;
+    merge_extra_proxy_reference_rename_map(&mut proxy_ref_rename_map, extra_proxy_rename_map);
+    proxy_ref_rename_map.extend(landing_group_rename_map);
+    remap_proxy_references_in_mapping(&mut root, &proxy_ref_rename_map);
+    dedupe_proxy_refs_in_mapping(&mut root);
+    let proxy_group_order_hints = collect_mihomo_proxy_group_order_hints(&root);
+    prune_template_reference_helper_blocks(&mut root);
+
+    let extra_provider_map = parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
+    if extra_provider_map.contains_key(serde_yaml::Value::String(
+        MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+    )) {
+        return Err(SubscriptionError::MihomoReservedProxyProviderNameConflict {
+            name: MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+        });
+    }
+
+    let mut provider_names = vec![MIHOMO_SYSTEM_PROVIDER_NAME.to_string()];
+    let mut provider_map = serde_yaml::Mapping::new();
+    provider_map.insert(
+        serde_yaml::Value::String(MIHOMO_SYSTEM_PROVIDER_NAME.to_string()),
+        serde_yaml::Value::Mapping(build_mihomo_system_provider_entry(system_provider_url)),
+    );
+    for (key, value) in extra_provider_map {
+        if let Some(name) = key.as_str() {
+            provider_names.push(name.to_string());
+        }
+        provider_map.insert(key, value);
+    }
+    let provider_name_set = provider_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let proxy_name_set = collect_top_level_proxy_names(&merged_proxies);
+
+    root.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        serde_yaml::Value::Sequence(std::mem::take(&mut merged_proxies)),
+    );
+    root.insert(
+        serde_yaml::Value::String("proxy-providers".to_string()),
+        serde_yaml::Value::Mapping(provider_map),
+    );
+    inject_mihomo_provider_proxy_groups(&mut root, &provider_names, &generated_proxy_name_set);
+    prune_unknown_proxy_provider_names_in_use_fields(&mut root, &provider_name_set);
+    let proxy_group_name_set = collect_proxy_group_names(&root);
+    prune_unknown_proxy_names_in_proxies_fields(&mut root, &proxy_name_set, &proxy_group_name_set);
+    normalize_user_proxy_group_order(
+        &mut root,
+        &proxy_group_name_set,
+        &generated_proxy_name_set,
+        &proxy_group_order_hints,
+    );
+    dedupe_proxy_refs_in_mapping(&mut root);
+    ensure_proxy_groups_have_candidates(&mut root, &provider_name_set);
+
+    serde_yaml::to_string(&serde_yaml::Value::Mapping(root)).map_err(|e| {
+        SubscriptionError::YamlSerialize {
+            reason: e.to_string(),
+        }
+    })
+}
+
+pub fn build_mihomo_provider_system_yaml(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+) -> Result<String, SubscriptionError> {
+    let mut rng = rand::thread_rng();
+    let generated = build_mihomo_generated_proxies(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        &mut rng,
+    )?;
+    let (generated_direct_proxies, _) = split_mihomo_generated_proxies(generated)?;
+
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        serde_yaml::Value::Sequence(generated_direct_proxies),
+    );
+
+    serde_yaml::to_string(&serde_yaml::Value::Mapping(root)).map_err(|e| {
+        SubscriptionError::YamlSerialize {
+            reason: e.to_string(),
+        }
+    })
+}
+
+fn split_mihomo_generated_proxies(
+    generated: Vec<serde_yaml::Value>,
+) -> Result<(Vec<serde_yaml::Value>, Vec<serde_yaml::Value>), SubscriptionError> {
+    let mut direct = Vec::new();
+    let mut glue = Vec::new();
+
+    for (idx, proxy) in generated.into_iter().enumerate() {
+        let name = proxy_name_from_yaml(&proxy, idx)?;
+        if matches!(
+            classify_proxy_ref_name(&name),
+            Some((ProxyRefKind::Chain, _))
+        ) {
+            glue.push(proxy);
+        } else {
+            direct.push(proxy);
+        }
+    }
+
+    Ok((direct, glue))
+}
+
+fn build_mihomo_system_provider_entry(system_provider_url: &str) -> serde_yaml::Mapping {
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("http".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("url".to_string()),
+        serde_yaml::Value::String(system_provider_url.to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("path".to_string()),
+        serde_yaml::Value::String(MIHOMO_SYSTEM_PROVIDER_PATH.to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("interval".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(3600)),
+    );
+    let mut health_check = serde_yaml::Mapping::new();
+    health_check.insert(
+        serde_yaml::Value::String("enable".to_string()),
+        serde_yaml::Value::Bool(true),
+    );
+    health_check.insert(
+        serde_yaml::Value::String("url".to_string()),
+        serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
+    );
+    health_check.insert(
+        serde_yaml::Value::String("interval".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(300)),
+    );
+    map.insert(
+        serde_yaml::Value::String("health-check".to_string()),
+        serde_yaml::Value::Mapping(health_check),
+    );
+    map
+}
+
+pub const MIHOMO_SYSTEM_PROVIDER_NAME: &str = "xp-system-generated";
+const MIHOMO_SYSTEM_PROVIDER_PATH: &str = "./providers/xp-system-generated.yaml";
 const MIHOMO_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|台湾|台灣|🇹🇼|Taiwan|TW)";
@@ -601,6 +801,64 @@ fn inject_mihomo_proxy_groups(
         generated_proxy_name_set,
         &landing_groups,
     );
+    inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
+
+    root.insert(
+        serde_yaml::Value::String("proxy-groups".to_string()),
+        serde_yaml::Value::Sequence(groups),
+    );
+}
+
+fn inject_mihomo_provider_proxy_groups(
+    root: &mut serde_yaml::Mapping,
+    provider_names: &[String],
+    generated_proxy_name_set: &std::collections::BTreeSet<String>,
+) {
+    let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
+        Some(serde_yaml::Value::Sequence(seq)) => seq,
+        _ => Vec::new(),
+    };
+
+    let base_names = collect_mihomo_base_names(generated_proxy_name_set);
+
+    let mut override_names = std::collections::BTreeSet::<String>::new();
+    override_names.insert(MIHOMO_OUTER_GROUP.to_string());
+    override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
+    override_names.extend(
+        MIHOMO_REGION_GROUP_NAMES
+            .iter()
+            .map(|name| (*name).to_string()),
+    );
+
+    groups.retain(|value| {
+        let serde_yaml::Value::Mapping(map) = value else {
+            return true;
+        };
+        let Some(name) = map
+            .get(serde_yaml::Value::String("name".to_string()))
+            .and_then(|v| v.as_str())
+        else {
+            return true;
+        };
+        if name.starts_with("🛬 ") {
+            return false;
+        }
+        !override_names.contains(name)
+    });
+
+    let provider_values = provider_names
+        .iter()
+        .map(|name| serde_yaml::Value::String(name.clone()))
+        .collect::<Vec<_>>();
+
+    inject_mihomo_outer_group(&mut groups, &provider_values);
+    let landing_groups = inject_mihomo_provider_landing_groups(
+        &mut groups,
+        &provider_values,
+        generated_proxy_name_set,
+        &base_names,
+    );
+    inject_mihomo_provider_region_groups(&mut groups, &provider_values, &landing_groups);
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
 
     root.insert(
@@ -799,6 +1057,159 @@ fn inject_mihomo_landing_groups(
     }
 
     out
+}
+
+fn exact_proxy_name_filter(name: &str) -> String {
+    format!("^{}$", regex::escape(name))
+}
+
+fn inject_mihomo_provider_landing_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    provider_values: &[serde_yaml::Value],
+    proxy_name_set: &std::collections::BTreeSet<String>,
+    base_names: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+
+    for base in base_names {
+        let group_name = format!("🛬 {base}");
+
+        let reality_name = format!("{base}-reality");
+        let ss_name = format!("{base}-ss");
+        let chain_name = format!("{base}-chain");
+
+        let mut proxies = Vec::<serde_yaml::Value>::new();
+        let filter_name = if proxy_name_set.contains(&ss_name) {
+            if proxy_name_set.contains(&chain_name) {
+                proxies.push(serde_yaml::Value::String(chain_name));
+            }
+            Some(ss_name)
+        } else if proxy_name_set.contains(&reality_name) {
+            Some(reality_name)
+        } else {
+            None
+        };
+        let Some(filter_name) = filter_name else {
+            continue;
+        };
+
+        out.push(group_name.clone());
+
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(group_name),
+        );
+        map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("fallback".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String("https://www.gstatic.com/generate_204".to_string()),
+        );
+        map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+        );
+        map.insert(
+            serde_yaml::Value::String("timeout".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
+        );
+        map.insert(
+            serde_yaml::Value::String("max-failed-times".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(1)),
+        );
+        map.insert(
+            serde_yaml::Value::String("lazy".to_string()),
+            serde_yaml::Value::Bool(false),
+        );
+        map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(exact_proxy_name_filter(&filter_name)),
+        );
+        if !proxies.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(proxies),
+            );
+        }
+        groups.push(serde_yaml::Value::Mapping(map));
+    }
+
+    out
+}
+
+fn inject_mihomo_provider_region_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    provider_values: &[serde_yaml::Value],
+    landing_groups: &[String],
+) {
+    for region in MIHOMO_REGION_GROUPS {
+        let select_name = format!("🔒 {}", region.name);
+
+        let proxies = landing_groups
+            .iter()
+            .filter_map(|name| {
+                name.strip_prefix("🛬 ").and_then(|base| {
+                    mihomo_region_slug_matches(base, region)
+                        .then(|| serde_yaml::Value::String(name.clone()))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut select_map = serde_yaml::Mapping::new();
+        select_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(select_name.clone()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("select".to_string()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(region.filter.to_string()),
+        );
+        select_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        if !proxies.is_empty() {
+            select_map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(proxies),
+            );
+        }
+        groups.push(serde_yaml::Value::Mapping(select_map));
+
+        for (prefix, hidden) in [("🌟", true), ("🤯", true), ("🛣️", true)] {
+            let mut alias_map = serde_yaml::Mapping::new();
+            alias_map.insert(
+                serde_yaml::Value::String("name".to_string()),
+                serde_yaml::Value::String(format!("{prefix} {}", region.name)),
+            );
+            alias_map.insert(
+                serde_yaml::Value::String("type".to_string()),
+                serde_yaml::Value::String("select".to_string()),
+            );
+            if hidden {
+                alias_map.insert(
+                    serde_yaml::Value::String("hidden".to_string()),
+                    serde_yaml::Value::Bool(true),
+                );
+            }
+            alias_map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(select_name.clone())]),
+            );
+            groups.push(serde_yaml::Value::Mapping(alias_map));
+        }
+    }
 }
 
 fn inject_mihomo_landing_pool_group(
@@ -2941,6 +3352,145 @@ providerB:
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(landing_refs, vec!["Tokyo-A-chain", "Tokyo-A-ss"]);
+    }
+
+    #[test]
+    fn build_mihomo_provider_yaml_moves_system_direct_proxies_into_provider() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/a
+"#
+            .to_string(),
+        };
+
+        let yaml = build_mihomo_provider_yaml(
+            SEED,
+            &u,
+            &memberships,
+            &endpoints,
+            &[n],
+            &profile,
+            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        )
+        .unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+
+        let proxy_names = root
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .unwrap()
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(proxy_names, vec!["Tokyo-A-chain"]);
+
+        let provider_map = root
+            .get("proxy-providers")
+            .and_then(Value::as_mapping)
+            .unwrap();
+        let system_provider = provider_map
+            .get(Value::String(MIHOMO_SYSTEM_PROVIDER_NAME.to_string()))
+            .and_then(Value::as_mapping)
+            .expect("provider route should inject xp-system-generated");
+        assert_eq!(
+            system_provider
+                .get(Value::String("url".to_string()))
+                .and_then(Value::as_str),
+            Some("https://sub.example.com/api/sub/token/mihomo/provider/system")
+        );
+
+        let proxy_groups = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .unwrap();
+        let landing_group = proxy_groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🛬 Tokyo-A"))
+            .expect("provider route should keep landing group");
+        assert_eq!(
+            landing_group
+                .get("proxies")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec!["Tokyo-A-chain"]
+        );
+        assert_eq!(
+            landing_group.get("filter").and_then(Value::as_str).unwrap(),
+            "^Tokyo\\-A\\-ss$"
+        );
+        assert_eq!(
+            landing_group
+                .get("use")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
+        );
+    }
+
+    #[test]
+    fn build_mihomo_provider_system_yaml_contains_only_direct_proxies() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+
+        let yaml =
+            build_mihomo_provider_system_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let proxy_names = root
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .unwrap()
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert!(proxy_names.contains(&"Tokyo-A-ss"));
+        assert!(proxy_names.contains(&"Tokyo-A-reality"));
+        assert!(!proxy_names.iter().any(|name| name.ends_with("-chain")));
     }
 
     #[test]

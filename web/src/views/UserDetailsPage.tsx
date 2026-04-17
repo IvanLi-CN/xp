@@ -379,12 +379,23 @@ export function UserDetailsPage() {
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
 		if (!subscriptionToken) return "";
-		const path = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+		const basePath = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
+		const path =
+			subFormat === "mihomo_legacy"
+				? `${basePath}/mihomo/legacy`
+				: subFormat === "mihomo_provider"
+					? `${basePath}/mihomo/provider`
+					: basePath;
 		if (typeof window === "undefined") {
+			if (subFormat === "mihomo_legacy" || subFormat === "mihomo_provider") {
+				return path;
+			}
 			return `${path}?format=${encodeURIComponent(subFormat)}`;
 		}
 		const url = new URL(path, window.location.origin);
-		url.searchParams.set("format", subFormat);
+		if (subFormat !== "mihomo_legacy" && subFormat !== "mihomo_provider") {
+			url.searchParams.set("format", subFormat);
+		}
 		return url.toString();
 	}, [subFormat, subscriptionToken]);
 
@@ -1041,7 +1052,13 @@ export function UserDetailsPage() {
 										<SelectContent>
 											<SelectItem value="raw">raw</SelectItem>
 											<SelectItem value="clash">clash</SelectItem>
-											<SelectItem value="mihomo">mihomo</SelectItem>
+											<SelectItem value="mihomo">mihomo(default)</SelectItem>
+											<SelectItem value="mihomo_legacy">
+												mihomo(legacy)
+											</SelectItem>
+											<SelectItem value="mihomo_provider">
+												mihomo(provider)
+											</SelectItem>
 										</SelectContent>
 									</Select>
 								</div>
@@ -1064,8 +1081,9 @@ export function UserDetailsPage() {
 								</Button>
 							</div>
 							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal and keeps subscription formatting
-								unchanged.
+								Preview opens in a modal. `mihomo(default)` follows the global
+								service setting; `mihomo(legacy)` / `mihomo(provider)` always
+								use explicit test paths.
 							</div>
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">

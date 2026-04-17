@@ -1,7 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
-import { fetchAdminConfig } from "../api/adminConfig";
+import {
+	type MihomoDeliveryMode,
+	fetchAdminConfig,
+	patchAdminConfig,
+} from "../api/adminConfig";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
@@ -11,6 +15,13 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -104,6 +115,13 @@ function FieldBlock({ label, value, copyText }: FieldBlockProps) {
 export function ServiceConfigPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
+	const queryClient = useQueryClient();
+	const [mihomoDeliveryModeDraft, setMihomoDeliveryModeDraft] =
+		useState<MihomoDeliveryMode>("legacy");
+	const [isSavingDeliveryMode, setIsSavingDeliveryMode] = useState(false);
+	const [deliveryModeSaveError, setDeliveryModeSaveError] = useState<
+		string | null
+	>(null);
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -120,6 +138,11 @@ export function ServiceConfigPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
 	});
+
+	useEffect(() => {
+		if (!configQuery.data) return;
+		setMihomoDeliveryModeDraft(configQuery.data.mihomo_delivery_mode);
+	}, [configQuery.data]);
 
 	const headerActions = (
 		<>
@@ -211,6 +234,8 @@ export function ServiceConfigPage() {
 		const nodeValue = `${
 			data.node_name.trim().length > 0 ? data.node_name : "(empty)"
 		}${clusterInfo.isSuccess ? ` (${shortId(clusterInfo.data.node_id)})` : ""}`;
+		const mihomoDeliveryDirty =
+			mihomoDeliveryModeDraft !== data.mihomo_delivery_mode;
 
 		return (
 			<div className="space-y-4">
@@ -224,6 +249,10 @@ export function ServiceConfigPage() {
 					<SummaryChip
 						label="access host"
 						value={displayValue(data.access_host)}
+					/>
+					<SummaryChip
+						label="mihomo default"
+						value={data.mihomo_delivery_mode}
 					/>
 				</div>
 
@@ -352,11 +381,105 @@ export function ServiceConfigPage() {
 							</div>
 						</div>
 					</div>
+
+					<div className="xp-card lg:col-span-2">
+						<div className="xp-card-body space-y-4">
+							<div>
+								<h2 className="text-base font-semibold">Mihomo delivery</h2>
+								<p className="text-sm text-muted-foreground">
+									控制 canonical `?format=mihomo` 默认返回 legacy 还是
+									provider；显式 `/mihomo/legacy` 与 `/mihomo/provider`
+									路径始终保持稳定。
+								</p>
+							</div>
+							<div className="grid gap-3 md:grid-cols-[minmax(0,260px)_1fr]">
+								<div className="space-y-2">
+									<div className="text-xs uppercase tracking-widest text-muted-foreground">
+										Default delivery mode
+									</div>
+									<Select
+										value={mihomoDeliveryModeDraft}
+										onValueChange={(value) => {
+											setDeliveryModeSaveError(null);
+											setMihomoDeliveryModeDraft(value as MihomoDeliveryMode);
+										}}
+									>
+										<SelectTrigger
+											aria-label="Mihomo default delivery"
+											className="w-full"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="legacy">legacy</SelectItem>
+											<SelectItem value="provider">provider</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground">
+									<div className="font-medium text-foreground">
+										Current default: {data.mihomo_delivery_mode}
+									</div>
+									<div className="mt-1">
+										legacy 会继续内联系统节点；provider 会把系统直连节点放到
+										`xp-system-generated` 的 `proxy-provider`。
+									</div>
+								</div>
+							</div>
+							{deliveryModeSaveError ? (
+								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+									{deliveryModeSaveError}
+								</div>
+							) : null}
+							<div className="flex flex-wrap items-center gap-3">
+								<Button
+									variant="primary"
+									loading={isSavingDeliveryMode}
+									disabled={!mihomoDeliveryDirty}
+									onClick={async () => {
+										setIsSavingDeliveryMode(true);
+										setDeliveryModeSaveError(null);
+										try {
+											const next = await patchAdminConfig(adminToken, {
+												mihomo_delivery_mode: mihomoDeliveryModeDraft,
+											});
+											queryClient.setQueryData(
+												["adminConfig", adminToken],
+												next,
+											);
+											setMihomoDeliveryModeDraft(next.mihomo_delivery_mode);
+											toast.pushToast({
+												variant: "success",
+												message: "Saved Mihomo delivery mode",
+											});
+										} catch (error) {
+											setDeliveryModeSaveError(formatErrorMessage(error));
+											toast.pushToast({
+												variant: "error",
+												message: "Save failed",
+											});
+										} finally {
+											setIsSavingDeliveryMode(false);
+										}
+									}}
+								>
+									Save default route
+								</Button>
+								<div className="text-xs text-muted-foreground">
+									Only this delivery mode is writable; process/file config
+									fields above stay read-only.
+								</div>
+							</div>
+						</div>
+					</div>
 				</div>
 
 				<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
 					<div>Settings / Service config</div>
-					<div>All fields are read-only · JSON export logs hidden</div>
+					<div>
+						Runtime file config is read-only · Mihomo default route is
+						persistent runtime state
+					</div>
 				</div>
 			</div>
 		);

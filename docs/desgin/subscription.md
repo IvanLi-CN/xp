@@ -5,7 +5,10 @@
 - `GET /api/sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
 - `GET /api/sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
 - `GET /api/sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
-- `GET /api/sub/{subscription_token}?format=mihomo`：返回用户混入配置驱动的完整 Mihomo YAML（未配置 mixin 时回退 clash）
+- `GET /api/sub/{subscription_token}?format=mihomo`：canonical Mihomo URL；返回 legacy 或 provider 主配置（未配置 mixin 时回退 clash）
+- `GET /api/sub/{subscription_token}/mihomo/legacy`：显式 legacy Mihomo 主配置
+- `GET /api/sub/{subscription_token}/mihomo/provider`：显式 provider Mihomo 主配置
+- `GET /api/sub/{subscription_token}/mihomo/provider/system`：provider payload（`proxies:` YAML）
 
 ## 2. 统一规则
 
@@ -133,7 +136,27 @@ MVP 建议输出“可直接导入”的最小 YAML：
   注释/anchors 不保证保留）。
 - 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，保存会返回 `invalid_request`，避免静默覆盖另一份输入。
 
-### 6.2 渲染规则
+### 6.2 双轨 delivery mode
+
+- 新增全局持久化设置 `mihomo_delivery_mode=legacy|provider`，默认 `legacy`。
+- `GET /api/sub/{subscription_token}?format=mihomo` 跟随该设置返回对应主配置。
+- `/mihomo/legacy` 与 `/mihomo/provider` 始终返回固定方案，便于回归。
+- provider 主配置中的系统 provider 名称固定为 `xp-system-generated`。
+
+### 6.3 Provider 方案
+
+- provider 方案中，系统直连节点（`{base}-reality` / `{base}-ss`）移入 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload。
+- provider 主配置顶层：
+  - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
+  - `proxies` = `extra_proxies_yaml` + 系统 `{base}-chain` glue proxies
+- `🛣️ JP/HK/TW` 与地区组继续通过 `use:` 消费 provider。
+- `🛬 {base}` 改为 `use + filter + proxies` 混合组：
+  - 存在 `{base}-ss` 时，保留 `{base}-chain` 作为首选直链 fallback，并通过 `filter` 从 provider 中选择 `{base}-ss`
+  - 仅存在 `{base}-reality` 时，只通过 `filter` 选择 `{base}-reality`
+- provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
+- provider 方案仅保证系统组与链式逻辑兼容；不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定。
+
+### 6.4 Legacy 渲染规则
 
 - 渲染时忽略 mixin 中的 `proxies` 与 `proxy-providers`，由系统重建：
   - 系统节点：
@@ -156,6 +179,6 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
 
-### 6.3 缺失混入配置回退
+### 6.5 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。

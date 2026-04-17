@@ -50,7 +50,14 @@ function chooseLanguage(
 	format: SubscriptionFormat,
 	content: string,
 ): CodeLanguage {
-	if (format === "clash" || format === "mihomo") return "yaml";
+	if (
+		format === "clash" ||
+		format === "mihomo" ||
+		format === "mihomo_legacy" ||
+		format === "mihomo_provider"
+	) {
+		return "yaml";
+	}
 	if (isProbablyJson(content)) return "json";
 	return "text";
 }

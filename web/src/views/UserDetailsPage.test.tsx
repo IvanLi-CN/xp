@@ -597,11 +597,27 @@ describe("<UserDetailsPage />", () => {
 		renderPage();
 
 		fireEvent.click(await screenByLabel("Subscription format"));
-		fireEvent.click(await screen.findByText("mihomo"));
+		fireEvent.click(await screen.findByText("mihomo(default)"));
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "mihomo");
+		});
+	});
+
+	it("supports explicit provider mihomo subscription preview", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByLabel("Subscription format"));
+		fireEvent.click(await screen.findByText("mihomo(provider)"));
+		fireEvent.click(await screenByRole("button", "Fetch"));
+
+		await waitFor(() => {
+			expect(fetchSubscription).toHaveBeenCalledWith(
+				"subtoken",
+				"mihomo_provider",
+			);
 		});
 	});
 

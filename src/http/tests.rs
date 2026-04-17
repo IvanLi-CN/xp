@@ -2305,10 +2305,40 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["api_base_url"], "https://127.0.0.1:62416");
     assert_eq!(json["quota_poll_interval_secs"], 10);
     assert_eq!(json["quota_auto_unban"], true);
+    assert_eq!(json["mihomo_delivery_mode"], "legacy");
 
     assert_eq!(json["admin_token_present"], true);
     assert_eq!(json["admin_token_masked"], "********");
     assert_ne!(json["admin_token_masked"], "testtoken");
+}
+
+#[tokio::test]
+async fn admin_config_patch_updates_mihomo_delivery_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            "/api/admin/config",
+            json!({
+                "mihomo_delivery_mode": "provider"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["mihomo_delivery_mode"], "provider");
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/config"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["mihomo_delivery_mode"], "provider");
 }
 
 #[tokio::test]
@@ -3942,6 +3972,268 @@ async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
     let yaml: YamlValue = serde_yaml::from_str(&body).unwrap();
     let proxies = yaml.get("proxies").and_then(|v| v.as_sequence()).unwrap();
     assert!(!proxies.is_empty());
+}
+
+#[tokio::test]
+async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token.clone();
+
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+                "mixin_yaml": "port: 0\nrules: []\n",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let legacy_res = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(legacy_res.status(), StatusCode::OK);
+    let legacy_yaml: YamlValue = serde_yaml::from_str(&body_text(legacy_res).await).unwrap();
+    let legacy_providers = legacy_yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("legacy output should still include proxy-providers root");
+    assert!(
+        !legacy_providers.contains_key(YamlValue::String(
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+        )),
+        "legacy route must not inject provider delivery metadata"
+    );
+    let legacy_proxy_names = legacy_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        legacy_proxy_names.iter().any(|name| name.ends_with("-ss")),
+        "legacy output should keep direct ss proxies inline"
+    );
+
+    let patch_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            "/api/admin/config",
+            json!({
+                "mihomo_delivery_mode": "provider"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patch_res.status(), StatusCode::OK);
+
+    let provider_res = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
+        .await
+        .unwrap();
+    assert_eq!(provider_res.status(), StatusCode::OK);
+    let provider_yaml: YamlValue = serde_yaml::from_str(&body_text(provider_res).await).unwrap();
+    let provider_map = provider_yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .expect("provider route should expose proxy-providers");
+    let system_provider = provider_map
+        .get(YamlValue::String(
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+        ))
+        .and_then(YamlValue::as_mapping)
+        .expect("provider route should inject xp-system-generated");
+    let expected_system_provider_url =
+        format!("https://127.0.0.1:62416/api/sub/{token}/mihomo/provider/system");
+    assert_eq!(
+        system_provider
+            .get(YamlValue::String("url".to_string()))
+            .and_then(YamlValue::as_str),
+        Some(expected_system_provider_url.as_str())
+    );
+    let provider_proxy_names = provider_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        provider_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-chain")),
+        "provider main config should keep glue chain proxies"
+    );
+    assert!(
+        provider_proxy_names
+            .iter()
+            .all(|name| !name.ends_with("-ss") && !name.ends_with("-reality")),
+        "provider main config should move system direct proxies into provider payload"
+    );
+
+    let explicit_legacy_res = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/sub/{token}/mihomo/legacy")))
+        .await
+        .unwrap();
+    assert_eq!(explicit_legacy_res.status(), StatusCode::OK);
+    let explicit_legacy_yaml: YamlValue =
+        serde_yaml::from_str(&body_text(explicit_legacy_res).await).unwrap();
+    let explicit_legacy_proxy_names = explicit_legacy_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        explicit_legacy_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-ss")),
+        "explicit legacy path should remain stable regardless of global setting"
+    );
+
+    let provider_system_res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}/mihomo/provider/system"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(provider_system_res.status(), StatusCode::OK);
+    let provider_system_yaml: YamlValue =
+        serde_yaml::from_str(&body_text(provider_system_res).await).unwrap();
+    let provider_system_proxy_names = provider_system_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-ss") || name.ends_with("-reality")),
+        "provider payload should expose system direct proxies"
+    );
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .all(|name| !name.ends_with("-chain")),
+        "provider payload must not contain glue chain proxies"
+    );
+}
+
+#[tokio::test]
+async fn mihomo_provider_route_uses_forwarded_origin_for_system_provider_url() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token.clone();
+
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+                "mixin_yaml": "port: 0\nrules: []\n",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/sub/{token}/mihomo/provider"))
+        .header(header::FORWARDED, "proto=https;host=sub.example.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let system_provider_url = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|providers| {
+            providers.get(YamlValue::String(
+                crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+            ))
+        })
+        .and_then(YamlValue::as_mapping)
+        .and_then(|provider| provider.get(YamlValue::String("url".to_string())))
+        .and_then(YamlValue::as_str)
+        .unwrap();
+    assert_eq!(
+        system_provider_url,
+        format!("https://sub.example.com/api/sub/{token}/mihomo/provider/system")
+    );
+}
+
+#[tokio::test]
+async fn mihomo_provider_route_rejects_reserved_system_provider_name_in_extra_providers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token.clone();
+
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+                "mixin_yaml": "port: 0\nrules: []\n",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": r#"xp-system-generated:
+  type: http
+  url: https://example.com/conflict
+  path: ./conflict.yaml
+"#,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req("GET", &format!("/api/sub/{token}/mihomo/provider")))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("xp-system-generated"),
+        "reserved provider name conflict should be surfaced clearly"
+    );
 }
 
 #[tokio::test]

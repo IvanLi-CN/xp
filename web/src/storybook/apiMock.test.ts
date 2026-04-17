@@ -253,6 +253,68 @@ describe("storybook api mock", () => {
 		expect(text).toContain(token);
 	});
 
+	it("supports admin config mihomo delivery mode patch", async () => {
+		const mock = createMockApi();
+
+		const patchRes = await mock.handle(
+			jsonRequest("/api/admin/config", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					mihomo_delivery_mode: "provider",
+				}),
+			}),
+		);
+		expect(patchRes.ok).toBe(true);
+		const patchData = (await patchRes.json()) as {
+			mihomo_delivery_mode: string;
+		};
+		expect(patchData.mihomo_delivery_mode).toBe("provider");
+
+		const getRes = await mock.handle(
+			jsonRequest("/api/admin/config", { method: "GET" }),
+		);
+		expect(getRes.ok).toBe(true);
+		const getData = (await getRes.json()) as {
+			mihomo_delivery_mode: string;
+		};
+		expect(getData.mihomo_delivery_mode).toBe("provider");
+	});
+
+	it("supports explicit mihomo provider routes", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ subscription_token: string }>;
+		};
+		const token = usersData.items[0]?.subscription_token ?? "";
+		expect(token.length).toBeGreaterThan(0);
+
+		const providerRes = await mock.handle(
+			jsonRequest(`/api/sub/${encodeURIComponent(token)}/mihomo/provider`, {
+				method: "GET",
+				headers: { Accept: "text/plain" },
+			}),
+		);
+		expect(providerRes.ok).toBe(true);
+		expect(await providerRes.text()).toContain("xp-system-generated");
+
+		const providerSystemRes = await mock.handle(
+			jsonRequest(
+				`/api/sub/${encodeURIComponent(token)}/mihomo/provider/system`,
+				{
+					method: "GET",
+					headers: { Accept: "text/plain" },
+				},
+			),
+		);
+		expect(providerSystemRes.ok).toBe(true);
+		expect(await providerSystemRes.text()).toContain("mock-system");
+	});
+
 	it("supports mihomo redact preview endpoint", async () => {
 		const mock = createMockApi();
 		const res = await mock.handle(

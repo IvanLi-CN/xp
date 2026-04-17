@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminNode } from "../api/adminNodes";
 import { buildDenseUserIpUsageStories } from "../storybook/ipUsageStoryData";
@@ -245,6 +245,23 @@ export const UsageDetailsTab7d: Story = {
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
 			await canvas.findByRole("button", { name: "198.51.100.99" }),
+		).toBeInTheDocument();
+	},
+};
+
+export const MihomoProviderPreview: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByLabelText("Subscription format"));
+		await userEvent.click(
+			await screen.findByRole("option", { name: "mihomo(provider)" }),
+		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Fetch" }));
+		await expect(
+			await screen.findByText("Subscription preview"),
+		).toBeInTheDocument();
+		await expect(
+			await screen.findByText(/xp-system-generated/i),
 		).toBeInTheDocument();
 	},
 };
