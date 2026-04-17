@@ -1666,7 +1666,7 @@ function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
 			case "external_override":
 				return "Geo enrichment uses a legacy external MMDB override.";
 			case "missing":
-				return "Geo enrichment is disabled (set XP_IP_GEO_ENABLED=true to enable country.is lookups).";
+				return "Geo enrichment is disabled in Cluster settings; enable country.is lookups there.";
 		}
 	})();
 	return (

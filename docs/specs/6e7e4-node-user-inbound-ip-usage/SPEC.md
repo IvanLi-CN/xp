@@ -33,8 +33,8 @@
 ### In scope
 
 - Backend：Xray online IP 采集、本地持久化 `inbound_ip_usage.json`、Geo 解析缓存、node/user usage admin APIs、internal local fan-out APIs、删除/快照安装清理逻辑。
-- Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点 tabs 切换的 `Usage details` tab；24h/7d 切换、ECharts 面积折线图、泳道时间图、IP 列表、warning/empty/error 空态，以及图表/列表跨视图高亮联动。
-- Ops / config：不再提供专用 Geo env；节点只需能访问 `https://api.country.is/`，并在 Xray 静态配置中开启 `statsUserOnline=true`。
+- Frontend：NodeDetailsPage 新增 `IP usage` tab；UserDetailsPage 新增按节点 tabs 切换的 `Usage details` tab；24h/7d 切换、ECharts 面积折线图、泳道时间图、IP 列表、warning/empty/error 空态，以及图表/列表跨视图高亮联动；新增独立 `Cluster settings` 页面承载集群级 IP Geo 设置。
+- Ops / config：IP Geo 主入口迁到 `Cluster settings`；节点只需能访问 `https://api.country.is/`，并在 Xray 静态配置中开启 `statsUserOnline=true`。`XP_IP_GEO_ENABLED` / `XP_IP_GEO_ORIGIN` 仅保留为首次保存前的 legacy bootstrap fallback。
 - Docs：规格、HTTP API、文件格式、CLI/env、设计文档同步。
 
 ### Out of scope
@@ -51,6 +51,7 @@
 - 采集口径固定为每分钟在线快照：每分钟最多采一次 `GetStatsOnlineIpList("user>>>m:{membership_key}>>>online")`。
 - 新增 `GET /api/admin/nodes/{node_id}/ip-usage?window=24h|7d`。
 - 新增 `GET /api/admin/users/{user_id}/ip-usage?window=24h|7d`。
+- 新增 `GET /api/admin/cluster-settings` 与 `PUT /api/admin/cluster-settings`，统一管理集群级 IP Geo 开关与 origin。
 - 新增 internal local APIs：
   - `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
   - `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`
@@ -131,6 +132,7 @@
 - 公开 API 的时间窗口仅允许 `24h` / `7d`，且 UTC 分钟起点口径已冻结。
 - 用户详情按节点 tabs 切换的展示语义已冻结。
 - Geo 数据源为 `country.is` Hosted API（通过 `XP_IP_GEO_ENABLED` 开关启用；关闭时 `geo_source=missing`）。
+- Geo 数据源为 `country.is` Hosted API，由 `Cluster settings` 控制；在首次保存前，leader 本机的 `XP_IP_GEO_ENABLED` / `XP_IP_GEO_ORIGIN` 仅作为 legacy bootstrap fallback。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
@@ -155,7 +157,7 @@
 
 - `docs/desgin/api.md`: 新增 node/user IP usage APIs。
 - `docs/desgin/xray.md`: 增加 `statsUserOnline` 要求与采集限制说明。
-- `docs/ops/README.md`: 说明 `country.is` Hosted API 前置条件与无本地 Geo DB 要求。
+- `docs/ops/README.md`: 说明 `country.is` Hosted API 前置条件、`Cluster settings` 主入口与 legacy fallback 约束。
 - `docs/ops/env/xp.env.example`: 不再出现 Geo DB override 示例。
 
 ## 计划资产（Plan assets）

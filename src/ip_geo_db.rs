@@ -14,12 +14,12 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::{
+    cluster_settings::{ClusterIpGeoSettings, normalize_ip_geo_origin},
     config::Config,
     inbound_ip_usage::{GeoLookup, PersistedInboundIpGeo, normalize_ip_string},
     state::JsonSnapshotStore,
 };
 
-pub const COUNTRY_IS_ORIGIN: &str = "https://api.country.is";
 const COUNTRY_IS_BATCH_FIELDS: &str = "?fields=city,subdivision,asn";
 const COUNTRY_IS_BATCH_SIZE: usize = 100;
 const COUNTRY_IS_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(10);
@@ -153,8 +153,7 @@ impl ResolverCache {
 
 #[derive(Debug, Clone)]
 pub struct SharedGeoResolver {
-    enabled: bool,
-    batch_url: Arc<String>,
+    settings: Arc<RwLock<ResolverSettings>>,
     client: reqwest::Client,
     cache: Arc<RwLock<ResolverCache>>,
     last_request_at: Arc<Mutex<Instant>>,
@@ -162,6 +161,39 @@ pub struct SharedGeoResolver {
     prime_in_flight: Arc<AtomicBool>,
     last_error: Arc<RwLock<Option<ResolverLastError>>>,
     last_success_at: Arc<RwLock<Option<Instant>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolverSettings {
+    enabled: bool,
+    origin: String,
+    batch_url: String,
+}
+
+impl ResolverSettings {
+    fn new(enabled: bool, origin: &str) -> Self {
+        let origin = normalize_ip_geo_origin(origin);
+        let batch_url = if origin.contains('?') {
+            format!(
+                "{origin}&{}",
+                COUNTRY_IS_BATCH_FIELDS.trim_start_matches('?')
+            )
+        } else {
+            format!("{origin}{COUNTRY_IS_BATCH_FIELDS}")
+        };
+        Self {
+            enabled,
+            origin,
+            batch_url,
+        }
+    }
+
+    fn cluster_ip_geo(&self) -> ClusterIpGeoSettings {
+        ClusterIpGeoSettings {
+            enabled: self.enabled,
+            origin: self.origin.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -177,38 +209,27 @@ impl Drop for GeoPrimeGuard {
 
 impl SharedGeoResolver {
     pub fn new(config: &Config) -> Self {
-        let origin = config.ip_geo_origin.trim();
-        let origin = if origin.is_empty() {
-            COUNTRY_IS_ORIGIN
-        } else {
-            origin
-        };
-        Self::with_origin_and_enabled(origin, config.ip_geo_enabled)
+        Self::with_settings(ClusterIpGeoSettings::from_config(config))
             .expect("country.is resolver init")
     }
 
     pub fn with_origin(origin: &str) -> anyhow::Result<Self> {
-        Self::with_origin_and_enabled(origin, true)
+        Self::with_settings(ClusterIpGeoSettings::new(true, origin))
     }
 
     fn with_origin_and_enabled(origin: &str, enabled: bool) -> anyhow::Result<Self> {
-        let origin = origin.trim_end_matches('/');
-        let batch_url = if origin.contains('?') {
-            format!(
-                "{origin}&{}",
-                COUNTRY_IS_BATCH_FIELDS.trim_start_matches('?')
-            )
-        } else {
-            format!("{origin}{COUNTRY_IS_BATCH_FIELDS}")
-        };
+        Self::with_settings(ClusterIpGeoSettings::new(enabled, origin))
+    }
+
+    fn with_settings(settings: ClusterIpGeoSettings) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .connect_timeout(COUNTRY_IS_CONNECT_TIMEOUT)
             .timeout(COUNTRY_IS_HTTP_TIMEOUT)
             .build()
             .context("build country.is client")?;
+        let settings = ResolverSettings::new(settings.enabled, &settings.origin);
         Ok(Self {
-            enabled,
-            batch_url: Arc::new(batch_url),
+            settings: Arc::new(RwLock::new(settings)),
             client,
             cache: Arc::new(RwLock::new(ResolverCache::default())),
             last_request_at: Arc::new(Mutex::new(Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL)),
@@ -217,6 +238,17 @@ impl SharedGeoResolver {
             last_error: Arc::new(RwLock::new(None)),
             last_success_at: Arc::new(RwLock::new(None)),
         })
+    }
+
+    fn settings_snapshot(&self) -> ResolverSettings {
+        self.settings
+            .read()
+            .expect("geo resolver read lock")
+            .clone()
+    }
+
+    pub fn settings(&self) -> ClusterIpGeoSettings {
+        self.settings_snapshot().cluster_ip_geo()
     }
 
     pub fn begin_prime(&self) -> Option<GeoPrimeGuard> {
@@ -250,11 +282,46 @@ impl SharedGeoResolver {
     }
 
     pub fn ip_geo_source(&self) -> IpGeoSource {
-        if self.enabled {
+        if self.settings_snapshot().enabled {
             IpGeoSource::CountryIs
         } else {
             IpGeoSource::Missing
         }
+    }
+
+    pub async fn apply_settings(&self, next: ClusterIpGeoSettings) {
+        let next = ResolverSettings::new(next.enabled, &next.origin);
+        let changed = {
+            let mut current = self.settings.write().expect("geo resolver write lock");
+            if *current == next {
+                false
+            } else {
+                *current = next;
+                true
+            }
+        };
+        if !changed {
+            return;
+        }
+
+        {
+            let mut cache = self.cache.write().expect("geo resolver write lock");
+            cache.retry_after_by_ip.clear();
+            cache.last_pruned_at = Instant::now();
+        }
+        {
+            let mut last_error = self.last_error.write().expect("geo resolver write lock");
+            *last_error = None;
+        }
+        {
+            let mut last_success = self
+                .last_success_at
+                .write()
+                .expect("geo resolver write lock");
+            *last_success = None;
+        }
+        self.pending_ips.lock().await.clear();
+        *self.last_request_at.lock().await = Instant::now() - COUNTRY_IS_MIN_REQUEST_INTERVAL;
     }
 
     pub fn last_error_message(&self) -> Option<String> {
@@ -277,7 +344,7 @@ impl SharedGeoResolver {
     where
         I: IntoIterator<Item = String>,
     {
-        if !self.enabled {
+        if !self.settings_snapshot().enabled {
             return Ok(());
         }
         let now = Instant::now();
@@ -349,14 +416,15 @@ impl SharedGeoResolver {
     }
 
     async fn fetch_batch(&self, batch: &[String]) -> anyhow::Result<()> {
-        if !self.enabled {
+        let settings = self.settings_snapshot();
+        if !settings.enabled {
             return Ok(());
         }
         self.wait_for_rate_limit().await;
         let request_ips = batch.iter().cloned().collect::<BTreeSet<_>>();
         let response = self
             .client
-            .post(self.batch_url.as_str())
+            .post(settings.batch_url)
             .json(batch)
             .send()
             .await
@@ -498,7 +566,7 @@ impl SharedGeoResolver {
 
 impl GeoLookup for SharedGeoResolver {
     fn lookup(&self, ip: &str) -> PersistedInboundIpGeo {
-        if !self.enabled {
+        if !self.settings_snapshot().enabled {
             return PersistedInboundIpGeo::default();
         }
         let Some(ip) = normalize_ip_string(ip) else {
@@ -533,14 +601,18 @@ fn sanitize_error_message(raw: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct GeoDbUpdateHandle {
     resolver: SharedGeoResolver,
+    config: Arc<Config>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
 }
 
 pub fn spawn_geo_db_update_worker(
     cfg: Arc<Config>,
-    _store: Arc<Mutex<JsonSnapshotStore>>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
     let handle = GeoDbUpdateHandle {
         resolver: SharedGeoResolver::new(cfg.as_ref()),
+        config: cfg,
+        store,
     };
     let task = tokio::spawn(async {});
     Ok((handle, task))
@@ -548,11 +620,14 @@ pub fn spawn_geo_db_update_worker(
 
 pub fn spawn_geo_db_update_worker_with_origin(
     cfg: Arc<Config>,
+    store: Arc<Mutex<JsonSnapshotStore>>,
     origin: String,
 ) -> anyhow::Result<(GeoDbUpdateHandle, tokio::task::JoinHandle<()>)> {
     let handle = GeoDbUpdateHandle {
         resolver: SharedGeoResolver::with_origin_and_enabled(&origin, cfg.ip_geo_enabled)
             .unwrap_or_else(|_| SharedGeoResolver::new(cfg.as_ref())),
+        config: cfg,
+        store,
     };
     let task = tokio::spawn(async {});
     Ok((handle, task))
@@ -565,6 +640,17 @@ impl GeoDbUpdateHandle {
 
     pub fn ip_geo_source(&self) -> IpGeoSource {
         self.resolver.ip_geo_source()
+    }
+
+    pub async fn sync_with_cluster_settings(&self) -> ClusterIpGeoSettings {
+        let settings = {
+            let store = self.store.lock().await;
+            store
+                .state()
+                .effective_cluster_ip_geo_settings(&self.config)
+        };
+        self.resolver.apply_settings(settings.clone()).await;
+        settings
     }
 }
 

@@ -272,6 +272,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         )?);
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
+    geo_db_update.sync_with_cluster_settings().await;
     let _quota = xp::quota::spawn_quota_worker(
         config_arc.clone(),
         store.clone(),

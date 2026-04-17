@@ -33,6 +33,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 							icon: "tabler:gauge",
 						},
 						{
+							label: "Cluster settings",
+							to: "/cluster-settings",
+							icon: "tabler:adjustments-horizontal",
+						},
+						{
 							label: "Reality domains",
 							to: "/reality-domains",
 							icon: "tabler:world",
