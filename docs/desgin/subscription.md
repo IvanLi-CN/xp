@@ -145,16 +145,16 @@ MVP 建议输出“可直接导入”的最小 YAML：
 
 ### 6.3 Provider 方案
 
-- provider 方案中，系统直连节点（`{base}-reality` / `{base}-ss`）移入 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload。
+- provider 方案中，系统直连 SS 节点（`{base}-ss`）移入 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload；系统 Reality 直连节点（`{base}-reality`）继续保留在主配置顶层 `proxies`，便于显式直连引用保持可见。
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
-  - `proxies` = `extra_proxies_yaml` + 系统 `{base}-chain` glue proxies
+  - `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
 - `🛣️ JP/HK/TW` 与地区组继续通过 `use:` 消费 provider。
 - `🛬 {base}` 改为 `use + filter + proxies` 混合组：
   - 存在 `{base}-ss` 时，保留 `{base}-chain` 作为首选直链 fallback，并通过 `filter` 从 provider 中选择 `{base}-ss`
-  - 仅存在 `{base}-reality` 时，只通过 `filter` 选择 `{base}-reality`
+  - 仅存在 `{base}-reality` 时，直接使用主配置顶层 `{base}-reality`
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
-- provider 方案仅保证系统组与链式逻辑兼容；不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定。
+- provider 方案仍会隐藏系统 `{base}-ss` 直连，不承诺手写 `{base}-ss` 业务引用继续稳定；`{base}-reality` 的显式引用应保持可见且可用。
 
 ### 6.4 Legacy 渲染规则
 

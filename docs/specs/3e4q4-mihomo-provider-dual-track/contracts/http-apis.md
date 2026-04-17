@@ -74,7 +74,7 @@ Response:
 - 始终返回 provider 方案的 Mihomo 主配置。
 - 当用户未配置 Mihomo profile 时，回退到 clash 输出。
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
-- 顶层 `proxies` 仅保留 `extra_proxies_yaml` 与系统 `{base}-chain` glue proxies。
+- 顶层 `proxies` 保留 `extra_proxies_yaml` 与系统 `{base}-reality` / `{base}-chain`。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 
 Response:
@@ -87,16 +87,16 @@ Response:
 
 ```yaml
 proxies:
-  - name: tokyo-reality
-    type: vless
+  - name: tokyo-ss
+    type: ss
     # ...
 ```
 
 Rules:
 
-- 仅包含系统直连节点（例如 `-reality` / `-ss`）；不包含 `{base}-chain`。
+- 仅包含系统隐藏直连节点（当前为 `-ss`）；不包含 `{base}-reality` 与 `{base}-chain`。
 - provider payload 可被 Mihomo `proxy-providers.type=http` 直接消费。
-- 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统直连节点。
+- 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统隐藏直连节点。
 
 Response:
 
