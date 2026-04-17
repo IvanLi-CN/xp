@@ -24,7 +24,7 @@
   - `GET /api/sub/{token}/mihomo/legacy`
   - `GET /api/sub/{token}/mihomo/provider`
   - `GET /api/sub/{token}/mihomo/provider/system`
-- provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点从主配置移入 provider payload。
+- provider 方案采用单一系统 provider `xp-system-generated`，将系统隐藏直连节点（当前为 SS）移入 provider payload，并保留 Reality 直连节点在主配置顶层可见。
 - 保留 `{base}-chain` 为主配置里的 glue proxy，继续复用 `dialer-proxy: 🛣️ JP/HK/TW`。
 - 管理端支持切换全局默认方案；用户详情页可直接复制/预览 default / legacy / provider 三类 Mihomo URL。
 
@@ -32,7 +32,7 @@
 
 - 不改 `raw` / `base64` / `clash` 输出。
 - 不做按用户维度的 Mihomo delivery mode。
-- 不承诺 provider 路径继续兼容手写 `{base}-ss` / `{base}-reality` 业务引用。
+- 不承诺 provider 路径继续兼容手写 `{base}-ss` 业务引用；`{base}-reality` 应保持可见且可被显式引用。
 - 不把 `{base}-chain` 也放进 provider payload。
 
 ## 范围（Scope）
@@ -63,9 +63,10 @@
 - provider 主配置里的 provider `url` 必须基于请求对外 origin 生成，而不是直接复用内网 `api_base_url`。
 - provider 方案中：
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
-  - 顶层 `proxies` = `extra_proxies_yaml` + 系统 `{base}-chain`
+  - 顶层 `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
   - `🛣️ JP/HK/TW`、地区组、`🛬 {base}`、`🔒 落地`、`{base}-chain` 保持可用
-- provider 方案下 `🛬 {base}` 必须采用 `use + filter + proxies` 混合组：存在 SS 时保留 `{base}-chain` 并筛 `{base}-ss`；仅有 Reality 时只筛 `{base}-reality`。
+- provider 方案下系统 `{base}-ss` 直连默认隐藏，仅通过 `xp-system-generated` 参与链式/落地 fallback；`{base}-reality` 继续保留为主配置顶层可见直连节点。
+- provider 方案下 `🛬 {base}` 必须采用 `use + filter + proxies` 混合组：存在 SS 时保留 `{base}-chain` 并筛 `{base}-ss`；仅有 Reality 时直接引用顶层 `{base}-reality`。
 - legacy 路径行为不得回归。
 
 ### SHOULD
@@ -111,9 +112,10 @@
 - Given 全局设置仍为 `legacy`，When 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回现有 legacy 输出。
 - Given 全局设置切到 `provider`，When 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy` 或 `/mihomo/provider`，When 全局设置任意切换，Then 两条显式路径始终返回固定方案。
-- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统 `-reality` / `-ss` 直连节点，不依赖用户是否配置 Mihomo profile。
+- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统隐藏直连节点（当前为 `-ss`），不依赖用户是否配置 Mihomo profile。
 - Given provider 方案存在 `base-ss`，When 检查 `🛬 {base}`，Then 该组保留 `{base}-chain` 并通过 `filter` 消费 provider 中的 `{base}-ss`。
-- Given provider 方案只有 `base-reality`，When 检查 `🛬 {base}`，Then 该组只通过 `filter` 消费 provider 中的 `{base}-reality`，不再引用缺失的 `{base}-chain` / `{base}-ss`。
+- Given provider 方案存在 `base-reality`，When 检查主配置与地区组，Then `{base}-reality` 仍作为顶层可见节点保留，并可被显式引用。
+- Given provider 方案只有 `base-reality`，When 检查 `🛬 {base}`，Then 该组直接引用顶层 `{base}-reality`，不再引用缺失的 `{base}-chain` / `{base}-ss`。
 - Given Web 管理端打开 `Settings / Service config`，When 修改 Mihomo delivery mode 并保存，Then 页面刷新后仍显示新值，且 `User Details` 可复制/预览三类 Mihomo URL。
 - Given 真实 Mihomo 在共享测试环境加载显式 provider URL，When 执行 `mihomo -t` 或等价校验，Then 主配置与 provider payload 均可被成功解析。
 
@@ -180,6 +182,6 @@
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：provider 路径若误保留 legacy `-ss` / `-reality` 组内直引，容易造成悬挂引用，需要用测试锁死。
+- 风险：provider 路径若误隐藏 `{base}-reality` 或误保留系统 `{base}-ss` 直连显示，容易造成可选节点回退或悬挂引用，需要用测试锁死。
 - 风险：请求头组合在反向代理下可能非常杂，需要优先以 live 请求头为准，并保留 `api_base_url` 回退。
 - 假设：项目自己的系统 provider 名称 `xp-system-generated` 当前未被现有用户配置占用；若占用，返回显式错误即可。
