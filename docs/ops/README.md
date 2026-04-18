@@ -10,6 +10,7 @@ This directory contains sample service definitions and an environment template t
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` (when enabled via `XP_CLOUDFLARED_RESTART_MODE!=none`) and records runtime status transitions/restart outcomes to `${XP_DATA_DIR}/service_runtime.json` for the Web runtime pages.
+- When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp` also reconciles `XP_ACCESS_HOST` against Cloudflare DNS (`A` / `AAAA`) and stores local DDNS state in `${XP_DATA_DIR}/ddns_state.json`.
 
 ## Endpoint probe (ingress reachability)
 
@@ -29,6 +30,7 @@ Notes:
 
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
+- `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 
@@ -136,6 +138,31 @@ Required (or commonly set):
   - Timeout for cloudflared restart command invocation.
 - `XP_CLOUDFLARED_SYSTEMD_UNIT` / `XP_CLOUDFLARED_OPENRC_SERVICE`
   - Init-system target names for cloudflared restart/probe.
+- `XP_CLOUDFLARE_DDNS_ENABLED` (default: `false`)
+  - Enables runtime DDNS reconciliation for `XP_ACCESS_HOST`.
+- `XP_CLOUDFLARE_DDNS_TOKEN_FILE` (default: `/etc/xp/cloudflare_ddns_api_token`)
+  - Path to the Cloudflare API token file that `xp` can read at runtime.
+- `XP_CLOUDFLARE_DDNS_ZONE_ID` (default: empty)
+  - Optional explicit Cloudflare zone id. When empty, `xp` derives the zone from `XP_ACCESS_HOST`.
+- `XP_CLOUDFLARE_DDNS_IPV4_URL` / `XP_CLOUDFLARE_DDNS_IPV6_URL`
+  - Public IP echo endpoints for IPv4 / IPv6 detection. Defaults to `https://cloudflare.com/cdn-cgi/trace`.
+- `XP_CLOUDFLARE_DDNS_INTERVAL_SECS_WITH_MONITOR` (default: `300`, allowed range `30..=3600`)
+  - Base DDNS poll interval when cloudflared runtime monitoring is enabled.
+- `XP_CLOUDFLARE_DDNS_INTERVAL_SECS_NO_MONITOR` (default: `60`, allowed range `30..=3600`)
+  - Base DDNS poll interval when cloudflared runtime monitoring is disabled.
+- `XP_CLOUDFLARE_DDNS_FAST_INTERVAL_SECS` (default: `30`, allowed range `10..=600`)
+  - Fast-mode DDNS poll interval after cloudflared recovery-style hints.
+- `XP_CLOUDFLARE_DDNS_FAST_WINDOW_SECS` (default: `300`, allowed range `30..=3600`)
+  - Duration of the fast-mode DDNS polling window.
+- `XP_CLOUDFLARE_DDNS_FAMILY_MISSING_GRACE` (default: `3`, allowed range `1..=10`)
+  - Consecutive hard-missing observations before deleting an `A` or `AAAA` record.
+
+DDNS runtime notes:
+
+- `xp` starts one DDNS probe immediately on startup.
+- `xp` only updates Cloudflare when the observed public IP actually changes.
+- `cloudflared` is only used as a heuristic fast-mode trigger (`down -> up` / `became available`), never as the source of truth for public IPs.
+- Probe timeouts or transient upstream errors do not delete records; only repeated hard evidence of a missing address family can remove `A` / `AAAA`.
 
 Optional quota knobs:
 
@@ -199,6 +226,7 @@ ${XP_DATA_DIR}/
   usage.json
   inbound_ip_usage.json
   service_runtime.json
+  ddns_state.json
 ```
 
 Notes:
@@ -208,6 +236,7 @@ Notes:
 - `state.json` and `usage.json` are raft-backed JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
 - `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
+- `ddns_state.json` stores local Cloudflare DDNS reconcile state (last synced IPs, record ids, error state, fast-mode window). It is **not** replicated via raft.
 - Geo enrichment uses a hosted API (`https://api.country.is/`); there are no local Geo DB files under `XP_DATA_DIR`.
 
 ## Service examples

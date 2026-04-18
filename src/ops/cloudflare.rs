@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Read};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
 
@@ -503,14 +504,14 @@ fn save_settings(paths: &Paths, s: &Settings) -> Result<(), ExitError> {
 }
 
 #[derive(Debug)]
-struct CloudflareClient {
+pub(crate) struct CloudflareClient {
     base: String,
     token: String,
     client: reqwest::Client,
 }
 
 impl CloudflareClient {
-    fn new(base: String, token: String) -> Self {
+    pub(crate) fn new(base: String, token: String) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("xp-ops")
             .build()
@@ -651,7 +652,7 @@ impl CloudflareClient {
         parse_cloudflare_response::<Vec<DnsRecordInfo>>(resp).await
     }
 
-    async fn list_zones_by_name(&self, name: &str) -> anyhow::Result<Vec<ZoneLookup>> {
+    pub(crate) async fn list_zones_by_name(&self, name: &str) -> anyhow::Result<Vec<ZoneLookup>> {
         let mut url = reqwest::Url::parse(&format!(
             "{}/client/v4/zones",
             self.base.trim_end_matches('/')
@@ -683,6 +684,85 @@ impl CloudflareClient {
                 name: t.name,
             })
             .collect())
+    }
+
+    pub(crate) async fn list_dns_records_by_type(
+        &self,
+        zone_id: &str,
+        hostname: &str,
+        record_type: &str,
+    ) -> anyhow::Result<Vec<DnsRecordInfo>> {
+        let records = self.list_dns_records(zone_id, hostname).await?;
+        Ok(records
+            .into_iter()
+            .filter(|record| record.record_type.eq_ignore_ascii_case(record_type))
+            .collect())
+    }
+
+    pub(crate) async fn create_ip_dns_record(
+        &self,
+        zone_id: &str,
+        hostname: &str,
+        ip: IpAddr,
+        proxied: bool,
+        ttl: u32,
+    ) -> anyhow::Result<DnsRecordInfo> {
+        let url = format!(
+            "{}/client/v4/zones/{zone_id}/dns_records",
+            self.base.trim_end_matches('/')
+        );
+        let body = ip_dns_record_body(hostname, ip, proxied, ttl);
+        let resp = self
+            .client
+            .post(url)
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await?;
+        parse_cloudflare_response::<DnsRecordInfo>(resp).await
+    }
+
+    pub(crate) async fn patch_ip_dns_record(
+        &self,
+        zone_id: &str,
+        dns_record_id: &str,
+        hostname: &str,
+        ip: IpAddr,
+        proxied: bool,
+        ttl: u32,
+    ) -> anyhow::Result<DnsRecordInfo> {
+        let url = format!(
+            "{}/client/v4/zones/{zone_id}/dns_records/{dns_record_id}",
+            self.base.trim_end_matches('/')
+        );
+        let body = ip_dns_record_body(hostname, ip, proxied, ttl);
+        let resp = self
+            .client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await?;
+        parse_cloudflare_response::<DnsRecordInfo>(resp).await
+    }
+
+    pub(crate) async fn delete_dns_record(
+        &self,
+        zone_id: &str,
+        dns_record_id: &str,
+    ) -> anyhow::Result<()> {
+        let url = format!(
+            "{}/client/v4/zones/{zone_id}/dns_records/{dns_record_id}",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self
+            .client
+            .delete(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+        let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
+        Ok(())
     }
 }
 
@@ -751,12 +831,27 @@ pub struct DnsRecordInfo {
     pub record_type: String,
     pub name: String,
     pub content: String,
+    pub proxied: Option<bool>,
+    pub ttl: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ZoneInfo {
     pub name: String,
     pub account_id: Option<String>,
+}
+
+fn ip_dns_record_body(hostname: &str, ip: IpAddr, proxied: bool, ttl: u32) -> serde_json::Value {
+    serde_json::json!({
+      "type": match ip {
+        IpAddr::V4(_) => "A",
+        IpAddr::V6(_) => "AAAA",
+      },
+      "name": hostname,
+      "content": ip.to_string(),
+      "proxied": proxied,
+      "ttl": ttl,
+    })
 }
 
 #[derive(Debug, Clone)]

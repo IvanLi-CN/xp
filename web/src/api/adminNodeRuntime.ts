@@ -10,8 +10,14 @@ const RuntimeSummaryStatusSchema = z.enum([
 	"down",
 	"unknown",
 ]);
-const RuntimeStatusSchema = z.enum(["disabled", "up", "down", "unknown"]);
-const RuntimeComponentSchema = z.enum(["xp", "xray", "cloudflared"]);
+const RuntimeStatusSchema = z.enum([
+	"disabled",
+	"up",
+	"degraded",
+	"down",
+	"unknown",
+]);
+const RuntimeComponentSchema = z.enum(["xp", "xray", "cloudflared", "ddns"]);
 const RuntimeEventKindSchema = z.enum([
 	"status_changed",
 	"restart_requested",
@@ -35,6 +41,11 @@ export const NodeRuntimeComponentSchema = z.object({
 	restart_attempts: z.number(),
 	last_restart_at: z.string().nullable().optional(),
 	last_restart_fail_at: z.string().nullable().optional(),
+	last_sync_at: z.string().nullable().optional(),
+	current_ipv4: z.string().nullable().optional(),
+	current_ipv6: z.string().nullable().optional(),
+	fast_mode_until: z.string().nullable().optional(),
+	last_error: z.string().nullable().optional(),
 });
 
 export const NodeRuntimeHistorySlotSchema = z.object({

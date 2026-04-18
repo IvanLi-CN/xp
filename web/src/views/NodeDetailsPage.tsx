@@ -78,10 +78,12 @@ function summaryBadgeVariant(
 
 function componentBadgeVariant(
 	status: string,
-): "success" | "destructive" | "ghost" | "outline" {
+): "success" | "warning" | "destructive" | "ghost" | "outline" {
 	switch (status) {
 		case "up":
 			return "success";
+		case "degraded":
+			return "warning";
 		case "down":
 			return "destructive";
 		case "disabled":
@@ -570,8 +572,8 @@ export function NodeDetailsPage() {
 									<div>
 										<h2 className="xp-card-title">Service runtime</h2>
 										<p className="text-sm text-muted-foreground">
-											Live status of xp/xray/cloudflared with 7-day history and
-											key events.
+											Live status of xp/xray/cloudflared/ddns with 7-day history
+											and key events.
 										</p>
 									</div>
 									<div className="flex items-center gap-2">
@@ -655,6 +657,28 @@ export function NodeDetailsPage() {
 															last_restart:{" "}
 															{formatTime(component.last_restart_at)}
 														</p>
+														{component.last_sync_at ? (
+															<p>
+																last_sync: {formatTime(component.last_sync_at)}
+															</p>
+														) : null}
+														{component.current_ipv4 ? (
+															<p>ipv4: {component.current_ipv4}</p>
+														) : null}
+														{component.current_ipv6 ? (
+															<p>ipv6: {component.current_ipv6}</p>
+														) : null}
+														{component.fast_mode_until ? (
+															<p>
+																fast_until:{" "}
+																{formatTime(component.fast_mode_until)}
+															</p>
+														) : null}
+														{component.last_error ? (
+															<p className="whitespace-pre-wrap break-words text-warning">
+																last_error: {component.last_error}
+															</p>
+														) : null}
 													</div>
 												</div>
 											))}

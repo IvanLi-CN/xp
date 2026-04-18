@@ -60,11 +60,16 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
             cloudflare: values.cloudflare_enabled,
             no_cloudflare: !values.cloudflare_enabled,
         },
+        ddns_toggle: crate::ops::cli::DdnsToggle {
+            ddns: values.ddns_enabled,
+            no_ddns: !values.ddns_enabled,
+        },
         account_id: values.account_id,
         zone_id: values.zone_id,
         hostname: values.hostname,
         tunnel_name: None,
         origin_url: values.origin_url,
+        ddns_zone_id: values.ddns_zone_id,
         join_token: None,
         join_token_stdin: false,
         join_token_stdin_value: None,
@@ -192,6 +197,8 @@ struct AppValues {
     node_name: String,
     access_host: String,
     cloudflare_enabled: bool,
+    ddns_enabled: bool,
+    ddns_zone_id: Option<String>,
     account_id: Option<String>,
     zone_id: Option<String>,
     hostname: Option<String>,
@@ -219,6 +226,8 @@ struct AppSnapshot {
     node_name: String,
     access_host: String,
     cloudflare_enabled: bool,
+    ddns_enabled: bool,
+    ddns_zone_id: String,
     account_id: String,
     zone_id: String,
     hostname: String,
@@ -249,6 +258,8 @@ struct App {
     access_host: String,
 
     cloudflare_enabled: bool,
+    ddns_enabled: bool,
+    ddns_zone_id: String,
     account_id: String,
     zone_id: String,
     hostname: String,
@@ -272,6 +283,8 @@ impl App {
                 node_name: String::new(),
                 access_host: String::new(),
                 cloudflare_enabled: true,
+                ddns_enabled: false,
+                ddns_zone_id: String::new(),
                 account_id: String::new(),
                 zone_id: String::new(),
                 hostname: String::new(),
@@ -287,6 +300,8 @@ impl App {
             node_name: "node-1".to_string(),
             access_host: String::new(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: String::new(),
             account_id: String::new(),
             zone_id: String::new(),
             hostname: String::new(),
@@ -306,7 +321,7 @@ impl App {
     }
 
     fn items_len(&self) -> usize {
-        11
+        13
     }
 
     fn render_items(&self) -> Vec<ListItem<'static>> {
@@ -320,6 +335,22 @@ impl App {
                 "true"
             } else {
                 "false"
+            },
+        ));
+        v.push(item(
+            "ddns_enabled",
+            if self.ddns_enabled { "true" } else { "false" },
+        ));
+        v.push(item(
+            if self.ddns_enabled {
+                "ddns_zone_id"
+            } else {
+                "ddns_zone_id (auto)"
+            },
+            if self.ddns_enabled && !self.ddns_zone_id.trim().is_empty() {
+                &self.ddns_zone_id
+            } else {
+                "-"
             },
         ));
 
@@ -465,8 +496,9 @@ impl App {
     fn handle_toggle(&mut self) {
         match self.focus {
             2 => self.cloudflare_enabled = !self.cloudflare_enabled,
-            9 => self.enable_services = !self.enable_services,
-            10 => self.dry_run = !self.dry_run,
+            3 => self.ddns_enabled = !self.ddns_enabled,
+            11 => self.enable_services = !self.enable_services,
+            12 => self.dry_run = !self.dry_run,
             _ => {}
         }
     }
@@ -474,9 +506,10 @@ impl App {
     fn is_editable_field(&self) -> bool {
         match self.focus {
             0..=1 => true,
-            3 => !self.cloudflare_enabled,
-            4..=7 => self.cloudflare_enabled,
-            8 => true,
+            4 => self.ddns_enabled,
+            5 => !self.cloudflare_enabled,
+            6..=9 => self.cloudflare_enabled,
+            10 => true,
             _ => false,
         }
     }
@@ -485,12 +518,13 @@ impl App {
         match self.focus {
             0 => self.node_name.push(c),
             1 => self.access_host.push(c),
-            3 if !self.cloudflare_enabled => self.api_base_url.push(c),
-            4 if self.cloudflare_enabled => self.account_id.push(c),
-            5 if self.cloudflare_enabled => self.zone_id.push(c),
-            6 if self.cloudflare_enabled => self.hostname.push(c),
-            7 if self.cloudflare_enabled => self.origin_url.push(c),
-            8 => self.cloudflare_token.push(c),
+            4 if self.ddns_enabled => self.ddns_zone_id.push(c),
+            5 if !self.cloudflare_enabled => self.api_base_url.push(c),
+            6 if self.cloudflare_enabled => self.account_id.push(c),
+            7 if self.cloudflare_enabled => self.zone_id.push(c),
+            8 if self.cloudflare_enabled => self.hostname.push(c),
+            9 if self.cloudflare_enabled => self.origin_url.push(c),
+            10 => self.cloudflare_token.push(c),
             _ => {}
         }
     }
@@ -522,22 +556,25 @@ impl App {
             1 => {
                 self.access_host.pop();
             }
-            3 if !self.cloudflare_enabled => {
+            4 if self.ddns_enabled => {
+                self.ddns_zone_id.pop();
+            }
+            5 if !self.cloudflare_enabled => {
                 self.api_base_url.pop();
             }
-            4 if self.cloudflare_enabled => {
+            6 if self.cloudflare_enabled => {
                 self.account_id.pop();
             }
-            5 if self.cloudflare_enabled => {
+            7 if self.cloudflare_enabled => {
                 self.zone_id.pop();
             }
-            6 if self.cloudflare_enabled => {
+            8 if self.cloudflare_enabled => {
                 self.hostname.pop();
             }
-            7 if self.cloudflare_enabled => {
+            9 if self.cloudflare_enabled => {
                 self.origin_url.pop();
             }
-            8 => {
+            10 => {
                 self.cloudflare_token.pop();
             }
             _ => {}
@@ -549,6 +586,12 @@ impl App {
             node_name: self.node_name.clone(),
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
+            ddns_enabled: self.ddns_enabled,
+            ddns_zone_id: if self.ddns_enabled {
+                Some(self.ddns_zone_id.clone()).filter(|s| !s.trim().is_empty())
+            } else {
+                None
+            },
             account_id: if self.cloudflare_enabled {
                 Some(self.account_id.clone()).filter(|s| !s.trim().is_empty())
             } else {
@@ -586,6 +629,8 @@ impl App {
             node_name: self.node_name.clone(),
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
+            ddns_enabled: self.ddns_enabled,
+            ddns_zone_id: self.ddns_zone_id.clone(),
             account_id: self.account_id.clone(),
             zone_id: self.zone_id.clone(),
             hostname: self.hostname.clone(),
@@ -611,6 +656,12 @@ impl App {
         }
         if let Some(v) = cfg.cloudflare_enabled {
             self.cloudflare_enabled = v;
+        }
+        if let Some(v) = cfg.ddns_enabled {
+            self.ddns_enabled = v;
+        }
+        if let Some(v) = cfg.ddns_zone_id {
+            self.ddns_zone_id = v;
         }
         if let Some(v) = cfg.account_id {
             self.account_id = v;
@@ -705,6 +756,8 @@ struct TuiConfig {
     #[serde(alias = "public_domain")]
     access_host: Option<String>,
     cloudflare_enabled: Option<bool>,
+    ddns_enabled: Option<bool>,
+    ddns_zone_id: Option<String>,
     account_id: Option<String>,
     zone_id: Option<String>,
     hostname: Option<String>,
@@ -733,6 +786,8 @@ fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::
         node_name: Some(values.node_name.clone()),
         access_host: Some(values.access_host.clone()),
         cloudflare_enabled: Some(values.cloudflare_enabled),
+        ddns_enabled: Some(values.ddns_enabled),
+        ddns_zone_id: values.ddns_zone_id.clone(),
         account_id: values.account_id.clone(),
         zone_id: values.zone_id.clone(),
         hostname: values.hostname.clone(),
@@ -867,6 +922,8 @@ mod tests {
             node_name: "node-1".to_string(),
             access_host: "node-1.example.net".to_string(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: None,
             account_id: Some("acc".to_string()),
             zone_id: Some("zone".to_string()),
             hostname: Some("node-1.example.com".to_string()),
@@ -906,6 +963,8 @@ mod tests {
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: None,
             account_id: None,
             zone_id: None,
             hostname: None,
@@ -933,6 +992,8 @@ mod tests {
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: None,
             account_id: None,
             zone_id: None,
             hostname: None,
@@ -960,6 +1021,8 @@ mod tests {
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: None,
             account_id: None,
             zone_id: None,
             hostname: None,
@@ -987,6 +1050,8 @@ mod tests {
             node_name: String::new(),
             access_host: String::new(),
             cloudflare_enabled: true,
+            ddns_enabled: false,
+            ddns_zone_id: None,
             account_id: None,
             zone_id: None,
             hostname: None,

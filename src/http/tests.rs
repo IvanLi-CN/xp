@@ -25,6 +25,7 @@ use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
     config::Config,
+    ddns::{DdnsHealthHandle, DdnsStatus},
     domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
@@ -119,6 +120,16 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        cloudflare_ddns_enabled: false,
+        cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
+        cloudflare_ddns_zone_id: String::new(),
+        cloudflare_ddns_ipv4_url: crate::ddns::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_ipv6_url: crate::ddns::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_interval_secs_with_monitor: 300,
+        cloudflare_ddns_interval_secs_no_monitor: 60,
+        cloudflare_ddns_fast_interval_secs: 30,
+        cloudflare_ddns_fast_window_secs: 300,
+        cloudflare_ddns_family_missing_grace: 3,
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
@@ -191,11 +202,13 @@ fn app_with(
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -233,11 +246,13 @@ fn build_app_with_cluster_store_and_raft(
     let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(&config.data_dir).unwrap();
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -1577,11 +1592,13 @@ async fn follower_admin_write_does_not_redirect() {
 
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -3528,11 +3545,13 @@ async fn grant_usage_includes_warning_fields() {
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -3731,11 +3750,13 @@ async fn grant_usage_warns_on_quota_mismatch() {
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -6162,11 +6183,13 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -6477,11 +6500,13 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -6534,11 +6559,13 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let raft = leader_raft(store.clone(), &cluster);
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = DdnsHealthHandle::new_with_status(DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),

@@ -209,11 +209,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
     let (cloudflared_health, _cloudflared_supervisor_task) =
         xp::cloudflared_supervisor::spawn_cloudflared_supervisor(config_arc.clone());
+    let (ddns_health, _ddns_supervisor_task) =
+        xp::ddns::spawn_ddns_supervisor(config_arc.clone(), cloudflared_health.clone());
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         config_arc.clone(),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;

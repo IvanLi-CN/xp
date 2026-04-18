@@ -30,6 +30,17 @@ pub struct XpEnvFlags {
     pub has_cloudflared_restart_timeout: bool,
     pub has_cloudflared_systemd_unit: bool,
     pub has_cloudflared_openrc_service: bool,
+
+    pub has_cloudflare_ddns_enabled: bool,
+    pub has_cloudflare_ddns_token_file: bool,
+    pub has_cloudflare_ddns_zone_id: bool,
+    pub has_cloudflare_ddns_ipv4_url: bool,
+    pub has_cloudflare_ddns_ipv6_url: bool,
+    pub has_cloudflare_ddns_interval_with_monitor: bool,
+    pub has_cloudflare_ddns_interval_no_monitor: bool,
+    pub has_cloudflare_ddns_fast_interval: bool,
+    pub has_cloudflare_ddns_fast_window: bool,
+    pub has_cloudflare_ddns_family_missing_grace: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +60,9 @@ pub struct XpEnvWriteValues<'a> {
     pub node_name: &'a str,
     pub access_host: &'a str,
     pub api_base_url: &'a str,
+    pub cloudflare_ddns_enabled: bool,
+    pub cloudflare_ddns_token_file: &'a str,
+    pub cloudflare_ddns_zone_id: &'a str,
 }
 
 pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
@@ -127,6 +141,18 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
                         .to_string(),
                 );
             }
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_ENABLED=") {
+            flags.has_cloudflare_ddns_enabled = true;
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_TOKEN_FILE=") {
+            flags.has_cloudflare_ddns_token_file = true;
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_ZONE_ID=") {
+            flags.has_cloudflare_ddns_zone_id = true;
             continue;
         }
 
@@ -216,6 +242,41 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             retained_lines.push(line.to_string());
             continue;
         }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_IPV4_URL=") {
+            flags.has_cloudflare_ddns_ipv4_url = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_IPV6_URL=") {
+            flags.has_cloudflare_ddns_ipv6_url = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_INTERVAL_SECS_WITH_MONITOR=") {
+            flags.has_cloudflare_ddns_interval_with_monitor = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_INTERVAL_SECS_NO_MONITOR=") {
+            flags.has_cloudflare_ddns_interval_no_monitor = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_FAST_INTERVAL_SECS=") {
+            flags.has_cloudflare_ddns_fast_interval = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_FAST_WINDOW_SECS=") {
+            flags.has_cloudflare_ddns_fast_window = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("XP_CLOUDFLARE_DDNS_FAMILY_MISSING_GRACE=") {
+            flags.has_cloudflare_ddns_family_missing_grace = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
         retained_lines.push(line.to_string());
     }
 
@@ -290,6 +351,28 @@ pub fn write_xp_env(
     lines.push(format!("XP_NODE_NAME={node_name}"));
     lines.push(format!("XP_ACCESS_HOST={access_host}"));
     lines.push(format!("XP_API_BASE_URL={api_base_url}"));
+    lines.push(format!(
+        "XP_CLOUDFLARE_DDNS_ENABLED={}",
+        if values.cloudflare_ddns_enabled {
+            "true"
+        } else {
+            "false"
+        }
+    ));
+    let ddns_token_file = shell_quote_single(values.cloudflare_ddns_token_file).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: XP_CLOUDFLARE_DDNS_TOKEN_FILE cannot be written safely: {e}"),
+        )
+    })?;
+    lines.push(format!("XP_CLOUDFLARE_DDNS_TOKEN_FILE={ddns_token_file}"));
+    let ddns_zone_id = shell_quote_single(values.cloudflare_ddns_zone_id).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: XP_CLOUDFLARE_DDNS_ZONE_ID cannot be written safely: {e}"),
+        )
+    })?;
+    lines.push(format!("XP_CLOUDFLARE_DDNS_ZONE_ID={ddns_zone_id}"));
 
     let quoted = shell_quote_single(values.admin_token_hash).map_err(|e| {
         ExitError::new(
@@ -352,6 +435,33 @@ pub fn write_xp_env(
     }
     if !flags.has_cloudflared_openrc_service {
         lines.push("XP_CLOUDFLARED_OPENRC_SERVICE=cloudflared".to_string());
+    }
+    if !flags.has_cloudflare_ddns_ipv4_url {
+        lines.push(format!(
+            "XP_CLOUDFLARE_DDNS_IPV4_URL={}",
+            crate::ddns::DEFAULT_TRACE_URL
+        ));
+    }
+    if !flags.has_cloudflare_ddns_ipv6_url {
+        lines.push(format!(
+            "XP_CLOUDFLARE_DDNS_IPV6_URL={}",
+            crate::ddns::DEFAULT_TRACE_URL
+        ));
+    }
+    if !flags.has_cloudflare_ddns_interval_with_monitor {
+        lines.push("XP_CLOUDFLARE_DDNS_INTERVAL_SECS_WITH_MONITOR=300".to_string());
+    }
+    if !flags.has_cloudflare_ddns_interval_no_monitor {
+        lines.push("XP_CLOUDFLARE_DDNS_INTERVAL_SECS_NO_MONITOR=60".to_string());
+    }
+    if !flags.has_cloudflare_ddns_fast_interval {
+        lines.push("XP_CLOUDFLARE_DDNS_FAST_INTERVAL_SECS=30".to_string());
+    }
+    if !flags.has_cloudflare_ddns_fast_window {
+        lines.push("XP_CLOUDFLARE_DDNS_FAST_WINDOW_SECS=300".to_string());
+    }
+    if !flags.has_cloudflare_ddns_family_missing_grace {
+        lines.push("XP_CLOUDFLARE_DDNS_FAMILY_MISSING_GRACE=3".to_string());
     }
 
     let content = format!("{}\n", lines.join("\n"));

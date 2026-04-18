@@ -1930,6 +1930,7 @@ fn runtime_components_unknown() -> Vec<ComponentRuntimeStatus> {
         RuntimeComponent::Xp,
         RuntimeComponent::Xray,
         RuntimeComponent::Cloudflared,
+        RuntimeComponent::Ddns,
     ] {
         components.push(ComponentRuntimeStatus {
             component,
@@ -1942,6 +1943,11 @@ fn runtime_components_unknown() -> Vec<ComponentRuntimeStatus> {
             restart_attempts: 0,
             last_restart_at: None,
             last_restart_fail_at: None,
+            last_sync_at: None,
+            current_ipv4: None,
+            current_ipv6: None,
+            fast_mode_until: None,
+            last_error: None,
         });
     }
     components
