@@ -3,7 +3,7 @@ pub mod cli;
 mod admin_token;
 #[cfg(test)]
 mod admin_token_tests;
-mod cloudflare;
+pub(crate) mod cloudflare;
 mod deploy;
 mod init;
 mod install;

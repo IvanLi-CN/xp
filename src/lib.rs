@@ -5,6 +5,7 @@ pub mod cluster_metadata;
 pub mod config;
 pub mod credentials;
 pub mod cycle;
+pub mod ddns;
 pub mod domain;
 pub mod endpoint_probe;
 pub mod http;

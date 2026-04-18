@@ -8,7 +8,7 @@ use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
 use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
-use crate::ops::util::{Mode, is_test_root};
+use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_string_if_changed};
 use crate::ops::xp;
 use dialoguer::Confirm;
 use dialoguer::Select;
@@ -66,6 +66,8 @@ struct DeployPlan {
     xray_version: String,
     enable_services: bool,
     cloudflare_enabled: bool,
+    ddns_enabled: bool,
+    ddns_zone_id: Option<String>,
     cloudflare_token_source: Option<CloudflareTokenSource>,
     cloudflare: Option<CloudflarePlan>,
     warnings: Vec<String>,
@@ -82,6 +84,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     let auto_yes = args.yes;
     let force_overwrite = args.overwrite_existing;
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
+    let ddns_enabled = args.ddns_toggle.enabled();
     let interactive = !args.non_interactive && io::stdin().is_terminal();
 
     if args.join_token_stdin && args.cloudflare_token_stdin {
@@ -113,10 +116,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     }
 
     if args.cloudflare_token_stdin {
-        if !cloudflare_enabled {
+        if !cloudflare_enabled && !ddns_enabled {
             return Err(ExitError::new(
                 2,
-                "invalid_args: --cloudflare-token-stdin requires Cloudflare enabled (remove --no-cloudflare)",
+                "invalid_args: --cloudflare-token-stdin requires --cloudflare or --ddns",
             ));
         }
         if io::stdin().is_terminal() {
@@ -139,10 +142,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         args.cloudflare_token_stdin_value = Some(token);
     }
 
-    if args.cloudflare_token.is_some() && !cloudflare_enabled {
+    if args.cloudflare_token.is_some() && !cloudflare_enabled && !ddns_enabled {
         return Err(ExitError::new(
             2,
-            "invalid_args: --cloudflare-token requires Cloudflare enabled (remove --no-cloudflare)",
+            "invalid_args: --cloudflare-token requires --cloudflare or --ddns",
         ));
     }
 
@@ -252,6 +255,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         }
         eprintln!("  - init directories and service files (no enable)");
         eprintln!("  - install xp binary");
+        if plan.ddns_enabled {
+            eprintln!("  - write xp-readable cloudflare ddns token file");
+        }
         if plan.cloudflare_enabled {
             eprintln!("  - cloudflare provision");
             if plan.join_token_present && plan.enable_services {
@@ -308,6 +314,26 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     )
     .await?;
 
+    if plan.ddns_enabled {
+        let token = cloudflare::load_cloudflare_token_for_deploy(
+            &paths,
+            args.cloudflare_token.as_deref(),
+            args.cloudflare_token_stdin_value.as_deref(),
+        )
+        .map(|(t, _src)| t)
+        .map_err(|e| {
+            if e.message == "token_missing" {
+                ExitError::new(
+                    3,
+                    "cloudflare token missing: provide --cloudflare-token / --cloudflare-token-stdin, or set CLOUDFLARE_API_TOKEN, or write /etc/xp-ops/cloudflare_tunnel/api_token",
+                )
+            } else {
+                e
+            }
+        })?;
+        ensure_ddns_runtime_token_file(&paths, mode, &token)?;
+    }
+
     // After `xp-ops init`, we know the `xp` group exists (so `chown root:xp` is reliable).
     let bootstrap_admin_token = if plan.join_token_present {
         None
@@ -318,6 +344,8 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             plan.node_name.as_str(),
             plan.access_host.as_str(),
             plan.api_base_url.as_str(),
+            plan.ddns_enabled,
+            plan.ddns_zone_id.as_deref().unwrap_or_default(),
             force_overwrite,
         )?
     };
@@ -423,6 +451,8 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 plan.node_name.as_str(),
                 plan.access_host.as_str(),
                 plan.api_base_url.as_str(),
+                plan.ddns_enabled,
+                plan.ddns_zone_id.as_deref().unwrap_or_default(),
                 force_overwrite,
             )?;
         }
@@ -552,20 +582,14 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     }
 
     let cloudflare_enabled = args.cloudflare_toggle.enabled();
+    let ddns_enabled = args.ddns_toggle.enabled();
     let mut api_base_url_source = ValueSource::Provided;
     let mut cloudflare_plan = None;
     let mut cloudflare_token_source: Option<CloudflareTokenSource> = None;
+    let mut ddns_zone_id = args.ddns_zone_id.clone();
 
-    let api_base_url = if cloudflare_enabled {
-        let account_id = match args.account_id.clone() {
-            Some(v) => v,
-            None => {
-                errors.push("missing --account-id with --cloudflare".to_string());
-                String::new()
-            }
-        };
-
-        let token = match cloudflare::load_cloudflare_token_for_deploy(
+    let token = if cloudflare_enabled || ddns_enabled {
+        match cloudflare::load_cloudflare_token_for_deploy(
             paths,
             args.cloudflare_token.as_deref(),
             args.cloudflare_token_stdin_value.as_deref(),
@@ -584,6 +608,18 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
                     errors.push(format!("cloudflare token error: {}", e.message));
                 }
                 None
+            }
+        }
+    } else {
+        None
+    };
+
+    let api_base_url = if cloudflare_enabled {
+        let account_id = match args.account_id.clone() {
+            Some(v) => v,
+            None => {
+                errors.push("missing --account-id with --cloudflare".to_string());
+                String::new()
             }
         };
 
@@ -777,6 +813,34 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         base
     };
 
+    if ddns_enabled {
+        if args.access_host.trim().is_empty() {
+            errors.push("ddns requires a non-empty --access-host".to_string());
+        } else if !is_valid_hostname(args.access_host.trim()) {
+            errors.push("ddns access-host is not a valid DNS name".to_string());
+        }
+        if ddns_zone_id.is_none()
+            && let Some(token) = token.as_deref()
+        {
+            match resolve_zone_from_domain(
+                &cloudflare::cloudflare_api_base(),
+                token,
+                "",
+                args.access_host.trim(),
+                &mut warnings,
+            )
+            .await
+            {
+                Ok(Some(found)) => ddns_zone_id = Some(found.id),
+                Ok(None) => warnings.push(
+                    "ddns zone could not be derived from access-host; XP_CLOUDFLARE_DDNS_ZONE_ID will stay empty"
+                        .to_string(),
+                ),
+                Err(e) => errors.push(format!("ddns zone error: {}", e.message)),
+            }
+        }
+    }
+
     Ok(DeployPlan {
         xp_install_from: args.xp_bin.clone(),
         xp_path,
@@ -788,6 +852,8 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         xray_version: args.xray_version.clone(),
         enable_services: args.enable_services_toggle.enabled(),
         cloudflare_enabled,
+        ddns_enabled,
+        ddns_zone_id,
         cloudflare_token_source,
         cloudflare: cloudflare_plan,
         warnings,
@@ -1335,7 +1401,16 @@ fn render_plan(plan: &DeployPlan) {
         }
         .to_string(),
     );
-    if plan.cloudflare_enabled {
+    line(
+        "ddns",
+        if plan.ddns_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+        .to_string(),
+    );
+    if plan.cloudflare_enabled || plan.ddns_enabled {
         let value = match plan.cloudflare_token_source {
             Some(src) => format!("provided via {}", src.display()),
             None => "absent".to_string(),
@@ -1365,6 +1440,14 @@ fn render_plan(plan: &DeployPlan) {
         "api_base_url",
         auto(plan.api_base_url.as_str(), plan.api_base_url_source),
     );
+    if plan.ddns_enabled {
+        line(
+            "ddns_zone_id",
+            plan.ddns_zone_id
+                .clone()
+                .unwrap_or_else(|| "(empty)".to_string()),
+        );
+    }
     line("xray_version", plan.xray_version.clone());
     line(
         "enable_services",
@@ -1603,12 +1686,15 @@ fn confirm(message: &str) -> Result<bool, ExitError> {
     Ok(v == "y" || v == "yes")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_xp_env_admin_token_hash_bootstrap(
     paths: &Paths,
     mode: Mode,
     node_name: &str,
     access_host: &str,
     api_base_url: &str,
+    ddns_enabled: bool,
+    ddns_zone_id: &str,
     force_overwrite: bool,
 ) -> Result<Option<String>, ExitError> {
     let p = paths.etc_xp_env();
@@ -1660,6 +1746,9 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 node_name,
                 access_host,
                 api_base_url,
+                cloudflare_ddns_enabled: ddns_enabled,
+                cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+                cloudflare_ddns_zone_id: ddns_zone_id,
             },
         )?;
         return Ok(None);
@@ -1678,6 +1767,9 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 node_name,
                 access_host,
                 api_base_url,
+                cloudflare_ddns_enabled: ddns_enabled,
+                cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+                cloudflare_ddns_zone_id: ddns_zone_id,
             },
         )?;
         return Ok(None);
@@ -1696,11 +1788,15 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
             node_name,
             access_host,
             api_base_url,
+            cloudflare_ddns_enabled: ddns_enabled,
+            cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+            cloudflare_ddns_zone_id: ddns_zone_id,
         },
     )?;
     Ok(Some(token))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_xp_env_admin_token_hash_join(
     paths: &Paths,
     mode: Mode,
@@ -1708,6 +1804,8 @@ fn ensure_xp_env_admin_token_hash_join(
     node_name: &str,
     access_host: &str,
     api_base_url: &str,
+    ddns_enabled: bool,
+    ddns_zone_id: &str,
     force_overwrite: bool,
 ) -> Result<(), ExitError> {
     if parse_admin_token_hash(expected_hash).is_none() {
@@ -1769,6 +1867,9 @@ fn ensure_xp_env_admin_token_hash_join(
                 node_name,
                 access_host,
                 api_base_url,
+                cloudflare_ddns_enabled: ddns_enabled,
+                cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+                cloudflare_ddns_zone_id: ddns_zone_id,
             },
         )?;
         return Ok(());
@@ -1794,6 +1895,9 @@ fn ensure_xp_env_admin_token_hash_join(
                 node_name,
                 access_host,
                 api_base_url,
+                cloudflare_ddns_enabled: ddns_enabled,
+                cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+                cloudflare_ddns_zone_id: ddns_zone_id,
             },
         )?;
         return Ok(());
@@ -1809,6 +1913,9 @@ fn ensure_xp_env_admin_token_hash_join(
             node_name,
             access_host,
             api_base_url,
+            cloudflare_ddns_enabled: ddns_enabled,
+            cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token",
+            cloudflare_ddns_zone_id: ddns_zone_id,
         },
     )?;
     Ok(())
@@ -1831,6 +1938,26 @@ fn read_cluster_admin_token_hash(paths: &Paths, data_dir: &Path) -> Result<Strin
         ));
     }
     Ok(hash.to_string())
+}
+
+fn ensure_ddns_runtime_token_file(paths: &Paths, mode: Mode, token: &str) -> Result<(), ExitError> {
+    let path = paths.etc_xp_cloudflare_ddns_token();
+    if mode == Mode::DryRun {
+        eprintln!("would write: {}", path.display());
+        return Ok(());
+    }
+
+    ensure_dir(&paths.etc_xp_dir())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&path, &(token.trim().to_string() + "\n"))
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&path, 0o640).ok();
+    if !is_test_root(paths.root()) {
+        let _ = std::process::Command::new("chown")
+            .args(["root:xp", path.to_string_lossy().as_ref()])
+            .status();
+    }
+    Ok(())
 }
 
 fn generate_admin_token() -> String {
@@ -1892,6 +2019,8 @@ mod tests {
             "example.com",
             "https://example.com",
             false,
+            "",
+            false,
         )
         .unwrap();
         ensure_xp_env_admin_token_hash_bootstrap(
@@ -1900,6 +2029,8 @@ mod tests {
             "node-1",
             "example.com",
             "https://example.com",
+            false,
+            "",
             false,
         )
         .unwrap();
@@ -1951,6 +2082,8 @@ XP_XRAY_CUSTOM=keep-me\n",
             "example.com",
             "https://example.com",
             false,
+            "",
+            false,
         )
         .unwrap();
 
@@ -1983,11 +2116,16 @@ XP_XRAY_CUSTOM=keep-me\n",
                 cloudflare: true,
                 no_cloudflare: false,
             },
+            ddns_toggle: crate::ops::cli::DdnsToggle {
+                ddns: false,
+                no_ddns: true,
+            },
             account_id: Some("acc".to_string()),
             zone_id: Some("zone".to_string()),
             hostname: Some("node-1.example.com".to_string()),
             tunnel_name: None,
             origin_url: None,
+            ddns_zone_id: None,
             join_token: None,
             join_token_stdin: false,
             join_token_stdin_value: None,

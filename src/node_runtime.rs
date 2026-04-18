@@ -19,6 +19,7 @@ use crate::{
         CloudflaredHealthHandle, CloudflaredHealthSnapshot, CloudflaredStatus,
     },
     config::{Config, XrayRestartMode},
+    ddns::{DdnsHealthHandle, DdnsStatus, DdnsStatusSnapshot},
     id::new_ulid_string,
     xray_supervisor::{XrayHealthHandle, XrayHealthSnapshot, XrayStatus},
 };
@@ -34,6 +35,7 @@ pub enum RuntimeComponent {
     Xp,
     Xray,
     Cloudflared,
+    Ddns,
 }
 
 impl RuntimeComponent {
@@ -42,6 +44,7 @@ impl RuntimeComponent {
             Self::Xp => "xp",
             Self::Xray => "xray",
             Self::Cloudflared => "cloudflared",
+            Self::Ddns => "ddns",
         }
     }
 }
@@ -51,6 +54,7 @@ impl RuntimeComponent {
 pub enum RuntimeStatus {
     Disabled,
     Up,
+    Degraded,
     Down,
     Unknown,
 }
@@ -60,6 +64,7 @@ impl RuntimeStatus {
         match self {
             Self::Disabled => "disabled",
             Self::Up => "up",
+            Self::Degraded => "degraded",
             Self::Down => "down",
             Self::Unknown => "unknown",
         }
@@ -101,7 +106,7 @@ pub struct NodeRuntimeSummary {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentRuntimeStatus {
     pub component: RuntimeComponent,
     pub status: RuntimeStatus,
@@ -113,6 +118,16 @@ pub struct ComponentRuntimeStatus {
     pub restart_attempts: u64,
     pub last_restart_at: Option<String>,
     pub last_restart_fail_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_ipv4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_ipv6: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_mode_until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +177,7 @@ struct NodeRuntimeState {
 }
 
 impl NodeRuntimeState {
-    fn new(node_id: String, cloudflared_enabled: bool) -> Self {
+    fn new(node_id: String, cloudflared_enabled: bool, ddns_enabled: bool) -> Self {
         let now = Utc::now();
         let now_str = rfc3339(now);
         let mut components = BTreeMap::new();
@@ -179,6 +194,11 @@ impl NodeRuntimeState {
                 restart_attempts: 0,
                 last_restart_at: None,
                 last_restart_fail_at: None,
+                last_sync_at: None,
+                current_ipv4: None,
+                current_ipv6: None,
+                fast_mode_until: None,
+                last_error: None,
             },
         );
         components.insert(
@@ -194,6 +214,11 @@ impl NodeRuntimeState {
                 restart_attempts: 0,
                 last_restart_at: None,
                 last_restart_fail_at: None,
+                last_sync_at: None,
+                current_ipv4: None,
+                current_ipv6: None,
+                fast_mode_until: None,
+                last_error: None,
             },
         );
         components.insert(
@@ -213,6 +238,35 @@ impl NodeRuntimeState {
                 restart_attempts: 0,
                 last_restart_at: None,
                 last_restart_fail_at: None,
+                last_sync_at: None,
+                current_ipv4: None,
+                current_ipv6: None,
+                fast_mode_until: None,
+                last_error: None,
+            },
+        );
+        components.insert(
+            RuntimeComponent::Ddns,
+            ComponentRuntimeStatus {
+                component: RuntimeComponent::Ddns,
+                status: if ddns_enabled {
+                    RuntimeStatus::Unknown
+                } else {
+                    RuntimeStatus::Disabled
+                },
+                last_ok_at: None,
+                last_fail_at: None,
+                down_since: None,
+                consecutive_failures: 0,
+                recoveries_observed: 0,
+                restart_attempts: 0,
+                last_restart_at: None,
+                last_restart_fail_at: None,
+                last_sync_at: None,
+                current_ipv4: None,
+                current_ipv6: None,
+                fast_mode_until: None,
+                last_error: None,
             },
         );
 
@@ -233,13 +287,14 @@ impl NodeRuntimeState {
     fn load_from(
         persisted: PersistedRuntime,
         cloudflared_enabled: bool,
+        ddns_enabled: bool,
         now: DateTime<Utc>,
     ) -> Option<Self> {
         if persisted.schema_version != RUNTIME_SCHEMA_VERSION {
             return None;
         }
 
-        let mut state = Self::new(persisted.node_id, cloudflared_enabled);
+        let mut state = Self::new(persisted.node_id, cloudflared_enabled, ddns_enabled);
         for component in persisted.components {
             state.components.insert(component.component, component);
         }
@@ -350,19 +405,37 @@ pub struct NodeRuntimeHandle {
 impl NodeRuntimeHandle {
     pub fn from_config(config: &Config, node_id: String) -> Self {
         let cloudflared_enabled = config.cloudflared_restart_mode != XrayRestartMode::None;
+        let ddns_enabled = config.cloudflare_ddns_enabled;
         Self::new(
             config.data_dir.join("service_runtime.json"),
             node_id,
             cloudflared_enabled,
+            ddns_enabled,
         )
     }
 
-    fn new(persistence_path: PathBuf, node_id: String, cloudflared_enabled: bool) -> Self {
+    fn new(
+        persistence_path: PathBuf,
+        node_id: String,
+        cloudflared_enabled: bool,
+        ddns_enabled: bool,
+    ) -> Self {
         let now = Utc::now();
         let (events_tx, _) = broadcast::channel::<NodeRuntimeEvent>(512);
 
-        let state = load_persisted_state(&persistence_path, cloudflared_enabled, now)
-            .unwrap_or_else(|| NodeRuntimeState::new(node_id, cloudflared_enabled));
+        let state = load_persisted_state(&persistence_path, cloudflared_enabled, ddns_enabled, now)
+            .unwrap_or_else(|| NodeRuntimeState::new(node_id, cloudflared_enabled, ddns_enabled));
+
+        let mut state = state;
+        if let Some(ddns) = state.components.get_mut(&RuntimeComponent::Ddns) {
+            ddns.status = if !ddns_enabled {
+                RuntimeStatus::Disabled
+            } else if ddns.status == RuntimeStatus::Disabled {
+                RuntimeStatus::Unknown
+            } else {
+                ddns.status
+            };
+        }
 
         Self {
             inner: Arc::new(RwLock::new(state)),
@@ -392,9 +465,11 @@ impl NodeRuntimeHandle {
         now: DateTime<Utc>,
         xray: XrayHealthSnapshot,
         cloudflared: CloudflaredHealthSnapshot,
+        ddns: DdnsStatusSnapshot,
     ) {
         let xray_component = map_xray_component(xray);
         let cloudflared_component = map_cloudflared_component(cloudflared);
+        let ddns_component = map_ddns_component(ddns);
 
         let mut events_to_emit: Vec<NodeRuntimeEvent> = Vec::new();
         let mut should_persist = false;
@@ -406,6 +481,8 @@ impl NodeRuntimeHandle {
                 apply_component_update(&mut state, xray_component, now, &mut events_to_emit);
             should_persist |=
                 apply_component_update(&mut state, cloudflared_component, now, &mut events_to_emit);
+            should_persist |=
+                apply_component_update(&mut state, ddns_component, now, &mut events_to_emit);
 
             if state.recompute_summary(now) {
                 should_persist = true;
@@ -440,8 +517,13 @@ impl NodeRuntimeHandle {
     }
 
     #[cfg(test)]
-    fn test_new(path: PathBuf, node_id: String, cloudflared_enabled: bool) -> Self {
-        Self::new(path, node_id, cloudflared_enabled)
+    fn test_new(
+        path: PathBuf,
+        node_id: String,
+        cloudflared_enabled: bool,
+        ddns_enabled: bool,
+    ) -> Self {
+        Self::new(path, node_id, cloudflared_enabled, ddns_enabled)
     }
 }
 
@@ -450,6 +532,7 @@ pub fn spawn_node_runtime_monitor(
     node_id: String,
     xray_health: XrayHealthHandle,
     cloudflared_health: CloudflaredHealthHandle,
+    ddns_health: DdnsHealthHandle,
 ) -> (NodeRuntimeHandle, tokio::task::JoinHandle<()>) {
     let runtime = NodeRuntimeHandle::from_config(&config, node_id);
     let runtime_clone = runtime.clone();
@@ -470,8 +553,9 @@ pub fn spawn_node_runtime_monitor(
             let now = Utc::now();
             let xray = xray_health.snapshot().await;
             let cloudflared = cloudflared_health.snapshot().await;
+            let ddns = ddns_health.snapshot().await;
             runtime_clone
-                .apply_probe_snapshots(now, xray, cloudflared)
+                .apply_probe_snapshots(now, xray, cloudflared, ddns)
                 .await;
         }
     });
@@ -491,9 +575,8 @@ fn apply_component_update(
         return true;
     };
 
-    let mut should_persist = false;
+    let should_persist = previous != next;
     if previous.status != next.status {
-        should_persist = true;
         events.push(NodeRuntimeEvent {
             event_id: new_ulid_string(),
             occurred_at: rfc3339(now),
@@ -511,7 +594,6 @@ fn apply_component_update(
     }
 
     if next.restart_attempts > previous.restart_attempts {
-        should_persist = true;
         let restart_time = next.last_restart_at.clone().unwrap_or_else(|| rfc3339(now));
         let restart_fail = next.last_restart_fail_at.as_ref() == Some(&restart_time);
 
@@ -562,6 +644,11 @@ fn map_xray_component(snapshot: XrayHealthSnapshot) -> ComponentRuntimeStatus {
         restart_attempts: snapshot.restart_attempts,
         last_restart_at: snapshot.last_restart_at.map(rfc3339),
         last_restart_fail_at: snapshot.last_restart_fail_at.map(rfc3339),
+        last_sync_at: None,
+        current_ipv4: None,
+        current_ipv6: None,
+        fast_mode_until: None,
+        last_error: None,
     }
 }
 
@@ -582,6 +669,37 @@ fn map_cloudflared_component(snapshot: CloudflaredHealthSnapshot) -> ComponentRu
         restart_attempts: snapshot.restart_attempts,
         last_restart_at: snapshot.last_restart_at.map(rfc3339),
         last_restart_fail_at: snapshot.last_restart_fail_at.map(rfc3339),
+        last_sync_at: None,
+        current_ipv4: None,
+        current_ipv6: None,
+        fast_mode_until: None,
+        last_error: None,
+    }
+}
+
+fn map_ddns_component(snapshot: DdnsStatusSnapshot) -> ComponentRuntimeStatus {
+    ComponentRuntimeStatus {
+        component: RuntimeComponent::Ddns,
+        status: match snapshot.status {
+            DdnsStatus::Disabled => RuntimeStatus::Disabled,
+            DdnsStatus::Unknown => RuntimeStatus::Unknown,
+            DdnsStatus::Up => RuntimeStatus::Up,
+            DdnsStatus::Degraded => RuntimeStatus::Degraded,
+            DdnsStatus::Down => RuntimeStatus::Down,
+        },
+        last_ok_at: snapshot.last_ok_at.map(rfc3339),
+        last_fail_at: snapshot.last_fail_at.map(rfc3339),
+        down_since: snapshot.down_since.map(rfc3339),
+        consecutive_failures: snapshot.consecutive_failures,
+        recoveries_observed: snapshot.recoveries_observed,
+        restart_attempts: 0,
+        last_restart_at: None,
+        last_restart_fail_at: None,
+        last_sync_at: snapshot.last_sync_at.map(rfc3339),
+        current_ipv4: snapshot.current_ipv4,
+        current_ipv6: snapshot.current_ipv6,
+        fast_mode_until: snapshot.fast_mode_until.map(rfc3339),
+        last_error: snapshot.last_error,
     }
 }
 
@@ -611,6 +729,10 @@ where
         return RuntimeSummaryStatus::Degraded;
     }
 
+    if statuses.contains(&RuntimeStatus::Degraded) {
+        return RuntimeSummaryStatus::Degraded;
+    }
+
     if statuses.contains(&RuntimeStatus::Unknown) {
         return RuntimeSummaryStatus::Unknown;
     }
@@ -637,11 +759,12 @@ fn rfc3339(at: DateTime<Utc>) -> String {
 fn load_persisted_state(
     path: &PathBuf,
     cloudflared_enabled: bool,
+    ddns_enabled: bool,
     now: DateTime<Utc>,
 ) -> Option<NodeRuntimeState> {
     let raw = fs::read(path).ok()?;
     let parsed = serde_json::from_slice::<PersistedRuntime>(&raw).ok()?;
-    NodeRuntimeState::load_from(parsed, cloudflared_enabled, now)
+    NodeRuntimeState::load_from(parsed, cloudflared_enabled, ddns_enabled, now)
 }
 
 fn persist_runtime(path: &PathBuf, payload: &PersistedRuntime) -> Result<(), String> {
@@ -681,6 +804,10 @@ mod tests {
             RuntimeSummaryStatus::Unknown
         );
         assert_eq!(
+            compute_summary([RuntimeStatus::Degraded, RuntimeStatus::Up]),
+            RuntimeSummaryStatus::Degraded
+        );
+        assert_eq!(
             compute_summary([RuntimeStatus::Disabled]),
             RuntimeSummaryStatus::Unknown
         );
@@ -690,7 +817,7 @@ mod tests {
     async fn status_transition_and_restart_events_are_recorded() {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("service_runtime.json");
-        let handle = NodeRuntimeHandle::test_new(path, "node-1".to_string(), true);
+        let handle = NodeRuntimeHandle::test_new(path, "node-1".to_string(), true, true);
 
         let mut xray = XrayHealthSnapshot {
             status: XrayStatus::Up,
@@ -702,7 +829,12 @@ mod tests {
         };
 
         handle
-            .apply_probe_snapshots(Utc::now(), xray.clone(), cloudflared.clone())
+            .apply_probe_snapshots(
+                Utc::now(),
+                xray.clone(),
+                cloudflared.clone(),
+                DdnsStatusSnapshot::unknown(),
+            )
             .await;
 
         xray.status = XrayStatus::Down;
@@ -710,7 +842,12 @@ mod tests {
         let restart_at = Utc::now();
         xray.last_restart_at = Some(restart_at);
         handle
-            .apply_probe_snapshots(Utc::now(), xray.clone(), cloudflared.clone())
+            .apply_probe_snapshots(
+                Utc::now(),
+                xray.clone(),
+                cloudflared.clone(),
+                DdnsStatusSnapshot::unknown(),
+            )
             .await;
 
         let snapshot = handle.snapshot(20).await;
@@ -736,7 +873,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("service_runtime.json");
 
-        let handle = NodeRuntimeHandle::test_new(path.clone(), "node-1".to_string(), false);
+        let handle = NodeRuntimeHandle::test_new(path.clone(), "node-1".to_string(), false, false);
         handle
             .apply_probe_snapshots(
                 Utc::now(),
@@ -748,13 +885,14 @@ mod tests {
                     status: CloudflaredStatus::Disabled,
                     ..CloudflaredHealthSnapshot::default()
                 },
+                DdnsStatusSnapshot::disabled(),
             )
             .await;
 
         let before = handle.snapshot(10).await;
         assert!(!before.events.is_empty());
 
-        let restored = NodeRuntimeHandle::test_new(path, "node-1".to_string(), false);
+        let restored = NodeRuntimeHandle::test_new(path, "node-1".to_string(), false, false);
         let after = restored.snapshot(10).await;
         assert!(!after.events.is_empty());
         assert_eq!(after.node_id, "node-1");

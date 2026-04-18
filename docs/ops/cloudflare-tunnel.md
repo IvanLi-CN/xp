@@ -2,6 +2,11 @@
 
 This document describes how `xp-ops` provisions a Cloudflare Tunnel so you can reach `xp` from the public Internet without opening inbound ports.
 
+It does **not** publish `XP_ACCESS_HOST` for user traffic. Tunnel-managed `hostname` and DDNS-managed `XP_ACCESS_HOST` are separate concerns:
+
+- Tunnel: `XP_API_BASE_URL` / admin reachability (`hostname -> <tunnel-id>.cfargotunnel.com`, proxied CNAME)
+- Runtime DDNS: `XP_ACCESS_HOST` / node endpoint reachability (`A` / `AAAA`, DNS only)
+
 ## What gets created / written
 
 Local files (on the target server, root-managed):
@@ -16,6 +21,7 @@ Cloudflare-side resources:
 - A Tunnel (under the given `account_id`)
 - A Tunnel configuration (ingress)
 - A DNS record (CNAME, proxied) for `hostname` → `<tunnel-id>.cfargotunnel.com`
+- Optional runtime-managed `A` / `AAAA` records for `XP_ACCESS_HOST` when deploy is run with `--ddns`
 
 ## Required API token permissions
 
@@ -31,6 +37,12 @@ Create a Cloudflare API token with:
 - `/etc/xp-ops/cloudflare_tunnel/api_token`
 
 The token is never printed to stdout/stderr by design.
+
+When DDNS is enabled, `xp-ops deploy --ddns` also writes an `xp`-readable copy to:
+
+- `/etc/xp/cloudflare_ddns_api_token` (secret, `0640`, typically `root:xp`)
+
+`xp` uses that runtime token file together with `XP_CLOUDFLARE_DDNS_*` settings to reconcile `XP_ACCESS_HOST`.
 
 ## Typical workflow
 
@@ -62,6 +74,25 @@ sudo -E xp-ops deploy \
   --hostname node-1.example.com \
   -y
 ```
+
+To enable runtime DDNS for `XP_ACCESS_HOST` on the same node:
+
+```
+sudo -E xp-ops deploy \
+  --node-name node-1 \
+  --access-host node-1.example.net \
+  --ddns \
+  --hostname node-1.example.com \
+  --account-id <id> \
+  -y
+```
+
+Notes:
+
+- `--ddns` may be used with or without `--cloudflare`.
+- `--ddns-zone-id` is optional; when omitted, deploy tries to derive the Cloudflare zone from `--access-host`.
+- Runtime DDNS keeps records normalized as `DNS only` + `TTL=Auto`.
+- If Cloudflare already has exactly one `A` / `AAAA` for `XP_ACCESS_HOST`, `xp` adopts and updates it. Multiple same-type records are treated as an operator error and are not modified automatically.
 
 - If you want to provide the Cloudflare token from the command line (not recommended, can leak via shell history / `ps`):
 
@@ -109,6 +140,14 @@ sudo systemctl status cloudflared.service
 - Local runtime:
   - `/etc/cloudflared/config.yml` exists and references the correct `credentials-file`.
   - `/etc/cloudflared/<tunnel-id>.json` exists and is `0600`.
+
+DDNS-specific checks:
+
+- `/etc/xp/cloudflare_ddns_api_token` exists, is readable by the `xp` service user, and is not empty.
+- `XP_CLOUDFLARE_DDNS_ENABLED=true` is present in `/etc/xp/xp.env`.
+- `XP_ACCESS_HOST` is a valid FQDN under the expected Cloudflare zone.
+- `/api/admin/nodes/<node>/runtime` shows a `ddns` component; `degraded` / `down` states will include the last error.
+- `${XP_DATA_DIR}/ddns_state.json` reflects the last synced IPv4 / IPv6 and any pending fast-mode window.
 
 ## Security notes
 

@@ -82,6 +82,16 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        cloudflare_ddns_enabled: false,
+        cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
+        cloudflare_ddns_zone_id: String::new(),
+        cloudflare_ddns_ipv4_url: xp::ddns::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_ipv6_url: xp::ddns::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_interval_secs_with_monitor: 300,
+        cloudflare_ddns_interval_secs_no_monitor: 60,
+        cloudflare_ddns_fast_interval_secs: 30,
+        cloudflare_ddns_fast_window_secs: 300,
+        cloudflare_ddns_family_missing_grace: 3,
         endpoint_probe_skip_self_test: false,
         quota_poll_interval_secs: 10,
         quota_auto_unban: true,
@@ -290,11 +300,13 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
 
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = xp::ddns::DdnsHealthHandle::new_with_status(xp::ddns::DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),
@@ -491,11 +503,13 @@ async fn xray_e2e_quota_enforcement_ss2022() {
 
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let ddns_health = xp::ddns::DdnsHealthHandle::new_with_status(xp::ddns::DdnsStatus::Disabled);
     let (node_runtime, _node_runtime_task) = xp::node_runtime::spawn_node_runtime_monitor(
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
         cloudflared_health,
+        ddns_health,
     );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
         cluster.node_id.clone(),

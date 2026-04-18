@@ -257,6 +257,9 @@ pub struct DeployArgs {
     #[command(flatten)]
     pub cloudflare_toggle: CloudflareToggle,
 
+    #[command(flatten)]
+    pub ddns_toggle: DdnsToggle,
+
     #[arg(long, value_name = "ID")]
     pub account_id: Option<String>,
 
@@ -271,6 +274,9 @@ pub struct DeployArgs {
 
     #[arg(long, value_name = "URL")]
     pub origin_url: Option<String>,
+
+    #[arg(long, value_name = "ID")]
+    pub ddns_zone_id: Option<String>,
 
     #[arg(long, value_name = "TOKEN", conflicts_with = "join_token_stdin")]
     pub join_token: Option<String>,
@@ -324,6 +330,21 @@ pub struct CloudflareToggle {
 impl CloudflareToggle {
     pub fn enabled(&self) -> bool {
         !self.no_cloudflare
+    }
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct DdnsToggle {
+    #[arg(long, conflicts_with = "no_ddns")]
+    pub ddns: bool,
+
+    #[arg(long, conflicts_with = "ddns")]
+    pub no_ddns: bool,
+}
+
+impl DdnsToggle {
+    pub fn enabled(&self) -> bool {
+        self.ddns && !self.no_ddns
     }
 }
 

@@ -35,6 +35,10 @@ impl Paths {
         self.map_abs(Path::new("/etc/xp/xp.env"))
     }
 
+    pub fn etc_xp_cloudflare_ddns_token(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/xp/cloudflare_ddns_api_token"))
+    }
+
     pub fn etc_xray_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xray"))
     }
