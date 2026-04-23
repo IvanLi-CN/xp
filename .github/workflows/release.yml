@@ -230,7 +230,13 @@ jobs:
 
       - name: publish ghcr image
         if: steps.intent.outputs.should_release == 'true'
+        timeout-minutes: 30
         uses: docker/build-push-action@v6
+        env:
+          # Work around docker/build-push-action post-build hangs introduced by the
+          # new build record export path in v6.17+.
+          # Upstream: https://github.com/docker/build-push-action/issues/1388
+          DOCKER_BUILD_EXPORT_LEGACY: true
         with:
           context: .
           file: ./Dockerfile
