@@ -129,9 +129,15 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
+          target_sha="$(git rev-parse "${RELEASE_HEAD_SHA}^{commit}")"
           echo "target tag: $tag"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            echo "tag exists: ${tag}"
+            existing_tag_sha="$(git rev-list -n 1 "${tag}^{commit}")"
+            if [[ "${existing_tag_sha}" != "${target_sha}" ]]; then
+              echo "tag ${tag} already exists on ${existing_tag_sha}, expected ${target_sha}" >&2
+              exit 1
+            fi
+            echo "tag exists on target commit: ${tag}"
             exit 0
           fi
           git tag -a "${tag}" -m "${tag}"
