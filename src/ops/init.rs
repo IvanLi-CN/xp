@@ -84,7 +84,7 @@ fn ensure_layout(
     }
 
     if mode == Mode::Real {
-        write_xray_config(paths)?;
+        write_static_xray_config(paths)?;
     } else {
         eprintln!("would write: /etc/xray/config.json");
     }
@@ -117,7 +117,7 @@ fn ensure_layout(
     Ok(())
 }
 
-fn write_xray_config(paths: &Paths) -> Result<(), ExitError> {
+pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     let cfg = json!({
       "log": { "loglevel": "warning" },
       "api": {

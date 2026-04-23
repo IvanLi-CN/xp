@@ -78,6 +78,29 @@ pub async fn cmd_cloudflare_provision_with_token(
     args: CloudflareProvisionArgs,
     token: String,
 ) -> Result<(), ExitError> {
+    cmd_cloudflare_provision_with_mode(paths, args, token, ProvisionRuntime::ManagedService).await
+}
+
+pub async fn cmd_cloudflare_provision_container(
+    paths: Paths,
+    args: CloudflareProvisionArgs,
+    token: String,
+) -> Result<(), ExitError> {
+    cmd_cloudflare_provision_with_mode(paths, args, token, ProvisionRuntime::Container).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProvisionRuntime {
+    ManagedService,
+    Container,
+}
+
+async fn cmd_cloudflare_provision_with_mode(
+    paths: Paths,
+    args: CloudflareProvisionArgs,
+    token: String,
+    runtime: ProvisionRuntime,
+) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
     } else {
@@ -88,7 +111,9 @@ pub async fn cmd_cloudflare_provision_with_token(
     let init_system = detect_init_system(distro, None);
 
     ensure_cloudflared_present(&paths, distro, mode).await?;
-    ensure_cloudflared_service(&paths, distro, init_system, mode)?;
+    if runtime == ProvisionRuntime::ManagedService {
+        ensure_cloudflared_service(&paths, distro, init_system, mode)?;
+    }
 
     if mode == Mode::DryRun {
         eprintln!("would call Cloudflare API (token redacted)");
@@ -102,7 +127,7 @@ pub async fn cmd_cloudflare_provision_with_token(
         );
         eprintln!("would write: {}", paths.etc_cloudflared_config().display());
         eprintln!("would write: /etc/cloudflared/<tunnel-id>.json");
-        if args.enabled() {
+        if args.enabled() && runtime == ProvisionRuntime::ManagedService {
             eprintln!("would enable cloudflared service ({init_system:?})");
         }
         return Ok(());
@@ -114,7 +139,10 @@ pub async fn cmd_cloudflare_provision_with_token(
 
     let mut settings = load_settings_or_default(&paths)?;
     settings.enabled = args.enabled();
-    settings.install_mode = "external".to_string();
+    settings.install_mode = match runtime {
+        ProvisionRuntime::ManagedService => "external".to_string(),
+        ProvisionRuntime::Container => "container".to_string(),
+    };
     settings.account_id = args.account_id.clone();
     settings.zone_id = args.zone_id.clone();
     settings.hostname = args.hostname.clone();
@@ -199,7 +227,7 @@ pub async fn cmd_cloudflare_provision_with_token(
     settings.dns_record_id = Some(dns_record_id);
     save_settings(&paths, &settings)?;
 
-    if args.enabled() {
+    if args.enabled() && runtime == ProvisionRuntime::ManagedService {
         enable_cloudflared_service(init_system, mode, &paths)?;
     }
 

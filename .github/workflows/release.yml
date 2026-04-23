@@ -15,6 +15,7 @@ on:
 permissions:
   contents: write
   issues: read
+  packages: write
   pull-requests: read
 
 env:
@@ -93,6 +94,28 @@ jobs:
           set -euo pipefail
           chmod +x .github/scripts/compute-version.sh
           .github/scripts/compute-version.sh
+
+      - name: prepare docker image tags
+        id: image
+        if: steps.intent.outputs.should_release == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+          owner_lc="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner_lc}/xp"
+          {
+            echo "image=${image}"
+            echo "tags<<EOF"
+            echo "${image}:v${VERSION}"
+            echo "${image}:${VERSION}"
+            if [[ "${IS_PRERELEASE}" != "true" ]]; then
+              echo "${image}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: configure git user
         if: steps.intent.outputs.should_release == 'true'
@@ -188,6 +211,36 @@ jobs:
 
           cd release
           sha256sum xp-* > checksums.txt
+
+      - name: setup qemu
+        if: steps.intent.outputs.should_release == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: setup buildx
+        if: steps.intent.outputs.should_release == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: login ghcr
+        if: steps.intent.outputs.should_release == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: publish ghcr image
+        if: steps.intent.outputs.should_release == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.image.outputs.tags }}
+          build-args: |
+            XP_BUILD_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: create release
         if: steps.intent.outputs.should_release == 'true'

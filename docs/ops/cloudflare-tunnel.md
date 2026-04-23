@@ -7,6 +7,8 @@ It does **not** publish `XP_ACCESS_HOST` for user traffic. Tunnel-managed `hostn
 - Tunnel: `XP_API_BASE_URL` / admin reachability (`hostname -> <tunnel-id>.cfargotunnel.com`, proxied CNAME)
 - Runtime DDNS: `XP_ACCESS_HOST` / node endpoint reachability (`A` / `AAAA`, DNS only)
 
+For the single-image Docker runtime, use the same Cloudflare API token and the same persisted files, but let `xp-ops container run` supervise the `cloudflared` process inside the container. See `docs/ops/docker.md` for the Compose flow.
+
 ## What gets created / written
 
 Local files (on the target server, root-managed):

@@ -87,6 +87,16 @@ jobs:
               --no-enable
           done
 
+      - name: xp-ops container dry-run contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XP_NODE_NAME=node-1 \
+          XP_API_BASE_URL=https://node-1.example.com \
+          XP_ADMIN_TOKEN=test-token \
+          cargo run --quiet --bin xp-ops -- container run --dry-run
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -179,3 +189,23 @@ jobs:
 
           curl -fsS "http://127.0.0.1:60081/" >/dev/null
           bun run test-storybook
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: docker build
+        run: docker build --build-arg XP_BUILD_VERSION=ci-smoke -t xp:smoke .
+
+      - name: default entrypoint bootstrap dry-run
+        run: |
+          docker run --rm \
+            -e XP_NODE_NAME=node-1 \
+            -e XP_API_BASE_URL=https://node-1.example.com \
+            -e XP_ADMIN_TOKEN=test-token \
+            xp:smoke --dry-run

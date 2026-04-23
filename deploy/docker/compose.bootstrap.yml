@@ -1,0 +1,33 @@
+services:
+  xp:
+    image: ${XP_IMAGE:-ghcr.io/ivanli-cn/xp:latest}
+    container_name: ${XP_CONTAINER_NAME:-xp-node-1}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${XP_HOST_PORT:-62416}:62416"
+    environment:
+      XP_NODE_NAME: ${XP_NODE_NAME:-node-1}
+      XP_ADMIN_TOKEN: ${XP_ADMIN_TOKEN:?set XP_ADMIN_TOKEN}
+      XP_BIND: 0.0.0.0:62416
+      XP_ENABLE_CLOUDFLARE: ${XP_ENABLE_CLOUDFLARE:-true}
+      XP_API_BASE_URL: ${XP_API_BASE_URL:-}
+      XP_CLOUDFLARE_ACCOUNT_ID: ${XP_CLOUDFLARE_ACCOUNT_ID:-}
+      XP_CLOUDFLARE_ZONE_ID: ${XP_CLOUDFLARE_ZONE_ID:-}
+      XP_CLOUDFLARE_HOSTNAME: ${XP_CLOUDFLARE_HOSTNAME:-}
+      XP_CLOUDFLARE_TUNNEL_NAME: ${XP_CLOUDFLARE_TUNNEL_NAME:-xp-node-1}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:62416/api/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    volumes:
+      - xp-node-1-data:/var/lib/xp/data
+      - xp-node-1-cloudflared:/etc/cloudflared
+      - xp-node-1-cloudflare-state:/etc/xp-ops/cloudflare_tunnel
+
+volumes:
+  xp-node-1-data:
+  xp-node-1-cloudflared:
+  xp-node-1-cloudflare-state:
