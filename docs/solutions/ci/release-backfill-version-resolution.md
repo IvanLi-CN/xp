@@ -26,6 +26,10 @@ This keeps `workflow_dispatch(head_sha=...)` idempotent for reruns and makes his
 
 For backfills, keep the target commit on its own release line even if later tags already exist, but still advance to the next globally free stable patch or `-rc.N` whenever the target-local version has already been consumed by a newer release.
 
+Run the release automation from the current workflow revision first, and only switch the worktree to the historical release target after the version/tag decisions are locked in. That keeps manual backfills from accidentally running stale scripts that still live on the historical target commit.
+
+If the requested historical target predates `Cargo.toml` and there is no exact tag or earlier release tag on that target's own history, fail loudly instead of reading the current automation branch manifest. Modern automation state is not a valid version baseline for those old commits.
+
 The release workflow should also treat an existing tag as reusable only when it already points at the requested release target commit. Reuse both `v<version>` and legacy `<version>` tags when they already belong to the target commit; if the same tag string exists on a different commit, fail loudly instead of silently updating the wrong release.
 
 ## Verification

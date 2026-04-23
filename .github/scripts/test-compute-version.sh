@@ -65,6 +65,39 @@ assert_version() {
   echo "[PASS] ${label}: ${actual}"
 }
 
+assert_failure() {
+  local label="$1"
+  local repo="$2"
+  local target_sha="$3"
+  local expected_substring="$4"
+  local output
+
+  set +e
+  output="$(
+    cd "${repo}"
+    RELEASE_HEAD_SHA="${target_sha}" \
+      BUMP_LEVEL=patch \
+      IS_PRERELEASE=false \
+      "${compute_script}" 2>&1
+  )"
+  local status=$?
+  set -e
+
+  if [[ "${status}" -eq 0 ]]; then
+    echo "[FAIL] ${label}: expected failure, but command succeeded" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  if [[ "${output}" != *"${expected_substring}"* ]]; then
+    echo "[FAIL] ${label}: expected output to contain '${expected_substring}'" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  echo "[PASS] ${label}: failed as expected"
+}
+
 repo_exact="${tmp_root}/exact"
 create_repo "${repo_exact}"
 git -C "${repo_exact}" tag -a v3.5.0 -m v3.5.0 HEAD
@@ -122,13 +155,45 @@ assert_version \
 repo_cargo_fallback="${tmp_root}/cargo-fallback"
 create_repo "${repo_cargo_fallback}"
 target_cargo_fallback_sha="$(git -C "${repo_cargo_fallback}" rev-parse HEAD)"
+cat >"${repo_cargo_fallback}/Cargo.toml" <<'EOF'
+[package]
+name = "xp"
+version = "0.9.0"
+edition = "2024"
+EOF
+git -C "${repo_cargo_fallback}" add Cargo.toml
+git -C "${repo_cargo_fallback}" commit -q -m "bump cargo version"
 commit_file "${repo_cargo_fallback}" feature.txt "later" "later release"
 git -C "${repo_cargo_fallback}" tag -a v3.5.0 -m v3.5.0 HEAD
 assert_version \
-  "fall back to Cargo.toml before the first release tag" \
+  "fall back to the target commit Cargo.toml before the first release tag" \
   "${repo_cargo_fallback}" \
   "${target_cargo_fallback_sha}" \
   "0.2.1"
+
+repo_missing_target_cargo="${tmp_root}/missing-target-cargo"
+mkdir -p "${repo_missing_target_cargo}"
+git -C "${repo_missing_target_cargo}" init -q
+git -C "${repo_missing_target_cargo}" config user.name "Test User"
+git -C "${repo_missing_target_cargo}" config user.email "test@example.com"
+echo "seed" >"${repo_missing_target_cargo}/README.md"
+git -C "${repo_missing_target_cargo}" add README.md
+git -C "${repo_missing_target_cargo}" commit -q -m "init"
+target_missing_target_cargo_sha="$(git -C "${repo_missing_target_cargo}" rev-parse HEAD)"
+cat >"${repo_missing_target_cargo}/Cargo.toml" <<'EOF'
+[package]
+name = "xp"
+version = "0.2.0"
+edition = "2024"
+EOF
+git -C "${repo_missing_target_cargo}" add Cargo.toml
+git -C "${repo_missing_target_cargo}" commit -q -m "add cargo"
+git -C "${repo_missing_target_cargo}" tag -a v3.5.0 -m v3.5.0 HEAD
+assert_failure \
+  "fail cleanly when the target predates Cargo.toml and has no release baseline" \
+  "${repo_missing_target_cargo}" \
+  "${target_missing_target_cargo_sha}" \
+  "does not contain Cargo.toml"
 
 repo_prerelease="${tmp_root}/prerelease"
 create_repo "${repo_prerelease}"

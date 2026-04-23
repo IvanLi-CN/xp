@@ -17,23 +17,6 @@ git fetch --tags --force >/dev/null 2>&1 || true
 
 target_sha="${RELEASE_HEAD_SHA:-${WORKFLOW_RUN_SHA:-${GITHUB_SHA:-}}}"
 
-cargo_ver="$(
-  awk '
-    $0 ~ /^\[package\]/ { in_pkg=1; next }
-    $0 ~ /^\[/ { in_pkg=0 }
-    in_pkg && $1 == "version" {
-      gsub(/"/, "", $3);
-      print $3;
-      exit
-    }
-  ' "${root_dir}/Cargo.toml"
-)"
-
-if [[ -z "${cargo_ver:-}" ]]; then
-  echo "failed to parse [package].version from Cargo.toml" >&2
-  exit 1
-fi
-
 if [[ -z "${BUMP_LEVEL:-}" ]]; then
   echo "missing BUMP_LEVEL (expected: major|minor|patch)" >&2
   exit 1
@@ -54,6 +37,44 @@ if [[ -n "${target_sha}" ]] && ! git rev-parse -q --verify "${target_sha}^{commi
   echo "invalid release target sha=${target_sha}" >&2
   exit 1
 fi
+
+load_cargo_manifest() {
+  if [[ -n "${target_sha}" ]]; then
+    if git rev-parse -q --verify "${target_sha}:Cargo.toml" >/dev/null 2>&1; then
+      git show "${target_sha}:Cargo.toml"
+      return 0
+    fi
+
+    echo "release target ${target_sha} does not contain Cargo.toml" >&2
+    return 1
+  fi
+
+  cat "${root_dir}/Cargo.toml"
+}
+
+resolve_cargo_version() {
+  local version
+
+  version="$(
+    load_cargo_manifest \
+      | awk '
+        $0 ~ /^\[package\]/ { in_pkg=1; next }
+        $0 ~ /^\[/ { in_pkg=0 }
+        in_pkg && $1 == "version" {
+          gsub(/"/, "", $3);
+          print $3;
+          exit
+        }
+      '
+  )"
+
+  if [[ -z "${version:-}" ]]; then
+    echo "failed to parse [package].version from Cargo.toml" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${version}"
+}
 
 list_normalized_semver_tags_on_commit() {
   local sha="$1"
@@ -170,6 +191,7 @@ max_tag="$(
     || true
 )"
 
+cargo_ver=""
 exact_version="$(resolve_exact_release_version "${target_sha}")"
 
 if [[ -n "${exact_version}" ]]; then
@@ -182,12 +204,19 @@ else
     if [[ -n "${base_ver}" ]]; then
       version_source="previous_release_on_target_history"
     else
+      cargo_ver="$(resolve_cargo_version)"
       base_ver="${cargo_ver}"
       version_source="cargo_version_fallback"
     fi
   else
-    base_ver="${max_tag:-$cargo_ver}"
-    version_source="global_max_tag"
+    if [[ -n "${max_tag}" ]]; then
+      base_ver="${max_tag}"
+      version_source="global_max_tag"
+    else
+      cargo_ver="$(resolve_cargo_version)"
+      base_ver="${cargo_ver}"
+      version_source="cargo_version_fallback"
+    fi
   fi
 
   base_major="$(echo "$base_ver" | cut -d. -f1)"
@@ -241,7 +270,7 @@ fi
 
 echo "XP_EFFECTIVE_VERSION=${effective_version}"
 echo "Computed XP_EFFECTIVE_VERSION=${effective_version}"
-echo "  base_version=${base_ver} (max_tag=${max_tag:-<none>}, cargo=${cargo_ver})"
+echo "  base_version=${base_ver} (max_tag=${max_tag:-<none>}, cargo=${cargo_ver:-<unused>})"
 echo "  bump_level=${BUMP_LEVEL}"
 echo "  is_prerelease=${is_prerelease}"
 echo "  target_sha=${target_sha:-<none>}"

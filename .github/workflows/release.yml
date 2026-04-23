@@ -48,11 +48,10 @@ jobs:
           echo "RELEASE_REQUESTED_SHA=${target_sha}"
           echo "RELEASE_TARGET_SHA=${target_sha}"
 
-      - name: checkout
+      - name: checkout release automation
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ steps.release-head.outputs.release_head_sha }}
 
       - name: determine release intent (labels)
         id: intent
@@ -154,13 +153,20 @@ jobs:
               exit 1
             fi
           else
-            git tag -a "${preferred_tag}" -m "${preferred_tag}"
+            git tag -a "${preferred_tag}" -m "${preferred_tag}" "${target_sha}"
             git push origin "${preferred_tag}"
             selected_tag="${preferred_tag}"
           fi
 
           echo "selected tag: ${selected_tag}"
           echo "tag_name=${selected_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: checkout release target tree
+        if: steps.intent.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --progress --force "${RELEASE_HEAD_SHA}"
 
       - name: setup rust
         if: steps.intent.outputs.should_release == 'true'
