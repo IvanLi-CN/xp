@@ -26,7 +26,7 @@ This keeps `workflow_dispatch(head_sha=...)` idempotent for reruns and makes his
 
 For backfills, keep the target commit on its own release line even if later tags already exist, but still advance to the next globally free stable patch or `-rc.N` whenever the target-local version has already been consumed by a newer release.
 
-The release workflow should also treat an existing tag as reusable only when it already points at the requested release target commit. If the same tag exists on a different commit, fail loudly instead of silently updating the wrong release.
+The release workflow should also treat an existing tag as reusable only when it already points at the requested release target commit. Reuse both `v<version>` and legacy `<version>` tags when they already belong to the target commit; if the same tag string exists on a different commit, fail loudly instead of silently updating the wrong release.
 
 ## Verification
 

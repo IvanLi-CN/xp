@@ -79,6 +79,18 @@ assert_version \
   "${target_exact_sha}" \
   "3.5.1"
 
+repo_exact_legacy="${tmp_root}/exact-legacy"
+create_repo "${repo_exact_legacy}"
+git -C "${repo_exact_legacy}" tag -a 3.5.0 -m 3.5.0 HEAD
+commit_file "${repo_exact_legacy}" feature.txt "target" "target release"
+target_exact_legacy_sha="$(git -C "${repo_exact_legacy}" rev-parse HEAD)"
+git -C "${repo_exact_legacy}" tag -a 3.5.1 -m 3.5.1 "${target_exact_legacy_sha}"
+assert_version \
+  "reuse exact legacy tag on backfill target" \
+  "${repo_exact_legacy}" \
+  "${target_exact_legacy_sha}" \
+  "3.5.1"
+
 repo_ancestor="${tmp_root}/ancestor"
 create_repo "${repo_ancestor}"
 git -C "${repo_ancestor}" tag -a v3.5.0 -m v3.5.0 HEAD
