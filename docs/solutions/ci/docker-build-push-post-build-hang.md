@@ -38,6 +38,7 @@ In `Dockerfile`:
 
 - keep the existing source-building final image path for local `docker build`
 - add a `runtime-from-prebuilt` stage that selects the correct release binaries by `TARGETARCH`
+- do not `COPY release/` wholesale into the final image; use a BuildKit bind mount inside `RUN` so each platform image only layers the matching pair of binaries
 
 ## Verification
 

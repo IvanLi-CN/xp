@@ -66,8 +66,8 @@ COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
 
 FROM runtime-base AS runtime-from-prebuilt
 ARG TARGETARCH
-COPY release/ /tmp/release/
-RUN set -eu; \
+RUN --mount=type=bind,source=release,target=/tmp/release,ro \
+  set -eu; \
   case "${TARGETARCH}" in \
     amd64) suffix='x86_64' ;; \
     arm64) suffix='aarch64' ;; \
@@ -75,7 +75,6 @@ RUN set -eu; \
   esac; \
   cp "/tmp/release/xp-linux-${suffix}" /usr/local/bin/xp; \
   cp "/tmp/release/xp-ops-linux-${suffix}" /usr/local/bin/xp-ops; \
-  chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops; \
-  rm -rf /tmp/release
+  chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops
 
 FROM runtime-from-source AS runtime
