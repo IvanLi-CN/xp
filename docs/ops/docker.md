@@ -2,6 +2,10 @@
 
 This guide covers the official single-image runtime for one `xp` cluster node per container.
 
+Owner-facing deployment walkthrough:
+
+- `docs/ops/docker-deployment-guide.md`
+
 ## What the image contains
 
 `ghcr.io/ivanli-cn/xp` bundles:

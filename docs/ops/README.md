@@ -4,6 +4,7 @@ This directory contains both the traditional host-managed service examples and t
 
 - Host-managed services (systemd/OpenRC): this document
 - Single-image Docker runtime: `docs/ops/docker.md`
+- Owner-facing Docker deployment walkthrough: `docs/ops/docker-deployment-guide.md`
 
 ## Minimal runtime assumptions
 
