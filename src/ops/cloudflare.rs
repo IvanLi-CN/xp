@@ -196,7 +196,7 @@ async fn cmd_cloudflare_provision_with_mode(
         ));
     }
     write_cloudflared_config(&paths, &tunnel_id, &cred_path_abs)?;
-    ensure_cloudflared_file_ownership(&paths, &tunnel_id, mode)?;
+    ensure_cloudflared_file_ownership(&paths, &tunnel_id, mode, runtime)?;
 
     client
         .put_tunnel_config(
@@ -453,8 +453,10 @@ fn ensure_cloudflared_file_ownership(
     paths: &Paths,
     tunnel_id: &str,
     mode: Mode,
+    runtime: ProvisionRuntime,
 ) -> Result<(), ExitError> {
-    if mode == Mode::DryRun || is_test_root(paths.root()) {
+    if mode == Mode::DryRun || is_test_root(paths.root()) || runtime == ProvisionRuntime::Container
+    {
         return Ok(());
     }
     let config = paths.etc_cloudflared_config();

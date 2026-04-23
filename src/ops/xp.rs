@@ -228,8 +228,30 @@ pub async fn cmd_xp_sync_node_meta(
     if data_dir.trim().is_empty() {
         return Err(ExitError::new(2, "invalid_input: XP_DATA_DIR is empty"));
     }
-    let abs_data_dir = paths.map_abs(Path::new(&data_dir));
+    sync_node_meta_runtime(
+        &paths,
+        Path::new(&data_dir),
+        &node_name,
+        &access_host,
+        &api_base_url,
+        &args.xp_base_url,
+        mode,
+    )
+    .await
+}
 
+pub(crate) async fn sync_node_meta_runtime(
+    paths: &Paths,
+    data_dir: &Path,
+    node_name: &str,
+    access_host: &str,
+    api_base_url: &str,
+    xp_base_url: &str,
+    mode: Mode,
+) -> Result<(), ExitError> {
+    validate_https_origin(api_base_url)?;
+
+    let abs_data_dir = paths.map_abs(data_dir);
     let mut meta = crate::cluster_metadata::ClusterMetadata::load(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
     let node_id = meta.node_id.clone();
@@ -242,10 +264,10 @@ pub async fn cmd_xp_sync_node_meta(
     let cluster_ca_pem = meta
         .read_cluster_ca_pem(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_ca_error: {e}")))?;
-    let client = build_xp_ops_http_client(&args.xp_base_url, &cluster_ca_pem)?;
+    let client = build_xp_ops_http_client(xp_base_url, &cluster_ca_pem)?;
 
     let current_node =
-        fetch_admin_node_internal(&client, &args.xp_base_url, &ca_key_pem, &node_id).await?;
+        fetch_admin_node_internal(&client, xp_base_url, &ca_key_pem, &node_id).await?;
 
     let current = current_node.clone().unwrap_or_else(|| crate::domain::Node {
         node_id: node_id.clone(),
@@ -272,34 +294,31 @@ pub async fn cmd_xp_sync_node_meta(
         return Ok(());
     }
 
-    // 1) Update local persisted cluster metadata to match config file.
-    meta.node_name = node_name.clone();
-    meta.access_host = access_host.clone();
-    meta.api_base_url = api_base_url.clone();
+    meta.node_name = node_name.to_string();
+    meta.access_host = access_host.to_string();
+    meta.api_base_url = api_base_url.to_string();
     meta.save(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
 
-    // 2) Update Raft state machine node record (used by subscription output and admin UI).
     let desired_node = crate::domain::Node {
         node_id: node_id.clone(),
-        node_name: node_name.clone(),
-        access_host: access_host.clone(),
-        api_base_url: api_base_url.clone(),
+        node_name: node_name.to_string(),
+        access_host: access_host.to_string(),
+        api_base_url: api_base_url.to_string(),
         quota_limit_bytes: current.quota_limit_bytes,
         quota_reset: current.quota_reset.clone(),
     };
     internal_client_write(
         &client,
-        &args.xp_base_url,
+        xp_base_url,
         &ca_key_pem,
         crate::state::DesiredStateCommand::UpsertNode { node: desired_node },
     )
     .await?;
 
-    // 3) Update Raft membership NodeMeta (used for leader discovery and forwarding).
-    let info = fetch_cluster_info(&client, &args.xp_base_url).await?;
+    let info = fetch_cluster_info(&client, xp_base_url).await?;
     let set_nodes_base_url = if info.role == "leader" {
-        args.xp_base_url.as_str()
+        xp_base_url
     } else {
         info.leader_api_base_url.as_str()
     };
@@ -314,9 +333,9 @@ pub async fn cmd_xp_sync_node_meta(
         set_nodes_base_url,
         &ca_key_pem,
         vec![InternalSetNodeArgs {
-            node_id: node_id.clone(),
-            node_name,
-            api_base_url,
+            node_id,
+            node_name: node_name.to_string(),
+            api_base_url: api_base_url.to_string(),
         }],
     )
     .await?;
@@ -812,7 +831,7 @@ fn validate_origin(origin: &str) -> Result<(), ExitError> {
     Ok(())
 }
 
-fn build_xp_ops_http_client(
+pub(crate) fn build_xp_ops_http_client(
     base_url: &str,
     cluster_ca_pem: &str,
 ) -> Result<reqwest::Client, ExitError> {
@@ -855,7 +874,7 @@ async fn fetch_cluster_info(
         .map_err(|e| ExitError::new(5, format!("http_error: parse cluster info: {e}")))
 }
 
-async fn fetch_admin_node_internal(
+pub(crate) async fn fetch_admin_node_internal(
     client: &reqwest::Client,
     base_url: &str,
     cluster_ca_key_pem: &str,
@@ -898,7 +917,7 @@ async fn fetch_admin_node_internal(
     Ok(Some(node))
 }
 
-async fn internal_client_write(
+pub(crate) async fn internal_client_write(
     client: &reqwest::Client,
     base_url: &str,
     cluster_ca_key_pem: &str,
@@ -953,13 +972,13 @@ struct InternalSetNodesRequestArgs {
 }
 
 #[derive(serde::Serialize)]
-struct InternalSetNodeArgs {
-    node_id: String,
-    node_name: String,
-    api_base_url: String,
+pub(crate) struct InternalSetNodeArgs {
+    pub node_id: String,
+    pub node_name: String,
+    pub api_base_url: String,
 }
 
-async fn internal_set_nodes(
+pub(crate) async fn internal_set_nodes(
     client: &reqwest::Client,
     base_url: &str,
     cluster_ca_key_pem: &str,
@@ -991,4 +1010,46 @@ async fn internal_set_nodes(
         ));
     }
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct InternalItems<T> {
+    items: Vec<T>,
+}
+
+pub(crate) async fn fetch_admin_endpoints_internal(
+    client: &reqwest::Client,
+    base_url: &str,
+    cluster_ca_key_pem: &str,
+) -> Result<Vec<crate::domain::Endpoint>, ExitError> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{base}/api/admin/endpoints");
+    let uri: Uri = "/endpoints".parse().expect("valid uri");
+    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::GET, &uri)
+        .map_err(|e| ExitError::new(5, format!("sign internal request: {e}")))?;
+
+    let resp = client
+        .get(url)
+        .header(
+            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send()
+        .await
+        .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ExitError::new(
+            5,
+            format!("http_error: admin endpoints get failed: {status}: {body}"),
+        ));
+    }
+
+    let items = resp
+        .json::<InternalItems<crate::domain::Endpoint>>()
+        .await
+        .map_err(|e| ExitError::new(5, format!("http_error: parse admin endpoints: {e}")))?;
+    Ok(items.items)
 }

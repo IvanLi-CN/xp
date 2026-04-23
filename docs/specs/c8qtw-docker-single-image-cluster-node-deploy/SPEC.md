@@ -19,6 +19,7 @@
 - 交付官方单镜像节点部署路径：镜像内包含 `xp`、`xp-ops`、真实嵌入版 `web/dist`、`xray`、`cloudflared`、`tini`。
 - 新增 `xp-ops container run` 作为唯一容器入口，负责 bootstrap/join、可选 Cloudflare Tunnel provisioning、子进程托管、健康退出与信号转发。
 - 支持 bootstrap 节点与 join 节点两类首启流程，并保证重启后不会重复 `xp init` / 重复创建 Tunnel 与 DNS 资源。
+- 支持保留既有数据卷时的自动 realign：环境变量变化后自动对齐 node metadata、DDNS runtime state 与默认托管 endpoint。
 - 发布 `ghcr.io/<owner>/xp` 多架构镜像，并在 CI 中新增 Docker smoke build。
 - 提供可直接复用的 Compose 示例与运维文档，覆盖 Cloudflare Tunnel 开关、持久化卷、bootstrap/join 使用方式。
 
@@ -58,6 +59,8 @@
 - 容器固定持久化卷：`/var/lib/xp/data`、`/etc/cloudflared`、`/etc/xp-ops/cloudflare_tunnel`。
 - Tunnel 开启且未显式提供 `XP_API_BASE_URL` 时，默认派生为 `https://<XP_CLOUDFLARE_HOSTNAME>`。
 - join 节点在首次执行 `xp join` 前，必须先完成/reuse Tunnel 配置并等待 public `api_base_url` 就绪。
+- 当既有 `metadata.json` 与环境变量不一致时，容器入口必须自动 realign 本地 metadata，并在 `xp` 启动后同步回 Raft state machine / membership metadata。
+- 容器入口必须支持 `XP_CLOUDFLARE_DDNS_ENABLED` 驱动的 DDNS runtime token file 准备，以及 `XP_DEFAULT_VLESS_*` / `XP_DEFAULT_SS_PORT` 驱动的默认 endpoint reconcile。
 - runtime 镜像入口固定为 `tini -- xp-ops container run`。
 - release 工作流必须发布 `linux/amd64` 与 `linux/arm64` 的 GHCR 镜像；稳定版发布 `vX.Y.Z`、`X.Y.Z`、`latest`，预发布不推 `latest`。
 
@@ -79,7 +82,15 @@
 
 - 提供 `XP_JOIN_TOKEN` 且数据卷为空时，容器进入 join 首启流程。
 - 若启用 Tunnel，容器必须先 provision/reuse Tunnel、本地 credentials 与 DNS，再等待 `https://<hostname>/health` 可达，然后执行 `xp join --token ...`。
+- join 首次 runtime reconcile 必须允许直接复用 join token 自带的 `leader_api_base_url` 作为 control-plane 写入目标，避免因为本地 follower 尚未学到 leader routing 而阻塞默认 endpoint / node-meta 对齐。
 - join 成功后会复用 leader 返回的证书与 admin token hash；重启时不再重复 join。
+
+### Runtime reconcile flow
+
+- 对已有数据卷重启时，容器入口保留既有 `cluster_id` / `node_id`，并将环境变量中的 `XP_NODE_NAME`、`XP_ACCESS_HOST`、`XP_API_BASE_URL` 写回本地 metadata。
+- `xp` 启动后，入口会使用内部签名请求把同样的节点元数据同步回 Raft state machine 与 membership node meta。
+- 当 `XP_CLOUDFLARE_DDNS_ENABLED=true` 时，入口会在启动 `xp` 前写好 DDNS runtime token file，并确保 `xp` 拿到最终 `XP_CLOUDFLARE_DDNS_ZONE_ID`。
+- 默认托管 endpoint 使用保守 adopt 策略：当前节点上某个 kind 恰好只有一条 endpoint 时可以 adopt；若存在多条同 kind endpoint，则直接报错，避免误伤人工配置。
 
 ### Child supervision
 
@@ -91,18 +102,23 @@
 
 ### Container env contract
 
-| Key                                      | Required when   | Description                              |
-| ---------------------------------------- | --------------- | ---------------------------------------- |
-| `XP_NODE_NAME`                           | always          | 节点名                                   |
-| `XP_ADMIN_TOKEN` / `XP_ADMIN_TOKEN_HASH` | bootstrap       | bootstrap 节点 admin token/hash          |
-| `XP_JOIN_TOKEN`                          | join            | join token                               |
-| `XP_API_BASE_URL`                        | tunnel disabled | 节点可达 HTTPS origin                    |
-| `XP_ENABLE_CLOUDFLARE`                   | optional        | `true/false`                             |
-| `XP_CLOUDFLARE_ACCOUNT_ID`               | tunnel enabled  | Cloudflare account id                    |
-| `XP_CLOUDFLARE_ZONE_ID`                  | optional        | 显式 zone id；未提供时可由 hostname 解析 |
-| `XP_CLOUDFLARE_HOSTNAME`                 | tunnel enabled  | Tunnel 对外 hostname                     |
-| `XP_CLOUDFLARE_TUNNEL_NAME`              | optional        | Tunnel 名称；默认 `xp-<node-name>`       |
-| `CLOUDFLARE_API_TOKEN`                   | tunnel enabled  | Cloudflare API token                     |
+| Key                                                                                         | Required when   | Description                                      |
+| ------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------ |
+| `XP_NODE_NAME`                                                                              | always          | 节点名                                           |
+| `XP_ADMIN_TOKEN` / `XP_ADMIN_TOKEN_HASH`                                                    | bootstrap       | bootstrap 节点 admin token/hash                  |
+| `XP_JOIN_TOKEN`                                                                             | join            | join token                                       |
+| `XP_API_BASE_URL`                                                                           | tunnel disabled | 节点可达 HTTPS origin                            |
+| `XP_ENABLE_CLOUDFLARE`                                                                      | optional        | `true/false`                                     |
+| `XP_CLOUDFLARE_ACCOUNT_ID`                                                                  | tunnel enabled  | Cloudflare account id                            |
+| `XP_CLOUDFLARE_ZONE_ID`                                                                     | optional        | 显式 zone id；未提供时可由 hostname 解析         |
+| `XP_CLOUDFLARE_HOSTNAME`                                                                    | tunnel enabled  | Tunnel 对外 hostname                             |
+| `XP_CLOUDFLARE_TUNNEL_NAME`                                                                 | optional        | Tunnel 名称；默认 `xp-<node-name>`               |
+| `XP_ACCESS_HOST`                                                                            | optional        | 对外 endpoint hostname；启用 DDNS 时推荐显式设置 |
+| `XP_CLOUDFLARE_DDNS_ENABLED`                                                                | optional        | 是否启用 `XP_ACCESS_HOST` 的 runtime DDNS        |
+| `XP_CLOUDFLARE_DDNS_ZONE_ID`                                                                | DDNS enabled    | DDNS zone id；与 Tunnel 同 zone 时可自动复用     |
+| `XP_DEFAULT_VLESS_PORT` / `XP_DEFAULT_VLESS_REALITY_DEST` / `XP_DEFAULT_VLESS_SERVER_NAMES` | optional        | 默认托管 VLESS endpoint 契约                     |
+| `XP_DEFAULT_SS_PORT`                                                                        | optional        | 默认托管 SS2022 endpoint 契约                    |
+| `CLOUDFLARE_API_TOKEN`                                                                      | tunnel enabled  | Cloudflare API token                             |
 
 ### Volume contract
 
@@ -116,6 +132,8 @@
 - Given 空数据卷与 bootstrap 环境变量，When 容器首次启动，Then 只执行一次 `xp init`；重启后不重复初始化。
 - Given 空数据卷、join token 与 Tunnel 环境变量，When 容器首次启动，Then 会先完成/reuse Tunnel 配置并等待 public URL，再执行 `xp join`。
 - Given 已存在 `/etc/cloudflared` 与 `/etc/xp-ops/cloudflare_tunnel` 卷，When 容器二次启动，Then 复用已有 Tunnel credentials/settings，不生成重复 Tunnel/DNS 资源。
+- Given 既有数据卷且节点 hostname 变更，When 使用新的 `XP_NODE_NAME` / `XP_ACCESS_HOST` / `XP_API_BASE_URL` 重启，Then 本地 metadata 与集群 node meta 自动对齐到新值。
+- Given 设置了 `XP_DEFAULT_VLESS_*` / `XP_DEFAULT_SS_PORT`，When 容器首次启动或后续重启，Then 当前节点存在与 env 对齐的默认托管 endpoint；删除这些 env 后，对应托管 endpoint 会被移除。
 - Given PR CI 运行，When Docker job 执行，Then 镜像 smoke build 通过且默认 entrypoint dry-run 合同通过。
 - Given release 工作流成功，When 版本被发布，Then GHCR 产出 amd64/arm64 镜像与约定 tag。
 - Given 操作者只参考 README 与 ops 文档，When 按 Compose 示例部署 bootstrap / join 节点，Then 能明确知道所需 env、secret、volume 与 Cloudflare 前提。

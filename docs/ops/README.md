@@ -48,6 +48,7 @@ If you prefer one container per cluster node, use:
 Container-specific note:
 
 - `xp-ops container run` owns the `xray` / `cloudflared` child processes inside the container.
+- It also prepares DDNS runtime files and reconciles default managed SS/VLESS endpoints from container env on every start.
 - `xp` still reports `xray` health through `GET /api/health`.
 - `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
 
