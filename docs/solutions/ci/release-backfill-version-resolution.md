@@ -30,6 +30,8 @@ Run the release automation from the current workflow revision first, and only sw
 
 If the requested historical target predates `Cargo.toml` and there is no exact tag or earlier release tag on that target's own history, fail loudly instead of reading the current automation branch manifest. Modern automation state is not a valid version baseline for those old commits.
 
+For image publishing, keep using the current automation revision's Dockerfile even after the workspace switches to the historical release target. Older targets can predate newer runtime stages such as `runtime-from-prebuilt`; if the workflow reuses the historical Dockerfile for a backfill, GHCR publishing can fail after the binaries were already built successfully.
+
 The release workflow should also treat an existing tag as reusable only when it already points at the requested release target commit. Reuse both `v<version>` and legacy `<version>` tags when they already belong to the target commit; if the same tag string exists on a different commit, fail loudly instead of silently updating the wrong release.
 
 ## Verification

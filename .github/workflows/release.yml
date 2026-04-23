@@ -161,6 +161,14 @@ jobs:
           echo "selected tag: ${selected_tag}"
           echo "tag_name=${selected_tag}" >> "${GITHUB_OUTPUT}"
 
+      - name: preserve release automation Dockerfile
+        if: steps.intent.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .release-automation
+          cp Dockerfile .release-automation/Dockerfile
+
       - name: checkout release target tree
         if: steps.intent.outputs.should_release == 'true'
         shell: bash
@@ -270,7 +278,7 @@ jobs:
           DOCKER_BUILD_EXPORT_LEGACY: true
         with:
           context: .
-          file: ./Dockerfile
+          file: ./.release-automation/Dockerfile
           target: runtime-from-prebuilt
           push: true
           platforms: linux/amd64,linux/arm64
