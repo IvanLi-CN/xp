@@ -230,7 +230,7 @@ jobs:
 
       - name: publish ghcr image
         if: steps.intent.outputs.should_release == 'true'
-        timeout-minutes: 30
+        timeout-minutes: 60
         uses: docker/build-push-action@v6
         env:
           # Work around docker/build-push-action post-build hangs introduced by the
@@ -240,6 +240,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          target: runtime-from-prebuilt
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.image.outputs.tags }}

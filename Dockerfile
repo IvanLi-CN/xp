@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM ghcr.io/xtls/xray-core:${XRAY_DOCKER_TAG} AS xray
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime-base
 ARG XP_BUILD_VERSION=dev
 ENV XP_BUILD_VERSION=${XP_BUILD_VERSION}
 LABEL org.opencontainers.image.source="https://github.com/IvanLi-CN/xp"
@@ -50,8 +50,6 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends cloudflared \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /out/xp /usr/local/bin/xp
-COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
 COPY --from=xray /usr/local/bin/xray /usr/local/bin/xray
 
 RUN mkdir -p /var/lib/xp/data /etc/cloudflared /etc/xp-ops/cloudflare_tunnel /etc/xray
@@ -61,3 +59,23 @@ EXPOSE 62416
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=6 CMD curl -fsS http://127.0.0.1:62416/api/health >/dev/null || exit 1
 ENTRYPOINT ["tini", "--", "/usr/local/bin/xp-ops", "container", "run"]
+
+FROM runtime-base AS runtime-from-source
+COPY --from=builder /out/xp /usr/local/bin/xp
+COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
+
+FROM runtime-base AS runtime-from-prebuilt
+ARG TARGETARCH
+COPY release/ /tmp/release/
+RUN set -eu; \
+  case "${TARGETARCH}" in \
+    amd64) suffix='x86_64' ;; \
+    arm64) suffix='aarch64' ;; \
+    *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+  esac; \
+  cp "/tmp/release/xp-linux-${suffix}" /usr/local/bin/xp; \
+  cp "/tmp/release/xp-ops-linux-${suffix}" /usr/local/bin/xp-ops; \
+  chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops; \
+  rm -rf /tmp/release
+
+FROM runtime-from-source AS runtime
