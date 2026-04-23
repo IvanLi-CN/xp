@@ -213,7 +213,7 @@ else
   esac
 
   candidate="${next_patch}"
-  if [[ -z "${target_sha}" ]]; then
+  if [[ "${is_prerelease}" != "true" || -z "${target_sha}" ]]; then
     while \
       git rev-parse -q --verify "refs/tags/v${next_major}.${next_minor}.${candidate}" >/dev/null \
       || git rev-parse -q --verify "refs/tags/${next_major}.${next_minor}.${candidate}" >/dev/null; do

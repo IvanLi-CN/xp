@@ -24,7 +24,7 @@ Teach `.github/scripts/compute-version.sh` to resolve versions in this order:
 
 This keeps `workflow_dispatch(head_sha=...)` idempotent for reruns and makes historical backfills recover the version that belongs to the requested commit.
 
-For backfills, keep the target commit on its own version family even if later stable tags already exist, then for prereleases treat the target history as the starting RC floor and still advance to the next globally free `-rc.N` when a newer prerelease has already consumed that exact tag.
+For backfills, keep the target commit on its own release line even if later tags already exist, but still advance to the next globally free stable patch or `-rc.N` whenever the target-local version has already been consumed by a newer release.
 
 The release workflow should also treat an existing tag as reusable only when it already points at the requested release target commit. If the same tag exists on a different commit, fail loudly instead of silently updating the wrong release.
 

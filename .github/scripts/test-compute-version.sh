@@ -102,10 +102,10 @@ git -C "${repo_stable_collision}" tag -a v1.0.1 -m v1.0.1 HEAD
 commit_file "${repo_stable_collision}" extra.txt "later-2" "later release two"
 git -C "${repo_stable_collision}" tag -a v1.0.2 -m v1.0.2 HEAD
 assert_version \
-  "keep stable backfills on the target patch line" \
+  "keep stable backfills on the target release line while remaining unique" \
   "${repo_stable_collision}" \
   "${target_stable_collision_sha}" \
-  "1.0.1"
+  "1.0.3"
 
 repo_cargo_fallback="${tmp_root}/cargo-fallback"
 create_repo "${repo_cargo_fallback}"
