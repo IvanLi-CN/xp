@@ -124,18 +124,43 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: create and push tag (if missing)
+        id: release-tag
         if: steps.intent.outputs.should_release == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          tag="v${{ steps.version.outputs.version }}"
-          echo "target tag: $tag"
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            echo "tag exists: ${tag}"
-            exit 0
+          version="${{ steps.version.outputs.version }}"
+          preferred_tag="v${version}"
+          legacy_tag="${version}"
+          target_sha="$(git rev-parse "${RELEASE_HEAD_SHA}^{commit}")"
+          selected_tag=""
+
+          echo "target version: ${version}"
+
+          if git rev-parse -q --verify "refs/tags/${preferred_tag}" >/dev/null; then
+            existing_tag_sha="$(git rev-list -n 1 "${preferred_tag}^{commit}")"
+            if [[ "${existing_tag_sha}" == "${target_sha}" ]]; then
+              selected_tag="${preferred_tag}"
+            else
+              echo "tag ${preferred_tag} already exists on ${existing_tag_sha}, expected ${target_sha}" >&2
+              exit 1
+            fi
+          elif git rev-parse -q --verify "refs/tags/${legacy_tag}" >/dev/null; then
+            existing_tag_sha="$(git rev-list -n 1 "${legacy_tag}^{commit}")"
+            if [[ "${existing_tag_sha}" == "${target_sha}" ]]; then
+              selected_tag="${legacy_tag}"
+            else
+              echo "tag ${legacy_tag} already exists on ${existing_tag_sha}, expected ${target_sha}" >&2
+              exit 1
+            fi
+          else
+            git tag -a "${preferred_tag}" -m "${preferred_tag}"
+            git push origin "${preferred_tag}"
+            selected_tag="${preferred_tag}"
           fi
-          git tag -a "${tag}" -m "${tag}"
-          git push origin "${tag}"
+
+          echo "selected tag: ${selected_tag}"
+          echo "tag_name=${selected_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: setup rust
         if: steps.intent.outputs.should_release == 'true'
@@ -253,8 +278,8 @@ jobs:
         if: steps.intent.outputs.should_release == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag: ${{ steps.release-tag.outputs.tag_name }}
+          name: ${{ steps.release-tag.outputs.tag_name }}
           prerelease: ${{ steps.intent.outputs.is_prerelease }}
           generateReleaseNotes: true
           allowUpdates: true
