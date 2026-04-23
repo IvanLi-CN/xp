@@ -1,8 +1,14 @@
-# Ops: running `xp` with local `xray`
+# Ops: host-managed and container deployments
 
-This directory contains sample service definitions and an environment template to operate `xp` long-term.
+This directory contains both the traditional host-managed service examples and the single-image Docker deployment guide.
+
+- Host-managed services (systemd/OpenRC): this document
+- Single-image Docker runtime: `docs/ops/docker.md`
+- Owner-facing Docker deployment walkthrough: `docs/ops/docker-deployment-guide.md`
 
 ## Minimal runtime assumptions
+
+Host-managed mode assumptions:
 
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
@@ -31,6 +37,21 @@ Notes:
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 - `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
+
+## Single-image Docker runtime
+
+If you prefer one container per cluster node, use:
+
+- `docs/ops/docker.md`
+- `deploy/docker/compose.bootstrap.yml`
+- `deploy/docker/compose.join.yml`
+
+Container-specific note:
+
+- `xp-ops container run` owns the `xray` / `cloudflared` child processes inside the container.
+- It also prepares DDNS runtime files and reconciles default managed SS/VLESS endpoints from container env on every start.
+- `xp` still reports `xray` health through `GET /api/health`.
+- `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 

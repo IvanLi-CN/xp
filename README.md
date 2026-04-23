@@ -18,13 +18,14 @@ into the `xp` binary at build time and served as a SPA by default.
 - Quotas: cycle windows, bidirectional traffic, auto-ban, optional auto-unban (see `docs/desgin/quota.md` and `XP_QUOTA_*`)
 - Cluster consistency: 1–20 nodes Raft (OpenRaft); write requests are serialized by the leader
 - Embedded admin UI: served by `xp` (default: `http://127.0.0.1:62416/`)
-- Ops tool: `xp-ops` (install/init services, unified `upgrade`, optional Cloudflare Tunnel)
+- Ops tool: `xp-ops` (install/init services, unified `upgrade`, optional Cloudflare Tunnel, `container run`)
+- Official container image: `ghcr.io/ivanli-cn/xp` (single-image node runtime with optional Cloudflare Tunnel)
 
 ## Docs
 
 - Design: `docs/desgin/README.md`
 - Operations: `docs/ops/README.md`
-- Plans / acceptance criteria: `docs/plan/README.md`
+- Specs / acceptance criteria: `docs/specs/README.md`
 
 Note: most docs are currently written in Chinese.
 
@@ -53,6 +54,24 @@ Notes:
 
 - Installs the latest stable release (`releases/latest`) by default.
 - If you cannot write to `/usr/local/bin`, the script will try to use `sudo`. You can also pass `--install-dir` (or set `XP_INSTALL_DIR`) to install into a user-writable directory.
+
+## Docker deployment (single image)
+
+Official GHCR image:
+
+```bash
+docker pull ghcr.io/ivanli-cn/xp:latest
+```
+
+Key facts:
+
+- Entry point is fixed to `xp-ops container run`
+- Runtime image bundles `xp`, `xp-ops`, real embedded `web/dist`, `xray`, `cloudflared`, and `tini`
+- The container entrypoint can realign persisted node metadata, prepare Cloudflare DDNS runtime state, and reconcile default SS/VLESS endpoints purely from environment variables
+- Reference Compose examples:
+  - `deploy/docker/compose.bootstrap.yml`
+  - `deploy/docker/compose.join.yml`
+- Full guide: `docs/ops/docker.md`
 
 ## Runtime model (important)
 
@@ -169,6 +188,7 @@ Full contracts:
 See `docs/ops/README.md` for:
 
 - systemd/OpenRC examples
+- Docker/Compose single-image deployment
 - `XP_DATA_DIR` layout + backup guidance
 - `xp-ops` upgrade/rollback strategy (GitHub Releases)
 - `xp-ops mihomo redact` usage for safely sharing subscription/config snippets
@@ -219,4 +239,4 @@ XP_ADMIN_TOKEN=testtoken node scripts/dev/seed-m6-demo-data.js
 - `web/`: Vite + React admin UI (TanStack Router/Query, Tailwind + DaisyUI)
 - `docs/desgin/`: design docs
 - `docs/ops/`: ops examples and templates
-- `docs/plan/`: plans, milestones, acceptance criteria
+- `docs/specs/`: specs, milestones, acceptance criteria

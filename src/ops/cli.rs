@@ -1,5 +1,6 @@
 use crate::ops::admin_token;
 use crate::ops::cloudflare;
+use crate::ops::container;
 use crate::ops::deploy;
 use crate::ops::init;
 use crate::ops::install;
@@ -32,6 +33,8 @@ pub struct Cli {
 pub enum Command {
     Install(InstallArgs),
     Init(InitArgs),
+    #[command(subcommand)]
+    Container(ContainerCommand),
 
     Upgrade(UpgradeArgs),
 
@@ -110,6 +113,17 @@ pub enum XpCommand {
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
     RecoverSingleNode(XpRecoverSingleNodeArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ContainerCommand {
+    Run(ContainerRunArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ContainerRunArgs {
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -506,6 +520,9 @@ pub async fn run() -> i32 {
     let res: Result<(), ExitError> = match cli.command {
         Some(Command::Install(args)) => install::cmd_install(paths, args).await,
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
+        Some(Command::Container(cmd)) => match cmd {
+            ContainerCommand::Run(args) => container::cmd_container_run(paths, args).await,
+        },
         Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,

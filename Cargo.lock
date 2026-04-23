@@ -4834,6 +4834,7 @@ dependencies = [
  "hex",
  "hmac",
  "http-body-util",
+ "libc",
  "maxminddb",
  "nanoid",
  "openraft",

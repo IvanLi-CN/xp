@@ -1,0 +1,41 @@
+services:
+  xp:
+    image: ${XP_IMAGE:-ghcr.io/ivanli-cn/xp:latest}
+    container_name: ${XP_CONTAINER_NAME:-xp-node-2}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${XP_HOST_PORT:-62416}:62416"
+    environment:
+      XP_NODE_NAME: ${XP_NODE_NAME:-node-2}
+      XP_JOIN_TOKEN: ${XP_JOIN_TOKEN:?set XP_JOIN_TOKEN}
+      XP_BIND: 0.0.0.0:62416
+      XP_ACCESS_HOST: ${XP_ACCESS_HOST:-}
+      XP_ENABLE_CLOUDFLARE: ${XP_ENABLE_CLOUDFLARE:-true}
+      XP_API_BASE_URL: ${XP_API_BASE_URL:-}
+      XP_CLOUDFLARE_ACCOUNT_ID: ${XP_CLOUDFLARE_ACCOUNT_ID:-}
+      XP_CLOUDFLARE_ZONE_ID: ${XP_CLOUDFLARE_ZONE_ID:-}
+      XP_CLOUDFLARE_HOSTNAME: ${XP_CLOUDFLARE_HOSTNAME:-}
+      XP_CLOUDFLARE_TUNNEL_NAME: ${XP_CLOUDFLARE_TUNNEL_NAME:-}
+      XP_CLOUDFLARE_DDNS_ENABLED: ${XP_CLOUDFLARE_DDNS_ENABLED:-false}
+      XP_CLOUDFLARE_DDNS_ZONE_ID: ${XP_CLOUDFLARE_DDNS_ZONE_ID:-}
+      XP_DEFAULT_VLESS_PORT: ${XP_DEFAULT_VLESS_PORT:-}
+      XP_DEFAULT_VLESS_REALITY_DEST: ${XP_DEFAULT_VLESS_REALITY_DEST:-}
+      XP_DEFAULT_VLESS_SERVER_NAMES: ${XP_DEFAULT_VLESS_SERVER_NAMES:-}
+      XP_DEFAULT_VLESS_FINGERPRINT: ${XP_DEFAULT_VLESS_FINGERPRINT:-chrome}
+      XP_DEFAULT_SS_PORT: ${XP_DEFAULT_SS_PORT:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:62416/api/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    volumes:
+      - xp-node-2-data:/var/lib/xp/data
+      - xp-node-2-cloudflared:/etc/cloudflared
+      - xp-node-2-cloudflare-state:/etc/xp-ops/cloudflare_tunnel
+
+volumes:
+  xp-node-2-data:
+  xp-node-2-cloudflared:
+  xp-node-2-cloudflare-state:

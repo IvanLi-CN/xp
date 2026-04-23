@@ -4,6 +4,7 @@ mod admin_token;
 #[cfg(test)]
 mod admin_token_tests;
 pub(crate) mod cloudflare;
+mod container;
 mod deploy;
 mod init;
 mod install;

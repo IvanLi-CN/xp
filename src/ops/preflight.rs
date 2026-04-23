@@ -1,6 +1,7 @@
 use crate::ops::cli::{
-    AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, DeployArgs, ExitError,
-    InitArgs, InstallArgs, MihomoCommand, UpgradeArgs, XpCommand, XpInstallArgs,
+    AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, ContainerCommand,
+    DeployArgs, ExitError, InitArgs, InstallArgs, MihomoCommand, UpgradeArgs, XpCommand,
+    XpInstallArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -47,6 +48,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
 
         Command::Install(args) => preflight_install(paths, args),
         Command::Init(args) => preflight_init(paths, args),
+        Command::Container(ContainerCommand::Run(_args)) => Ok(()),
         Command::Upgrade(args) => preflight_upgrade(paths, args),
 
         Command::Xp(XpCommand::Install(args)) => preflight_xp_install(paths, args),
