@@ -850,7 +850,7 @@ fn stored_subscription_region(probe: &NodeEgressProbeState) -> Option<NodeSubscr
     probe
         .last_success_at
         .as_ref()
-        .or(probe.selected_public_ip.as_ref())
+        .or(probe.classification_invalidated_at.as_ref())
         .map(|_| probe.subscription_region)
 }
 
@@ -3361,6 +3361,7 @@ mod tests {
             subscription_region: region,
             checked_at: "2099-01-01T00:00:00Z".to_string(),
             last_success_at: Some("2099-01-01T00:00:00Z".to_string()),
+            classification_invalidated_at: None,
             error_summary: None,
         }
     }
@@ -3434,6 +3435,29 @@ mod tests {
     }
 
     #[test]
+    fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_probe() {
+        let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+        let mut probes = BTreeMap::new();
+        probes.insert(
+            "n1".to_string(),
+            NodeEgressProbeState {
+                checked_at: "2026-04-24T01:00:00Z".to_string(),
+                selected_public_ip: Some("198.51.100.9".to_string()),
+                subscription_region: NodeSubscriptionRegion::Other,
+                error_summary: Some("country.is lookup failed".to_string()),
+                ..NodeEgressProbeState::default()
+            },
+        );
+
+        let region_map = build_mihomo_base_region_map(&nodes, &probes);
+
+        assert_eq!(
+            region_map.get("tokyo-a"),
+            Some(&NodeSubscriptionRegion::Japan)
+        );
+    }
+
+    #[test]
     fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() {
         let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
         let mut stale_probe = egress_probe(NodeSubscriptionRegion::Taiwan, "TW", "203.0.113.30");
@@ -3454,9 +3478,10 @@ mod tests {
     fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slug_fallback() {
         let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
         let probe = NodeEgressProbeState {
-            selected_public_ip: Some("198.51.100.9".to_string()),
             subscription_region: NodeSubscriptionRegion::Other,
             checked_at: "2026-04-24T01:00:00Z".to_string(),
+            selected_public_ip: Some("198.51.100.9".to_string()),
+            classification_invalidated_at: Some("2026-04-24T01:00:00Z".to_string()),
             error_summary: Some("country.is lookup failed".to_string()),
             ..NodeEgressProbeState::default()
         };

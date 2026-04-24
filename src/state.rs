@@ -456,6 +456,8 @@ pub struct NodeEgressProbeState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_success_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_invalidated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_summary: Option<String>,
 }
 

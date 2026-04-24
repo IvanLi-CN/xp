@@ -218,6 +218,7 @@ async fn probe_and_publish(
                     next.geo = geo.clone();
                     next.subscription_region = subscription_region_from_country_code(&geo.country);
                     next.last_success_at = Some(checked_at.clone());
+                    next.classification_invalidated_at = None;
                     next.error_summary = None;
                     success = true;
                 }
@@ -285,6 +286,7 @@ fn invalidate_previous_classification_on_selected_ip_change(
     next.geo = Default::default();
     next.subscription_region = NodeSubscriptionRegion::Other;
     next.last_success_at = None;
+    next.classification_invalidated_at = Some(next.checked_at.clone());
 }
 
 fn join_errors(errors: Vec<String>) -> String {
@@ -401,6 +403,7 @@ mod tests {
             ..NodeEgressProbeState::default()
         };
         let mut next = previous.clone();
+        next.checked_at = "2026-04-24T01:00:00Z".to_string();
 
         invalidate_previous_classification_on_selected_ip_change(
             &previous,
@@ -411,6 +414,10 @@ mod tests {
         assert_eq!(next.selected_public_ip.as_deref(), Some("198.51.100.9"));
         assert_eq!(next.subscription_region, NodeSubscriptionRegion::Other);
         assert!(next.last_success_at.is_none());
+        assert_eq!(
+            next.classification_invalidated_at.as_deref(),
+            Some("2026-04-24T01:00:00Z")
+        );
         assert!(next.geo.country.is_empty());
     }
 

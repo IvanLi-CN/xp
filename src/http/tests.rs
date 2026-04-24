@@ -650,6 +650,7 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
         subscription_region: region,
         checked_at: now.clone(),
         last_success_at: Some(now),
+        classification_invalidated_at: None,
         error_summary: None,
     }
 }
