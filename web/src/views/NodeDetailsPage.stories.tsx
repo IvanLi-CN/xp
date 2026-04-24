@@ -101,7 +101,7 @@ export const MetadataEgressProbe: Story = {
 		await expect(
 			await canvas.findByText("Node egress probe"),
 		).toBeInTheDocument();
-		await expect(await canvas.findByText("203.0.113.8")).toBeInTheDocument();
+		await expect(await canvas.findAllByText("203.0.113.8")).toHaveLength(2);
 		await expect(await canvas.findByText("HiNet")).toBeInTheDocument();
 	},
 };
