@@ -4,13 +4,14 @@
 
 - Status: 已完成
 - Created: 2026-02-26
-- Last: 2026-02-26
+- Last: 2026-04-24
 
 ## 背景 / 问题陈述
 
 - 当前 Web 仅能看到节点静态元数据，缺少 `xp/xray/cloudflared` 运行态与近期趋势。
 - 已有 `xray` 探活与自动重启机制，但关键事件仅在日志中，无法在管理界面集中查看。
 - 运维需要在节点列表快速识别异常，并在详情页查看组件状态与关键事件时间线。
+- 节点详情的 metadata 页此前只展示静态字段，无法确认节点当前出口 IP、Geo 归类与订阅地区映射，也没有手动刷新探测入口。
 
 ## 目标 / 非目标
 
@@ -21,6 +22,7 @@
 - 在后端新增节点运行态聚合 API（含跨节点拉取、`partial/unreachable_nodes` 语义）。
 - 为 cloudflared 增加监控与可选自动重启能力，并接入事件记录。
 - 将运行态历史与事件持久化到本地 `${XP_DATA_DIR}/service_runtime.json`（不进 Raft）。
+- 在节点详情 metadata 页展示主动探测得到的出口 IP / Geo / `subscription_region` / stale 状态，并提供单节点手动刷新入口。
 
 ### Non-goals
 
@@ -33,7 +35,7 @@
 ### In scope
 
 - Backend: 运行态采集、持久化、聚合 API、SSE 转发、internal local API。
-- Web: `NodesPage` 摘要列与趋势条、`NodeDetailsPage` 组件卡片 + 事件流。
+- Web: `NodesPage` 摘要列与趋势条、`NodeDetailsPage` 组件卡片 + 事件流、metadata 页 egress probe 摘要/刷新。
 - Ops: `xp-ops` 写入 cloudflared 重启最小权限（polkit/doas）与 env 模板。
 - Docs: API/ops/workflows/env 文档同步。
 
@@ -52,6 +54,11 @@
 - 新增 internal API：
   - `GET /api/admin/_internal/nodes/runtime/local`
   - `GET /api/admin/_internal/nodes/runtime/local/events`
+- `GET /api/admin/nodes` 与 `GET /api/admin/nodes/{node_id}` 必须返回可选 `egress_probe` 摘要，包含 `public_ip / geo / subscription_region / checked_at / last_success_at / stale / error_summary`。
+- 新增刷新接口：
+  - `POST /api/admin/nodes/{node_id}/egress-probe/refresh`
+  - `GET /api/admin/_internal/nodes/egress-probe/local`
+  - `POST /api/admin/_internal/nodes/egress-probe/local/refresh`
 - 组件状态必须支持枚举：`disabled/up/down/unknown`；节点摘要支持：`up/degraded/down/unknown`。
 - 历史窗口固定 `7d/30min`（336 slots），事件保留 7 天，重启后可恢复。
 - cloudflared 未启用时必须显示 `disabled`，且不触发重启请求。
@@ -72,6 +79,7 @@
 
 - 管理员进入节点列表：前端并行拉取静态节点信息 + 运行态摘要，渲染摘要与趋势条。
 - 管理员进入节点详情：拉取运行态详情并建立 SSE 流，实时更新组件状态与事件列表。
+- 管理员切到节点详情 metadata 页：读取节点静态字段与最新 `egress_probe` 摘要；需要时点击刷新按钮触发单节点立即重探。
 - leader 节点调用 runtime 聚合接口时，使用 internal signature 并发请求其他节点 local runtime。
 
 ### Edge cases / errors
@@ -88,6 +96,7 @@
 | -------------------------- | ------------ | ------------- | -------------- | --------------------------- | --------------- | ------------------- | -------------------------------------- |
 | Node runtime admin APIs    | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web                 | 列表/详情/SSE                          |
 | Node runtime internal APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | backend             | local 汇总转发                         |
+| Node egress probe APIs     | HTTP API     | internal      | Changed        | ./contracts/http-apis.md    | backend         | web/backend         | metadata 摘要 + 手动刷新               |
 | cloudflared runtime config | CLI          | internal      | Modify         | ./contracts/cli.md          | ops             | xp/xp-ops           | 新增 `XP_CLOUDFLARED_*`                |
 | service_runtime.json       | File format  | internal      | New            | ./contracts/file-formats.md | backend         | backend             | 本地持久化                             |
 | runtime SSE events         | Events       | internal      | New            | ./contracts/events.md       | backend         | web                 | hello/snapshot/event/node_error/lagged |
@@ -104,6 +113,7 @@
 
 - Given 集群包含本地+远端节点，When 打开节点列表，Then 每个节点都显示 `summary` 与 7 天状态指示器。
 - Given 打开节点详情，When 组件状态变化，Then 页面通过 SSE 自动更新组件卡片和事件列表。
+- Given 打开节点详情 metadata 页，When 节点存在最近一次主动探测结果，Then 页面显示出口 IP、Geo、订阅地区与 stale 状态，并允许手动刷新。
 - Given cloudflared 未启用，When 打开详情，Then cloudflared 状态为 `disabled` 且无重启事件。
 - Given cloudflared 已启用并故障，When 连续失败达到阈值，Then 记录重启请求与结果事件。
 - Given `xp` 进程重启，When 重新打开详情，Then 可看到重启前 7 天窗口内历史槽位与事件。
@@ -139,6 +149,13 @@
 - `docs/ops/README.md`: cloudflared 监控/自动重启配置说明。
 - `docs/ops/env/xp.env.example`: `XP_CLOUDFLARED_*` 参数说明。
 
+## Visual Evidence
+
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/NodeDetailsPage/MetadataEgressProbe`
+  - evidence_note: `NodeDetailsPage` 的 metadata 页会展示节点主动探测得到的出口 IP、Geo 与订阅地区，并提供手动刷新按钮。
+    ![Node details egress probe summary](./assets/node-details-egress-probe-story.png)
+
 ## 计划资产（Plan assets）
 
 - Directory: `docs/specs/9vmap-node-service-observability/assets/`
@@ -170,6 +187,7 @@ None
 
 - 2026-02-26: 创建规格并冻结首版接口、状态枚举、窗口策略。
 - 2026-02-26: 完成后端运行态聚合/持久化、前端 Nodes/NodeDetails 改造、cloudflared 运维配置与文档同步。
+- 2026-04-24: 在节点 metadata API 与 `NodeDetailsPage` 补充主动探测 egress probe 摘要、单节点刷新入口与 Storybook 视觉证据。
 
 ## 参考（References）
 

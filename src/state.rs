@@ -14,7 +14,9 @@ use crate::{
         validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
-    inbound_ip_usage::{GeoLookup, InboundIpMinuteSample, PersistedInboundIpUsage},
+    inbound_ip_usage::{
+        GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
+    },
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
@@ -33,6 +35,7 @@ const SCHEMA_VERSION_V5: u32 = 5;
 const SCHEMA_VERSION_V4: u32 = 4;
 pub const USAGE_SCHEMA_VERSION: u32 = 2;
 const USAGE_SCHEMA_VERSION_V1: u32 = 1;
+const NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX: &str = "node_egress_probe_state:";
 const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
 /// Migrate any historical state payload into the latest schema (v11).
@@ -120,6 +123,9 @@ pub(crate) fn migrate_state_value_to_latest(
         }
     }
     let _ = prune_deleted_nodes_from_endpoint_probe_tracking(&mut state);
+    state
+        .node_egress_probes
+        .retain(|node_id, _| state.nodes.contains_key(node_id));
 
     state.user_global_weights =
         normalize_user_global_weights(&state, state.user_global_weights.clone());
@@ -251,6 +257,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub endpoint_probe_participants_by_hour: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
+    pub node_egress_probes: BTreeMap<String, NodeEgressProbeState>,
+    #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
     pub reality_domains: Vec<RealityDomain>,
@@ -282,6 +290,7 @@ impl PersistedState {
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
             endpoint_probe_participants_by_hour: BTreeMap::new(),
+            node_egress_probes: BTreeMap::new(),
             users: BTreeMap::new(),
             reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
@@ -399,6 +408,81 @@ pub struct EndpointProbeAppendSample {
     #[serde(default)]
     pub error: Option<String>,
     pub config_hash: String,
+}
+
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeSubscriptionRegion {
+    Japan,
+    HongKong,
+    Taiwan,
+    Korea,
+    Singapore,
+    Us,
+    #[default]
+    Other,
+}
+
+impl NodeSubscriptionRegion {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Japan => "Japan",
+            Self::HongKong => "HongKong",
+            Self::Taiwan => "Taiwan",
+            Self::Korea => "Korea",
+            Self::Singapore => "Singapore",
+            Self::Us => "US",
+            Self::Other => "Other",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct NodeEgressProbeState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_ipv4: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_ipv6: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_public_ip: Option<String>,
+    #[serde(default)]
+    pub geo: PersistedInboundIpGeo,
+    #[serde(default)]
+    pub subscription_region: NodeSubscriptionRegion,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub checked_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct NodeEgressProbeCompatPayload {
+    node_id: String,
+    probe: NodeEgressProbeState,
+}
+
+pub(crate) fn encode_node_egress_probe_compat_note(
+    node_id: &str,
+    probe: &NodeEgressProbeState,
+) -> Result<String, serde_json::Error> {
+    let payload = NodeEgressProbeCompatPayload {
+        node_id: node_id.to_string(),
+        probe: probe.clone(),
+    };
+    Ok(format!(
+        "{NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX}{}",
+        serde_json::to_string(&payload)?
+    ))
+}
+
+fn decode_node_egress_probe_compat_note(note: &str) -> Option<(String, NodeEgressProbeState)> {
+    let raw = note.strip_prefix(NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX)?;
+    let payload = serde_json::from_str::<NodeEgressProbeCompatPayload>(raw).ok()?;
+    Some((payload.node_id, payload.probe))
 }
 
 fn prune_endpoint_probe_hour_map<T>(hours: &mut BTreeMap<String, T>) {
@@ -2112,6 +2196,7 @@ impl DesiredStateCommand {
                 state
                     .endpoint_probe_participants_by_hour
                     .retain(|_hour, participants| !participants.is_empty());
+                state.node_egress_probes.remove(node_id);
 
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::NodeDeleted { deleted: true })
@@ -2621,7 +2706,15 @@ impl DesiredStateCommand {
                     credential_epoch: user.credential_epoch,
                 })
             }
-            Self::CompatNoop { note: _ } => Ok(DesiredStateApplyResult::Applied),
+            Self::CompatNoop { note } => {
+                if let Some((node_id, probe)) = decode_node_egress_probe_compat_note(note) {
+                    if !state.nodes.contains_key(&node_id) {
+                        return Ok(DesiredStateApplyResult::Applied);
+                    }
+                    state.node_egress_probes.insert(node_id, probe);
+                }
+                Ok(DesiredStateApplyResult::Applied)
+            }
             Self::AppendEndpointProbeSamples {
                 hour,
                 from_node_id,
@@ -3671,6 +3764,14 @@ impl JsonSnapshotStore {
         self.state.user_mihomo_profiles.get(user_id).cloned()
     }
 
+    pub fn get_node_egress_probe(&self, node_id: &str) -> Option<NodeEgressProbeState> {
+        self.state.node_egress_probes.get(node_id).cloned()
+    }
+
+    pub fn list_node_egress_probes(&self) -> BTreeMap<String, NodeEgressProbeState> {
+        self.state.node_egress_probes.clone()
+    }
+
     pub fn mihomo_delivery_mode(&self) -> MihomoDeliveryMode {
         self.state.mihomo_delivery_mode
     }
@@ -4194,6 +4295,37 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn compat_noop_can_carry_node_egress_probe_state() {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node-1".to_string(),
+            Node {
+                node_id: "node-1".to_string(),
+                node_name: "Tokyo".to_string(),
+                access_host: "tokyo.example.com".to_string(),
+                api_base_url: "https://tokyo.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        let probe = NodeEgressProbeState {
+            selected_public_ip: Some("203.0.113.8".to_string()),
+            subscription_region: NodeSubscriptionRegion::Taiwan,
+            checked_at: "2026-04-24T00:00:00Z".to_string(),
+            last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+            ..NodeEgressProbeState::default()
+        };
+        let note = encode_node_egress_probe_compat_note("node-1", &probe).unwrap();
+
+        let result = DesiredStateCommand::CompatNoop { note }
+            .apply(&mut state)
+            .unwrap();
+
+        assert_eq!(result, DesiredStateApplyResult::Applied);
+        assert_eq!(state.node_egress_probes.get("node-1"), Some(&probe));
     }
 
     #[test]

@@ -282,7 +282,7 @@ pub struct Config {
         global = true,
         env = "XP_CLOUDFLARE_DDNS_IPV4_URL",
         value_name = "URL",
-        default_value = crate::ddns::DEFAULT_TRACE_URL
+        default_value = crate::public_ip_probe::DEFAULT_TRACE_URL
     )]
     pub cloudflare_ddns_ipv4_url: String,
 
@@ -291,7 +291,7 @@ pub struct Config {
         global = true,
         env = "XP_CLOUDFLARE_DDNS_IPV6_URL",
         value_name = "URL",
-        default_value = crate::ddns::DEFAULT_TRACE_URL
+        default_value = crate::public_ip_probe::DEFAULT_TRACE_URL
     )]
     pub cloudflare_ddns_ipv6_url: String,
 
@@ -433,11 +433,11 @@ mod tests {
         assert_eq!(cli.config.cloudflare_ddns_zone_id, "");
         assert_eq!(
             cli.config.cloudflare_ddns_ipv4_url,
-            crate::ddns::DEFAULT_TRACE_URL
+            crate::public_ip_probe::DEFAULT_TRACE_URL
         );
         assert_eq!(
             cli.config.cloudflare_ddns_ipv6_url,
-            crate::ddns::DEFAULT_TRACE_URL
+            crate::public_ip_probe::DEFAULT_TRACE_URL
         );
         assert_eq!(cli.config.cloudflare_ddns_interval_secs_with_monitor, 300);
         assert_eq!(cli.config.cloudflare_ddns_interval_secs_no_monitor, 60);

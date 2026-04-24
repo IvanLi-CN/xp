@@ -186,6 +186,8 @@
   - 管理端调用 `GET /api/admin/nodes/runtime`，leader 聚合本地与远端 `_internal` 运行态；
   - 不可达节点以 `partial + unreachable_nodes` 标记，前端降级显示。
 - 节点详情：
+  - metadata 初始加载 `GET /api/admin/nodes/{node_id}`，直接读取静态字段与最新 `egress_probe` 摘要；
+  - metadata 页点击刷新时调用 `POST /api/admin/nodes/{node_id}/egress-probe/refresh`，leader 会在必要时转发到目标节点的 local refresh；
   - 初始加载 `GET /api/admin/nodes/{node_id}/runtime`；
   - 实时增量通过 `GET /api/admin/nodes/{node_id}/runtime/events` (SSE)；
   - SSE 断开时退化为轮询详情接口。

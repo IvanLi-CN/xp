@@ -15,6 +15,20 @@ const node: AdminNode = {
 		day_of_month: 1,
 		tz_offset_minutes: null,
 	},
+	egress_probe: {
+		public_ipv4: "203.0.113.8",
+		public_ipv6: "2001:db8::8",
+		selected_public_ip: "203.0.113.8",
+		country_code: "TW",
+		geo_region: "Taiwan",
+		geo_city: "Taipei",
+		geo_operator: "HiNet",
+		subscription_region: "taiwan",
+		checked_at: "2026-03-08T00:59:00Z",
+		last_success_at: "2026-03-08T00:59:00Z",
+		stale: false,
+		error_summary: null,
+	},
 };
 
 const ipUsageReports = buildDenseNodeIpUsageStories(node);
@@ -75,5 +89,19 @@ export const IpUsageTab7d: Story = {
 		await expect(
 			await canvas.findByRole("button", { name: "198.51.100.88" }),
 		).toBeInTheDocument();
+	},
+};
+
+export const MetadataEgressProbe: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node metadata" }),
+		);
+		await expect(
+			await canvas.findByText("Node egress probe"),
+		).toBeInTheDocument();
+		await expect(await canvas.findByText("203.0.113.8")).toBeInTheDocument();
+		await expect(await canvas.findByText("HiNet")).toBeInTheDocument();
 	},
 };

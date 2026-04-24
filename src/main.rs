@@ -290,6 +290,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         probe_secret,
         config.endpoint_probe_skip_self_test,
     );
+    let (node_egress_probe, _node_egress_probe_task) =
+        xp::node_egress_probe::spawn_node_egress_probe_worker(
+            config_arc.clone(),
+            cluster.node_id.clone(),
+            store.clone(),
+            raft_facade.clone(),
+        )?;
 
     let app = xp::http::build_router(
         config.clone(),
@@ -298,6 +305,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xray_health,
         node_runtime,
         endpoint_probe,
+        node_egress_probe,
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem_required),

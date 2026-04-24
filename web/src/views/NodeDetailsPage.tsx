@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -17,10 +17,13 @@ import {
 	startNodeRuntimeEvents,
 } from "../api/adminNodeRuntime";
 import {
+	type AdminNode,
+	type AdminNodeEgressProbe,
 	type AdminNodePatchRequest,
 	deleteAdminNode,
 	fetchAdminNode,
 	patchAdminNode,
+	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
@@ -237,11 +240,30 @@ function formatTime(value: string | null | undefined): string {
 	return dt.toLocaleString();
 }
 
+function formatSubscriptionRegion(
+	value: AdminNodeEgressProbe["subscription_region"],
+): string {
+	switch (value) {
+		case "hong_kong":
+			return "HongKong";
+		case "us":
+			return "US";
+		default:
+			return value
+				.split("_")
+				.map((part) =>
+					part.length === 0 ? part : part[0].toUpperCase() + part.slice(1),
+				)
+				.join(" ");
+	}
+}
+
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
@@ -283,6 +305,7 @@ export function NodeDetailsPage() {
 
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
 
@@ -463,6 +486,50 @@ export function NodeDetailsPage() {
 		}
 	});
 
+	const handleRefreshEgressProbe = async () => {
+		setIsRefreshingEgressProbe(true);
+		try {
+			const refreshed = await refreshAdminNodeEgressProbe(adminToken, nodeId);
+			if (refreshed.egress_probe) {
+				queryClient.setQueryData(
+					["adminNode", adminToken, nodeId],
+					(previous: AdminNode | undefined) =>
+						previous
+							? {
+									...previous,
+									egress_probe: refreshed.egress_probe,
+								}
+							: previous,
+				);
+				queryClient.setQueryData(
+					["adminNodes", adminToken],
+					(previous: { items: AdminNode[] } | undefined) =>
+						previous
+							? {
+									items: previous.items.map((item) =>
+										item.node_id === nodeId
+											? { ...item, egress_probe: refreshed.egress_probe }
+											: item,
+									),
+								}
+							: previous,
+				);
+			}
+			pushToast({
+				variant: "success",
+				message: "Node egress probe refreshed.",
+			});
+		} catch (error) {
+			const message = formatErrorMessage(error);
+			pushToast({
+				variant: "error",
+				message: `Failed to refresh node egress probe: ${message}`,
+			});
+		} finally {
+			setIsRefreshingEgressProbe(false);
+		}
+	};
+
 	const content = (() => {
 		if (adminToken.length === 0) {
 			return (
@@ -515,6 +582,7 @@ export function NodeDetailsPage() {
 
 		const runtime = runtimeLive ?? runtimeQuery.data;
 		const quotaPolicy = quotaForm.watch("resetPolicy");
+		const egressProbe = nodeQuery.data.egress_probe;
 
 		return (
 			<div className="space-y-4">
@@ -874,6 +942,136 @@ export function NodeDetailsPage() {
 											</div>
 										</div>
 									</div>
+								</div>
+								<div className="rounded-2xl border border-border/70 bg-muted/35 p-4 space-y-4">
+									<div className="flex flex-wrap items-start justify-between gap-3">
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Node egress probe
+											</div>
+											<p className="text-sm text-muted-foreground">
+												Subscription region is derived from the latest outbound
+												public IP probe.
+											</p>
+										</div>
+										<div className="flex items-center gap-2">
+											{egressProbe ? (
+												<>
+													<Badge variant="outline">
+														{formatSubscriptionRegion(
+															egressProbe.subscription_region,
+														)}
+													</Badge>
+													{egressProbe.stale ? (
+														<Badge variant="warning">stale</Badge>
+													) : (
+														<Badge variant="success">fresh</Badge>
+													)}
+												</>
+											) : (
+												<Badge variant="ghost">unknown</Badge>
+											)}
+											<Button
+												variant="secondary"
+												loading={isRefreshingEgressProbe}
+												onClick={() => void handleRefreshEgressProbe()}
+											>
+												Refresh probe
+											</Button>
+										</div>
+									</div>
+
+									{egressProbe ? (
+										<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Selected public IP
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.selected_public_ip ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													IPv4
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.public_ipv4 ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													IPv6
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.public_ipv6 ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Country
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.country_code ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Region
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.geo_region ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													City
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.geo_city ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Operator
+												</div>
+												<div className="font-mono text-sm break-all">
+													{egressProbe.geo_operator ?? "-"}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Checked at
+												</div>
+												<div className="font-mono text-sm break-all">
+													{formatTime(egressProbe.checked_at)}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs uppercase tracking-wide text-muted-foreground">
+													Last success
+												</div>
+												<div className="font-mono text-sm break-all">
+													{formatTime(egressProbe.last_success_at)}
+												</div>
+											</div>
+										</div>
+									) : (
+										<div className={alertClass("warning", "py-2")}>
+											<span>
+												No egress probe result is stored yet. Trigger a refresh
+												to probe the node now.
+											</span>
+										</div>
+									)}
+
+									{egressProbe?.error_summary ? (
+										<div className={alertClass("warning", "py-2")}>
+											<span className="break-words">
+												Last probe error: {egressProbe.error_summary}
+											</span>
+										</div>
+									) : null}
 								</div>
 								<div className="text-sm text-muted-foreground">
 									To change node meta, edit{" "}

@@ -150,6 +150,8 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
 - `🛣️ JP/HK/TW` 与地区组继续通过 `use:` 消费 provider。
+- 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯/🛣️ {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
+- 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 改为 `use + filter + proxies` 混合组：
   - 存在 `{base}-ss` 时，保留 `{base}-chain` 作为首选直链 fallback，并通过 `filter` 从 provider 中选择 `{base}-ss`
   - 仅存在 `{base}-reality` 时，直接使用主配置顶层 `{base}-reality`
@@ -170,9 +172,13 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 所有 provider 名称会注入固定外层候选组 `🛣️ JP/HK/TW` 的 `use` 列表，并用单一 filter 在日本/香港/台湾节点中选最低延迟的外层入口。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
   - 外层候选组：`🛣️ JP/HK/TW`
-  - 兼容地区组：`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
+  - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
+  - 兼容地区组：`🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
+  - 聚合组：`💎 高质量`、`🚀 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
-- 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan}`，模板中已有的 `🌟 Singapore` / `🌟 US` 会按模板原位保留；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
+- 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
+- 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
+- `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回的规范化结果会自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），用户模板仅保留偏好层与额外静态内容。
 - 落地组生成策略：
   - 若存在 `{base}-ss`：只放 `{base}-chain` 与 `{base}-ss`，允许在连接失败后通过 Mihomo 的 health check 机制做主动回落
   - 否则若存在 `{base}-reality`：仅使用 `{base}-reality`

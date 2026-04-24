@@ -324,6 +324,10 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem),
@@ -527,6 +531,10 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem.clone()),

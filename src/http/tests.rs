@@ -29,6 +29,7 @@ use crate::{
     domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
+    inbound_ip_usage::PersistedInboundIpGeo,
     protocol::{Ss2022EndpointMeta, ss2022_password},
     raft::{
         app::LocalRaft,
@@ -36,7 +37,8 @@ use crate::{
     },
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{
-        DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, StoreInit, membership_key,
+        DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, NodeEgressProbeState,
+        NodeSubscriptionRegion, StoreInit, membership_key,
     },
     xray_supervisor::XrayHealthHandle,
 };
@@ -123,8 +125,8 @@ fn test_config(data_dir: PathBuf) -> Config {
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
         cloudflare_ddns_zone_id: String::new(),
-        cloudflare_ddns_ipv4_url: crate::ddns::DEFAULT_TRACE_URL.to_string(),
-        cloudflare_ddns_ipv6_url: crate::ddns::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_ipv4_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
+        cloudflare_ddns_ipv6_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
         cloudflare_ddns_interval_secs_with_monitor: 300,
         cloudflare_ddns_interval_secs_no_monitor: 60,
         cloudflare_ddns_fast_interval_secs: 30,
@@ -225,6 +227,10 @@ fn app_with(
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -264,11 +270,15 @@ fn build_app_with_cluster_store_and_raft(
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     build_router(
         config,
-        store,
+        store.clone(),
         reconcile,
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -606,6 +616,44 @@ fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
         .unwrap()
 }
 
+fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeState {
+    let (country, region_name, city, operator, ip) = match region {
+        NodeSubscriptionRegion::Japan => ("JP", "Tokyo", "Tokyo", "Example JP", "203.0.113.10"),
+        NodeSubscriptionRegion::HongKong => {
+            ("HK", "Hong Kong", "Hong Kong", "Example HK", "203.0.113.20")
+        }
+        NodeSubscriptionRegion::Taiwan => ("TW", "Taiwan", "Taipei", "HiNet", "203.0.113.30"),
+        NodeSubscriptionRegion::Korea => ("KR", "Seoul", "Seoul", "Example KR", "203.0.113.40"),
+        NodeSubscriptionRegion::Singapore => {
+            ("SG", "Singapore", "Singapore", "Example SG", "203.0.113.50")
+        }
+        NodeSubscriptionRegion::Us => {
+            ("US", "California", "San Jose", "Example US", "203.0.113.60")
+        }
+        NodeSubscriptionRegion::Other => {
+            ("DE", "Bavaria", "Munich", "Example Other", "203.0.113.70")
+        }
+    };
+
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    NodeEgressProbeState {
+        public_ipv4: Some(ip.to_string()),
+        public_ipv6: None,
+        selected_public_ip: Some(ip.to_string()),
+        geo: PersistedInboundIpGeo {
+            country: country.to_string(),
+            region: region_name.to_string(),
+            city: city.to_string(),
+            operator: operator.to_string(),
+        },
+        subscription_region: region,
+        checked_at: now.clone(),
+        last_success_at: Some(now),
+        error_summary: None,
+    }
+}
+
 async fn record_inbound_ip_usage_samples(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     minute: chrono::DateTime<chrono::Utc>,
@@ -736,6 +784,11 @@ async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, a
         .get_mut(&node_id)
         .unwrap()
         .access_host = access_host.to_string();
+    store
+        .state_mut()
+        .node_egress_probes
+        .entry(node_id)
+        .or_insert_with(|| sample_node_egress_probe(NodeSubscriptionRegion::Japan));
     store.save().unwrap();
 }
 
@@ -1038,6 +1091,38 @@ async fn patch_node_rejects_node_meta_but_allows_quota_reset() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
     assert_eq!(json["quota_reset"]["policy"], "unlimited");
+}
+
+#[tokio::test]
+async fn admin_get_node_includes_egress_probe_summary_when_present() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    let meta = ClusterMetadata::load(tmp.path()).unwrap();
+
+    {
+        let mut store = store.lock().await;
+        store.state_mut().node_egress_probes.insert(
+            meta.node_id.clone(),
+            sample_node_egress_probe(NodeSubscriptionRegion::Taiwan),
+        );
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{}", meta.node_id),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["egress_probe"]["subscription_region"], "taiwan");
+    assert_eq!(json["egress_probe"]["country_code"], "TW");
+    assert_eq!(json["egress_probe"]["selected_public_ip"], "203.0.113.30");
+    assert_eq!(json["egress_probe"]["geo_city"], "Taipei");
+    assert_eq!(json["egress_probe"]["geo_operator"], "HiNet");
+    assert_eq!(json["egress_probe"]["stale"], false);
 }
 
 #[tokio::test]
@@ -1610,11 +1695,15 @@ async fn follower_admin_write_does_not_redirect() {
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config,
-        store,
+        store.clone(),
         ReconcileHandle::noop(),
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -3567,6 +3656,10 @@ async fn grant_usage_includes_warning_fields() {
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -3773,6 +3866,10 @@ async fn grant_usage_warns_on_quota_mismatch() {
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -4161,6 +4258,109 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
 }
 
 #[tokio::test]
+async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_edits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!(
+                "/api/admin/users/{}/subscription-mihomo-profile",
+                fixtures.user_id
+            ),
+            json!({
+                "mixin_yaml": "port: 0\nrules: []\n",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let extra_node = Node {
+        node_id: new_ulid_string(),
+        node_name: "hinetlh".to_string(),
+        access_host: "hinetlh-ep.example.com".to_string(),
+        api_base_url: "https://hinetlh.example.com".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(extra_node.clone()).unwrap();
+        store.state_mut().node_egress_probes.insert(
+            extra_node.node_id.clone(),
+            sample_node_egress_probe(NodeSubscriptionRegion::Taiwan),
+        );
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": extra_node.node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 9393
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let endpoint = body_json(res).await;
+    let endpoint_id = endpoint["endpoint_id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{}/access", fixtures.user_id),
+            json!({
+              "items": [{ "endpoint_id": endpoint_id }]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{}?format=mihomo", fixtures.subscription_token),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let groups = yaml
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist");
+    let group_refs = |name: &str| {
+        groups
+            .iter()
+            .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
+            .and_then(|group| group.get("proxies"))
+            .and_then(YamlValue::as_sequence)
+            .expect("group proxies must exist")
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(group_refs("🌟 Taiwan"), vec!["🛬 hinetlh"]);
+    assert!(group_refs("💎 高质量").contains(&"🛬 hinetlh"));
+    assert!(group_refs("🚀 节点选择").contains(&"🛬 hinetlh"));
+}
+
+#[tokio::test]
 async fn mihomo_provider_route_uses_forwarded_origin_for_system_provider_url() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
@@ -4363,24 +4563,7 @@ rules: []
         .collect::<Vec<_>>();
     assert!(outer_use.contains(&"providerA"));
 
-    for expected in [
-        "🛣️ Japan",
-        "🌟 Japan",
-        "🔒 Japan",
-        "🤯 Japan",
-        "🛣️ HongKong",
-        "🌟 HongKong",
-        "🔒 HongKong",
-        "🤯 HongKong",
-        "🛣️ Taiwan",
-        "🌟 Taiwan",
-        "🔒 Taiwan",
-        "🤯 Taiwan",
-        "🛣️ Korea",
-        "🌟 Korea",
-        "🔒 Korea",
-        "🤯 Korea",
-    ] {
+    for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
             groups
                 .iter()
@@ -5089,24 +5272,7 @@ rules: []
         outer_group.get("proxies").and_then(YamlValue::as_sequence),
         Some(&vec![YamlValue::String("DIRECT".to_string())])
     );
-    for expected in [
-        "🛣️ Japan",
-        "🌟 Japan",
-        "🔒 Japan",
-        "🤯 Japan",
-        "🛣️ HongKong",
-        "🌟 HongKong",
-        "🔒 HongKong",
-        "🤯 HongKong",
-        "🛣️ Taiwan",
-        "🌟 Taiwan",
-        "🔒 Taiwan",
-        "🤯 Taiwan",
-        "🛣️ Korea",
-        "🌟 Korea",
-        "🔒 Korea",
-        "🤯 Korea",
-    ] {
+    for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
             groups
                 .iter()
@@ -5262,15 +5428,7 @@ rules: []
 
     assert_eq!(
         group_refs("🚀 节点选择"),
-        vec![
-            "🌟 Japan",
-            "🌟 Korea",
-            "🌟 Singapore",
-            "🌟 HongKong",
-            "🌟 Taiwan",
-            "🌟 US",
-            "💎 高质量",
-        ]
+        vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]
     );
     assert_eq!(
         group_refs("🐟 漏网之鱼"),
@@ -5398,37 +5556,10 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        &refs[..6],
-        &[
-            "🌟 Japan",
-            "🌟 Korea",
-            "🌟 Singapore",
-            "🌟 HongKong",
-            "🌟 Taiwan",
-            "🌟 US",
-        ]
-    );
+    assert_eq!(refs, vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]);
     assert!(
         refs.iter().all(|name| *name != "🛬 Legacy-A"),
         "legacy landing ref should be remapped before final render"
-    );
-
-    let landing_idx = refs
-        .iter()
-        .position(|name| name.starts_with("🛬 "))
-        .expect("expected remapped landing group in final output");
-    let quality_idx = refs
-        .iter()
-        .position(|name| *name == "💎 高质量")
-        .expect("expected 💎 高质量 in final output");
-    let ss_idx = refs
-        .iter()
-        .position(|name| name.ends_with("-ss"))
-        .expect("expected generated ss proxy in final output");
-    assert!(
-        landing_idx < quality_idx && quality_idx < ss_idx,
-        "relay helper order should keep landing before quality before generated proxies: {refs:?}"
     );
 }
 
@@ -5511,25 +5642,10 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        &refs[..6],
-        &[
-            "🌟 Japan",
-            "🌟 Korea",
-            "🌟 Singapore",
-            "🌟 HongKong",
-            "🌟 Taiwan",
-            "🌟 US",
-        ]
-    );
+    assert_eq!(refs, vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]);
     assert!(
         refs.iter().all(|name| *name != "🛬 Legacy-A"),
         "landing-only legacy ref should be remapped before final render"
-    );
-    assert!(
-        refs.get(6).is_some_and(|name| name.starts_with("🛬 "))
-            && refs.get(7) == Some(&"💎 高质量"),
-        "relay helper order should keep the remapped landing entry before quality: {refs:?}"
     );
 }
 
@@ -6213,6 +6329,10 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -6518,11 +6638,15 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config.clone(),
-        store,
+        store.clone(),
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster.clone(),
         cluster_ca_pem,
         cluster_ca_key_pem,
@@ -6577,11 +6701,15 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
         config,
-        store,
+        store.clone(),
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
         node_runtime,
         endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         cluster_ca_key_pem,

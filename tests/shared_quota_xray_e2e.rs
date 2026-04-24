@@ -304,6 +304,10 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem.clone()),
@@ -564,6 +568,10 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem.clone()),
@@ -829,6 +837,10 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
         cluster,
         cluster_ca_pem,
         Some(cluster_ca_key_pem.clone()),

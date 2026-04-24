@@ -206,7 +206,8 @@ To expose minute-level inbound IP usage in the admin UI, the node must enable Xr
 
 1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats.
 2. When `XP_IP_GEO_ENABLED=true`, nodes need outbound HTTPS access to `https://api.country.is/` so new public IPs can be resolved on first sight.
-3. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection (the admin UI will show an `ip_geo_lookup_failed` warning after failed lookups).
+3. The node egress probe used by Mihomo region auto-grouping also relies on outbound HTTPS access to the public IP trace endpoint (default `https://cloudflare.com/cdn-cgi/trace`) and to `https://api.country.is/`.
+4. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection (the admin UI will show an `ip_geo_lookup_failed` warning after failed lookups).
 
 Operational notes:
 

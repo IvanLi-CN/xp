@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-04
-- Last: 2026-03-08
+- Last: 2026-04-24
 
 ## 背景 / 问题陈述
 
@@ -25,9 +25,11 @@
 - 新增并稳定 `format=mihomo` 输出，支持“每用户 mixin + 系统动态注入 + 用户扩展”。
 - 保持 `raw/base64/clash` 现有行为不变。
 - 将管理 API 字段统一收敛为 `mixin_yaml`，移除旧字段 `template_yaml` 兼容层。
-- 系统内置生成并覆盖 JP/HK/TW 单一外层候选组与落地组：
+- 系统内置生成并覆盖单一外层候选组、探测驱动的地区组与落地组：
   - 外层候选组：`🛣️ JP/HK/TW`
-  - 兼容地区组：`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
+  - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
+  - 兼容地区组：`🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，统一改为被动 `select` 别名
+  - 聚合组：`💎 高质量`、`🚀 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
   - SS 链式节点：`{base}-chain`（固定经 `🛣️ JP/HK/TW` 出口）
 - 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
@@ -67,6 +69,8 @@
 - 用户可输入 `extra_proxies_yaml`（sequence）与 `extra_proxy_providers_yaml`（mapping，可空）。
 - 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
 - 系统固定只生成 1 个 `🛣️ JP/HK/TW` 外层候选组与 `🛬 {base}` / `🔒 落地` 落地逻辑。
+- 系统保留地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
+- 地区面固定为 `Japan / HongKong / Taiwan / Korea / Singapore / US / Other`；首次成功探测前，为避免滚动升级时既有地区组瞬间清空，历史节点继续沿用 legacy slug fallback（JP/HK/TW/KR）归类；一旦存在成功探测结果，则优先使用 `subscription_region`，但仅在 probe 未 stale 时视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `proxy-providers` 视为一个整体普通节点池；`🛣️ JP/HK/TW` 候选来自 provider 全集的日本/香港/台湾节点；当 provider 为空时仍必须生成可加载配置。
 - `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
 - 落地组生成遵循“单链优先 + 故障回落”：
@@ -74,6 +78,7 @@
   - 仅当不存在 `base-ss` 且存在 `base-reality` 时，`🛬 {base}` 才回退为仅使用 `base-reality`。
 - 节点名冲突自动稳定重命名并记录告警日志。
 - mixin 缺失时 `format=mihomo` 回退 clash。
+- `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 的规范化结果必须自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），让用户模板只保留偏好层与额外静态内容。
 
 ### SHOULD
 
@@ -95,8 +100,9 @@
   - 读取用户 `mixin_yaml`；
   - 读取 `extra_proxy_providers_yaml` 作为普通节点池（可空）；
   - 生成主力节点：`-reality`、`-ss`、`-chain`；
+  - 读取节点主动探测持久化状态，把每个落地节点映射到固定地区面；
   - 合并 `extra_proxies_yaml`；
-  - 覆盖并注入系统保留动态组；
+  - 覆盖并注入系统保留动态组（`🌟/🔒/🤯/🛣️ {Region}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🔒 落地`）；
   - 裁剪或重映射 mixin 中残留的未知动态引用；
   - 输出可直接导入的 Mihomo YAML。
 
@@ -126,8 +132,11 @@
 - Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then 外层候选组 `🛣️ JP/HK/TW` 的 `use` 包含这些 provider。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then `🛣️ JP/HK/TW` 仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
+- Given 新增节点已拥有 membership 与系统 provider 入口，When 该节点完成首次主动探测并映射到 `Taiwan`，Then 无需修改任何用户模板，`🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 都会自动包含 `🛬 {base}`。
+- Given 旧集群升级后某历史节点暂时还没有成功探测记录，When 其旧节点名 slug 原本会命中 `Japan/HongKong/Taiwan/Korea`，Then 订阅渲染仍保持该 legacy 地区归类，直到首次成功探测结果落盘。
+- Given 某节点主动探测暂时失败，When 该节点存在最近一次成功归类且该结果仍在 stale 窗口内，Then 订阅仍保留其上一轮地区归类，不会立即从系统托管分组中消失；一旦 probe 进入 stale，渲染回退到 legacy slug fallback / `Other`。
 - Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
-- Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|Korea|HongKong|Taiwan}`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯/🛣️ {Region}`。
+- Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯/🛣️ {Region}`。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-chain` 与 `base-ss`。
@@ -147,8 +156,8 @@
 
 ### Testing
 
-- Unit tests: `src/subscription.rs` 覆盖动态组注入、provider 为空、冲突重命名、根类型错误、悬挂引用裁剪。
-- Integration tests: `src/http/tests.rs` 覆盖 admin profile API 的 `mixin_yaml` 主字段、旧字段拒绝、autosplit、`format=mihomo` 渲染与 provider 为空场景。
+- Unit tests: `src/subscription.rs` 覆盖动态组注入、probe-derived 地区分组、provider 为空、冲突重命名、根类型错误、悬挂引用裁剪。
+- Integration tests: `src/http/tests.rs` 覆盖 admin profile API 的 `mixin_yaml` 主字段、旧字段拒绝、autosplit、`format=mihomo` 渲染、provider 为空与新增节点自动入组场景。
 - Web tests: `web/**` 覆盖 mixin 语义迁移、旧字段拒绝与 UI 文案。
 - Shared testbox: 在 `codex-testbox` 生成目标示例的真实输出；若源示例已脱敏且包含不可解析静态节点，则使用去掉这些节点的 provider-only 变体执行真实 Mihomo `-t` 校验，并保留差异说明。
 
@@ -209,6 +218,7 @@
 - 2026-03-06: 在 `codex-testbox` 生成示例输出并完成两类证据：原样例的脱敏输出/差异分析，以及去掉已脱敏静态节点后的 provider-only 变体 Mihomo `-t` 通过记录。
 - 2026-03-07: 清理对外 `template_yaml` 兼容层；管理 API、前端 schema/mock 与文档统一只保留 `mixin_yaml`，同时恢复内部状态/WAL 的读写兼容（内部双写）以保证滚动升级安全。
 - 2026-03-06: review 收口补充 extra proxy 引用保护：对显式 extra proxies 的名称保持最高优先级，即便名称带有 `-JP` / `-HK` / `-KR` / `-ss` / `-reality` 后缀，也不再被系统动态 remap 误绑。
+- 2026-04-24: 将系统托管地区组切换为“节点主动探测出口 IP + Geo 解析”唯一真相源；新增固定 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 地区面、`💎 高质量` / `🚀 节点选择` 自动补点，以及用户 mixin 对系统托管引用的持久化清洗。
 
 ## 参考（References）
 

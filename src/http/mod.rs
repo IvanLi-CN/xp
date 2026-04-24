@@ -45,6 +45,7 @@ use crate::{
     internal_auth,
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
     mihomo_redact,
+    node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -59,7 +60,10 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    state::{DesiredStateCommand, JsonSnapshotStore, MihomoDeliveryMode, StoreError},
+    state::{
+        DesiredStateCommand, JsonSnapshotStore, MihomoDeliveryMode, NodeEgressProbeState,
+        NodeSubscriptionRegion, StoreError,
+    },
     subscription,
     xray_supervisor::XrayHealthHandle,
 };
@@ -74,6 +78,7 @@ pub struct AppState {
     pub xray_health: XrayHealthHandle,
     pub node_runtime: NodeRuntimeHandle,
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
+    pub node_egress_probe: NodeEgressProbeHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
@@ -497,6 +502,43 @@ struct PatchNodeRequest {
     quota_reset: Option<NodeQuotaReset>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminNodeEgressProbeResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    public_ipv4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    public_ipv6: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected_public_ip: Option<String>,
+    country_code: String,
+    geo_region: String,
+    geo_city: String,
+    geo_operator: String,
+    subscription_region: NodeSubscriptionRegion,
+    checked_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_success_at: Option<String>,
+    stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminNodeResponse {
+    #[serde(flatten)]
+    node: Node,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    egress_probe: Option<AdminNodeEgressProbeResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminNodeEgressProbeRefreshResponse {
+    node_id: String,
+    accepted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    egress_probe: Option<AdminNodeEgressProbeResponse>,
+}
+
 #[derive(Clone, Serialize)]
 struct AdminServiceConfigResponse {
     bind: String,
@@ -685,6 +727,7 @@ pub fn build_router(
     xray_health: XrayHealthHandle,
     node_runtime: NodeRuntimeHandle,
     endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
+    node_egress_probe: NodeEgressProbeHandle,
     cluster: ClusterMetadata,
     cluster_ca_pem: String,
     cluster_ca_key_pem: Option<String>,
@@ -717,6 +760,7 @@ pub fn build_router(
         xray_health,
         node_runtime,
         endpoint_probe,
+        node_egress_probe,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
@@ -746,6 +790,10 @@ pub fn build_router(
         .route("/config", get(admin_get_config).patch(admin_patch_config))
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
+        .route(
+            "/nodes/:node_id/egress-probe/refresh",
+            post(admin_refresh_node_egress_probe),
+        )
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
         .route("/nodes/:node_id/ip-usage", get(admin_get_node_ip_usage))
@@ -874,6 +922,14 @@ pub fn build_router(
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
+        )
+        .route(
+            "/_internal/nodes/egress-probe/local",
+            get(admin_internal_get_local_node_egress_probe),
+        )
+        .route(
+            "/_internal/nodes/egress-probe/local/refresh",
+            post(admin_internal_refresh_local_node_egress_probe),
         )
         .route(
             "/_internal/nodes/ip-usage/local",
@@ -2908,31 +2964,176 @@ async fn admin_internal_stream_local_node_runtime_events(
     ))
 }
 
+fn admin_node_egress_probe_response(
+    record: Option<NodeEgressProbeState>,
+) -> Option<AdminNodeEgressProbeResponse> {
+    let record = record?;
+    let now = Utc::now();
+    let stale = is_node_egress_probe_stale(&record, now);
+    Some(AdminNodeEgressProbeResponse {
+        public_ipv4: record.public_ipv4,
+        public_ipv6: record.public_ipv6,
+        selected_public_ip: record.selected_public_ip,
+        country_code: record.geo.country,
+        geo_region: record.geo.region,
+        geo_city: record.geo.city,
+        geo_operator: record.geo.operator,
+        subscription_region: record.subscription_region,
+        checked_at: record.checked_at,
+        last_success_at: record.last_success_at,
+        stale,
+        error_summary: record.error_summary,
+    })
+}
+
+fn admin_node_response(node: Node, probe: Option<NodeEgressProbeState>) -> AdminNodeResponse {
+    AdminNodeResponse {
+        node,
+        egress_probe: admin_node_egress_probe_response(probe),
+    }
+}
+
+async fn admin_internal_get_local_node_egress_probe(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<AdminNodeEgressProbeRefreshResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let probe = state.node_egress_probe.current_state().await;
+    Ok(Json(AdminNodeEgressProbeRefreshResponse {
+        node_id: state.cluster.node_id.clone(),
+        accepted: true,
+        egress_probe: admin_node_egress_probe_response(probe),
+    }))
+}
+
+async fn admin_internal_refresh_local_node_egress_probe(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<AdminNodeEgressProbeRefreshResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let probe = Some(
+        state
+            .node_egress_probe
+            .trigger_refresh()
+            .await
+            .map_err(ApiError::internal)?,
+    );
+    Ok(Json(AdminNodeEgressProbeRefreshResponse {
+        node_id: state.cluster.node_id.clone(),
+        accepted: true,
+        egress_probe: admin_node_egress_probe_response(probe),
+    }))
+}
+
+async fn admin_refresh_node_egress_probe(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminNodeEgressProbeRefreshResponse>, ApiError> {
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+
+    if node.node_id == state.cluster.node_id {
+        let probe = Some(
+            state
+                .node_egress_probe
+                .trigger_refresh()
+                .await
+                .map_err(ApiError::internal)?,
+        );
+        return Ok(Json(AdminNodeEgressProbeRefreshResponse {
+            node_id,
+            accepted: true,
+            egress_probe: admin_node_egress_probe_response(probe),
+        }));
+    }
+
+    let base = node.api_base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err(ApiError::internal(format!(
+            "node is unreachable: {}",
+            node.node_id
+        )));
+    }
+
+    let client = build_cluster_http_client(&state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri = "/_internal/nodes/egress-probe/local/refresh"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+    let request = client
+        .post(format!(
+            "{base}/api/admin/_internal/nodes/egress-probe/local/refresh"
+        ))
+        .header(
+            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+            sig,
+        )
+        .send();
+    let response = tokio::time::timeout(Duration::from_secs(20), request)
+        .await
+        .map_err(|_| ApiError::internal("request timeout"))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if !response.status().is_success() {
+        return Err(ApiError::internal(format!(
+            "node egress probe refresh request failed: {}",
+            response.status()
+        )));
+    }
+    let remote = response
+        .json::<AdminNodeEgressProbeRefreshResponse>()
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(remote))
+}
+
 async fn admin_list_nodes(
     Extension(state): Extension<AppState>,
-) -> Result<Json<Items<Node>>, ApiError> {
+) -> Result<Json<Items<AdminNodeResponse>>, ApiError> {
     let store = state.store.lock().await;
     Ok(Json(Items {
-        items: store.list_nodes(),
+        items: store
+            .list_nodes()
+            .into_iter()
+            .map(|node| {
+                let probe = store.get_node_egress_probe(&node.node_id);
+                admin_node_response(node, probe)
+            })
+            .collect(),
     }))
 }
 
 async fn admin_get_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
-) -> Result<Json<Node>, ApiError> {
+) -> Result<Json<AdminNodeResponse>, ApiError> {
     let store = state.store.lock().await;
     let node = store
         .get_node(&node_id)
         .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
-    Ok(Json(node))
+    let probe = store.get_node_egress_probe(&node_id);
+    Ok(Json(admin_node_response(node, probe)))
 }
 
 async fn admin_patch_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
     ApiJson(req): ApiJson<PatchNodeRequest>,
-) -> Result<Json<Node>, ApiError> {
+) -> Result<Json<AdminNodeResponse>, ApiError> {
     if req.node_name.is_some() || req.access_host.is_some() || req.api_base_url.is_some() {
         return Err(ApiError::invalid_request(
             "node meta (node_name/access_host/api_base_url) is managed by xp-ops and cannot be edited via API",
@@ -2958,7 +3159,11 @@ async fn admin_patch_node(
         crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
     )
     .await?;
-    Ok(Json(node))
+    let probe = {
+        let store = state.store.lock().await;
+        store.get_node_egress_probe(&node.node_id)
+    };
+    Ok(Json(admin_node_response(node, probe)))
 }
 
 async fn admin_delete_node(
@@ -6287,6 +6492,7 @@ struct SubscriptionContext {
     memberships: Vec<crate::state::NodeUserEndpointMembership>,
     endpoints: Vec<Endpoint>,
     nodes: Vec<Node>,
+    node_egress_probes: BTreeMap<String, NodeEgressProbeState>,
     mihomo_profile: Option<crate::state::UserMihomoProfile>,
     mihomo_delivery_mode: MihomoDeliveryMode,
 }
@@ -6329,6 +6535,7 @@ async fn load_subscription_context(
         .map_err(ApiError::from)?;
     let endpoints = store.list_endpoints();
     let nodes = store.list_nodes();
+    let node_egress_probes = store.list_node_egress_probes();
     let mihomo_profile = store.get_user_mihomo_profile(&user.user_id);
     let mihomo_delivery_mode = store.mihomo_delivery_mode();
     Ok(SubscriptionContext {
@@ -6336,6 +6543,7 @@ async fn load_subscription_context(
         memberships,
         endpoints,
         nodes,
+        node_egress_probes,
         mihomo_profile,
         mihomo_delivery_mode,
     })
@@ -6435,12 +6643,13 @@ fn render_mihomo_subscription(
         .map_err(map_subscription_render_error),
         MihomoRenderMode::Legacy => {
             if let Some(profile) = &ctx.mihomo_profile {
-                subscription::build_mihomo_yaml(
+                subscription::build_mihomo_yaml_with_node_probes(
                     ca_key_pem,
                     &ctx.user,
                     &ctx.memberships,
                     &ctx.endpoints,
                     &ctx.nodes,
+                    &ctx.node_egress_probes,
                     profile,
                 )
                 .map(text_yaml_utf8)
@@ -6464,12 +6673,13 @@ fn render_mihomo_subscription(
                     "{origin}/api/sub/{}/mihomo/provider/system",
                     ctx.user.subscription_token
                 );
-                subscription::build_mihomo_provider_yaml(
+                subscription::build_mihomo_provider_yaml_with_node_probes(
                     ca_key_pem,
                     &ctx.user,
                     &ctx.memberships,
                     &ctx.endpoints,
                     &ctx.nodes,
+                    &ctx.node_egress_probes,
                     profile,
                     &system_provider_url,
                 )
