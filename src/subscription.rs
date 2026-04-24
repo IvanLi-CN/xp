@@ -1,12 +1,10 @@
 use base64::Engine as _;
-use chrono::Utc;
 use rand::RngCore;
 use regex::Regex;
 
 use crate::{
     credentials,
     domain::{Endpoint, EndpointKind, Node, User},
-    node_egress_probe::is_node_egress_probe_stale,
     protocol::{SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta, ss2022_password},
     state::{
         NodeEgressProbeState, NodeSubscriptionRegion, NodeUserEndpointMembership, UserMihomoProfile,
@@ -840,7 +838,7 @@ fn build_mihomo_base_region_map(
             .unwrap_or_else(|| slugify_node_name(&node.node_name));
         let region = node_egress_probes
             .get(&node.node_id)
-            .and_then(probed_subscription_region)
+            .and_then(stored_subscription_region)
             .or_else(|| legacy_subscription_region_from_base(&prefix))
             .unwrap_or(NodeSubscriptionRegion::Other);
         out.insert(prefix, region);
@@ -848,8 +846,12 @@ fn build_mihomo_base_region_map(
     out
 }
 
-fn probed_subscription_region(probe: &NodeEgressProbeState) -> Option<NodeSubscriptionRegion> {
-    (!is_node_egress_probe_stale(probe, Utc::now())).then_some(probe.subscription_region)
+fn stored_subscription_region(probe: &NodeEgressProbeState) -> Option<NodeSubscriptionRegion> {
+    probe
+        .last_success_at
+        .as_ref()
+        .or(probe.selected_public_ip.as_ref())
+        .map(|_| probe.subscription_region)
 }
 
 fn legacy_subscription_region_from_base(base: &str) -> Option<NodeSubscriptionRegion> {
@@ -3432,7 +3434,7 @@ mod tests {
     }
 
     #[test]
-    fn build_mihomo_base_region_map_ignores_stale_probe_regions() {
+    fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() {
         let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
         let mut stale_probe = egress_probe(NodeSubscriptionRegion::Taiwan, "TW", "203.0.113.30");
         stale_probe.last_success_at = Some("2026-04-24T00:00:00Z".to_string());
@@ -3444,7 +3446,29 @@ mod tests {
 
         assert_eq!(
             region_map.get("tokyo-a"),
-            Some(&NodeSubscriptionRegion::Japan)
+            Some(&NodeSubscriptionRegion::Taiwan)
+        );
+    }
+
+    #[test]
+    fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slug_fallback() {
+        let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+        let probe = NodeEgressProbeState {
+            selected_public_ip: Some("198.51.100.9".to_string()),
+            subscription_region: NodeSubscriptionRegion::Other,
+            checked_at: "2026-04-24T01:00:00Z".to_string(),
+            error_summary: Some("country.is lookup failed".to_string()),
+            ..NodeEgressProbeState::default()
+        };
+
+        let mut probes = BTreeMap::new();
+        probes.insert("n1".to_string(), probe);
+
+        let region_map = build_mihomo_base_region_map(&nodes, &probes);
+
+        assert_eq!(
+            region_map.get("tokyo-a"),
+            Some(&NodeSubscriptionRegion::Other)
         );
     }
 

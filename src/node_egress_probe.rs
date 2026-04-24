@@ -52,19 +52,30 @@ impl NodeEgressProbeHandle {
     }
 
     pub async fn trigger_refresh(&self) -> Result<NodeEgressProbeState, String> {
+        self.trigger_refresh_with_timeout(MANUAL_PROBE_TIMEOUT)
+            .await
+    }
+
+    async fn trigger_refresh_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<NodeEgressProbeState, String> {
         let Some(tx) = &self.inner.trigger_tx else {
             return Err("node egress probe worker is not running".to_string());
         };
         let (completion_tx, completion_rx) = oneshot::channel();
-        tx.send(ManualProbeRequest {
-            completion: completion_tx,
+        tokio::time::timeout(timeout, async {
+            tx.send(ManualProbeRequest {
+                completion: completion_tx,
+            })
+            .await
+            .map_err(|_| "node egress probe worker is unavailable".to_string())?;
+            completion_rx
+                .await
+                .map_err(|_| "node egress probe worker dropped refresh result".to_string())?
         })
         .await
-        .map_err(|_| "node egress probe worker is unavailable".to_string())?;
-        tokio::time::timeout(MANUAL_PROBE_TIMEOUT, completion_rx)
-            .await
-            .map_err(|_| "node egress probe refresh timed out".to_string())?
-            .map_err(|_| "node egress probe worker dropped refresh result".to_string())?
+        .map_err(|_| "node egress probe refresh timed out".to_string())?
     }
 
     pub async fn current_state(&self) -> Option<NodeEgressProbeState> {
@@ -322,7 +333,8 @@ fn parse_rfc3339(raw: &str) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::NodeEgressProbeState;
+    use crate::state::{JsonSnapshotStore, NodeEgressProbeState, StoreInit};
+    use tempfile::tempdir;
 
     #[test]
     fn country_code_maps_to_subscription_region() {
@@ -400,5 +412,40 @@ mod tests {
         assert_eq!(next.subscription_region, NodeSubscriptionRegion::Other);
         assert!(next.last_success_at.is_none());
         assert!(next.geo.country.is_empty());
+    }
+
+    #[tokio::test]
+    async fn manual_refresh_times_out_when_enqueue_is_blocked() {
+        let tmp = tempdir().unwrap();
+        let store = JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: tmp.path().to_path_buf(),
+            bootstrap_node_id: None,
+            bootstrap_node_name: "node-a".to_string(),
+            bootstrap_access_host: "node-a.example.invalid".to_string(),
+            bootstrap_api_base_url: "https://node-a.example.invalid".to_string(),
+        })
+        .unwrap();
+        let store = Arc::new(Mutex::new(store));
+
+        let (tx, _rx) = mpsc::channel::<ManualProbeRequest>(1);
+        let (completion_tx, _completion_rx) = oneshot::channel();
+        tx.try_send(ManualProbeRequest {
+            completion: completion_tx,
+        })
+        .unwrap();
+
+        let handle = NodeEgressProbeHandle {
+            inner: Arc::new(NodeEgressProbeHandleInner {
+                local_node_id: "node-a".to_string(),
+                store,
+                trigger_tx: Some(tx),
+            }),
+        };
+
+        let err = handle
+            .trigger_refresh_with_timeout(Duration::from_millis(10))
+            .await
+            .unwrap_err();
+        assert_eq!(err, "node egress probe refresh timed out");
     }
 }
