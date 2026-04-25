@@ -4193,8 +4193,16 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
         .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
     assert!(
-        provider_proxy_names.is_empty(),
-        "provider main config should keep system proxies inside the provider payload"
+        provider_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-chain")),
+        "provider main config should keep glue chain proxies"
+    );
+    assert!(
+        provider_proxy_names
+            .iter()
+            .all(|name| !name.ends_with("-ss")),
+        "provider main config should move system direct ss proxies into provider payload"
     );
 
     let explicit_legacy_res = app
@@ -4237,16 +4245,16 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
         .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
     assert!(
-        provider_system_proxy_names.iter().any(|name| {
-            name.ends_with("-ss") || name.ends_with("-reality") || name.ends_with("-chain")
-        }),
-        "provider payload should expose all system proxies"
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-ss")),
+        "provider payload should expose system direct proxies"
     );
     assert!(
         provider_system_proxy_names
             .iter()
-            .any(|name| name.ends_with("-chain")),
-        "provider payload should carry glue chain proxies too"
+            .all(|name| !name.ends_with("-chain") && !name.ends_with("-reality")),
+        "provider payload must not contain top-level chain/reality proxies"
     );
 }
 
