@@ -4609,12 +4609,22 @@ rules: []
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
+    let expected_reality = format!("{base}-reality");
     let expected_chain = format!("{base}-chain");
-    let expected_ss = format!("{base}-ss");
-    assert_eq!(
-        landing_proxies,
-        vec![expected_chain.as_str(), expected_ss.as_str()]
-    );
+    if proxies.iter().any(|p| {
+        p.get("name").and_then(YamlValue::as_str) == Some(expected_reality.as_str())
+    }) {
+        assert_eq!(
+            landing_proxies,
+            vec![expected_reality.as_str(), expected_chain.as_str()]
+        );
+    } else {
+        let expected_ss = format!("{base}-ss");
+        assert_eq!(
+            landing_proxies,
+            vec![expected_chain.as_str(), expected_ss.as_str()]
+        );
+    }
 
     let landing_pool = groups
         .iter()

@@ -1150,13 +1150,16 @@ fn inject_mihomo_landing_groups(
 
         let mut proxies = Vec::<serde_yaml::Value>::new();
 
-        if proxy_name_set.contains(&ss_name) {
+        if proxy_name_set.contains(&reality_name) {
+            proxies.push(serde_yaml::Value::String(reality_name));
+            if proxy_name_set.contains(&chain_name) {
+                proxies.push(serde_yaml::Value::String(chain_name));
+            }
+        } else if proxy_name_set.contains(&ss_name) {
             if proxy_name_set.contains(&chain_name) {
                 proxies.push(serde_yaml::Value::String(chain_name));
             }
             proxies.push(serde_yaml::Value::String(ss_name));
-        } else if proxy_name_set.contains(&reality_name) {
-            proxies.push(serde_yaml::Value::String(reality_name));
         } else {
             continue;
         }
@@ -1223,14 +1226,17 @@ fn inject_mihomo_provider_landing_groups(
         let chain_name = format!("{base}-chain");
 
         let mut proxies = Vec::<serde_yaml::Value>::new();
-        let filter_name = if provider_proxy_name_set.contains(&ss_name) {
+        let filter_name = if top_level_proxy_name_set.contains(&reality_name) {
+            proxies.push(serde_yaml::Value::String(reality_name));
+            if top_level_proxy_name_set.contains(&chain_name) {
+                proxies.push(serde_yaml::Value::String(chain_name));
+            }
+            None
+        } else if provider_proxy_name_set.contains(&ss_name) {
             if top_level_proxy_name_set.contains(&chain_name) {
                 proxies.push(serde_yaml::Value::String(chain_name));
             }
             Some(ss_name)
-        } else if top_level_proxy_name_set.contains(&reality_name) {
-            proxies.push(serde_yaml::Value::String(reality_name));
-            None
         } else {
             None
         };
@@ -3791,7 +3797,7 @@ providerB:
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(landing_refs, vec!["Tokyo-A-chain", "Tokyo-A-ss"]);
+        assert_eq!(landing_refs, vec!["Tokyo-A-reality", "Tokyo-A-chain"]);
     }
 
     #[test]
@@ -3887,22 +3893,10 @@ providerA:
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec!["Tokyo-A-chain"]
+            vec!["Tokyo-A-reality", "Tokyo-A-chain"]
         );
-        assert_eq!(
-            landing_group.get("filter").and_then(Value::as_str).unwrap(),
-            "^Tokyo\\-A\\-ss$"
-        );
-        assert_eq!(
-            landing_group
-                .get("use")
-                .and_then(Value::as_sequence)
-                .unwrap()
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
-        );
+        assert!(landing_group.get("filter").is_none());
+        assert!(landing_group.get("use").is_none());
 
         let japan_group = proxy_groups
             .iter()
