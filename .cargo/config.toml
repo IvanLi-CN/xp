@@ -1,3 +1,0 @@
-[env]
-RUSTFMT = { value = "scripts/start-backend.sh", relative = true }
-XP_RUSTFMT_WRAPPER = "1"
