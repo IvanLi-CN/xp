@@ -1,0 +1,1 @@
+ignore = ["src/http/tests.rs"]
