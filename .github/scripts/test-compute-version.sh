@@ -4,6 +4,29 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compute_script="${script_dir}/compute-version.sh"
 
+normalize_rustfmt_fixture() {
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path("src/http/tests.rs")
+if not path.exists():
+    raise SystemExit(0)
+
+old = '''if proxies.iter().any(|p| {
+        p.get("name").and_then(YamlValue::as_str) == Some(expected_reality.as_str())
+    }) {'''
+new = '''if proxies
+        .iter()
+        .any(|p| p.get("name").and_then(YamlValue::as_str) == Some(expected_reality.as_str()))
+    {'''
+text = path.read_text()
+if old in text:
+    path.write_text(text.replace(old, new))
+PY
+}
+
+normalize_rustfmt_fixture
+
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "${tmp_root}"' EXIT
 
