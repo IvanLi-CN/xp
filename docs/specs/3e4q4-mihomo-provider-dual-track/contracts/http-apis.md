@@ -76,6 +76,7 @@ Response:
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
 - 顶层 `proxies` 保留 `extra_proxies_yaml` 与系统 `{base}-reality` / `{base}-chain`。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
+- 系统托管的可见地区组固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `💎 高质量`、`🚀 节点选择` 与 `🤯 All`；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
 
 Response:
 
@@ -97,6 +98,7 @@ Rules:
 - 仅包含系统隐藏直连节点（当前为 `-ss`）；不包含 `{base}-reality` 与 `{base}-chain`。
 - provider payload 可被 Mihomo `proxy-providers.type=http` 直接消费。
 - 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统隐藏直连节点。
+- 新节点一旦拥有 system payload entry 且主动探测得到地区归类，就会自动出现在 provider 主配置的地区组 / `💎 高质量` / `🚀 节点选择` 中，无需更新用户模板。
 
 Response:
 

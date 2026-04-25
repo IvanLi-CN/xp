@@ -128,17 +128,54 @@
       "node_id": "01J...",
       "node_name": "node-1",
       "access_host": "example.com",
-      "api_base_url": "https://node-1.internal:8443"
+      "api_base_url": "https://node-1.internal:8443",
+      "egress_probe": {
+        "public_ipv4": "203.0.113.8",
+        "public_ipv6": "2001:db8::8",
+        "selected_public_ip": "203.0.113.8",
+        "country_code": "TW",
+        "geo_region": "Taiwan",
+        "geo_city": "Taipei",
+        "geo_operator": "HiNet",
+        "subscription_region": "taiwan",
+        "checked_at": "RFC3339",
+        "last_success_at": "RFC3339|null",
+        "stale": false,
+        "error_summary": null
+      }
     }
   ]
 }
 ```
 
+说明：
+
+- `egress_probe` 可为空，表示当前节点还没有任何保存的主动探测结果。
+- `subscription_region` 固定为 `japan|hong_kong|taiwan|korea|singapore|us|other`。
+
 ### 2.5 查询单个节点（管理员）
 
 `GET /api/admin/nodes/{node_id}`
 
-返回：Node（略，字段同上）。
+返回：单个 Node 对象（字段同上，包含可选 `egress_probe`）。
+
+### 2.5.1 刷新节点出口探测（管理员）
+
+`POST /api/admin/nodes/{node_id}/egress-probe/refresh`
+
+返回：
+
+```json
+{
+  "node_id": "01J...",
+  "accepted": true,
+  "egress_probe": {
+    "selected_public_ip": "203.0.113.8",
+    "subscription_region": "taiwan",
+    "stale": false
+  }
+}
+```
 
 ### 2.6 查询节点运行态摘要列表（管理员）
 
@@ -234,6 +271,8 @@ SSE 事件类型：
 
 - `GET /api/admin/_internal/nodes/runtime/local?events_limit=200`
 - `GET /api/admin/_internal/nodes/runtime/local/events`（SSE）
+- `GET /api/admin/_internal/nodes/egress-probe/local`
+- `POST /api/admin/_internal/nodes/egress-probe/local/refresh`
 
 仅接受 internal signature 鉴权，用于 leader/follower 之间跨节点聚合与事件转发。
 
@@ -253,7 +292,7 @@ SSE 事件类型：
 }
 ```
 
-返回：Node（略，字段同创建/查询返回）。
+返回：Node（字段同创建/查询返回，包含可选 `egress_probe`）。
 
 ## 3. Endpoints（端点）
 

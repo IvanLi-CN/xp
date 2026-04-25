@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-04-17
+- Last: 2026-04-24
 
 ## 背景 / 问题陈述
 
@@ -26,6 +26,7 @@
   - `GET /api/sub/{token}/mihomo/provider/system`
 - provider 方案采用单一系统 provider `xp-system-generated`，将系统隐藏直连节点（当前为 SS）移入 provider payload，并保留 Reality 直连节点在主配置顶层可见。
 - 保留 `{base}-chain` 为主配置里的 glue proxy，继续复用 `dialer-proxy: 🛣️ JP/HK/TW`。
+- provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端支持切换全局默认方案；用户详情页可直接复制/预览 default / legacy / provider 三类 Mihomo URL。
 
 ### Non-goals
@@ -64,9 +65,10 @@
 - provider 方案中：
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
-  - `🛣️ JP/HK/TW`、地区组、`🛬 {base}`、`🔒 落地`、`{base}-chain` 保持可用
+  - `🛣️ JP/HK/TW`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地`、`{base}-chain` 保持可用
 - provider 方案下系统 `{base}-ss` 直连默认隐藏，仅通过 `xp-system-generated` 参与链式/落地 fallback；`{base}-reality` 继续保留为主配置顶层可见直连节点。
 - provider 方案下 `🛬 {base}` 必须采用 `use + filter + proxies` 混合组：存在 SS 时保留 `{base}-chain` 并筛 `{base}-ss`；仅有 Reality 时直接引用顶层 `{base}-reality`。
+- provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy 路径行为不得回归。
 
 ### SHOULD
@@ -116,6 +118,7 @@
 - Given provider 方案存在 `base-ss`，When 检查 `🛬 {base}`，Then 该组保留 `{base}-chain` 并通过 `filter` 消费 provider 中的 `{base}-ss`。
 - Given provider 方案存在 `base-reality`，When 检查主配置与地区组，Then `{base}-reality` 仍作为顶层可见节点保留，并可被显式引用。
 - Given provider 方案只有 `base-reality`，When 检查 `🛬 {base}`，Then 该组直接引用顶层 `{base}-reality`，不再引用缺失的 `{base}-chain` / `{base}-ss`。
+- Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given Web 管理端打开 `Settings / Service config`，When 修改 Mihomo delivery mode 并保存，Then 页面刷新后仍显示新值，且 `User Details` 可复制/预览三类 Mihomo URL。
 - Given 真实 Mihomo 在共享测试环境加载显式 provider URL，When 执行 `mihomo -t` 或等价校验，Then 主配置与 provider payload 均可被成功解析。
 
@@ -185,3 +188,9 @@
 - 风险：provider 路径若误隐藏 `{base}-reality` 或误保留系统 `{base}-ss` 直连显示，容易造成可选节点回退或悬挂引用，需要用测试锁死。
 - 风险：请求头组合在反向代理下可能非常杂，需要优先以 live 请求头为准，并保留 `api_base_url` 回退。
 - 假设：项目自己的系统 provider 名称 `xp-system-generated` 当前未被现有用户配置占用；若占用，返回显式错误即可。
+
+## 变更记录（Change log）
+
+- 2026-04-17: 创建规格并冻结双轨 URL、provider 保留名与双轨 admin 设置语义。
+- 2026-04-17: 完成全局 `mihomo_delivery_mode`、显式 dual-track 路由、Storybook/真实 Mihomo provider 验证与文档同步。
+- 2026-04-24: provider 主配置的系统地区组切换为 probe-derived 固定地区面，并补充 `🌟 Other`、`💎 高质量` / `🚀 节点选择` 自动补点语义。

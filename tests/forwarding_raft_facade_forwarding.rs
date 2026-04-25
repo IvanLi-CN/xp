@@ -357,6 +357,10 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_health,
         node_runtime,
         endpoint_probe,
+        xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            leader_store.clone(),
+        ),
         cluster,
         cluster_ca_pem.clone(),
         cluster_ca_key_pem.clone(),

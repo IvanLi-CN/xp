@@ -956,6 +956,22 @@ async function handleRequest(
 		return jsonResponse({ items: clone(state.nodes) });
 	}
 
+	const nodeEgressProbeRefreshMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/egress-probe\/refresh$/,
+	);
+	if (nodeEgressProbeRefreshMatch && method === "POST") {
+		const nodeId = decodeURIComponent(nodeEgressProbeRefreshMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		return jsonResponse({
+			node_id: nodeId,
+			accepted: true,
+			egress_probe: clone(node.egress_probe),
+		});
+	}
+
 	if (path === "/api/admin/nodes/runtime" && method === "GET") {
 		const items = state.nodes.map((node) => buildNodeRuntimeListItem(node));
 		return jsonResponse({

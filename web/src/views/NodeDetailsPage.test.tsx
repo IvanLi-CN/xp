@@ -17,6 +17,7 @@ import {
 	deleteAdminNode,
 	fetchAdminNode,
 	patchAdminNode,
+	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -76,6 +77,27 @@ function renderPage() {
 
 function setupMocks(args?: {
 	nodeIpUsage?: Awaited<ReturnType<typeof fetchAdminNodeIpUsage>>;
+	refreshEgressProbe?: {
+		public_ipv4: string | null;
+		public_ipv6: string | null;
+		selected_public_ip: string | null;
+		country_code: string | null;
+		geo_region: string | null;
+		geo_city: string | null;
+		geo_operator: string | null;
+		subscription_region:
+			| "japan"
+			| "hong_kong"
+			| "taiwan"
+			| "korea"
+			| "singapore"
+			| "us"
+			| "other";
+		checked_at: string;
+		last_success_at: string | null;
+		stale: boolean;
+		error_summary: string | null;
+	};
 }) {
 	const node = {
 		node_id: "node-tokyo",
@@ -88,10 +110,30 @@ function setupMocks(args?: {
 			day_of_month: 1,
 			tz_offset_minutes: null,
 		},
+		egress_probe: {
+			public_ipv4: "203.0.113.8",
+			public_ipv6: "2001:db8::8",
+			selected_public_ip: "203.0.113.8",
+			country_code: "TW",
+			geo_region: "Taiwan",
+			geo_city: "Taipei",
+			geo_operator: "HiNet",
+			subscription_region: "taiwan" as const,
+			checked_at: "2026-03-08T00:59:00Z",
+			last_success_at: "2026-03-08T00:59:00Z",
+			stale: false,
+			error_summary: null,
+		},
 	};
+	const refreshEgressProbe = args?.refreshEgressProbe ?? node.egress_probe;
 
 	vi.mocked(fetchAdminNode).mockResolvedValue(node);
 	vi.mocked(patchAdminNode).mockResolvedValue(node);
+	vi.mocked(refreshAdminNodeEgressProbe).mockResolvedValue({
+		node_id: node.node_id,
+		accepted: true,
+		egress_probe: refreshEgressProbe,
+	});
 	vi.mocked(deleteAdminNode).mockResolvedValue(undefined);
 	vi.mocked(fetchAdminNodeRuntime).mockResolvedValue({
 		node,
@@ -244,6 +286,52 @@ describe("<NodeDetailsPage />", () => {
 		expect(
 			screen.queryByText("Reset day must be an integer between 1 and 31."),
 		).toBeNull();
+	});
+
+	it("shows node egress probe details and refreshes on demand", async () => {
+		setupMocks({
+			refreshEgressProbe: {
+				public_ipv4: "198.51.100.9",
+				public_ipv6: "2001:db8::9",
+				selected_public_ip: "198.51.100.9",
+				country_code: "US",
+				geo_region: "California",
+				geo_city: "San Jose",
+				geo_operator: "Example Transit",
+				subscription_region: "us",
+				checked_at: "2026-03-08T01:05:00Z",
+				last_success_at: "2026-03-08T01:05:00Z",
+				stale: false,
+				error_summary: null,
+			},
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Node metadata"));
+		expect(await screenByText("Node egress probe")).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getAllByText("203.0.113.8").length).toBeGreaterThan(0);
+		});
+		expect(await screenByText("HiNet")).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getAllByText("Taiwan").length).toBeGreaterThan(0);
+		});
+
+		fireEvent.click(await screenByRole("button", "Refresh probe"));
+		await waitFor(() => {
+			expect(refreshAdminNodeEgressProbe).toHaveBeenCalledWith(
+				"admintoken",
+				"node-tokyo",
+			);
+		});
+		await waitFor(() => {
+			expect(screen.getAllByText("198.51.100.9").length).toBeGreaterThan(0);
+		});
+		expect(await screenByText("Example Transit")).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getAllByText("US").length).toBeGreaterThan(0);
+		});
+		expect(fetchAdminNode).toHaveBeenCalledTimes(1);
 	});
 
 	it("shows online stats warning state when snapshots are unavailable", async () => {

@@ -510,6 +510,68 @@ describe("storybook api mock", () => {
 		expect(userUsage.groups.length).toBeGreaterThan(0);
 	});
 
+	it("supports node egress probe refresh", async () => {
+		const mock = createMockApi({
+			data: {
+				nodes: [
+					{
+						node_id: "node-egress-1",
+						node_name: "node-egress-1",
+						access_host: "node-egress-1.example.invalid",
+						api_base_url: "https://node-egress-1.example.invalid",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: 0,
+						},
+						egress_probe: {
+							public_ipv4: "203.0.113.8",
+							public_ipv6: "2001:db8::8",
+							selected_public_ip: "203.0.113.8",
+							country_code: "TW",
+							geo_region: "Taiwan",
+							geo_city: "Taipei",
+							geo_operator: "HiNet",
+							subscription_region: "taiwan",
+							checked_at: "2026-04-24T00:00:00Z",
+							last_success_at: "2026-04-24T00:00:00Z",
+							stale: false,
+							error_summary: null,
+						},
+					},
+				],
+			},
+		});
+
+		const nodesRes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		expect(nodesRes.ok).toBe(true);
+		const nodes = (await nodesRes.json()) as {
+			items: Array<{
+				node_id: string;
+				egress_probe?: { subscription_region: string };
+			}>;
+		};
+		const nodeId = nodes.items[0]?.node_id ?? "node-egress-1";
+
+		const refreshRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/egress-probe/refresh`, {
+				method: "POST",
+			}),
+		);
+		expect(refreshRes.ok).toBe(true);
+		const payload = (await refreshRes.json()) as {
+			node_id: string;
+			accepted: boolean;
+			egress_probe?: { subscription_region: string };
+		};
+		expect(payload.node_id).toBe(nodeId);
+		expect(payload.accepted).toBe(true);
+		expect(payload.egress_probe?.subscription_region).toBeTruthy();
+	});
+
 	it("supports quota policy global weight rows and node inherit policy", async () => {
 		const mock = createMockApi();
 
