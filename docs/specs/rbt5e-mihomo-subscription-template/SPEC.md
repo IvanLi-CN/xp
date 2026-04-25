@@ -73,9 +73,9 @@
 - 地区面固定为 `Japan / HongKong / Taiwan / Korea / Singapore / US / Other`；首次成功探测前，为避免滚动升级时既有地区组瞬间清空，历史节点继续沿用 legacy slug fallback（JP/HK/TW/KR）归类；一旦存在成功探测结果，则优先使用 `subscription_region`，但仅在 probe 未 stale 时视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `proxy-providers` 视为一个整体普通节点池；`🛣️ JP/HK/TW` 候选来自 provider 全集的日本/香港/台湾节点；当 provider 为空时仍必须生成可加载配置。
 - `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
-- 落地组生成遵循“单链优先 + 故障回落”：
-  - 存在 `base-ss` 时，`🛬 {base}` 只包含 `base-chain` 与 `base-ss`；
-  - 仅当不存在 `base-ss` 且存在 `base-reality` 时，`🛬 {base}` 才回退为仅使用 `base-reality`。
+- 落地组生成遵循“Reality 优先 + 兼容回落”：
+  - 存在 `base-reality` 时，`🛬 {base}` 必须优先包含 `base-reality`，并在存在 `base-chain` 时把它作为回落候选；
+  - 仅当不存在 `base-reality` 且存在 `base-ss` 时，`🛬 {base}` 才回退为使用 `base-chain` / `base-ss`。
 - 节点名冲突自动稳定重命名并记录告警日志。
 - mixin 缺失时 `format=mihomo` 回退 clash。
 - `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 的规范化结果必须自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），让用户模板只保留偏好层与额外静态内容。
@@ -139,8 +139,8 @@
 - Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯/🛣️ {Region}`。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
-- Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 只包含 `base-chain` 与 `base-ss`。
-- Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 优先包含 `base-chain`，并以 `base-ss` 兜底。
+- Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 必须包含 `base-reality`，且不得再把 `base-ss` 暴露为该组成员。
+- Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 继续沿用 `base-chain` 与 `base-ss` 的兼容回落路径。
 - Given 请求体只提供旧字段 `template_yaml`，When 保存 profile，Then 请求被拒绝。
 - Given 一份外部提供的脱敏 Mihomo 示例作为目标，When 在共享测试机生成 `format=mihomo` 输出，Then 必须能展示一份脱敏但结构真实的订阅片段，并说明系统托管动态段带来的结构差异与业务行为等价证据。
 - Given 目标示例自带脱敏后的静态 `proxies`（如遮蔽的 REALITY 公钥），When 需要做真实 Mihomo `-t` 校验，Then 应基于同一份业务 mixin 去掉这些不可解析的脱敏静态节点后再校验，以验证系统生成的动态层、provider 池与业务分组仍可被 Mihomo 实际加载。

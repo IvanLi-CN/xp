@@ -99,9 +99,11 @@ describe("<ToolsPage />", () => {
 		});
 		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
 
-		expect(await screen.findByLabelText("Redacted result")).toHaveValue(
-			"server: e***.example.com\npassword: supe***cret\n",
-		);
+		await waitFor(() => {
+			expect(screen.getByLabelText("Redacted result")).toHaveValue(
+				"server: e***.example.com\npassword: supe***cret\n",
+			);
+		});
 
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Copy redacted result" }),
@@ -122,9 +124,11 @@ describe("<ToolsPage />", () => {
 		});
 		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
 
-		expect(await screen.findByLabelText("Redacted result")).toHaveValue(
-			"server: e***.example.com\npassword: supe***cret\n",
-		);
+		await waitFor(() => {
+			expect(screen.getByLabelText("Redacted result")).toHaveValue(
+				"server: e***.example.com\npassword: supe***cret\n",
+			);
+		});
 
 		fireEvent.change(await screen.findByLabelText("Source text"), {
 			target: { value: "server: next.example.com\npassword: next-secret\n" },
@@ -144,9 +148,11 @@ describe("<ToolsPage />", () => {
 		});
 		fireEvent.click(await screen.findByRole("button", { name: "Run redact" }));
 
-		expect(await screen.findByLabelText("Redacted result")).toHaveValue(
-			"server: e***.example.com\npassword: supe***cret\n",
-		);
+		await waitFor(() => {
+			expect(screen.getByLabelText("Redacted result")).toHaveValue(
+				"server: e***.example.com\npassword: supe***cret\n",
+			);
+		});
 
 		fireEvent.click(await screen.findByLabelText("Redaction level"));
 		fireEvent.click(

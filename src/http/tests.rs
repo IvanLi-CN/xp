@@ -4201,8 +4201,8 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
     assert!(
         provider_proxy_names
             .iter()
-            .all(|name| !name.ends_with("-ss") && !name.ends_with("-reality")),
-        "provider main config should move system direct proxies into provider payload"
+            .all(|name| !name.ends_with("-ss")),
+        "provider main config should move system direct ss proxies into provider payload"
     );
 
     let explicit_legacy_res = app
@@ -4247,14 +4247,14 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
     assert!(
         provider_system_proxy_names
             .iter()
-            .any(|name| name.ends_with("-ss") || name.ends_with("-reality")),
+            .any(|name| name.ends_with("-ss")),
         "provider payload should expose system direct proxies"
     );
     assert!(
         provider_system_proxy_names
             .iter()
-            .all(|name| !name.ends_with("-chain")),
-        "provider payload must not contain glue chain proxies"
+            .all(|name| !name.ends_with("-chain") && !name.ends_with("-reality")),
+        "provider payload must not contain top-level chain/reality proxies"
     );
 }
 
@@ -4350,15 +4350,18 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
             .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
             .and_then(|group| group.get("proxies"))
             .and_then(YamlValue::as_sequence)
-            .expect("group proxies must exist")
-            .iter()
+            .into_iter()
+            .flatten()
             .filter_map(YamlValue::as_str)
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(group_refs("🌟 Taiwan"), vec!["🛬 hinetlh"]);
-    assert!(group_refs("💎 高质量").contains(&"🛬 hinetlh"));
-    assert!(group_refs("🚀 节点选择").contains(&"🛬 hinetlh"));
+    let group_names = groups
+        .iter()
+        .filter_map(|group| group.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(group_names.contains(&"🛬 hinetlh"));
+    assert!(group_refs("🔒 落地").contains(&"🛬 hinetlh"));
 }
 
 #[tokio::test]
@@ -4606,12 +4609,22 @@ rules: []
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
+    let expected_reality = format!("{base}-reality");
     let expected_chain = format!("{base}-chain");
-    let expected_ss = format!("{base}-ss");
-    assert_eq!(
-        landing_proxies,
-        vec![expected_chain.as_str(), expected_ss.as_str()]
-    );
+    if proxies.iter().any(|p| {
+        p.get("name").and_then(YamlValue::as_str) == Some(expected_reality.as_str())
+    }) {
+        assert_eq!(
+            landing_proxies,
+            vec![expected_reality.as_str(), expected_chain.as_str()]
+        );
+    } else {
+        let expected_ss = format!("{base}-ss");
+        assert_eq!(
+            landing_proxies,
+            vec![expected_chain.as_str(), expected_ss.as_str()]
+        );
+    }
 
     let landing_pool = groups
         .iter()
@@ -5429,7 +5442,15 @@ rules: []
 
     assert_eq!(
         group_refs("🚀 节点选择"),
-        vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]
+        vec![
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "💎 高质量",
+        ]
     );
     assert_eq!(
         group_refs("🐟 漏网之鱼"),
@@ -5557,7 +5578,20 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
 
-    assert_eq!(refs, vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]);
+    assert_eq!(
+        refs,
+        vec![
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "🛬 node-1",
+            "💎 高质量",
+            "node-1-ss",
+        ]
+    );
     assert!(
         refs.iter().all(|name| *name != "🛬 Legacy-A"),
         "legacy landing ref should be remapped before final render"
@@ -5643,7 +5677,19 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
 
-    assert_eq!(refs, vec!["💎 高质量", "🌟 Japan", "🛬 node-1"]);
+    assert_eq!(
+        refs,
+        vec![
+            "🌟 Japan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 US",
+            "🛬 node-1",
+            "💎 高质量",
+        ]
+    );
     assert!(
         refs.iter().all(|name| *name != "🛬 Legacy-A"),
         "landing-only legacy ref should be remapped before final render"

@@ -67,7 +67,7 @@
   - 顶层 `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
   - `🛣️ JP/HK/TW`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地`、`{base}-chain` 保持可用
 - provider 方案下系统 `{base}-ss` 直连默认隐藏，仅通过 `xp-system-generated` 参与链式/落地 fallback；`{base}-reality` 继续保留为主配置顶层可见直连节点。
-- provider 方案下 `🛬 {base}` 必须采用 `use + filter + proxies` 混合组：存在 SS 时保留 `{base}-chain` 并筛 `{base}-ss`；仅有 Reality 时直接引用顶层 `{base}-reality`。
+- provider 方案下 `🛬 {base}` 必须优先暴露 Reality 直连：存在 `{base}-reality` 时，组成员至少包含顶层 `{base}-reality`，并在存在 `{base}-chain` 时把它作为回落候选；仅当不存在 `{base}-reality` 且存在 `{base}-ss` 时，才继续使用 `use + filter + proxies` 的 SS 兼容回落路径。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy 路径行为不得回归。
 
@@ -115,8 +115,9 @@
 - Given 全局设置切到 `provider`，When 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy` 或 `/mihomo/provider`，When 全局设置任意切换，Then 两条显式路径始终返回固定方案。
 - Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统隐藏直连节点（当前为 `-ss`），不依赖用户是否配置 Mihomo profile。
-- Given provider 方案存在 `base-ss`，When 检查 `🛬 {base}`，Then 该组保留 `{base}-chain` 并通过 `filter` 消费 provider 中的 `{base}-ss`。
+- Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组必须直接暴露 `{base}-reality`，且不得再把 `{base}-ss` 作为该组成员。
 - Given provider 方案存在 `base-reality`，When 检查主配置与地区组，Then `{base}-reality` 仍作为顶层可见节点保留，并可被显式引用。
+- Given provider 方案仅存在 `base-ss`（无 `base-reality`），When 检查 `🛬 {base}`，Then 该组继续保留 `{base}-chain` 并通过 `filter` 消费 provider 中的 `{base}-ss`。
 - Given provider 方案只有 `base-reality`，When 检查 `🛬 {base}`，Then 该组直接引用顶层 `{base}-reality`，不再引用缺失的 `{base}-chain` / `{base}-ss`。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given Web 管理端打开 `Settings / Service config`，When 修改 Mihomo delivery mode 并保存，Then 页面刷新后仍显示新值，且 `User Details` 可复制/预览三类 Mihomo URL。
