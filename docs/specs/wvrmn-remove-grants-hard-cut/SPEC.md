@@ -153,6 +153,7 @@
   state: protocol and node all-select hint
   evidence_note: verifies Access tab explains that protocol all-select creates future same-protocol auto assignment while node all-select only covers current endpoints.
   image:
+  PR: include
   ![Access tab auto-assign hints](./assets/access-auto-assign-hints.png)
 
 ## Milestones
