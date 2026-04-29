@@ -152,12 +152,12 @@ html[data-density="compact"] {
 	}
 
 	.xp-card {
-		@apply rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm;
+		@apply min-w-0 rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm;
 	}
 
 	.xp-card-body {
 		padding: var(--xp-card-padding);
-		@apply flex flex-col gap-4;
+		@apply flex min-w-0 flex-col gap-4;
 	}
 
 	.xp-card-title {
@@ -184,12 +184,12 @@ html[data-density="compact"] {
 
 	.xp-input,
 	.xp-select {
-		@apply h-10 px-3 py-2;
+		@apply h-10 min-h-11 px-3 py-2 sm:min-h-10;
 	}
 
 	.xp-input-sm,
 	.xp-select-sm {
-		@apply h-8 rounded-lg px-3 text-xs;
+		@apply h-8 min-h-11 rounded-lg px-3 text-xs sm:min-h-8;
 	}
 
 	.xp-textarea {
@@ -197,7 +197,7 @@ html[data-density="compact"] {
 	}
 
 	.xp-checkbox {
-		@apply size-4 rounded border border-input bg-background text-primary shadow-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50;
+		@apply size-11 rounded-lg border border-input bg-background text-primary shadow-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50 sm:size-4 sm:rounded;
 	}
 
 	.xp-link {
@@ -262,7 +262,7 @@ html[data-density="compact"] {
 	}
 
 	.xp-table-wrap {
-		@apply overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-sm;
+		@apply max-w-full min-w-0 overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-sm;
 	}
 
 	.xp-table {

@@ -10,12 +10,12 @@ const Checkbox = React.forwardRef<
 	<CheckboxPrimitive.Root
 		ref={ref}
 		className={cn(
-			"peer size-4 shrink-0 rounded border border-input bg-background shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground",
+			"peer group relative inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-primary-foreground outline-none transition-colors before:pointer-events-none before:absolute before:left-1/2 before:top-1/2 before:size-4 before:-translate-x-1/2 before:-translate-y-1/2 before:rounded before:border before:border-input before:bg-background before:shadow-xs before:transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:before:border-primary data-[state=checked]:before:bg-primary data-[state=indeterminate]:before:border-primary data-[state=indeterminate]:before:bg-primary sm:size-4 sm:rounded",
 			className,
 		)}
 		{...props}
 	>
-		<CheckboxPrimitive.Indicator className="group flex items-center justify-center text-current">
+		<CheckboxPrimitive.Indicator className="relative z-10 flex items-center justify-center text-current">
 			<svg
 				viewBox="0 0 16 16"
 				className="size-3.5 group-data-[state=indeterminate]:hidden"

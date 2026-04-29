@@ -143,7 +143,7 @@ export function DemoDashboardPage() {
 				/>
 			</div>
 
-			<div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
+			<div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
 				<section className="xp-card">
 					<div className="xp-card-body">
 						<div className="flex items-center justify-between gap-3">
