@@ -17,6 +17,22 @@ import {
 	UI_THEME_STORAGE_KEY,
 } from "../src/components/UiPrefs";
 import { clearAdminToken, writeAdminToken } from "../src/components/auth";
+import { DemoDashboardPage } from "../src/demo/DemoDashboardPage";
+import {
+	DemoEndpointDetailsPage,
+	DemoEndpointFormPage,
+	DemoEndpointsPage,
+} from "../src/demo/DemoEndpointsPage";
+import { DemoAppRoute, DemoLoginRoute } from "../src/demo/DemoLayout";
+import { DemoLoginPage } from "../src/demo/DemoLoginPage";
+import { DemoNodeDetailsPage, DemoNodesPage } from "../src/demo/DemoNodesPage";
+import { DemoScenariosPage } from "../src/demo/DemoScenariosPage";
+import {
+	DemoUserDetailsPage,
+	DemoUserFormPage,
+	DemoUsersPage,
+} from "../src/demo/DemoUsersPage";
+import { clearDemoFallbackState, getDemoStorageKey } from "../src/demo/store";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
@@ -50,6 +66,14 @@ installStorybookFetchMock();
 function safeLocalStorageSet(key: string, value: string) {
 	try {
 		localStorage.setItem(key, value);
+	} catch {
+		// ignore
+	}
+}
+
+function safeLocalStorageRemove(key: string) {
+	try {
+		localStorage.removeItem(key);
 	} catch {
 		// ignore
 	}
@@ -124,6 +148,8 @@ const preview: Preview = {
 			} else {
 				writeAdminToken(mockParams?.adminToken ?? "storybook-admin-token");
 			}
+			safeLocalStorageRemove(getDemoStorageKey());
+			clearDemoFallbackState();
 
 			const history = createMemoryHistory({
 				initialEntries: [routerParams?.initialEntry ?? "/__story"],
@@ -229,6 +255,84 @@ const preview: Preview = {
 				component: RealityDomainsPage,
 			});
 
+			const demoLoginRootRoute = createRoute({
+				getParentRoute: () => rootRoute,
+				path: "/demo/login",
+				component: DemoLoginRoute,
+			});
+
+			const demoLoginPageRoute = createRoute({
+				getParentRoute: () => demoLoginRootRoute,
+				path: "/",
+				component: DemoLoginPage,
+			});
+
+			const demoAppRoute = createRoute({
+				getParentRoute: () => rootRoute,
+				path: "/demo",
+				component: DemoAppRoute,
+			});
+
+			const demoDashboardRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/",
+				component: DemoDashboardPage,
+			});
+
+			const demoNodesRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/nodes",
+				component: DemoNodesPage,
+			});
+
+			const demoNodeDetailsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/nodes/$nodeId",
+				component: DemoNodeDetailsPage,
+			});
+
+			const demoEndpointsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/endpoints",
+				component: DemoEndpointsPage,
+			});
+
+			const demoEndpointNewRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/endpoints/new",
+				component: DemoEndpointFormPage,
+			});
+
+			const demoEndpointDetailsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/endpoints/$endpointId",
+				component: DemoEndpointDetailsPage,
+			});
+
+			const demoUsersRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/users",
+				component: DemoUsersPage,
+			});
+
+			const demoUserNewRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/users/new",
+				component: DemoUserFormPage,
+			});
+
+			const demoUserDetailsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/users/$userId",
+				component: DemoUserDetailsPage,
+			});
+
+			const demoScenariosRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/scenarios",
+				component: DemoScenariosPage,
+			});
+
 			const appRouteTree = appRoute.addChildren([
 				dashboardRoute,
 				nodesRoute,
@@ -245,10 +349,29 @@ const preview: Preview = {
 				realityDomainsRoute,
 			]);
 
+			const demoLoginRouteTree = demoLoginRootRoute.addChildren([
+				demoLoginPageRoute,
+			]);
+
+			const demoAppRouteTree = demoAppRoute.addChildren([
+				demoDashboardRoute,
+				demoNodesRoute,
+				demoNodeDetailsRoute,
+				demoEndpointsRoute,
+				demoEndpointNewRoute,
+				demoEndpointDetailsRoute,
+				demoUsersRoute,
+				demoUserNewRoute,
+				demoUserDetailsRoute,
+				demoScenariosRoute,
+			]);
+
 			const routeTree = rootRoute.addChildren([
 				storyRoute,
 				loginRoute,
 				appRouteTree,
+				demoLoginRouteTree,
+				demoAppRouteTree,
 			]);
 
 			const router = createRouter({ routeTree, history });
