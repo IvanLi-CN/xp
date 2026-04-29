@@ -10,6 +10,22 @@ import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
+import { DemoDashboardPage } from "./demo/DemoDashboardPage";
+import {
+	DemoEndpointDetailsPage,
+	DemoEndpointFormPage,
+	DemoEndpointsPage,
+} from "./demo/DemoEndpointsPage";
+import { DemoAppRoute, DemoLoginRoute } from "./demo/DemoLayout";
+import { DemoLoginPage } from "./demo/DemoLoginPage";
+import { DemoNodeDetailsPage, DemoNodesPage } from "./demo/DemoNodesPage";
+import { DemoScenariosPage } from "./demo/DemoScenariosPage";
+import {
+	DemoUserDetailsPage,
+	DemoUserFormPage,
+	DemoUsersPage,
+} from "./demo/DemoUsersPage";
+import { hasDemoSession } from "./demo/store";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
@@ -137,6 +153,89 @@ const realityDomainsRoute = createRoute({
 	component: RealityDomainsPage,
 });
 
+const demoLoginRootRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/demo/login",
+	component: DemoLoginRoute,
+});
+
+const demoLoginPageRoute = createRoute({
+	getParentRoute: () => demoLoginRootRoute,
+	path: "/",
+	component: DemoLoginPage,
+});
+
+const demoAppRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/demo",
+	beforeLoad: () => {
+		if (!hasDemoSession()) {
+			throw redirect({ to: "/demo/login" });
+		}
+	},
+	component: DemoAppRoute,
+});
+
+const demoDashboardRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/",
+	component: DemoDashboardPage,
+});
+
+const demoNodesRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/nodes",
+	component: DemoNodesPage,
+});
+
+const demoNodeDetailsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/nodes/$nodeId",
+	component: DemoNodeDetailsPage,
+});
+
+const demoEndpointsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/endpoints",
+	component: DemoEndpointsPage,
+});
+
+const demoEndpointNewRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/endpoints/new",
+	component: DemoEndpointFormPage,
+});
+
+const demoEndpointDetailsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/endpoints/$endpointId",
+	component: DemoEndpointDetailsPage,
+});
+
+const demoUsersRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/users",
+	component: DemoUsersPage,
+});
+
+const demoUserNewRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/users/new",
+	component: DemoUserFormPage,
+});
+
+const demoUserDetailsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/users/$userId",
+	component: DemoUserDetailsPage,
+});
+
+const demoScenariosRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/scenarios",
+	component: DemoScenariosPage,
+});
+
 const appRouteTree = appRoute.addChildren([
 	dashboardRoute,
 	nodesRoute,
@@ -155,7 +254,27 @@ const appRouteTree = appRoute.addChildren([
 	realityDomainsRoute,
 ]);
 
-const routeTree = rootRoute.addChildren([loginRoute, appRouteTree]);
+const demoLoginRouteTree = demoLoginRootRoute.addChildren([demoLoginPageRoute]);
+
+const demoAppRouteTree = demoAppRoute.addChildren([
+	demoDashboardRoute,
+	demoNodesRoute,
+	demoNodeDetailsRoute,
+	demoEndpointsRoute,
+	demoEndpointNewRoute,
+	demoEndpointDetailsRoute,
+	demoUsersRoute,
+	demoUserNewRoute,
+	demoUserDetailsRoute,
+	demoScenariosRoute,
+]);
+
+const routeTree = rootRoute.addChildren([
+	loginRoute,
+	appRouteTree,
+	demoLoginRouteTree,
+	demoAppRouteTree,
+]);
 
 export function createAppRouter() {
 	const router = createRouter({ routeTree });
