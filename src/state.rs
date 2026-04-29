@@ -25,7 +25,8 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
+const SCHEMA_VERSION_V11: u32 = 11;
 const SCHEMA_VERSION_V10: u32 = 10;
 const SCHEMA_VERSION_V9: u32 = 9;
 const SCHEMA_VERSION_V8: u32 = 8;
@@ -38,7 +39,7 @@ const USAGE_SCHEMA_VERSION_V1: u32 = 1;
 const NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX: &str = "node_egress_probe_state:";
 const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
-/// Migrate any historical state payload into the latest schema (v11).
+/// Migrate any historical state payload into the latest schema (v12).
 ///
 /// This is used by Raft snapshot installation to support upgrades without requiring operators
 /// to start an older binary for snapshot/purge first.
@@ -52,7 +53,11 @@ pub(crate) fn migrate_state_value_to_latest(
 
     let mut state = match schema_version {
         SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
-        SCHEMA_VERSION_V10 => migrate_v10_to_v11(serde_json::from_value::<PersistedState>(raw)?)?,
+        SCHEMA_VERSION_V11 => migrate_v11_to_v12(serde_json::from_value::<PersistedState>(raw)?)?,
+        SCHEMA_VERSION_V10 => {
+            let v11 = migrate_v10_to_v11(serde_json::from_value::<PersistedState>(raw)?)?;
+            migrate_v11_to_v12(v11)?
+        }
         SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7 | SCHEMA_VERSION_V6
         | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
             let mut legacy: PersistedStateV9Compat = serde_json::from_value(raw)?;
@@ -85,7 +90,8 @@ pub(crate) fn migrate_state_value_to_latest(
             };
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(legacy)?;
-            v10
+            let v11 = migrate_v10_to_v11(v10)?;
+            migrate_v11_to_v12(v11)?
         }
         2 | 1 => {
             let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
@@ -96,7 +102,8 @@ pub(crate) fn migrate_state_value_to_latest(
             let v8 = migrate_v7_to_v8(v7)?;
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(v8)?;
-            v10
+            let v11 = migrate_v10_to_v11(v10)?;
+            migrate_v11_to_v12(v11)?
         }
         got => {
             return Err(StoreError::SchemaVersionMismatch {
@@ -131,6 +138,10 @@ pub(crate) fn migrate_state_value_to_latest(
         normalize_user_global_weights(&state, state.user_global_weights.clone());
     state.node_weight_policies =
         normalize_node_weight_policies(&state, state.node_weight_policies.clone());
+    state.user_auto_assign_endpoint_kinds = normalize_user_auto_assign_endpoint_kinds(
+        &state,
+        state.user_auto_assign_endpoint_kinds.clone(),
+    );
     state.node_user_endpoint_memberships = normalize_node_user_endpoint_memberships(
         &state,
         state.node_user_endpoint_memberships.clone(),
@@ -273,6 +284,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub node_user_endpoint_memberships: BTreeSet<NodeUserEndpointMembership>,
     #[serde(default)]
+    pub user_auto_assign_endpoint_kinds: BTreeMap<String, BTreeSet<EndpointKind>>,
+    #[serde(default)]
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
     #[serde(default)]
     pub mihomo_delivery_mode: MihomoDeliveryMode,
@@ -298,6 +311,7 @@ impl PersistedState {
             user_global_weights: BTreeMap::new(),
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
+            user_auto_assign_endpoint_kinds: BTreeMap::new(),
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
@@ -891,7 +905,26 @@ fn migrate_v4_to_v5(
 fn build_node_user_endpoint_memberships(
     state: &PersistedState,
 ) -> BTreeSet<NodeUserEndpointMembership> {
-    normalize_node_user_endpoint_memberships(state, state.node_user_endpoint_memberships.clone())
+    let mut out =
+        normalize_node_user_endpoint_memberships(state, state.node_user_endpoint_memberships.clone());
+
+    for (user_id, kinds) in state.user_auto_assign_endpoint_kinds.iter() {
+        if !state.users.contains_key(user_id) {
+            continue;
+        }
+        for endpoint in state.endpoints.values() {
+            if !kinds.contains(&endpoint.kind) {
+                continue;
+            }
+            out.insert(NodeUserEndpointMembership {
+                user_id: user_id.clone(),
+                node_id: endpoint.node_id.clone(),
+                endpoint_id: endpoint.endpoint_id.clone(),
+            });
+        }
+    }
+
+    out
 }
 
 fn normalize_node_user_endpoint_memberships(
@@ -916,7 +949,72 @@ fn normalize_node_user_endpoint_memberships(
     out
 }
 
+fn normalize_user_auto_assign_endpoint_kinds(
+    state: &PersistedState,
+    auto_assign: BTreeMap<String, BTreeSet<EndpointKind>>,
+) -> BTreeMap<String, BTreeSet<EndpointKind>> {
+    let mut out = BTreeMap::new();
+    for (user_id, kinds) in auto_assign {
+        if !state.users.contains_key(&user_id) {
+            continue;
+        }
+        if !kinds.is_empty() {
+            out.insert(user_id, kinds);
+        }
+    }
+    out
+}
+
+fn infer_auto_assign_endpoint_kinds_for_user(
+    state: &PersistedState,
+    endpoint_ids: &BTreeSet<String>,
+) -> BTreeSet<EndpointKind> {
+    let mut endpoint_ids_by_kind = BTreeMap::<EndpointKind, BTreeSet<String>>::new();
+    for endpoint in state.endpoints.values() {
+        endpoint_ids_by_kind
+            .entry(endpoint.kind.clone())
+            .or_default()
+            .insert(endpoint.endpoint_id.clone());
+    }
+
+    endpoint_ids_by_kind
+        .into_iter()
+        .filter_map(|(kind, kind_endpoint_ids)| {
+            if kind_endpoint_ids.is_empty() || !kind_endpoint_ids.is_subset(endpoint_ids) {
+                return None;
+            }
+            Some(kind)
+        })
+        .collect()
+}
+
+fn infer_user_auto_assign_endpoint_kinds(
+    state: &PersistedState,
+) -> BTreeMap<String, BTreeSet<EndpointKind>> {
+    let mut endpoint_ids_by_user = BTreeMap::<String, BTreeSet<String>>::new();
+    for membership in state.node_user_endpoint_memberships.iter() {
+        endpoint_ids_by_user
+            .entry(membership.user_id.clone())
+            .or_default()
+            .insert(membership.endpoint_id.clone());
+    }
+
+    let mut out = BTreeMap::new();
+    for user_id in state.users.keys() {
+        let endpoint_ids = endpoint_ids_by_user.remove(user_id).unwrap_or_default();
+        let kinds = infer_auto_assign_endpoint_kinds_for_user(state, &endpoint_ids);
+        if !kinds.is_empty() {
+            out.insert(user_id.clone(), kinds);
+        }
+    }
+    out
+}
+
 fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
+    state.user_auto_assign_endpoint_kinds = normalize_user_auto_assign_endpoint_kinds(
+        state,
+        state.user_auto_assign_endpoint_kinds.clone(),
+    );
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(state);
 }
 
@@ -1054,7 +1152,26 @@ fn migrate_v10_to_v11(mut input: PersistedState) -> Result<PersistedState, Store
             ),
         });
     }
+    input.schema_version = SCHEMA_VERSION_V11;
+    Ok(input)
+}
+
+fn migrate_v11_to_v12(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V11 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "expected v11 state during migration, got schema_version {}",
+                input.schema_version
+            ),
+        });
+    }
+    input.node_user_endpoint_memberships = normalize_node_user_endpoint_memberships(
+        &input,
+        input.node_user_endpoint_memberships.clone(),
+    );
+    input.user_auto_assign_endpoint_kinds = infer_user_auto_assign_endpoint_kinds(&input);
     input.schema_version = SCHEMA_VERSION;
+    sync_node_user_endpoint_memberships(&mut input);
     Ok(input)
 }
 
@@ -1075,7 +1192,7 @@ fn migrate_v9_compat_to_v10(
     };
 
     let mut out = PersistedState::empty();
-    out.schema_version = SCHEMA_VERSION;
+    out.schema_version = SCHEMA_VERSION_V10;
     out.nodes = input.nodes;
     out.endpoints = input.endpoints;
     out.endpoint_probe_history = input.endpoint_probe_history;
@@ -1261,6 +1378,39 @@ fn normalize_node_weight_policies(
 mod migrate_tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
+
+    fn migrate_test_user(user_id: &str) -> User {
+        User {
+            user_id: user_id.to_string(),
+            display_name: user_id.to_string(),
+            subscription_token: format!("sub_{user_id}"),
+            credential_epoch: 0,
+            priority_tier: UserPriorityTier::P2,
+            quota_reset: UserQuotaReset::default(),
+        }
+    }
+
+    fn migrate_test_node(node_id: &str) -> Node {
+        Node {
+            node_id: node_id.to_string(),
+            node_name: node_id.to_string(),
+            access_host: "localhost".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        }
+    }
+
+    fn migrate_test_ss_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
+        Endpoint {
+            endpoint_id: endpoint_id.to_string(),
+            node_id: node_id.to_string(),
+            tag: endpoint_id.to_string(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: serde_json::json!({}),
+        }
+    }
 
     #[test]
     fn migrate_v2_like_to_v3_overrides_seeded_quota_reset_source_from_grants() {
@@ -1555,7 +1705,7 @@ mod migrate_tests {
         );
 
         let (v10, mapping, stats) = migrate_v9_compat_to_v10(v9).expect("migration should succeed");
-        assert_eq!(v10.schema_version, SCHEMA_VERSION);
+        assert_eq!(v10.schema_version, SCHEMA_VERSION_V10);
         assert!(v10.user_node_quotas.is_empty());
         assert_eq!(v10.node_user_endpoint_memberships.len(), 1);
         assert_eq!(
@@ -1573,6 +1723,56 @@ mod migrate_tests {
         assert_eq!(stats.memberships_created, 1);
         assert_eq!(stats.memberships_deduped, 1);
         assert_eq!(stats.user_node_quotas_cleared, 2);
+    }
+
+    #[test]
+    fn migrate_v11_to_v12_infers_auto_assign_endpoint_kinds() {
+        let mut v11 = PersistedState::empty();
+        v11.schema_version = SCHEMA_VERSION_V11;
+        v11.users
+            .insert("user_all".to_string(), migrate_test_user("user_all"));
+        v11.users
+            .insert("user_subset".to_string(), migrate_test_user("user_subset"));
+        v11.nodes
+            .insert("node_1".to_string(), migrate_test_node("node_1"));
+        v11.endpoints.insert(
+            "ss_1".to_string(),
+            migrate_test_ss_endpoint("ss_1", "node_1"),
+        );
+        v11.endpoints.insert(
+            "ss_2".to_string(),
+            migrate_test_ss_endpoint("ss_2", "node_1"),
+        );
+        v11.node_user_endpoint_memberships = BTreeSet::from([
+            NodeUserEndpointMembership {
+                user_id: "user_all".to_string(),
+                node_id: "node_1".to_string(),
+                endpoint_id: "ss_1".to_string(),
+            },
+            NodeUserEndpointMembership {
+                user_id: "user_all".to_string(),
+                node_id: "node_1".to_string(),
+                endpoint_id: "ss_2".to_string(),
+            },
+            NodeUserEndpointMembership {
+                user_id: "user_subset".to_string(),
+                node_id: "node_1".to_string(),
+                endpoint_id: "ss_1".to_string(),
+            },
+        ]);
+
+        let v12 = migrate_v11_to_v12(v11).unwrap();
+
+        assert_eq!(v12.schema_version, SCHEMA_VERSION);
+        assert_eq!(
+            v12.user_auto_assign_endpoint_kinds.get("user_all"),
+            Some(&BTreeSet::from([
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm
+            ]))
+        );
+        assert!(!v12
+            .user_auto_assign_endpoint_kinds
+            .contains_key("user_subset"));
     }
 }
 
@@ -2668,6 +2868,22 @@ impl DesiredStateCommand {
                         });
                 }
 
+                let desired_endpoint_ids: BTreeSet<String> = state
+                    .node_user_endpoint_memberships
+                    .iter()
+                    .filter(|m| m.user_id == *user_id)
+                    .map(|m| m.endpoint_id.clone())
+                    .collect();
+                let auto_assign_kinds =
+                    infer_auto_assign_endpoint_kinds_for_user(state, &desired_endpoint_ids);
+                if auto_assign_kinds.is_empty() {
+                    state.user_auto_assign_endpoint_kinds.remove(user_id);
+                } else {
+                    state
+                        .user_auto_assign_endpoint_kinds
+                        .insert(user_id.clone(), auto_assign_kinds);
+                }
+
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::UserAccessReplaced { created, deleted })
             }
@@ -2896,12 +3112,17 @@ impl JsonSnapshotStore {
 
                 match schema_version {
                     SCHEMA_VERSION => {
+                        let v12: PersistedState = serde_json::from_value(raw)?;
+                        (v12, None, false, false)
+                    }
+                    SCHEMA_VERSION_V11 => {
                         let v11: PersistedState = serde_json::from_value(raw)?;
-                        (v11, None, false, false)
+                        (migrate_v11_to_v12(v11)?, None, false, true)
                     }
                     SCHEMA_VERSION_V10 => {
                         let v10: PersistedState = serde_json::from_value(raw)?;
-                        (migrate_v10_to_v11(v10)?, None, false, true)
+                        let v11 = migrate_v10_to_v11(v10)?;
+                        (migrate_v11_to_v12(v11)?, None, false, true)
                     }
                     SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7
                     | SCHEMA_VERSION_V6 | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
@@ -2942,6 +3163,8 @@ impl JsonSnapshotStore {
                         };
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(legacy)?;
+                        let v11 = migrate_v10_to_v11(v10)?;
+                        let v12 = migrate_v11_to_v12(v11)?;
                         // Best-effort migration stats (logs are useful in production upgrades).
                         tracing::info!(
                             grants_total = stats.grants_total,
@@ -2953,7 +3176,7 @@ impl JsonSnapshotStore {
                         );
 
                         let _ = migrated;
-                        (v10, Some(mapping), false, true)
+                        (v12, Some(mapping), false, true)
                     }
                     2 | 1 => {
                         let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
@@ -2964,6 +3187,8 @@ impl JsonSnapshotStore {
                         let v8 = migrate_v7_to_v8(v7)?;
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(v8)?;
+                        let v11 = migrate_v10_to_v11(v10)?;
+                        let v12 = migrate_v11_to_v12(v11)?;
                         tracing::info!(
                             grants_total = stats.grants_total,
                             grants_orphan_dropped = stats.grants_orphan_dropped,
@@ -2972,7 +3197,7 @@ impl JsonSnapshotStore {
                             user_node_quotas_cleared = stats.user_node_quotas_cleared,
                             "state migration: v2like->v10 (remove grants hard cut)"
                         );
-                        (v10, Some(mapping), false, true)
+                        (v12, Some(mapping), false, true)
                     }
                     got => {
                         return Err(StoreError::SchemaVersionMismatch {
@@ -3030,6 +3255,15 @@ impl JsonSnapshotStore {
             normalize_node_weight_policies(&state, state.node_weight_policies.clone());
         if normalized_node_policies != state.node_weight_policies {
             state.node_weight_policies = normalized_node_policies;
+            migrated = true;
+        }
+
+        let normalized_auto_assign = normalize_user_auto_assign_endpoint_kinds(
+            &state,
+            state.user_auto_assign_endpoint_kinds.clone(),
+        );
+        if normalized_auto_assign != state.user_auto_assign_endpoint_kinds {
+            state.user_auto_assign_endpoint_kinds = normalized_auto_assign;
             migrated = true;
         }
 
@@ -3856,6 +4090,27 @@ impl JsonSnapshotStore {
         items.sort_by(|a, b| a.endpoint_id.cmp(&b.endpoint_id));
         Ok(items)
     }
+
+    pub fn list_user_auto_assign_endpoint_kinds(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<EndpointKind>, StoreError> {
+        if !self.state.users.contains_key(user_id) {
+            return Err(DomainError::MissingUser {
+                user_id: user_id.to_string(),
+            }
+            .into());
+        }
+
+        Ok(self
+            .state
+            .user_auto_assign_endpoint_kinds
+            .get(user_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -3967,6 +4222,65 @@ mod tests {
             bootstrap_node_name: "node-1".to_string(),
             bootstrap_access_host: "".to_string(),
             bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        }
+    }
+
+    fn test_user(user_id: &str) -> User {
+        User {
+            user_id: user_id.to_string(),
+            display_name: user_id.to_string(),
+            subscription_token: format!("sub_{user_id}"),
+            credential_epoch: 0,
+            priority_tier: UserPriorityTier::P2,
+            quota_reset: UserQuotaReset::default(),
+        }
+    }
+
+    fn test_node(node_id: &str) -> Node {
+        Node {
+            node_id: node_id.to_string(),
+            node_name: node_id.to_string(),
+            access_host: "localhost".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        }
+    }
+
+    fn ss_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
+        Endpoint {
+            endpoint_id: endpoint_id.to_string(),
+            node_id: node_id.to_string(),
+            tag: endpoint_id.to_string(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        }
+    }
+
+    fn vless_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: "example.com:443".to_string(),
+                server_names: vec!["example.com".to_string()],
+                server_names_source: RealityServerNamesSource::Manual,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        Endpoint {
+            endpoint_id: endpoint_id.to_string(),
+            node_id: node_id.to_string(),
+            tag: endpoint_id.to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
         }
     }
 
@@ -4593,39 +4907,12 @@ rules: []
     #[test]
     fn replace_user_access_reports_delta_counts_not_physical_rewrites() {
         let mut state = PersistedState::empty();
-        state.users.insert(
-            "user_1".to_string(),
-            User {
-                user_id: "user_1".to_string(),
-                display_name: "alice".to_string(),
-                subscription_token: "sub_1".to_string(),
-                credential_epoch: 0,
-                priority_tier: UserPriorityTier::P2,
-                quota_reset: UserQuotaReset::default(),
-            },
-        );
-        state.nodes.insert(
-            "node_1".to_string(),
-            Node {
-                node_id: "node_1".to_string(),
-                node_name: "node-1".to_string(),
-                access_host: "localhost".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            },
-        );
+        state.users.insert("user_1".to_string(), test_user("user_1"));
+        state.nodes.insert("node_1".to_string(), test_node("node_1"));
         for endpoint_id in ["endpoint_1", "endpoint_2", "endpoint_3"] {
             state.endpoints.insert(
                 endpoint_id.to_string(),
-                Endpoint {
-                    endpoint_id: endpoint_id.to_string(),
-                    node_id: "node_1".to_string(),
-                    tag: endpoint_id.to_string(),
-                    kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                    port: 10_000,
-                    meta: json!({}),
-                },
+                ss_endpoint(endpoint_id, "node_1"),
             );
         }
 
@@ -4663,6 +4950,168 @@ rules: []
             .map(|m| m.endpoint_id.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(endpoints, BTreeSet::from(["endpoint_2", "endpoint_3"]));
+    }
+
+    #[test]
+    fn replace_user_access_records_all_selected_endpoint_kinds() {
+        let mut state = PersistedState::empty();
+        state.users.insert("user_1".to_string(), test_user("user_1"));
+        state.nodes.insert("node_1".to_string(), test_node("node_1"));
+        state
+            .endpoints
+            .insert("ss_1".to_string(), ss_endpoint("ss_1", "node_1"));
+        state
+            .endpoints
+            .insert("ss_2".to_string(), ss_endpoint("ss_2", "node_1"));
+        state
+            .endpoints
+            .insert("vless_1".to_string(), vless_endpoint("vless_1", "node_1"));
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["ss_1".to_string(), "ss_2".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert_eq!(
+            state.user_auto_assign_endpoint_kinds.get("user_1"),
+            Some(&BTreeSet::from([
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm
+            ]))
+        );
+    }
+
+    #[test]
+    fn replace_user_access_clears_auto_kind_when_subset_selected() {
+        let mut state = PersistedState::empty();
+        state.users.insert("user_1".to_string(), test_user("user_1"));
+        state.nodes.insert("node_1".to_string(), test_node("node_1"));
+        state
+            .endpoints
+            .insert("ss_1".to_string(), ss_endpoint("ss_1", "node_1"));
+        state
+            .endpoints
+            .insert("ss_2".to_string(), ss_endpoint("ss_2", "node_1"));
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["ss_1".to_string(), "ss_2".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert!(state.user_auto_assign_endpoint_kinds.contains_key("user_1"));
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["ss_1".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        assert!(!state.user_auto_assign_endpoint_kinds.contains_key("user_1"));
+        let endpoints = state
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.user_id == "user_1")
+            .map(|m| m.endpoint_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(endpoints, BTreeSet::from(["ss_1"]));
+    }
+
+    #[test]
+    fn upsert_endpoint_auto_grants_matching_kind_only() {
+        let mut state = PersistedState::empty();
+        for user_id in ["vless_user", "ss_user"] {
+            state.users.insert(user_id.to_string(), test_user(user_id));
+        }
+        state.nodes.insert("node_1".to_string(), test_node("node_1"));
+        state
+            .endpoints
+            .insert("vless_1".to_string(), vless_endpoint("vless_1", "node_1"));
+        state
+            .endpoints
+            .insert("ss_1".to_string(), ss_endpoint("ss_1", "node_1"));
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "vless_user".to_string(),
+            endpoint_ids: vec!["vless_1".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "ss_user".to_string(),
+            endpoint_ids: vec!["ss_1".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: vless_endpoint("vless_2", "node_1"),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        let endpoints_by_user = |state: &PersistedState, user_id: &str| {
+            state
+                .node_user_endpoint_memberships
+                .iter()
+                .filter(|m| m.user_id == user_id)
+                .map(|m| m.endpoint_id.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            endpoints_by_user(&state, "vless_user"),
+            BTreeSet::from(["vless_1".to_string(), "vless_2".to_string()])
+        );
+        assert_eq!(
+            endpoints_by_user(&state, "ss_user"),
+            BTreeSet::from(["ss_1".to_string()])
+        );
+    }
+
+    #[test]
+    fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
+        let mut state = PersistedState::empty();
+        state.users.insert("user_1".to_string(), test_user("user_1"));
+        state.nodes.insert("node_1".to_string(), test_node("node_1"));
+        state
+            .endpoints
+            .insert("ss_1".to_string(), ss_endpoint("ss_1", "node_1"));
+
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: "user_1".to_string(),
+            endpoint_ids: vec!["ss_1".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        DesiredStateCommand::DeleteEndpoint {
+            endpoint_id: "ss_1".to_string(),
+        }
+        .apply(&mut state)
+        .unwrap();
+        assert_eq!(
+            state.user_auto_assign_endpoint_kinds.get("user_1"),
+            Some(&BTreeSet::from([
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm
+            ]))
+        );
+        assert!(state.node_user_endpoint_memberships.is_empty());
+
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: ss_endpoint("ss_2", "node_1"),
+        }
+        .apply(&mut state)
+        .unwrap();
+
+        let endpoints = state
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|m| m.user_id == "user_1")
+            .map(|m| m.endpoint_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(endpoints, BTreeSet::from(["ss_2"]));
     }
 
     #[test]

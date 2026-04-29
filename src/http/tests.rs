@@ -3238,6 +3238,10 @@ async fn put_user_access_dedups_and_allows_clear() {
     assert_eq!(put["deleted"], 0);
     assert_eq!(put["items"].as_array().unwrap().len(), 1);
     assert_eq!(put["items"][0]["endpoint_id"], endpoint_id);
+    assert_eq!(
+        put["auto_assign_endpoint_kinds"],
+        json!(["ss2022_2022_blake3_aes_128_gcm"])
+    );
 
     let res = app
         .clone()
@@ -3255,6 +3259,10 @@ async fn put_user_access_dedups_and_allows_clear() {
     assert_eq!(updated["items"].as_array().unwrap().len(), 1);
     assert_eq!(updated["items"][0]["endpoint_id"], endpoint_id);
     assert_eq!(updated["items"][0]["node_id"], node_id);
+    assert_eq!(
+        updated["auto_assign_endpoint_kinds"],
+        json!(["ss2022_2022_blake3_aes_128_gcm"])
+    );
 
     let res = app
         .clone()
@@ -3283,6 +3291,166 @@ async fn put_user_access_dedups_and_allows_clear() {
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
     assert_eq!(updated["items"].as_array().unwrap().len(), 0);
+    assert_eq!(updated["auto_assign_endpoint_kinds"], json!([]));
+}
+
+#[tokio::test]
+async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let create_user = |name: &'static str| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(req_authed_json(
+                    "POST",
+                    "/api/admin/users",
+                    json!({ "display_name": name }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            body_json(res).await["user_id"].as_str().unwrap().to_string()
+        }
+    };
+    let vless_user_id = create_user("vless-user").await;
+    let ss_user_id = create_user("ss-user").await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let vless_endpoint_id = body_json(res).await["endpoint_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "ss2022_2022_blake3_aes_128_gcm",
+              "port": 8388
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let ss_endpoint_id = body_json(res).await["endpoint_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for (user_id, endpoint_id) in [
+        (vless_user_id.as_str(), vless_endpoint_id.as_str()),
+        (ss_user_id.as_str(), ss_endpoint_id.as_str()),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/access"),
+                json!({ "items": [{ "endpoint_id": endpoint_id }] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 8443,
+              "reality": {
+                "dest": "second.example.com:443",
+                "server_names": ["second.example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let new_vless_endpoint_id = body_json(res).await["endpoint_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{vless_user_id}/access"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let vless_access = body_json(res).await;
+    let vless_endpoint_ids = vless_access["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["endpoint_id"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        vless_endpoint_ids,
+        std::collections::BTreeSet::from([
+            vless_endpoint_id.as_str(),
+            new_vless_endpoint_id.as_str()
+        ])
+    );
+    assert_eq!(
+        vless_access["auto_assign_endpoint_kinds"],
+        json!(["vless_reality_vision_tcp"])
+    );
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{ss_user_id}/access"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let ss_access = body_json(res).await;
+    assert_eq!(ss_access["items"].as_array().unwrap().len(), 1);
+    assert_eq!(ss_access["items"][0]["endpoint_id"], json!(ss_endpoint_id));
+    assert_eq!(
+        ss_access["auto_assign_endpoint_kinds"],
+        json!(["ss2022_2022_blake3_aes_128_gcm"])
+    );
 }
 
 #[tokio::test]

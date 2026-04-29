@@ -3,6 +3,7 @@ import type { MihomoDeliveryMode } from "../../src/api/adminConfig";
 import type {
 	AdminEndpoint,
 	AdminEndpointCreateRequest,
+	AdminEndpointKind,
 	AdminEndpointPatchRequest,
 } from "../../src/api/adminEndpoints";
 import type {
@@ -76,6 +77,7 @@ type MockStateSeed = {
 	realityDomains: AdminRealityDomain[];
 	users: AdminUser[];
 	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
+	userAutoAssignEndpointKindsByUserId: Record<string, AdminEndpointKind[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
@@ -650,6 +652,12 @@ function createDefaultSeed(): MockStateSeed {
 			},
 		],
 	};
+	const userAutoAssignEndpointKindsByUserId = Object.fromEntries(
+		Object.entries(userAccessByUserId).map(([userId, items]) => [
+			userId,
+			inferAutoAssignEndpointKindsFromEndpoints(endpoints, items),
+		]),
+	);
 
 	const alerts: AlertsResponse = {
 		partial: false,
@@ -710,6 +718,7 @@ node-2`,
 		realityDomains,
 		users,
 		userAccessByUserId,
+		userAutoAssignEndpointKindsByUserId,
 		nodeQuotas: [],
 		nodeIpUsageByNodeId,
 		userIpUsageByUserId,
@@ -737,6 +746,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		userAccessByUserId: {
 			...base.userAccessByUserId,
 			...(overrides?.userAccessByUserId ?? {}),
+		},
+		userAutoAssignEndpointKindsByUserId: {
+			...base.userAutoAssignEndpointKindsByUserId,
+			...(overrides?.userAutoAssignEndpointKindsByUserId ?? {}),
 		},
 		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
 		nodeIpUsageByNodeId: {
@@ -824,6 +837,79 @@ function ensureUserAccessStore(
 	const items: AdminUserAccessItem[] = [];
 	state.userAccessByUserId[userId] = items;
 	return items;
+}
+
+function inferAutoAssignEndpointKindsFromEndpoints(
+	endpoints: Array<Pick<AdminEndpoint, "endpoint_id" | "kind">>,
+	items: AdminUserAccessItem[],
+): AdminEndpointKind[] {
+	const selectedEndpointIds = new Set(items.map((item) => item.endpoint_id));
+	const endpointIdsByKind = new Map<AdminEndpointKind, Set<string>>();
+	for (const endpoint of endpoints) {
+		const endpointIds =
+			endpointIdsByKind.get(endpoint.kind) ?? new Set<string>();
+		endpointIds.add(endpoint.endpoint_id);
+		endpointIdsByKind.set(endpoint.kind, endpointIds);
+	}
+
+	const out: AdminEndpointKind[] = [];
+	for (const [kind, endpointIds] of endpointIdsByKind) {
+		if (
+			[...endpointIds].every((endpointId) =>
+				selectedEndpointIds.has(endpointId),
+			)
+		) {
+			out.push(kind);
+		}
+	}
+	return out.sort();
+}
+
+function inferAutoAssignEndpointKinds(
+	state: MockState,
+	items: AdminUserAccessItem[],
+): AdminEndpointKind[] {
+	return inferAutoAssignEndpointKindsFromEndpoints(state.endpoints, items);
+}
+
+function autoAssignKindsForUser(
+	state: MockState,
+	userId: string,
+): AdminEndpointKind[] {
+	return state.userAutoAssignEndpointKindsByUserId[userId] ?? [];
+}
+
+function setAutoAssignKindsForUser(
+	state: MockState,
+	userId: string,
+	kinds: AdminEndpointKind[],
+) {
+	if (kinds.length === 0) {
+		delete state.userAutoAssignEndpointKindsByUserId[userId];
+		return;
+	}
+	state.userAutoAssignEndpointKindsByUserId[userId] = kinds;
+}
+
+function applyAutoAssignForEndpoint(
+	state: MockState,
+	endpoint: MockEndpointRecord,
+) {
+	for (const [userId, kinds] of Object.entries(
+		state.userAutoAssignEndpointKindsByUserId,
+	)) {
+		if (!kinds.includes(endpoint.kind)) continue;
+		const items = ensureUserAccessStore(state, userId);
+		if (items.some((item) => item.endpoint_id === endpoint.endpoint_id)) {
+			continue;
+		}
+		items.push({
+			user_id: userId,
+			endpoint_id: endpoint.endpoint_id,
+			node_id: endpoint.node_id,
+		});
+		items.sort((a, b) => a.endpoint_id.localeCompare(b.endpoint_id));
+	}
 }
 
 function mockRedactOutput(payload: AdminMihomoRedactRequest): string {
@@ -1498,6 +1584,7 @@ async function handleRequest(
 		};
 		record.short_ids.unshift(record.active_short_id);
 		state.endpoints = [...state.endpoints, record];
+		applyAutoAssignForEndpoint(state, record);
 		return jsonResponse(endpoint);
 	}
 
@@ -1559,6 +1646,11 @@ async function handleRequest(
 			state.endpoints = state.endpoints.filter(
 				(item) => item.endpoint_id !== endpointId,
 			);
+			for (const [userId, items] of Object.entries(state.userAccessByUserId)) {
+				state.userAccessByUserId[userId] = items.filter(
+					(item) => item.endpoint_id !== endpointId,
+				);
+			}
 			return new Response(null, { status: 204 });
 		}
 	}
@@ -1677,6 +1769,7 @@ async function handleRequest(
 		if (method === "DELETE") {
 			state.users = state.users.filter((item) => item.user_id !== userId);
 			delete state.userAccessByUserId[userId];
+			delete state.userAutoAssignEndpointKindsByUserId[userId];
 			state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
 			return new Response(null, { status: 204 });
 		}
@@ -1712,7 +1805,10 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 		const items = ensureUserAccessStore(state, userId);
-		return jsonResponse({ items: clone(items) });
+		return jsonResponse({
+			items: clone(items),
+			auto_assign_endpoint_kinds: autoAssignKindsForUser(state, userId),
+		});
 	}
 
 	if (userAccessMatch && method === "PUT") {
@@ -1770,10 +1866,13 @@ async function handleRequest(
 			});
 
 		state.userAccessByUserId[userId] = nextItems;
+		const autoAssignKinds = inferAutoAssignEndpointKinds(state, nextItems);
+		setAutoAssignKindsForUser(state, userId, autoAssignKinds);
 		return jsonResponse({
 			created,
 			deleted,
 			items: clone(nextItems),
+			auto_assign_endpoint_kinds: autoAssignKinds,
 		});
 	}
 

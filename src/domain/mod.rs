@@ -149,7 +149,7 @@ pub fn validate_tz_offset_minutes(tz_offset_minutes: i16) -> Result<(), DomainEr
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointKind {
     VlessRealityVisionTcp,
