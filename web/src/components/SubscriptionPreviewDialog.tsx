@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
 	Dialog,
@@ -8,9 +8,10 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 import type { SubscriptionFormat } from "../api/subscription";
-import { useUiPrefsOptional } from "./UiPrefs";
+import { Icon } from "./Icon";
 
 type SubscriptionPreviewDialogProps = {
 	open: boolean;
@@ -293,29 +294,26 @@ function tokenizeYamlLine(line: string): TokenPart[] {
 function TokenSpan({
 	kind,
 	text,
-	theme,
 	matchRanges,
 	tokenStart,
 }: {
 	kind: string;
 	text: string;
-	theme: "light" | "dark";
 	matchRanges: Range[] | null;
 	tokenStart: number;
 }) {
 	const colorByKind: Record<string, string> = {
-		plain: "#e2e8f0",
-		punct: "#cbd5e1",
-		key: "#93c5fd",
-		string: "#a7f3d0",
-		number: "#fcd34d",
-		keyword: "#fda4af",
-		comment: "#94a3b8",
+		plain: "var(--xp-code-plain)",
+		punct: "var(--xp-code-punct)",
+		key: "var(--xp-code-key)",
+		string: "var(--xp-code-string)",
+		number: "var(--xp-code-number)",
+		keyword: "var(--xp-code-keyword)",
+		comment: "var(--xp-code-comment)",
 	};
 
 	const color = colorByKind[kind] ?? colorByKind.plain;
-	const matchBg =
-		theme === "light" ? "rgba(168,85,247,0.20)" : "rgba(168,85,247,0.28)";
+	const matchBg = "var(--xp-code-highlight)";
 
 	if (!matchRanges || matchRanges.length === 0) {
 		return <span style={{ color }}>{text}</span>;
@@ -374,14 +372,12 @@ function CodeView({
 	text,
 	language,
 	activeLine,
-	theme,
 	highlight,
 	fillHeight = false,
 }: {
 	text: string;
 	language: CodeLanguage;
 	activeLine: number | null;
-	theme: "light" | "dark";
 	highlight: string;
 	fillHeight?: boolean;
 }) {
@@ -456,16 +452,12 @@ function CodeView({
 		target.scrollIntoView({ block: "center" });
 	}, [activeLine]);
 
-	const codeStroke = theme === "light" ? "#1f2a44" : "#22304a";
-	const codeBg = theme === "light" ? "#0b1220" : "#050817";
-	const gutterBg = theme === "light" ? "bg-[#0f172a]/75" : "bg-[#0f172a]/90";
-	const activeLineBg =
-		theme === "light" ? "rgba(168,85,247,0.12)" : "rgba(168,85,247,0.16)";
-	const codeDimColor = "#94a3b8";
-
-	const trackBg =
-		theme === "light" ? "rgba(17,28,51,0.9)" : "rgba(17,28,51,0.95)";
-	const thumbBg = "rgba(34,211,238,0.85)";
+	const codeStroke = "var(--xp-code-border)";
+	const codeBg = "var(--xp-code-bg)";
+	const activeLineBg = "var(--xp-code-active-line)";
+	const codeDimColor = "var(--xp-code-comment)";
+	const trackBg = "var(--xp-code-track)";
+	const thumbBg = "var(--xp-code-thumb)";
 
 	useEffect(() => {
 		const scroller = codeScrollRef.current;
@@ -611,20 +603,18 @@ function CodeView({
 			className={[
 				"rounded-[14px] border overflow-hidden relative",
 				fillHeight
-					? "max-h-[40vh] lg:h-[508px] lg:max-h-none"
-					: "h-[56vh] min-h-[320px] max-h-[56vh]",
+					? "min-h-[260px] max-h-[52vh] sm:min-h-[320px] xl:h-[508px] xl:max-h-none"
+					: "h-[min(56vh,520px)] min-h-[260px] sm:min-h-[320px]",
 			].join(" ")}
 			style={{ borderColor: codeStroke, backgroundColor: codeBg }}
 		>
 			<div className="flex h-full">
 				<div
-					className={[
-						"shrink-0 overflow-hidden font-mono tabular-nums select-none",
-						gutterBg,
-					].join(" ")}
+					className="shrink-0 overflow-hidden font-mono tabular-nums select-none"
 					style={{
 						width: "56px",
 						minWidth: "56px",
+						backgroundColor: "var(--xp-code-gutter)",
 					}}
 					aria-hidden
 				>
@@ -687,7 +677,6 @@ function CodeView({
 											key={`${t.start}:${t.kind}`}
 											kind={t.kind}
 											text={t.text}
-											theme={theme}
 											matchRanges={matchRanges}
 											tokenStart={t.start}
 										/>
@@ -745,13 +734,7 @@ export function SubscriptionPreviewDialog({
 	content,
 	error,
 }: SubscriptionPreviewDialogProps) {
-	const prefs = useUiPrefsOptional();
-	const resolvedTheme =
-		prefs?.resolvedTheme ??
-		(typeof document !== "undefined" &&
-		document.documentElement.getAttribute("data-theme") === "xp-light"
-			? "light"
-			: "dark");
+	const searchInputId = useId();
 
 	const language = useMemo(
 		() => chooseLanguage(format, content),
@@ -794,67 +777,26 @@ export function SubscriptionPreviewDialog({
 		matches.length > 0 ? (matches[matchIndex]?.line ?? 0) : null;
 	const showFieldsPanel = format === "clash";
 
-	const theme =
-		resolvedTheme === "light"
-			? {
-					modalBg: "bg-white border-[#e2e8f0] text-[#0f172a]",
-					stroke: "#e2e8f0",
-					btnBg: "#f1f5f9",
-					btnText: "#0f172a",
-					inputBg: "#ffffff",
-					inputText: "#0f172a",
-					muted: "#64748b",
-					fieldsBg: "#f8fafc",
-					fieldsTitle: "#0f172a",
-					fieldsCopyBg: "#f1f5f9",
-					fieldsCopyText: "#0f172a",
-					copyAllBg: "#e6fbff",
-					copyAllText: "#062a30",
-					codeBg: "#050817",
-				}
-			: {
-					modalBg: "bg-[#0f172a] border-[#24324a] text-slate-200",
-					stroke: "#24324a",
-					btnBg: "#111c33",
-					btnText: "#e2e8f0",
-					inputBg: "#0f172a",
-					inputText: "#e2e8f0",
-					muted: "#94a3b8",
-					fieldsBg: "#111c33",
-					fieldsTitle: "#e2e8f0",
-					fieldsCopyBg: "#22d3ee",
-					fieldsCopyText: "#031c22",
-					copyAllBg: "#22d3ee2e",
-					copyAllText: "#e2e8f0",
-					codeBg: "#050817",
-				};
-
 	const headerBtnBase =
-		"h-[34px] w-[120px] rounded-[10px] border text-[12px] font-[750] !shadow-none";
-	const headerBtnWide = "w-[140px]";
+		"min-h-11 sm:min-h-10 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 	const searchBtnBase =
-		"h-9 px-6 rounded-xl border text-[12px] font-[750] whitespace-nowrap !shadow-none";
-	const contentPadClass = "pl-[36px] pr-[24px]";
-	const closePadClass = "pr-[24px]";
-	// Match close button size (44px) + intended gap (12px).
-	const closeLaneSpacerClass = "w-[56px]";
+		"min-h-11 sm:min-h-10 rounded-xl border border-border bg-muted px-4 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
+	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
+	const closePadClass = "pr-3 sm:pr-6";
 
-	const mutedTextClass =
-		resolvedTheme === "light" ? "text-[#64748b]" : "text-[#94a3b8]";
-	const mutedPlaceholderClass =
-		resolvedTheme === "light"
-			? "placeholder:text-[#64748b]"
-			: "placeholder:text-[#94a3b8]";
+	const mutedTextClass = "text-muted-foreground";
+	const mutedPlaceholderClass = "placeholder:text-muted-foreground";
+	const fieldCopyButtonClass =
+		"min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:w-auto sm:min-w-[5.5rem]";
 
 	return (
 		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
 			<DialogContent
 				showCloseButton={false}
-				className={[
-					"w-[calc(100vw-64px)] max-w-[1160px] max-h-[calc(100vh-64px)] overflow-x-hidden overflow-y-auto rounded-[18px] border p-0 !shadow-none lg:overflow-hidden",
-					showFieldsPanel ? "lg:h-[660px]" : "",
-					theme.modalBg,
-				].join(" ")}
+				className={cn(
+					"w-[calc(100vw-1rem)] max-w-[1160px] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto rounded-[18px] border border-border bg-card p-0 text-card-foreground shadow-sm sm:w-[calc(100vw-2rem)] sm:max-h-[calc(100dvh-2rem)] xl:overflow-hidden",
+					showFieldsPanel ? "xl:h-[660px]" : "",
+				)}
 				data-sub-preview-dialog
 			>
 				<DialogTitle className="sr-only">
@@ -871,41 +813,26 @@ export function SubscriptionPreviewDialog({
 					>
 						<button
 							type="button"
-							className="w-11 h-11 rounded-full border !shadow-none flex items-center justify-center pointer-events-auto"
-							style={{
-								borderColor: theme.stroke,
-								backgroundColor: theme.inputBg,
-								color: theme.btnText,
-							}}
+							className="pointer-events-auto flex size-11 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
 							aria-label="Close"
 							data-sub-preview-close
 							onClick={() => {
 								onClose();
 							}}
 						>
-							<span className="text-[20px] leading-none font-[900]">×</span>
+							<Icon name="tabler:x" size={20} ariaLabel="Close" />
 						</button>
 					</div>
 				</div>
 
 				<div className={[contentPadClass, "pt-[13px] pb-[18px]"].join(" ")}>
-					<div className="grid gap-0 md:gap-x-3 md:grid-cols-[minmax(0,1fr)_minmax(0,372px)]">
-						<div className="h-11 flex items-center gap-3 min-w-0">
-							<h3
-								className="text-[22px] leading-[28px] font-[750] whitespace-nowrap"
-								style={{ color: theme.btnText }}
-							>
+					<div className="grid gap-3 pr-14 lg:grid-cols-[minmax(0,1fr)_auto]">
+						<div className="flex min-h-11 min-w-0 flex-wrap items-center gap-3">
+							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
 							<div className="inline-flex items-center gap-4 min-w-0">
-								<span
-									className={[
-										"inline-flex items-center justify-center w-[90px] h-7 rounded-[10px] border text-[12px] font-[750]",
-										resolvedTheme === "light"
-											? "bg-[#e6fbff] border-[#e2e8f0] text-[#062a30]"
-											: "bg-[#22d3ee2e] border-[#24324a] text-slate-200",
-									].join(" ")}
-								>
+								<span className="inline-flex h-7 min-w-20 items-center justify-center rounded-[10px] border border-info/25 bg-info/10 px-3 text-[12px] font-[750] text-info">
 									{format}
 								</span>
 								{loading ? (
@@ -914,60 +841,40 @@ export function SubscriptionPreviewDialog({
 							</div>
 						</div>
 
-						<div className="min-h-11 flex items-center justify-end flex-wrap">
-							<div className="flex items-center gap-2">
-								<button
-									type="button"
-									className={headerBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
-									onClick={async () => {
-										await writeClipboard(subscriptionUrl);
-									}}
-								>
-									Copy URL
-								</button>
-								<button
-									type="button"
-									className={[headerBtnBase, headerBtnWide].join(" ")}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
-									onClick={async () => {
-										await writeClipboard(content);
-									}}
-								>
-									Copy content
-								</button>
-							</div>
-							{/* Reserve a lane for the pinned close button so actions never sit underneath it. */}
-							<div className={closeLaneSpacerClass} aria-hidden />
+						<div className="flex min-h-11 flex-wrap items-center gap-2 lg:justify-end">
+							<button
+								type="button"
+								className={headerBtnBase}
+								onClick={async () => {
+									await writeClipboard(subscriptionUrl);
+								}}
+							>
+								Copy URL
+							</button>
+							<button
+								type="button"
+								className={headerBtnBase}
+								onClick={async () => {
+									await writeClipboard(content);
+								}}
+							>
+								Copy content
+							</button>
 						</div>
 
-						<div className="mt-[13px] flex flex-wrap items-center gap-3 min-w-0 md:col-span-2">
-							<span
-								className={[
-									"w-[52px] shrink-0 text-[12px] leading-none",
-									mutedTextClass,
-								].join(" ")}
+						<div className="grid min-w-0 gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center lg:col-span-2">
+							<label
+								htmlFor={searchInputId}
+								className={cn("text-[12px] leading-none", mutedTextClass)}
 							>
 								Search
-							</span>
+							</label>
 							<Input
-								className={[
-									"flex-1 min-w-[240px] h-9 rounded-xl border px-4 font-mono text-[12px] !shadow-none outline-none",
+								id={searchInputId}
+								className={cn(
+									"h-10 min-w-0 rounded-xl border border-input bg-background px-4 font-mono text-[12px] text-foreground shadow-xs outline-none",
 									mutedPlaceholderClass,
-								].join(" ")}
-								style={{
-									backgroundColor: theme.inputBg,
-									borderColor: theme.stroke,
-									color: theme.inputText,
-								}}
+								)}
 								value={searchQuery}
 								onChange={(e) => {
 									setSearchQuery(e.target.value);
@@ -975,15 +882,10 @@ export function SubscriptionPreviewDialog({
 								}}
 								placeholder="e.g. public-key / short-id / servername"
 							/>
-							<div className="ml-auto shrink-0 flex items-center gap-2">
+							<div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
 								<button
 									type="button"
 									className={searchBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
 									onClick={() => {
 										if (matches.length === 0) return;
 										setMatchIndex((prev) => (prev + 1) % matches.length);
@@ -994,11 +896,6 @@ export function SubscriptionPreviewDialog({
 								<button
 									type="button"
 									className={searchBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
 									onClick={() => {
 										if (matches.length === 0) return;
 										setMatchIndex(
@@ -1022,7 +919,7 @@ export function SubscriptionPreviewDialog({
 						className={[
 							"grid gap-4",
 							showFieldsPanel
-								? "lg:grid-cols-[minmax(0,1fr)_264px]"
+								? "xl:grid-cols-[minmax(0,1fr)_264px]"
 								: "lg:grid-cols-1",
 						].join(" ")}
 					>
@@ -1031,27 +928,15 @@ export function SubscriptionPreviewDialog({
 								text={content}
 								language={language}
 								activeLine={activeLine}
-								theme={resolvedTheme}
 								highlight={searchQuery}
 								fillHeight={showFieldsPanel}
 							/>
 						</div>
 
 						{showFieldsPanel ? (
-							<div
-								className={[
-									"rounded-[14px] border p-4 space-y-3 overflow-hidden lg:h-[508px]",
-								].join(" ")}
-								style={{
-									backgroundColor: theme.fieldsBg,
-									borderColor: theme.stroke,
-								}}
-							>
+							<div className="space-y-3 overflow-hidden rounded-[14px] border border-border bg-muted/35 p-4 xl:h-[508px]">
 								<div className="space-y-1">
-									<h4
-										className="text-[13px] font-[750]"
-										style={{ color: theme.fieldsTitle }}
-									>
+									<h4 className="text-[13px] font-[750] text-foreground">
 										Fields
 									</h4>
 									<div className={["text-[12px]", mutedTextClass].join(" ")}>
@@ -1068,15 +953,9 @@ export function SubscriptionPreviewDialog({
 										>
 											public-key
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.publicKey ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1088,12 +967,8 @@ export function SubscriptionPreviewDialog({
 											{fields.publicKey ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy public-key"
 													onClick={async () => {
 														await writeClipboard(fields.publicKey ?? "");
 													}}
@@ -1112,15 +987,9 @@ export function SubscriptionPreviewDialog({
 										>
 											short-id
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.shortId ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1132,12 +1001,8 @@ export function SubscriptionPreviewDialog({
 											{fields.shortId ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy short-id"
 													onClick={async () => {
 														await writeClipboard(fields.shortId ?? "");
 													}}
@@ -1156,15 +1021,9 @@ export function SubscriptionPreviewDialog({
 										>
 											servername
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.servername ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1174,12 +1033,8 @@ export function SubscriptionPreviewDialog({
 											{fields.servername ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy servername"
 													onClick={async () => {
 														await writeClipboard(fields.servername ?? "");
 													}}
@@ -1193,12 +1048,7 @@ export function SubscriptionPreviewDialog({
 									{copyAllFieldsText ? (
 										<button
 											type="button"
-											className="w-full h-10 rounded-xl border text-[12px] font-[750]"
-											style={{
-												backgroundColor: theme.copyAllBg,
-												borderColor: theme.stroke,
-												color: theme.copyAllText,
-											}}
+											className="min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-4 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
 											onClick={async () => {
 												await writeClipboard(copyAllFieldsText);
 											}}

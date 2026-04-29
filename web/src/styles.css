@@ -65,6 +65,21 @@
 	--warning-foreground: oklch(22% 0.02 85);
 	--neutral: oklch(72% 0.03 250);
 	--neutral-foreground: oklch(20% 0.03 250);
+	--xp-overlay: oklch(16% 0.02 250 / 0.58);
+	--xp-code-bg: oklch(18% 0.02 250);
+	--xp-code-border: oklch(30% 0.02 250);
+	--xp-code-gutter: oklch(22% 0.02 250 / 0.86);
+	--xp-code-track: oklch(24% 0.03 250 / 0.9);
+	--xp-code-thumb: oklch(70% 0.18 205 / 0.84);
+	--xp-code-active-line: oklch(70% 0.18 205 / 0.14);
+	--xp-code-highlight: oklch(78% 0.16 85 / 0.22);
+	--xp-code-plain: oklch(93% 0.01 230);
+	--xp-code-punct: oklch(82% 0.02 230);
+	--xp-code-key: oklch(78% 0.12 230);
+	--xp-code-string: oklch(82% 0.13 155);
+	--xp-code-number: oklch(82% 0.15 85);
+	--xp-code-keyword: oklch(76% 0.16 25);
+	--xp-code-comment: oklch(72% 0.03 230);
 	--radius: 1rem;
 	--xp-page-padding: 1.5rem;
 	--xp-card-padding: 1.5rem;
@@ -101,6 +116,7 @@
 	--warning-foreground: oklch(18% 0.02 85);
 	--neutral: oklch(76% 0.03 250);
 	--neutral-foreground: oklch(15% 0.02 250);
+	--xp-overlay: oklch(10% 0.02 250 / 0.66);
 }
 
 html[data-density="compact"] {
@@ -181,7 +197,7 @@ html[data-density="compact"] {
 	}
 
 	.xp-checkbox {
-		@apply size-4 rounded border border-input bg-background text-primary shadow-xs outline-none transition-all focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50;
+		@apply size-4 rounded border border-input bg-background text-primary shadow-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50;
 	}
 
 	.xp-link {
