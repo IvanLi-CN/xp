@@ -603,7 +603,7 @@ function CodeView({
 			className={[
 				"rounded-[14px] border overflow-hidden relative",
 				fillHeight
-					? "min-h-[260px] max-h-[52vh] sm:min-h-[320px] xl:h-[508px] xl:max-h-none"
+					? "h-[min(52vh,508px)] min-h-[260px] sm:min-h-[320px] xl:h-[508px]"
 					: "h-[min(56vh,520px)] min-h-[260px] sm:min-h-[320px]",
 			].join(" ")}
 			style={{ borderColor: codeStroke, backgroundColor: codeBg }}
