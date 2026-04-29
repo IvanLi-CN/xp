@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -56,6 +56,9 @@ export function DemoEndpointsPage() {
 
 	const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
 	const safePage = Math.min(page, pages);
+	useEffect(() => {
+		if (page > pages) setPage(pages);
+	}, [page, pages]);
 	const visible = filtered.slice(
 		(safePage - 1) * pageSize,
 		safePage * pageSize,
@@ -218,7 +221,7 @@ export function DemoEndpointsPage() {
 								variant="secondary"
 								size="sm"
 								disabled={safePage <= 1}
-								onClick={() => setPage((value) => Math.max(1, value - 1))}
+								onClick={() => setPage(Math.max(1, safePage - 1))}
 							>
 								Previous
 							</Button>
@@ -226,7 +229,7 @@ export function DemoEndpointsPage() {
 								variant="secondary"
 								size="sm"
 								disabled={safePage >= pages}
-								onClick={() => setPage((value) => Math.min(pages, value + 1))}
+								onClick={() => setPage(Math.min(pages, safePage + 1))}
 							>
 								Next
 							</Button>
