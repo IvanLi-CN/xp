@@ -1,52 +1,52 @@
-# Product
+# 产品
 
 ## Register
 
 product
 
-## Users
+## 用户
 
-xp is for a self-hosted cluster operator who runs Xray nodes across one or more small servers and wants one reliable control plane for day-to-day management. The primary user is technical, usually the only administrator, and works in focused maintenance windows: checking node health, creating endpoints, granting user access, inspecting quota state, copying subscription material, and resolving failures without losing context.
+xp 面向自托管 Xray 集群的维护者。典型用户是单管理员或少量技术维护者，他们在多台小型服务器上运行 Xray 节点，需要一个可靠的控制面完成日常管理。使用场景通常很集中：确认节点健康，创建端点，分配用户访问，检查配额状态，复制订阅材料，以及在故障发生时快速定位原因。
 
-The interface is an authenticated operational tool, not a marketing surface. It should support fast scanning, precise edits, and confident recovery when a node, endpoint, quota rule, or subscription output is wrong.
+这个界面是已认证的运维工具，不是营销页面。它应该帮助用户快速扫读、精确编辑，并在节点、端点、配额规则或订阅输出异常时保持上下文和可恢复性。
 
-## Product Purpose
+## 产品目的
 
-xp connects multiple `xp + xray` hosts into a lightweight Raft-backed cluster manager. It keeps cluster-wide desired state consistent, reconciles local Xray runtime state, exposes an embedded admin UI, and ships an ops CLI for installation, upgrades, container runtime, and Mihomo redaction.
+xp 将多个 `xp + xray` 主机连接成一个轻量的 Raft 集群管理器。它维护集群级期望状态，协调本机 Xray 运行态，提供嵌入式管理 UI，并通过 `xp-ops` 支持安装、升级、容器运行和 Mihomo 配置脱敏。
 
-Success means the operator can manage nodes, endpoints, users, subscriptions, quota policy, Reality domains, service config, and diagnostic tools from any reachable node while trusting that writes are serialized by the leader and that local runtime drift is visible and recoverable.
+成功状态是：维护者可以从任一可访问节点管理节点、端点、用户、订阅、配额策略、Reality 域名、服务配置和诊断工具，同时信任写入由 leader 串行化，本机运行态漂移能被看见并恢复。
 
-## Brand Personality
+## 品牌性格
 
-Calm, exacting, operational.
+冷静、精确、运维导向。
 
-The product voice should sound like a precise runbook with a good interface: compact, factual, and composed under failure. It should avoid marketing flourish, fake excitement, and novelty for its own sake. Labels should name the object or action directly, especially around tokens, node IDs, endpoint IDs, public origins, quota values, and unsafe operations.
+产品语气应该像一份带有好界面的精确 runbook：紧凑、事实优先，在故障下也保持克制。避免营销式夸张、虚假的兴奋感，以及为了新奇而新奇的表达。标签应直接命名对象或动作，尤其是 token、节点 ID、端点 ID、公开 origin、配额数值和危险操作。
 
-## Anti-references
+## 反向参考
 
-- Do not make the admin UI look like a cyber or hacker toy: no neon green console pastiche, terminal rain, circuit-board decoration, or fake intrusion aesthetics.
-- Do not use generic SaaS hero patterns inside the product: no hero metric panels, sales copy, decorative gradients, or repeated icon-card grids.
-- Do not invent custom affordances for standard tasks: navigation, forms, dialogs, tables, command palette, and destructive confirmations should feel familiar.
-- Do not over-decorate operational state. Health, role, leader, term, alerts, quota, and endpoint status must read as system facts, not visual ornaments.
-- Do not hide machine values behind friendly copy. IDs, tokens, URLs, ports, and quota units need copy, monospace treatment, and predictable wrapping.
+- 不要把管理界面做成“赛博黑客玩具”：不要霓虹绿终端、代码雨、电路板装饰或伪入侵视觉。
+- 不要在产品内部使用通用 SaaS hero 模板：不要 hero metric、销售文案、装饰渐变或重复的图标卡片网格。
+- 不要为了风格重新发明标准交互：导航、表单、对话框、表格、命令面板和危险确认都应保持熟悉。
+- 不要把运维状态过度装饰化。Health、role、leader、term、alerts、quota、endpoint status 应该像系统事实，而不是视觉装饰。
+- 不要用友好文案遮住机器值。ID、token、URL、端口和配额单位需要可复制、等宽呈现和可预测换行。
 
-## Design Principles
+## 设计原则
 
-1. Show cluster truth first.
-   The UI should make health, leader, term, alerts, and partial failure visible before secondary decoration. If the cluster is degraded, the operator should see where trust is limited.
+1. 先展示集群事实。
+   UI 应该优先呈现 health、leader、term、alerts 和 partial failure。集群降级时，维护者必须马上知道哪些结论不再完全可信。
 
-2. Treat density as a working tool.
-   xp is used by a technical operator who benefits from dense lists, aligned fields, and quick comparison. Density must stay controlled, readable, and switchable through the existing comfortable and compact preference.
+2. 把密度当作工作工具。
+   xp 的用户需要密集列表、字段对齐和快速比较。密度可以高，但必须受控、可读，并通过现有 comfortable/compact 偏好切换。
 
-3. Keep actions close to evidence.
-   Create, copy, refresh, retry, delete, and reset actions should appear beside the object they affect. Error states should retain the relevant object context and expose retry or copy-details affordances.
+3. 让操作贴近证据。
+   New、Copy、Refresh、Retry、Delete、Reset 等动作应靠近它们影响的对象。错误状态必须保留相关对象上下文，并提供重试或复制详情入口。
 
-4. Preserve operational vocabulary.
-   Use the domain words the system actually uses: node, endpoint, user, quota, subscription, Reality domain, leader, term, token, inbound, Mihomo. Avoid vague aliases that make logs and UI disagree.
+4. 保留运维词汇。
+   使用系统真实词汇：node、endpoint、user、quota、subscription、Reality domain、leader、term、token、inbound、Mihomo。避免 UI、日志和 API 之间出现含糊别名。
 
-5. Prefer boring reliability over expressive novelty.
-   Standard product UI patterns are a feature here. The interface earns trust through consistency, state coverage, accessible contrast, and predictable keyboard and mobile behavior.
+5. 用可靠性压过表达欲。
+   标准产品 UI 模式在这里是优点。界面通过一致性、完整状态、可访问对比度、键盘行为和移动端行为赢得信任，而不是靠惊喜取胜。
 
-## Accessibility & Inclusion
+## 可访问性与包容性
 
-Target WCAG 2.1 AA for the admin UI. Maintain visible focus states, non-color-only status cues, stable keyboard navigation, and readable contrast in both `xp-light` and `xp-dark`. Respect reduced-motion preferences; motion should communicate state changes only. Long machine values must wrap or scroll without covering adjacent controls, and destructive actions must remain explicit and reversible only when the backend supports it.
+管理 UI 目标是 WCAG 2.1 AA。保持可见焦点状态、非纯颜色状态表达、稳定键盘导航，以及 `xp-light` 和 `xp-dark` 下的可读对比度。尊重 reduced motion 偏好；动效只用于表达状态变化。长机器值必须能换行或横向滚动，不能遮挡相邻控件；危险操作必须清晰，只有后端真正支持恢复时才暗示可逆。
