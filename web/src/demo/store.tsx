@@ -8,6 +8,16 @@ import {
 } from "react";
 
 import { createDemoState } from "./fixtures";
+import {
+	clearDemoFallbackState,
+	getDemoStorageKey,
+	hasDemoSession,
+	isDemoSession,
+	readDemoFallbackState,
+	setDemoFallbackState,
+	setPreferDemoFallbackState,
+	shouldPreferDemoFallbackState,
+} from "./session";
 import type {
 	DemoEndpoint,
 	DemoRole,
@@ -17,7 +27,7 @@ import type {
 	DemoUser,
 } from "./types";
 
-const DEMO_STORAGE_KEY = "xp_demo_state";
+export { clearDemoFallbackState, getDemoStorageKey, hasDemoSession };
 
 type DemoEndpointInput = {
 	name: string;
@@ -120,25 +130,9 @@ type DemoContextValue = {
 };
 
 const DemoContext = createContext<DemoContextValue | null>(null);
-let fallbackState: DemoState | null = null;
-let preferFallbackState = false;
 
 function nowIso() {
 	return new Date().toISOString();
-}
-
-function isDemoSession(
-	value: DemoState["session"] | undefined,
-): value is DemoSession {
-	return (
-		value !== null &&
-		value !== undefined &&
-		(value.role === "admin" ||
-			value.role === "operator" ||
-			value.role === "viewer") &&
-		typeof value.operatorName === "string" &&
-		typeof value.startedAt === "string"
-	);
 }
 
 function normalizeState(value: DemoState): DemoState {
@@ -351,10 +345,11 @@ function reducer(state: DemoState, action: DemoAction): DemoState {
 }
 
 function readStoredState(): DemoState {
-	if (preferFallbackState && fallbackState) return fallbackState;
+	const fallbackState = readDemoFallbackState();
+	if (shouldPreferDemoFallbackState() && fallbackState) return fallbackState;
 
 	try {
-		const raw = localStorage.getItem(DEMO_STORAGE_KEY);
+		const raw = localStorage.getItem(getDemoStorageKey());
 		if (!raw) return createDemoState("normal");
 		const parsed = JSON.parse(raw) as DemoState;
 		if (
@@ -365,41 +360,21 @@ function readStoredState(): DemoState {
 			return createDemoState("normal");
 		}
 		const normalized = normalizeState(parsed);
-		fallbackState = normalized;
+		setDemoFallbackState(normalized);
 		return normalized;
 	} catch {
-		return fallbackState ?? createDemoState("normal");
+		return readDemoFallbackState() ?? createDemoState("normal");
 	}
 }
 
 function writeStoredState(state: DemoState): void {
-	fallbackState = normalizeState(state);
+	setDemoFallbackState(normalizeState(state));
 	try {
-		localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(state));
-		preferFallbackState = false;
+		localStorage.setItem(getDemoStorageKey(), JSON.stringify(state));
+		setPreferDemoFallbackState(false);
 	} catch {
-		preferFallbackState = true;
+		setPreferDemoFallbackState(true);
 	}
-}
-
-export function hasDemoSession(): boolean {
-	if (preferFallbackState && fallbackState) {
-		return isDemoSession(fallbackState.session);
-	}
-
-	try {
-		const raw = localStorage.getItem(DEMO_STORAGE_KEY);
-		if (!raw) return false;
-		const parsed = JSON.parse(raw) as Partial<DemoState>;
-		return isDemoSession(parsed.session);
-	} catch {
-		return fallbackState ? isDemoSession(fallbackState.session) : false;
-	}
-}
-
-export function clearDemoFallbackState(): void {
-	fallbackState = null;
-	preferFallbackState = false;
 }
 
 export function DemoProvider({ children }: { children: ReactNode }) {
@@ -471,8 +446,4 @@ export function useDemo() {
 		throw new Error("useDemo must be used within DemoProvider");
 	}
 	return context;
-}
-
-export function getDemoStorageKey() {
-	return DEMO_STORAGE_KEY;
 }

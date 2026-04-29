@@ -3,6 +3,7 @@ import {
 	createRootRoute,
 	createRoute,
 	createRouter,
+	lazyRouteComponent,
 	redirect,
 } from "@tanstack/react-router";
 
@@ -10,22 +11,7 @@ import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
-import { DemoDashboardPage } from "./demo/DemoDashboardPage";
-import {
-	DemoEndpointDetailsPage,
-	DemoEndpointFormPage,
-	DemoEndpointsPage,
-} from "./demo/DemoEndpointsPage";
-import { DemoAppRoute, DemoLoginRoute } from "./demo/DemoLayout";
-import { DemoLoginPage } from "./demo/DemoLoginPage";
-import { DemoNodeDetailsPage, DemoNodesPage } from "./demo/DemoNodesPage";
-import { DemoScenariosPage } from "./demo/DemoScenariosPage";
-import {
-	DemoUserDetailsPage,
-	DemoUserFormPage,
-	DemoUsersPage,
-} from "./demo/DemoUsersPage";
-import { hasDemoSession } from "./demo/store";
+import { hasDemoSession } from "./demo/session";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
@@ -42,6 +28,59 @@ import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
 import { UserNewPage } from "./views/UserNewPage";
 import { UsersPage } from "./views/UsersPage";
+
+const DemoDashboardPage = lazyRouteComponent(
+	() => import("./demo/DemoDashboardPage"),
+	"DemoDashboardPage",
+);
+const DemoEndpointDetailsPage = lazyRouteComponent(
+	() => import("./demo/DemoEndpointsPage"),
+	"DemoEndpointDetailsPage",
+);
+const DemoEndpointFormPage = lazyRouteComponent(
+	() => import("./demo/DemoEndpointsPage"),
+	"DemoEndpointFormPage",
+);
+const DemoEndpointsPage = lazyRouteComponent(
+	() => import("./demo/DemoEndpointsPage"),
+	"DemoEndpointsPage",
+);
+const DemoAppRoute = lazyRouteComponent(
+	() => import("./demo/DemoLayout"),
+	"DemoAppRoute",
+);
+const DemoLoginRoute = lazyRouteComponent(
+	() => import("./demo/DemoLayout"),
+	"DemoLoginRoute",
+);
+const DemoLoginPage = lazyRouteComponent(
+	() => import("./demo/DemoLoginPage"),
+	"DemoLoginPage",
+);
+const DemoNodeDetailsPage = lazyRouteComponent(
+	() => import("./demo/DemoNodesPage"),
+	"DemoNodeDetailsPage",
+);
+const DemoNodesPage = lazyRouteComponent(
+	() => import("./demo/DemoNodesPage"),
+	"DemoNodesPage",
+);
+const DemoScenariosPage = lazyRouteComponent(
+	() => import("./demo/DemoScenariosPage"),
+	"DemoScenariosPage",
+);
+const DemoUserDetailsPage = lazyRouteComponent(
+	() => import("./demo/DemoUsersPage"),
+	"DemoUserDetailsPage",
+);
+const DemoUserFormPage = lazyRouteComponent(
+	() => import("./demo/DemoUsersPage"),
+	"DemoUserFormPage",
+);
+const DemoUsersPage = lazyRouteComponent(
+	() => import("./demo/DemoUsersPage"),
+	"DemoUsersPage",
+);
 
 const rootRoute = createRootRoute({
 	component: RootLayout,
