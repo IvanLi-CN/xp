@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AdminEndpointKindSchema } from "./adminEndpoints";
 import { throwIfNotOk } from "./backendError";
 
 export const AdminUserAccessItemSchema = z.object({
@@ -12,6 +13,7 @@ export type AdminUserAccessItem = z.infer<typeof AdminUserAccessItemSchema>;
 
 export const GetAdminUserAccessResponseSchema = z.object({
 	items: z.array(AdminUserAccessItemSchema),
+	auto_assign_endpoint_kinds: z.array(AdminEndpointKindSchema),
 });
 
 export type GetAdminUserAccessResponse = z.infer<
@@ -26,6 +28,7 @@ export const PutAdminUserAccessResponseSchema = z.object({
 	created: z.number().int().nonnegative(),
 	deleted: z.number().int().nonnegative(),
 	items: z.array(AdminUserAccessItemSchema),
+	auto_assign_endpoint_kinds: z.array(AdminEndpointKindSchema),
 });
 
 export type PutAdminUserAccessResponse = z.infer<

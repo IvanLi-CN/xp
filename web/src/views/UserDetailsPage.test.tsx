@@ -166,6 +166,7 @@ function setupMocks(args?: {
 
 	vi.mocked(fetchAdminUserAccess).mockResolvedValue({
 		items: args?.access ?? [],
+		auto_assign_endpoint_kinds: [],
 	});
 
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
@@ -263,6 +264,7 @@ function setupMocks(args?: {
 		created: 0,
 		deleted: 0,
 		items: [],
+		auto_assign_endpoint_kinds: [],
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",

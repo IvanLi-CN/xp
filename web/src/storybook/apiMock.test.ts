@@ -88,10 +88,14 @@ describe("storybook api mock", () => {
 		expect(listRes.ok).toBe(true);
 		const listData = (await listRes.json()) as {
 			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
+			auto_assign_endpoint_kinds: string[];
 		};
 		expect(listData.items.length).toBeGreaterThan(0);
 		expect(listData.items.every((item) => item.user_id === userId)).toBe(true);
 		expect(listData.items.every((item) => item.node_id.length > 0)).toBe(true);
+		expect(listData.auto_assign_endpoint_kinds).toEqual([
+			"vless_reality_vision_tcp",
+		]);
 
 		const replaceRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, {
@@ -111,12 +115,16 @@ describe("storybook api mock", () => {
 			created: number;
 			deleted: number;
 			items: Array<{ user_id: string; endpoint_id: string; node_id: string }>;
+			auto_assign_endpoint_kinds: string[];
 		};
 		expect(replaced.created + replaced.deleted).toBeGreaterThanOrEqual(0);
 		expect(replaced.items).toHaveLength(1);
 		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
 		expect(replaced.items[0]?.user_id).toBe(userId);
 		expect(replaced.items[0]?.node_id.length).toBeGreaterThan(0);
+		expect(replaced.auto_assign_endpoint_kinds).toEqual([
+			"vless_reality_vision_tcp",
+		]);
 
 		const clearRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, {
@@ -131,9 +139,11 @@ describe("storybook api mock", () => {
 		const clearData = (await clearRes.json()) as {
 			deleted: number;
 			items: Array<unknown>;
+			auto_assign_endpoint_kinds: string[];
 		};
 		expect(clearData.deleted).toBeGreaterThanOrEqual(1);
 		expect(clearData.items).toHaveLength(0);
+		expect(clearData.auto_assign_endpoint_kinds).toEqual([]);
 
 		const detailsRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/access`, {
@@ -143,8 +153,10 @@ describe("storybook api mock", () => {
 		expect(detailsRes.ok).toBe(true);
 		const detailsData = (await detailsRes.json()) as {
 			items: Array<unknown>;
+			auto_assign_endpoint_kinds: string[];
 		};
 		expect(detailsData.items).toHaveLength(0);
+		expect(detailsData.auto_assign_endpoint_kinds).toEqual([]);
 	});
 
 	it("rejects invalid items in user access hard-cut replace", async () => {
@@ -211,10 +223,82 @@ describe("storybook api mock", () => {
 		expect(replaceRes.ok).toBe(true);
 		const payload = (await replaceRes.json()) as {
 			items: Array<{ endpoint_id: string }>;
+			auto_assign_endpoint_kinds: string[];
 		};
 		expect(
 			payload.items.filter((i) => i.endpoint_id === "endpoint-1"),
 		).toHaveLength(1);
+		expect(payload.auto_assign_endpoint_kinds).toEqual([
+			"vless_reality_vision_tcp",
+		]);
+	});
+
+	it("auto-assigns newly created endpoints by persisted kind intent", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ user_id: string }>;
+		};
+		const vlessUserId = usersData.items[0]?.user_id ?? "";
+		const ssUserId = usersData.items[1]?.user_id ?? "";
+		expect(vlessUserId.length).toBeGreaterThan(0);
+		expect(ssUserId.length).toBeGreaterThan(0);
+
+		const createEndpointRes = await mock.handle(
+			jsonRequest("/api/admin/endpoints", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					node_id: "node-1",
+					kind: "vless_reality_vision_tcp",
+					port: 9443,
+					reality: {
+						dest: "example.com:443",
+						server_names: ["example.com"],
+						server_names_source: "manual",
+						fingerprint: "chrome",
+					},
+				}),
+			}),
+		);
+		expect(createEndpointRes.ok).toBe(true);
+		const createdEndpoint = (await createEndpointRes.json()) as {
+			endpoint_id: string;
+		};
+
+		const vlessAccessRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${vlessUserId}/access`, { method: "GET" }),
+		);
+		expect(vlessAccessRes.ok).toBe(true);
+		const vlessAccess = (await vlessAccessRes.json()) as {
+			items: Array<{ endpoint_id: string }>;
+			auto_assign_endpoint_kinds: string[];
+		};
+		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual([
+			"endpoint-1",
+			createdEndpoint.endpoint_id,
+		]);
+		expect(vlessAccess.auto_assign_endpoint_kinds).toEqual([
+			"vless_reality_vision_tcp",
+		]);
+
+		const ssAccessRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${ssUserId}/access`, { method: "GET" }),
+		);
+		expect(ssAccessRes.ok).toBe(true);
+		const ssAccess = (await ssAccessRes.json()) as {
+			items: Array<{ endpoint_id: string }>;
+			auto_assign_endpoint_kinds: string[];
+		};
+		expect(ssAccess.items.map((item) => item.endpoint_id)).toEqual([
+			"endpoint-2",
+		]);
+		expect(ssAccess.auto_assign_endpoint_kinds).toEqual([
+			"ss2022_2022_blake3_aes_128_gcm",
+		]);
 	});
 
 	it("returns not_found for retired grant-groups routes", async () => {

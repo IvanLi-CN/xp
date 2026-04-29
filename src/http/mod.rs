@@ -637,11 +637,13 @@ struct PutUserAccessResponse {
     created: usize,
     deleted: usize,
     items: Vec<crate::state::NodeUserEndpointMembership>,
+    auto_assign_endpoint_kinds: Vec<EndpointKind>,
 }
 
 #[derive(Serialize)]
 struct GetUserAccessResponse {
     items: Vec<crate::state::NodeUserEndpointMembership>,
+    auto_assign_endpoint_kinds: Vec<EndpointKind>,
 }
 
 #[derive(Serialize)]
@@ -5980,7 +5982,13 @@ async fn admin_get_user_access(
 ) -> Result<Json<GetUserAccessResponse>, ApiError> {
     let store = state.store.lock().await;
     let items = store.list_user_access(&user_id).map_err(ApiError::from)?;
-    Ok(Json(GetUserAccessResponse { items }))
+    let auto_assign_endpoint_kinds = store
+        .list_user_auto_assign_endpoint_kinds(&user_id)
+        .map_err(ApiError::from)?;
+    Ok(Json(GetUserAccessResponse {
+        items,
+        auto_assign_endpoint_kinds,
+    }))
 }
 
 async fn admin_put_user_access(
@@ -6013,6 +6021,12 @@ async fn admin_put_user_access(
         let store = state.store.lock().await;
         store.list_user_access(&user_id).map_err(ApiError::from)?
     };
+    let auto_assign_endpoint_kinds = {
+        let store = state.store.lock().await;
+        store
+            .list_user_auto_assign_endpoint_kinds(&user_id)
+            .map_err(ApiError::from)?
+    };
 
     // Access changes should take effect immediately on the data plane.
     state.reconcile.request_full();
@@ -6021,6 +6035,7 @@ async fn admin_put_user_access(
         created,
         deleted,
         items,
+        auto_assign_endpoint_kinds,
     }))
 }
 
