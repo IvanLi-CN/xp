@@ -2,9 +2,14 @@ import type {
 	DemoActivity,
 	DemoEndpoint,
 	DemoNode,
+	DemoProbeRun,
+	DemoQuotaPolicy,
+	DemoRealityDomain,
 	DemoScenario,
 	DemoScenarioId,
+	DemoServiceConfig,
 	DemoState,
+	DemoToolRun,
 	DemoUser,
 } from "./types";
 
@@ -136,6 +141,8 @@ const baseUsers: DemoUser[] = [
 		quotaUsedGb: 86,
 		endpointIds: ["endpoint-tokyo-reality"],
 		subscriptionToken: "sub_01HXPDEMO0LINCHEN8ZPMDV",
+		mihomoMixinYaml:
+			"rules:\n  - DOMAIN-SUFFIX,example.net,DIRECT\n  - GEOIP,CN,DIRECT\n",
 		createdAt: "2026-02-08T08:00:00Z",
 	},
 	{
@@ -149,6 +156,7 @@ const baseUsers: DemoUser[] = [
 		quotaUsedGb: 64,
 		endpointIds: ["endpoint-osaka-ss"],
 		subscriptionToken: "sub_01HXPDEMO0MARIA84J5T9",
+		mihomoMixinYaml: "proxy-groups:\n  - name: Auto\n    type: url-test\n",
 		createdAt: "2026-02-12T16:25:00Z",
 	},
 	{
@@ -162,6 +170,7 @@ const baseUsers: DemoUser[] = [
 		quotaUsedGb: 81,
 		endpointIds: ["endpoint-sgp-reality"],
 		subscriptionToken: "sub_01HXPDEMO0SATO01EY84",
+		mihomoMixinYaml: "rules:\n  - MATCH,Proxy\n",
 		createdAt: "2026-03-01T03:40:00Z",
 	},
 	{
@@ -176,6 +185,7 @@ const baseUsers: DemoUser[] = [
 		quotaUsedGb: 244,
 		endpointIds: ["endpoint-osaka-ss"],
 		subscriptionToken: "sub_01HXPDEMO_LONG_TOKEN_FOR_LAYOUT_REVIEW_9EY84",
+		mihomoMixinYaml: "dns:\n  enable: true\n  enhanced-mode: fake-ip\n",
 		createdAt: "2026-03-18T10:30:00Z",
 	},
 	{
@@ -189,7 +199,102 @@ const baseUsers: DemoUser[] = [
 		quotaUsedGb: 0,
 		endpointIds: ["endpoint-tokyo-reality"],
 		subscriptionToken: "sub_01HXPDEMO_DISABLED_OPS",
+		mihomoMixinYaml: "",
 		createdAt: "2026-01-04T00:00:00Z",
+	},
+];
+
+const baseRealityDomains: DemoRealityDomain[] = [
+	{
+		id: "domain-onedrive",
+		hostname: "public.sn.files.1drv.com",
+		enabled: true,
+		nodeIds: ["node-tokyo-1", "node-osaka-1"],
+		priority: 1,
+		lastValidatedAt: "2026-04-29T09:32:00Z",
+		notes: "Primary Reality camouflage domain for Japan nodes.",
+	},
+	{
+		id: "domain-office",
+		hostname: "oneclient.sfx.ms",
+		enabled: true,
+		nodeIds: ["node-tokyo-1"],
+		priority: 2,
+		lastValidatedAt: "2026-04-29T08:52:00Z",
+		notes: "Secondary serverName for token rotation tests.",
+	},
+	{
+		id: "domain-archive",
+		hostname: "public.bn.files.1drv.com",
+		enabled: false,
+		nodeIds: ["node-sgp-1"],
+		priority: 3,
+		lastValidatedAt: null,
+		notes: "Disabled while Singapore probe is degraded.",
+	},
+];
+
+const baseQuotaPolicy: DemoQuotaPolicy = {
+	defaultLimitGb: 160,
+	resetPolicy: "monthly",
+	enforcementMode: "block",
+	tierWeights: {
+		p1: 160,
+		p2: 100,
+		p3: 60,
+	},
+	nodeWeights: {
+		"node-tokyo-1": 120,
+		"node-osaka-1": 90,
+		"node-sgp-1": 70,
+	},
+};
+
+const baseServiceConfig: DemoServiceConfig = {
+	publicOrigin: "https://tokio-xp.example.net",
+	defaultSubscriptionFormat: "mihomo",
+	mihomoDelivery: "provider",
+	auditLogRetentionDays: 30,
+	xrayRestartStrategy: "rolling",
+};
+
+const baseToolRuns: DemoToolRun[] = [
+	{
+		id: "tool-1",
+		at: "2026-04-29T09:18:00Z",
+		kind: "mihomo_redact",
+		status: "success",
+		message: "Redacted 2 subscription tokens and 1 server address.",
+	},
+];
+
+const baseProbeRuns: DemoProbeRun[] = [
+	{
+		id: "probe-run-001",
+		endpointId: "endpoint-tokyo-reality",
+		status: "completed",
+		startedAt: "2026-04-29T09:41:42Z",
+		completedAt: "2026-04-29T09:42:00Z",
+		samples: [
+			{
+				nodeId: "node-tokyo-1",
+				status: "ok",
+				latencyMs: 31,
+				message: "Inbound accepted the probe.",
+			},
+			{
+				nodeId: "node-osaka-1",
+				status: "ok",
+				latencyMs: 44,
+				message: "Cross-node probe succeeded.",
+			},
+			{
+				nodeId: "node-sgp-1",
+				status: "ok",
+				latencyMs: 71,
+				message: "Cross-region path is slower but healthy.",
+			},
+		],
 	},
 ];
 
@@ -249,9 +354,41 @@ function largeUsers(): DemoUser[] {
 			quotaUsedGb: used,
 			endpointIds,
 			subscriptionToken: `sub_01HXPDEMOLARGE${String(index + 1).padStart(2, "0")}`,
+			mihomoMixinYaml:
+				index % 4 === 0 ? "rules:\n  - DOMAIN-SUFFIX,internal,DIRECT\n" : "",
 			createdAt: `2026-03-${String((index % 24) + 1).padStart(2, "0")}T08:30:00Z`,
 		};
 	});
+}
+
+function cloneRealityDomains(): DemoRealityDomain[] {
+	return baseRealityDomains.map((domain) => ({
+		...domain,
+		nodeIds: [...domain.nodeIds],
+	}));
+}
+
+function cloneQuotaPolicy(): DemoQuotaPolicy {
+	return {
+		...baseQuotaPolicy,
+		tierWeights: { ...baseQuotaPolicy.tierWeights },
+		nodeWeights: { ...baseQuotaPolicy.nodeWeights },
+	};
+}
+
+function cloneServiceConfig(): DemoServiceConfig {
+	return { ...baseServiceConfig };
+}
+
+function cloneToolRuns(): DemoToolRun[] {
+	return baseToolRuns.map((run) => ({ ...run }));
+}
+
+function cloneProbeRuns(): DemoProbeRun[] {
+	return baseProbeRuns.map((run) => ({
+		...run,
+		samples: run.samples.map((sample) => ({ ...sample })),
+	}));
 }
 
 export function createDemoState(scenarioId: DemoScenarioId): DemoState {
@@ -309,6 +446,14 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 			nodes: [nodes[0] as DemoNode],
 			endpoints: [],
 			users: [],
+			realityDomains: cloneRealityDomains().slice(0, 1),
+			quotaPolicy: {
+				...cloneQuotaPolicy(),
+				nodeWeights: { "node-tokyo-1": 100 },
+			},
+			serviceConfig: cloneServiceConfig(),
+			toolRuns: [],
+			probeRuns: [],
 			activity: [
 				{
 					id: "empty-1",
@@ -319,6 +464,9 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 			],
 			nextEndpoint: 1,
 			nextUser: 1,
+			nextRealityDomain: 1,
+			nextToolRun: 1,
+			nextProbeRun: 1,
 			lastDeletedUser: null,
 		};
 	}
@@ -336,9 +484,17 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 					.map((user) => user.id),
 			})),
 			users: manyUsers,
+			realityDomains: cloneRealityDomains(),
+			quotaPolicy: cloneQuotaPolicy(),
+			serviceConfig: cloneServiceConfig(),
+			toolRuns: cloneToolRuns(),
+			probeRuns: cloneProbeRuns(),
 			activity,
 			nextEndpoint: 1,
 			nextUser: manyUsers.length + 1,
+			nextRealityDomain: 1,
+			nextToolRun: 2,
+			nextProbeRun: 2,
 			lastDeletedUser: null,
 		};
 	}
@@ -349,9 +505,17 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 		nodes,
 		endpoints,
 		users,
+		realityDomains: cloneRealityDomains(),
+		quotaPolicy: cloneQuotaPolicy(),
+		serviceConfig: cloneServiceConfig(),
+		toolRuns: cloneToolRuns(),
+		probeRuns: cloneProbeRuns(),
 		activity,
 		nextEndpoint: 1,
 		nextUser: 1,
+		nextRealityDomain: 1,
+		nextToolRun: 2,
+		nextProbeRun: 2,
 		lastDeletedUser: null,
 	};
 }
