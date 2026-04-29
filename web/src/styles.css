@@ -234,7 +234,7 @@ html[data-density="compact"] {
 	}
 
 	.xp-badge-warning {
-		@apply border-transparent bg-warning/18 text-warning-foreground;
+		@apply border-transparent bg-warning/18 text-warning-foreground dark:bg-warning/16 dark:text-warning;
 	}
 
 	.xp-badge-error {
