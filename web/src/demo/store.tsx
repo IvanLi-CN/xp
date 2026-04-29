@@ -20,10 +20,15 @@ import {
 } from "./session";
 import type {
 	DemoEndpoint,
+	DemoProbeRun,
+	DemoQuotaPolicy,
+	DemoRealityDomain,
 	DemoRole,
 	DemoScenarioId,
+	DemoServiceConfig,
 	DemoSession,
 	DemoState,
+	DemoToolRun,
 	DemoUser,
 } from "./types";
 
@@ -44,6 +49,13 @@ type DemoUserInput = {
 	tier: DemoUser["tier"];
 	quotaLimitGb: number | null;
 	endpointIds: string[];
+};
+
+type DemoRealityDomainInput = {
+	hostname: string;
+	enabled: boolean;
+	nodeIds: string[];
+	notes: string;
 };
 
 type DemoAction =
@@ -83,11 +95,31 @@ type DemoAction =
 					| "tier"
 					| "quotaLimitGb"
 					| "endpointIds"
+					| "mihomoMixinYaml"
 				>
 			>;
 	  }
 	| { type: "deleteUser"; userId: string }
-	| { type: "undoDeleteUser" };
+	| { type: "undoDeleteUser" }
+	| { type: "updateQuotaPolicy"; quotaPolicy: DemoQuotaPolicy }
+	| { type: "createRealityDomain"; input: DemoRealityDomainInput }
+	| {
+			type: "updateRealityDomain";
+			domainId: string;
+			patch: Partial<
+				Pick<DemoRealityDomain, "hostname" | "enabled" | "nodeIds" | "notes">
+			>;
+	  }
+	| { type: "deleteRealityDomain"; domainId: string }
+	| { type: "moveRealityDomain"; domainId: string; direction: "up" | "down" }
+	| { type: "updateServiceConfig"; serviceConfig: DemoServiceConfig }
+	| {
+			type: "addToolRun";
+			kind: DemoToolRun["kind"];
+			status: DemoToolRun["status"];
+			message: string;
+	  }
+	| { type: "createProbeRun"; run: DemoProbeRun };
 
 type DemoContextValue = {
 	state: DemoState;
@@ -122,11 +154,29 @@ type DemoContextValue = {
 				| "tier"
 				| "quotaLimitGb"
 				| "endpointIds"
+				| "mihomoMixinYaml"
 			>
 		>,
 	) => void;
 	deleteUser: (userId: string) => void;
 	undoDeleteUser: () => void;
+	updateQuotaPolicy: (quotaPolicy: DemoQuotaPolicy) => void;
+	createRealityDomain: (input: DemoRealityDomainInput) => DemoRealityDomain;
+	updateRealityDomain: (
+		domainId: string,
+		patch: Partial<
+			Pick<DemoRealityDomain, "hostname" | "enabled" | "nodeIds" | "notes">
+		>,
+	) => void;
+	deleteRealityDomain: (domainId: string) => void;
+	moveRealityDomain: (domainId: string, direction: "up" | "down") => void;
+	updateServiceConfig: (serviceConfig: DemoServiceConfig) => void;
+	addToolRun: (
+		kind: DemoToolRun["kind"],
+		status: DemoToolRun["status"],
+		message: string,
+	) => void;
+	createProbeRun: (endpointId: string) => DemoProbeRun;
 };
 
 const DemoContext = createContext<DemoContextValue | null>(null);
@@ -136,6 +186,7 @@ function nowIso() {
 }
 
 function normalizeState(value: DemoState): DemoState {
+	const defaults = createDemoState(value.scenarioId ?? "normal");
 	const endpointMembership = new Map<string, Set<string>>();
 	for (const endpoint of value.endpoints) {
 		endpointMembership.set(endpoint.id, new Set());
@@ -152,10 +203,31 @@ function normalizeState(value: DemoState): DemoState {
 	return {
 		...value,
 		session: isDemoSession(value.session) ? value.session : null,
+		users: value.users.map((user) => ({
+			...user,
+			mihomoMixinYaml: user.mihomoMixinYaml ?? "",
+		})),
 		endpoints: value.endpoints.map((endpoint) => ({
 			...endpoint,
 			assignedUserIds: [...(endpointMembership.get(endpoint.id) ?? new Set())],
 		})),
+		realityDomains: value.realityDomains ?? defaults.realityDomains,
+		quotaPolicy: value.quotaPolicy ?? defaults.quotaPolicy,
+		serviceConfig: value.serviceConfig ?? defaults.serviceConfig,
+		toolRuns: value.toolRuns ?? defaults.toolRuns,
+		probeRuns: value.probeRuns ?? defaults.probeRuns,
+		nextRealityDomain:
+			typeof value.nextRealityDomain === "number"
+				? value.nextRealityDomain
+				: defaults.nextRealityDomain,
+		nextToolRun:
+			typeof value.nextToolRun === "number"
+				? value.nextToolRun
+				: defaults.nextToolRun,
+		nextProbeRun:
+			typeof value.nextProbeRun === "number"
+				? value.nextProbeRun
+				: defaults.nextProbeRun,
 	};
 }
 
@@ -212,7 +284,91 @@ function buildUser(state: DemoState, input: DemoUserInput): DemoUser {
 		quotaUsedGb: 0,
 		endpointIds: input.endpointIds,
 		subscriptionToken: `sub_01HXPDEMO_CREATED_${String(state.nextUser).padStart(2, "0")}`,
+		mihomoMixinYaml: "",
 		createdAt: nowIso(),
+	};
+}
+
+function buildRealityDomain(
+	state: DemoState,
+	input: DemoRealityDomainInput,
+): DemoRealityDomain {
+	const id = `domain-demo-${String(state.nextRealityDomain).padStart(2, "0")}`;
+	return {
+		id,
+		hostname: input.hostname.trim().toLowerCase(),
+		enabled: input.enabled,
+		nodeIds: input.nodeIds,
+		priority: state.realityDomains.length + 1,
+		lastValidatedAt: null,
+		notes: input.notes.trim(),
+	};
+}
+
+function buildToolRun(
+	state: DemoState,
+	kind: DemoToolRun["kind"],
+	status: DemoToolRun["status"],
+	message: string,
+): DemoToolRun {
+	return {
+		id: `tool-${String(state.nextToolRun).padStart(3, "0")}`,
+		at: nowIso(),
+		kind,
+		status,
+		message,
+	};
+}
+
+function buildProbeRun(state: DemoState, endpointId: string): DemoProbeRun {
+	const endpoint = state.endpoints.find((item) => item.id === endpointId);
+	const startedAt = nowIso();
+	const samples = state.nodes.map((node, index) => {
+		if (!endpoint) {
+			return {
+				nodeId: node.id,
+				status: "skipped" as const,
+				latencyMs: null,
+				message: "Endpoint was not found in the demo state.",
+			};
+		}
+		if (node.status === "offline") {
+			return {
+				nodeId: node.id,
+				status: "timeout" as const,
+				latencyMs: null,
+				message: "Node did not answer before the probe deadline.",
+			};
+		}
+		if (endpoint.status === "disabled" && node.id === endpoint.nodeId) {
+			return {
+				nodeId: node.id,
+				status: "timeout" as const,
+				latencyMs: null,
+				message: "Inbound is disabled on the owner node.",
+			};
+		}
+		const base = node.latencyMs ?? 120;
+		const endpointPenalty = endpoint.status === "degraded" ? 180 : 12;
+		return {
+			nodeId: node.id,
+			status: "ok" as const,
+			latencyMs: base + endpointPenalty + index * 7,
+			message:
+				node.id === endpoint.nodeId
+					? "Owner node accepted the probe."
+					: "Cross-node probe reached the endpoint.",
+		};
+	});
+	const failed = samples.some((sample) => sample.status === "timeout");
+
+	return {
+		id: `probe-run-${String(state.nextProbeRun).padStart(3, "0")}`,
+		endpointId,
+		status: failed ? "failed" : "completed",
+		startedAt,
+		completedAt: nowIso(),
+		samples,
 	};
 }
 
@@ -341,6 +497,151 @@ function reducer(state: DemoState, action: DemoAction): DemoState {
 		});
 	}
 
+	if (action.type === "updateQuotaPolicy") {
+		return {
+			...state,
+			quotaPolicy: action.quotaPolicy,
+			...appendActivity(state, "info", "Quota policy updated."),
+		};
+	}
+
+	if (action.type === "createRealityDomain") {
+		const domain = buildRealityDomain(state, action.input);
+		return {
+			...state,
+			realityDomains: [...state.realityDomains, domain],
+			nextRealityDomain: state.nextRealityDomain + 1,
+			...appendActivity(
+				state,
+				"success",
+				`Reality domain ${domain.hostname} created.`,
+			),
+		};
+	}
+
+	if (action.type === "updateRealityDomain") {
+		return {
+			...state,
+			realityDomains: state.realityDomains.map((domain) =>
+				domain.id === action.domainId
+					? {
+							...domain,
+							...action.patch,
+							lastValidatedAt:
+								action.patch.hostname || action.patch.enabled !== undefined
+									? nowIso()
+									: domain.lastValidatedAt,
+						}
+					: domain,
+			),
+			...appendActivity(
+				state,
+				"info",
+				`Reality domain ${action.domainId} updated.`,
+			),
+		};
+	}
+
+	if (action.type === "deleteRealityDomain") {
+		return {
+			...state,
+			realityDomains: state.realityDomains
+				.filter((domain) => domain.id !== action.domainId)
+				.map((domain, index) => ({ ...domain, priority: index + 1 })),
+			...appendActivity(
+				state,
+				"warning",
+				`Reality domain ${action.domainId} deleted.`,
+			),
+		};
+	}
+
+	if (action.type === "moveRealityDomain") {
+		const currentIndex = state.realityDomains.findIndex(
+			(domain) => domain.id === action.domainId,
+		);
+		const targetIndex =
+			action.direction === "up" ? currentIndex - 1 : currentIndex + 1;
+		if (
+			currentIndex < 0 ||
+			targetIndex < 0 ||
+			targetIndex >= state.realityDomains.length
+		) {
+			return state;
+		}
+		const nextDomains = [...state.realityDomains];
+		const current = nextDomains[currentIndex];
+		const target = nextDomains[targetIndex];
+		if (!current || !target) return state;
+		nextDomains[currentIndex] = target;
+		nextDomains[targetIndex] = current;
+		return {
+			...state,
+			realityDomains: nextDomains.map((domain, index) => ({
+				...domain,
+				priority: index + 1,
+			})),
+			...appendActivity(state, "info", "Reality domain order changed."),
+		};
+	}
+
+	if (action.type === "updateServiceConfig") {
+		return {
+			...state,
+			serviceConfig: action.serviceConfig,
+			...appendActivity(state, "success", "Service config saved."),
+		};
+	}
+
+	if (action.type === "addToolRun") {
+		const run = buildToolRun(state, action.kind, action.status, action.message);
+		return {
+			...state,
+			toolRuns: [run, ...state.toolRuns].slice(0, 8),
+			nextToolRun: state.nextToolRun + 1,
+			...appendActivity(
+				state,
+				action.status === "success" ? "success" : "error",
+				action.message,
+			),
+		};
+	}
+
+	if (action.type === "createProbeRun") {
+		const okSamples = action.run.samples.filter(
+			(sample) => sample.status === "ok" && sample.latencyMs !== null,
+		);
+		const averageLatency =
+			okSamples.length > 0
+				? Math.round(
+						okSamples.reduce(
+							(sum, sample) => sum + (sample.latencyMs ?? 0),
+							0,
+						) / okSamples.length,
+					)
+				: null;
+		return {
+			...state,
+			probeRuns: [action.run, ...state.probeRuns].slice(0, 12),
+			nextProbeRun: state.nextProbeRun + 1,
+			endpoints: state.endpoints.map((endpoint) =>
+				endpoint.id === action.run.endpointId
+					? {
+							...endpoint,
+							status: action.run.status === "failed" ? "degraded" : "serving",
+							probeLatencyMs: averageLatency,
+							lastProbeAt: action.run.completedAt,
+						}
+					: endpoint,
+			),
+			...appendActivity(
+				state,
+				action.run.status === "failed" ? "warning" : "success",
+				`Probe run ${action.run.id} completed for ${action.run.endpointId}.`,
+			),
+		};
+	}
+
 	return state;
 }
 
@@ -432,6 +733,34 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 			},
 			undoDeleteUser() {
 				dispatch({ type: "undoDeleteUser" });
+			},
+			updateQuotaPolicy(quotaPolicy) {
+				dispatch({ type: "updateQuotaPolicy", quotaPolicy });
+			},
+			createRealityDomain(input) {
+				const domain = buildRealityDomain(state, input);
+				dispatch({ type: "createRealityDomain", input });
+				return domain;
+			},
+			updateRealityDomain(domainId, patch) {
+				dispatch({ type: "updateRealityDomain", domainId, patch });
+			},
+			deleteRealityDomain(domainId) {
+				dispatch({ type: "deleteRealityDomain", domainId });
+			},
+			moveRealityDomain(domainId, direction) {
+				dispatch({ type: "moveRealityDomain", domainId, direction });
+			},
+			updateServiceConfig(serviceConfig) {
+				dispatch({ type: "updateServiceConfig", serviceConfig });
+			},
+			addToolRun(kind, status, message) {
+				dispatch({ type: "addToolRun", kind, status, message });
+			},
+			createProbeRun(endpointId) {
+				const run = buildProbeRun(state, endpointId);
+				dispatch({ type: "createProbeRun", run });
+				return run;
 			},
 		}),
 		[state],

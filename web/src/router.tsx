@@ -41,6 +41,14 @@ const DemoEndpointFormPage = lazyRouteComponent(
 	() => import("./demo/DemoEndpointsPage"),
 	"DemoEndpointFormPage",
 );
+const DemoEndpointProbeRunPage = lazyRouteComponent(
+	() => import("./demo/DemoEndpointsPage"),
+	"DemoEndpointProbeRunPage",
+);
+const DemoEndpointProbeStatsPage = lazyRouteComponent(
+	() => import("./demo/DemoEndpointsPage"),
+	"DemoEndpointProbeStatsPage",
+);
 const DemoEndpointsPage = lazyRouteComponent(
 	() => import("./demo/DemoEndpointsPage"),
 	"DemoEndpointsPage",
@@ -68,6 +76,22 @@ const DemoNodesPage = lazyRouteComponent(
 const DemoScenariosPage = lazyRouteComponent(
 	() => import("./demo/DemoScenariosPage"),
 	"DemoScenariosPage",
+);
+const DemoQuotaPolicyPage = lazyRouteComponent(
+	() => import("./demo/DemoSettingsPages"),
+	"DemoQuotaPolicyPage",
+);
+const DemoRealityDomainsPage = lazyRouteComponent(
+	() => import("./demo/DemoSettingsPages"),
+	"DemoRealityDomainsPage",
+);
+const DemoServiceConfigPage = lazyRouteComponent(
+	() => import("./demo/DemoSettingsPages"),
+	"DemoServiceConfigPage",
+);
+const DemoToolsPage = lazyRouteComponent(
+	() => import("./demo/DemoSettingsPages"),
+	"DemoToolsPage",
 );
 const DemoUserDetailsPage = lazyRouteComponent(
 	() => import("./demo/DemoUsersPage"),
@@ -251,6 +275,18 @@ const demoEndpointDetailsRoute = createRoute({
 	component: DemoEndpointDetailsPage,
 });
 
+const demoEndpointProbeRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/endpoints/$endpointId/probe",
+	component: DemoEndpointProbeStatsPage,
+});
+
+const demoEndpointProbeRunRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/endpoints/probe/runs/$runId",
+	component: DemoEndpointProbeRunPage,
+});
+
 const demoUsersRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/users",
@@ -273,6 +309,30 @@ const demoScenariosRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/scenarios",
 	component: DemoScenariosPage,
+});
+
+const demoQuotaPolicyRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/quota-policy",
+	component: DemoQuotaPolicyPage,
+});
+
+const demoRealityDomainsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/reality-domains",
+	component: DemoRealityDomainsPage,
+});
+
+const demoServiceConfigRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/service-config",
+	component: DemoServiceConfigPage,
+});
+
+const demoToolsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/tools",
+	component: DemoToolsPage,
 });
 
 const appRouteTree = appRoute.addChildren([
@@ -302,10 +362,16 @@ const demoAppRouteTree = demoAppRoute.addChildren([
 	demoEndpointsRoute,
 	demoEndpointNewRoute,
 	demoEndpointDetailsRoute,
+	demoEndpointProbeRoute,
+	demoEndpointProbeRunRoute,
 	demoUsersRoute,
 	demoUserNewRoute,
 	demoUserDetailsRoute,
 	demoScenariosRoute,
+	demoQuotaPolicyRoute,
+	demoRealityDomainsRoute,
+	demoServiceConfigRoute,
+	demoToolsRoute,
 ]);
 
 const routeTree = rootRoute.addChildren([

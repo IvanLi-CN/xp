@@ -60,5 +60,46 @@ export const MainFlow: Story = {
 		).toBeInTheDocument();
 		await userEvent.type(await canvas.findByLabelText("Search users"), "sato");
 		await expect(await canvas.findByText("佐藤 未来")).toBeInTheDocument();
+
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "Quota policy" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Quota policy" }),
+		).toBeInTheDocument();
+
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "Reality domains" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Reality domains" }),
+		).toBeInTheDocument();
+
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "Service config" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Service config" }),
+		).toBeInTheDocument();
+
+		await userEvent.click(await canvas.findByRole("link", { name: "Tools" }));
+		await expect(
+			await canvas.findByRole("heading", { name: "Tools" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Run redaction" }),
+		);
+		await expect(await canvas.findByText(/\[REDACTED\]/)).toBeInTheDocument();
+
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "Endpoints" }),
+		);
+		await userEvent.click(await canvas.findByRole("link", { name: /tokyo/i }));
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "Probe stats" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Endpoint probe stats" }),
+		).toBeInTheDocument();
 	},
 };

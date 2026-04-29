@@ -20,11 +20,13 @@ import { useDemo } from "./store";
 import type { DemoEndpoint } from "./types";
 
 export function DemoEndpointsPage() {
-	const { state } = useDemo();
+	const navigate = useNavigate();
+	const { state, createProbeRun } = useDemo();
 	const [query, setQuery] = useState("");
 	const [status, setStatus] = useState("all");
 	const [sort, setSort] = useState("name");
 	const [page, setPage] = useState(1);
+	const [runningProbe, setRunningProbe] = useState(false);
 	const pageSize = 5;
 	const canWrite = state.session?.role !== "viewer";
 
@@ -71,6 +73,28 @@ export function DemoEndpointsPage() {
 				description="Create, filter, probe, and inspect ingress endpoints."
 				actions={
 					<>
+						<Button
+							variant="secondary"
+							loading={runningProbe}
+							disabled={
+								!canWrite || runningProbe || state.endpoints.length === 0
+							}
+							onClick={() => {
+								const endpoint = filtered[0] ?? state.endpoints[0];
+								if (!endpoint) return;
+								setRunningProbe(true);
+								window.setTimeout(() => {
+									const run = createProbeRun(endpoint.id);
+									setRunningProbe(false);
+									navigate({
+										to: "/demo/endpoints/probe/runs/$runId",
+										params: { runId: run.id },
+									});
+								}, 500);
+							}}
+						>
+							Run probe
+						</Button>
 						{canWrite ? (
 							<Button asChild>
 								<Link to="/demo/endpoints/new">New endpoint</Link>
@@ -446,7 +470,8 @@ export function DemoEndpointFormPage() {
 
 export function DemoEndpointDetailsPage() {
 	const { endpointId } = useParams({ from: "/demo/endpoints/$endpointId" });
-	const { state, completeProbe } = useDemo();
+	const navigate = useNavigate();
+	const { state, createProbeRun } = useDemo();
 	const { pushToast } = useToast();
 	const [probing, setProbing] = useState(false);
 	const endpoint = state.endpoints.find((item) => item.id === endpointId);
@@ -493,20 +518,31 @@ export function DemoEndpointDetailsPage() {
 								if (!canWrite) return;
 								setProbing(true);
 								window.setTimeout(() => {
-									const degraded = endpoint.status === "disabled";
-									const latency = degraded ? 720 : 28 + users.length * 9;
-									completeProbe(endpoint.id, latency, degraded);
+									const run = createProbeRun(endpoint.id);
 									setProbing(false);
 									pushToast({
-										variant: degraded ? "error" : "success",
-										message: degraded
-											? "Probe completed with degraded result."
-											: "Probe completed successfully.",
+										variant: run.status === "failed" ? "error" : "success",
+										message:
+											run.status === "failed"
+												? "Probe completed with degraded result."
+												: "Probe completed successfully.",
+									});
+									navigate({
+										to: "/demo/endpoints/probe/runs/$runId",
+										params: { runId: run.id },
 									});
 								}, 700);
 							}}
 						>
 							Run probe
+						</Button>
+						<Button asChild variant="secondary" size="sm">
+							<Link
+								to="/demo/endpoints/$endpointId/probe"
+								params={{ endpointId: endpoint.id }}
+							>
+								Probe stats
+							</Link>
 						</Button>
 						<Button asChild variant="ghost" size="sm">
 							<Link to="/demo/endpoints">Back</Link>
@@ -577,6 +613,305 @@ export function DemoEndpointDetailsPage() {
 							}
 						/>
 					)}
+				</div>
+			</section>
+		</div>
+	);
+}
+
+function probeStatusVariant(status: "ok" | "timeout" | "skipped") {
+	if (status === "ok") return "success";
+	if (status === "timeout") return "destructive";
+	return "ghost";
+}
+
+export function DemoEndpointProbeStatsPage() {
+	const { endpointId } = useParams({
+		from: "/demo/endpoints/$endpointId/probe",
+	});
+	const navigate = useNavigate();
+	const { state, createProbeRun } = useDemo();
+	const { pushToast } = useToast();
+	const [running, setRunning] = useState(false);
+	const endpoint = state.endpoints.find((item) => item.id === endpointId);
+	const canWrite = state.session?.role !== "viewer";
+
+	if (!endpoint) {
+		return (
+			<PageState
+				variant="error"
+				title="Endpoint not found"
+				description="The selected demo endpoint does not exist in this seed."
+				action={
+					<Link className={buttonVariants()} to="/demo/endpoints">
+						Back to endpoints
+					</Link>
+				}
+			/>
+		);
+	}
+
+	const runs = state.probeRuns.filter((run) => run.endpointId === endpoint.id);
+	const latest = runs[0] ?? null;
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="Endpoint probe stats"
+				description={`${endpoint.name} probe history and per-node samples.`}
+				meta={
+					<Badge variant={endpointStatusVariant(endpoint.status)}>
+						{endpoint.status}
+					</Badge>
+				}
+				actions={
+					<>
+						<Button
+							loading={running}
+							disabled={!canWrite || running}
+							onClick={() => {
+								setRunning(true);
+								window.setTimeout(() => {
+									const run = createProbeRun(endpoint.id);
+									setRunning(false);
+									pushToast({
+										variant: run.status === "failed" ? "error" : "success",
+										message: `Probe run ${run.id} completed.`,
+									});
+									navigate({
+										to: "/demo/endpoints/probe/runs/$runId",
+										params: { runId: run.id },
+									});
+								}, 600);
+							}}
+						>
+							Run probe
+						</Button>
+						<Button asChild variant="ghost" size="sm">
+							<Link
+								to="/demo/endpoints/$endpointId"
+								params={{ endpointId: endpoint.id }}
+							>
+								Back
+							</Link>
+						</Button>
+					</>
+				}
+			/>
+
+			<div className="grid gap-4 md:grid-cols-3">
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Last latency
+					</p>
+					<p className="mt-2 font-mono text-lg">
+						{endpoint.probeLatencyMs === null
+							? "not run"
+							: `${endpoint.probeLatencyMs} ms`}
+					</p>
+				</div>
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Last run
+					</p>
+					<p className="mt-2 font-mono text-lg">
+						{latest ? latest.id : "none"}
+					</p>
+				</div>
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Samples
+					</p>
+					<p className="mt-2 font-mono text-lg">
+						{latest ? latest.samples.length : 0}
+					</p>
+				</div>
+			</div>
+
+			{runs.length === 0 ? (
+				<PageState
+					variant="empty"
+					title="No probe runs"
+					description="Run a mock probe to populate per-node samples."
+				/>
+			) : (
+				<section className="xp-card">
+					<div className="xp-card-body">
+						<h2 className="xp-card-title">Recent runs</h2>
+						<div className="xp-table-wrap">
+							<table className="xp-table xp-table-zebra">
+								<thead>
+									<tr>
+										<th>Run</th>
+										<th>Status</th>
+										<th>Completed</th>
+										<th>Samples</th>
+									</tr>
+								</thead>
+								<tbody>
+									{runs.map((run) => (
+										<tr key={run.id}>
+											<td>
+												<Link
+													className="font-mono text-xs hover:underline"
+													to="/demo/endpoints/probe/runs/$runId"
+													params={{ runId: run.id }}
+												>
+													{run.id}
+												</Link>
+											</td>
+											<td>
+												<Badge
+													variant={
+														run.status === "completed" ? "success" : "warning"
+													}
+												>
+													{run.status}
+												</Badge>
+											</td>
+											<td className="font-mono text-xs">
+												{shortDate(run.completedAt)}
+											</td>
+											<td className="font-mono text-xs">
+												{
+													run.samples.filter((sample) => sample.status === "ok")
+														.length
+												}
+												/{run.samples.length} ok
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</section>
+			)}
+		</div>
+	);
+}
+
+export function DemoEndpointProbeRunPage() {
+	const { runId } = useParams({ from: "/demo/endpoints/probe/runs/$runId" });
+	const { state } = useDemo();
+	const run = state.probeRuns.find((item) => item.id === runId);
+
+	if (!run) {
+		return (
+			<PageState
+				variant="error"
+				title="Probe run not found"
+				description="The selected mock probe run is not available in this seed."
+				action={
+					<Link className={buttonVariants()} to="/demo/endpoints">
+						Back to endpoints
+					</Link>
+				}
+			/>
+		);
+	}
+
+	const endpoint = state.endpoints.find((item) => item.id === run.endpointId);
+	const okSamples = run.samples.filter((sample) => sample.status === "ok");
+	const timeoutSamples = run.samples.filter(
+		(sample) => sample.status === "timeout",
+	);
+
+	return (
+		<div className="space-y-6">
+			<PageHeader
+				title="Endpoint probe run"
+				description={`${run.id} for ${endpoint?.name ?? run.endpointId}`}
+				meta={
+					<Badge variant={run.status === "completed" ? "success" : "warning"}>
+						{run.status}
+					</Badge>
+				}
+				actions={
+					<>
+						{endpoint ? (
+							<Button asChild variant="secondary" size="sm">
+								<Link
+									to="/demo/endpoints/$endpointId/probe"
+									params={{ endpointId: endpoint.id }}
+								>
+									Probe stats
+								</Link>
+							</Button>
+						) : null}
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/demo/endpoints">Back</Link>
+						</Button>
+					</>
+				}
+			/>
+
+			<div className="grid gap-4 md:grid-cols-3">
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						OK samples
+					</p>
+					<p className="mt-2 font-mono text-lg">{okSamples.length}</p>
+				</div>
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Timeouts
+					</p>
+					<p className="mt-2 font-mono text-lg">{timeoutSamples.length}</p>
+				</div>
+				<div className="xp-panel-muted p-4">
+					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Completed
+					</p>
+					<p className="mt-2 font-mono text-sm">{shortDate(run.completedAt)}</p>
+				</div>
+			</div>
+
+			<section className="xp-card">
+				<div className="xp-card-body">
+					<h2 className="xp-card-title">Node samples</h2>
+					<div className="xp-table-wrap">
+						<table className="xp-table xp-table-zebra">
+							<thead>
+								<tr>
+									<th>Node</th>
+									<th>Status</th>
+									<th>Latency</th>
+									<th>Message</th>
+								</tr>
+							</thead>
+							<tbody>
+								{run.samples.map((sample) => {
+									const node = state.nodes.find(
+										(item) => item.id === sample.nodeId,
+									);
+									return (
+										<tr key={sample.nodeId}>
+											<td>
+												<p className="font-medium">
+													{node?.name ?? sample.nodeId}
+												</p>
+												<p className="font-mono text-xs text-muted-foreground">
+													{sample.nodeId}
+												</p>
+											</td>
+											<td>
+												<Badge variant={probeStatusVariant(sample.status)}>
+													{sample.status}
+												</Badge>
+											</td>
+											<td className="font-mono text-xs">
+												{sample.latencyMs === null
+													? "-"
+													: `${sample.latencyMs} ms`}
+											</td>
+											<td className="text-sm">{sample.message}</td>
+										</tr>
+									);
+								})}
+							</tbody>
+						</table>
+					</div>
 				</div>
 			</section>
 		</div>

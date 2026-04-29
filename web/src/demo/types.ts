@@ -47,7 +47,58 @@ export type DemoUser = {
 	quotaUsedGb: number;
 	endpointIds: string[];
 	subscriptionToken: string;
+	mihomoMixinYaml: string;
 	createdAt: string;
+};
+
+export type DemoRealityDomain = {
+	id: string;
+	hostname: string;
+	enabled: boolean;
+	nodeIds: string[];
+	priority: number;
+	lastValidatedAt: string | null;
+	notes: string;
+};
+
+export type DemoQuotaPolicy = {
+	defaultLimitGb: number | null;
+	resetPolicy: "never" | "weekly" | "monthly";
+	enforcementMode: "report" | "block";
+	tierWeights: Record<DemoUser["tier"], number>;
+	nodeWeights: Record<string, number>;
+};
+
+export type DemoServiceConfig = {
+	publicOrigin: string;
+	defaultSubscriptionFormat: "raw" | "mihomo";
+	mihomoDelivery: "inline" | "provider";
+	auditLogRetentionDays: number;
+	xrayRestartStrategy: "rolling" | "immediate";
+};
+
+export type DemoToolRun = {
+	id: string;
+	at: string;
+	kind: "mihomo_redact" | "config_check";
+	status: "success" | "error";
+	message: string;
+};
+
+export type DemoProbeSample = {
+	nodeId: string;
+	status: "ok" | "timeout" | "skipped";
+	latencyMs: number | null;
+	message: string;
+};
+
+export type DemoProbeRun = {
+	id: string;
+	endpointId: string;
+	status: "completed" | "failed";
+	startedAt: string;
+	completedAt: string;
+	samples: DemoProbeSample[];
 };
 
 export type DemoActivity = {
@@ -69,9 +120,17 @@ export type DemoState = {
 	nodes: DemoNode[];
 	endpoints: DemoEndpoint[];
 	users: DemoUser[];
+	realityDomains: DemoRealityDomain[];
+	quotaPolicy: DemoQuotaPolicy;
+	serviceConfig: DemoServiceConfig;
+	toolRuns: DemoToolRun[];
+	probeRuns: DemoProbeRun[];
 	activity: DemoActivity[];
 	nextEndpoint: number;
 	nextUser: number;
+	nextRealityDomain: number;
+	nextToolRun: number;
+	nextProbeRun: number;
 	lastDeletedUser: DemoUser | null;
 };
 

@@ -12,9 +12,11 @@ import { useToast } from "../components/Toast";
 import { buttonVariants } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import {
 	formatGb,
 	formatPercent,
+	shortDate,
 	subscriptionUrl,
 	userStatusVariant,
 } from "./format";
@@ -480,7 +482,18 @@ export function DemoUserDetailsPage() {
 	const [selectedIds, setSelectedIds] = useState<string[]>(
 		user?.endpointIds ?? [],
 	);
+	const [subscriptionFormat, setSubscriptionFormat] = useState<
+		"raw" | "mihomo"
+	>("raw");
+	const [mihomoMixinYaml, setMihomoMixinYaml] = useState(
+		user?.mihomoMixinYaml ?? "",
+	);
 	const canWrite = state.session?.role !== "viewer";
+
+	useEffect(() => {
+		setSelectedIds(user?.endpointIds ?? []);
+		setMihomoMixinYaml(user?.mihomoMixinYaml ?? "");
+	}, [user?.endpointIds, user?.mihomoMixinYaml]);
 
 	if (!user) {
 		return (
@@ -498,6 +511,35 @@ export function DemoUserDetailsPage() {
 	}
 
 	const dirty = selectedIds.join("|") !== user.endpointIds.join("|");
+	const mihomoDirty = mihomoMixinYaml !== user.mihomoMixinYaml;
+	const assignedEndpoints = state.endpoints.filter((endpoint) =>
+		user.endpointIds.includes(endpoint.id),
+	);
+	const subscriptionPreview =
+		subscriptionFormat === "mihomo"
+			? [
+					"proxies:",
+					...assignedEndpoints.map(
+						(endpoint) =>
+							`  - name: ${endpoint.name}\n    type: ${
+								endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
+							}\n    server: ${
+								state.nodes.find((node) => node.id === endpoint.nodeId)
+									?.accessHost ?? endpoint.nodeId
+							}\n    port: ${endpoint.port}`,
+					),
+					user.mihomoMixinYaml.trim()
+						? `# user mixin\n${user.mihomoMixinYaml.trim()}`
+						: "# no user mixin",
+				].join("\n")
+			: assignedEndpoints.length > 0
+				? assignedEndpoints
+						.map(
+							(endpoint) =>
+								`${endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"}://${user.subscriptionToken}@${state.nodes.find((node) => node.id === endpoint.nodeId)?.accessHost ?? endpoint.nodeId}:${endpoint.port}#${endpoint.name}`,
+						)
+						.join("\n")
+				: "# no endpoint access assigned";
 
 	return (
 		<div className="space-y-6">
@@ -561,6 +603,86 @@ export function DemoUserDetailsPage() {
 				<div className="xp-card-body">
 					<div className="flex flex-wrap items-start justify-between gap-3">
 						<div>
+							<h2 className="xp-card-title">Quota status</h2>
+							<p className="mt-1 text-sm text-muted-foreground">
+								Per-node mock enforcement follows the current quota policy.
+							</p>
+						</div>
+						<Badge variant="ghost">{state.quotaPolicy.resetPolicy}</Badge>
+					</div>
+					<div className="xp-table-wrap">
+						<table className="xp-table xp-table-zebra">
+							<thead>
+								<tr>
+									<th>Node</th>
+									<th>Access</th>
+									<th>Remaining</th>
+									<th>Policy weight</th>
+									<th>Last seen</th>
+								</tr>
+							</thead>
+							<tbody>
+								{state.nodes.map((node) => {
+									const endpointCount = state.endpoints.filter(
+										(endpoint) =>
+											endpoint.nodeId === node.id &&
+											user.endpointIds.includes(endpoint.id),
+									).length;
+									const remaining =
+										user.quotaLimitGb === null
+											? null
+											: Math.max(0, user.quotaLimitGb - user.quotaUsedGb);
+									const blocked =
+										state.quotaPolicy.enforcementMode === "block" &&
+										user.status === "quota_limited" &&
+										endpointCount > 0;
+									return (
+										<tr key={node.id}>
+											<td>
+												<p className="font-medium">{node.name}</p>
+												<p className="font-mono text-xs text-muted-foreground">
+													{node.id}
+												</p>
+											</td>
+											<td>
+												<Badge
+													variant={
+														blocked
+															? "destructive"
+															: endpointCount > 0
+																? "success"
+																: "ghost"
+													}
+												>
+													{blocked
+														? "blocked"
+														: endpointCount > 0
+															? `${endpointCount} endpoint(s)`
+															: "no access"}
+												</Badge>
+											</td>
+											<td className="font-mono text-xs">
+												{formatGb(remaining)}
+											</td>
+											<td className="font-mono text-xs">
+												{state.quotaPolicy.nodeWeights[node.id] ?? 0}
+											</td>
+											<td className="font-mono text-xs">
+												{shortDate(node.lastSeenAt)}
+											</td>
+										</tr>
+									);
+								})}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</section>
+
+			<section className="xp-card">
+				<div className="xp-card-body">
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div>
 							<h2 className="xp-card-title">Endpoint access</h2>
 							<p className="mt-1 text-sm text-muted-foreground">
 								Changing access updates the subscription preview immediately
@@ -612,21 +734,79 @@ export function DemoUserDetailsPage() {
 
 			<section className="xp-card">
 				<div className="xp-card-body">
-					<h2 className="xp-card-title">Subscription result</h2>
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div>
+							<h2 className="xp-card-title">Subscription result</h2>
+							<p className="mt-1 text-sm text-muted-foreground">
+								Format switch mirrors the live subscription preview workflow.
+							</p>
+						</div>
+						<select
+							className="xp-select w-40"
+							value={subscriptionFormat}
+							aria-label="Subscription format"
+							onChange={(event) =>
+								setSubscriptionFormat(event.target.value as "raw" | "mihomo")
+							}
+						>
+							<option value="raw">Raw</option>
+							<option value="mihomo">Mihomo</option>
+						</select>
+					</div>
 					<div className="rounded-2xl border border-border/70 bg-muted/35 p-4">
-						<p className="break-all font-mono text-sm">
-							{subscriptionUrl(user.subscriptionToken)}
-						</p>
+						<pre className="whitespace-pre-wrap break-words font-mono text-xs">
+							{subscriptionPreview}
+						</pre>
 						<div className="mt-3 flex flex-wrap gap-2">
+							<CopyButton text={subscriptionPreview} label="Copy preview" />
 							<CopyButton
 								text={subscriptionUrl(user.subscriptionToken)}
-								label="Copy subscription URL"
+								label="Copy URL"
 							/>
 							<Badge variant="ghost">
 								{user.endpointIds.length} endpoint(s) in subscription
 							</Badge>
 						</div>
 					</div>
+				</div>
+			</section>
+
+			<section className="xp-card">
+				<div className="xp-card-body">
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div>
+							<h2 className="xp-card-title">Mihomo profile</h2>
+							<p className="mt-1 text-sm text-muted-foreground">
+								Per-user mixin is stored in the mock user record and reflected
+								in Mihomo preview output.
+							</p>
+						</div>
+						<Button
+							disabled={!mihomoDirty || !canWrite}
+							onClick={() => {
+								updateUser(user.id, { mihomoMixinYaml });
+								pushToast({
+									variant: "success",
+									message: "Mihomo profile saved.",
+								});
+							}}
+						>
+							Save profile
+						</Button>
+					</div>
+					<Textarea
+						value={mihomoMixinYaml}
+						onChange={(event) => setMihomoMixinYaml(event.target.value)}
+						className="min-h-56 font-mono"
+						aria-label="Mihomo mixin config"
+						placeholder="rules:\n  - DOMAIN-SUFFIX,example.net,DIRECT"
+						disabled={!canWrite}
+					/>
+					{mihomoDirty ? (
+						<div className="xp-alert xp-alert-warning">
+							Mihomo profile has unsaved changes.
+						</div>
+					) : null}
 				</div>
 			</section>
 
