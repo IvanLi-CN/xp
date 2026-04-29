@@ -21,12 +21,20 @@ import { DemoDashboardPage } from "../src/demo/DemoDashboardPage";
 import {
 	DemoEndpointDetailsPage,
 	DemoEndpointFormPage,
+	DemoEndpointProbeRunPage,
+	DemoEndpointProbeStatsPage,
 	DemoEndpointsPage,
 } from "../src/demo/DemoEndpointsPage";
 import { DemoAppRoute, DemoLoginRoute } from "../src/demo/DemoLayout";
 import { DemoLoginPage } from "../src/demo/DemoLoginPage";
 import { DemoNodeDetailsPage, DemoNodesPage } from "../src/demo/DemoNodesPage";
 import { DemoScenariosPage } from "../src/demo/DemoScenariosPage";
+import {
+	DemoQuotaPolicyPage,
+	DemoRealityDomainsPage,
+	DemoServiceConfigPage,
+	DemoToolsPage,
+} from "../src/demo/DemoSettingsPages";
 import {
 	DemoUserDetailsPage,
 	DemoUserFormPage,
@@ -309,6 +317,18 @@ const preview: Preview = {
 				component: DemoEndpointDetailsPage,
 			});
 
+			const demoEndpointProbeRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/endpoints/$endpointId/probe",
+				component: DemoEndpointProbeStatsPage,
+			});
+
+			const demoEndpointProbeRunRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/endpoints/probe/runs/$runId",
+				component: DemoEndpointProbeRunPage,
+			});
+
 			const demoUsersRoute = createRoute({
 				getParentRoute: () => demoAppRoute,
 				path: "/users",
@@ -331,6 +351,30 @@ const preview: Preview = {
 				getParentRoute: () => demoAppRoute,
 				path: "/scenarios",
 				component: DemoScenariosPage,
+			});
+
+			const demoQuotaPolicyRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/quota-policy",
+				component: DemoQuotaPolicyPage,
+			});
+
+			const demoRealityDomainsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/reality-domains",
+				component: DemoRealityDomainsPage,
+			});
+
+			const demoServiceConfigRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/service-config",
+				component: DemoServiceConfigPage,
+			});
+
+			const demoToolsRoute = createRoute({
+				getParentRoute: () => demoAppRoute,
+				path: "/tools",
+				component: DemoToolsPage,
 			});
 
 			const appRouteTree = appRoute.addChildren([
@@ -360,10 +404,16 @@ const preview: Preview = {
 				demoEndpointsRoute,
 				demoEndpointNewRoute,
 				demoEndpointDetailsRoute,
+				demoEndpointProbeRoute,
+				demoEndpointProbeRunRoute,
 				demoUsersRoute,
 				demoUserNewRoute,
 				demoUserDetailsRoute,
 				demoScenariosRoute,
+				demoQuotaPolicyRoute,
+				demoRealityDomainsRoute,
+				demoServiceConfigRoute,
+				demoToolsRoute,
 			]);
 
 			const routeTree = rootRoute.addChildren([
