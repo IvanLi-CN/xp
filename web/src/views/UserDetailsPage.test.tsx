@@ -372,6 +372,34 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
+	it("explains protocol all-select auto assignment before apply", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(await screenByLabel("Toggle VLESS"));
+
+		expect(
+			await screenByText(
+				"After Apply access, new VLESS endpoints will be assigned to this user automatically.",
+			),
+		).toBeTruthy();
+	});
+
+	it("explains node all-select scope before apply", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(await screenByLabel("Toggle row Tokyo"));
+
+		expect(
+			await screenByText(
+				"Node all-select covers current endpoints on Tokyo only. Future endpoints still follow protocol all-select defaults.",
+			),
+		).toBeTruthy();
+	});
+
 	it("submits empty items when all access is cleared", async () => {
 		setupMocks({
 			access: [
