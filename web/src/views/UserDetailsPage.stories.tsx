@@ -113,6 +113,16 @@ export const AccessTab: Story = {
 		await expect(
 			await canvas.findByText("Selected endpoints: 2"),
 		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(
+				"After Apply access, new VLESS and SS2022 endpoints will be assigned to this user automatically.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(
+				"Node all-select covers current endpoints on tokyo-1 and osaka-1 only. Future endpoints still follow protocol all-select defaults.",
+			),
+		).toBeInTheDocument();
 	},
 };
 

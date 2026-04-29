@@ -295,6 +295,7 @@ describe("GetAdminUserAccessResponseSchema", () => {
 						node_id: "node-1",
 					},
 				],
+				auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
 			}),
 		).toEqual({
 			items: [
@@ -304,6 +305,7 @@ describe("GetAdminUserAccessResponseSchema", () => {
 					node_id: "node-1",
 				},
 			],
+			auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
 		});
 	});
 });
@@ -321,6 +323,7 @@ describe("PutAdminUserAccessResponseSchema", () => {
 						node_id: "node-1",
 					},
 				],
+				auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],
 			}),
 		).toEqual({
 			created: 1,
@@ -332,6 +335,7 @@ describe("PutAdminUserAccessResponseSchema", () => {
 					node_id: "node-1",
 				},
 			],
+			auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],
 		});
 	});
 });

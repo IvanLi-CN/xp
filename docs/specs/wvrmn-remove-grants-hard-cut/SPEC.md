@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-01
-- Last: 2026-03-02
+- Last: 2026-04-29
 
 ## Background
 
@@ -18,6 +18,8 @@
 - **彻底下线 grants 实体**：系统不再存储、读取、写入、暴露 `Grant/grant_id`。
 - 接入模型统一为：`memberships(user_id, endpoint_id, node_id)`（`node_id` 仅冗余索引，来自 endpoint）。
 - Admin 侧读写仅围绕 Access（membership）进行，不再出现 grants 语义。
+- Admin Access 保存时可持久化“该用户已拥有某协议全部 endpoints”的自动授予意图；后续新增同协议 endpoint 时自动补齐 membership。
+- Admin Access UI 在协议全选或节点全选时给出就地提示，说明保存后的自动授予范围与节点全选边界。
 - 非 admin 订阅输出协议格式保持不变（raw/base64/clash 协议输出不变）。
 - 升级后历史数据可读、可启动、可运行，不依赖 grants 历史语义。
 
@@ -26,6 +28,7 @@
 - 不改 quota 分配算法（P1/P2/P3/overflow）。
 - 不改节点、端点协议类型与已有端口/Reality 基本行为。
 - 不引入长期双写兼容期（采用硬切）。
+- 不跨协议自动授予；VLESS 全选只影响未来 VLESS endpoint，SS2022 全选只影响未来 SS2022 endpoint。
 
 ## Scope
 
@@ -47,14 +50,16 @@
 
 - `GET /api/admin/users/:user_id/access`
   - Response:
-    - `{ "items": [ { "user_id": "...", "endpoint_id": "...", "node_id": "..." } ] }`
+    - `{ "items": [ { "user_id": "...", "endpoint_id": "...", "node_id": "..." } ], "auto_assign_endpoint_kinds": ["vless_reality_vision_tcp"] }`
 - `PUT /api/admin/users/:user_id/access`
   - Request:
     - `{ "items": [ { "endpoint_id": "..." } ] }` (不接受 `node_id`；由后端从 endpoint 推导)
   - Response:
-    - `{ "created": 1, "deleted": 2, "items": [ { "user_id":"...", "endpoint_id":"...", "node_id":"..." } ] }`
+    - `{ "created": 1, "deleted": 2, "items": [ { "user_id":"...", "endpoint_id":"...", "node_id":"..." } ], "auto_assign_endpoint_kinds": ["ss2022_2022_blake3_aes_128_gcm"] }`
   - Semantics:
     - apply 后该用户 memberships **精确等于** `items`（按 `endpoint_id` 去重；`items=[]` 表示清空）。
+    - apply 后服务端按现有 endpoint 集合推断 `auto_assign_endpoint_kinds`：若请求覆盖某个 `EndpointKind` 的全部现存 endpoints，则记录该 kind；否则清除该 kind。
+    - 后续 `UpsertEndpoint` 时，若新 endpoint 的 kind 命中用户记录的 `auto_assign_endpoint_kinds`，服务端自动创建对应 membership。
 
 ### Delete (hard cut, always 404)
 
@@ -103,6 +108,12 @@
 - `users`：补 `credential_epoch: 0`。
 - SHOULD：输出迁移统计日志（保留/丢弃/去重数；user_node_quotas 清空条目数）。
 
+### State (SCHEMA_VERSION: 12)
+
+- 新增 `user_auto_assign_endpoint_kinds: map<user_id, set<EndpointKind>>`，表示用户已选择某协议全部现存 endpoints，未来同协议 endpoint 应自动授予。
+- v11 -> v12 迁移从当前 `node_user_endpoint_memberships` 推断该字段：只有当用户已拥有某协议全部现存 endpoints 时才记录；无现存 endpoint 的协议不推断。
+- 启动、snapshot 安装、endpoint upsert/delete、user delete 都会规范化该字段并重新同步 memberships，避免 orphan user 与 stale endpoint 残留；若某协议 endpoint 暂时全部删除，已记录的自动授予意图继续保留以覆盖后续同协议 endpoint。
+
 ### Usage (USAGE_SCHEMA_VERSION: 2)
 
 - 从 `usage.grants[grant_id]` 聚合到 `usage.memberships[membership_key]`：
@@ -124,13 +135,26 @@
 ## Acceptance criteria
 
 - UI 中无 grants 概念：无 grants 路由、无 grants API 调用、无 grants 文案。
+- Access tab 在协议全选时提示：apply 后未来同协议 endpoint 会自动分配；在节点全选时提示：仅覆盖该节点当前 endpoints，未来 endpoint 仍按协议级默认授予规则处理。
 - `/api/admin/users/:id/access` 可完整管理接入关系：0 endpoint => 0 输出；N endpoint => N 条。
+- 用户保存某协议全选后，新建同协议 endpoint 会自动出现在该用户 access 与订阅输出中；不同协议不会被自动授予。
+- `GET/PUT /api/admin/users/:id/access` 返回 `auto_assign_endpoint_kinds`，且 `PUT` 请求体保持仅提交 `items[{endpoint_id}]`。
 - 旧 grants API 下线后统一返回 404。
 - 订阅输出回归：raw/base64/clash 协议格式不变，条目数正确。
 - Xray reconcile 不再按 grant_id；不再残留 `email=grant:*` 用户。
 - quota/usage 不再依赖 grant_id；迁移后统计正确。
 - `user_node_quotas` 历史覆盖不再生效（迁移清空 + 运行时忽略）。
 - 全量测试通过（Rust + Web + Storybook + E2E）。
+
+## Visual Evidence
+
+- source_type: storybook_canvas
+  story_id_or_title: Pages/UserDetailsPage/AccessTab
+  state: protocol and node all-select hint
+  evidence_note: verifies Access tab explains that protocol all-select creates future same-protocol auto assignment while node all-select only covers current endpoints.
+  image:
+  PR: include
+  ![Access tab auto-assign hints](./assets/access-auto-assign-hints.png)
 
 ## Milestones
 
@@ -149,3 +173,5 @@
 - 2026-03-02: AccessMatrix 多 endpoint 树交互做 post-fix（父子勾选对齐、折叠态保留全选、列宽固定不抖动且树展开保持 in-flow 以允许行高变化）；继续补强为 `colgroup + table-fixed` 固定列宽，移除 Node ID 与空态提示文案展示，折叠/展开图标切换为 Iconify 文件夹并加过渡动画，同时将树引导线对齐到图标中心并弱化配色，修正折叠态复选框与右侧标题的垂直对齐（PR #90）。
 - 2026-03-02: AccessMatrix 树形勾选状态修正：多选单元格部分选中时，行/列/全局勾选框均正确显示 `indeterminate` 而非错误“全选”；同时修复单 endpoint 未勾选场景的元数据显示，避免展示 `port ?`（PR #90）。
 - 2026-03-02: AccessMatrix 状态一致性修正：当 endpoint 列表变更时，仅保留仍存在于当前 options 的已选 endpoint，避免 stale endpoint_id 导致单元格误显示为选中或提交无效 endpoint（PR #90）。
+- 2026-04-29: 增加协议级自动授予语义：用户保存某协议全选后，新增同协议 endpoint 自动补齐 membership；Access API 响应暴露 `auto_assign_endpoint_kinds`。
+- 2026-04-29: Access tab 增加协议全选与节点全选的上下文提示，明确 apply 后未来 endpoint 自动授予范围。

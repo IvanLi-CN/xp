@@ -38,6 +38,7 @@ import {
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
+import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
@@ -216,6 +217,13 @@ function formatError(err: unknown): string {
 
 function buildCellKey(nodeId: string, protocolId: string): string {
 	return `${nodeId}::${protocolId}`;
+}
+
+function formatInlineList(items: string[]): string {
+	if (items.length === 0) return "";
+	if (items.length === 1) return items[0] ?? "";
+	if (items.length === 2) return `${items[0]} and ${items[1]}`;
+	return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
 
 export function UserDetailsPage() {
@@ -667,6 +675,43 @@ export function UserDetailsPage() {
 			),
 		);
 	}, [optionsByCell, selectedByCell]);
+
+	const accessSelectionHints = useMemo(() => {
+		const selected = new Set(selectedEndpointIds);
+		const protocolLabels = PROTOCOLS.filter((protocol) => {
+			const protocolEndpointIds = endpoints
+				.filter((endpoint) => endpoint.kind === protocol.protocolId)
+				.map((endpoint) => endpoint.endpoint_id);
+			return (
+				protocolEndpointIds.length > 0 &&
+				protocolEndpointIds.every((endpointId) => selected.has(endpointId))
+			);
+		}).map((protocol) => protocol.label);
+		const nodeLabels = (nodesQuery.data?.items ?? [])
+			.filter((node) => {
+				const nodeEndpointIds = endpoints
+					.filter((endpoint) => endpoint.node_id === node.node_id)
+					.map((endpoint) => endpoint.endpoint_id);
+				return (
+					nodeEndpointIds.length > 0 &&
+					nodeEndpointIds.every((endpointId) => selected.has(endpointId))
+				);
+			})
+			.map((node) => node.node_name);
+		const hints: string[] = [];
+		if (protocolLabels.length > 0) {
+			hints.push(
+				`After Apply access, new ${formatInlineList(protocolLabels)} endpoints will be assigned to this user automatically.`,
+			);
+		}
+		if (nodeLabels.length > 0) {
+			hints.push(
+				`Node all-select covers current endpoints on ${formatInlineList(nodeLabels)} only. Future endpoints still follow protocol all-select defaults.`,
+			);
+		}
+		return hints;
+	}, [endpoints, nodesQuery.data?.items, selectedEndpointIds]);
+
 	const isAccessDataLoading =
 		nodesQuery.isLoading || endpointsQuery.isLoading || accessQuery.isLoading;
 	const accessDataError = nodesQuery.isError
@@ -1219,6 +1264,23 @@ export function UserDetailsPage() {
 						<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
 							{accessError}
 						</div>
+					) : null}
+					{accessSelectionHints.length > 0 ? (
+						<output
+							aria-live="polite"
+							className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
+						>
+							<Icon
+								name="tabler:info-circle"
+								size={16}
+								className="mt-0.5 shrink-0 text-primary"
+							/>
+							<div className="space-y-0.5">
+								{accessSelectionHints.map((hint) => (
+									<p key={hint}>{hint}</p>
+								))}
+							</div>
+						</output>
 					) : null}
 					{isAccessDataLoading ? (
 						<PageState variant="loading" title="Loading access matrix" />

@@ -166,6 +166,7 @@ function setupMocks(args?: {
 
 	vi.mocked(fetchAdminUserAccess).mockResolvedValue({
 		items: args?.access ?? [],
+		auto_assign_endpoint_kinds: [],
 	});
 
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
@@ -263,6 +264,7 @@ function setupMocks(args?: {
 		created: 0,
 		deleted: 0,
 		items: [],
+		auto_assign_endpoint_kinds: [],
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
@@ -368,6 +370,34 @@ describe("<UserDetailsPage />", () => {
 				},
 			);
 		});
+	});
+
+	it("explains protocol all-select auto assignment before apply", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(await screenByLabel("Toggle VLESS"));
+
+		expect(
+			await screenByText(
+				"After Apply access, new VLESS endpoints will be assigned to this user automatically.",
+			),
+		).toBeTruthy();
+	});
+
+	it("explains node all-select scope before apply", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("button", "Access"));
+		fireEvent.click(await screenByLabel("Toggle row Tokyo"));
+
+		expect(
+			await screenByText(
+				"Node all-select covers current endpoints on Tokyo only. Future endpoints still follow protocol all-select defaults.",
+			),
+		).toBeTruthy();
 	});
 
 	it("submits empty items when all access is cleared", async () => {
