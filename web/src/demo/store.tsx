@@ -96,6 +96,7 @@ type DemoAction =
 					| "quotaLimitGb"
 					| "endpointIds"
 					| "mihomoMixinYaml"
+					| "subscriptionToken"
 				>
 			>;
 	  }
@@ -155,6 +156,7 @@ type DemoContextValue = {
 				| "quotaLimitGb"
 				| "endpointIds"
 				| "mihomoMixinYaml"
+				| "subscriptionToken"
 			>
 		>,
 	) => void;

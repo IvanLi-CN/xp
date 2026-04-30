@@ -1,18 +1,32 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
+import type { SubscriptionFormat } from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
 
+import {
+	AccessMatrix,
+	type AccessMatrixCellState,
+} from "../components/AccessMatrix";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
+import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
+import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { buttonVariants } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
-import { Textarea } from "../components/ui/textarea";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../components/ui/select";
 import {
 	formatGb,
 	formatPercent,
@@ -21,7 +35,22 @@ import {
 	userStatusVariant,
 } from "./format";
 import { useDemo } from "./store";
-import type { DemoUser } from "./types";
+import type { DemoEndpoint, DemoUser } from "./types";
+
+const DEMO_PROTOCOLS = [
+	{ protocolId: "vless", label: "VLESS" },
+	{ protocolId: "ss2022", label: "SS2022" },
+] as const;
+
+type DemoUserTab = "user" | "access" | "quotaStatus" | "usageDetails";
+
+function endpointProtocolId(endpoint: DemoEndpoint) {
+	return endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss2022";
+}
+
+function normalizeSelection(ids: string[]) {
+	return [...new Set(ids)].sort();
+}
 
 export function DemoUsersPage() {
 	const { state, undoDeleteUser } = useDemo();
@@ -477,23 +506,61 @@ export function DemoUserDetailsPage() {
 	const { state, updateUser, deleteUser } = useDemo();
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
-	const [confirmOpen, setConfirmOpen] = useState(false);
 	const user = state.users.find((item) => item.id === userId);
+	const [tab, setTab] = useState<DemoUserTab>("user");
+	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [resetTokenOpen, setResetTokenOpen] = useState(false);
+	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
+	const [displayName, setDisplayName] = useState(user?.displayName ?? "");
+	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
+		user?.quotaLimitGb === null ? "unlimited" : "monthly",
+	);
+	const [resetDay, setResetDay] = useState(1);
+	const [resetTzOffsetMinutes, setResetTzOffsetMinutes] = useState(0);
+	const [tier, setTier] = useState<DemoUser["tier"]>(user?.tier ?? "p2");
+	const [locale, setLocale] = useState(user?.locale ?? "en-US");
 	const [selectedIds, setSelectedIds] = useState<string[]>(
 		user?.endpointIds ?? [],
 	);
-	const [subscriptionFormat, setSubscriptionFormat] = useState<
-		"raw" | "mihomo"
-	>("raw");
+	const [subscriptionFormat, setSubscriptionFormat] =
+		useState<SubscriptionFormat>("raw");
+	const [subscriptionOpen, setSubscriptionOpen] = useState(false);
+	const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+	const [subscriptionText, setSubscriptionText] = useState("");
+	const [subscriptionError, setSubscriptionError] = useState<string | null>(
+		null,
+	);
 	const [mihomoMixinYaml, setMihomoMixinYaml] = useState(
 		user?.mihomoMixinYaml ?? "",
+	);
+	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
+	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
+		useState("");
+	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
+		null,
 	);
 	const canWrite = state.session?.role !== "viewer";
 
 	useEffect(() => {
+		setDisplayName(user?.displayName ?? "");
+		setResetPolicy(user?.quotaLimitGb === null ? "unlimited" : "monthly");
+		setResetDay(1);
+		setResetTzOffsetMinutes(0);
+		setTier(user?.tier ?? "p2");
+		setLocale(user?.locale ?? "en-US");
 		setSelectedIds(user?.endpointIds ?? []);
 		setMihomoMixinYaml(user?.mihomoMixinYaml ?? "");
-	}, [user?.endpointIds, user?.mihomoMixinYaml]);
+		setMihomoExtraProxiesYaml("");
+		setMihomoExtraProxyProvidersYaml("");
+		setActiveUsageNodeId(null);
+	}, [
+		user?.displayName,
+		user?.endpointIds,
+		user?.locale,
+		user?.mihomoMixinYaml,
+		user?.quotaLimitGb,
+		user?.tier,
+	]);
 
 	if (!user) {
 		return (
@@ -510,42 +577,200 @@ export function DemoUserDetailsPage() {
 		);
 	}
 
-	const dirty = selectedIds.join("|") !== user.endpointIds.join("|");
-	const mihomoDirty = mihomoMixinYaml !== user.mihomoMixinYaml;
+	const currentUser = user;
 	const assignedEndpoints = state.endpoints.filter((endpoint) =>
-		user.endpointIds.includes(endpoint.id),
+		currentUser.endpointIds.includes(endpoint.id),
 	);
-	const subscriptionPreview =
-		subscriptionFormat === "mihomo"
-			? [
-					"proxies:",
-					...assignedEndpoints.map(
+	const selectedEndpointSet = new Set(selectedIds);
+	const dirty =
+		normalizeSelection(selectedIds).join("|") !==
+		normalizeSelection(currentUser.endpointIds).join("|");
+	const profileDirty =
+		displayName !== currentUser.displayName ||
+		locale !== currentUser.locale ||
+		tier !== currentUser.tier ||
+		(resetPolicy === "unlimited") !== (currentUser.quotaLimitGb === null);
+	const mihomoDirty = mihomoMixinYaml !== currentUser.mihomoMixinYaml;
+
+	function endpointIdsFor(nodeId: string, protocolId: string) {
+		return state.endpoints
+			.filter(
+				(endpoint) =>
+					endpoint.nodeId === nodeId &&
+					endpointProtocolId(endpoint) === protocolId,
+			)
+			.map((endpoint) => endpoint.id);
+	}
+
+	function setEndpointMembership(endpointIds: string[], checked: boolean) {
+		setSelectedIds((prev) => {
+			const next = new Set(prev);
+			for (const endpointId of endpointIds) {
+				if (checked) next.add(endpointId);
+				else next.delete(endpointId);
+			}
+			return [...next];
+		});
+	}
+
+	function toggleCell(nodeId: string, protocolId: string) {
+		const endpointIds = endpointIdsFor(nodeId, protocolId);
+		const allSelected = endpointIds.every((endpointId) =>
+			selectedEndpointSet.has(endpointId),
+		);
+		setEndpointMembership(endpointIds, !allSelected);
+	}
+
+	function toggleRow(nodeId: string) {
+		const endpointIds = state.endpoints
+			.filter((endpoint) => endpoint.nodeId === nodeId)
+			.map((endpoint) => endpoint.id);
+		const allSelected = endpointIds.every((endpointId) =>
+			selectedEndpointSet.has(endpointId),
+		);
+		setEndpointMembership(endpointIds, !allSelected);
+	}
+
+	function toggleColumn(protocolId: string) {
+		const endpointIds = state.endpoints
+			.filter((endpoint) => endpointProtocolId(endpoint) === protocolId)
+			.map((endpoint) => endpoint.id);
+		const allSelected = endpointIds.every((endpointId) =>
+			selectedEndpointSet.has(endpointId),
+		);
+		setEndpointMembership(endpointIds, !allSelected);
+	}
+
+	function toggleAll() {
+		const endpointIds = state.endpoints.map((endpoint) => endpoint.id);
+		const allSelected = endpointIds.every((endpointId) =>
+			selectedEndpointSet.has(endpointId),
+		);
+		setEndpointMembership(endpointIds, !allSelected);
+	}
+
+	const accessCells = useMemo<
+		Record<string, Record<string, AccessMatrixCellState>>
+	>(() => {
+		const selectedForCells = new Set(selectedIds);
+		const next: Record<string, Record<string, AccessMatrixCellState>> = {};
+		for (const node of state.nodes) {
+			next[node.id] = {};
+			for (const protocol of DEMO_PROTOCOLS) {
+				const options = state.endpoints
+					.filter(
 						(endpoint) =>
-							`  - name: ${endpoint.name}\n    type: ${
-								endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
-							}\n    server: ${
-								state.nodes.find((node) => node.id === endpoint.nodeId)
-									?.accessHost ?? endpoint.nodeId
-							}\n    port: ${endpoint.port}`,
-					),
-					user.mihomoMixinYaml.trim()
-						? `# user mixin\n${user.mihomoMixinYaml.trim()}`
-						: "# no user mixin",
-				].join("\n")
-			: assignedEndpoints.length > 0
-				? assignedEndpoints
-						.map(
-							(endpoint) =>
-								`${endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"}://${user.subscriptionToken}@${state.nodes.find((node) => node.id === endpoint.nodeId)?.accessHost ?? endpoint.nodeId}:${endpoint.port}#${endpoint.name}`,
-						)
-						.join("\n")
-				: "# no endpoint access assigned";
+							endpoint.nodeId === node.id &&
+							endpointProtocolId(endpoint) === protocol.protocolId,
+					)
+					.map((endpoint) => ({
+						endpointId: endpoint.id,
+						tag: endpoint.name,
+						port: endpoint.port,
+					}));
+				const selectedEndpointIds = options
+					.map((option) => option.endpointId)
+					.filter((endpointId) => selectedForCells.has(endpointId));
+				next[node.id][protocol.protocolId] =
+					options.length === 0
+						? {
+								value: "disabled",
+								reason: "No endpoint for this node/protocol",
+							}
+						: {
+								value: selectedEndpointIds.length > 0 ? "on" : "off",
+								meta: {
+									options,
+									selectedEndpointIds,
+								},
+							};
+			}
+		}
+		return next;
+	}, [selectedIds, state.endpoints, state.nodes]);
+
+	const usageGroups = state.nodes
+		.map((node) => ({
+			node,
+			endpoints: assignedEndpoints.filter(
+				(endpoint) => endpoint.nodeId === node.id,
+			),
+		}))
+		.filter((group) => group.endpoints.length > 0);
+	const activeUsageGroup =
+		usageGroups.find((group) => group.node.id === activeUsageNodeId) ??
+		usageGroups[0] ??
+		null;
+
+	function buildSubscriptionPreview(format: SubscriptionFormat) {
+		if (assignedEndpoints.length === 0) return "# no endpoint access assigned";
+		if (
+			format === "clash" ||
+			format === "mihomo" ||
+			format === "mihomo_legacy" ||
+			format === "mihomo_provider"
+		) {
+			const providerComment =
+				format === "mihomo_provider"
+					? "# provider mode preview"
+					: format === "mihomo_legacy"
+						? "# legacy mihomo preview"
+						: format === "clash"
+							? "# clash-compatible preview"
+							: "# default mihomo preview";
+			return [
+				providerComment,
+				"proxies:",
+				...assignedEndpoints.map((endpoint) => {
+					const node = state.nodes.find((item) => item.id === endpoint.nodeId);
+					return `  - name: ${endpoint.name}\n    type: ${
+						endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
+					}\n    server: ${node?.accessHost ?? endpoint.nodeId}\n    port: ${
+						endpoint.port
+					}`;
+				}),
+				currentUser.mihomoMixinYaml.trim()
+					? `# user mixin\n${currentUser.mihomoMixinYaml.trim()}`
+					: "# no user mixin",
+			].join("\n");
+		}
+
+		return assignedEndpoints
+			.map((endpoint) => {
+				const node = state.nodes.find((item) => item.id === endpoint.nodeId);
+				return `${
+					endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
+				}://${currentUser.subscriptionToken}@${
+					node?.accessHost ?? endpoint.nodeId
+				}:${endpoint.port}#${endpoint.name}`;
+			})
+			.join("\n");
+	}
+
+	function fetchSubscriptionPreview() {
+		setSubscriptionOpen(true);
+		setSubscriptionLoading(true);
+		setSubscriptionError(null);
+		window.setTimeout(() => {
+			setSubscriptionText(buildSubscriptionPreview(subscriptionFormat));
+			setSubscriptionLoading(false);
+		}, 240);
+	}
+
+	function resetSubscriptionToken() {
+		const suffix = Date.now().toString(36).toUpperCase();
+		updateUser(currentUser.id, {
+			subscriptionToken: `sub_${currentUser.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}_${suffix}`,
+		});
+		setResetTokenOpen(false);
+		pushToast({ variant: "success", message: "Subscription token reset." });
+	}
 
 	return (
 		<div className="space-y-6">
 			<PageHeader
 				title={user.displayName}
-				description={user.email}
+				description="Manage profile, access, quota status, and usage details"
 				meta={
 					<>
 						<Badge variant={userStatusVariant(user.status)}>
@@ -558,136 +783,280 @@ export function DemoUserDetailsPage() {
 					</>
 				}
 				actions={
-					<>
-						<Button asChild variant="ghost" size="sm">
-							<Link to="/demo/users">Back</Link>
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={!canWrite}
+							onClick={() => setResetTokenOpen(true)}
+						>
+							Reset token
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={!canWrite}
+							onClick={() => setResetCredentialsOpen(true)}
+						>
+							Reset credentials
 						</Button>
 						<Button
 							variant="danger"
 							size="sm"
 							disabled={!canWrite}
-							onClick={() => setConfirmOpen(true)}
+							onClick={() => setDeleteOpen(true)}
 						>
-							Delete
+							Delete user
 						</Button>
-					</>
+					</div>
 				}
 			/>
 
-			<div className="grid gap-4 md:grid-cols-3">
-				<div className="xp-panel-muted p-4">
-					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-						Quota
-					</p>
-					<p className="mt-2 font-mono text-lg">
-						{formatGb(user.quotaUsedGb)} / {formatGb(user.quotaLimitGb)}
-					</p>
-				</div>
-				<div className="xp-panel-muted p-4">
-					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-						Locale
-					</p>
-					<p className="mt-2 font-mono text-lg">{user.locale}</p>
-				</div>
-				<div className="xp-panel-muted p-4">
-					<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-						Token
-					</p>
-					<p className="mt-2 truncate font-mono text-sm">
-						{user.subscriptionToken}
-					</p>
+			<div className="overflow-x-auto">
+				<div className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm">
+					{(["user", "access", "quotaStatus", "usageDetails"] as const).map(
+						(item) => (
+							<Button
+								key={item}
+								type="button"
+								size="sm"
+								variant={tab === item ? "primary" : "ghost"}
+								onClick={() => setTab(item)}
+							>
+								{item === "user"
+									? "User"
+									: item === "access"
+										? "Access"
+										: item === "quotaStatus"
+											? "Quota status"
+											: "Usage details"}
+							</Button>
+						),
+					)}
 				</div>
 			</div>
 
-			<section className="xp-card">
-				<div className="xp-card-body">
-					<div className="flex flex-wrap items-start justify-between gap-3">
-						<div>
-							<h2 className="xp-card-title">Quota status</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								Per-node mock enforcement follows the current quota policy.
-							</p>
+			{tab === "user" ? (
+				<div className="space-y-6">
+					<div className="xp-card p-4 space-y-3">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Display name</span>
+							<Input
+								aria-label="Display name"
+								value={displayName}
+								onChange={(event) => setDisplayName(event.target.value)}
+							/>
 						</div>
-						<Badge variant="ghost">{state.quotaPolicy.resetPolicy}</Badge>
-					</div>
-					<div className="xp-table-wrap">
-						<table className="xp-table xp-table-zebra">
-							<thead>
-								<tr>
-									<th>Node</th>
-									<th>Access</th>
-									<th>Remaining</th>
-									<th>Policy weight</th>
-									<th>Last seen</th>
-								</tr>
-							</thead>
-							<tbody>
-								{state.nodes.map((node) => {
-									const endpointCount = state.endpoints.filter(
-										(endpoint) =>
-											endpoint.nodeId === node.id &&
-											user.endpointIds.includes(endpoint.id),
-									).length;
-									const remaining =
-										user.quotaLimitGb === null
+
+						<div className="grid gap-3 md:grid-cols-3">
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Quota reset policy</span>
+								<Select
+									value={resetPolicy}
+									onValueChange={(value) =>
+										setResetPolicy(value as "monthly" | "unlimited")
+									}
+								>
+									<SelectTrigger aria-label="Quota reset policy">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="monthly">monthly</SelectItem>
+										<SelectItem value="unlimited">unlimited</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Day of month</span>
+								<Input
+									type="number"
+									min={1}
+									max={31}
+									disabled={resetPolicy !== "monthly"}
+									value={resetDay}
+									onChange={(event) =>
+										setResetDay(Number(event.target.value || "1"))
+									}
+								/>
+							</div>
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">TZ offset (minutes)</span>
+								<Input
+									type="number"
+									value={resetTzOffsetMinutes}
+									onChange={(event) =>
+										setResetTzOffsetMinutes(Number(event.target.value || "0"))
+									}
+								/>
+							</div>
+						</div>
+
+						<div className="grid gap-3 md:grid-cols-2">
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Tier</span>
+								<Select
+									value={tier}
+									onValueChange={(value) => setTier(value as DemoUser["tier"])}
+								>
+									<SelectTrigger aria-label="Tier">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="p1">p1</SelectItem>
+										<SelectItem value="p2">p2</SelectItem>
+										<SelectItem value="p3">p3</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="xp-field-stack gap-2">
+								<span className="text-sm font-medium">Locale</span>
+								<Input
+									aria-label="Locale"
+									value={locale}
+									onChange={(event) => setLocale(event.target.value)}
+								/>
+							</div>
+						</div>
+
+						<div className="flex items-center gap-3 text-sm">
+							<span className="font-medium">User ID:</span>
+							<span className="font-mono">{user.id}</span>
+						</div>
+						<div className="flex items-center gap-3 text-sm">
+							<span className="font-medium">Subscription token:</span>
+							<span className="font-mono break-all">
+								{user.subscriptionToken}
+							</span>
+						</div>
+
+						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+							<div className="flex flex-wrap items-end gap-3">
+								<div className="xp-field-stack gap-2">
+									<span className="text-sm font-medium">
+										Subscription format
+									</span>
+									<Select
+										value={subscriptionFormat}
+										onValueChange={(value) =>
+											setSubscriptionFormat(value as SubscriptionFormat)
+										}
+									>
+										<SelectTrigger
+											aria-label="Subscription format"
+											data-testid="demo-subscription-format"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="raw">raw</SelectItem>
+											<SelectItem value="clash">clash</SelectItem>
+											<SelectItem value="mihomo">mihomo(default)</SelectItem>
+											<SelectItem value="mihomo_legacy">
+												mihomo(legacy)
+											</SelectItem>
+											<SelectItem value="mihomo_provider">
+												mihomo(provider)
+											</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<CopyButton
+									text={subscriptionUrl(user.subscriptionToken)}
+									label="Copy URL"
+									ariaLabel="Copy subscription URL"
+									className="self-end"
+								/>
+								<Button
+									className="self-end"
+									loading={subscriptionLoading}
+									onClick={fetchSubscriptionPreview}
+								>
+									Fetch
+								</Button>
+							</div>
+							<div className="text-xs text-muted-foreground">
+								Preview opens in a modal. The mock output follows the current
+								Demo seed and selected endpoint access.
+							</div>
+						</div>
+
+						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+							<div className="font-medium text-sm">
+								Mihomo mixin config (per user)
+							</div>
+							<YamlCodeEditor
+								label="mixin_yaml"
+								value={mihomoMixinYaml}
+								onChange={setMihomoMixinYaml}
+								placeholder="Paste Mihomo mixin YAML"
+								minRows={10}
+							/>
+							<YamlCodeEditor
+								label="extra_proxies_yaml"
+								value={mihomoExtraProxiesYaml}
+								onChange={setMihomoExtraProxiesYaml}
+								placeholder="- name: custom-ss\n  type: ss\n  ..."
+								minRows={6}
+							/>
+							<YamlCodeEditor
+								label="extra_proxy_providers_yaml"
+								value={mihomoExtraProxyProvidersYaml}
+								onChange={setMihomoExtraProxyProvidersYaml}
+								placeholder="ProviderA:\n  type: http\n  ..."
+								minRows={6}
+							/>
+							{mihomoDirty ? (
+								<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+									Mihomo profile has unsaved changes.
+								</div>
+							) : null}
+							<div>
+								<Button
+									disabled={!canWrite || !mihomoDirty}
+									onClick={() => {
+										updateUser(user.id, { mihomoMixinYaml });
+										pushToast({
+											variant: "success",
+											message: "Mihomo profile saved.",
+										});
+									}}
+								>
+									Save mihomo mixin
+								</Button>
+							</div>
+						</div>
+
+						<Button
+							disabled={!canWrite || !profileDirty}
+							onClick={() => {
+								updateUser(user.id, {
+									displayName,
+									locale,
+									tier,
+									quotaLimitGb:
+										resetPolicy === "unlimited"
 											? null
-											: Math.max(0, user.quotaLimitGb - user.quotaUsedGb);
-									const blocked =
-										state.quotaPolicy.enforcementMode === "block" &&
-										user.status === "quota_limited" &&
-										endpointCount > 0;
-									return (
-										<tr key={node.id}>
-											<td>
-												<p className="font-medium">{node.name}</p>
-												<p className="font-mono text-xs text-muted-foreground">
-													{node.id}
-												</p>
-											</td>
-											<td>
-												<Badge
-													variant={
-														blocked
-															? "destructive"
-															: endpointCount > 0
-																? "success"
-																: "ghost"
-													}
-												>
-													{blocked
-														? "blocked"
-														: endpointCount > 0
-															? `${endpointCount} endpoint(s)`
-															: "no access"}
-												</Badge>
-											</td>
-											<td className="font-mono text-xs">
-												{formatGb(remaining)}
-											</td>
-											<td className="font-mono text-xs">
-												{state.quotaPolicy.nodeWeights[node.id] ?? 0}
-											</td>
-											<td className="font-mono text-xs">
-												{shortDate(node.lastSeenAt)}
-											</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
+											: (user.quotaLimitGb ??
+												state.quotaPolicy.defaultLimitGb ??
+												100),
+								});
+								pushToast({
+									variant: "success",
+									message: "User saved.",
+								});
+							}}
+						>
+							Save user
+						</Button>
 					</div>
 				</div>
-			</section>
+			) : null}
 
-			<section className="xp-card">
-				<div className="xp-card-body">
-					<div className="flex flex-wrap items-start justify-between gap-3">
-						<div>
-							<h2 className="xp-card-title">Endpoint access</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								Changing access updates the subscription preview immediately
-								after save.
-							</p>
+			{tab === "access" ? (
+				<div className="space-y-4">
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div className="text-sm opacity-70">
+							Selected endpoints: {selectedIds.length}
 						</div>
 						<Button
 							disabled={!dirty || !canWrite}
@@ -696,129 +1065,220 @@ export function DemoUserDetailsPage() {
 								pushToast({ variant: "success", message: "Access saved." });
 							}}
 						>
-							Save access
+							Apply access
 						</Button>
 					</div>
-
-					<div className="grid gap-2 md:grid-cols-2">
-						{state.endpoints.map((endpoint) => (
-							<div
-								key={endpoint.id}
-								className="flex items-start gap-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2"
-							>
-								<Checkbox
-									aria-label={`Toggle access for ${endpoint.name}`}
-									checked={selectedIds.includes(endpoint.id)}
-									disabled={!canWrite}
-									onCheckedChange={(checked) => {
-										setSelectedIds((prev) =>
-											checked
-												? [...new Set([...prev, endpoint.id])]
-												: prev.filter((id) => id !== endpoint.id),
-										);
-									}}
-								/>
-								<span>
-									<span className="block text-sm font-medium">
-										{endpoint.name}
-									</span>
-									<span className="block font-mono text-xs text-muted-foreground">
-										{endpoint.id}
-									</span>
-								</span>
-							</div>
-						))}
-					</div>
-				</div>
-			</section>
-
-			<section className="xp-card">
-				<div className="xp-card-body">
-					<div className="flex flex-wrap items-start justify-between gap-3">
-						<div>
-							<h2 className="xp-card-title">Subscription result</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								Format switch mirrors the live subscription preview workflow.
-							</p>
-						</div>
-						<select
-							className="xp-select w-40"
-							value={subscriptionFormat}
-							aria-label="Subscription format"
-							onChange={(event) =>
-								setSubscriptionFormat(event.target.value as "raw" | "mihomo")
-							}
+					{dirty ? (
+						<output
+							aria-live="polite"
+							className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
 						>
-							<option value="raw">Raw</option>
-							<option value="mihomo">Mihomo</option>
-						</select>
-					</div>
-					<div className="rounded-2xl border border-border/70 bg-muted/35 p-4">
-						<pre className="whitespace-pre-wrap break-words font-mono text-xs">
-							{subscriptionPreview}
-						</pre>
-						<div className="mt-3 flex flex-wrap gap-2">
-							<CopyButton text={subscriptionPreview} label="Copy preview" />
-							<CopyButton
-								text={subscriptionUrl(user.subscriptionToken)}
-								label="Copy URL"
+							<Icon
+								name="tabler:info-circle"
+								className="mt-0.5 size-4 shrink-0 text-primary"
 							/>
-							<Badge variant="ghost">
-								{user.endpointIds.length} endpoint(s) in subscription
-							</Badge>
-						</div>
-					</div>
-				</div>
-			</section>
-
-			<section className="xp-card">
-				<div className="xp-card-body">
-					<div className="flex flex-wrap items-start justify-between gap-3">
-						<div>
-							<h2 className="xp-card-title">Mihomo profile</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								Per-user mixin is stored in the mock user record and reflected
-								in Mihomo preview output.
-							</p>
-						</div>
-						<Button
-							disabled={!mihomoDirty || !canWrite}
-							onClick={() => {
-								updateUser(user.id, { mihomoMixinYaml });
-								pushToast({
-									variant: "success",
-									message: "Mihomo profile saved.",
-								});
-							}}
-						>
-							Save profile
-						</Button>
-					</div>
-					<Textarea
-						value={mihomoMixinYaml}
-						onChange={(event) => setMihomoMixinYaml(event.target.value)}
-						className="min-h-56 font-mono"
-						aria-label="Mihomo mixin config"
-						placeholder="rules:\n  - DOMAIN-SUFFIX,example.net,DIRECT"
+							<p>Access changes are local until Apply access is clicked.</p>
+						</output>
+					) : null}
+					<AccessMatrix
+						nodes={state.nodes.map((node) => ({
+							nodeId: node.id,
+							label: node.name,
+							details: (
+								<div className="space-y-0.5">
+									<div className="text-xs text-muted-foreground">
+										Remaining:{" "}
+										{node.quotaLimitGb === null
+											? "unlimited"
+											: formatGb(
+													Math.max(0, node.quotaLimitGb - node.quotaUsedGb),
+												)}
+									</div>
+								</div>
+							),
+						}))}
+						protocols={[...DEMO_PROTOCOLS]}
+						cells={accessCells}
 						disabled={!canWrite}
+						onToggleCell={toggleCell}
+						onToggleRow={toggleRow}
+						onToggleColumn={toggleColumn}
+						onToggleAll={toggleAll}
+						onToggleCellEndpoint={(nodeId, protocolId, endpointId, checked) => {
+							if (!endpointIdsFor(nodeId, protocolId).includes(endpointId)) {
+								return;
+							}
+							setEndpointMembership([endpointId], checked);
+						}}
 					/>
-					{mihomoDirty ? (
-						<div className="xp-alert xp-alert-warning">
-							Mihomo profile has unsaved changes.
+				</div>
+			) : null}
+
+			{tab === "quotaStatus" ? (
+				<div className="xp-card p-4 space-y-3">
+					{state.quotaPolicy.enforcementMode === "block" &&
+					user.status === "quota_limited" ? (
+						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+							Quota status is partial for access decisions because this user is
+							quota-limited.
 						</div>
 					) : null}
+					{state.nodes.map((node) => {
+						const endpointCount = state.endpoints.filter(
+							(endpoint) =>
+								endpoint.nodeId === node.id &&
+								user.endpointIds.includes(endpoint.id),
+						).length;
+						const quotaLimitGb = user.quotaLimitGb;
+						const remaining =
+							quotaLimitGb === null
+								? null
+								: Math.max(0, quotaLimitGb - user.quotaUsedGb);
+						return (
+							<div
+								key={node.id}
+								className="rounded-2xl border border-border/70 p-3 space-y-1"
+							>
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<div className="font-medium">{node.id}</div>
+									<Badge variant={endpointCount > 0 ? "success" : "ghost"}>
+										{endpointCount > 0
+											? `${endpointCount} endpoint(s)`
+											: "no access"}
+									</Badge>
+								</div>
+								<div className="text-sm">
+									Used {formatGb(user.quotaUsedGb)} /{" "}
+									{formatGb(user.quotaLimitGb)}
+								</div>
+								<div className="text-sm opacity-70">
+									Remaining: {formatGb(remaining)}
+								</div>
+							</div>
+						);
+					})}
 				</div>
-			</section>
+			) : null}
+
+			{tab === "usageDetails" ? (
+				<div className="space-y-4">
+					{usageGroups.length > 0 ? (
+						<>
+							<div className="overflow-x-auto">
+								<div
+									className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
+									role="tablist"
+									aria-label="Usage detail nodes"
+								>
+									{usageGroups.map((group) => {
+										const selected =
+											group.node.id === activeUsageGroup?.node.id;
+										return (
+											<Button
+												key={group.node.id}
+												type="button"
+												size="sm"
+												variant={selected ? "primary" : "ghost"}
+												role="tab"
+												aria-selected={selected}
+												title={`${group.node.name} · ${group.node.id}`}
+												onClick={() => setActiveUsageNodeId(group.node.id)}
+											>
+												{group.node.name}
+											</Button>
+										);
+									})}
+								</div>
+							</div>
+							{activeUsageGroup ? (
+								<div className="xp-card p-4 space-y-4">
+									<div>
+										<h2 className="xp-card-title">
+											Usage details · {activeUsageGroup.node.name}
+										</h2>
+										<p className="mt-1 text-sm text-muted-foreground">
+											{activeUsageGroup.node.id} ·{" "}
+											{activeUsageGroup.node.accessHost}
+										</p>
+									</div>
+									<div className="xp-table-wrap">
+										<table className="xp-table xp-table-zebra">
+											<thead>
+												<tr>
+													<th>Endpoint</th>
+													<th>Window</th>
+													<th>Inbound IPs</th>
+													<th>Transfer</th>
+													<th>Last probe</th>
+												</tr>
+											</thead>
+											<tbody>
+												{activeUsageGroup.endpoints.map((endpoint, index) => (
+													<tr key={endpoint.id}>
+														<td>
+															<p className="font-medium">{endpoint.name}</p>
+															<p className="font-mono text-xs text-muted-foreground">
+																{endpoint.id}
+															</p>
+														</td>
+														<td className="font-mono text-xs">24h</td>
+														<td className="font-mono text-xs">
+															{3 + index * 2}
+														</td>
+														<td className="font-mono text-xs">
+															{formatGb(Math.round(user.quotaUsedGb / 3))}
+														</td>
+														<td className="font-mono text-xs">
+															{shortDate(endpoint.lastProbeAt)}
+														</td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								</div>
+							) : null}
+						</>
+					) : (
+						<PageState
+							variant="empty"
+							title="No usage groups"
+							description="This user has no active node memberships to aggregate inbound IP usage from."
+						/>
+					)}
+				</div>
+			) : null}
 
 			<ConfirmDialog
-				open={confirmOpen}
-				title={`Delete ${user.displayName}?`}
+				open={resetTokenOpen}
+				title="Reset subscription token"
+				description="This invalidates the old token in the mock state immediately."
+				confirmLabel="Reset"
+				onCancel={() => setResetTokenOpen(false)}
+				onConfirm={resetSubscriptionToken}
+			/>
+
+			<ConfirmDialog
+				open={resetCredentialsOpen}
+				title="Reset credentials"
+				description="This rotates derived credentials for the user in the demo flow."
+				confirmLabel="Reset"
+				onCancel={() => setResetCredentialsOpen(false)}
+				onConfirm={() => {
+					setResetCredentialsOpen(false);
+					pushToast({ variant: "success", message: "Credentials reset." });
+				}}
+			/>
+
+			<ConfirmDialog
+				open={deleteOpen}
+				title="Delete user"
 				description="This removes the user from the mock state. You can undo from the users list."
 				confirmLabel="Delete user"
-				onCancel={() => setConfirmOpen(false)}
+				onCancel={() => setDeleteOpen(false)}
 				onConfirm={() => {
 					deleteUser(user.id);
-					setConfirmOpen(false);
+					setDeleteOpen(false);
 					pushToast({
 						variant: "info",
 						message: "User deleted. Undo is available.",
@@ -826,6 +1286,24 @@ export function DemoUserDetailsPage() {
 					navigate({ to: "/demo/users" });
 				}}
 			/>
+
+			<SubscriptionPreviewDialog
+				open={subscriptionOpen}
+				onClose={() => setSubscriptionOpen(false)}
+				subscriptionUrl={subscriptionUrl(user.subscriptionToken)}
+				format={subscriptionFormat}
+				loading={subscriptionLoading}
+				content={subscriptionText}
+				error={subscriptionError}
+			/>
+
+			<div className="text-xs text-muted-foreground">
+				Tip: use the Access tab to control endpoint membership directly in
+				user/node/endpoint mode.
+			</div>
+			<Button asChild variant="ghost" size="sm">
+				<Link to="/demo/users">Back to users</Link>
+			</Button>
 		</div>
 	);
 }
