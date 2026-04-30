@@ -75,6 +75,42 @@ export const MainFlow: Story = {
 		).toBeInTheDocument();
 		await userEvent.type(await canvas.findByLabelText("Search users"), "sato");
 		await expect(await canvas.findByText("佐藤 未来")).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("link", { name: "佐藤 未来" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "佐藤 未来" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Reset token" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Reset credentials" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Access" }),
+		);
+		await expect(
+			await canvas.findByRole("button", { name: "Apply access" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Quota status" }),
+		);
+		await expect(await canvas.findByText("node-tokyo-1")).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Usage details" }),
+		);
+		await expect(
+			await canvas.findByText(/Usage details ·/),
+		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^User$/ }),
+		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Fetch" }));
+		await expect(
+			await screen.findByText("Subscription preview"),
+		).toBeInTheDocument();
+		await userEvent.click(await screen.findByRole("button", { name: "Close" }));
 
 		await userEvent.click(
 			await canvas.findByRole("link", { name: "Quota policy" }),
