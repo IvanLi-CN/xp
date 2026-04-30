@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, screen, userEvent, within } from "@storybook/test";
 
 function Empty() {
 	return <></>;
@@ -40,6 +40,21 @@ export const MainFlow: Story = {
 				"231 GiB finite used / 420 GiB, 1 unlimited user",
 			),
 		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Open demo settings" }),
+		);
+		await userEvent.click(await screen.findByRole("radio", { name: "Dark" }));
+		await expect(document.documentElement).toHaveAttribute(
+			"data-theme",
+			"xp-dark",
+		);
+		await userEvent.click(
+			await screen.findByRole("radio", { name: "Compact" }),
+		);
+		await expect(document.documentElement).toHaveAttribute(
+			"data-density",
+			"compact",
+		);
 
 		await userEvent.click(
 			await canvas.findByRole("link", { name: "New endpoint" }),

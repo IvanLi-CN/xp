@@ -2,7 +2,13 @@ import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
+import { useUiPrefs } from "@/components/UiPrefs";
 import { Badge } from "@/components/ui/badge";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import {
 	Select,
 	SelectContent,
@@ -10,6 +16,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
@@ -58,6 +65,17 @@ const navGroups = [
 	},
 ] as const;
 
+const themeOptions = [
+	{ value: "system", label: "System", icon: "tabler:device-desktop" },
+	{ value: "light", label: "Light", icon: "tabler:sun" },
+	{ value: "dark", label: "Dark", icon: "tabler:moon" },
+] as const;
+
+const densityOptions = [
+	{ value: "comfortable", label: "Comfortable", icon: "tabler:layout-grid" },
+	{ value: "compact", label: "Compact", icon: "tabler:layout-list" },
+] as const;
+
 export function DemoLoginRoute() {
 	return (
 		<DemoProvider>
@@ -83,6 +101,7 @@ export function DemoAppRoute() {
 function DemoShell({ children }: { children: ReactNode }) {
 	const navigate = useNavigate();
 	const { state, logout, resetScenario } = useDemo();
+	const prefs = useUiPrefs();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const scenario = getScenario(state.scenarioId);
 	const degradedNodes = state.nodes.filter((node) => node.status !== "healthy");
@@ -107,6 +126,93 @@ function DemoShell({ children }: { children: ReactNode }) {
 			</>
 		),
 		[activeAlerts, state.nodes, state.session?.role],
+	);
+
+	const settingsMenu = (
+		<Popover>
+			<PopoverTrigger asChild>
+				<Button variant="secondary" size="sm" aria-label="Open demo settings">
+					<Icon name="tabler:settings" ariaLabel="Settings" />
+					<span className="hidden sm:inline">Settings</span>
+				</Button>
+			</PopoverTrigger>
+			<PopoverContent align="end" className="w-[19rem] space-y-4 p-4">
+				<div className="space-y-2">
+					<p className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Theme
+					</p>
+					<div
+						role="radiogroup"
+						aria-label="Demo theme"
+						className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1"
+					>
+						{themeOptions.map((option) => (
+							<label
+								key={option.value}
+								className={cn(
+									"relative flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+									prefs.theme === option.value &&
+										"bg-background text-foreground shadow-sm",
+								)}
+							>
+								<input
+									type="radio"
+									name="demo-theme"
+									value={option.value}
+									checked={prefs.theme === option.value}
+									onChange={() => prefs.setTheme(option.value)}
+									className="absolute inset-0 cursor-pointer opacity-0"
+								/>
+								<Icon
+									name={option.icon}
+									className="pointer-events-none size-4"
+								/>
+								<span className="pointer-events-none">{option.label}</span>
+							</label>
+						))}
+					</div>
+				</div>
+
+				<div className="space-y-2">
+					<p className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+						Density
+					</p>
+					<div
+						role="radiogroup"
+						aria-label="Demo density"
+						className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1"
+					>
+						{densityOptions.map((option) => (
+							<label
+								key={option.value}
+								className={cn(
+									"relative flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+									prefs.density === option.value &&
+										"bg-background text-foreground shadow-sm",
+								)}
+							>
+								<input
+									type="radio"
+									name="demo-density"
+									value={option.value}
+									checked={prefs.density === option.value}
+									onChange={() => prefs.setDensity(option.value)}
+									className="absolute inset-0 cursor-pointer opacity-0"
+								/>
+								<Icon
+									name={option.icon}
+									className="pointer-events-none size-4"
+								/>
+								<span className="pointer-events-none">{option.label}</span>
+							</label>
+						))}
+					</div>
+				</div>
+				<p className="px-1 text-xs leading-relaxed text-muted-foreground">
+					Saved to this browser for repeatable demo reviews.
+				</p>
+			</PopoverContent>
+		</Popover>
 	);
 
 	const nav = (
@@ -200,6 +306,7 @@ function DemoShell({ children }: { children: ReactNode }) {
 										))}
 									</SelectContent>
 								</Select>
+								{settingsMenu}
 								<Button
 									variant="secondary"
 									size="sm"
