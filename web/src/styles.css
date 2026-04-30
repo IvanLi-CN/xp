@@ -230,7 +230,7 @@ html[data-density="compact"] {
 	}
 
 	.xp-badge-success {
-		@apply border-transparent bg-success/14 text-success;
+		@apply border-success/40 bg-success/22 text-success-foreground ring-1 ring-success/25 dark:bg-success/18 dark:text-success;
 	}
 
 	.xp-badge-warning {
