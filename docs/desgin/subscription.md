@@ -149,7 +149,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`
-- 地区组继续通过 `use:` 消费 provider；`🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为地区接入点目标。
+- `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
 - `🛣️ JP/HK/TW` 只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；无外部 provider 时回落 `DIRECT`。
 - 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯/🛣️ {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
@@ -179,6 +179,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
 - 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
 - `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回的规范化结果会自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），用户模板仅保留偏好层与额外静态内容。
+- `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
 - 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`；同一 base 的 system provider payload 顺序必须保证过滤后 ss-chain 在 reality-chain 前。
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。

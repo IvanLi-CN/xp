@@ -608,6 +608,10 @@ pub fn build_mihomo_provider_yaml_with_node_probes(
         &generated_proxy_name_set,
         &generated_system_provider_name_set,
     );
+    inject_mihomo_provider_high_quality_reality_access(
+        &mut root,
+        &generated_system_provider_name_set,
+    );
     prune_unknown_proxy_provider_names_in_use_fields(&mut root, &provider_name_set);
     let proxy_group_name_set = collect_proxy_group_names(&root);
     prune_unknown_proxy_names_in_proxies_fields(&mut root, &proxy_name_set, &proxy_group_name_set);
@@ -1393,6 +1397,111 @@ fn inject_mihomo_provider_region_groups(
                 serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(select_name.clone())]),
             );
             groups.push(serde_yaml::Value::Mapping(alias_map));
+        }
+    }
+}
+
+fn provider_reality_access_names(
+    proxy_name_set: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    proxy_name_set
+        .iter()
+        .filter_map(|name| {
+            let (kind, _) = classify_proxy_ref_name(name)?;
+            matches!(kind, ProxyRefKind::Reality).then_some(name.clone())
+        })
+        .collect()
+}
+
+fn provider_ss_direct_names(proxy_name_set: &std::collections::BTreeSet<String>) -> Vec<String> {
+    proxy_name_set
+        .iter()
+        .filter_map(|name| {
+            let (kind, _) = classify_proxy_ref_name(name)?;
+            matches!(kind, ProxyRefKind::SsDirect).then_some(name.clone())
+        })
+        .collect()
+}
+
+fn merge_mihomo_regex(existing: Option<&str>, exact_names: &[String]) -> Option<String> {
+    if exact_names.is_empty() {
+        return existing.map(ToString::to_string);
+    }
+
+    let exact_filter = exact_proxy_names_filter(exact_names);
+    match existing {
+        Some(existing) if !existing.is_empty() => {
+            Some(format!("(?:{existing})|(?:{exact_filter})"))
+        }
+        _ => Some(exact_filter),
+    }
+}
+
+fn inject_mihomo_provider_high_quality_reality_access(
+    root: &mut serde_yaml::Mapping,
+    provider_proxy_name_set: &std::collections::BTreeSet<String>,
+) {
+    let reality_names = provider_reality_access_names(provider_proxy_name_set);
+    if reality_names.is_empty() {
+        return;
+    }
+
+    let ss_direct_names = provider_ss_direct_names(provider_proxy_name_set);
+    let Some(serde_yaml::Value::Sequence(groups)) =
+        root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
+    else {
+        return;
+    };
+
+    for group in groups {
+        let serde_yaml::Value::Mapping(map) = group else {
+            continue;
+        };
+        if map
+            .get(serde_yaml::Value::String("name".to_string()))
+            .and_then(serde_yaml::Value::as_str)
+            != Some("🔒 高质量")
+        {
+            continue;
+        }
+
+        let use_key = serde_yaml::Value::String("use".to_string());
+        match map.get_mut(&use_key) {
+            Some(serde_yaml::Value::Sequence(use_values)) => {
+                if !use_values
+                    .iter()
+                    .any(|value| value.as_str() == Some(MIHOMO_SYSTEM_PROVIDER_NAME))
+                {
+                    use_values.insert(
+                        0,
+                        serde_yaml::Value::String(MIHOMO_SYSTEM_PROVIDER_NAME.to_string()),
+                    );
+                }
+            }
+            _ => {
+                map.insert(
+                    use_key,
+                    serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+                        MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+                    )]),
+                );
+            }
+        }
+
+        let filter_key = serde_yaml::Value::String("filter".to_string());
+        if let Some(filter) = merge_mihomo_regex(
+            map.get(&filter_key).and_then(serde_yaml::Value::as_str),
+            &reality_names,
+        ) {
+            map.insert(filter_key, serde_yaml::Value::String(filter));
+        }
+
+        let exclude_key = serde_yaml::Value::String("exclude-filter".to_string());
+        if let Some(exclude_filter) = merge_mihomo_regex(
+            map.get(&exclude_key).and_then(serde_yaml::Value::as_str),
+            &ss_direct_names,
+        ) {
+            map.insert(exclude_key, serde_yaml::Value::String(exclude_filter));
         }
     }
 }
@@ -3965,7 +4074,16 @@ providerB:
         ];
         let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
         let profile = UserMihomoProfile {
-            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🔒 高质量"
+    type: select
+    use: ["providerA"]
+    exclude-filter: "剩余|到期"
+rules: []
+"#
+            .to_string(),
             extra_proxies_yaml: "".to_string(),
             extra_proxy_providers_yaml: r#"
 providerA:
@@ -4099,6 +4217,34 @@ providerA:
                 .collect::<Vec<_>>(),
             vec!["🔒 Japan"]
         );
+
+        let high_quality_group = proxy_groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 高质量"))
+            .expect("provider route should keep high quality group");
+        assert_eq!(
+            high_quality_group
+                .get("use")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
+        );
+        let high_quality_filter = high_quality_group
+            .get("filter")
+            .and_then(Value::as_str)
+            .expect("high quality group should include provider-hosted reality access");
+        assert!(high_quality_filter.contains("Tokyo\\-A\\-reality"));
+        assert!(!high_quality_filter.contains("Tokyo\\-A\\-ss|"));
+        let high_quality_exclude_filter = high_quality_group
+            .get("exclude-filter")
+            .and_then(Value::as_str)
+            .expect("high quality group should exclude provider-hosted direct ss proxies");
+        assert!(high_quality_exclude_filter.contains("剩余|到期"));
+        assert!(high_quality_exclude_filter.contains("Tokyo\\-A\\-ss"));
+        assert!(!high_quality_exclude_filter.contains("Tokyo\\-A\\-reality"));
     }
 
     #[test]
