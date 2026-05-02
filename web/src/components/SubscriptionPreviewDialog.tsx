@@ -779,10 +779,11 @@ export function SubscriptionPreviewDialog({
 
 	const headerBtnBase =
 		"min-h-11 sm:min-h-10 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
+	const headerIconBtnBase =
+		"flex size-11 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:size-10";
 	const searchBtnBase =
 		"min-h-11 sm:min-h-10 rounded-xl border border-border bg-muted px-4 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
-	const closePadClass = "pr-3 sm:pr-6";
 
 	const mutedTextClass = "text-muted-foreground";
 	const mutedPlaceholderClass = "placeholder:text-muted-foreground";
@@ -806,27 +807,9 @@ export function SubscriptionPreviewDialog({
 					Inspect the generated subscription content and copy derived connection
 					fields.
 				</DialogDescription>
-				{/* Keep the close action pinned to the top-right for all sizes. */}
-				<div className="sticky top-0 z-30 h-0 pointer-events-none">
-					<div
-						className={["flex justify-end pt-[13px]", closePadClass].join(" ")}
-					>
-						<button
-							type="button"
-							className="pointer-events-auto flex size-11 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
-							aria-label="Close"
-							data-sub-preview-close
-							onClick={() => {
-								onClose();
-							}}
-						>
-							<Icon name="tabler:x" size={20} ariaLabel="Close" />
-						</button>
-					</div>
-				</div>
 
 				<div className={[contentPadClass, "pt-[13px] pb-[18px]"].join(" ")}>
-					<div className="grid gap-3 pr-14 lg:grid-cols-[minmax(0,1fr)_auto]">
+					<div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
 						<div className="flex min-h-11 min-w-0 flex-wrap items-center gap-3">
 							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
@@ -859,6 +842,17 @@ export function SubscriptionPreviewDialog({
 								}}
 							>
 								Copy content
+							</button>
+							<button
+								type="button"
+								className={headerIconBtnBase}
+								aria-label="Close"
+								data-sub-preview-close
+								onClick={() => {
+									onClose();
+								}}
+							>
+								<Icon name="tabler:x" size={20} ariaLabel="Close" />
 							</button>
 						</div>
 
