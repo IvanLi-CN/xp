@@ -1,14 +1,8 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAdminConfig, patchAdminConfig } from "../api/adminConfig";
+import { fetchAdminConfig } from "../api/adminConfig";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { ToastProvider } from "../components/Toast";
@@ -65,22 +59,6 @@ function setupMocks() {
 		ip_geo_origin: "https://api.country.is",
 		admin_token_present: true,
 		admin_token_masked: "********",
-		mihomo_delivery_mode: "legacy",
-	});
-	vi.mocked(patchAdminConfig).mockResolvedValue({
-		bind: "127.0.0.1:62416",
-		xray_api_addr: "127.0.0.1:10085",
-		data_dir: "./data",
-		node_name: "node-1",
-		access_host: "edge.example.com",
-		api_base_url: "https://api.example.com",
-		quota_poll_interval_secs: 10,
-		quota_auto_unban: true,
-		ip_geo_enabled: false,
-		ip_geo_origin: "https://api.country.is",
-		admin_token_present: true,
-		admin_token_masked: "********",
-		mihomo_delivery_mode: "provider",
 	});
 }
 
@@ -94,26 +72,12 @@ describe("ServiceConfigPage", () => {
 		vi.clearAllMocks();
 	});
 
-	it("shows current mihomo delivery mode in the summary", async () => {
+	it("shows provider-only mihomo delivery in the summary", async () => {
 		renderPage();
-		expect(await screen.findByText("mihomo default")).toBeTruthy();
-		expect(await screen.findByText("Current default: legacy")).toBeTruthy();
-	});
-
-	it("saves updated mihomo delivery mode", async () => {
-		renderPage();
-
-		fireEvent.click(await screen.findByLabelText("Mihomo default delivery"));
-		fireEvent.click(await screen.findByText("provider"));
-		fireEvent.click(
-			await screen.findByRole("button", { name: "Save default route" }),
-		);
-
-		await waitFor(() => {
-			expect(patchAdminConfig).toHaveBeenCalledWith("admintoken", {
-				mihomo_delivery_mode: "provider",
-			});
-		});
-		expect(await screen.findByText("Current default: provider")).toBeTruthy();
+		expect(await screen.findByText("mihomo")).toBeTruthy();
+		expect(
+			await screen.findByText(/Mihomo uses provider-only delivery/),
+		).toBeTruthy();
+		expect(screen.queryByText("Mihomo delivery")).toBeNull();
 	});
 });

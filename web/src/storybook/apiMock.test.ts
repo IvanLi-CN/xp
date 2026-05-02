@@ -337,7 +337,7 @@ describe("storybook api mock", () => {
 		expect(text).toContain(token);
 	});
 
-	it("supports admin config mihomo delivery mode patch", async () => {
+	it("rejects removed admin config patch route", async () => {
 		const mock = createMockApi();
 
 		const patchRes = await mock.handle(
@@ -349,20 +349,14 @@ describe("storybook api mock", () => {
 				}),
 			}),
 		);
-		expect(patchRes.ok).toBe(true);
-		const patchData = (await patchRes.json()) as {
-			mihomo_delivery_mode: string;
-		};
-		expect(patchData.mihomo_delivery_mode).toBe("provider");
+		expect(patchRes.status).toBe(404);
 
 		const getRes = await mock.handle(
 			jsonRequest("/api/admin/config", { method: "GET" }),
 		);
 		expect(getRes.ok).toBe(true);
-		const getData = (await getRes.json()) as {
-			mihomo_delivery_mode: string;
-		};
-		expect(getData.mihomo_delivery_mode).toBe("provider");
+		const getData = (await getRes.json()) as Record<string, unknown>;
+		expect(getData.mihomo_delivery_mode).toBeUndefined();
 	});
 
 	it("supports explicit mihomo provider routes", async () => {
@@ -397,6 +391,27 @@ describe("storybook api mock", () => {
 		);
 		expect(providerSystemRes.ok).toBe(true);
 		expect(await providerSystemRes.text()).toContain("mock-system");
+	});
+
+	it("returns not found for removed mihomo legacy route", async () => {
+		const mock = createMockApi();
+		const usersRes = await mock.handle(
+			jsonRequest("/api/admin/users", { method: "GET" }),
+		);
+		expect(usersRes.ok).toBe(true);
+		const usersData = (await usersRes.json()) as {
+			items: Array<{ subscription_token: string }>;
+		};
+		const token = usersData.items[0]?.subscription_token ?? "";
+		expect(token.length).toBeGreaterThan(0);
+
+		const legacyRes = await mock.handle(
+			jsonRequest(`/api/sub/${encodeURIComponent(token)}/mihomo/legacy`, {
+				method: "GET",
+				headers: { Accept: "text/plain" },
+			}),
+		);
+		expect(legacyRes.status).toBe(404);
 	});
 
 	it("supports mihomo redact preview endpoint", async () => {

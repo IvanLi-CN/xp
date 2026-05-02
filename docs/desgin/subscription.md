@@ -5,8 +5,8 @@
 - `GET /api/sub/{subscription_token}`：默认返回 Base64（便于大多数客户端直接导入）
 - `GET /api/sub/{subscription_token}?format=raw`：返回纯 URI（逐行）
 - `GET /api/sub/{subscription_token}?format=clash`：返回 Clash YAML（Mihomo/Clash.Meta）
-- `GET /api/sub/{subscription_token}?format=mihomo`：canonical Mihomo URL；返回 legacy 或 provider 主配置（未配置 mixin 时回退 clash）
-- `GET /api/sub/{subscription_token}/mihomo/legacy`：显式 legacy Mihomo 主配置
+- `GET /api/sub/{subscription_token}?format=mihomo`：canonical Mihomo URL；返回 provider 主配置（未配置 mixin 时回退 clash）
+- `GET /api/sub/{subscription_token}/mihomo/legacy`：已移除，不再返回 Mihomo 主配置
 - `GET /api/sub/{subscription_token}/mihomo/provider`：显式 provider Mihomo 主配置
 - `GET /api/sub/{subscription_token}/mihomo/provider/system`：provider payload（`proxies:` YAML）
 
@@ -136,38 +136,38 @@ MVP 建议输出“可直接导入”的最小 YAML：
   注释/anchors 不保证保留）。
 - 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，保存会返回 `invalid_request`，避免静默覆盖另一份输入。
 
-### 6.2 双轨 delivery mode
+### 6.2 Provider-only delivery
 
-- 新增全局持久化设置 `mihomo_delivery_mode=legacy|provider`，默认 `legacy`。
-- `GET /api/sub/{subscription_token}?format=mihomo` 跟随该设置返回对应主配置。
-- `/mihomo/legacy` 与 `/mihomo/provider` 始终返回固定方案，便于回归。
+- `GET /api/sub/{subscription_token}?format=mihomo` 固定返回 provider 主配置。
+- `/mihomo/provider` 返回同一 provider 主配置，便于回归。
+- `/mihomo/legacy` 不再是可用订阅路径。
 - provider 主配置中的系统 provider 名称固定为 `xp-system-generated`。
 
 ### 6.3 Provider 方案
 
-- provider 方案中，系统直连 SS 节点（`{base}-ss`）移入 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload；系统 Reality 直连节点（`{base}-reality`）继续保留在主配置顶层 `proxies`，便于显式直连引用保持可见。
+- provider 方案中，系统直连节点（`{base}-ss` / `{base}-reality`）与链式节点（`{base}-ss-chain` / `{base}-reality-chain`）都由 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload 动态承载。
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
-  - `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
-- `🛣️ JP/HK/TW` 与地区组继续通过 `use:` 消费 provider。
+  - `proxies` = `extra_proxies_yaml`
+- 地区组继续通过 `use:` 消费 provider；用户可见系统候选只匹配 `*-chain`。
+- `🛣️ JP/HK/TW` 只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；无外部 provider 时回落 `DIRECT`。
 - 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯/🛣️ {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
-- `🛬 {base}` 优先使用 Reality 直连：
-  - 存在 `{base}-reality` 时，优先引用主配置顶层 `{base}-reality`，并在存在 `{base}-chain` 时把它作为回落候选
-  - 仅当不存在 `{base}-reality` 且存在 `{base}-ss` 时，才保留 `{base}-chain` / `{base}-ss` 的旧回落路径
+- `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
-- provider 方案仍会隐藏系统 `{base}-ss` 直连，不承诺手写 `{base}-ss` 业务引用继续稳定；`{base}-reality` 的显式引用应保持可见且可用。
+- provider 方案隐藏系统直连节点，不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定。
 
-### 6.4 Legacy 渲染规则
+### 6.4 Provider 渲染规则
 
 - 渲染时忽略 mixin 中的 `proxies` 与 `proxy-providers`，由系统重建：
   - 系统节点：
     - reality direct：`<node_slug>-reality`
     - ss direct：`<node_slug>-ss`
-    - ss chain：`<node_slug>-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
+    - ss chain：`<node_slug>-ss-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
+    - reality chain：`<node_slug>-reality-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
   - 用户扩展：
-    - 追加 `extra_proxies_yaml` 到最终 `proxies`
-    - 以 `extra_proxy_providers_yaml` 作为最终 `proxy-providers`
+    - 追加 `extra_proxies_yaml` 到主配置顶层 `proxies`
+    - 以 `extra_proxy_providers_yaml` 追加到最终 `proxy-providers`
 - 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
 - 所有 provider 名称会注入固定外层候选组 `🛣️ JP/HK/TW` 的 `use` 列表，并用单一 filter 在日本/香港/台湾节点中选最低延迟的外层入口。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
@@ -179,9 +179,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
 - 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
 - `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回的规范化结果会自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），用户模板仅保留偏好层与额外静态内容。
-- 落地组生成策略：
-  - 若存在 `{base}-reality`：优先放 `{base}-reality`，并在存在 `{base}-chain` 时把它作为回落候选
-  - 否则若存在 `{base}-ss`：沿用 `{base}-chain` 与 `{base}-ss` 的兼容回落路径
+- 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`。
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
 

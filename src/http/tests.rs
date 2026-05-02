@@ -2412,7 +2412,7 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["api_base_url"], "https://127.0.0.1:62416");
     assert_eq!(json["quota_poll_interval_secs"], 10);
     assert_eq!(json["quota_auto_unban"], true);
-    assert_eq!(json["mihomo_delivery_mode"], "legacy");
+    assert!(json.get("mihomo_delivery_mode").is_none());
 
     assert_eq!(json["admin_token_present"], true);
     assert_eq!(json["admin_token_masked"], "********");
@@ -2420,12 +2420,11 @@ async fn admin_config_returns_safe_view_and_masks_token() {
 }
 
 #[tokio::test]
-async fn admin_config_patch_updates_mihomo_delivery_mode() {
+async fn admin_config_patch_is_removed() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
     let res = app
-        .clone()
         .oneshot(req_authed_json(
             "PATCH",
             "/api/admin/config",
@@ -2435,17 +2434,7 @@ async fn admin_config_patch_updates_mihomo_delivery_mode() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let json = body_json(res).await;
-    assert_eq!(json["mihomo_delivery_mode"], "provider");
-
-    let res = app
-        .oneshot(req_authed("GET", "/api/admin/config"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let json = body_json(res).await;
-    assert_eq!(json["mihomo_delivery_mode"], "provider");
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
@@ -4262,7 +4251,7 @@ async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
 }
 
 #[tokio::test]
-async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
+async fn mihomo_subscription_paths_are_provider_only() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
@@ -4270,6 +4259,45 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
     let token = fixtures.subscription_token.clone();
+
+    let vless_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": fixtures.node_id.clone(),
+              "kind": "vless_reality_vision_tcp",
+              "port": 8443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(vless_res.status(), StatusCode::OK);
+    let vless_endpoint_id = body_json(vless_res).await["endpoint_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let access_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/access"),
+            json!({
+              "items": [
+                { "endpoint_id": fixtures.endpoint_id.clone() },
+                { "endpoint_id": vless_endpoint_id }
+              ]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(access_res.status(), StatusCode::OK);
 
     let put_res = app
         .clone()
@@ -4285,48 +4313,6 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
         .await
         .unwrap();
     assert_eq!(put_res.status(), StatusCode::OK);
-
-    let legacy_res = app
-        .clone()
-        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
-        .await
-        .unwrap();
-    assert_eq!(legacy_res.status(), StatusCode::OK);
-    let legacy_yaml: YamlValue = serde_yaml::from_str(&body_text(legacy_res).await).unwrap();
-    let legacy_providers = legacy_yaml
-        .get("proxy-providers")
-        .and_then(YamlValue::as_mapping)
-        .expect("legacy output should still include proxy-providers root");
-    assert!(
-        !legacy_providers.contains_key(YamlValue::String(
-            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
-        )),
-        "legacy route must not inject provider delivery metadata"
-    );
-    let legacy_proxy_names = legacy_yaml
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .unwrap()
-        .iter()
-        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
-        .collect::<Vec<_>>();
-    assert!(
-        legacy_proxy_names.iter().any(|name| name.ends_with("-ss")),
-        "legacy output should keep direct ss proxies inline"
-    );
-
-    let patch_res = app
-        .clone()
-        .oneshot(req_authed_json(
-            "PATCH",
-            "/api/admin/config",
-            json!({
-                "mihomo_delivery_mode": "provider"
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(patch_res.status(), StatusCode::OK);
 
     let provider_res = app
         .clone()
@@ -4363,14 +4349,11 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
     assert!(
         provider_proxy_names
             .iter()
-            .any(|name| name.ends_with("-chain")),
-        "provider main config should keep glue chain proxies"
-    );
-    assert!(
-        provider_proxy_names
-            .iter()
-            .all(|name| !name.ends_with("-ss")),
-        "provider main config should move system direct ss proxies into provider payload"
+            .all(|name| !name.ends_with("-ss")
+                && !name.ends_with("-ss-chain")
+                && !name.ends_with("-reality")
+                && !name.ends_with("-reality-chain")),
+        "provider main config should move generated system proxies into provider payload"
     );
 
     let explicit_legacy_res = app
@@ -4378,22 +4361,7 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
         .oneshot(req("GET", &format!("/api/sub/{token}/mihomo/legacy")))
         .await
         .unwrap();
-    assert_eq!(explicit_legacy_res.status(), StatusCode::OK);
-    let explicit_legacy_yaml: YamlValue =
-        serde_yaml::from_str(&body_text(explicit_legacy_res).await).unwrap();
-    let explicit_legacy_proxy_names = explicit_legacy_yaml
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .unwrap()
-        .iter()
-        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
-        .collect::<Vec<_>>();
-    assert!(
-        explicit_legacy_proxy_names
-            .iter()
-            .any(|name| name.ends_with("-ss")),
-        "explicit legacy path should remain stable regardless of global setting"
-    );
+    assert_eq!(explicit_legacy_res.status(), StatusCode::NOT_FOUND);
 
     let provider_system_res = app
         .oneshot(req(
@@ -4421,8 +4389,20 @@ async fn mihomo_subscription_dual_track_paths_follow_global_setting() {
     assert!(
         provider_system_proxy_names
             .iter()
-            .all(|name| !name.ends_with("-chain") && !name.ends_with("-reality")),
-        "provider payload must not contain top-level chain/reality proxies"
+            .any(|name| name.ends_with("-ss-chain")),
+        "provider payload should expose ss chain proxies"
+    );
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-reality")),
+        "provider payload should expose reality direct proxies"
+    );
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-reality-chain")),
+        "provider payload should expose reality chain proxies"
     );
 }
 
@@ -4734,6 +4714,10 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
     assert!(outer_use.contains(&"providerA"));
+    assert!(
+        !outer_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
+        "outer dialer group must not consume generated chain proxies recursively"
+    );
 
     for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
@@ -4749,50 +4733,47 @@ rules: []
         .and_then(YamlValue::as_sequence)
         .expect("proxies must exist");
     assert!(
-        proxies.iter().any(|item| {
+        proxies.iter().all(|item| {
             item.get("name")
                 .and_then(YamlValue::as_str)
-                .map(|n| n.ends_with("-chain"))
-                .unwrap_or(false)
-                && item.get("dialer-proxy").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW")
+                .map(|n| {
+                    !n.ends_with("-ss")
+                        && !n.ends_with("-ss-chain")
+                        && !n.ends_with("-reality")
+                        && !n.ends_with("-reality-chain")
+                })
+                .unwrap_or(true)
         }),
-        "expected at least one generated single-chain proxy"
+        "provider main config should not inline generated system proxies"
     );
 
-    let base = proxies
-        .iter()
-        .filter_map(|p| p.get("name").and_then(YamlValue::as_str))
-        .find_map(|name| name.strip_suffix("-ss"))
-        .expect("expected at least one generated -ss proxy for landing group test");
-    let landing_group_name = format!("🛬 {base}");
+    let system_provider = providers
+        .get(YamlValue::String(
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+        ))
+        .expect("provider route should include xp-system-generated");
+    assert!(system_provider.is_mapping());
+
+    let landing_group_name = "🛬 node-1";
 
     let landing_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(&landing_group_name))
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(landing_group_name))
         .expect("expected per-base landing group to exist");
-    let landing_proxies = landing_group
-        .get("proxies")
+    assert!(landing_group.get("proxies").is_none());
+    let landing_use = landing_group
+        .get("use")
         .and_then(YamlValue::as_sequence)
-        .expect("landing group proxies missing")
+        .expect("landing group provider use missing")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    let expected_reality = format!("{base}-reality");
-    let expected_chain = format!("{base}-chain");
-    if proxies.iter().any(|p| {
-        p.get("name").and_then(YamlValue::as_str) == Some(expected_reality.as_str())
-    }) {
-        assert_eq!(
-            landing_proxies,
-            vec![expected_reality.as_str(), expected_chain.as_str()]
-        );
-    } else {
-        let expected_ss = format!("{base}-ss");
-        assert_eq!(
-            landing_proxies,
-            vec![expected_chain.as_str(), expected_ss.as_str()]
-        );
-    }
+    assert!(landing_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME));
+    let landing_filter = landing_group
+        .get("filter")
+        .and_then(YamlValue::as_str)
+        .expect("landing group chain filter missing");
+    assert!(landing_filter.contains("node\\-1\\-ss\\-chain"));
 
     let landing_pool = groups
         .iter()
@@ -4806,7 +4787,7 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
     assert!(
-        landing_pool_proxies.contains(&landing_group_name.as_str()),
+        landing_pool_proxies.contains(&landing_group_name),
         "expected 🔒 落地 to include per-base landing group"
     );
 }
@@ -4851,8 +4832,10 @@ rules: []
         .and_then(YamlValue::as_mapping)
         .expect("proxy-providers must exist");
     assert!(
-        providers.is_empty(),
-        "proxy-providers should be empty when omitted"
+        providers.contains_key(YamlValue::String(
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string()
+        )),
+        "provider-only output should inject xp-system-generated even without user providers"
     );
 
     let groups = yaml
@@ -4863,21 +4846,11 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW"))
         .expect("expected built-in outer group 🛣️ JP/HK/TW");
-    let use_values = outer_group
-        .get("use")
-        .and_then(YamlValue::as_sequence)
-        .expect("outer group use missing");
-    assert!(
-        use_values.is_empty(),
-        "outer group use should stay empty without providers"
-    );
-    let fallback_values = outer_group
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("outer group should fall back to DIRECT without providers");
+    assert!(outer_group.get("use").is_none());
     assert_eq!(
-        fallback_values,
-        &vec![YamlValue::String("DIRECT".to_string())]
+        outer_group.get("proxies").and_then(YamlValue::as_sequence),
+        Some(&vec![YamlValue::String("DIRECT".to_string())]),
+        "outer group should fall back to DIRECT without external providers"
     );
 }
 
@@ -5430,8 +5403,10 @@ rules: []
         .and_then(YamlValue::as_mapping)
         .expect("proxy-providers must exist");
     assert!(
-        providers.is_empty(),
-        "expected empty proxy-providers mapping"
+        providers.contains_key(YamlValue::String(
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string()
+        )),
+        "provider-only output should inject xp-system-generated"
     );
 
     let groups = yaml
@@ -5442,17 +5417,11 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/TW"))
         .expect("expected built-in outer group 🛣️ JP/HK/TW");
-    assert_eq!(
-        outer_group
-            .get("use")
-            .and_then(YamlValue::as_sequence)
-            .map(|items| items.len()),
-        Some(0),
-        "expected 🛣️ JP/HK/TW to tolerate an empty provider pool"
-    );
+    assert!(outer_group.get("use").is_none());
     assert_eq!(
         outer_group.get("proxies").and_then(YamlValue::as_sequence),
-        Some(&vec![YamlValue::String("DIRECT".to_string())])
+        Some(&vec![YamlValue::String("DIRECT".to_string())]),
+        "expected 🛣️ JP/HK/TW to fall back to DIRECT without external providers"
     );
     for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
@@ -5757,7 +5726,6 @@ rules: []
             "🌟 US",
             "🛬 node-1",
             "💎 高质量",
-            "node-1-ss",
         ]
     );
     assert!(

@@ -1,5 +1,4 @@
 import type { AlertsResponse } from "../../src/api/adminAlerts";
-import type { MihomoDeliveryMode } from "../../src/api/adminConfig";
 import type {
 	AdminEndpoint,
 	AdminEndpointCreateRequest,
@@ -87,14 +86,12 @@ type MockStateSeed = {
 	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
-	mihomoDeliveryMode: MihomoDeliveryMode;
 };
 
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
 	failAdminConfig: boolean;
 	failVersionCheck: boolean;
-	mihomoDeliveryMode: MihomoDeliveryMode;
 	counters: {
 		endpoint: number;
 		joinToken: number;
@@ -727,7 +724,6 @@ node-2`,
 		nodeWeightPolicies,
 		alerts,
 		subscriptions,
-		mihomoDeliveryMode: "legacy",
 	};
 }
 
@@ -770,8 +766,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...base.subscriptions,
 			...(overrides?.subscriptions ?? {}),
 		},
-		mihomoDeliveryMode:
-			overrides?.mihomoDeliveryMode ?? base.mihomoDeliveryMode,
 	};
 
 	const counters = {
@@ -802,9 +796,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 function buildSubscriptionText(token: string, format: string | null): string {
 	if (format === "clash") {
 		return `# clash subscription for ${token}\nproxy: mock-${token}`;
-	}
-	if (format === "mihomo_legacy") {
-		return "port: 0\nproxy-groups:\n  - name: mihomo(legacy)\n    type: select\n    proxies: [DIRECT]\n";
 	}
 	if (format === "mihomo_provider") {
 		return `proxy-providers:\n  xp-system-generated:\n    type: http\n    url: https://example.com/api/sub/${token}/mihomo/provider/system\nproxies: []\n`;
@@ -997,44 +988,6 @@ async function handleRequest(
 			ip_geo_origin: "https://api.country.is",
 			admin_token_present: true,
 			admin_token_masked: "*".repeat(token.length),
-			mihomo_delivery_mode: state.mihomoDeliveryMode,
-		});
-	}
-
-	if (path === "/api/admin/config" && method === "PATCH") {
-		if (state.failAdminConfig) {
-			return errorResponse(500, "internal", "mock admin config failure");
-		}
-		const payload = await readJson<{
-			mihomo_delivery_mode?: MihomoDeliveryMode;
-		}>(req);
-		if (
-			payload?.mihomo_delivery_mode !== "legacy" &&
-			payload?.mihomo_delivery_mode !== "provider"
-		) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"mihomo_delivery_mode is required",
-			);
-		}
-		state.mihomoDeliveryMode = payload.mihomo_delivery_mode;
-		const node = state.nodes[0];
-		const token = "storybook-admin-token";
-		return jsonResponse({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
-			data_dir: "./data",
-			node_name: node?.node_name ?? "node-1",
-			access_host: node?.access_host ?? "",
-			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
-			quota_poll_interval_secs: 10,
-			quota_auto_unban: true,
-			ip_geo_enabled: false,
-			ip_geo_origin: "https://api.country.is",
-			admin_token_present: true,
-			admin_token_masked: "*".repeat(token.length),
-			mihomo_delivery_mode: state.mihomoDeliveryMode,
 		});
 	}
 
@@ -1920,14 +1873,6 @@ async function handleRequest(
 		return textResponse(buildSubscriptionText(token, "mihomo_provider_system"));
 	}
 
-	const subscriptionLegacyMatch = path.match(
-		/^\/api\/sub\/([^/]+)\/mihomo\/legacy$/,
-	);
-	if (subscriptionLegacyMatch && method === "GET") {
-		const token = decodeURIComponent(subscriptionLegacyMatch[1]);
-		return textResponse(buildSubscriptionText(token, "mihomo_legacy"));
-	}
-
 	const subscriptionProviderMatch = path.match(
 		/^\/api\/sub\/([^/]+)\/mihomo\/provider$/,
 	);
@@ -1940,12 +1885,7 @@ async function handleRequest(
 	if (subscriptionMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionMatch[1]);
 		const format = url.searchParams.get("format");
-		const effectiveFormat =
-			format === "mihomo"
-				? state.mihomoDeliveryMode === "provider"
-					? "mihomo_provider"
-					: "mihomo_legacy"
-				: format;
+		const effectiveFormat = format === "mihomo" ? "mihomo_provider" : format;
 		const content =
 			effectiveFormat === null || effectiveFormat === "raw"
 				? (state.subscriptions[token] ?? buildSubscriptionText(token, null))
