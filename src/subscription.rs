@@ -636,7 +636,7 @@ pub fn build_mihomo_provider_system_yaml(
     nodes: &[Node],
 ) -> Result<String, SubscriptionError> {
     let mut rng = rand::thread_rng();
-    let generated_direct_proxies = build_mihomo_generated_proxies(
+    let mut generated_direct_proxies = build_mihomo_generated_proxies(
         cluster_ca_key_pem,
         user,
         memberships,
@@ -644,6 +644,7 @@ pub fn build_mihomo_provider_system_yaml(
         nodes,
         &mut rng,
     )?;
+    sort_mihomo_system_provider_proxies(&mut generated_direct_proxies);
 
     let mut root = serde_yaml::Mapping::new();
     root.insert(
@@ -1309,6 +1310,27 @@ fn inject_mihomo_provider_region_groups(
             .filter(|(base, _)| mihomo_region_slug_matches(base, region))
             .map(|(_, name)| name.clone())
             .collect::<Vec<_>>();
+        let reality_names = proxy_name_set
+            .iter()
+            .filter_map(|name| {
+                let (kind, base) = classify_proxy_ref_name(name)?;
+                matches!(kind, ProxyRefKind::Reality).then_some((base, name))
+            })
+            .filter(|(base, _)| mihomo_region_slug_matches(base, region))
+            .map(|(_, name)| name.clone())
+            .collect::<Vec<_>>();
+        let ss_direct_names = proxy_name_set
+            .iter()
+            .filter_map(|name| {
+                let (kind, base) = classify_proxy_ref_name(name)?;
+                matches!(kind, ProxyRefKind::SsDirect).then_some((base, name))
+            })
+            .filter(|(base, _)| mihomo_region_slug_matches(base, region))
+            .map(|(_, name)| name.clone())
+            .collect::<Vec<_>>();
+        let mut exact_names = Vec::with_capacity(reality_names.len() + chain_names.len());
+        exact_names.extend(reality_names);
+        exact_names.extend(chain_names);
 
         let mut select_map = serde_yaml::Mapping::new();
         select_map.insert(
@@ -1323,15 +1345,25 @@ fn inject_mihomo_provider_region_groups(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        let region_filter = if chain_names.is_empty() {
+        let region_filter = if exact_names.is_empty() {
             region.filter.to_string()
         } else {
-            format!("(?:{})|(?:{})", region.filter, exact_proxy_names_filter(&chain_names))
+            format!(
+                "(?:{})|(?:{})",
+                region.filter,
+                exact_proxy_names_filter(&exact_names)
+            )
         };
         select_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(region_filter),
         );
+        if !ss_direct_names.is_empty() {
+            select_map.insert(
+                serde_yaml::Value::String("exclude-filter".to_string()),
+                serde_yaml::Value::String(exact_proxy_names_filter(&ss_direct_names)),
+            );
+        }
         if !proxies.is_empty() {
             select_map.insert(
                 serde_yaml::Value::String("proxies".to_string()),
@@ -1770,6 +1802,33 @@ impl ProxyRefKind {
             Self::RealityChain => "reality-chain",
         }
     }
+}
+
+fn provider_proxy_order_key(name: &str) -> (String, u8, String) {
+    let Some((kind, base)) = classify_proxy_ref_name(name) else {
+        return (name.to_string(), u8::MAX, name.to_string());
+    };
+    let rank = match kind {
+        ProxyRefKind::Reality => 0,
+        ProxyRefKind::SsChain => 1,
+        ProxyRefKind::RealityChain => 2,
+        ProxyRefKind::SsDirect => 3,
+    };
+    (base, rank, name.to_string())
+}
+
+fn sort_mihomo_system_provider_proxies(proxies: &mut [serde_yaml::Value]) {
+    proxies.sort_by(|a, b| {
+        let a_name = a
+            .get("name")
+            .and_then(serde_yaml::Value::as_str)
+            .unwrap_or_default();
+        let b_name = b
+            .get("name")
+            .and_then(serde_yaml::Value::as_str)
+            .unwrap_or_default();
+        provider_proxy_order_key(a_name).cmp(&provider_proxy_order_key(b_name))
+    });
 }
 
 fn collect_proxy_names(
@@ -3993,10 +4052,18 @@ providerA:
         let japan_filter = japan_group
             .get("filter")
             .and_then(Value::as_str)
-            .expect("Japan group should filter provider-hosted chain proxies");
+            .expect("Japan group should filter provider-hosted system proxies");
         assert!(japan_filter.contains("日本|🇯🇵|Japan|JP"));
+        assert!(japan_filter.contains("Tokyo\\-A\\-reality"));
         assert!(japan_filter.contains("Tokyo\\-A\\-ss\\-chain"));
         assert!(japan_filter.contains("Tokyo\\-A\\-reality\\-chain"));
+        assert!(!japan_filter.contains("Tokyo\\-A\\-ss|"));
+        let japan_exclude_filter = japan_group
+            .get("exclude-filter")
+            .and_then(Value::as_str)
+            .expect("Japan group should exclude provider-hosted direct ss proxies");
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
+        assert!(!japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
         assert_eq!(
             japan_group
                 .get("use")
@@ -4159,10 +4226,10 @@ rules: []
         assert_eq!(
             proxy_names,
             vec![
-                "Tokyo-A-ss",
-                "Tokyo-A-ss-chain",
                 "Tokyo-A-reality",
-                "Tokyo-A-reality-chain"
+                "Tokyo-A-ss-chain",
+                "Tokyo-A-reality-chain",
+                "Tokyo-A-ss"
             ]
         );
     }
