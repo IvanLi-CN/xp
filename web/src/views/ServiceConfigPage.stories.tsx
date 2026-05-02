@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, screen, userEvent, within } from "@storybook/test";
+import { expect, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/ServiceConfigPage",
@@ -7,11 +7,6 @@ const meta = {
 	parameters: {
 		router: {
 			initialEntry: "/service-config",
-		},
-		mockApi: {
-			data: {
-				mihomoDeliveryMode: "legacy",
-			},
 		},
 	},
 } satisfies Meta;
@@ -22,33 +17,12 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
-export const ProviderDefault: Story = {
-	parameters: {
-		mockApi: {
-			data: {
-				mihomoDeliveryMode: "provider",
-			},
-		},
-	},
-};
-
-export const SaveProviderMode: Story = {
+export const ProviderOnly: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await canvas.findByText("Current default: legacy"),
+			await canvas.findByText(/Mihomo uses provider-only delivery/),
 		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByLabelText("Mihomo default delivery"),
-		);
-		await userEvent.click(
-			await screen.findByRole("option", { name: "provider" }),
-		);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Save default route" }),
-		);
-		await expect(
-			await canvas.findByText("Current default: provider"),
-		).toBeInTheDocument();
+		await expect(canvas.queryByText("Mihomo delivery")).not.toBeInTheDocument();
 	},
 };

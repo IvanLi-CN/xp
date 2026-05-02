@@ -1,48 +1,44 @@
-# Mihomo 双轨订阅：legacy 默认 + provider 并行（#3e4q4）
+# Mihomo provider-only 动态链式订阅（#3e4q4）
 
 ## 状态
 
 - Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-04-24
+- Last: 2026-05-02
 
 ## 背景 / 问题陈述
 
 - 当前 `format=mihomo` 已支持系统动态节点 + 用户 mixin，但系统节点仍直接写入最终 `proxies`，一旦项目自己的入口地址、端口或节点集合变化，就需要整体刷新主配置。
 - 这对真实客户端并不友好：用户导入的是完整配置而不是独立 provider，入口池变化无法通过 Mihomo 自身的 `proxy-provider` 拉取机制独立更新。
-- 同时，现网已经存在稳定工作的 legacy 方案，不能为了引入 provider 路径而破坏现有订阅、链式中转和管理员工作流。
+- 现网已切到 provider 默认方案；继续保留 legacy Mihomo 会增加双轨测试和 UI 心智成本，且不能满足链式节点随 provider 动态更新的目标。
 
 ## 目标 / 非目标
 
 ### Goals
 
-- 保留现有 legacy Mihomo 输出为默认方案，作为零风险回退路径。
-- 新增 provider 方案，并让 legacy / provider 双轨长期并行。
-- 新增全局持久化设置 `mihomo_delivery_mode=legacy|provider`，默认 `legacy`。
-- 保留 canonical URL `GET /api/sub/{token}?format=mihomo`，但其返回方案跟随全局设置。
-- 新增显式测试/回归路径：
-  - `GET /api/sub/{token}/mihomo/legacy`
+- 移除 legacy Mihomo 输出与全局 delivery mode，`GET /api/sub/{token}?format=mihomo` 固定返回 provider 主配置。
+- 保留显式 provider 回归路径：
   - `GET /api/sub/{token}/mihomo/provider`
   - `GET /api/sub/{token}/mihomo/provider/system`
-- provider 方案采用单一系统 provider `xp-system-generated`，将系统隐藏直连节点（当前为 SS）移入 provider payload，并保留 Reality 直连节点在主配置顶层可见。
-- 保留 `{base}-chain` 为主配置里的 glue proxy，继续复用 `dialer-proxy: 🛣️ JP/HK/TW`。
+- provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点与链式节点都移入 provider payload。
+- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，继续复用 `dialer-proxy: 🛣️ JP/HK/TW`。
 - provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
-- 管理端支持切换全局默认方案；用户详情页可直接复制/预览 default / legacy / provider 三类 Mihomo URL。
+- 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 
 ### Non-goals
 
 - 不改 `raw` / `base64` / `clash` 输出。
 - 不做按用户维度的 Mihomo delivery mode。
-- 不承诺 provider 路径继续兼容手写 `{base}-ss` 业务引用；`{base}-reality` 应保持可见且可被显式引用。
-- 不把 `{base}-chain` 也放进 provider payload。
+- 不承诺 provider 主配置继续兼容手写系统节点名；系统节点应通过 provider `use + filter` 消费。
+- 不按 endpoint probe 健康状态过滤节点；有 access host 与用户 endpoint membership 即视为可输出。
 
 ## 范围（Scope）
 
 ### In scope
 
-- 后端全局设置持久化、admin config GET/PATCH 扩展、双轨 Mihomo HTTP 路由。
+- 后端 provider-only Mihomo HTTP 路由与 provider payload 渲染。
 - provider 主配置渲染、provider payload 渲染、请求 origin 解析。
-- Web `Settings / Service config` 全局开关与 `User Details` 订阅 URL 双轨选择。
+- Web `Settings / Service config` provider-only 状态展示与 `User Details` canonical Mihomo URL。
 - Storybook / 前后端回归 / 真实 Mihomo provider 装载验证。
 - 设计文档与契约文档同步。
 
@@ -50,45 +46,47 @@
 
 - 不扩展更多 provider 名称或多套系统 provider。
 - 不替换当前 `UserMihomoProfile` 结构。
-- 不把 legacy 方案降级成兼容层；它仍是完整受支持路径。
+- 不改 `raw` / `base64` / `clash` 输出。
 
 ## 需求（Requirements）
 
 ### MUST
 
-- `GET /api/sub/{token}?format=mihomo` 在 `mihomo_delivery_mode=legacy` 时继续输出当前 legacy 配置；在 `provider` 时输出 provider 主配置。
-- `GET /api/sub/{token}/mihomo/legacy` 与 `GET /api/sub/{token}/mihomo/provider` 必须始终返回固定方案，与全局设置无关。
+- `GET /api/sub/{token}?format=mihomo` 必须输出 provider 主配置。
+- `GET /api/sub/{token}/mihomo/legacy` 不再是可用订阅路径。
+- `GET /api/sub/{token}/mihomo/provider` 必须输出 provider 主配置。
 - `GET /api/sub/{token}/mihomo/provider/system` 必须返回合法 `text/yaml`，根为 `proxies:`。
-- `GET /api/admin/config` 必须返回 `mihomo_delivery_mode`；`PATCH /api/admin/config` 必须允许管理员切换该值并持久化。
 - provider 主配置里的系统 provider 名称固定为 `xp-system-generated`；若用户 `extra_proxy_providers_yaml` 里占用了同名 provider，服务端返回清晰错误。
 - provider 主配置里的 provider `url` 必须基于请求对外 origin 生成，而不是直接复用内网 `api_base_url`。
 - provider 方案中：
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
-  - 顶层 `proxies` = `extra_proxies_yaml` + 系统 `{base}-reality` / `{base}-chain`
-  - `🛣️ JP/HK/TW`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地`、`{base}-chain` 保持可用
-- provider 方案下系统 `{base}-ss` 直连默认隐藏，仅通过 `xp-system-generated` 参与链式/落地 fallback；`{base}-reality` 继续保留为主配置顶层可见直连节点。
-- provider 方案下 `🛬 {base}` 必须优先暴露 Reality 直连：存在 `{base}-reality` 时，组成员至少包含顶层 `{base}-reality`，并在存在 `{base}-chain` 时把它作为回落候选；仅当不存在 `{base}-reality` 且存在 `{base}-ss` 时，才继续使用 `use + filter + proxies` 的 SS 兼容回落路径。
+  - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
+  - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
+  - `🛣️ JP/HK/TW`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+- provider 方案下用户可见系统候选必须只暴露链式节点；直连 `{base}-ss` / `{base}-reality` 只作为 provider payload 原料。
+- provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`。
+- `🛣️ JP/HK/TW` 不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；外部 provider 为空时回落 `DIRECT`。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
-- legacy 路径行为不得回归。
+- legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
 
 ### SHOULD
 
 - `PATCH /api/admin/config` 应只接受可写字段，保留其它配置只读。
-- provider payload 与主配置应共享同一套系统节点生成逻辑，避免 legacy/provider 漂移。
-- 前端订阅 URL 选择应显式区分 `mihomo(default)` / `mihomo(legacy)` / `mihomo(provider)`。
+- provider payload 与主配置应共享同一套系统节点命名与分组逻辑，避免悬挂引用。
+- 前端订阅 URL 选择应只暴露 canonical `mihomo(provider)`。
 
 ## 功能与行为规格（Functional/Behavior Spec）
 
 ### Core flows
 
-- 管理员在 `Settings / Service config` 选择 Mihomo 默认方案并保存。
-- 普通 Mihomo 客户端继续使用 canonical URL；其实际返回 legacy/provider 由全局设置决定。
-- 回归/测试场景通过显式 legacy/provider URL 做 A/B 对照。
-- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连节点；链式代理仍经 `🛣️ JP/HK/TW` 做外层中转。
+- 管理员在 `Settings / Service config` 查看 Mihomo provider-only 状态。
+- 普通 Mihomo 客户端继续使用 canonical URL；其实际返回 provider 主配置。
+- 回归/测试场景通过 canonical/provider URL 与 provider system payload 验证。
+- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连与链式节点；链式代理仍经 `🛣️ JP/HK/TW` 做外层中转。
 
 ### Edge cases / errors
 
-- 用户未配置 Mihomo profile 时，canonical `?format=mihomo` 与显式 legacy 路径继续回退 clash；显式 provider 路径同样回退 clash，避免输出残缺 provider 主配置；`/mihomo/provider/system` 则始终返回系统直连节点 payload，不依赖用户 mixin。
+- 用户未配置 Mihomo profile 时，canonical `?format=mihomo` 与显式 provider 路径回退 clash；`/mihomo/provider/system` 始终返回系统 provider payload，不依赖用户 mixin。
 - 当 `extra_proxy_providers_yaml` 已包含 `xp-system-generated` 时，保存 profile 成功但渲染 provider 路径返回 `400 invalid_request`，提示保留名冲突。
 - 当请求头无法推导外部 origin 时，provider 主配置回退到 `Config.api_base_url` 的规范化 origin。
 
@@ -99,11 +97,9 @@
 | 接口（Name）                                  | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 使用方（Consumers） |
 | --------------------------------------------- | ------------ | ------------- | -------------- | ------------------------ | ------------------- |
 | `GET /api/sub/{token}?format=mihomo`          | HTTP API     | external      | Changed        | ./contracts/http-apis.md | Mihomo clients      |
-| `GET /api/sub/{token}/mihomo/legacy`          | HTTP API     | external      | New            | ./contracts/http-apis.md | Mihomo clients      |
-| `GET /api/sub/{token}/mihomo/provider`        | HTTP API     | external      | New            | ./contracts/http-apis.md | Mihomo clients      |
+| `GET /api/sub/{token}/mihomo/provider`        | HTTP API     | external      | Existing       | ./contracts/http-apis.md | Mihomo clients      |
 | `GET /api/sub/{token}/mihomo/provider/system` | HTTP API     | external      | New            | ./contracts/http-apis.md | Mihomo clients      |
 | `GET /api/admin/config`                       | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | Web admin           |
-| `PATCH /api/admin/config`                     | HTTP API     | internal      | New            | ./contracts/http-apis.md | Web admin           |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -111,32 +107,29 @@
 
 ## 验收标准（Acceptance Criteria）
 
-- Given 全局设置仍为 `legacy`，When 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回现有 legacy 输出。
-- Given 全局设置切到 `provider`，When 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
-- Given 请求 `GET /api/sub/{token}/mihomo/legacy` 或 `/mihomo/provider`，When 全局设置任意切换，Then 两条显式路径始终返回固定方案。
-- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统隐藏直连节点（当前为 `-ss`），不依赖用户是否配置 Mihomo profile。
-- Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组必须直接暴露 `{base}-reality`，且不得再把 `{base}-ss` 作为该组成员。
-- Given provider 方案存在 `base-reality`，When 检查主配置与地区组，Then `{base}-reality` 仍作为顶层可见节点保留，并可被显式引用。
-- Given provider 方案仅存在 `base-ss`（无 `base-reality`），When 检查 `🛬 {base}`，Then 该组继续保留 `{base}-chain` 并通过 `filter` 消费 provider 中的 `{base}-ss`。
-- Given provider 方案只有 `base-reality`，When 检查 `🛬 {base}`，Then 该组直接引用顶层 `{base}-reality`，不再引用缺失的 `{base}-chain` / `{base}-ss`。
+- Given 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
+- Given 请求 `GET /api/sub/{token}/mihomo/legacy`，Then 不再返回 legacy Mihomo 主配置。
+- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统直连与链式节点（`-ss` / `-reality` / `-ss-chain` / `-reality-chain`）。
+- Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组只通过 provider filter 暴露 `{base}-ss-chain` / `{base}-reality-chain`。
+- Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
-- Given Web 管理端打开 `Settings / Service config`，When 修改 Mihomo delivery mode 并保存，Then 页面刷新后仍显示新值，且 `User Details` 可复制/预览三类 Mihomo URL。
-- Given 真实 Mihomo 在共享测试环境加载显式 provider URL，When 执行 `mihomo -t` 或等价校验，Then 主配置与 provider payload 均可被成功解析。
+- Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
+- Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 `🛣️ JP/HK/TW`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
-- 双轨 URL 语义与 provider 保留名已冻结。
+- Provider-only URL 语义与 provider 保留名已冻结。
 - provider 路径只保证系统组与链式逻辑兼容的口径已冻结。
-- 全局默认开关由持久化 admin setting 控制，而不是静态环境变量。
+- 旧全局默认开关不再影响 canonical Mihomo 输出。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
 ### Testing
 
-- Rust unit/integration tests：覆盖 delivery mode、双轨订阅路径、provider payload、origin 解析、保留名冲突。
-- Web tests：覆盖 service config 开关与 user details 三类 Mihomo URL 选择。
-- Storybook：为 `ServiceConfigPage` / `UserDetailsPage` 增加双轨状态与交互覆盖。
-- Shared testbox：至少一次真实 Mihomo provider 装载验证。
+- Rust unit/integration tests：覆盖 provider-only 订阅路径、provider payload、origin 解析、保留名冲突与 legacy 路由移除。
+- Web tests：覆盖 provider-only service config 状态与 user details canonical Mihomo URL。
+- Storybook：为 `ServiceConfigPage` / `UserDetailsPage` 增加 provider-only 状态与交互覆盖。
+- Mihomo smoke：至少一次真实 Mihomo provider 装载与 provider 内链式 `dialer-proxy` 验证。
 
 ### Quality checks
 
@@ -161,32 +154,26 @@
 ## Visual Evidence
 
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
-  - state: `Pages/ServiceConfigPage/SaveProviderMode`
-  - evidence_note: 管理端 `Settings / Service config` 已提供全局 Mihomo delivery mode 开关，保存后展示 `provider` 为当前默认路由。
-    ![Service config Mihomo delivery mode](./assets/service-config-provider.png)
-- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
-  - state: `Pages/UserDetailsPage/MihomoProviderPreview`
-  - evidence_note: 用户详情页可显式预览 `mihomo(provider)`，预览内容包含 `xp-system-generated` 的系统 provider URL。
-    ![User details Mihomo provider preview](./assets/user-details-mihomo-provider-preview.png)
-- Shared testbox real Mihomo validation
-  - environment: `codex-testbox`
-  - run_id: `20260417_104340_1b0cc8e_mihomo`
-  - compose_project: `codex_xp__1f006d76_20260417_104340_1b0cc8e_mihomo`
-  - result: `main.yaml` / `system.yaml` 显式 URL 均可 fetch，`/mihomo` provider 主配置执行 `/mihomo -t -f /tmp/main.yaml` 返回 `configuration file /tmp/main.yaml test is successful`。
+  - state: `Pages/ServiceConfigPage/ProviderOnly`
+  - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
+    ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
+- Real Mihomo validation
+  - environment: local `mihomo v1.19.24`
+  - result: provider-hosted `*-ss-chain` can reference main-config `dialer-proxy: 🛣️ JP/HK/TW`; missing main-config dialer fails immediately, proving the chain depends on the stable main group.
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
 - [x] M1: follow-up spec / 设计文档 / 契约冻结双轨语义
-- [x] M2: 全局 `mihomo_delivery_mode` 持久化与 admin config GET/PATCH
-- [x] M3: 双轨订阅路由 + origin 解析 helper
-- [x] M4: provider 主配置 / payload 渲染与 legacy 并行保持兼容
-- [x] M5: Web 设置页与订阅 URL 双轨 UI + Storybook
+- [x] M2: provider-only admin config 与订阅路由
+- [x] M3: provider 主配置 / payload 渲染 + origin 解析 helper
+- [x] M4: provider payload 动态承载直连与链式节点
+- [x] M5: Web 设置页与订阅 URL provider-only UI + Storybook
 - [x] M6: 回归测试、视觉证据、共享测试机 Mihomo 验证
 - [x] M7: PR / review / merge / cleanup
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：provider 路径若误隐藏 `{base}-reality` 或误保留系统 `{base}-ss` 直连显示，容易造成可选节点回退或悬挂引用，需要用测试锁死。
+- 风险：provider 路径若把 `{base}-reality` 或 `{base}-ss` 直连暴露到用户可见组，容易绕过链式中转，需要用测试锁死。
 - 风险：请求头组合在反向代理下可能非常杂，需要优先以 live 请求头为准，并保留 `api_base_url` 回退。
 - 假设：项目自己的系统 provider 名称 `xp-system-generated` 当前未被现有用户配置占用；若占用，返回显式错误即可。
 
@@ -195,3 +182,4 @@
 - 2026-04-17: 创建规格并冻结双轨 URL、provider 保留名与双轨 admin 设置语义。
 - 2026-04-17: 完成全局 `mihomo_delivery_mode`、显式 dual-track 路由、Storybook/真实 Mihomo provider 验证与文档同步。
 - 2026-04-24: provider 主配置的系统地区组切换为 probe-derived 固定地区面，并补充 `🌟 Other`、`💎 高质量` / `🚀 节点选择` 自动补点语义。
+- 2026-05-02: 冻结 provider-only Mihomo 口径；系统 provider 动态输出直连与链式节点，主配置通过 provider filter 消费链式候选。

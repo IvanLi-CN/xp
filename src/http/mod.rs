@@ -61,8 +61,8 @@ use crate::{
     },
     reconcile::ReconcileHandle,
     state::{
-        DesiredStateCommand, JsonSnapshotStore, MihomoDeliveryMode, NodeEgressProbeState,
-        NodeSubscriptionRegion, StoreError,
+        DesiredStateCommand, JsonSnapshotStore, NodeEgressProbeState, NodeSubscriptionRegion,
+        StoreError,
     },
     subscription,
     xray_supervisor::XrayHealthHandle,
@@ -553,14 +553,6 @@ struct AdminServiceConfigResponse {
     ip_geo_origin: String,
     admin_token_present: bool,
     admin_token_masked: String,
-    mihomo_delivery_mode: MihomoDeliveryMode,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PatchAdminConfigRequest {
-    #[serde(default)]
-    mihomo_delivery_mode: Option<MihomoDeliveryMode>,
 }
 
 #[derive(Deserialize)]
@@ -789,7 +781,7 @@ pub fn build_router(
             post(admin_internal_raft_set_nodes),
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
-        .route("/config", get(admin_get_config).patch(admin_patch_config))
+        .route("/config", get(admin_get_config))
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
         .route(
@@ -953,10 +945,6 @@ pub fn build_router(
         .route("/cluster/info", get(cluster_info))
         .route("/version/check", get(api_version_check))
         .route("/cluster/join", post(cluster_join))
-        .route(
-            "/sub/:subscription_token/mihomo/legacy",
-            get(get_subscription_mihomo_legacy),
-        )
         .route(
             "/sub/:subscription_token/mihomo/provider",
             get(get_subscription_mihomo_provider),
@@ -3265,11 +3253,6 @@ async fn build_admin_service_config_response(
         ip_geo_origin
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
-    let mihomo_delivery_mode = {
-        let store = state.store.lock().await;
-        store.mihomo_delivery_mode()
-    };
-
     Ok(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
         xray_api_addr: state.config.xray_api_addr.to_string(),
@@ -3283,34 +3266,12 @@ async fn build_admin_service_config_response(
         ip_geo_origin,
         admin_token_present,
         admin_token_masked,
-        mihomo_delivery_mode,
     })
 }
 
 async fn admin_get_config(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
-    Ok(Json(build_admin_service_config_response(&state).await?))
-}
-
-async fn admin_patch_config(
-    Extension(state): Extension<AppState>,
-    ApiJson(req): ApiJson<PatchAdminConfigRequest>,
-) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
-    let Some(mihomo_delivery_mode) = req.mihomo_delivery_mode else {
-        return Err(ApiError::invalid_request(
-            "mihomo_delivery_mode is required",
-        ));
-    };
-
-    let _ = raft_write(
-        &state,
-        DesiredStateCommand::SetMihomoDeliveryMode {
-            mode: mihomo_delivery_mode,
-        },
-    )
-    .await?;
-
     Ok(Json(build_admin_service_config_response(&state).await?))
 }
 
@@ -6509,12 +6470,10 @@ struct SubscriptionContext {
     nodes: Vec<Node>,
     node_egress_probes: BTreeMap<String, NodeEgressProbeState>,
     mihomo_profile: Option<crate::state::UserMihomoProfile>,
-    mihomo_delivery_mode: MihomoDeliveryMode,
 }
 
 #[derive(Clone, Copy)]
 enum MihomoRenderMode {
-    Legacy,
     Provider,
     ProviderSystem,
 }
@@ -6552,7 +6511,6 @@ async fn load_subscription_context(
     let nodes = store.list_nodes();
     let node_egress_probes = store.list_node_egress_probes();
     let mihomo_profile = store.get_user_mihomo_profile(&user.user_id);
-    let mihomo_delivery_mode = store.mihomo_delivery_mode();
     Ok(SubscriptionContext {
         user,
         memberships,
@@ -6560,7 +6518,6 @@ async fn load_subscription_context(
         nodes,
         node_egress_probes,
         mihomo_profile,
-        mihomo_delivery_mode,
     })
 }
 
@@ -6656,31 +6613,6 @@ fn render_mihomo_subscription(
         )
         .map(text_yaml_utf8)
         .map_err(map_subscription_render_error),
-        MihomoRenderMode::Legacy => {
-            if let Some(profile) = &ctx.mihomo_profile {
-                subscription::build_mihomo_yaml_with_node_probes(
-                    ca_key_pem,
-                    &ctx.user,
-                    &ctx.memberships,
-                    &ctx.endpoints,
-                    &ctx.nodes,
-                    &ctx.node_egress_probes,
-                    profile,
-                )
-                .map(text_yaml_utf8)
-                .map_err(map_subscription_render_error)
-            } else {
-                subscription::build_clash_yaml(
-                    ca_key_pem,
-                    &ctx.user,
-                    &ctx.memberships,
-                    &ctx.endpoints,
-                    &ctx.nodes,
-                )
-                .map(text_yaml_utf8)
-                .map_err(map_subscription_render_error)
-            }
-        }
         MihomoRenderMode::Provider => {
             if let Some(profile) = &ctx.mihomo_profile {
                 let origin = resolve_request_origin(headers, fallback_api_base_url);
@@ -6772,35 +6704,12 @@ async fn get_subscription(
         "mihomo" => render_mihomo_subscription(
             ca_key_pem,
             &ctx,
-            match ctx.mihomo_delivery_mode {
-                MihomoDeliveryMode::Legacy => MihomoRenderMode::Legacy,
-                MihomoDeliveryMode::Provider => MihomoRenderMode::Provider,
-            },
+            MihomoRenderMode::Provider,
             &headers,
             &state.config.api_base_url,
         ),
         _ => Err(ApiError::internal("unreachable subscription format")),
     }
-}
-
-async fn get_subscription_mihomo_legacy(
-    Extension(state): Extension<AppState>,
-    headers: HeaderMap,
-    Path(subscription_token): Path<String>,
-) -> Result<Response, ApiError> {
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let ctx = load_subscription_context(&state, &subscription_token).await?;
-    render_mihomo_subscription(
-        ca_key_pem,
-        &ctx,
-        MihomoRenderMode::Legacy,
-        &headers,
-        &state.config.api_base_url,
-    )
 }
 
 async fn get_subscription_mihomo_provider(
