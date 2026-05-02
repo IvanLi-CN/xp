@@ -788,7 +788,7 @@ export function SubscriptionPreviewDialog({
 	const mutedTextClass = "text-muted-foreground";
 	const mutedPlaceholderClass = "placeholder:text-muted-foreground";
 	const fieldCopyButtonClass =
-		"min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:w-auto sm:min-w-[5.5rem]";
+		"min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 
 	return (
 		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -947,9 +947,9 @@ export function SubscriptionPreviewDialog({
 										>
 											public-key
 										</div>
-										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
+										<div className="space-y-2">
 											<div
-												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.publicKey ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -981,9 +981,9 @@ export function SubscriptionPreviewDialog({
 										>
 											short-id
 										</div>
-										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
+										<div className="space-y-2">
 											<div
-												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.shortId ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1015,9 +1015,9 @@ export function SubscriptionPreviewDialog({
 										>
 											servername
 										</div>
-										<div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] xl:grid-cols-[154px_minmax(5.5rem,auto)]">
+										<div className="space-y-2">
 											<div
-												className="flex h-11 items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
 												title={fields.servername ?? ""}
 											>
 												<div className="whitespace-nowrap">
