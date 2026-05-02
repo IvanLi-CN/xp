@@ -52,7 +52,7 @@ Response:
 - 顶层 `proxies` 仅保留 `extra_proxies_yaml`；系统动态节点不写入主配置顶层。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
-- `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点；`{base}-ss` 不作为本次地区接入点目标。
+- `🔒 高质量` 与 `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点，并通过 `exclude-filter` 排除系统 `{base}-ss` 直连接入候选。
 - `🛣️ JP/HK/TW` 只消费外部第三方 provider；无外部 provider 时回落 `DIRECT`，不得 `use` `xp-system-generated`。
 - 系统托管的可见地区组固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `💎 高质量`、`🚀 节点选择` 与 `🤯 All`；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
 
