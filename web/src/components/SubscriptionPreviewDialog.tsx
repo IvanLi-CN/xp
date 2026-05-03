@@ -787,6 +787,8 @@ export function SubscriptionPreviewDialog({
 
 	const mutedTextClass = "text-muted-foreground";
 	const mutedPlaceholderClass = "placeholder:text-muted-foreground";
+	const fieldValueClass =
+		"block h-11 w-full min-w-0 overflow-hidden rounded-xl border border-input bg-background px-4 py-3 font-mono text-[13px] leading-5 text-foreground";
 	const fieldCopyButtonClass =
 		"min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 
@@ -949,7 +951,7 @@ export function SubscriptionPreviewDialog({
 										</div>
 										<div className="space-y-2">
 											<div
-												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className={fieldValueClass}
 												title={fields.publicKey ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -983,7 +985,7 @@ export function SubscriptionPreviewDialog({
 										</div>
 										<div className="space-y-2">
 											<div
-												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className={fieldValueClass}
 												title={fields.shortId ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1017,7 +1019,7 @@ export function SubscriptionPreviewDialog({
 										</div>
 										<div className="space-y-2">
 											<div
-												className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background px-4 font-mono text-[13px] text-foreground"
+												className={fieldValueClass}
 												title={fields.servername ?? ""}
 											>
 												<div className="whitespace-nowrap">
