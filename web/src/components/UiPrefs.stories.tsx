@@ -102,7 +102,7 @@ function UiPrefsStory({ initialTheme, initialDensity }: UiPrefsStoryProps) {
 
 				<div
 					className={cn(
-						"rounded-2xl border border-border/70 bg-muted/30 transition-all",
+						"rounded-2xl border border-border/70 bg-muted/30 transition-colors",
 						density === "compact" ? "space-y-2 p-3 text-sm" : "space-y-3 p-4",
 					)}
 				>

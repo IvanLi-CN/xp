@@ -642,9 +642,9 @@ export function EndpointProbeRunPage() {
 								</div>
 								<div className="h-2 overflow-hidden rounded-full bg-muted">
 									<div
-										className="h-full rounded-full bg-primary transition-[width]"
+										className="h-full w-full origin-left rounded-full bg-primary transition-transform"
 										style={{
-											width: `${Math.max(0, Math.min(100, (done / progressMax) * 100))}%`,
+											transform: `scaleX(${Math.max(0, Math.min(1, done / progressMax))})`,
 										}}
 									/>
 								</div>

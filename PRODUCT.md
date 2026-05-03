@@ -1,0 +1,54 @@
+# Product Context
+
+## Register
+
+product
+
+## Users
+
+xp 面向自托管 Xray 集群的维护者。典型用户是单管理员或少量技术维护者，他们在多台小型服务器上运行 Xray 节点，需要一个可靠的控制面完成日常管理。使用场景通常很集中：确认节点健康，创建端点，分配用户访问，检查配额状态，复制订阅材料，以及在故障发生时快速定位原因。
+
+这个界面是已认证的运维工具，不是营销页面。它应该帮助用户快速扫读、精确编辑，并在节点、端点、配额规则或订阅输出异常时保持上下文和可恢复性。
+
+## Product Purpose
+
+xp 将多个 `xp + xray` 主机连接成一个轻量的 Raft 集群管理器。它维护集群级期望状态，协调本机 Xray 运行态，提供嵌入式管理 UI，并通过 `xp-ops` 支持安装、升级、容器运行和 Mihomo 配置脱敏。
+
+成功状态是：维护者可以从任一可访问节点管理节点、端点、用户、订阅、配额策略、Reality 域名、服务配置和诊断工具，同时信任写入由 leader 串行化，本机运行态漂移能被看见并恢复。
+
+## Brand Personality
+
+冷静、精确、运维导向。
+
+产品语气应该像一份带有好界面的精确 runbook：紧凑、事实优先，在故障下也保持克制。避免营销式夸张、虚假的兴奋感，以及为了新奇而新奇的表达。标签应直接命名对象或动作，尤其是 token、节点 ID、端点 ID、公开 origin、配额数值和危险操作。
+
+文档和 UI 文案默认使用中文组织说明；章节标题、稳定导航锚点、组件名、协议名和运维术语可以直接使用英文。不要为了翻译而翻译 `node`、`endpoint`、`quota`、`subscription`、`leader`、`term`、`token`、`inbound`、`Mihomo` 等机器世界里的词。
+
+## Anti-References
+
+- 不要把管理界面做成“赛博黑客玩具”：不要霓虹绿终端、代码雨、电路板装饰或伪入侵视觉。
+- 不要在产品内部使用通用 SaaS hero 模板：不要 hero metric、销售文案、装饰渐变或重复的图标卡片网格。
+- 不要为了风格重新发明标准交互：导航、表单、对话框、表格、命令面板和危险确认都应保持熟悉。
+- 不要把运维状态过度装饰化。Health、role、leader、term、alerts、quota、endpoint status 应该像系统事实，而不是视觉装饰。
+- 不要用友好文案遮住机器值。ID、token、URL、端口和配额单位需要可复制、等宽呈现和可预测换行。
+
+## Design Principles
+
+1. 先展示集群事实。
+   UI 应该优先呈现 health、leader、term、alerts 和 partial failure。集群降级时，维护者必须马上知道哪些结论不再完全可信。
+
+2. 把密度当作工作工具。
+   xp 的用户需要密集列表、字段对齐和快速比较。密度可以高，但必须受控、可读，并通过现有 comfortable/compact 偏好切换。
+
+3. 让操作贴近证据。
+   New、Copy、Refresh、Retry、Delete、Reset 等动作应靠近它们影响的对象。错误状态必须保留相关对象上下文，并提供重试或复制详情入口。
+
+4. 保留运维词汇。
+   使用系统真实词汇：node、endpoint、user、quota、subscription、Reality domain、leader、term、token、inbound、Mihomo。避免 UI、日志和 API 之间出现含糊别名。
+
+5. 用可靠性压过表达欲。
+   标准产品 UI 模式在这里是优点。界面通过一致性、完整状态、可访问对比度、键盘行为和移动端行为赢得信任，而不是靠惊喜取胜。
+
+## Accessibility and Inclusion
+
+管理 UI 目标是 WCAG 2.1 AA。保持可见焦点状态、非纯颜色状态表达、稳定键盘导航，以及 `xp-light` 和 `xp-dark` 下的可读对比度。尊重 reduced motion 偏好；动效只用于表达状态变化。长机器值必须能换行或横向滚动，不能遮挡相邻控件；危险操作必须清晰，只有后端真正支持恢复时才暗示可逆。
