@@ -88,6 +88,21 @@ export const MainFlow: Story = {
 			await canvas.findByRole("button", { name: "Reset credentials" }),
 		).toBeInTheDocument();
 		await userEvent.click(
+			await canvas.findByTestId("demo-subscription-format"),
+		);
+		await expect(
+			await screen.findByRole("option", { name: "raw" }),
+		).toBeInTheDocument();
+		await expect(
+			await screen.findByRole("option", { name: "clash" }),
+		).toBeInTheDocument();
+		await expect(
+			await screen.findByRole("option", { name: "mihomo(provider)" }),
+		).toBeInTheDocument();
+		await expect(screen.queryByRole("option", { name: /legacy/i })).toBeNull();
+		await expect(screen.queryByRole("option", { name: /default/i })).toBeNull();
+		await userEvent.keyboard("{Escape}");
+		await userEvent.click(
 			await canvas.findByRole("button", { name: "Access" }),
 		);
 		await expect(

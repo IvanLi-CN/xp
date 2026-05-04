@@ -252,8 +252,6 @@ const baseQuotaPolicy: DemoQuotaPolicy = {
 
 const baseServiceConfig: DemoServiceConfig = {
 	publicOrigin: "https://tokio-xp.example.net",
-	defaultSubscriptionFormat: "mihomo",
-	mihomoDelivery: "provider",
 	auditLogRetentionDays: 30,
 	xrayRestartStrategy: "rolling",
 };

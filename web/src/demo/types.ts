@@ -71,8 +71,6 @@ export type DemoQuotaPolicy = {
 
 export type DemoServiceConfig = {
 	publicOrigin: string;
-	defaultSubscriptionFormat: "raw" | "mihomo";
-	mihomoDelivery: "inline" | "provider";
 	auditLogRetentionDays: number;
 	xrayRestartStrategy: "rolling" | "immediate";
 };

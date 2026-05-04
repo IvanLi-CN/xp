@@ -496,7 +496,7 @@ export function DemoServiceConfigPage() {
 	})();
 	const dirty = !configEquals(draft, state.serviceConfig);
 	const firstToken = state.users[0]?.subscriptionToken ?? "sub_01HXPDEMO";
-	const previewUrl = `${draft.publicOrigin.replace(/\/$/, "")}/sub/${firstToken}?format=${draft.defaultSubscriptionFormat}`;
+	const previewUrl = `${draft.publicOrigin.replace(/\/$/, "")}/sub/${firstToken}?format=mihomo`;
 
 	return (
 		<div className="space-y-6">
@@ -547,51 +547,17 @@ export function DemoServiceConfigPage() {
 								}
 							/>
 						</div>
-						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-subscription-format"
-							>
-								Default subscription format
-							</label>
-							<select
-								id="demo-subscription-format"
-								className="xp-select"
-								value={draft.defaultSubscriptionFormat}
-								onChange={(event) =>
-									setDraft((prev) => ({
-										...prev,
-										defaultSubscriptionFormat: event.target
-											.value as DemoServiceConfig["defaultSubscriptionFormat"],
-									}))
-								}
-							>
-								<option value="raw">Raw</option>
-								<option value="mihomo">Mihomo</option>
-							</select>
-						</div>
-						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-mihomo-delivery"
-							>
-								Mihomo default delivery
-							</label>
-							<select
-								id="demo-mihomo-delivery"
-								className="xp-select"
-								value={draft.mihomoDelivery}
-								onChange={(event) =>
-									setDraft((prev) => ({
-										...prev,
-										mihomoDelivery: event.target
-											.value as DemoServiceConfig["mihomoDelivery"],
-									}))
-								}
-							>
-								<option value="inline">Inline proxies</option>
-								<option value="provider">Proxy provider</option>
-							</select>
+						<div className="rounded-2xl border border-border/70 bg-muted/35 p-4 md:col-span-2">
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<div>
+									<h2 className="text-sm font-medium">Mihomo delivery</h2>
+									<p className="mt-1 text-sm text-muted-foreground">
+										Canonical `format=mihomo` always returns the provider-backed
+										Mihomo config.
+									</p>
+								</div>
+								<Badge variant="success">provider-only</Badge>
+							</div>
 						</div>
 						<div className="xp-field-stack">
 							<label className="text-sm font-medium" htmlFor="demo-restart">
@@ -646,7 +612,7 @@ export function DemoServiceConfigPage() {
 						<p className="break-all font-mono text-sm">{previewUrl}</p>
 						<div className="mt-3 flex flex-wrap gap-2">
 							<CopyButton text={previewUrl} label="Copy preview URL" />
-							<Badge variant="ghost">{draft.mihomoDelivery}</Badge>
+							<Badge variant="ghost">provider-only</Badge>
 							<Badge variant="ghost">{draft.xrayRestartStrategy}</Badge>
 						</div>
 					</div>

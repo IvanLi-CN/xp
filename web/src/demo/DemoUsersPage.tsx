@@ -704,20 +704,11 @@ export function DemoUserDetailsPage() {
 
 	function buildSubscriptionPreview(format: SubscriptionFormat) {
 		if (assignedEndpoints.length === 0) return "# no endpoint access assigned";
-		if (
-			format === "clash" ||
-			format === "mihomo" ||
-			format === "mihomo_legacy" ||
-			format === "mihomo_provider"
-		) {
+		if (format === "clash" || format === "mihomo") {
 			const providerComment =
-				format === "mihomo_provider"
+				format === "mihomo"
 					? "# provider mode preview"
-					: format === "mihomo_legacy"
-						? "# legacy mihomo preview"
-						: format === "clash"
-							? "# clash-compatible preview"
-							: "# default mihomo preview";
+					: "# clash-compatible preview";
 			return [
 				providerComment,
 				"proxies:",
@@ -950,13 +941,7 @@ export function DemoUserDetailsPage() {
 										<SelectContent>
 											<SelectItem value="raw">raw</SelectItem>
 											<SelectItem value="clash">clash</SelectItem>
-											<SelectItem value="mihomo">mihomo(default)</SelectItem>
-											<SelectItem value="mihomo_legacy">
-												mihomo(legacy)
-											</SelectItem>
-											<SelectItem value="mihomo_provider">
-												mihomo(provider)
-											</SelectItem>
+											<SelectItem value="mihomo">mihomo(provider)</SelectItem>
 										</SelectContent>
 									</Select>
 								</div>
