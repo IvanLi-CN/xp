@@ -35,16 +35,17 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	const rawDialog = page.getByRole("dialog");
 	await expect(rawDialog).toBeVisible();
 	await expect(rawDialog.getByText("Subscription preview")).toBeVisible();
-	await expect(
-		rawDialog.getByRole("button", { name: "Refresh" }),
-	).toBeVisible();
+	const previewFormat = rawDialog.getByTestId("subscription-preview-format");
+	await expect(previewFormat.locator('input[type="radio"]')).toHaveCount(3);
+	await expect(previewFormat.locator('input[value="raw"]')).toBeChecked();
 	await expect(rawDialog.getByLabel("Search")).toHaveCount(0);
 	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
 		"vless://example-host?encryption=none",
 	);
-	await rawDialog.getByRole("button", { name: "Refresh" }).click();
+	await previewFormat.locator("label").nth(1).click();
+	await expect(previewFormat.locator('input[value="clash"]')).toBeChecked();
 	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
-		"vless://example-host?encryption=none",
+		"reality-opts:",
 	);
 	await rawDialog.locator("[data-sub-preview-close]").click();
 

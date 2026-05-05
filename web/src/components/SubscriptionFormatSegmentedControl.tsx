@@ -9,21 +9,29 @@ import { cn } from "@/lib/utils";
 type SubscriptionFormatSegmentedControlProps = {
 	value: SubscriptionFormat;
 	onValueChange: (value: SubscriptionFormat) => void;
+	onValueActivate?: (value: SubscriptionFormat) => void;
 	className?: string;
 	testId?: string;
+	hideLegend?: boolean;
 };
 
 export function SubscriptionFormatSegmentedControl({
 	value,
 	onValueChange,
+	onValueActivate,
 	className,
 	testId,
+	hideLegend = false,
 }: SubscriptionFormatSegmentedControlProps) {
 	const id = useId();
 
 	return (
 		<fieldset className={cn("min-w-0", className)}>
-			<legend className="mb-2 text-sm font-medium">Subscription format</legend>
+			<legend
+				className={cn(hideLegend ? "sr-only" : "mb-2 text-sm font-medium")}
+			>
+				Subscription format
+			</legend>
 			<div
 				aria-label="Subscription format"
 				className="grid h-10 w-full grid-cols-3 rounded-full border border-border/70 bg-muted/35 p-1 shadow-xs sm:w-auto"
@@ -40,6 +48,9 @@ export function SubscriptionFormatSegmentedControl({
 								className="peer sr-only"
 								id={optionId}
 								name={id}
+								onClick={() => {
+									if (checked) onValueActivate?.(option.value);
+								}}
 								onChange={() => onValueChange(option.value)}
 								type="radio"
 								value={option.value}

@@ -72,6 +72,7 @@ export const Clash: Story = {
 					format="clash"
 					loading={false}
 					content={sampleClash}
+					onFormatChange={() => {}}
 				/>
 			</DesignBackdrop>
 		);
@@ -92,6 +93,7 @@ export const Raw: Story = {
 					content={
 						"vless://example-host?encryption=none\nvless://second-host?encryption=none\n"
 					}
+					onFormatChange={() => {}}
 				/>
 			</DesignBackdrop>
 		);

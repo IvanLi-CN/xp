@@ -4,12 +4,10 @@ import CodeMirror from "@uiw/react-codemirror";
 import { useMemo } from "react";
 
 import { cn } from "@/lib/utils";
-import {
-	SUBSCRIPTION_FORMAT_OPTIONS,
-	type SubscriptionFormat,
-} from "../api/subscription";
+import type { SubscriptionFormat } from "../api/subscription";
 import { EditorShortcutHint } from "./EditorShortcutHint";
 import { Icon } from "./Icon";
+import { SubscriptionFormatSegmentedControl } from "./SubscriptionFormatSegmentedControl";
 import { useUiPrefsOptional } from "./UiPrefs";
 import {
 	Dialog,
@@ -27,7 +25,7 @@ type SubscriptionPreviewDialogProps = {
 	loading: boolean;
 	content: string;
 	error?: string | null;
-	onRefresh?: () => void | Promise<void>;
+	onFormatChange?: (format: SubscriptionFormat) => void | Promise<void>;
 };
 
 type ClashFields = {
@@ -54,13 +52,6 @@ const CODEMIRROR_BASIC_SETUP = {
 };
 
 const IS_TEST_MODE = import.meta.env.MODE === "test";
-
-function formatLabel(format: SubscriptionFormat): string {
-	return (
-		SUBSCRIPTION_FORMAT_OPTIONS.find((option) => option.value === format)
-			?.label ?? format
-	);
-}
 
 function truncateMiddle(value: string, head: number, tail: number): string {
 	if (value.length <= head + tail + 1) return value;
@@ -142,10 +133,12 @@ function SubscriptionContentEditor({
 	content,
 	format,
 	fillHeight,
+	loading,
 }: {
 	content: string;
 	format: SubscriptionFormat;
 	fillHeight: boolean;
+	loading: boolean;
 }) {
 	const prefs = useUiPrefsOptional();
 	const editorTheme =
@@ -159,13 +152,16 @@ function SubscriptionContentEditor({
 	if (IS_TEST_MODE) {
 		return (
 			<div className="space-y-2">
-				<Textarea
-					aria-label="Subscription content"
-					className="h-[360px] resize-none font-mono text-sm"
-					readOnly
-					value={content}
-					data-testid="subscription-code-scroll"
-				/>
+				<div className="relative">
+					<Textarea
+						aria-label="Subscription content"
+						className="h-[360px] resize-none font-mono text-sm"
+						readOnly
+						value={content}
+						data-testid="subscription-code-scroll"
+					/>
+					{loading ? <EditorLoadingOverlay /> : null}
+				</div>
 				<EditorShortcutHint />
 			</div>
 		);
@@ -175,7 +171,7 @@ function SubscriptionContentEditor({
 		<div className="space-y-2">
 			<div
 				className={cn(
-					"min-h-[260px] overflow-hidden rounded-[14px] border border-border bg-background",
+					"relative min-h-[260px] overflow-hidden rounded-[14px] border border-border bg-background",
 					fillHeight ? "xl:h-[508px]" : "",
 				)}
 				data-testid="subscription-code-scroll"
@@ -190,8 +186,20 @@ function SubscriptionContentEditor({
 					className="font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto"
 					aria-label="Subscription content"
 				/>
+				{loading ? <EditorLoadingOverlay /> : null}
 			</div>
 			<EditorShortcutHint />
+		</div>
+	);
+}
+
+function EditorLoadingOverlay() {
+	return (
+		<div className="absolute inset-0 z-10 flex items-center justify-center rounded-[14px] bg-background/70 backdrop-blur-[1px]">
+			<div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm">
+				<span className="xp-loading-spinner xp-loading-spinner-xs" />
+				Loading content
+			</div>
 		</div>
 	);
 }
@@ -204,7 +212,7 @@ export function SubscriptionPreviewDialog({
 	loading,
 	content,
 	error,
-	onRefresh,
+	onFormatChange,
 }: SubscriptionPreviewDialogProps) {
 	const fields = useMemo(
 		() => (format === "clash" ? extractClashFields(content) : {}),
@@ -219,7 +227,6 @@ export function SubscriptionPreviewDialog({
 		return parts.join("\n");
 	}, [fields.publicKey, fields.servername, fields.shortId, format]);
 	const showFieldsPanel = format === "clash";
-	const displayFormat = formatLabel(format);
 
 	const headerBtnBase =
 		"inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10";
@@ -256,28 +263,23 @@ export function SubscriptionPreviewDialog({
 							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
-							<div className="inline-flex items-center gap-4 min-w-0">
-								<span className="inline-flex h-7 min-w-20 items-center justify-center rounded-[10px] border border-info/25 bg-info/10 px-3 text-[12px] font-[750] text-info">
-									{displayFormat}
-								</span>
-								{loading ? (
-									<span className="xp-loading-spinner xp-loading-spinner-xs" />
-								) : null}
-							</div>
 						</div>
 
 						<div className="flex min-h-11 flex-wrap items-center gap-2 lg:justify-end">
-							{onRefresh ? (
-								<button
-									type="button"
-									className={headerBtnBase}
-									disabled={loading}
-									onClick={() => void onRefresh()}
-								>
-									<Icon name="tabler:refresh" size={16} />
-									Refresh
-								</button>
-							) : null}
+							<SubscriptionFormatSegmentedControl
+								className="w-full min-w-[260px] sm:w-auto"
+								hideLegend
+								onValueActivate={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								onValueChange={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								testId="subscription-preview-format"
+								value={format}
+							/>
 							<button
 								type="button"
 								className={headerBtnBase}
@@ -329,6 +331,7 @@ export function SubscriptionPreviewDialog({
 								content={content}
 								format={format}
 								fillHeight={showFieldsPanel}
+								loading={loading}
 							/>
 						</div>
 

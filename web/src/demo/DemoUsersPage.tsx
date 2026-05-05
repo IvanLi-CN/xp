@@ -707,13 +707,14 @@ export function DemoUserDetailsPage() {
 		usageGroups[0] ??
 		null;
 
-	async function fetchSubscriptionPreview() {
+	async function fetchSubscriptionPreview(nextFormat = subscriptionFormat) {
 		setSubscriptionOpen(true);
+		setSubscriptionFormat(nextFormat);
 		setSubscriptionLoading(true);
 		setSubscriptionError(null);
 		try {
 			setSubscriptionText(
-				await fetchDemoSubscription(state, currentUser, subscriptionFormat),
+				await fetchDemoSubscription(state, currentUser, nextFormat),
 			);
 		} catch (error) {
 			setSubscriptionError(
@@ -915,7 +916,10 @@ export function DemoUserDetailsPage() {
 									className="self-end"
 									iconLeft={<Icon name="tabler:cloud-download" />}
 									loading={subscriptionLoading}
-									onClick={fetchSubscriptionPreview}
+									onClick={() => {
+										setSubscriptionOpen(true);
+										void fetchSubscriptionPreview(subscriptionFormat);
+									}}
 								>
 									Fetch
 								</Button>
@@ -1242,7 +1246,7 @@ export function DemoUserDetailsPage() {
 				loading={subscriptionLoading}
 				content={subscriptionText}
 				error={subscriptionError}
-				onRefresh={fetchSubscriptionPreview}
+				onFormatChange={fetchSubscriptionPreview}
 			/>
 
 			<div className="text-xs text-muted-foreground">

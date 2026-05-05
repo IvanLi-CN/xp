@@ -744,12 +744,13 @@ export function UserDetailsPage() {
 		}
 	}
 
-	async function loadSubscriptionPreview() {
+	async function loadSubscriptionPreview(nextFormat = subFormat) {
 		if (!subscriptionToken) return;
 		setSubLoading(true);
 		setSubError(null);
+		setSubFormat(nextFormat);
 		try {
-			const text = await fetchSubscription(subscriptionToken, subFormat);
+			const text = await fetchSubscription(subscriptionToken, nextFormat);
 			setSubText(text);
 		} catch (error) {
 			setSubError(formatError(error));
@@ -1457,7 +1458,7 @@ export function UserDetailsPage() {
 				loading={subLoading}
 				content={subText}
 				error={subError}
-				onRefresh={loadSubscriptionPreview}
+				onFormatChange={loadSubscriptionPreview}
 			/>
 
 			<ConfirmDialog
