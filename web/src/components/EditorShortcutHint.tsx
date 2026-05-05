@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { cn } from "@/lib/utils";
 
 import { Icon } from "./Icon";
 
@@ -50,46 +52,156 @@ type EditorShortcutHintProps = {
 	platform?: EditorShortcutPlatform;
 };
 
+function ShortcutCombo({ combo }: { combo: string[] }) {
+	return (
+		<span className="inline-flex items-center gap-1">
+			{combo.map((key) => (
+				<kbd
+					key={key}
+					className="inline-flex h-6 min-w-7 items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-semibold tracking-tight text-foreground shadow-xs"
+				>
+					{key}
+				</kbd>
+			))}
+		</span>
+	);
+}
+
 export function EditorShortcutHint({
 	platform = "auto",
 }: EditorShortcutHintProps) {
 	const shortcuts = useEditorShortcutItems(platform);
+	const [open, setOpen] = useState(false);
+	const hoverTimerRef = useRef<number | null>(null);
+	const closeTimerRef = useRef<number | null>(null);
+	const panelRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(
+		() => () => {
+			if (hoverTimerRef.current !== null) {
+				window.clearTimeout(hoverTimerRef.current);
+			}
+			if (closeTimerRef.current !== null) {
+				window.clearTimeout(closeTimerRef.current);
+			}
+		},
+		[],
+	);
+
+	const openSoon = () => {
+		if (closeTimerRef.current !== null) {
+			window.clearTimeout(closeTimerRef.current);
+			closeTimerRef.current = null;
+		}
+		if (open) return;
+		if (hoverTimerRef.current !== null) return;
+		hoverTimerRef.current = window.setTimeout(() => {
+			setOpen(true);
+			hoverTimerRef.current = null;
+		}, 500);
+	};
+
+	const openNow = () => {
+		if (hoverTimerRef.current !== null) {
+			window.clearTimeout(hoverTimerRef.current);
+			hoverTimerRef.current = null;
+		}
+		if (closeTimerRef.current !== null) {
+			window.clearTimeout(closeTimerRef.current);
+			closeTimerRef.current = null;
+		}
+		setOpen(true);
+	};
+
+	const scheduleClose = () => {
+		if (hoverTimerRef.current !== null) {
+			window.clearTimeout(hoverTimerRef.current);
+			hoverTimerRef.current = null;
+		}
+		if (closeTimerRef.current !== null) {
+			window.clearTimeout(closeTimerRef.current);
+		}
+		closeTimerRef.current = window.setTimeout(() => {
+			setOpen(false);
+			closeTimerRef.current = null;
+		}, 260);
+	};
 
 	return (
-		<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground">
-			<div className="flex shrink-0 items-center gap-1.5">
-				<Icon name="tabler:keyboard" size={14} />
-				<span className="font-medium text-foreground/80">Shortcuts</span>
-			</div>
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				{shortcuts.map((shortcut) => (
-					<div
-						key={shortcut.label}
-						className="inline-flex items-center gap-2 whitespace-nowrap"
-					>
-						<span>{shortcut.label}</span>
-						<div className="inline-flex items-center gap-2">
-							{shortcut.combos.map((combo, comboIndex) => (
-								<div
-									key={`${shortcut.label}-${String(comboIndex)}`}
-									className="inline-flex items-center gap-1"
-								>
-									{comboIndex > 0 ? (
-										<span className="text-muted-foreground/60">/</span>
-									) : null}
-									{combo.map((key, keyIndex) => (
-										<kbd
-											key={`${shortcut.label}-${String(comboIndex)}-${key}-${String(keyIndex)}`}
-											className="inline-flex h-6 min-w-7 items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-semibold tracking-tight text-foreground shadow-xs"
-										>
-											{key}
-										</kbd>
-									))}
-								</div>
-							))}
-						</div>
+		<div className="relative w-full">
+			<button
+				type="button"
+				className={cn(
+					"flex h-9 w-full items-center justify-between gap-3 overflow-hidden rounded-xl border border-border bg-muted/25 px-3 text-left text-[11px] leading-5 text-muted-foreground shadow-xs",
+					open ? "rounded-b-none" : "",
+				)}
+				aria-expanded={open}
+				aria-controls="editor-shortcut-panel"
+				onBlur={(event) => {
+					if (
+						event.currentTarget.contains(event.relatedTarget as Node | null)
+					) {
+						return;
+					}
+					scheduleClose();
+				}}
+				onClick={openNow}
+				onFocus={openNow}
+				onMouseEnter={openSoon}
+				onMouseLeave={scheduleClose}
+			>
+				<div className="flex min-w-0 items-center gap-3 overflow-hidden">
+					<div className="flex shrink-0 items-center gap-1.5">
+						<Icon name="tabler:keyboard" size={14} />
+						<span className="font-medium text-foreground/80">Shortcuts</span>
 					</div>
-				))}
+					<div className="min-w-0 truncate whitespace-nowrap">
+						Search, Fold, Unfold
+					</div>
+				</div>
+				<span
+					aria-hidden
+					className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-xs"
+				>
+					<Icon
+						name={open ? "tabler:chevron-up" : "tabler:chevron-down"}
+						size={14}
+					/>
+				</span>
+			</button>
+			<div
+				id="editor-shortcut-panel"
+				ref={panelRef}
+				className={cn(
+					"absolute left-0 right-0 top-[calc(100%-1px)] z-20 overflow-hidden rounded-b-xl border border-border border-t-0 bg-background px-3 py-2 shadow-lg",
+					open ? "block" : "hidden",
+				)}
+				onMouseEnter={openNow}
+				onMouseLeave={scheduleClose}
+			>
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground">
+					{shortcuts.map((shortcut) => (
+						<div
+							key={shortcut.label}
+							className="inline-flex items-center gap-2"
+						>
+							<span className="whitespace-nowrap">{shortcut.label}</span>
+							<div className="flex flex-wrap items-center gap-1">
+								{shortcut.combos.map((combo, index) => (
+									<div
+										key={`${shortcut.label}-${String(index)}`}
+										className="inline-flex items-center gap-1"
+									>
+										{index > 0 ? (
+											<span className="text-muted-foreground/60">/</span>
+										) : null}
+										<ShortcutCombo combo={combo} />
+									</div>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
 			</div>
 		</div>
 	);
