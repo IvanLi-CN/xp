@@ -35,6 +35,14 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	const rawDialog = page.getByRole("dialog");
 	await expect(rawDialog).toBeVisible();
 	await expect(rawDialog.getByText("Subscription preview")).toBeVisible();
+	await expect(
+		rawDialog.getByRole("button", { name: "Refresh" }),
+	).toBeVisible();
+	await expect(rawDialog.getByLabel("Search")).toHaveCount(0);
+	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
+		"vless://example-host?encryption=none",
+	);
+	await rawDialog.getByRole("button", { name: "Refresh" }).click();
 	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
 		"vless://example-host?encryption=none",
 	);

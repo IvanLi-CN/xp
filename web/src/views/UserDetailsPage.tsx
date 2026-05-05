@@ -1085,6 +1085,7 @@ export function UserDetailsPage() {
 								<Button
 									className="self-end"
 									data-testid="subscription-fetch"
+									iconLeft={<Icon name="tabler:cloud-download" />}
 									loading={subLoading}
 									onClick={async () => {
 										setSubOpen(true);
@@ -1095,8 +1096,8 @@ export function UserDetailsPage() {
 								</Button>
 							</div>
 							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal. `mihomo(provider)` is the canonical
-								Mihomo delivery path.
+								Preview opens in a modal. Mihomo uses the canonical
+								provider-backed delivery path.
 							</div>
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
@@ -1455,6 +1456,7 @@ export function UserDetailsPage() {
 				loading={subLoading}
 				content={subText}
 				error={subError}
+				onRefresh={loadSubscriptionPreview}
 			/>
 
 			<ConfirmDialog

@@ -37,10 +37,8 @@ export const Default: Story = {
 		const group = await canvas.findByRole("radiogroup", {
 			name: "Subscription format",
 		});
-		await expect(within(group).getByLabelText("raw")).toBeChecked();
-		await userEvent.click(within(group).getByLabelText("mihomo(provider)"));
-		await expect(
-			within(group).getByLabelText("mihomo(provider)"),
-		).toBeChecked();
+		await expect(within(group).getByLabelText("Raw")).toBeChecked();
+		await userEvent.click(within(group).getByLabelText("Mihomo"));
+		await expect(within(group).getByLabelText("Mihomo")).toBeChecked();
 	},
 };

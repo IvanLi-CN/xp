@@ -8,9 +8,9 @@ export type SubscriptionFormatOption = {
 };
 
 export const SUBSCRIPTION_FORMAT_OPTIONS = [
-	{ value: "raw", label: "raw" },
-	{ value: "clash", label: "clash" },
-	{ value: "mihomo", label: "mihomo(provider)" },
+	{ value: "raw", label: "Raw" },
+	{ value: "clash", label: "Clash" },
+	{ value: "mihomo", label: "Mihomo" },
 ] as const satisfies readonly SubscriptionFormatOption[];
 
 export const DEFAULT_SUBSCRIPTION_FORMAT: SubscriptionFormat = "raw";

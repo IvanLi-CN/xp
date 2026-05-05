@@ -913,6 +913,7 @@ export function DemoUserDetailsPage() {
 								/>
 								<Button
 									className="self-end"
+									iconLeft={<Icon name="tabler:cloud-download" />}
 									loading={subscriptionLoading}
 									onClick={fetchSubscriptionPreview}
 								>
@@ -1240,6 +1241,7 @@ export function DemoUserDetailsPage() {
 				loading={subscriptionLoading}
 				content={subscriptionText}
 				error={subscriptionError}
+				onRefresh={fetchSubscriptionPreview}
 			/>
 
 			<div className="text-xs text-muted-foreground">

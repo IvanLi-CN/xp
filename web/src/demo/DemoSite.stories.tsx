@@ -92,9 +92,9 @@ export const MainFlow: Story = {
 		);
 		const labels = Array.from(subscriptionFormat.querySelectorAll("label"));
 		expect(labels.map((label) => label.textContent?.trim())).toEqual([
-			"raw",
-			"clash",
-			"mihomo(provider)",
+			"Raw",
+			"Clash",
+			"Mihomo",
 		]);
 		await userEvent.click(labels[2]);
 		await expect(

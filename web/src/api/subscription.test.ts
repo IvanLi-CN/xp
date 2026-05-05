@@ -9,9 +9,9 @@ describe("subscription format contract", () => {
 	it("keeps UI-selectable formats aligned with the backend contract", () => {
 		expect(DEFAULT_SUBSCRIPTION_FORMAT).toBe("raw");
 		expect(SUBSCRIPTION_FORMAT_OPTIONS).toEqual([
-			{ value: "raw", label: "raw" },
-			{ value: "clash", label: "clash" },
-			{ value: "mihomo", label: "mihomo(provider)" },
+			{ value: "raw", label: "Raw" },
+			{ value: "clash", label: "Clash" },
+			{ value: "mihomo", label: "Mihomo" },
 		]);
 		expect(
 			SUBSCRIPTION_FORMAT_OPTIONS.some((option) =>
