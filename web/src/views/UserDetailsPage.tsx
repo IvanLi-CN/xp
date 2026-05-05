@@ -28,6 +28,8 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
 import {
+	DEFAULT_SUBSCRIPTION_FORMAT,
+	SUBSCRIPTION_FORMAT_OPTIONS,
 	type SubscriptionFormat,
 	fetchSubscription,
 } from "../api/subscription";
@@ -260,7 +262,9 @@ export function UserDetailsPage() {
 	const [isResettingToken, setIsResettingToken] = useState(false);
 	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
 	const [isResettingCredentials, setIsResettingCredentials] = useState(false);
-	const [subFormat, setSubFormat] = useState<SubscriptionFormat>("raw");
+	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
+		DEFAULT_SUBSCRIPTION_FORMAT,
+	);
 	const [subOpen, setSubOpen] = useState(false);
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
@@ -1084,9 +1088,11 @@ export function UserDetailsPage() {
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="raw">raw</SelectItem>
-											<SelectItem value="clash">clash</SelectItem>
-											<SelectItem value="mihomo">mihomo(provider)</SelectItem>
+											{SUBSCRIPTION_FORMAT_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>

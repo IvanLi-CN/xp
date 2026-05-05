@@ -1,7 +1,11 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import type { SubscriptionFormat } from "@/api/subscription";
+import {
+	DEFAULT_SUBSCRIPTION_FORMAT,
+	SUBSCRIPTION_FORMAT_OPTIONS,
+	type SubscriptionFormat,
+} from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
 
 import {
@@ -34,6 +38,7 @@ import {
 	subscriptionUrl,
 	userStatusVariant,
 } from "./format";
+import { fetchDemoSubscription } from "./mockApi";
 import { useDemo } from "./store";
 import type { DemoEndpoint, DemoUser } from "./types";
 
@@ -523,7 +528,7 @@ export function DemoUserDetailsPage() {
 		user?.endpointIds ?? [],
 	);
 	const [subscriptionFormat, setSubscriptionFormat] =
-		useState<SubscriptionFormat>("raw");
+		useState<SubscriptionFormat>(DEFAULT_SUBSCRIPTION_FORMAT);
 	const [subscriptionOpen, setSubscriptionOpen] = useState(false);
 	const [subscriptionLoading, setSubscriptionLoading] = useState(false);
 	const [subscriptionText, setSubscriptionText] = useState("");
@@ -702,50 +707,22 @@ export function DemoUserDetailsPage() {
 		usageGroups[0] ??
 		null;
 
-	function buildSubscriptionPreview(format: SubscriptionFormat) {
-		if (assignedEndpoints.length === 0) return "# no endpoint access assigned";
-		if (format === "clash" || format === "mihomo") {
-			const providerComment =
-				format === "mihomo"
-					? "# provider mode preview"
-					: "# clash-compatible preview";
-			return [
-				providerComment,
-				"proxies:",
-				...assignedEndpoints.map((endpoint) => {
-					const node = state.nodes.find((item) => item.id === endpoint.nodeId);
-					return `  - name: ${endpoint.name}\n    type: ${
-						endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
-					}\n    server: ${node?.accessHost ?? endpoint.nodeId}\n    port: ${
-						endpoint.port
-					}`;
-				}),
-				currentUser.mihomoMixinYaml.trim()
-					? `# user mixin\n${currentUser.mihomoMixinYaml.trim()}`
-					: "# no user mixin",
-			].join("\n");
-		}
-
-		return assignedEndpoints
-			.map((endpoint) => {
-				const node = state.nodes.find((item) => item.id === endpoint.nodeId);
-				return `${
-					endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss"
-				}://${currentUser.subscriptionToken}@${
-					node?.accessHost ?? endpoint.nodeId
-				}:${endpoint.port}#${endpoint.name}`;
-			})
-			.join("\n");
-	}
-
-	function fetchSubscriptionPreview() {
+	async function fetchSubscriptionPreview() {
 		setSubscriptionOpen(true);
 		setSubscriptionLoading(true);
 		setSubscriptionError(null);
-		window.setTimeout(() => {
-			setSubscriptionText(buildSubscriptionPreview(subscriptionFormat));
+		try {
+			setSubscriptionText(
+				await fetchDemoSubscription(state, currentUser, subscriptionFormat),
+			);
+		} catch (error) {
+			setSubscriptionError(
+				error instanceof Error ? error.message : "Failed to load subscription.",
+			);
+			setSubscriptionText("");
+		} finally {
 			setSubscriptionLoading(false);
-		}, 240);
+		}
 	}
 
 	function resetSubscriptionToken() {
@@ -939,9 +916,11 @@ export function DemoUserDetailsPage() {
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="raw">raw</SelectItem>
-											<SelectItem value="clash">clash</SelectItem>
-											<SelectItem value="mihomo">mihomo(provider)</SelectItem>
+											{SUBSCRIPTION_FORMAT_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
