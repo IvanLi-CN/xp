@@ -289,7 +289,7 @@ export function SubscriptionPreviewDialog({
 							</h3>
 						</div>
 
-						<div className="grid min-h-11 grid-cols-1 items-center gap-2 sm:flex sm:flex-wrap lg:justify-end">
+						<div className="grid gap-2 lg:justify-end">
 							<SubscriptionFormatSegmentedControl
 								className="w-full min-w-0 sm:w-auto sm:min-w-[260px]"
 								hideLegend
@@ -304,24 +304,28 @@ export function SubscriptionPreviewDialog({
 								testId="subscription-preview-format"
 								value={format}
 							/>
-							<button
-								type="button"
-								className={headerBtnBase}
-								onClick={async () => {
-									await writeClipboard(subscriptionUrl);
-								}}
-							>
-								Copy URL
-							</button>
-							<button
-								type="button"
-								className={headerBtnBase}
-								onClick={async () => {
-									await writeClipboard(content);
-								}}
-							>
-								Copy content
-							</button>
+							<div className="grid grid-cols-2 gap-2">
+								<button
+									type="button"
+									className={headerBtnBase}
+									onClick={async () => {
+										await writeClipboard(subscriptionUrl);
+									}}
+								>
+									<Icon name="tabler:link" size={16} ariaLabel="Copy URL" />
+									<span>Copy URL</span>
+								</button>
+								<button
+									type="button"
+									className={headerBtnBase}
+									onClick={async () => {
+										await writeClipboard(content);
+									}}
+								>
+									<Icon name="tabler:copy" size={16} ariaLabel="Copy content" />
+									<span>Copy content</span>
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>
