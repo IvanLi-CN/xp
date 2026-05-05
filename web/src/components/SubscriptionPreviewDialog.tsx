@@ -148,6 +148,9 @@ function SubscriptionContentEditor({
 		[format],
 	);
 	const height = fillHeight ? "508px" : "min(56vh, 520px)";
+	const mobileHeightClass = fillHeight
+		? "[&_.cm-editor]:max-lg:!h-[min(44dvh,420px)]"
+		: "[&_.cm-editor]:max-lg:!h-[min(48dvh,420px)]";
 
 	if (IS_TEST_MODE) {
 		return (
@@ -183,7 +186,10 @@ function SubscriptionContentEditor({
 					extensions={extensions}
 					basicSetup={CODEMIRROR_BASIC_SETUP}
 					readOnly
-					className="font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto"
+					className={cn(
+						"font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto",
+						mobileHeightClass,
+					)}
 					aria-label="Subscription content"
 				/>
 				{loading ? <EditorLoadingOverlay /> : null}
@@ -245,7 +251,7 @@ export function SubscriptionPreviewDialog({
 				showCloseButton={false}
 				className={cn(
 					"w-[calc(100vw-1rem)] max-w-[1160px] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto rounded-[18px] border border-border bg-card p-0 text-card-foreground shadow-sm sm:w-[calc(100vw-2rem)] sm:max-h-[calc(100dvh-2rem)] xl:overflow-hidden",
-					"max-lg:!left-0 max-lg:!right-0 max-lg:!bottom-0 max-lg:!top-auto max-lg:!w-full max-lg:!max-w-none max-lg:!translate-x-0 max-lg:!translate-y-0 max-lg:rounded-b-none max-lg:border-x-0 max-lg:border-b-0 max-lg:max-h-[92dvh]",
+					"max-lg:!left-0 max-lg:!right-auto max-lg:!bottom-0 max-lg:!top-auto max-lg:!w-[100dvw] max-lg:!max-w-[100dvw] max-lg:!translate-x-0 max-lg:!translate-y-0 max-lg:rounded-b-none max-lg:border-x-0 max-lg:border-b-0 max-lg:max-h-[92dvh]",
 					showFieldsPanel ? "xl:h-[660px]" : "",
 				)}
 				data-sub-preview-dialog
