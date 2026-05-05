@@ -936,6 +936,7 @@ export function DemoUserDetailsPage() {
 								onChange={setMihomoMixinYaml}
 								placeholder="Paste Mihomo mixin YAML"
 								minRows={10}
+								showShortcutHint
 							/>
 							<YamlCodeEditor
 								label="extra_proxies_yaml"

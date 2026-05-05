@@ -8,6 +8,7 @@ import {
 	SUBSCRIPTION_FORMAT_OPTIONS,
 	type SubscriptionFormat,
 } from "../api/subscription";
+import { EditorShortcutHint } from "./EditorShortcutHint";
 import { Icon } from "./Icon";
 import { useUiPrefsOptional } from "./UiPrefs";
 import {
@@ -157,35 +158,40 @@ function SubscriptionContentEditor({
 
 	if (IS_TEST_MODE) {
 		return (
-			<Textarea
-				aria-label="Subscription content"
-				className="h-[360px] resize-none font-mono text-sm"
-				readOnly
-				value={content}
-				data-testid="subscription-code-scroll"
-			/>
+			<div className="space-y-2">
+				<Textarea
+					aria-label="Subscription content"
+					className="h-[360px] resize-none font-mono text-sm"
+					readOnly
+					value={content}
+					data-testid="subscription-code-scroll"
+				/>
+				<EditorShortcutHint />
+			</div>
 		);
 	}
 
 	return (
-		<div
-			className={cn(
-				"min-h-[260px] overflow-hidden rounded-[14px] border border-border bg-background",
-				fillHeight ? "xl:h-[508px]" : "",
-			)}
-			data-testid="subscription-code-scroll"
-		>
-			<CodeMirror
-				value={content}
-				height={height}
-				theme={editorTheme}
-				extensions={extensions}
-				basicSetup={CODEMIRROR_BASIC_SETUP}
-				readOnly
-				editable={false}
-				className="font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto"
-				aria-label="Subscription content"
-			/>
+		<div className="space-y-2">
+			<div
+				className={cn(
+					"min-h-[260px] overflow-hidden rounded-[14px] border border-border bg-background",
+					fillHeight ? "xl:h-[508px]" : "",
+				)}
+				data-testid="subscription-code-scroll"
+			>
+				<CodeMirror
+					value={content}
+					height={height}
+					theme={editorTheme}
+					extensions={extensions}
+					basicSetup={CODEMIRROR_BASIC_SETUP}
+					readOnly
+					className="font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto"
+					aria-label="Subscription content"
+				/>
+			</div>
+			<EditorShortcutHint />
 		</div>
 	);
 }
@@ -324,9 +330,6 @@ export function SubscriptionPreviewDialog({
 								format={format}
 								fillHeight={showFieldsPanel}
 							/>
-							<div className="text-xs text-muted-foreground">
-								Read-only editor. Use Ctrl/Cmd+F for search.
-							</div>
 						</div>
 
 						{showFieldsPanel ? (

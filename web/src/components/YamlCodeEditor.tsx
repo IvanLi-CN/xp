@@ -4,6 +4,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import type { EditorView } from "@uiw/react-codemirror";
 import { type ReactNode, useId, useMemo } from "react";
 
+import { EditorShortcutHint } from "./EditorShortcutHint";
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
 import { Textarea } from "./ui/textarea";
@@ -18,6 +19,7 @@ type YamlCodeEditorProps = {
 	readOnly?: boolean;
 	hideLabel?: boolean;
 	onCreateEditor?: (view: EditorView) => void;
+	showShortcutHint?: boolean;
 };
 
 const CODEMIRROR_BASIC_SETUP = {
@@ -49,6 +51,7 @@ export function YamlCodeEditor({
 	readOnly = false,
 	hideLabel = false,
 	onCreateEditor,
+	showShortcutHint = false,
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
@@ -76,6 +79,7 @@ export function YamlCodeEditor({
 					onChange={(event) => onChange(event.target.value)}
 					placeholder={placeholder}
 				/>
+				{showShortcutHint ? <EditorShortcutHint /> : null}
 			</div>
 		);
 	}
@@ -109,6 +113,7 @@ export function YamlCodeEditor({
 			{helperText ? (
 				<span className="text-xs opacity-70">{helperText}</span>
 			) : null}
+			{showShortcutHint ? <EditorShortcutHint /> : null}
 		</div>
 	);
 }

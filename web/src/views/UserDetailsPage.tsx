@@ -1120,6 +1120,7 @@ export function UserDetailsPage() {
 								onChange={setMihomoMixinYaml}
 								placeholder="Paste Mihomo mixin YAML (top-level proxies/proxy-providers will be extracted on save)"
 								minRows={14}
+								showShortcutHint
 							/>
 							<YamlCodeEditor
 								label="extra_proxies_yaml"
