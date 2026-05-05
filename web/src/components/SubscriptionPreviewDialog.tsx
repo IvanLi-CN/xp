@@ -235,7 +235,7 @@ export function SubscriptionPreviewDialog({
 	const showFieldsPanel = format === "clash";
 
 	const headerBtnBase =
-		"inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10";
+		"inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10 sm:w-auto";
 	const headerIconBtnBase =
 		"absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:right-5 sm:top-5";
 	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
@@ -282,16 +282,16 @@ export function SubscriptionPreviewDialog({
 						"pt-5 pb-4 sm:pt-[18px] sm:pb-[18px]",
 					].join(" ")}
 				>
-					<div className="grid gap-4 pr-12 lg:grid-cols-[minmax(0,1fr)_auto]">
-						<div className="flex min-h-10 min-w-0 items-center">
+					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+						<div className="flex min-h-10 min-w-0 items-center pr-12 lg:pr-0">
 							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
 						</div>
 
-						<div className="grid min-h-11 grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap lg:justify-end">
+						<div className="grid min-h-11 grid-cols-1 items-center gap-2 sm:flex sm:flex-wrap lg:justify-end">
 							<SubscriptionFormatSegmentedControl
-								className="col-span-2 w-full min-w-0 sm:w-auto sm:min-w-[260px]"
+								className="w-full min-w-0 sm:w-auto sm:min-w-[260px]"
 								hideLegend
 								onValueActivate={(nextFormat) => {
 									if (loading) return;
