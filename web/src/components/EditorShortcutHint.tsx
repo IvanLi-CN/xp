@@ -16,7 +16,7 @@ export function useEditorShortcutItems(
 	platform: EditorShortcutPlatform = "auto",
 ): Array<{
 	label: string;
-	keys: string[];
+	combos: string[][];
 }> {
 	const autoIsMac = useIsMacPlatform();
 	const isMac = platform === "auto" ? autoIsMac : platform === "mac";
@@ -25,23 +25,21 @@ export function useEditorShortcutItems(
 		() => [
 			{
 				label: "Search",
-				keys: isMac ? ["⌘", "F"] : ["Ctrl", "F"],
+				combos: [isMac ? ["⌘", "F"] : ["Ctrl", "F"]],
 			},
 			{
-				label: "Fold current",
-				keys: isMac ? ["⌘", "⌥", "["] : ["Ctrl", "Shift", "["],
+				label: "Fold",
+				combos: [
+					isMac ? ["⌘", "⌥", "["] : ["Ctrl", "Shift", "["],
+					isMac ? ["⌃", "⌥", "["] : ["Ctrl", "Alt", "["],
+				],
 			},
 			{
-				label: "Unfold current",
-				keys: isMac ? ["⌘", "⌥", "]"] : ["Ctrl", "Shift", "]"],
-			},
-			{
-				label: "Fold all",
-				keys: isMac ? ["⌃", "⌥", "["] : ["Ctrl", "Alt", "["],
-			},
-			{
-				label: "Unfold all",
-				keys: isMac ? ["⌃", "⌥", "]"] : ["Ctrl", "Alt", "]"],
+				label: "Unfold",
+				combos: [
+					isMac ? ["⌘", "⌥", "]"] : ["Ctrl", "Shift", "]"],
+					isMac ? ["⌃", "⌥", "]"] : ["Ctrl", "Alt", "]"],
+				],
 			},
 		],
 		[isMac],
@@ -67,18 +65,26 @@ export function EditorShortcutHint({
 				{shortcuts.map((shortcut) => (
 					<div
 						key={shortcut.label}
-						className="inline-flex items-center gap-1.5 whitespace-nowrap"
+						className="inline-flex items-center gap-2 whitespace-nowrap"
 					>
 						<span>{shortcut.label}</span>
-						<div className="inline-flex items-center gap-1">
-							{shortcut.keys.map((key, index) => (
+						<div className="inline-flex items-center gap-2">
+							{shortcut.combos.map((combo, comboIndex) => (
 								<div
-									key={`${shortcut.label}-${key}-${String(index)}`}
+									key={`${shortcut.label}-${String(comboIndex)}`}
 									className="inline-flex items-center gap-1"
 								>
-									<kbd className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-md border border-border bg-muted px-1.5 font-mono text-[10px] font-semibold tracking-tight text-foreground shadow-xs">
-										{key}
-									</kbd>
+									{comboIndex > 0 ? (
+										<span className="text-muted-foreground/60">/</span>
+									) : null}
+									{combo.map((key, keyIndex) => (
+										<kbd
+											key={`${shortcut.label}-${String(comboIndex)}-${key}-${String(keyIndex)}`}
+											className="inline-flex h-6 min-w-7 items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-semibold tracking-tight text-foreground shadow-xs"
+										>
+											{key}
+										</kbd>
+									))}
 								</div>
 							))}
 						</div>

@@ -47,7 +47,7 @@ export function YamlCodeEditor({
 	onChange,
 	placeholder,
 	minRows = 8,
-	helperText = "YAML syntax highlight · line numbers · fold · Ctrl/Cmd+F",
+	helperText,
 	readOnly = false,
 	hideLabel = false,
 	onCreateEditor,
@@ -55,6 +55,11 @@ export function YamlCodeEditor({
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
+	const resolvedHelperText =
+		helperText ??
+		(showShortcutHint
+			? null
+			: "YAML syntax highlight · line numbers · fold · Ctrl/Cmd+F");
 	const editorHeight = `${Math.max(minRows, 4) * 24}px`;
 	const extensions = useMemo(() => [yaml()], []);
 	const editorTheme =
@@ -110,8 +115,8 @@ export function YamlCodeEditor({
 					className="text-sm font-mono"
 				/>
 			</div>
-			{helperText ? (
-				<span className="text-xs opacity-70">{helperText}</span>
+			{resolvedHelperText ? (
+				<span className="text-xs opacity-70">{resolvedHelperText}</span>
 			) : null}
 			{showShortcutHint ? <EditorShortcutHint /> : null}
 		</div>
