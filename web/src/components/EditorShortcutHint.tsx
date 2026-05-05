@@ -58,24 +58,24 @@ export function EditorShortcutHint({
 	const shortcuts = useEditorShortcutItems(platform);
 
 	return (
-		<div className="flex items-center gap-3 overflow-x-auto whitespace-nowrap text-[11px] leading-5 text-muted-foreground">
+		<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground">
 			<div className="flex shrink-0 items-center gap-1.5">
 				<Icon name="tabler:keyboard" size={14} />
 				<span className="font-medium text-foreground/80">Shortcuts</span>
 			</div>
-			<div className="flex shrink-0 items-center gap-3">
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				{shortcuts.map((shortcut) => (
-					<div key={shortcut.label} className="flex items-center gap-1.5">
+					<div
+						key={shortcut.label}
+						className="inline-flex items-center gap-1.5 whitespace-nowrap"
+					>
 						<span>{shortcut.label}</span>
-						<div className="flex items-center gap-1">
+						<div className="inline-flex items-center gap-1">
 							{shortcut.keys.map((key, index) => (
 								<div
 									key={`${shortcut.label}-${key}-${String(index)}`}
-									className="flex items-center gap-1"
+									className="inline-flex items-center gap-1"
 								>
-									{index > 0 ? (
-										<span className="text-muted-foreground/70">+</span>
-									) : null}
 									<kbd className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-md border border-border bg-muted px-1.5 font-mono text-[10px] font-semibold tracking-tight text-foreground shadow-xs">
 										{key}
 									</kbd>
