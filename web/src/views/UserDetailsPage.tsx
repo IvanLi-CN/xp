@@ -29,7 +29,6 @@ import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
-	SUBSCRIPTION_FORMAT_OPTIONS,
 	type SubscriptionFormat,
 	fetchSubscription,
 } from "../api/subscription";
@@ -45,6 +44,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -1070,32 +1070,12 @@ export function UserDetailsPage() {
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">
-										Subscription format
-									</span>
-									<Select
-										value={subFormat}
-										onValueChange={(value) =>
-											setSubFormat(value as SubscriptionFormat)
-										}
-									>
-										<SelectTrigger
-											aria-label="Subscription format"
-											className={selectClassName}
-											data-testid="subscription-format"
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{SUBSCRIPTION_FORMAT_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
+								<SubscriptionFormatSegmentedControl
+									className="w-full sm:w-auto"
+									onValueChange={setSubFormat}
+									testId="subscription-format"
+									value={subFormat}
+								/>
 								<CopyButton
 									text={subscriptionUrl}
 									label="Copy URL"

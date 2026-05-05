@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
-	SUBSCRIPTION_FORMAT_OPTIONS,
 	type SubscriptionFormat,
 } from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +17,7 @@ import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { YamlCodeEditor } from "../components/YamlCodeEditor";
@@ -899,31 +899,12 @@ export function DemoUserDetailsPage() {
 
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">
-										Subscription format
-									</span>
-									<Select
-										value={subscriptionFormat}
-										onValueChange={(value) =>
-											setSubscriptionFormat(value as SubscriptionFormat)
-										}
-									>
-										<SelectTrigger
-											aria-label="Subscription format"
-											data-testid="demo-subscription-format"
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{SUBSCRIPTION_FORMAT_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
+								<SubscriptionFormatSegmentedControl
+									className="w-full sm:w-auto"
+									onValueChange={setSubscriptionFormat}
+									testId="demo-subscription-format"
+									value={subscriptionFormat}
+								/>
 								<CopyButton
 									text={subscriptionUrl(user.subscriptionToken)}
 									label="Copy URL"

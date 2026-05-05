@@ -19,15 +19,23 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(page.getByText("Display name")).toBeVisible();
 	await expect(page.getByText("Subscription token:")).toBeVisible();
 	await expect(page.getByText("Mihomo mixin config")).toBeVisible();
-	await page.getByTestId("demo-subscription-format").click();
-	await expect(page.getByRole("option", { name: "raw" })).toBeVisible();
-	await expect(page.getByRole("option", { name: "clash" })).toBeVisible();
+	const subscriptionFormat = page.getByTestId("demo-subscription-format");
+	await expect(subscriptionFormat.locator('input[type="radio"]')).toHaveCount(
+		3,
+	);
+	await expect(subscriptionFormat.locator('input[value="raw"]')).toBeChecked();
+	await expect(subscriptionFormat.locator('input[value="clash"]')).toHaveCount(
+		1,
+	);
+	await expect(subscriptionFormat.locator('input[value="mihomo"]')).toHaveCount(
+		1,
+	);
+	await subscriptionFormat.locator("label").nth(2).click();
 	await expect(
-		page.getByRole("option", { name: "mihomo(provider)" }),
-	).toBeVisible();
-	await expect(page.getByRole("option", { name: /legacy/i })).toHaveCount(0);
-	await expect(page.getByRole("option", { name: /default/i })).toHaveCount(0);
-	await page.keyboard.press("Escape");
+		subscriptionFormat.locator('input[value="mihomo"]'),
+	).toBeChecked();
+	await subscriptionFormat.locator("label").nth(0).click();
+	await expect(subscriptionFormat.locator('input[value="raw"]')).toBeChecked();
 
 	await page.getByRole("button", { name: "Access" }).click();
 	await expect(

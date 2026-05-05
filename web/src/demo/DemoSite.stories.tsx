@@ -87,21 +87,19 @@ export const MainFlow: Story = {
 		await expect(
 			await canvas.findByRole("button", { name: "Reset credentials" }),
 		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByTestId("demo-subscription-format"),
+		const subscriptionFormat = await canvas.findByTestId(
+			"demo-subscription-format",
 		);
+		const labels = Array.from(subscriptionFormat.querySelectorAll("label"));
+		expect(labels.map((label) => label.textContent?.trim())).toEqual([
+			"raw",
+			"clash",
+			"mihomo(provider)",
+		]);
+		await userEvent.click(labels[2]);
 		await expect(
-			await screen.findByRole("option", { name: "raw" }),
-		).toBeInTheDocument();
-		await expect(
-			await screen.findByRole("option", { name: "clash" }),
-		).toBeInTheDocument();
-		await expect(
-			await screen.findByRole("option", { name: "mihomo(provider)" }),
-		).toBeInTheDocument();
-		await expect(screen.queryByRole("option", { name: /legacy/i })).toBeNull();
-		await expect(screen.queryByRole("option", { name: /default/i })).toBeNull();
-		await userEvent.keyboard("{Escape}");
+			subscriptionFormat.querySelector('input[value="mihomo"]'),
+		).toBeChecked();
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Access" }),
 		);
