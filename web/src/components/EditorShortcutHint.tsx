@@ -69,16 +69,11 @@ function ShortcutCombo({ combo }: { combo: string[] }) {
 
 function ShortcutInlinePreview({
 	shortcuts,
-	innerRef,
 }: {
 	shortcuts: Array<{ label: string; combos: string[][] }>;
-	innerRef?: React.Ref<HTMLDivElement>;
 }) {
 	return (
-		<div
-			ref={innerRef}
-			className="flex min-w-0 items-center gap-3 whitespace-nowrap"
-		>
+		<div className="flex min-w-0 items-center gap-3 whitespace-nowrap">
 			{shortcuts.map((shortcut) => (
 				<div
 					key={shortcut.label}
@@ -114,7 +109,7 @@ export function EditorShortcutHint({
 	const closeTimerRef = useRef<number | null>(null);
 	const panelRef = useRef<HTMLDivElement | null>(null);
 	const rowRef = useRef<HTMLDivElement | null>(null);
-	const previewRef = useRef<HTMLDivElement | null>(null);
+	const measureRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(
 		() => () => {
@@ -130,11 +125,11 @@ export function EditorShortcutHint({
 
 	useEffect(() => {
 		const row = rowRef.current;
-		const preview = previewRef.current;
-		if (!row || !preview) return;
+		const measure = measureRef.current;
+		if (!row || !measure) return;
 
 		const updateOverflow = () => {
-			setOverflowing(preview.scrollWidth > preview.clientWidth + 1);
+			setOverflowing(measure.scrollWidth > row.clientWidth + 1);
 		};
 
 		updateOverflow();
@@ -146,7 +141,7 @@ export function EditorShortcutHint({
 
 		const observer = new ResizeObserver(updateOverflow);
 		observer.observe(row);
-		observer.observe(preview);
+		observer.observe(measure);
 		return () => observer.disconnect();
 	}, []);
 
@@ -200,6 +195,19 @@ export function EditorShortcutHint({
 	return (
 		<div className="relative w-full">
 			<div
+				aria-hidden
+				className="pointer-events-none absolute left-0 top-0 -z-10 invisible w-max"
+				ref={measureRef}
+			>
+				<div className="flex items-center gap-3 whitespace-nowrap">
+					<div className="flex shrink-0 items-center gap-1.5">
+						<Icon name="tabler:keyboard" size={14} />
+						<span className="font-medium text-foreground/80">Shortcuts</span>
+					</div>
+					<ShortcutInlinePreview shortcuts={shortcuts} />
+				</div>
+			</div>
+			<div
 				ref={rowRef}
 				className={cn(
 					"flex h-9 w-full items-center justify-between gap-3 overflow-hidden rounded-xl border border-border bg-muted/25 px-3 text-left text-[11px] leading-5 text-muted-foreground shadow-xs",
@@ -213,7 +221,7 @@ export function EditorShortcutHint({
 						<Icon name="tabler:keyboard" size={14} />
 						<span className="font-medium text-foreground/80">Shortcuts</span>
 					</div>
-					<ShortcutInlinePreview innerRef={previewRef} shortcuts={shortcuts} />
+					<ShortcutInlinePreview shortcuts={shortcuts} />
 				</div>
 				{overflowing ? (
 					<button
@@ -245,14 +253,16 @@ export function EditorShortcutHint({
 					onMouseEnter={openNow}
 					onMouseLeave={scheduleClose}
 				>
-					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground">
+					<div className="grid gap-2 text-[11px] leading-5 text-muted-foreground">
 						{shortcuts.map((shortcut) => (
 							<div
 								key={shortcut.label}
-								className="inline-flex items-center gap-2"
+								className="grid grid-cols-[4rem_1fr] items-center gap-3"
 							>
-								<span className="whitespace-nowrap">{shortcut.label}</span>
-								<div className="flex flex-wrap items-center gap-1">
+								<span className="whitespace-nowrap text-muted-foreground">
+									{shortcut.label}
+								</span>
+								<div className="flex flex-wrap items-center gap-1.5">
 									{shortcut.combos.map((combo, index) => (
 										<div
 											key={`${shortcut.label}-${String(index)}`}

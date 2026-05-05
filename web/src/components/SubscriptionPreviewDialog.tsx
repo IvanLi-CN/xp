@@ -229,9 +229,9 @@ export function SubscriptionPreviewDialog({
 	const showFieldsPanel = format === "clash";
 
 	const headerBtnBase =
-		"inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10";
+		"inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10";
 	const headerIconBtnBase =
-		"flex size-11 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:size-10";
+		"absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:right-5 sm:top-5";
 	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
 	const mutedTextClass = "text-muted-foreground";
 	const fieldValueClass =
@@ -245,6 +245,7 @@ export function SubscriptionPreviewDialog({
 				showCloseButton={false}
 				className={cn(
 					"w-[calc(100vw-1rem)] max-w-[1160px] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto rounded-[18px] border border-border bg-card p-0 text-card-foreground shadow-sm sm:w-[calc(100vw-2rem)] sm:max-h-[calc(100dvh-2rem)] xl:overflow-hidden",
+					"max-lg:!left-0 max-lg:!right-0 max-lg:!bottom-0 max-lg:!top-auto max-lg:!w-full max-lg:!max-w-none max-lg:!translate-x-0 max-lg:!translate-y-0 max-lg:rounded-b-none max-lg:border-x-0 max-lg:border-b-0 max-lg:max-h-[92dvh]",
 					showFieldsPanel ? "xl:h-[660px]" : "",
 				)}
 				data-sub-preview-dialog
@@ -257,17 +258,34 @@ export function SubscriptionPreviewDialog({
 					fields.
 				</DialogDescription>
 
-				<div className={[contentPadClass, "pt-[13px] pb-[18px]"].join(" ")}>
-					<div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-						<div className="flex min-h-11 min-w-0 flex-wrap items-center gap-3">
+				<button
+					type="button"
+					className={headerIconBtnBase}
+					aria-label="Close"
+					data-sub-preview-close
+					onClick={() => {
+						onClose();
+					}}
+				>
+					<Icon name="tabler:x" size={20} ariaLabel="Close" />
+				</button>
+
+				<div
+					className={[
+						contentPadClass,
+						"pt-5 pb-4 sm:pt-[18px] sm:pb-[18px]",
+					].join(" ")}
+				>
+					<div className="grid gap-4 pr-12 lg:grid-cols-[minmax(0,1fr)_auto]">
+						<div className="flex min-h-10 min-w-0 items-center">
 							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
 						</div>
 
-						<div className="flex min-h-11 flex-wrap items-center gap-2 lg:justify-end">
+						<div className="grid min-h-11 grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap lg:justify-end">
 							<SubscriptionFormatSegmentedControl
-								className="w-full min-w-[260px] sm:w-auto"
+								className="col-span-2 w-full min-w-0 sm:w-auto sm:min-w-[260px]"
 								hideLegend
 								onValueActivate={(nextFormat) => {
 									if (loading) return;
@@ -297,17 +315,6 @@ export function SubscriptionPreviewDialog({
 								}}
 							>
 								Copy content
-							</button>
-							<button
-								type="button"
-								className={headerIconBtnBase}
-								aria-label="Close"
-								data-sub-preview-close
-								onClick={() => {
-									onClose();
-								}}
-							>
-								<Icon name="tabler:x" size={20} ariaLabel="Close" />
 							</button>
 						</div>
 					</div>
