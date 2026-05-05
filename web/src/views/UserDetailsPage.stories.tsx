@@ -262,10 +262,8 @@ export const UsageDetailsTab7d: Story = {
 export const MihomoProviderPreview: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await canvas.findByLabelText("Subscription format"));
-		await userEvent.click(
-			await screen.findByRole("option", { name: "mihomo(provider)" }),
-		);
+		const subscriptionFormat = await canvas.findByTestId("subscription-format");
+		subscriptionFormat.querySelectorAll("label")[2]?.click();
 		await userEvent.click(await canvas.findByRole("button", { name: "Fetch" }));
 		await expect(
 			await screen.findByText("Subscription preview"),

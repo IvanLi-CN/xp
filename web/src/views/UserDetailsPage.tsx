@@ -28,6 +28,7 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
 import {
+	DEFAULT_SUBSCRIPTION_FORMAT,
 	type SubscriptionFormat,
 	fetchSubscription,
 } from "../api/subscription";
@@ -43,6 +44,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -260,7 +262,9 @@ export function UserDetailsPage() {
 	const [isResettingToken, setIsResettingToken] = useState(false);
 	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
 	const [isResettingCredentials, setIsResettingCredentials] = useState(false);
-	const [subFormat, setSubFormat] = useState<SubscriptionFormat>("raw");
+	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
+		DEFAULT_SUBSCRIPTION_FORMAT,
+	);
 	const [subOpen, setSubOpen] = useState(false);
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
@@ -740,12 +744,13 @@ export function UserDetailsPage() {
 		}
 	}
 
-	async function loadSubscriptionPreview() {
+	async function loadSubscriptionPreview(nextFormat = subFormat) {
 		if (!subscriptionToken) return;
 		setSubLoading(true);
 		setSubError(null);
+		setSubFormat(nextFormat);
 		try {
-			const text = await fetchSubscription(subscriptionToken, subFormat);
+			const text = await fetchSubscription(subscriptionToken, nextFormat);
 			setSubText(text);
 		} catch (error) {
 			setSubError(formatError(error));
@@ -1066,30 +1071,12 @@ export function UserDetailsPage() {
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
-								<div className="xp-field-stack gap-2">
-									<span className="text-sm font-medium">
-										Subscription format
-									</span>
-									<Select
-										value={subFormat}
-										onValueChange={(value) =>
-											setSubFormat(value as SubscriptionFormat)
-										}
-									>
-										<SelectTrigger
-											aria-label="Subscription format"
-											className={selectClassName}
-											data-testid="subscription-format"
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="raw">raw</SelectItem>
-											<SelectItem value="clash">clash</SelectItem>
-											<SelectItem value="mihomo">mihomo(provider)</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
+								<SubscriptionFormatSegmentedControl
+									className="w-full sm:w-auto"
+									onValueChange={setSubFormat}
+									testId="subscription-format"
+									value={subFormat}
+								/>
 								<CopyButton
 									text={subscriptionUrl}
 									label="Copy URL"
@@ -1099,6 +1086,7 @@ export function UserDetailsPage() {
 								<Button
 									className="self-end"
 									data-testid="subscription-fetch"
+									iconLeft={<Icon name="tabler:cloud-download" />}
 									loading={subLoading}
 									onClick={async () => {
 										setSubOpen(true);
@@ -1109,8 +1097,8 @@ export function UserDetailsPage() {
 								</Button>
 							</div>
 							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal. `mihomo(provider)` is the canonical
-								Mihomo delivery path.
+								Preview opens in a modal. Mihomo uses the canonical
+								provider-backed delivery path.
 							</div>
 						</div>
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
@@ -1133,6 +1121,7 @@ export function UserDetailsPage() {
 								onChange={setMihomoMixinYaml}
 								placeholder="Paste Mihomo mixin YAML (top-level proxies/proxy-providers will be extracted on save)"
 								minRows={14}
+								showShortcutHint
 							/>
 							<YamlCodeEditor
 								label="extra_proxies_yaml"
@@ -1469,6 +1458,7 @@ export function UserDetailsPage() {
 				loading={subLoading}
 				content={subText}
 				error={subError}
+				onFormatChange={loadSubscriptionPreview}
 			/>
 
 			<ConfirmDialog

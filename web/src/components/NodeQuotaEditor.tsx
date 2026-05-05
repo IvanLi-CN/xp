@@ -263,7 +263,7 @@ export function NodeQuotaEditor(props: {
 				ref={triggerRef}
 				type="button"
 				className={cn(
-					"inline-flex items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+					"inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground sm:min-h-0 sm:px-2 sm:py-1",
 					disabled && "cursor-not-allowed opacity-60",
 				)}
 				disabled={disabled}

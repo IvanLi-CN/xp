@@ -21,7 +21,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
 	Select,
 	SelectContent,
@@ -352,17 +351,19 @@ export function AppShell({
 
 							<div className="hidden items-center justify-center lg:flex">
 								<div className="relative w-full max-w-md">
-									<Input
-										type="text"
-										readOnly
-										placeholder="Search / command palette"
+									<button
+										type="button"
+										aria-label="Open command palette"
+										aria-haspopup="dialog"
+										aria-expanded={commandPaletteOpen}
 										className={inputClass(
 											prefs.density,
-											"cursor-pointer bg-muted/50 pr-20 font-mono",
+											"cursor-pointer justify-start bg-muted/50 pr-20 text-left font-mono text-muted-foreground hover:bg-muted",
 										)}
 										onClick={() => setCommandPaletteOpen(true)}
-										onFocus={() => setCommandPaletteOpen(true)}
-									/>
+									>
+										<span>Search / command palette</span>
+									</button>
 									<div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
 										<kbd className="xp-kbd">Ctrl</kbd>
 										<kbd className="xp-kbd">K</kbd>

@@ -402,7 +402,7 @@ function AccessMatrixCellLabel(props: {
 				</div>
 				<button
 					type="button"
-					className="flex min-h-6 min-w-0 items-center gap-1 text-left opacity-80 transition-opacity hover:opacity-100"
+					className="flex min-h-11 min-w-0 items-center gap-1 text-left opacity-80 transition-opacity hover:opacity-100 sm:min-h-6"
 					aria-expanded={expanded}
 					aria-label={`Toggle endpoint tree for ${nodeId} ${protocolId}`}
 					onClick={() => setExpanded((value) => !value)}
@@ -412,7 +412,7 @@ function AccessMatrixCellLabel(props: {
 							name="tabler:folder"
 							size={16}
 							className={cn(
-								"absolute transition-all duration-200 ease-out",
+								"absolute transition-[opacity,transform] duration-200 ease-out",
 								expanded
 									? "-rotate-6 scale-90 opacity-0"
 									: "rotate-0 scale-100 opacity-80",
@@ -422,7 +422,7 @@ function AccessMatrixCellLabel(props: {
 							name="tabler:folder-open"
 							size={16}
 							className={cn(
-								"absolute transition-all duration-200 ease-out",
+								"absolute transition-[opacity,transform] duration-200 ease-out",
 								expanded
 									? "rotate-0 scale-100 opacity-90"
 									: "scale-90 rotate-6 opacity-0",

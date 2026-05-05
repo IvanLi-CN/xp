@@ -4,6 +4,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import type { EditorView } from "@uiw/react-codemirror";
 import { type ReactNode, useId, useMemo } from "react";
 
+import { EditorShortcutHint } from "./EditorShortcutHint";
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
 import { Textarea } from "./ui/textarea";
@@ -18,6 +19,7 @@ type YamlCodeEditorProps = {
 	readOnly?: boolean;
 	hideLabel?: boolean;
 	onCreateEditor?: (view: EditorView) => void;
+	showShortcutHint?: boolean;
 };
 
 const CODEMIRROR_BASIC_SETUP = {
@@ -45,13 +47,15 @@ export function YamlCodeEditor({
 	onChange,
 	placeholder,
 	minRows = 8,
-	helperText = "YAML syntax highlight · line numbers · fold · Ctrl/Cmd+F",
+	helperText,
 	readOnly = false,
 	hideLabel = false,
 	onCreateEditor,
+	showShortcutHint = false,
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
+	const resolvedHelperText = helperText ?? null;
 	const editorHeight = `${Math.max(minRows, 4) * 24}px`;
 	const extensions = useMemo(() => [yaml()], []);
 	const editorTheme =
@@ -76,6 +80,7 @@ export function YamlCodeEditor({
 					onChange={(event) => onChange(event.target.value)}
 					placeholder={placeholder}
 				/>
+				{showShortcutHint ? <EditorShortcutHint /> : null}
 			</div>
 		);
 	}
@@ -106,8 +111,13 @@ export function YamlCodeEditor({
 					className="text-sm font-mono"
 				/>
 			</div>
-			{helperText ? (
-				<span className="text-xs opacity-70">{helperText}</span>
+			{resolvedHelperText ? (
+				<span className="text-xs opacity-70">{resolvedHelperText}</span>
+			) : null}
+			{showShortcutHint ? (
+				<div className="pt-1">
+					<EditorShortcutHint />
+				</div>
 			) : null}
 		</div>
 	);

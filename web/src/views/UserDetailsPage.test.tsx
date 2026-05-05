@@ -68,7 +68,13 @@ vi.mock("../api/adminUserAccess");
 vi.mock("../api/adminUserNodeQuotas");
 vi.mock("../api/adminUserNodeQuotaStatus");
 vi.mock("../api/adminIpUsage");
-vi.mock("../api/subscription");
+vi.mock("../api/subscription", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../api/subscription")>();
+	return {
+		...actual,
+		fetchSubscription: vi.fn(),
+	};
+});
 
 const { mockReadAdminToken } = vi.hoisted(() => ({
 	mockReadAdminToken: vi.fn(() => "admintoken"),
@@ -626,8 +632,16 @@ describe("<UserDetailsPage />", () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.click(await screenByLabel("Subscription format"));
-		fireEvent.click(await screen.findByText("mihomo(provider)"));
+		const group = (await screen.findByTestId(
+			"subscription-format",
+		)) as HTMLElement;
+		const inputs = group.querySelectorAll("input");
+		expect(inputs).toHaveLength(3);
+		const mihomoInput = inputs[2];
+		if (!(mihomoInput instanceof HTMLElement)) {
+			throw new Error("Missing mihomo subscription format input");
+		}
+		fireEvent.click(mihomoInput);
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {

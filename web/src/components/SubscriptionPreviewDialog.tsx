@@ -1,16 +1,21 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { yaml } from "@codemirror/lang-yaml";
+import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
+import CodeMirror from "@uiw/react-codemirror";
+import { useMemo } from "react";
 
+import { cn } from "@/lib/utils";
+import type { SubscriptionFormat } from "../api/subscription";
+import { EditorShortcutHint } from "./EditorShortcutHint";
+import { Icon } from "./Icon";
+import { SubscriptionFormatSegmentedControl } from "./SubscriptionFormatSegmentedControl";
+import { useUiPrefsOptional } from "./UiPrefs";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-
-import type { SubscriptionFormat } from "../api/subscription";
-import { useUiPrefsOptional } from "./UiPrefs";
+} from "./ui/dialog";
+import { Textarea } from "./ui/textarea";
 
 type SubscriptionPreviewDialogProps = {
 	open: boolean;
@@ -20,9 +25,8 @@ type SubscriptionPreviewDialogProps = {
 	loading: boolean;
 	content: string;
 	error?: string | null;
+	onFormatChange?: (format: SubscriptionFormat) => void | Promise<void>;
 };
-
-type CodeLanguage = "yaml" | "json" | "text";
 
 type ClashFields = {
 	servername?: string;
@@ -30,31 +34,28 @@ type ClashFields = {
 	shortId?: string;
 };
 
+const CODEMIRROR_BASIC_SETUP = {
+	lineNumbers: true,
+	highlightActiveLineGutter: true,
+	foldGutter: true,
+	allowMultipleSelections: true,
+	indentOnInput: true,
+	bracketMatching: true,
+	closeBrackets: true,
+	autocompletion: true,
+	highlightActiveLine: true,
+	highlightSelectionMatches: true,
+	searchKeymap: true,
+	foldKeymap: true,
+	completionKeymap: true,
+	tabSize: 2,
+};
+
+const IS_TEST_MODE = import.meta.env.MODE === "test";
+
 function truncateMiddle(value: string, head: number, tail: number): string {
 	if (value.length <= head + tail + 1) return value;
 	return `${value.slice(0, head)}…${value.slice(-tail)}`;
-}
-
-function isProbablyJson(text: string): boolean {
-	const trimmed = text.trim();
-	if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return false;
-	try {
-		JSON.parse(trimmed);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function chooseLanguage(
-	format: SubscriptionFormat,
-	content: string,
-): CodeLanguage {
-	if (format === "clash" || format === "mihomo") {
-		return "yaml";
-	}
-	if (isProbablyJson(content)) return "json";
-	return "text";
 }
 
 function parseYamlScalar(raw: string): string {
@@ -122,610 +123,88 @@ function extractClashFields(text: string): ClashFields {
 	return { servername, publicKey, shortId };
 }
 
-type TokenPart = { text: string; kind: string; start: number };
-
-type Range = { start: number; end: number };
-
-function tokenizeJsonLine(line: string): TokenPart[] {
-	const parts: TokenPart[] = [];
-
-	let i = 0;
-	while (i < line.length) {
-		const ch = line[i];
-
-		if (ch === '"') {
-			let j = i + 1;
-			let escaped = false;
-			while (j < line.length) {
-				const c = line[j];
-				if (escaped) {
-					escaped = false;
-					j += 1;
-					continue;
-				}
-				if (c === "\\") {
-					escaped = true;
-					j += 1;
-					continue;
-				}
-				if (c === '"') {
-					j += 1;
-					break;
-				}
-				j += 1;
-			}
-			parts.push({ text: line.slice(i, j), kind: "string", start: i });
-			i = j;
-			continue;
-		}
-
-		if ((ch >= "0" && ch <= "9") || ch === "-") {
-			let j = i + 1;
-			while (j < line.length) {
-				const c = line[j];
-				const isNumChar =
-					(c >= "0" && c <= "9") ||
-					c === "." ||
-					c === "e" ||
-					c === "E" ||
-					c === "+" ||
-					c === "-";
-				if (!isNumChar) break;
-				j += 1;
-			}
-			parts.push({ text: line.slice(i, j), kind: "number", start: i });
-			i = j;
-			continue;
-		}
-
-		const rest = line.slice(i);
-		if (
-			rest.startsWith("true") ||
-			rest.startsWith("false") ||
-			rest.startsWith("null")
-		) {
-			const kw = rest.startsWith("true")
-				? "true"
-				: rest.startsWith("false")
-					? "false"
-					: "null";
-			const next = line[i + kw.length] ?? "";
-			if (!next || /[^A-Za-z0-9_]/.test(next)) {
-				parts.push({ text: kw, kind: "keyword", start: i });
-				i += kw.length;
-				continue;
-			}
-		}
-
-		if ("{}[],:".includes(ch)) {
-			parts.push({ text: ch, kind: "punct", start: i });
-			i += 1;
-			continue;
-		}
-
-		parts.push({ text: ch, kind: "plain", start: i });
-		i += 1;
-	}
-
-	return parts;
-}
-
-function tokenizeYamlLine(line: string): TokenPart[] {
-	const parts: TokenPart[] = [];
-	let pos = 0;
-	const push = (text: string, kind: string) => {
-		parts.push({ text, kind, start: pos });
-		pos += text.length;
-	};
-
-	const trimmed = line.trim();
-	if (!trimmed) return [{ text: line, kind: "plain", start: 0 }];
-	if (trimmed.startsWith("#"))
-		return [{ text: line, kind: "comment", start: 0 }];
-
-	const indentLen = line.length - line.trimStart().length;
-	const indent = line.slice(0, indentLen);
-	let rest = line.slice(indentLen);
-
-	let listPrefix = "";
-	if (rest.startsWith("- ")) {
-		listPrefix = "- ";
-		rest = rest.slice(2);
-	}
-
-	const keyMatch = rest.match(/^([A-Za-z0-9_-]+)(\s*:\s*)(.*)$/);
-	if (!keyMatch) return [{ text: line, kind: "plain", start: 0 }];
-
-	const key = keyMatch[1] ?? "";
-	const sep = keyMatch[2] ?? ": ";
-	const valueAndMaybeComment = keyMatch[3] ?? "";
-
-	let value = valueAndMaybeComment;
-	let comment = "";
-	const hashIdx = valueAndMaybeComment.indexOf(" #");
-	if (hashIdx >= 0) {
-		value = valueAndMaybeComment.slice(0, hashIdx);
-		comment = valueAndMaybeComment.slice(hashIdx);
-	}
-
-	push(indent, "plain");
-	if (listPrefix) push(listPrefix, "punct");
-	push(key, "key");
-	push(sep, "plain");
-
-	const scalar = value.trim();
-	if (scalar.length === 0) {
-		push(value, "plain");
-	} else if (
-		(scalar.startsWith('"') && scalar.endsWith('"')) ||
-		(scalar.startsWith("'") && scalar.endsWith("'"))
-	) {
-		const leading = value.slice(0, value.indexOf(scalar));
-		const trailing = value.slice(leading.length + scalar.length);
-		if (leading) push(leading, "plain");
-		push(scalar, "string");
-		if (trailing) push(trailing, "plain");
-	} else if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(scalar)) {
-		const leading = value.slice(0, value.indexOf(scalar));
-		const trailing = value.slice(leading.length + scalar.length);
-		if (leading) push(leading, "plain");
-		push(scalar, "number");
-		if (trailing) push(trailing, "plain");
-	} else if (scalar === "true" || scalar === "false" || scalar === "null") {
-		const leading = value.slice(0, value.indexOf(scalar));
-		const trailing = value.slice(leading.length + scalar.length);
-		if (leading) push(leading, "plain");
-		push(scalar, "keyword");
-		if (trailing) push(trailing, "plain");
-	} else {
-		push(value, "plain");
-	}
-
-	if (comment) push(comment, "comment");
-	return parts;
-}
-
-function TokenSpan({
-	kind,
-	text,
-	theme,
-	matchRanges,
-	tokenStart,
-}: {
-	kind: string;
-	text: string;
-	theme: "light" | "dark";
-	matchRanges: Range[] | null;
-	tokenStart: number;
-}) {
-	const colorByKind: Record<string, string> = {
-		plain: "#e2e8f0",
-		punct: "#cbd5e1",
-		key: "#93c5fd",
-		string: "#a7f3d0",
-		number: "#fcd34d",
-		keyword: "#fda4af",
-		comment: "#94a3b8",
-	};
-
-	const color = colorByKind[kind] ?? colorByKind.plain;
-	const matchBg =
-		theme === "light" ? "rgba(168,85,247,0.20)" : "rgba(168,85,247,0.28)";
-
-	if (!matchRanges || matchRanges.length === 0) {
-		return <span style={{ color }}>{text}</span>;
-	}
-
-	const tokenEnd = tokenStart + text.length;
-	const segments: Array<{ text: string; highlighted: boolean }> = [];
-
-	let cursor = 0;
-	for (const r of matchRanges) {
-		if (r.end <= tokenStart || r.start >= tokenEnd) continue;
-		const startInToken = Math.max(r.start, tokenStart) - tokenStart;
-		const endInToken = Math.min(r.end, tokenEnd) - tokenStart;
-		if (startInToken > cursor) {
-			segments.push({
-				text: text.slice(cursor, startInToken),
-				highlighted: false,
-			});
-		}
-		segments.push({
-			text: text.slice(startInToken, endInToken),
-			highlighted: true,
-		});
-		cursor = endInToken;
-	}
-	if (cursor < text.length) {
-		segments.push({ text: text.slice(cursor), highlighted: false });
-	}
-
-	return (
-		<>
-			{segments.map((s, idx) => (
-				<span
-					key={`${tokenStart}:${String(idx)}`}
-					style={{
-						color,
-						backgroundColor: s.highlighted ? matchBg : "transparent",
-						borderRadius: s.highlighted ? 6 : 0,
-						boxDecorationBreak: "clone",
-					}}
-				>
-					{s.text}
-				</span>
-			))}
-		</>
-	);
-}
-
 async function writeClipboard(text: string): Promise<void> {
 	try {
 		await navigator.clipboard.writeText(text);
 	} catch {}
 }
 
-function CodeView({
-	text,
-	language,
-	activeLine,
-	theme,
-	highlight,
-	fillHeight = false,
+function SubscriptionContentEditor({
+	content,
+	format,
+	fillHeight,
+	loading,
 }: {
-	text: string;
-	language: CodeLanguage;
-	activeLine: number | null;
-	theme: "light" | "dark";
-	highlight: string;
-	fillHeight?: boolean;
+	content: string;
+	format: SubscriptionFormat;
+	fillHeight: boolean;
+	loading: boolean;
 }) {
-	const lines = useMemo(() => text.split("\n"), [text]);
-	const lineEntries = useMemo(
-		() => lines.map((line, idx) => ({ line, lineIdx: idx, lineNo: idx + 1 })),
-		[lines],
+	const prefs = useUiPrefsOptional();
+	const editorTheme =
+		prefs?.resolvedTheme === "dark" ? githubDark : githubLight;
+	const extensions = useMemo(
+		() => (format === "clash" || format === "mihomo" ? [yaml()] : []),
+		[format],
 	);
+	const height = fillHeight ? "508px" : "min(56vh, 520px)";
+	const mobileHeightClass = fillHeight
+		? "[&_.cm-editor]:max-lg:!h-[min(44dvh,420px)]"
+		: "[&_.cm-editor]:max-lg:!h-[min(48dvh,420px)]";
 
-	const codeScrollRef = useRef<HTMLDivElement | null>(null);
-	const gutterInnerRef = useRef<HTMLDivElement | null>(null);
-	const hTrackRef = useRef<HTMLDivElement | null>(null);
-	const hThumbRef = useRef<HTMLDivElement | null>(null);
-	const vTrackRef = useRef<HTMLDivElement | null>(null);
-	const vThumbRef = useRef<HTMLDivElement | null>(null);
-	const scheduleScrollbarUpdateRef = useRef<(() => void) | null>(null);
-	const [scrollbarVisibility, setScrollbarVisibility] = useState<{
-		h: boolean;
-		v: boolean;
-	}>({ h: false, v: false });
-
-	const highlightNeedle = useMemo(
-		() => highlight.trim().toLowerCase(),
-		[highlight],
-	);
-	const matchRangesByLine = useMemo(() => {
-		if (!highlightNeedle) return new Map<number, Range[]>();
-		const out = new Map<number, Range[]>();
-		for (const e of lineEntries) {
-			const hay = (e.line ?? "").toLowerCase();
-			let at = hay.indexOf(highlightNeedle);
-			if (at < 0) continue;
-			const ranges: Range[] = [];
-			while (at >= 0) {
-				ranges.push({ start: at, end: at + highlightNeedle.length });
-				at = hay.indexOf(highlightNeedle, at + highlightNeedle.length);
-			}
-			out.set(e.lineIdx, ranges);
-		}
-		return out;
-	}, [highlightNeedle, lineEntries]);
-
-	useEffect(() => {
-		const el = codeScrollRef.current;
-		const gutterInner = gutterInnerRef.current;
-		if (!el || !gutterInner) return;
-
-		let raf = 0;
-		const onScroll = () => {
-			cancelAnimationFrame(raf);
-			raf = requestAnimationFrame(() => {
-				gutterInner.style.transform = `translateY(-${el.scrollTop}px)`;
-			});
-		};
-
-		onScroll();
-		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => {
-			cancelAnimationFrame(raf);
-			el.removeEventListener("scroll", onScroll);
-		};
-	}, []);
-
-	useEffect(() => {
-		if (activeLine == null) return;
-		const scroller = codeScrollRef.current;
-		if (!scroller) return;
-		const target = scroller.querySelector(
-			`[data-line="${String(activeLine)}"]`,
-		) as HTMLElement | null;
-		if (!target) return;
-		target.scrollIntoView({ block: "center" });
-	}, [activeLine]);
-
-	const codeStroke = theme === "light" ? "#1f2a44" : "#22304a";
-	const codeBg = theme === "light" ? "#0b1220" : "#050817";
-	const gutterBg = theme === "light" ? "bg-[#0f172a]/75" : "bg-[#0f172a]/90";
-	const activeLineBg =
-		theme === "light" ? "rgba(168,85,247,0.12)" : "rgba(168,85,247,0.16)";
-	const codeDimColor = "#94a3b8";
-
-	const trackBg =
-		theme === "light" ? "rgba(17,28,51,0.9)" : "rgba(17,28,51,0.95)";
-	const thumbBg = "rgba(34,211,238,0.85)";
-
-	useEffect(() => {
-		const scroller = codeScrollRef.current;
-		const hTrack = hTrackRef.current;
-		const hThumb = hThumbRef.current;
-		const vTrack = vTrackRef.current;
-		const vThumb = vThumbRef.current;
-		if (!scroller || !hTrack || !hThumb || !vTrack || !vThumb) return;
-
-		let raf = 0;
-		const minThumb = 28;
-
-		const update = () => {
-			const hVisible = scroller.scrollWidth > scroller.clientWidth + 1;
-			const vVisible = scroller.scrollHeight > scroller.clientHeight + 1;
-
-			const hTrackWidth = hTrack.clientWidth;
-			const vTrackHeight = vTrack.clientHeight;
-
-			if (hVisible && hTrackWidth > 0) {
-				const ratio = scroller.clientWidth / scroller.scrollWidth;
-				const thumbWidth = Math.max(minThumb, Math.round(hTrackWidth * ratio));
-				const maxLeft = Math.max(0, hTrackWidth - thumbWidth);
-				const denom = Math.max(1, scroller.scrollWidth - scroller.clientWidth);
-				const left = Math.round((scroller.scrollLeft / denom) * maxLeft);
-				hThumb.style.width = `${thumbWidth}px`;
-				hThumb.style.transform = `translateX(${left}px)`;
-			}
-
-			if (vVisible && vTrackHeight > 0) {
-				const ratio = scroller.clientHeight / scroller.scrollHeight;
-				const thumbHeight = Math.max(
-					minThumb,
-					Math.round(vTrackHeight * ratio),
-				);
-				const maxTop = Math.max(0, vTrackHeight - thumbHeight);
-				const denom = Math.max(
-					1,
-					scroller.scrollHeight - scroller.clientHeight,
-				);
-				const top = Math.round((scroller.scrollTop / denom) * maxTop);
-				vThumb.style.height = `${thumbHeight}px`;
-				vThumb.style.transform = `translateY(${top}px)`;
-			}
-
-			setScrollbarVisibility((prev) => {
-				if (prev.h === hVisible && prev.v === vVisible) return prev;
-				return { h: hVisible, v: vVisible };
-			});
-		};
-
-		const scheduleUpdate = () => {
-			cancelAnimationFrame(raf);
-			raf = requestAnimationFrame(update);
-		};
-
-		scheduleScrollbarUpdateRef.current = scheduleUpdate;
-		scheduleUpdate();
-		scroller.addEventListener("scroll", scheduleUpdate, { passive: true });
-
-		if (typeof ResizeObserver !== "undefined") {
-			const ro = new ResizeObserver(scheduleUpdate);
-			ro.observe(scroller);
-			ro.observe(hTrack);
-			ro.observe(vTrack);
-			return () => {
-				cancelAnimationFrame(raf);
-				scroller.removeEventListener("scroll", scheduleUpdate);
-				ro.disconnect();
-				scheduleScrollbarUpdateRef.current = null;
-			};
-		}
-
-		const onResize = () => scheduleUpdate();
-		window.addEventListener("resize", onResize);
-		return () => {
-			cancelAnimationFrame(raf);
-			scroller.removeEventListener("scroll", scheduleUpdate);
-			window.removeEventListener("resize", onResize);
-			scheduleScrollbarUpdateRef.current = null;
-		};
-	}, []);
-
-	useEffect(() => {
-		scheduleScrollbarUpdateRef.current?.();
-	});
-
-	const beginDrag = (e: ReactPointerEvent<HTMLDivElement>, axis: "x" | "y") => {
-		const scroller = codeScrollRef.current;
-		const hTrack = hTrackRef.current;
-		const vTrack = vTrackRef.current;
-		const hThumb = hThumbRef.current;
-		const vThumb = vThumbRef.current;
-		if (!scroller || !hTrack || !vTrack || !hThumb || !vThumb) return;
-
-		e.preventDefault();
-
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const startScrollLeft = scroller.scrollLeft;
-		const startScrollTop = scroller.scrollTop;
-
-		const hTrackWidth = hTrack.clientWidth;
-		const vTrackHeight = vTrack.clientHeight;
-		const hThumbWidth = hThumb.getBoundingClientRect().width;
-		const vThumbHeight = vThumb.getBoundingClientRect().height;
-
-		const maxHThumbLeft = Math.max(1, hTrackWidth - hThumbWidth);
-		const maxVThumbTop = Math.max(1, vTrackHeight - vThumbHeight);
-		const maxScrollLeft = Math.max(
-			1,
-			scroller.scrollWidth - scroller.clientWidth,
+	if (IS_TEST_MODE) {
+		return (
+			<div className="space-y-2">
+				<div className="relative">
+					<Textarea
+						aria-label="Subscription content"
+						className="h-[360px] resize-none font-mono text-sm"
+						readOnly
+						value={content}
+						data-testid="subscription-code-scroll"
+					/>
+					{loading ? <EditorLoadingOverlay /> : null}
+				</div>
+				<EditorShortcutHint />
+			</div>
 		);
-		const maxScrollTop = Math.max(
-			1,
-			scroller.scrollHeight - scroller.clientHeight,
-		);
-
-		const onMove = (ev: PointerEvent) => {
-			if (axis === "x") {
-				const dx = ev.clientX - startX;
-				const next = startScrollLeft + (dx / maxHThumbLeft) * maxScrollLeft;
-				scroller.scrollLeft = Math.max(0, Math.min(maxScrollLeft, next));
-				return;
-			}
-
-			const dy = ev.clientY - startY;
-			const next = startScrollTop + (dy / maxVThumbTop) * maxScrollTop;
-			scroller.scrollTop = Math.max(0, Math.min(maxScrollTop, next));
-		};
-
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp, { once: true });
-	};
+	}
 
 	return (
-		<div
-			className={[
-				"rounded-[14px] border overflow-hidden relative",
-				fillHeight
-					? "max-h-[40vh] lg:h-[508px] lg:max-h-none"
-					: "h-[56vh] min-h-[320px] max-h-[56vh]",
-			].join(" ")}
-			style={{ borderColor: codeStroke, backgroundColor: codeBg }}
-		>
-			<div className="flex h-full">
-				<div
-					className={[
-						"shrink-0 overflow-hidden font-mono tabular-nums select-none",
-						gutterBg,
-					].join(" ")}
-					style={{
-						width: "56px",
-						minWidth: "56px",
-					}}
-					aria-hidden
-				>
-					<div ref={gutterInnerRef} className="pt-[30px] pb-6">
-						{lineEntries.map((e) => (
-							<div
-								key={e.lineNo}
-								className={[
-									"h-[22px] text-center text-[11px] leading-[22px]",
-									activeLine === e.lineIdx ? "" : "",
-								]
-									.filter(Boolean)
-									.join(" ")}
-								style={{
-									color: codeDimColor,
-									backgroundColor:
-										activeLine === e.lineIdx ? activeLineBg : "transparent",
-								}}
-							>
-								{String(e.lineNo).padStart(2, "0")}
-							</div>
-						))}
-					</div>
-				</div>
-				<div
-					ref={codeScrollRef}
-					className="flex-1 overflow-auto font-mono font-normal text-[12px] h-full [&::-webkit-scrollbar]:hidden"
-					data-testid="subscription-code-scroll"
-					style={{
-						scrollbarWidth: "none",
-						msOverflowStyle: "none",
-					}}
-				>
-					<div className="min-w-max pt-[30px] pb-6">
-						{lineEntries.map((e) => {
-							const isActive = activeLine === e.lineIdx;
-							const matchRanges = matchRangesByLine.get(e.lineIdx) ?? null;
-							const tokens =
-								language === "yaml"
-									? tokenizeYamlLine(e.line)
-									: language === "json"
-										? tokenizeJsonLine(e.line)
-										: [{ text: e.line, kind: "plain", start: 0 }];
-							return (
-								<div
-									key={e.lineNo}
-									data-line={e.lineIdx}
-									className={[
-										"pl-[18px] pr-3 leading-[22px] whitespace-pre",
-										isActive ? "" : "",
-									]
-										.filter(Boolean)
-										.join(" ")}
-									style={{
-										backgroundColor: isActive ? activeLineBg : "transparent",
-									}}
-								>
-									{tokens.map((t) => (
-										<TokenSpan
-											key={`${t.start}:${t.kind}`}
-											kind={t.kind}
-											text={t.text}
-											theme={theme}
-											matchRanges={matchRanges}
-											tokenStart={t.start}
-										/>
-									))}
-								</div>
-							);
-						})}
-					</div>
-				</div>
+		<div className="space-y-2">
+			<div
+				className={cn(
+					"relative min-h-[260px] overflow-hidden rounded-[14px] border border-border bg-background",
+					fillHeight ? "xl:h-[508px]" : "",
+				)}
+				data-testid="subscription-code-scroll"
+			>
+				<CodeMirror
+					value={content}
+					height={height}
+					theme={editorTheme}
+					extensions={extensions}
+					basicSetup={CODEMIRROR_BASIC_SETUP}
+					readOnly
+					className={cn(
+						"font-mono text-sm [&_.cm-editor]:min-h-[260px] [&_.cm-scroller]:overflow-auto",
+						mobileHeightClass,
+					)}
+					aria-label="Subscription content"
+				/>
+				{loading ? <EditorLoadingOverlay /> : null}
 			</div>
+			<EditorShortcutHint />
+		</div>
+	);
+}
 
-			{/* Custom scrollbars: styled like design, but reflect real scroll state. */}
-			<div
-				ref={hTrackRef}
-				className={[
-					"absolute left-[68px] right-[12px] bottom-[4px] h-[6px] rounded-[3px]",
-					scrollbarVisibility.h ? "" : "opacity-0",
-				].join(" ")}
-				aria-hidden
-				style={{ backgroundColor: trackBg }}
-			>
-				<div
-					ref={hThumbRef}
-					className="absolute top-0 left-0 h-[6px] rounded-[3px] cursor-grab active:cursor-grabbing"
-					style={{ backgroundColor: thumbBg }}
-					onPointerDown={(e) => beginDrag(e, "x")}
-				/>
-			</div>
-			<div
-				ref={vTrackRef}
-				className={[
-					"absolute right-[6px] top-[18px] bottom-[14px] w-[6px] rounded-[3px]",
-					scrollbarVisibility.v ? "" : "opacity-0",
-				].join(" ")}
-				aria-hidden
-				style={{ backgroundColor: trackBg }}
-			>
-				<div
-					ref={vThumbRef}
-					className="absolute left-0 top-0 w-[6px] rounded-[3px] cursor-grab active:cursor-grabbing"
-					style={{ backgroundColor: thumbBg }}
-					onPointerDown={(e) => beginDrag(e, "y")}
-				/>
+function EditorLoadingOverlay() {
+	return (
+		<div className="absolute inset-0 z-10 flex items-center justify-center rounded-[14px] bg-background/70 backdrop-blur-[1px]">
+			<div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm">
+				<span className="xp-loading-spinner xp-loading-spinner-xs" />
+				Loading content
 			</div>
 		</div>
 	);
@@ -739,19 +218,8 @@ export function SubscriptionPreviewDialog({
 	loading,
 	content,
 	error,
+	onFormatChange,
 }: SubscriptionPreviewDialogProps) {
-	const prefs = useUiPrefsOptional();
-	const resolvedTheme =
-		prefs?.resolvedTheme ??
-		(typeof document !== "undefined" &&
-		document.documentElement.getAttribute("data-theme") === "xp-light"
-			? "light"
-			: "dark");
-
-	const language = useMemo(
-		() => chooseLanguage(format, content),
-		[content, format],
-	);
 	const fields = useMemo(
 		() => (format === "clash" ? extractClashFields(content) : {}),
 		[content, format],
@@ -764,92 +232,28 @@ export function SubscriptionPreviewDialog({
 		if (fields.servername) parts.push(`servername: ${fields.servername}`);
 		return parts.join("\n");
 	}, [fields.publicKey, fields.servername, fields.shortId, format]);
-
-	const [searchQuery, setSearchQuery] = useState("");
-	const [matchIndex, setMatchIndex] = useState(0);
-
-	const matches = useMemo(() => {
-		const q = searchQuery.trim();
-		if (!q) return [];
-		const needle = q.toLowerCase();
-		const lines = content.split("\n");
-		const out: Array<{ line: number; at: number }> = [];
-		for (let lineIdx = 0; lineIdx < lines.length; lineIdx += 1) {
-			const hay = (lines[lineIdx] ?? "").toLowerCase();
-			let at = hay.indexOf(needle);
-			while (at >= 0) {
-				out.push({ line: lineIdx, at });
-				at = hay.indexOf(needle, at + needle.length);
-			}
-		}
-		return out;
-	}, [content, searchQuery]);
-
-	const activeLine =
-		matches.length > 0 ? (matches[matchIndex]?.line ?? 0) : null;
 	const showFieldsPanel = format === "clash";
 
-	const theme =
-		resolvedTheme === "light"
-			? {
-					modalBg: "bg-white border-[#e2e8f0] text-[#0f172a]",
-					stroke: "#e2e8f0",
-					btnBg: "#f1f5f9",
-					btnText: "#0f172a",
-					inputBg: "#ffffff",
-					inputText: "#0f172a",
-					muted: "#64748b",
-					fieldsBg: "#f8fafc",
-					fieldsTitle: "#0f172a",
-					fieldsCopyBg: "#f1f5f9",
-					fieldsCopyText: "#0f172a",
-					copyAllBg: "#e6fbff",
-					copyAllText: "#062a30",
-					codeBg: "#050817",
-				}
-			: {
-					modalBg: "bg-[#0f172a] border-[#24324a] text-slate-200",
-					stroke: "#24324a",
-					btnBg: "#111c33",
-					btnText: "#e2e8f0",
-					inputBg: "#0f172a",
-					inputText: "#e2e8f0",
-					muted: "#94a3b8",
-					fieldsBg: "#111c33",
-					fieldsTitle: "#e2e8f0",
-					fieldsCopyBg: "#22d3ee",
-					fieldsCopyText: "#031c22",
-					copyAllBg: "#22d3ee2e",
-					copyAllText: "#e2e8f0",
-					codeBg: "#050817",
-				};
-
 	const headerBtnBase =
-		"h-[34px] w-[120px] rounded-[10px] border text-[12px] font-[750] !shadow-none";
-	const headerBtnWide = "w-[140px]";
-	const searchBtnBase =
-		"h-9 px-6 rounded-xl border text-[12px] font-[750] whitespace-nowrap !shadow-none";
-	const contentPadClass = "pl-[36px] pr-[24px]";
-	const closePadClass = "pr-[24px]";
-	// Match close button size (44px) + intended gap (12px).
-	const closeLaneSpacerClass = "w-[56px]";
-
-	const mutedTextClass =
-		resolvedTheme === "light" ? "text-[#64748b]" : "text-[#94a3b8]";
-	const mutedPlaceholderClass =
-		resolvedTheme === "light"
-			? "placeholder:text-[#64748b]"
-			: "placeholder:text-[#94a3b8]";
+		"inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10 sm:w-auto";
+	const headerIconBtnBase =
+		"absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:right-5 sm:top-5";
+	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
+	const mutedTextClass = "text-muted-foreground";
+	const fieldValueClass =
+		"block h-11 w-full min-w-0 overflow-hidden rounded-xl border border-input bg-background px-4 py-3 font-mono text-[13px] leading-5 text-foreground";
+	const fieldCopyButtonClass =
+		"min-h-11 w-full rounded-xl border border-primary/25 bg-primary/10 px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 
 	return (
 		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
 			<DialogContent
 				showCloseButton={false}
-				className={[
-					"w-[calc(100vw-64px)] max-w-[1160px] max-h-[calc(100vh-64px)] overflow-x-hidden overflow-y-auto rounded-[18px] border p-0 !shadow-none lg:overflow-hidden",
-					showFieldsPanel ? "lg:h-[660px]" : "",
-					theme.modalBg,
-				].join(" ")}
+				className={cn(
+					"w-[calc(100vw-1rem)] max-w-[1160px] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto rounded-[18px] border border-border bg-card p-0 text-card-foreground shadow-sm sm:w-[calc(100vw-2rem)] sm:max-h-[calc(100dvh-2rem)] xl:overflow-hidden",
+					"max-lg:!left-0 max-lg:!right-auto max-lg:!bottom-0 max-lg:!top-auto max-lg:!w-[100dvw] max-lg:!max-w-[100dvw] max-lg:!translate-x-0 max-lg:!translate-y-0 max-lg:rounded-b-none max-lg:border-x-0 max-lg:border-b-0 max-lg:max-h-[92dvh]",
+					showFieldsPanel ? "xl:h-[660px]" : "",
+				)}
 				data-sub-preview-dialog
 			>
 				<DialogTitle className="sr-only">
@@ -859,149 +263,67 @@ export function SubscriptionPreviewDialog({
 					Inspect the generated subscription content and copy derived connection
 					fields.
 				</DialogDescription>
-				{/* Keep the close action pinned to the top-right for all sizes. */}
-				<div className="sticky top-0 z-30 h-0 pointer-events-none">
-					<div
-						className={["flex justify-end pt-[13px]", closePadClass].join(" ")}
-					>
-						<button
-							type="button"
-							className="w-11 h-11 rounded-full border !shadow-none flex items-center justify-center pointer-events-auto"
-							style={{
-								borderColor: theme.stroke,
-								backgroundColor: theme.inputBg,
-								color: theme.btnText,
-							}}
-							aria-label="Close"
-							data-sub-preview-close
-							onClick={() => {
-								onClose();
-							}}
-						>
-							<span className="text-[20px] leading-none font-[900]">×</span>
-						</button>
-					</div>
-				</div>
 
-				<div className={[contentPadClass, "pt-[13px] pb-[18px]"].join(" ")}>
-					<div className="grid gap-0 md:gap-x-3 md:grid-cols-[minmax(0,1fr)_minmax(0,372px)]">
-						<div className="h-11 flex items-center gap-3 min-w-0">
-							<h3
-								className="text-[22px] leading-[28px] font-[750] whitespace-nowrap"
-								style={{ color: theme.btnText }}
-							>
+				<button
+					type="button"
+					className={headerIconBtnBase}
+					aria-label="Close"
+					data-sub-preview-close
+					onClick={() => {
+						onClose();
+					}}
+				>
+					<Icon name="tabler:x" size={20} ariaLabel="Close" />
+				</button>
+
+				<div
+					className={[
+						contentPadClass,
+						"pt-5 pb-4 sm:pt-[18px] sm:pb-[18px]",
+					].join(" ")}
+				>
+					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+						<div className="flex min-h-10 min-w-0 items-center pr-12 lg:pr-0">
+							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
-							<div className="inline-flex items-center gap-4 min-w-0">
-								<span
-									className={[
-										"inline-flex items-center justify-center w-[90px] h-7 rounded-[10px] border text-[12px] font-[750]",
-										resolvedTheme === "light"
-											? "bg-[#e6fbff] border-[#e2e8f0] text-[#062a30]"
-											: "bg-[#22d3ee2e] border-[#24324a] text-slate-200",
-									].join(" ")}
-								>
-									{format}
-								</span>
-								{loading ? (
-									<span className="xp-loading-spinner xp-loading-spinner-xs" />
-								) : null}
-							</div>
 						</div>
 
-						<div className="min-h-11 flex items-center justify-end flex-wrap">
-							<div className="flex items-center gap-2">
+						<div className="grid gap-2 lg:justify-end">
+							<SubscriptionFormatSegmentedControl
+								className="w-full min-w-0 sm:w-auto sm:min-w-[260px]"
+								hideLegend
+								onValueActivate={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								onValueChange={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								testId="subscription-preview-format"
+								value={format}
+							/>
+							<div className="grid grid-cols-2 gap-2">
 								<button
 									type="button"
 									className={headerBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
 									onClick={async () => {
 										await writeClipboard(subscriptionUrl);
 									}}
 								>
-									Copy URL
+									<Icon name="tabler:link" size={16} ariaLabel="Copy URL" />
+									<span>Copy URL</span>
 								</button>
 								<button
 									type="button"
-									className={[headerBtnBase, headerBtnWide].join(" ")}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
+									className={headerBtnBase}
 									onClick={async () => {
 										await writeClipboard(content);
 									}}
 								>
-									Copy content
-								</button>
-							</div>
-							{/* Reserve a lane for the pinned close button so actions never sit underneath it. */}
-							<div className={closeLaneSpacerClass} aria-hidden />
-						</div>
-
-						<div className="mt-[13px] flex flex-wrap items-center gap-3 min-w-0 md:col-span-2">
-							<span
-								className={[
-									"w-[52px] shrink-0 text-[12px] leading-none",
-									mutedTextClass,
-								].join(" ")}
-							>
-								Search
-							</span>
-							<Input
-								className={[
-									"flex-1 min-w-[240px] h-9 rounded-xl border px-4 font-mono text-[12px] !shadow-none outline-none",
-									mutedPlaceholderClass,
-								].join(" ")}
-								style={{
-									backgroundColor: theme.inputBg,
-									borderColor: theme.stroke,
-									color: theme.inputText,
-								}}
-								value={searchQuery}
-								onChange={(e) => {
-									setSearchQuery(e.target.value);
-									setMatchIndex(0);
-								}}
-								placeholder="e.g. public-key / short-id / servername"
-							/>
-							<div className="ml-auto shrink-0 flex items-center gap-2">
-								<button
-									type="button"
-									className={searchBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
-									onClick={() => {
-										if (matches.length === 0) return;
-										setMatchIndex((prev) => (prev + 1) % matches.length);
-									}}
-								>
-									Find next
-								</button>
-								<button
-									type="button"
-									className={searchBtnBase}
-									style={{
-										backgroundColor: theme.btnBg,
-										borderColor: theme.stroke,
-										color: theme.btnText,
-									}}
-									onClick={() => {
-										if (matches.length === 0) return;
-										setMatchIndex(
-											(prev) => (prev - 1 + matches.length) % matches.length,
-										);
-									}}
-								>
-									Find prev
+									<Icon name="tabler:copy" size={16} ariaLabel="Copy content" />
+									<span>Copy content</span>
 								</button>
 							</div>
 						</div>
@@ -1010,46 +332,33 @@ export function SubscriptionPreviewDialog({
 
 				<div className={[contentPadClass, "pb-[28px]"].join(" ")}>
 					{error ? (
-						<div className="text-sm text-destructive">{error}</div>
+						<div className="mb-3 text-sm text-destructive">{error}</div>
 					) : null}
 
 					<div
-						className={[
+						className={cn(
 							"grid gap-4",
 							showFieldsPanel
-								? "lg:grid-cols-[minmax(0,1fr)_264px]"
+								? "xl:grid-cols-[minmax(0,1fr)_264px]"
 								: "lg:grid-cols-1",
-						].join(" ")}
+						)}
 					>
-						<div className="min-w-0">
-							<CodeView
-								text={content}
-								language={language}
-								activeLine={activeLine}
-								theme={resolvedTheme}
-								highlight={searchQuery}
+						<div className="min-w-0 space-y-2">
+							<SubscriptionContentEditor
+								content={content}
+								format={format}
 								fillHeight={showFieldsPanel}
+								loading={loading}
 							/>
 						</div>
 
 						{showFieldsPanel ? (
-							<div
-								className={[
-									"rounded-[14px] border p-4 space-y-3 overflow-hidden lg:h-[508px]",
-								].join(" ")}
-								style={{
-									backgroundColor: theme.fieldsBg,
-									borderColor: theme.stroke,
-								}}
-							>
+							<div className="space-y-3 overflow-hidden rounded-[14px] border border-border bg-muted/35 p-4 xl:h-[508px]">
 								<div className="space-y-1">
-									<h4
-										className="text-[13px] font-[750]"
-										style={{ color: theme.fieldsTitle }}
-									>
+									<h4 className="text-[13px] font-[750] text-foreground">
 										Fields
 									</h4>
-									<div className={["text-[12px]", mutedTextClass].join(" ")}>
+									<div className={cn("text-[12px]", mutedTextClass)}>
 										Click Copy to copy exact value
 									</div>
 								</div>
@@ -1057,21 +366,13 @@ export function SubscriptionPreviewDialog({
 								<div className="space-y-4">
 									<div className="space-y-1">
 										<div
-											className={["font-mono text-[12px]", mutedTextClass].join(
-												" ",
-											)}
+											className={cn("font-mono text-[12px]", mutedTextClass)}
 										>
 											public-key
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="space-y-2">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className={fieldValueClass}
 												title={fields.publicKey ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1083,12 +384,8 @@ export function SubscriptionPreviewDialog({
 											{fields.publicKey ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy public-key"
 													onClick={async () => {
 														await writeClipboard(fields.publicKey ?? "");
 													}}
@@ -1101,21 +398,13 @@ export function SubscriptionPreviewDialog({
 
 									<div className="space-y-1">
 										<div
-											className={["font-mono text-[12px]", mutedTextClass].join(
-												" ",
-											)}
+											className={cn("font-mono text-[12px]", mutedTextClass)}
 										>
 											short-id
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="space-y-2">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className={fieldValueClass}
 												title={fields.shortId ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1127,12 +416,8 @@ export function SubscriptionPreviewDialog({
 											{fields.shortId ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy short-id"
 													onClick={async () => {
 														await writeClipboard(fields.shortId ?? "");
 													}}
@@ -1145,21 +430,13 @@ export function SubscriptionPreviewDialog({
 
 									<div className="space-y-1">
 										<div
-											className={["font-mono text-[12px]", mutedTextClass].join(
-												" ",
-											)}
+											className={cn("font-mono text-[12px]", mutedTextClass)}
 										>
 											servername
 										</div>
-										<div className="grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 lg:grid-cols-[154px_70px]">
+										<div className="space-y-2">
 											<div
-												className={[
-													"h-11 rounded-xl border px-4 flex items-center overflow-hidden font-mono text-[13px] text-slate-200",
-												].join(" ")}
-												style={{
-													backgroundColor: theme.inputBg,
-													borderColor: theme.stroke,
-												}}
+												className={fieldValueClass}
 												title={fields.servername ?? ""}
 											>
 												<div className="whitespace-nowrap">
@@ -1169,12 +446,8 @@ export function SubscriptionPreviewDialog({
 											{fields.servername ? (
 												<button
 													type="button"
-													className="h-8 w-[70px] rounded-[10px] border text-[12px] font-[750]"
-													style={{
-														backgroundColor: theme.fieldsCopyBg,
-														borderColor: theme.stroke,
-														color: theme.fieldsCopyText,
-													}}
+													className={fieldCopyButtonClass}
+													aria-label="Copy servername"
 													onClick={async () => {
 														await writeClipboard(fields.servername ?? "");
 													}}
@@ -1188,12 +461,7 @@ export function SubscriptionPreviewDialog({
 									{copyAllFieldsText ? (
 										<button
 											type="button"
-											className="w-full h-10 rounded-xl border text-[12px] font-[750]"
-											style={{
-												backgroundColor: theme.copyAllBg,
-												borderColor: theme.stroke,
-												color: theme.copyAllText,
-											}}
+											className={fieldCopyButtonClass}
 											onClick={async () => {
 												await writeClipboard(copyAllFieldsText);
 											}}
@@ -1201,10 +469,6 @@ export function SubscriptionPreviewDialog({
 											Copy all fields
 										</button>
 									) : null}
-
-									<div className={["text-[12px]", mutedTextClass].join(" ")}>
-										Tip: horizontal scroll for long lines
-									</div>
 								</div>
 							</div>
 						) : null}

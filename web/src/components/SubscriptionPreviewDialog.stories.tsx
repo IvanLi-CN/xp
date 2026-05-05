@@ -22,28 +22,27 @@ function DesignBackdrop({
 		const html = document.documentElement;
 		const body = document.body;
 		const prevHtmlBg = html.style.background;
+		const prevHtmlClass = html.className;
 		const prevBodyBg = body.style.background;
 		const prevBodyMargin = body.style.margin;
 		const prevBodyPadding = body.style.padding;
 
-		html.style.background = "#0b1020";
-		body.style.background = "#0b1020";
+		html.classList.add("dark");
+		html.style.background = "var(--background)";
+		body.style.background = "var(--background)";
 		body.style.margin = "0";
 		body.style.padding = "0";
 
 		return () => {
 			html.style.background = prevHtmlBg;
+			html.className = prevHtmlClass;
 			body.style.background = prevBodyBg;
 			body.style.margin = prevBodyMargin;
 			body.style.padding = prevBodyPadding;
 		};
 	}, []);
 
-	return (
-		<div className="w-screen h-screen" style={{ background: "#0b1020" }}>
-			{children}
-		</div>
-	);
+	return <div className="h-screen w-screen bg-background">{children}</div>;
 }
 
 // Keep the demo content aligned with the design SVG to enable pixel-level
@@ -73,6 +72,7 @@ export const Clash: Story = {
 					format="clash"
 					loading={false}
 					content={sampleClash}
+					onFormatChange={() => {}}
 				/>
 			</DesignBackdrop>
 		);
@@ -93,6 +93,7 @@ export const Raw: Story = {
 					content={
 						"vless://example-host?encryption=none\nvless://second-host?encryption=none\n"
 					}
+					onFormatChange={() => {}}
 				/>
 			</DesignBackdrop>
 		);
