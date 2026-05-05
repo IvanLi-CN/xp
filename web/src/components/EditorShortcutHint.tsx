@@ -77,7 +77,7 @@ function ShortcutInlinePreview({
 	return (
 		<div
 			ref={innerRef}
-			className="flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap"
+			className="flex min-w-0 items-center gap-3 whitespace-nowrap"
 		>
 			{shortcuts.map((shortcut) => (
 				<div
@@ -85,7 +85,19 @@ function ShortcutInlinePreview({
 					className="inline-flex shrink-0 items-center gap-1.5"
 				>
 					<span>{shortcut.label}</span>
-					<ShortcutCombo combo={shortcut.combos[0] ?? []} />
+					<div className="inline-flex items-center gap-1">
+						{shortcut.combos.map((combo, index) => (
+							<div
+								key={`${shortcut.label}-${String(index)}`}
+								className="inline-flex items-center gap-1"
+							>
+								{index > 0 ? (
+									<span className="text-muted-foreground/60">/</span>
+								) : null}
+								<ShortcutCombo combo={combo} />
+							</div>
+						))}
+					</div>
 				</div>
 			))}
 		</div>
