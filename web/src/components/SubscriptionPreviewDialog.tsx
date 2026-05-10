@@ -235,9 +235,9 @@ export function SubscriptionPreviewDialog({
 	const showFieldsPanel = format === "clash";
 
 	const headerBtnBase =
-		"inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10 sm:w-auto";
+		"inline-flex h-10 min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-border bg-muted px-3 text-[12px] font-[750] leading-none text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto";
 	const headerIconBtnBase =
-		"absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:right-5 sm:top-5";
+		"flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-foreground shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20";
 	const contentPadClass = "px-4 sm:px-6 lg:pl-9 lg:pr-6";
 	const mutedTextClass = "text-muted-foreground";
 	const fieldValueClass =
@@ -264,47 +264,21 @@ export function SubscriptionPreviewDialog({
 					fields.
 				</DialogDescription>
 
-				<button
-					type="button"
-					className={headerIconBtnBase}
-					aria-label="Close"
-					data-sub-preview-close
-					onClick={() => {
-						onClose();
-					}}
-				>
-					<Icon name="tabler:x" size={20} ariaLabel="Close" />
-				</button>
-
 				<div
 					className={[
 						contentPadClass,
 						"pt-5 pb-4 sm:pt-[18px] sm:pb-[18px]",
 					].join(" ")}
 				>
-					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-						<div className="flex min-h-10 min-w-0 items-center pr-12 lg:pr-0">
+					<div className="grid grid-cols-[minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-3 lg:grid-cols-[minmax(0,1fr)_auto_2.5rem]">
+						<div className="flex min-h-10 min-w-0 items-center">
 							<h3 className="text-xl font-[750] leading-7 text-foreground sm:text-[22px]">
 								Subscription preview
 							</h3>
 						</div>
 
-						<div className="grid gap-2 lg:justify-end">
-							<SubscriptionFormatSegmentedControl
-								className="w-full min-w-0 sm:w-auto sm:min-w-[260px]"
-								hideLegend
-								onValueActivate={(nextFormat) => {
-									if (loading) return;
-									void onFormatChange?.(nextFormat);
-								}}
-								onValueChange={(nextFormat) => {
-									if (loading) return;
-									void onFormatChange?.(nextFormat);
-								}}
-								testId="subscription-preview-format"
-								value={format}
-							/>
-							<div className="grid grid-cols-2 gap-2">
+						<div className="col-span-2 grid min-w-0 gap-2 lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:flex lg:flex-wrap lg:items-start lg:justify-end">
+							<div className="grid grid-cols-2 gap-2 lg:order-1 lg:mr-3">
 								<button
 									type="button"
 									className={headerBtnBase}
@@ -326,6 +300,34 @@ export function SubscriptionPreviewDialog({
 									<span>Copy content</span>
 								</button>
 							</div>
+							<SubscriptionFormatSegmentedControl
+								className="w-full min-w-0 lg:order-2 lg:w-auto lg:min-w-[260px]"
+								hideLegend
+								onValueActivate={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								onValueChange={(nextFormat) => {
+									if (loading) return;
+									void onFormatChange?.(nextFormat);
+								}}
+								testId="subscription-preview-format"
+								value={format}
+							/>
+						</div>
+
+						<div className="col-start-2 row-start-1 flex justify-end lg:col-start-3">
+							<button
+								type="button"
+								className={headerIconBtnBase}
+								aria-label="Close"
+								data-sub-preview-close
+								onClick={() => {
+									onClose();
+								}}
+							>
+								<Icon name="tabler:x" size={20} ariaLabel="Close" />
+							</button>
 						</div>
 					</div>
 				</div>
