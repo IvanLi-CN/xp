@@ -21,7 +21,7 @@
   - `GET /api/sub/{token}/mihomo/provider`
   - `GET /api/sub/{token}/mihomo/provider/system`
 - provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点与链式节点都移入 provider payload。
-- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，继续复用 `dialer-proxy: 🛣️ JP/HK/TW`。
+- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，继续复用 `dialer-proxy: 🛣️ JP/HK/SG`。
 - provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 
@@ -62,10 +62,10 @@
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
-  - `🛣️ JP/HK/TW`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+  - `🛣️ JP/HK/SG`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
-- `🛣️ JP/HK/TW` 不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；外部 provider 为空时回落 `DIRECT`。
+- `🛣️ JP/HK/SG` 不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；外部 provider 为空时回落 `DIRECT`。该外层隧道只从外部 provider 中筛选日本/香港/新加坡节点，台湾节点不进入外层候选池。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
 
@@ -82,7 +82,7 @@
 - 管理员在 `Settings / Service config` 查看 Mihomo provider-only 状态。
 - 普通 Mihomo 客户端继续使用 canonical URL；其实际返回 provider 主配置。
 - 回归/测试场景通过 canonical/provider URL 与 provider system payload 验证。
-- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连与链式节点；链式代理仍经 `🛣️ JP/HK/TW` 做外层中转。
+- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连与链式节点；链式代理仍经 `🛣️ JP/HK/SG` 做外层中转。
 
 ### Edge cases / errors
 
@@ -116,7 +116,7 @@
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
-- Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 `🛣️ JP/HK/TW`。
+- Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 `🛣️ JP/HK/SG`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -161,7 +161,7 @@
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
-  - result: provider-hosted `*-ss-chain` can reference main-config `dialer-proxy: 🛣️ JP/HK/TW`; missing main-config dialer fails immediately, proving the chain depends on the stable main group.
+  - result: provider-hosted `*-ss-chain` can reference main-config `dialer-proxy: 🛣️ JP/HK/SG`; missing main-config dialer fails immediately, proving the chain depends on the stable main group.
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
