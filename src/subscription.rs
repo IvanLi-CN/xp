@@ -440,7 +440,8 @@ pub fn build_mihomo_yaml_with_node_probes(
         &mut rng,
     )?;
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
-    let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    let mut extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    remap_legacy_mihomo_outer_group_references_in_values(&mut extra_proxies);
     let preserved_proxy_ref_names = collect_proxy_names(&extra_proxies)?;
     let mut proxy_ref_rename_map =
         build_proxy_reference_rename_map(&root, &generated, &preserved_proxy_ref_names);
@@ -546,7 +547,8 @@ pub fn build_mihomo_provider_yaml_with_node_probes(
     let generated_system_provider_name_set = collect_top_level_proxy_names(&generated);
 
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
-    let extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    let mut extra_proxies = parse_extra_proxies_yaml(&profile.extra_proxies_yaml)?;
+    remap_legacy_mihomo_outer_group_references_in_values(&mut extra_proxies);
     let preserved_proxy_ref_names = collect_proxy_names(&extra_proxies)?;
     let mut proxy_ref_rename_map =
         build_proxy_reference_rename_map(&root, &generated, &preserved_proxy_ref_names);
@@ -2316,6 +2318,39 @@ fn remap_legacy_mihomo_outer_group_references(root: &mut serde_yaml::Mapping) {
         MIHOMO_OUTER_GROUP.to_string(),
     )]);
     remap_proxy_references_in_mapping(root, &rename_map);
+    remap_legacy_mihomo_outer_dialer_proxy_in_mapping(root);
+}
+
+fn remap_legacy_mihomo_outer_group_references_in_values(values: &mut [serde_yaml::Value]) {
+    for value in values {
+        remap_legacy_mihomo_outer_dialer_proxy_in_value(value);
+    }
+}
+
+fn remap_legacy_mihomo_outer_dialer_proxy_in_mapping(mapping: &mut serde_yaml::Mapping) {
+    for (key, value) in mapping.iter_mut() {
+        if key.as_str() == Some("dialer-proxy")
+            && value.as_str() == Some(MIHOMO_LEGACY_OUTER_GROUP)
+        {
+            *value = serde_yaml::Value::String(MIHOMO_OUTER_GROUP.to_string());
+            continue;
+        }
+        remap_legacy_mihomo_outer_dialer_proxy_in_value(value);
+    }
+}
+
+fn remap_legacy_mihomo_outer_dialer_proxy_in_value(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            remap_legacy_mihomo_outer_dialer_proxy_in_mapping(mapping);
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                remap_legacy_mihomo_outer_dialer_proxy_in_value(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn dedupe_proxy_refs_in_mapping(mapping: &mut serde_yaml::Mapping) {
@@ -5669,6 +5704,42 @@ rules: []
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(refs, vec!["🌟 US", "🛣️ JP/HK/SG", "🌟 Singapore"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_remaps_legacy_outer_ref_in_extra_proxy_dialer_proxy() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            extra_proxies_yaml: r#"
+- name: Custom-chain
+  type: ss
+  server: custom.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+  dialer-proxy: 🛣️ JP/HK/TW
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let custom = v
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .and_then(|proxies| {
+                proxies.iter().find(|proxy| {
+                    proxy.get("name").and_then(Value::as_str) == Some("Custom-chain")
+                })
+            })
+            .expect("custom extra proxy should exist");
+        assert_eq!(
+            custom.get("dialer-proxy").and_then(Value::as_str),
+            Some(MIHOMO_OUTER_GROUP)
+        );
     }
 
     #[test]
