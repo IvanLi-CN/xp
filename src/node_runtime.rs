@@ -18,7 +18,7 @@ use crate::{
     cloudflared_supervisor::{
         CloudflaredHealthHandle, CloudflaredHealthSnapshot, CloudflaredStatus,
     },
-    config::{Config, XrayRestartMode},
+    config::Config,
     ddns::{DdnsHealthHandle, DdnsStatus, DdnsStatusSnapshot},
     id::new_ulid_string,
     xray_supervisor::{XrayHealthHandle, XrayHealthSnapshot, XrayStatus},
@@ -404,7 +404,7 @@ pub struct NodeRuntimeHandle {
 
 impl NodeRuntimeHandle {
     pub fn from_config(config: &Config, node_id: String) -> Self {
-        let cloudflared_enabled = config.cloudflared_restart_mode != XrayRestartMode::None;
+        let cloudflared_enabled = config.cloudflared_monitoring_enabled();
         let ddns_enabled = config.cloudflare_ddns_enabled;
         Self::new(
             config.data_dir.join("service_runtime.json"),

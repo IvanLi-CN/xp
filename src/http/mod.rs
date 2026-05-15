@@ -29,6 +29,7 @@ use crate::{
     admin_token::{AdminTokenHash, verify_admin_token},
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
+    cloudflared_supervisor::CloudflaredHealthHandle,
     config::Config,
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
@@ -76,6 +77,7 @@ pub struct AppState {
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
+    pub cloudflared_health: CloudflaredHealthHandle,
     pub node_runtime: NodeRuntimeHandle,
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     pub node_egress_probe: NodeEgressProbeHandle,
@@ -719,6 +721,7 @@ pub fn build_router(
     store: Arc<Mutex<JsonSnapshotStore>>,
     reconcile: ReconcileHandle,
     xray_health: XrayHealthHandle,
+    cloudflared_health: CloudflaredHealthHandle,
     node_runtime: NodeRuntimeHandle,
     endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     node_egress_probe: NodeEgressProbeHandle,
@@ -752,6 +755,7 @@ pub fn build_router(
         store,
         reconcile,
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         node_egress_probe,
@@ -1037,6 +1041,7 @@ struct AdminAuthState {
 
 async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {
     let snap = state.xray_health.snapshot().await;
+    let cloudflared = state.cloudflared_health.snapshot().await;
     Json(json!({
         "status": "ok",
         "xray": {
@@ -1046,6 +1051,28 @@ async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value
             "down_since": snap.down_since.map(|t| t.to_rfc3339()),
             "consecutive_failures": snap.consecutive_failures,
             "recoveries_observed": snap.recoveries_observed,
+            "restart_attempts": snap.restart_attempts,
+            "last_restart_at": snap.last_restart_at.map(|t| t.to_rfc3339()),
+            "last_restart_fail_at": snap.last_restart_fail_at.map(|t| t.to_rfc3339()),
+            "next_restart_at": snap.next_restart_at.map(|t| t.to_rfc3339()),
+            "restart_backoff_secs": snap.restart_backoff_secs,
+            "restart_backoff_attempts": snap.restart_backoff_attempts,
+            "automatic_restart_enabled": snap.automatic_restart_enabled,
+        },
+        "cloudflared": {
+            "status": cloudflared.status.as_str(),
+            "last_ok_at": cloudflared.last_ok_at.map(|t| t.to_rfc3339()),
+            "last_fail_at": cloudflared.last_fail_at.map(|t| t.to_rfc3339()),
+            "down_since": cloudflared.down_since.map(|t| t.to_rfc3339()),
+            "consecutive_failures": cloudflared.consecutive_failures,
+            "recoveries_observed": cloudflared.recoveries_observed,
+            "restart_attempts": cloudflared.restart_attempts,
+            "last_restart_at": cloudflared.last_restart_at.map(|t| t.to_rfc3339()),
+            "last_restart_fail_at": cloudflared.last_restart_fail_at.map(|t| t.to_rfc3339()),
+            "next_restart_at": cloudflared.next_restart_at.map(|t| t.to_rfc3339()),
+            "restart_backoff_secs": cloudflared.restart_backoff_secs,
+            "restart_backoff_attempts": cloudflared.restart_backoff_attempts,
+            "automatic_restart_enabled": cloudflared.automatic_restart_enabled,
         }
     }))
 }

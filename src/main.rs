@@ -215,7 +215,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         config_arc.clone(),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
 
@@ -303,6 +303,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         store.clone(),
         reconcile,
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         node_egress_probe,

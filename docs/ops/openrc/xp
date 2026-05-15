@@ -8,8 +8,14 @@ command_args="run"
 command_user="xp:xp"
 
 # If you enable `XP_XRAY_RESTART_MODE=openrc`, `xp` may request `rc-service xray restart`
-# when it detects xray is down. This requires a minimal permission policy (doas/sudo) configured
-# by the operator or by `xp-ops`.
+# when it detects xray is down. The first restart is prompt; repeated failures use exponential
+# backoff to avoid restart storms on 256MB/no-swap hosts. This requires a minimal permission
+# policy (doas/sudo) configured by the operator or by `xp-ops`; duplicate supervisor
+# cleanup uses the narrow `xp-openrc-kill-supervisor` helper for root-owned supervise-daemon PIDs.
+#
+# cloudflared is normally monitor-only from xp:
+#   XP_CLOUDFLARED_MONITOR_MODE=openrc
+#   XP_CLOUDFLARED_RESTART_MODE=none
 
 depend() {
   need net

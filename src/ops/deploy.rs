@@ -2048,6 +2048,7 @@ mod tests {
         assert!(env.contains("XP_XRAY_OPENRC_SERVICE="));
         assert!(env.contains("XP_CLOUDFLARED_HEALTH_INTERVAL_SECS="));
         assert!(env.contains("XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN="));
+        assert!(env.contains("XP_CLOUDFLARED_MONITOR_MODE="));
         assert!(env.contains("XP_CLOUDFLARED_RESTART_MODE="));
         assert!(env.contains("XP_CLOUDFLARED_RESTART_COOLDOWN_SECS="));
         assert!(env.contains("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS="));
@@ -2094,6 +2095,38 @@ XP_XRAY_CUSTOM=keep-me\n",
         assert!(env.contains("XP_XRAY_SYSTEMD_UNIT=custom-xray.service"));
         assert!(env.contains("XP_XRAY_OPENRC_SERVICE=custom-xray"));
         assert!(env.contains("XP_XRAY_CUSTOM=keep-me"));
+    }
+
+    #[test]
+    fn ensure_xp_env_admin_token_hash_preserves_cloudflared_restart_none_opt_out() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            format!(
+                "XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n\
+XP_CLOUDFLARED_RESTART_MODE=none\n",
+            ),
+        )
+        .unwrap();
+
+        ensure_xp_env_admin_token_hash_bootstrap(
+            &paths,
+            Mode::Real,
+            "node-1",
+            "example.com",
+            "https://example.com",
+            false,
+            "",
+            false,
+        )
+        .unwrap();
+
+        let env = read_env(&paths);
+        assert!(env.contains("XP_CLOUDFLARED_RESTART_MODE=none"));
+        assert!(!env.contains("XP_CLOUDFLARED_MONITOR_MODE="));
     }
 
     #[tokio::test]

@@ -72,7 +72,7 @@ pub struct Config {
         global = true,
         env = "XP_XRAY_HEALTH_INTERVAL_SECS",
         value_name = "SECS",
-        default_value_t = 2,
+        default_value_t = 5,
         value_parser = clap::value_parser!(u64).range(1..=30)
     )]
     pub xray_health_interval_secs: u64,
@@ -82,7 +82,7 @@ pub struct Config {
         global = true,
         env = "XP_XRAY_HEALTH_FAILS_BEFORE_DOWN",
         value_name = "N",
-        default_value_t = 3,
+        default_value_t = 4,
         value_parser = clap::value_parser!(u64).range(1..=10)
     )]
     pub xray_health_fails_before_down: u64,
@@ -112,7 +112,7 @@ pub struct Config {
         global = true,
         env = "XP_XRAY_RESTART_TIMEOUT_SECS",
         value_name = "SECS",
-        default_value_t = 5,
+        default_value_t = 20,
         value_parser = clap::value_parser!(u64).range(1..=60)
     )]
     pub xray_restart_timeout_secs: u64,
@@ -156,6 +156,15 @@ pub struct Config {
     pub cloudflared_health_fails_before_down: u64,
 
     #[arg(
+        long = "cloudflared-monitor-mode",
+        global = true,
+        env = "XP_CLOUDFLARED_MONITOR_MODE",
+        value_name = "MODE",
+        value_enum
+    )]
+    pub cloudflared_monitor_mode: Option<XrayRestartMode>,
+
+    #[arg(
         long = "cloudflared-restart-mode",
         global = true,
         env = "XP_CLOUDFLARED_RESTART_MODE",
@@ -180,7 +189,7 @@ pub struct Config {
         global = true,
         env = "XP_CLOUDFLARED_RESTART_TIMEOUT_SECS",
         value_name = "SECS",
-        default_value_t = 5,
+        default_value_t = 20,
         value_parser = clap::value_parser!(u64).range(1..=60)
     )]
     pub cloudflared_restart_timeout_secs: u64,
@@ -402,6 +411,15 @@ impl Config {
     pub fn admin_token_hash(&self) -> Option<AdminTokenHash> {
         parse_admin_token_hash(&self.admin_token_hash)
     }
+
+    pub fn effective_cloudflared_monitor_mode(&self) -> XrayRestartMode {
+        self.cloudflared_monitor_mode
+            .unwrap_or(self.cloudflared_restart_mode)
+    }
+
+    pub fn cloudflared_monitoring_enabled(&self) -> bool {
+        self.effective_cloudflared_monitor_mode() != XrayRestartMode::None
+    }
 }
 
 #[cfg(test)]
@@ -411,18 +429,19 @@ mod tests {
     #[test]
     fn defaults_apply_when_flags_absent() {
         let cli = Cli::try_parse_from(["xp"]).unwrap();
-        assert_eq!(cli.config.xray_health_interval_secs, 2);
-        assert_eq!(cli.config.xray_health_fails_before_down, 3);
+        assert_eq!(cli.config.xray_health_interval_secs, 5);
+        assert_eq!(cli.config.xray_health_fails_before_down, 4);
         assert_eq!(cli.config.xray_restart_mode, XrayRestartMode::None);
         assert_eq!(cli.config.xray_restart_cooldown_secs, 30);
-        assert_eq!(cli.config.xray_restart_timeout_secs, 5);
+        assert_eq!(cli.config.xray_restart_timeout_secs, 20);
         assert_eq!(cli.config.xray_systemd_unit, "xray.service");
         assert_eq!(cli.config.xray_openrc_service, "xray");
         assert_eq!(cli.config.cloudflared_health_interval_secs, 5);
         assert_eq!(cli.config.cloudflared_health_fails_before_down, 3);
+        assert_eq!(cli.config.cloudflared_monitor_mode, None);
         assert_eq!(cli.config.cloudflared_restart_mode, XrayRestartMode::None);
         assert_eq!(cli.config.cloudflared_restart_cooldown_secs, 30);
-        assert_eq!(cli.config.cloudflared_restart_timeout_secs, 5);
+        assert_eq!(cli.config.cloudflared_restart_timeout_secs, 20);
         assert_eq!(cli.config.cloudflared_systemd_unit, "cloudflared.service");
         assert_eq!(cli.config.cloudflared_openrc_service, "cloudflared");
         assert!(!cli.config.cloudflare_ddns_enabled);
@@ -449,6 +468,39 @@ mod tests {
         assert!(cli.config.quota_auto_unban);
         assert!(!cli.config.ip_geo_enabled);
         assert_eq!(cli.config.ip_geo_origin, "https://api.country.is");
+    }
+
+    #[test]
+    fn legacy_cloudflared_restart_mode_enables_monitoring() {
+        let cli = Cli::try_parse_from(["xp", "--cloudflared-restart-mode", "openrc"]).unwrap();
+        assert_eq!(cli.config.cloudflared_monitor_mode, None);
+        assert_eq!(cli.config.cloudflared_restart_mode, XrayRestartMode::Openrc);
+        assert_eq!(
+            cli.config.effective_cloudflared_monitor_mode(),
+            XrayRestartMode::Openrc
+        );
+        assert!(cli.config.cloudflared_monitoring_enabled());
+    }
+
+    #[test]
+    fn explicit_cloudflared_monitor_none_disables_legacy_fallback() {
+        let cli = Cli::try_parse_from([
+            "xp",
+            "--cloudflared-monitor-mode",
+            "none",
+            "--cloudflared-restart-mode",
+            "openrc",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.config.cloudflared_monitor_mode,
+            Some(XrayRestartMode::None)
+        );
+        assert_eq!(
+            cli.config.effective_cloudflared_monitor_mode(),
+            XrayRestartMode::None
+        );
+        assert!(!cli.config.cloudflared_monitoring_enabled());
     }
 
     #[test]

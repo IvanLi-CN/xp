@@ -45,10 +45,34 @@
     "last_fail_at": "RFC3339|null",
     "down_since": "RFC3339|null",
     "consecutive_failures": 0,
-    "recoveries_observed": 0
+    "recoveries_observed": 0,
+    "restart_attempts": 0,
+    "last_restart_at": "RFC3339|null",
+    "last_restart_fail_at": "RFC3339|null",
+    "next_restart_at": "RFC3339|null",
+    "restart_backoff_secs": 0,
+    "restart_backoff_attempts": 0,
+    "automatic_restart_enabled": false
+  },
+  "cloudflared": {
+    "status": "disabled|unknown|up|down",
+    "last_ok_at": "RFC3339|null",
+    "last_fail_at": "RFC3339|null",
+    "down_since": "RFC3339|null",
+    "consecutive_failures": 0,
+    "recoveries_observed": 0,
+    "restart_attempts": 0,
+    "last_restart_at": "RFC3339|null",
+    "last_restart_fail_at": "RFC3339|null",
+    "next_restart_at": "RFC3339|null",
+    "restart_backoff_secs": 0,
+    "restart_backoff_attempts": 0,
+    "automatic_restart_enabled": false
   }
 }
 ```
+
+`restart_*` 字段描述 `xp` 通过 init system 请求恢复的状态；字段缺失不应用于判断存活，监控应优先看 `status` / `consecutive_failures` / `next_restart_at`。
 
 ## 2. 集群与节点
 

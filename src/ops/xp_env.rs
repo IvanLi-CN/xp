@@ -7,7 +7,7 @@ use crate::ops::util::{
     write_string_if_changed,
 };
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone)]
 pub struct XpEnvFlags {
     pub has_node_name: bool,
     pub has_access_host: bool,
@@ -25,6 +25,7 @@ pub struct XpEnvFlags {
 
     pub has_cloudflared_health_interval: bool,
     pub has_cloudflared_health_fails_before_down: bool,
+    pub has_cloudflared_monitor_mode: bool,
     pub has_cloudflared_restart_mode: bool,
     pub has_cloudflared_restart_cooldown: bool,
     pub has_cloudflared_restart_timeout: bool,
@@ -217,6 +218,11 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             retained_lines.push(line.to_string());
             continue;
         }
+        if line.starts_with("XP_CLOUDFLARED_MONITOR_MODE=") {
+            flags.has_cloudflared_monitor_mode = true;
+            retained_lines.push(line.to_string());
+            continue;
+        }
         if line.starts_with("XP_CLOUDFLARED_RESTART_MODE=") {
             flags.has_cloudflared_restart_mode = true;
             retained_lines.push(line.to_string());
@@ -389,10 +395,10 @@ pub fn write_xp_env(
         lines.push("XP_XRAY_API_ADDR=127.0.0.1:10085".to_string());
     }
     if !flags.has_xray_health_interval {
-        lines.push("XP_XRAY_HEALTH_INTERVAL_SECS=2".to_string());
+        lines.push("XP_XRAY_HEALTH_INTERVAL_SECS=5".to_string());
     }
     if !flags.has_xray_health_fails_before_down {
-        lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
+        lines.push("XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=4".to_string());
     }
     if !flags.has_xray_restart_mode {
         lines.push(format!(
@@ -404,7 +410,7 @@ pub fn write_xp_env(
         lines.push("XP_XRAY_RESTART_COOLDOWN_SECS=30".to_string());
     }
     if !flags.has_xray_restart_timeout {
-        lines.push("XP_XRAY_RESTART_TIMEOUT_SECS=5".to_string());
+        lines.push("XP_XRAY_RESTART_TIMEOUT_SECS=20".to_string());
     }
     if !flags.has_xray_systemd_unit {
         lines.push("XP_XRAY_SYSTEMD_UNIT=xray.service".to_string());
@@ -418,17 +424,20 @@ pub fn write_xp_env(
     if !flags.has_cloudflared_health_fails_before_down {
         lines.push("XP_CLOUDFLARED_HEALTH_FAILS_BEFORE_DOWN=3".to_string());
     }
-    if !flags.has_cloudflared_restart_mode {
+    if !flags.has_cloudflared_monitor_mode && !flags.has_cloudflared_restart_mode {
         lines.push(format!(
-            "XP_CLOUDFLARED_RESTART_MODE={}",
+            "XP_CLOUDFLARED_MONITOR_MODE={}",
             default_managed_restart_mode(paths)
         ));
+    }
+    if !flags.has_cloudflared_restart_mode {
+        lines.push("XP_CLOUDFLARED_RESTART_MODE=none".to_string());
     }
     if !flags.has_cloudflared_restart_cooldown {
         lines.push("XP_CLOUDFLARED_RESTART_COOLDOWN_SECS=30".to_string());
     }
     if !flags.has_cloudflared_restart_timeout {
-        lines.push("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS=5".to_string());
+        lines.push("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS=20".to_string());
     }
     if !flags.has_cloudflared_systemd_unit {
         lines.push("XP_CLOUDFLARED_SYSTEMD_UNIT=cloudflared.service".to_string());

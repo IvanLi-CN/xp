@@ -103,18 +103,19 @@ fn test_config(data_dir: PathBuf) -> Config {
     Config {
         bind: SocketAddr::from(([127, 0, 0, 1], 0)),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
-        xray_health_interval_secs: 2,
-        xray_health_fails_before_down: 3,
+        xray_health_interval_secs: 5,
+        xray_health_fails_before_down: 4,
         xray_restart_mode: crate::config::XrayRestartMode::None,
         xray_restart_cooldown_secs: 30,
-        xray_restart_timeout_secs: 5,
+        xray_restart_timeout_secs: 20,
         xray_systemd_unit: "xray.service".to_string(),
         xray_openrc_service: "xray".to_string(),
         cloudflared_health_interval_secs: 5,
         cloudflared_health_fails_before_down: 3,
+        cloudflared_monitor_mode: Some(crate::config::XrayRestartMode::None),
         cloudflared_restart_mode: crate::config::XrayRestartMode::None,
         cloudflared_restart_cooldown_secs: 30,
-        cloudflared_restart_timeout_secs: 5,
+        cloudflared_restart_timeout_secs: 20,
         cloudflared_systemd_unit: "cloudflared.service".to_string(),
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
@@ -209,7 +210,7 @@ fn app_with(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -225,6 +226,7 @@ fn app_with(
         store.clone(),
         reconcile,
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -257,7 +259,7 @@ fn build_app_with_cluster_store_and_raft(
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -273,6 +275,7 @@ fn build_app_with_cluster_store_and_raft(
         store.clone(),
         reconcile,
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -310,6 +313,20 @@ async fn health_is_200_and_includes_xray_fields() {
     assert!(xray.get("down_since").is_some());
     assert!(xray.get("consecutive_failures").is_some());
     assert!(xray.get("recoveries_observed").is_some());
+    assert!(xray.get("restart_attempts").is_some());
+    assert!(xray.get("restart_backoff_secs").is_some());
+    assert!(xray.get("automatic_restart_enabled").is_some());
+
+    let cloudflared = body.get("cloudflared").expect("missing cloudflared field");
+    assert!(cloudflared.get("status").is_some());
+    assert!(cloudflared.get("last_ok_at").is_some());
+    assert!(cloudflared.get("last_fail_at").is_some());
+    assert!(cloudflared.get("down_since").is_some());
+    assert!(cloudflared.get("consecutive_failures").is_some());
+    assert!(cloudflared.get("recoveries_observed").is_some());
+    assert!(cloudflared.get("restart_attempts").is_some());
+    assert!(cloudflared.get("restart_backoff_secs").is_some());
+    assert!(cloudflared.get("automatic_restart_enabled").is_some());
 }
 
 #[tokio::test]
@@ -1683,7 +1700,7 @@ async fn follower_admin_write_does_not_redirect() {
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -1699,6 +1716,7 @@ async fn follower_admin_write_does_not_redirect() {
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -3797,7 +3815,7 @@ async fn grant_usage_includes_warning_fields() {
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -3812,6 +3830,7 @@ async fn grant_usage_includes_warning_fields() {
         store,
         ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -4006,7 +4025,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -4022,6 +4041,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -6475,7 +6495,7 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -6498,6 +6518,7 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -6796,7 +6817,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -6812,6 +6833,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store.clone(),
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -6859,7 +6881,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
@@ -6875,6 +6897,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         store.clone(),
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(

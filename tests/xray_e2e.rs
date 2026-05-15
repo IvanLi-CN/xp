@@ -72,6 +72,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         xray_openrc_service: "xray".to_string(),
         cloudflared_health_interval_secs: 5,
         cloudflared_health_fails_before_down: 3,
+        cloudflared_monitor_mode: Some(xp::config::XrayRestartMode::None),
         cloudflared_restart_mode: xp::config::XrayRestartMode::None,
         cloudflared_restart_cooldown_secs: 30,
         cloudflared_restart_timeout_secs: 5,
@@ -305,7 +306,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
@@ -322,6 +323,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         store.clone(),
         reconcile,
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
@@ -512,7 +514,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         std::sync::Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let endpoint_probe = xp::endpoint_probe::new_endpoint_probe_handle(
@@ -529,6 +531,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         store.clone(),
         reconcile.clone(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
