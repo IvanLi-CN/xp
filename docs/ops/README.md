@@ -15,8 +15,22 @@ Host-managed mode assumptions:
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
-- `xp` also tracks `cloudflared` (when enabled via `XP_CLOUDFLARED_RESTART_MODE!=none`) and records runtime status transitions/restart outcomes to `${XP_DATA_DIR}/service_runtime.json` for the Web runtime pages.
+- `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
+- `xp` records runtime status transitions/restart outcomes to `${XP_DATA_DIR}/service_runtime.json` for the Web runtime pages.
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp` also reconciles `XP_ACCESS_HOST` against Cloudflare DNS (`A` / `AAAA`) and stores local DDNS state in `${XP_DATA_DIR}/ddns_state.json`.
+
+## Low-memory host defaults
+
+Host-managed deployments are expected to run on small VPS/LXC machines, including `256MB` RAM without swap. The default recovery contract is:
+
+- `XP_XRAY_HEALTH_INTERVAL_SECS=5`
+- `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN=4`
+- `XP_XRAY_RESTART_COOLDOWN_SECS=30`
+- `XP_XRAY_RESTART_TIMEOUT_SECS=20`
+- `XP_CLOUDFLARED_MONITOR_MODE=<init-system>`
+- `XP_CLOUDFLARED_RESTART_MODE=none`
+
+This keeps the first xray restart within roughly `30-60s` from an actual failure while avoiding repeated restarts when the host is under memory or I/O pressure. If a component remains down after restart attempts, `xp` increases the next restart delay exponentially up to 300 seconds and resets that delay after the probe recovers.
 
 ## Endpoint probe (ingress reachability)
 

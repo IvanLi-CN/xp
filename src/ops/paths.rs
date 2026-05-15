@@ -106,4 +106,13 @@ impl Paths {
     pub fn usr_local_bin_xray(&self) -> PathBuf {
         self.map_abs(Path::new("/usr/local/bin/xray"))
     }
+
+    pub fn usr_local_libexec_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/usr/local/libexec"))
+    }
+
+    pub fn usr_local_libexec_xp_openrc_kill_supervisor(&self) -> PathBuf {
+        self.usr_local_libexec_dir()
+            .join("xp-openrc-kill-supervisor")
+    }
 }

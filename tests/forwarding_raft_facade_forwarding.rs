@@ -302,6 +302,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xray_openrc_service: "xray".to_string(),
         cloudflared_health_interval_secs: 5,
         cloudflared_health_fails_before_down: 3,
+        cloudflared_monitor_mode: Some(xp::config::XrayRestartMode::None),
         cloudflared_restart_mode: xp::config::XrayRestartMode::None,
         cloudflared_restart_cooldown_secs: 30,
         cloudflared_restart_timeout_secs: 5,
@@ -336,7 +337,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         Arc::new(config.clone()),
         cluster.node_id.clone(),
         xray_health.clone(),
-        cloudflared_health,
+        cloudflared_health.clone(),
         ddns_health,
     );
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> = Arc::new(leader.clone());
@@ -355,6 +356,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         leader_store.clone(),
         ReconcileHandle::noop(),
         xray_health,
+        cloudflared_health,
         node_runtime,
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(

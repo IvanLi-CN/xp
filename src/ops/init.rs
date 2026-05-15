@@ -40,6 +40,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
         }
         InitSystem::OpenRc => {
             write_openrc_scripts(&paths, &args, mode)?;
+            write_openrc_supervisor_kill_helper(&paths, mode)?;
             write_openrc_xray_restart_policy(&paths, mode)?;
             if args.enable_services {
                 enable_openrc_services(mode)?;
@@ -316,6 +317,11 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
             missing_rules.push(rule);
         }
     }
+    let helper = "/usr/local/libexec/xp-openrc-kill-supervisor";
+    let rule = format!("permit nopass xp as root cmd {helper}");
+    if !existing.contains(&rule) {
+        missing_rules.push(rule);
+    }
 
     if missing_rules.is_empty() {
         return Ok(());
@@ -335,6 +341,21 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
     write_string_if_changed(&p, &out)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&p, 0o600).ok();
+    Ok(())
+}
+
+fn write_openrc_supervisor_kill_helper(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let dir = paths.usr_local_libexec_dir();
+    let helper = paths.usr_local_libexec_xp_openrc_kill_supervisor();
+    if mode == Mode::DryRun {
+        eprintln!("would write OpenRC supervisor kill helper: {}", helper.display());
+        return Ok(());
+    }
+
+    ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&helper, &openrc_supervisor_kill_helper_script())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&helper, 0o755).ok();
     Ok(())
 }
 
@@ -425,6 +446,36 @@ fn openrc_xp_script() -> String {
 
 fn openrc_xray_script() -> String {
     "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
+}
+
+fn openrc_supervisor_kill_helper_script() -> String {
+    r#"#!/bin/sh
+set -eu
+
+service="${1:-}"
+pid="${2:-}"
+
+case "$service" in
+  ""|*[!A-Za-z0-9_.:-]*) exit 64 ;;
+esac
+case "$pid" in
+  ""|*[!0-9]*) exit 64 ;;
+esac
+
+cmd=""
+if [ -r "/proc/$pid/cmdline" ]; then
+  cmd="$(tr '\000' ' ' < "/proc/$pid/cmdline")"
+fi
+case " $cmd " in
+  *" supervise-daemon $service "*|*" /supervise-daemon $service "*)
+    exec kill -TERM "$pid"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+"#
+    .to_string()
 }
 
 fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {
@@ -588,6 +639,24 @@ mod tests {
         assert!(
             doas.contains("permit nopass xp as root cmd /sbin/rc-service args cloudflared restart")
         );
+        assert!(
+            doas.contains(
+                "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-kill-supervisor"
+            )
+        );
+        assert!(!doas.contains("permit nopass xp as root cmd /bin/kill"));
+        assert!(!doas.contains("permit nopass xp as root cmd /usr/bin/kill"));
+    }
+
+    #[test]
+    fn openrc_supervisor_kill_helper_checks_service_and_pid() {
+        let script = openrc_supervisor_kill_helper_script();
+        assert!(script.contains("*[!A-Za-z0-9_.:-]*"));
+        assert!(script.contains("*[!0-9]*"));
+        assert!(script.contains("/proc/$pid/cmdline"));
+        assert!(!script.contains("ps -o args= -p"));
+        assert!(script.contains("supervise-daemon $service"));
+        assert!(script.contains("kill -TERM \"$pid\""));
     }
 
     #[test]

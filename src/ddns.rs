@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
-    config::{Config, XrayRestartMode},
+    config::Config,
     ops::cloudflare::{self, CloudflareClient, DnsRecordInfo},
     public_ip_probe::{PublicIpAddressFamily, PublicIpProbeOutcome, probe_public_ip},
 };
@@ -317,7 +317,7 @@ pub fn spawn_ddns_supervisor(
 
     let handle_clone = handle.clone();
     let task = tokio::spawn(async move {
-        let cloudflared_monitored = config.cloudflared_restart_mode != XrayRestartMode::None;
+        let cloudflared_monitored = config.cloudflared_monitoring_enabled();
         let mut previous_cloudflared_status: Option<CloudflaredStatus> = None;
 
         loop {

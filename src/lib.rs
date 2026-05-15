@@ -17,6 +17,7 @@ pub mod login_token;
 pub mod mihomo_redact;
 pub mod node_egress_probe;
 pub mod node_runtime;
+mod openrc_process;
 pub mod ops;
 pub mod protocol;
 pub mod public_ip_probe;
