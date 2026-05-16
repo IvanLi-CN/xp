@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
     time::Duration,
 };
@@ -154,26 +155,52 @@ fn classify_probe_error(
     err: reqwest::Error,
     family: PublicIpAddressFamily,
 ) -> PublicIpProbeOutcome {
-    if err.is_timeout() {
+    classify_probe_failure(err.is_timeout(), err.to_string(), probe_error_texts(&err), family)
+}
+
+fn classify_probe_failure(
+    is_timeout: bool,
+    display: String,
+    error_texts: Vec<String>,
+    family: PublicIpAddressFamily,
+) -> PublicIpProbeOutcome {
+    if is_timeout {
         return PublicIpProbeOutcome::Unknown("timeout".to_string());
     }
 
-    let text = err.to_string().to_ascii_lowercase();
-    if text.contains("network is unreachable")
-        || text.contains("network unreachable")
-        || text.contains("address family not supported")
-        || text.contains("no route to host")
-        || text.contains("cannot assign requested address")
-        || text.contains("requested address is not valid")
+    if error_texts
+        .iter()
+        .any(|text| is_missing_candidate_error_text(text))
     {
         return PublicIpProbeOutcome::MissingCandidate(format!(
             "{} path is unavailable: {}",
             family.label(),
-            err
+            display
         ));
     }
 
-    PublicIpProbeOutcome::Unknown(err.to_string())
+    PublicIpProbeOutcome::Unknown(display)
+}
+
+fn probe_error_texts(err: &(dyn Error + 'static)) -> Vec<String> {
+    let mut texts = vec![err.to_string().to_ascii_lowercase()];
+    let mut current = err.source();
+    while let Some(source) = current {
+        texts.push(source.to_string().to_ascii_lowercase());
+        current = source.source();
+    }
+    texts
+}
+
+fn is_missing_candidate_error_text(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    text.contains("network is unreachable")
+        || text.contains("network unreachable")
+        || text.contains("address family not supported")
+        || text.contains("no route to host")
+        || text.contains("cannot assign requested address")
+        || text.contains("can't assign requested address")
+        || text.contains("requested address is not valid")
 }
 
 #[cfg(test)]
@@ -202,5 +229,64 @@ mod tests {
     fn trace_parser_rejects_wrong_family() {
         let err = parse_probe_ip("ip=1.2.3.4\n", PublicIpAddressFamily::Ipv6).unwrap_err();
         assert!(err.contains("not ipv6"));
+    }
+
+    #[test]
+    fn missing_candidate_detection_checks_nested_error_text() {
+        assert!(is_missing_candidate_error_text(
+            "client error: tcp connect error: Network is unreachable (os error 101)"
+        ));
+        assert!(is_missing_candidate_error_text(
+            "connect failed: No route to host"
+        ));
+        assert!(is_missing_candidate_error_text(
+            "connect failed: Cannot assign requested address"
+        ));
+        assert!(is_missing_candidate_error_text(
+            "connect failed: Can't assign requested address (os error 49)"
+        ));
+    }
+
+    #[test]
+    fn missing_candidate_detection_rejects_transient_connect_failures() {
+        assert!(!is_missing_candidate_error_text(
+            "error sending request for url (https://cloudflare.com/cdn-cgi/trace)"
+        ));
+        assert!(!is_missing_candidate_error_text(
+            "client error: tcp connect error: Connection refused (os error 111)"
+        ));
+        assert!(!is_missing_candidate_error_text("timeout"));
+    }
+
+    #[test]
+    fn probe_failure_classifier_uses_source_chain_without_treating_timeouts_as_missing() {
+        assert_eq!(
+            classify_probe_failure(
+                false,
+                "error sending request for url (https://cloudflare.com/cdn-cgi/trace)"
+                    .to_string(),
+                vec![
+                    "error sending request for url (https://cloudflare.com/cdn-cgi/trace)"
+                        .to_string(),
+                    "client error: tcp connect error: network is unreachable (os error 101)"
+                        .to_string(),
+                ],
+                PublicIpAddressFamily::Ipv6,
+            ),
+            PublicIpProbeOutcome::MissingCandidate(
+                "ipv6 path is unavailable: error sending request for url (https://cloudflare.com/cdn-cgi/trace)"
+                    .to_string()
+            )
+        );
+
+        assert_eq!(
+            classify_probe_failure(
+                true,
+                "operation timed out".to_string(),
+                vec!["network is unreachable".to_string()],
+                PublicIpAddressFamily::Ipv6,
+            ),
+            PublicIpProbeOutcome::Unknown("timeout".to_string())
+        );
     }
 }

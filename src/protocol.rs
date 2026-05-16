@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 pub const SS2022_METHOD_2022_BLAKE3_AES_128_GCM: &str = "2022-blake3-aes-128-gcm";
 pub const SS2022_PSK_LEN_BYTES_AES_128: usize = 16;
@@ -122,6 +123,38 @@ pub fn validate_reality_server_name(host: &str) -> Result<(), &'static str> {
         }
     }
 
+    Ok(())
+}
+
+pub fn validate_reality_dest(dest: &str) -> Result<(), &'static str> {
+    let trimmed = dest.trim();
+    if trimmed.is_empty() {
+        return Err("dest is required");
+    }
+    if trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err("dest must not contain spaces");
+    }
+    let trimmed = trimmed.strip_prefix("tcp://").unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix("tcp:").unwrap_or(trimmed);
+    if trimmed.contains('/') {
+        return Err("dest must not include path (/)");
+    }
+
+    if let Ok(addr) = trimmed.parse::<SocketAddr>() {
+        if addr.port() == 0 {
+            return Err("dest port must be 1..65535");
+        }
+        return Ok(());
+    }
+
+    let (host, port) = trimmed.rsplit_once(':').ok_or("dest must include port (:)")?;
+    validate_reality_server_name(host)?;
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| "dest port must be 1..65535")?;
+    if port == 0 {
+        return Err("dest port must be 1..65535");
+    }
     Ok(())
 }
 
@@ -313,6 +346,23 @@ mod tests {
         let server = "server";
         let user = "user";
         assert_eq!(ss2022_password(server, user), "server:user");
+    }
+
+    #[test]
+    fn reality_dest_accepts_host_and_ip_socket_addresses() {
+        assert!(validate_reality_dest("oneclient.sfx.ms:443").is_ok());
+        assert!(validate_reality_dest("203.0.113.10:443").is_ok());
+        assert!(validate_reality_dest("[2001:db8::1]:443").is_ok());
+        assert!(validate_reality_dest("tcp://203.0.113.10:443").is_ok());
+    }
+
+    #[test]
+    fn reality_dest_rejects_missing_or_invalid_port() {
+        assert!(validate_reality_dest("oneclient.sfx.ms").is_err());
+        assert!(validate_reality_dest("203.0.113.10").is_err());
+        assert!(validate_reality_dest("[2001:db8::1]").is_err());
+        assert!(validate_reality_dest("oneclient.sfx.ms:0").is_err());
+        assert!(validate_reality_dest("[2001:db8::1]:0").is_err());
     }
 
     #[test]

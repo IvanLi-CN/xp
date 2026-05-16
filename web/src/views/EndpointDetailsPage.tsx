@@ -194,7 +194,7 @@ export function EndpointDetailsPage() {
 						: manualServerNames;
 
 				const destValue =
-					serverNames.length > 0
+					serverNamesSource === "global" && serverNames.length > 0
 						? `${serverNames[0]}:443`
 						: metaSnapshot.realityDest;
 
