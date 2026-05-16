@@ -133,7 +133,7 @@
 
 ### Testing
 
-- Unit tests: runtime 状态机、持久化裁剪、事件生成、DDNS public IP probe 错误分类。
+- Unit tests: runtime 状态机、持久化裁剪、事件生成、DDNS public IP probe 错误分类（含 Linux 与 BSD/macOS 地址不可绑定文案）。
 - Integration tests: runtime 列表聚合、remote unreachable、SSE 代理。
 - E2E tests: 节点列表与详情页基础交互回归。
 
