@@ -10,7 +10,8 @@ use crate::ops::util::{Mode, ensure_dir, write_string_if_changed};
 use crate::protocol::{
     RealityConfig, RealityKeys, RealityServerNamesSource, SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
     Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
-    generate_short_id_16hex, generate_ss2022_psk_b64, validate_reality_server_name,
+    generate_short_id_16hex, generate_ss2022_psk_b64, validate_reality_dest,
+    validate_reality_server_name,
 };
 use futures_util::future::pending;
 use rand::rngs::OsRng;
@@ -500,6 +501,12 @@ fn parse_default_vless_endpoint_spec(
         ExitError::new(
             2,
             "invalid_args: XP_DEFAULT_VLESS_REALITY_DEST is required when managing the default VLESS endpoint",
+        )
+    })?;
+    validate_reality_dest(&reality_dest).map_err(|reason| {
+        ExitError::new(
+            2,
+            format!("invalid_args: XP_DEFAULT_VLESS_REALITY_DEST is invalid: {reason}"),
         )
     })?;
     let server_names_raw = server_names_raw.ok_or_else(|| {
@@ -2085,18 +2092,49 @@ mod tests {
             ("XP_DEFAULT_VLESS_REALITY_DEST", "oneclient.sfx.ms:443"),
             (
                 "XP_DEFAULT_VLESS_SERVER_NAMES",
-                "oneclient.sfx.ms, skyapi.onedrive.com",
+                "public.sn.files.1drv.com, public.bn.files.1drv.com",
             ),
             ("XP_DEFAULT_SS_PORT", "53843"),
         ]);
         let spec = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap();
         assert_eq!(spec.vless.as_ref().unwrap().port, 53842);
         assert_eq!(
+            spec.vless.as_ref().unwrap().reality_dest,
+            "oneclient.sfx.ms:443"
+        );
+        assert_eq!(
             spec.vless.as_ref().unwrap().server_names,
-            vec!["oneclient.sfx.ms", "skyapi.onedrive.com"]
+            vec!["public.sn.files.1drv.com", "public.bn.files.1drv.com"]
         );
         assert_eq!(spec.vless.as_ref().unwrap().fingerprint, "chrome");
         assert_eq!(spec.ss.as_ref().unwrap().port, 53843);
+    }
+
+    #[test]
+    fn rejects_default_vless_reality_dest_without_port() {
+        let env = env_map(&[
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+            ("XP_DEFAULT_VLESS_REALITY_DEST", "oneclient.sfx.ms"),
+            ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ]);
+
+        let err = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap_err();
+        assert!(err.message.contains("dest must include port"));
+    }
+
+    #[test]
+    fn accepts_default_vless_reality_dest_with_tcp_prefix() {
+        let env = env_map(&[
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+            ("XP_DEFAULT_VLESS_REALITY_DEST", "tcp://oneclient.sfx.ms:443"),
+            ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ]);
+
+        let spec = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap();
+        assert_eq!(
+            spec.vless.as_ref().unwrap().reality_dest,
+            "tcp://oneclient.sfx.ms:443"
+        );
     }
 
     #[test]
@@ -2105,8 +2143,8 @@ mod tests {
             port: 53842,
             reality_dest: "oneclient.sfx.ms:443".to_string(),
             server_names: vec![
-                "oneclient.sfx.ms".to_string(),
-                "skyapi.onedrive.com".to_string(),
+                "public.sn.files.1drv.com".to_string(),
+                "public.bn.files.1drv.com".to_string(),
             ],
             fingerprint: "chrome".to_string(),
         }
@@ -2115,8 +2153,11 @@ mod tests {
 
         let desired = DefaultVlessEndpointSpec {
             port: 60000,
-            reality_dest: "download.example.com:443".to_string(),
-            server_names: vec!["download.example.com".to_string()],
+            reality_dest: "oneclient.sfx.ms:443".to_string(),
+            server_names: vec![
+                "public.sn.files.1drv.com".to_string(),
+                "public.bn.files.1drv.com".to_string(),
+            ],
             fingerprint: "firefox".to_string(),
         };
         let updated = desired.reconcile_existing(&endpoint).unwrap();
@@ -2125,8 +2166,11 @@ mod tests {
         let new_meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(updated.meta.clone()).unwrap();
         assert_eq!(updated.port, 60000);
-        assert_eq!(new_meta.reality.dest, "download.example.com:443");
-        assert_eq!(new_meta.reality.server_names, vec!["download.example.com"]);
+        assert_eq!(new_meta.reality.dest, "oneclient.sfx.ms:443");
+        assert_eq!(
+            new_meta.reality.server_names,
+            vec!["public.sn.files.1drv.com", "public.bn.files.1drv.com"]
+        );
         assert_eq!(new_meta.reality.fingerprint, "firefox");
         assert_eq!(new_meta.reality_keys, old_meta.reality_keys);
         assert_eq!(new_meta.short_ids, old_meta.short_ids);
