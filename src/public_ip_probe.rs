@@ -199,6 +199,7 @@ fn is_missing_candidate_error_text(text: &str) -> bool {
         || text.contains("address family not supported")
         || text.contains("no route to host")
         || text.contains("cannot assign requested address")
+        || text.contains("can't assign requested address")
         || text.contains("requested address is not valid")
 }
 
@@ -240,6 +241,9 @@ mod tests {
         ));
         assert!(is_missing_candidate_error_text(
             "connect failed: Cannot assign requested address"
+        ));
+        assert!(is_missing_candidate_error_text(
+            "connect failed: Can't assign requested address (os error 49)"
         ));
     }
 
