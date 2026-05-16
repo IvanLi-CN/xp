@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-02-26
-- Last: 2026-04-24
+- Last: 2026-05-16
 
 ## 背景 / 问题陈述
 
@@ -60,6 +60,7 @@
   - `GET /api/admin/_internal/nodes/egress-probe/local`
   - `POST /api/admin/_internal/nodes/egress-probe/local/refresh`
 - 组件状态必须支持枚举：`disabled/up/down/unknown`；节点摘要支持：`up/degraded/down/unknown`。
+- DDNS 组件必须区分“地址族缺失”和“探测异常”：IPv4 可用但 IPv6 出口不可用的节点应维护 `A` 记录、删除或不创建 `AAAA`，且不得仅因 IPv6 地址族缺失把 DDNS 标记为 `degraded`。
 - 历史窗口固定 `7d/30min`（336 slots），事件保留 7 天，重启后可恢复。
 - cloudflared 未启用时必须显示 `disabled`，且不触发重启请求。
 - cloudflared 启用后，连续失败达到阈值时触发重启并记录事件。
@@ -87,6 +88,7 @@
 - 远端节点超时/证书错误：汇总结果降级为 `partial`，本地与可达节点仍返回。
 - SSE 远端断流：发送 `node_error`；前端展示连接错误并保留最后快照。
 - cloudflared 配置为 `none`：组件状态固定 `disabled`。
+- DDNS IPv6 探测遇到本机无 IPv6 route、地址族不支持、无法绑定本地地址等硬缺失证据时，按该地址族缺失处理；timeout、HTTP 错误、连接拒绝等瞬时或上游异常仍按探测异常处理，避免误删 DNS 记录。
 
 ## 接口契约（Interfaces & Contracts）
 
@@ -97,6 +99,7 @@
 | Node runtime admin APIs    | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | web                 | 列表/详情/SSE                          |
 | Node runtime internal APIs | HTTP API     | internal      | New            | ./contracts/http-apis.md    | backend         | backend             | local 汇总转发                         |
 | Node egress probe APIs     | HTTP API     | internal      | Changed        | ./contracts/http-apis.md    | backend         | web/backend         | metadata 摘要 + 手动刷新               |
+| Cloudflare DDNS runtime    | Runtime      | internal      | Changed        | ./contracts/file-formats.md | backend         | web/backend         | `A` / `AAAA` 地址族探测与组件健康状态  |
 | cloudflared runtime config | CLI          | internal      | Modify         | ./contracts/cli.md          | ops             | xp/xp-ops           | 新增 `XP_CLOUDFLARED_*`                |
 | service_runtime.json       | File format  | internal      | New            | ./contracts/file-formats.md | backend         | backend             | 本地持久化                             |
 | runtime SSE events         | Events       | internal      | New            | ./contracts/events.md       | backend         | web                 | hello/snapshot/event/node_error/lagged |
@@ -116,6 +119,7 @@
 - Given 打开节点详情 metadata 页，When 节点存在最近一次主动探测结果，Then 页面显示出口 IP、Geo、订阅地区与 stale 状态，并允许手动刷新。
 - Given cloudflared 未启用，When 打开详情，Then cloudflared 状态为 `disabled` 且无重启事件。
 - Given cloudflared 已启用并故障，When 连续失败达到阈值，Then 记录重启请求与结果事件。
+- Given 节点只有 IPv4 公网出口且无 IPv6 route，When DDNS IPv6 探测失败但 IPv4 探测成功，Then DDNS 不记录 `ddns ipv6 probe` 异常，DNS 仅保持 `A` 记录且节点运行态不因此降级。
 - Given `xp` 进程重启，When 重新打开详情，Then 可看到重启前 7 天窗口内历史槽位与事件。
 - Given 任一远端节点不可达，When 请求 `/api/admin/nodes/runtime`，Then 返回 `partial=true` 且 `unreachable_nodes` 包含该节点。
 
@@ -129,7 +133,7 @@
 
 ### Testing
 
-- Unit tests: runtime 状态机、持久化裁剪、事件生成。
+- Unit tests: runtime 状态机、持久化裁剪、事件生成、DDNS public IP probe 错误分类。
 - Integration tests: runtime 列表聚合、remote unreachable、SSE 代理。
 - E2E tests: 节点列表与详情页基础交互回归。
 
@@ -188,6 +192,7 @@ None
 - 2026-02-26: 创建规格并冻结首版接口、状态枚举、窗口策略。
 - 2026-02-26: 完成后端运行态聚合/持久化、前端 Nodes/NodeDetails 改造、cloudflared 运维配置与文档同步。
 - 2026-04-24: 在节点 metadata API 与 `NodeDetailsPage` 补充主动探测 egress probe 摘要、单节点刷新入口与 Storybook 视觉证据。
+- 2026-05-16: 明确 DDNS 地址族缺失不等同于探测异常，无 IPv6 出口节点不应仅因 IPv6 probe 失败进入 degraded。
 
 ## 参考（References）
 
