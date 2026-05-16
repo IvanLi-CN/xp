@@ -2456,7 +2456,9 @@ impl DesiredStateCommand {
                     };
 
                     meta.reality.server_names = server_names;
-                    meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                    if meta.reality.server_names_source == RealityServerNamesSource::Global {
+                        meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                    }
                     endpoint.meta = serde_json::to_value(meta)?;
                 }
 
@@ -5115,7 +5117,7 @@ rules: []
     }
 
     #[test]
-    fn upsert_vless_endpoint_manual_enforces_dest_from_primary() {
+    fn upsert_vless_endpoint_manual_preserves_dest() {
         let mut state = PersistedState::empty();
 
         let endpoint_id = "endpoint_1".to_string();
@@ -5161,7 +5163,7 @@ rules: []
             meta.reality.server_names,
             vec!["b.example.com".to_string(), "a.example.com".to_string()]
         );
-        assert_eq!(meta.reality.dest, "b.example.com:443");
+        assert_eq!(meta.reality.dest, "ignored.example.com:443");
     }
 
     #[test]

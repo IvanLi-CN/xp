@@ -42,8 +42,8 @@ xp-ops container run
 | `XP_CLOUDFLARE_DDNS_ENABLED=true`         | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                |
 | `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                       |
 | `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                          |
-| `XP_DEFAULT_VLESS_REALITY_DEST`           | with `XP_DEFAULT_VLESS_PORT` | REALITY dest (for example `oneclient.sfx.ms:443`)                                                        |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated SNI hostnames                                                                            |
+| `XP_DEFAULT_VLESS_REALITY_DEST`           | with `XP_DEFAULT_VLESS_PORT` | REALITY destination origin (for example `oneclient.sfx.ms:443`)                                          |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated SNI hostnames; they may differ from `XP_DEFAULT_VLESS_REALITY_DEST`                      |
 | `XP_DEFAULT_VLESS_FINGERPRINT`            | optional                     | Defaults to `chrome`                                                                                     |
 | `XP_DEFAULT_SS_PORT`                      | optional                     | Enables managed default SS2022 endpoint                                                                  |
 | `CLOUDFLARE_API_TOKEN`                    | tunnel enabled               | Required on every start when Tunnel is enabled                                                           |
@@ -88,6 +88,8 @@ The managed default endpoint contract is:
 - VLESS: set `XP_DEFAULT_VLESS_PORT`, `XP_DEFAULT_VLESS_REALITY_DEST`, and `XP_DEFAULT_VLESS_SERVER_NAMES`
 - SS2022: set `XP_DEFAULT_SS_PORT`
 
+For managed VLESS REALITY endpoints, `XP_DEFAULT_VLESS_REALITY_DEST` is the Xray destination origin and `XP_DEFAULT_VLESS_SERVER_NAMES` is the client SNI candidate list. Keep them explicit. For OneDrive-based camouflage, use `oneclient.sfx.ms:443` as the destination and prefer `public.sn.files.1drv.com,public.bn.files.1drv.com` as SNI candidates.
+
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 
 ## Bootstrap node
@@ -111,7 +113,7 @@ export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
 export XP_DEFAULT_VLESS_PORT=53842
 export XP_DEFAULT_VLESS_REALITY_DEST='oneclient.sfx.ms:443'
-export XP_DEFAULT_VLESS_SERVER_NAMES='oneclient.sfx.ms,skyapi.onedrive.com'
+export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
 
@@ -151,7 +153,7 @@ export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
 export XP_DEFAULT_VLESS_PORT=53842
 export XP_DEFAULT_VLESS_REALITY_DEST='oneclient.sfx.ms:443'
-export XP_DEFAULT_VLESS_SERVER_NAMES='oneclient.sfx.ms,skyapi.onedrive.com'
+export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
 
