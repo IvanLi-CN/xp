@@ -3234,13 +3234,18 @@ async fn admin_patch_node(
     Ok(Json(admin_node_response(node, probe)))
 }
 
+struct RemovedRaftNodeMembership {
+    node_meta: crate::raft::types::NodeMeta,
+    was_voter: bool,
+}
+
 async fn remove_raft_node_membership(
     state: &AppState,
     raft_node_id: u64,
     metrics: &openraft::RaftMetrics<u64, crate::raft::types::NodeMeta>,
-) -> Result<(), ApiError> {
+) -> Result<Option<RemovedRaftNodeMembership>, ApiError> {
     let membership = metrics.membership_config.membership();
-    if membership.get_node(&raft_node_id).is_some() {
+    if let Some(node_meta) = membership.get_node(&raft_node_id).cloned() {
         let is_voter = membership
             .voter_ids()
             .any(|voter_id| voter_id == raft_node_id);
@@ -3264,6 +3269,33 @@ async fn remove_raft_node_membership(
             )
             .await
             .map_err(|e| ApiError::internal(format!("change_membership remove_nodes: {e}")))?;
+
+        return Ok(Some(RemovedRaftNodeMembership {
+            node_meta,
+            was_voter: is_voter,
+        }));
+    }
+
+    Ok(None)
+}
+
+async fn restore_raft_node_membership(
+    state: &AppState,
+    raft_node_id: u64,
+    removed: RemovedRaftNodeMembership,
+) -> Result<(), ApiError> {
+    state
+        .raft
+        .add_learner(raft_node_id, removed.node_meta)
+        .await
+        .map_err(|e| ApiError::internal(format!("restore membership add_learner: {e}")))?;
+
+    if removed.was_voter {
+        state
+            .raft
+            .add_voters(BTreeSet::from([raft_node_id]))
+            .await
+            .map_err(|e| ApiError::internal(format!("restore membership add_voters: {e}")))?;
     }
 
     Ok(())
@@ -3329,11 +3361,10 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
 
-    if !query.delete_endpoints {
+    let mut removed_membership =
         remove_raft_node_membership(&state, raft_node_id, &metrics).await?;
-    }
 
-    let out = raft_write(
+    let out = match raft_write(
         &state,
         crate::state::DesiredStateCommand::DeleteNode {
             node_id: node_id.clone(),
@@ -3341,20 +3372,31 @@ async fn admin_delete_node(
             expected_endpoint_ids,
         },
     )
-    .await?;
+    .await
+    {
+        Ok(out) => out,
+        Err(err) => {
+            if let Some(removed) = removed_membership.take() {
+                restore_raft_node_membership(&state, raft_node_id, removed).await?;
+            }
+            return Err(err);
+        }
+    };
     let crate::state::DesiredStateApplyResult::NodeDeleted {
         deleted,
         deleted_endpoint_tags,
     } = out
     else {
+        if let Some(removed) = removed_membership.take() {
+            restore_raft_node_membership(&state, raft_node_id, removed).await?;
+        }
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     if !deleted {
+        if let Some(removed) = removed_membership.take() {
+            restore_raft_node_membership(&state, raft_node_id, removed).await?;
+        }
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
-    }
-
-    if query.delete_endpoints {
-        remove_raft_node_membership(&state, raft_node_id, &metrics).await?;
     }
 
     for tag in deleted_endpoint_tags {
