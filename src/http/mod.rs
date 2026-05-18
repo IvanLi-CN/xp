@@ -3247,20 +3247,19 @@ async fn admin_delete_node(
         if store.get_node(&node_id).is_none() {
             return Err(ApiError::not_found(format!("node not found: {node_id}")));
         }
-        if !query.delete_endpoints {
-            if let Some(endpoint) = store
+        if !query.delete_endpoints
+            && let Some(endpoint) = store
                 .list_endpoints()
                 .into_iter()
                 .find(|endpoint| endpoint.node_id == node_id)
-            {
-                return Err(ApiError::conflict(
-                    crate::domain::DomainError::NodeInUse {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint.endpoint_id,
-                    }
-                    .to_string(),
-                ));
-            }
+        {
+            return Err(ApiError::conflict(
+                crate::domain::DomainError::NodeInUse {
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint.endpoint_id,
+                }
+                .to_string(),
+            ));
         }
     }
 
