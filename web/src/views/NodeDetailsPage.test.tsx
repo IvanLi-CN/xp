@@ -16,6 +16,7 @@ import {
 import {
 	deleteAdminNode,
 	fetchAdminNode,
+	fetchAdminNodeDeletePreview,
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
@@ -23,6 +24,11 @@ import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
 import { NodeDetailsPage } from "./NodeDetailsPage";
+
+const { mockNavigate, mockReadAdminToken } = vi.hoisted(() => ({
+	mockNavigate: vi.fn(),
+	mockReadAdminToken: vi.fn(() => "admintoken"),
+}));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual =
@@ -41,7 +47,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 				{children}
 			</a>
 		),
-		useNavigate: () => vi.fn(),
+		useNavigate: () => mockNavigate,
 		useParams: () => ({ nodeId: "node-tokyo" }),
 	};
 });
@@ -49,10 +55,6 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/adminIpUsage");
-
-const { mockReadAdminToken } = vi.hoisted(() => ({
-	mockReadAdminToken: vi.fn(() => "admintoken"),
-}));
 
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();
@@ -133,6 +135,10 @@ function setupMocks(args?: {
 		node_id: node.node_id,
 		accepted: true,
 		egress_probe: refreshEgressProbe,
+	});
+	vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValue({
+		node_id: node.node_id,
+		endpoints: [],
 	});
 	vi.mocked(deleteAdminNode).mockResolvedValue(undefined);
 	vi.mocked(fetchAdminNodeRuntime).mockResolvedValue({
@@ -332,6 +338,64 @@ describe("<NodeDetailsPage />", () => {
 			expect(screen.getAllByText("US").length).toBeGreaterThan(0);
 		});
 		expect(fetchAdminNode).toHaveBeenCalledTimes(1);
+	});
+
+	it("previews endpoint cleanup before deleting a node", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValueOnce({
+			node_id: "node-tokyo",
+			endpoints: [
+				{
+					endpoint_id: "endpoint-ss",
+					tag: "tokyo-ss",
+					kind: "ss2022_2022_blake3_aes_128_gcm",
+					port: 8388,
+				},
+			],
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("button", "Delete node"));
+
+		expect(await screenByText("Endpoints to delete: 1")).toBeTruthy();
+		expect(await screenByText("tokyo-ss")).toBeTruthy();
+		expect(await screenByText("SS2022")).toBeTruthy();
+		fireEvent.click(await screenByRole("button", "Cancel"));
+
+		expect(fetchAdminNodeDeletePreview).toHaveBeenCalledWith(
+			"admintoken",
+			"node-tokyo",
+		);
+		expect(deleteAdminNode).not.toHaveBeenCalled();
+	});
+
+	it("deletes node with endpoint cleanup after confirmation", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValueOnce({
+			node_id: "node-tokyo",
+			endpoints: [
+				{
+					endpoint_id: "endpoint-ss",
+					tag: "tokyo-ss",
+					kind: "ss2022_2022_blake3_aes_128_gcm",
+					port: 8388,
+				},
+			],
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("button", "Delete node"));
+		fireEvent.click(await screenByRole("button", "Delete node and endpoints"));
+
+		await waitFor(() => {
+			expect(deleteAdminNode).toHaveBeenCalledWith("admintoken", "node-tokyo", {
+				deleteEndpoints: true,
+				expectedEndpointIds: ["endpoint-ss"],
+			});
+		});
+		expect(mockNavigate).toHaveBeenCalledWith({ to: "/nodes" });
 	});
 
 	it("shows online stats warning state when snapshots are unavailable", async () => {

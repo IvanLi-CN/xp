@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AdminEndpointKindSchema } from "./adminEndpoints";
 import { throwIfNotOk } from "./backendError";
 import { type NodeQuotaReset, NodeQuotaResetSchema } from "./quotaReset";
 
@@ -50,6 +51,26 @@ export type AdminNodePatchRequest = {
 	quota_limit_bytes?: number;
 	quota_reset?: NodeQuotaReset;
 };
+
+export const AdminNodeDeletePreviewEndpointSchema = z.object({
+	endpoint_id: z.string(),
+	tag: z.string(),
+	kind: AdminEndpointKindSchema,
+	port: z.number().int().nonnegative(),
+});
+
+export type AdminNodeDeletePreviewEndpoint = z.infer<
+	typeof AdminNodeDeletePreviewEndpointSchema
+>;
+
+export const AdminNodeDeletePreviewResponseSchema = z.object({
+	node_id: z.string(),
+	endpoints: z.array(AdminNodeDeletePreviewEndpointSchema),
+});
+
+export type AdminNodeDeletePreviewResponse = z.infer<
+	typeof AdminNodeDeletePreviewResponseSchema
+>;
 
 const AdminNodeEgressProbeRefreshResponseSchema = z.object({
 	node_id: z.string(),
@@ -123,6 +144,29 @@ export async function patchAdminNode(
 	return AdminNodeSchema.parse(json);
 }
 
+export async function fetchAdminNodeDeletePreview(
+	adminToken: string,
+	nodeId: string,
+	signal?: AbortSignal,
+): Promise<AdminNodeDeletePreviewResponse> {
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}/delete-preview`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminNodeDeletePreviewResponseSchema.parse(json);
+}
+
 export async function refreshAdminNodeEgressProbe(
 	adminToken: string,
 	nodeId: string,
@@ -146,16 +190,31 @@ export async function refreshAdminNodeEgressProbe(
 export async function deleteAdminNode(
 	adminToken: string,
 	nodeId: string,
+	options?: { deleteEndpoints?: boolean; expectedEndpointIds?: string[] },
 	signal?: AbortSignal,
 ): Promise<void> {
-	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
-		method: "DELETE",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	const params = new URLSearchParams();
+	if (options?.deleteEndpoints) {
+		params.set("delete_endpoints", "true");
+		if (options.expectedEndpointIds && options.expectedEndpointIds.length > 0) {
+			params.set(
+				"expected_endpoint_ids",
+				options.expectedEndpointIds.join(","),
+			);
+		}
+	}
+	const query = params.size > 0 ? `?${params.toString()}` : "";
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}${query}`,
+		{
+			method: "DELETE",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
+	);
 
 	await throwIfNotOk(res);
 }

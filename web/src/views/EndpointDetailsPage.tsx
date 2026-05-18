@@ -124,6 +124,7 @@ export function EndpointDetailsPage() {
 	const [realityServerNamesSource, setRealityServerNamesSource] = useState<
 		"manual" | "global"
 	>("manual");
+	const [realityDest, setRealityDest] = useState("");
 	const [realityServerNamesManual, setRealityServerNamesManual] = useState<
 		string[]
 	>([]);
@@ -139,10 +140,12 @@ export function EndpointDetailsPage() {
 		if (endpoint.kind === "vless_reality_vision_tcp") {
 			const metaSnapshot = parseVlessMeta(endpoint.meta);
 			setRealityServerNamesSource(metaSnapshot.realityServerNamesSource);
+			setRealityDest(metaSnapshot.realityDest);
 			setRealityServerNamesManual(metaSnapshot.realityServerNames);
 			setRealityFingerprint(metaSnapshot.realityFingerprint);
 		} else {
 			setRealityServerNamesSource("manual");
+			setRealityDest("");
 			setRealityServerNamesManual([]);
 			setRealityFingerprint("");
 		}
@@ -181,6 +184,7 @@ export function EndpointDetailsPage() {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				const fingerprintValue = realityFingerprint.trim() || "chrome";
 				const serverNamesSource = realityServerNamesSource;
+				const destInput = realityDest.trim();
 
 				const manualServerNames = realityServerNamesManual
 					.map(normalizeRealityServerName)
@@ -196,16 +200,20 @@ export function EndpointDetailsPage() {
 				const destValue =
 					serverNamesSource === "global" && serverNames.length > 0
 						? `${serverNames[0]}:443`
-						: metaSnapshot.realityDest;
+						: destInput;
 
 				const realityChanged =
 					serverNamesSource !== metaSnapshot.realityServerNamesSource ||
+					destValue !== metaSnapshot.realityDest ||
 					fingerprintValue !== metaSnapshot.realityFingerprint ||
 					(serverNamesSource === "manual" &&
 						!arraysEqual(serverNames, metaSnapshot.realityServerNames));
 
 				if (realityChanged) {
 					if (serverNamesSource === "manual") {
+						if (destValue.length === 0) {
+							throw new Error("dest is required.");
+						}
 						if (serverNames.length === 0) {
 							throw new Error("serverName is required.");
 						}
@@ -433,6 +441,10 @@ export function EndpointDetailsPage() {
 									</span>
 								</p>
 								<p>
+									<span className="font-mono">dest</span>:{" "}
+									<span className="font-mono">{vlessMeta.realityDest}</span>
+								</p>
+								<p>
 									<span className="font-mono">serverNames</span>:
 								</p>
 								<div className="flex flex-wrap gap-2">
@@ -446,7 +458,9 @@ export function EndpointDetailsPage() {
 													"font-mono gap-2",
 												)}
 												title={
-													idx === 0 ? "Primary (used for dest / probe)" : name
+													idx === 0
+														? "Primary SNI candidate; global mode uses this for derived dest / probe"
+														: name
 												}
 											>
 												<span>{name}</span>
@@ -545,16 +559,40 @@ export function EndpointDetailsPage() {
 									</div>
 
 									{realityServerNamesSource === "manual" ? (
-										<TagInput
-											label="serverNames"
-											value={realityServerNamesManual}
-											onChange={setRealityServerNamesManual}
-											placeholder="download.example.com"
-											disabled={patchMutation.isPending}
-											inputClass={inputClass}
-											validateTag={validateRealityServerName}
-											helperText="Camouflage domains (TLS SNI). First tag is primary (used for dest/probe). Subscription may randomly output one of the tags."
-										/>
+										<>
+											<div className="xp-field-stack">
+												<div className="flex items-center justify-between gap-2">
+													<span className="text-sm font-medium font-mono">
+														dest
+													</span>
+												</div>
+												<Input
+													aria-label="dest"
+													type="text"
+													className={inputClass}
+													value={realityDest}
+													placeholder="oneclient.sfx.ms:443"
+													disabled={patchMutation.isPending}
+													onChange={(event) =>
+														setRealityDest(event.target.value)
+													}
+												/>
+												<p className="text-xs opacity-70">
+													REALITY destination origin. Manual mode stores this
+													separately from the SNI list.
+												</p>
+											</div>
+											<TagInput
+												label="serverNames"
+												value={realityServerNamesManual}
+												onChange={setRealityServerNamesManual}
+												placeholder="download.example.com"
+												disabled={patchMutation.isPending}
+												inputClass={inputClass}
+												validateTag={validateRealityServerName}
+												helperText="Camouflage domains (TLS SNI). Subscriptions may randomly output one of these names; destination is edited separately."
+											/>
+										</>
 									) : (
 										<div className="xp-field-stack">
 											<div className="flex items-center justify-between gap-2">
@@ -584,7 +622,7 @@ export function EndpointDetailsPage() {
 																className="gap-2 font-mono"
 																title={
 																	idx === 0
-																		? "Primary (used for dest / probe)"
+																		? "Primary (used for derived dest / probe)"
 																		: name
 																}
 															>
@@ -599,7 +637,8 @@ export function EndpointDetailsPage() {
 											</div>
 											<p className="text-xs opacity-70">
 												Derived from the ordered registry; the first enabled
-												domain becomes primary.
+												domain becomes the derived destination and primary probe
+												target.
 											</p>
 										</div>
 									)}

@@ -995,6 +995,28 @@ async function handleRequest(
 		return jsonResponse({ items: clone(state.nodes) });
 	}
 
+	const nodeDeletePreviewMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/delete-preview$/,
+	);
+	if (nodeDeletePreviewMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeDeletePreviewMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		return jsonResponse({
+			node_id: nodeId,
+			endpoints: state.endpoints
+				.filter((endpoint) => endpoint.node_id === nodeId)
+				.map((endpoint) => ({
+					endpoint_id: endpoint.endpoint_id,
+					tag: endpoint.tag,
+					kind: endpoint.kind,
+					port: endpoint.port,
+				})),
+		});
+	}
+
 	const nodeEgressProbeRefreshMatch = path.match(
 		/^\/api\/admin\/nodes\/([^/]+)\/egress-probe\/refresh$/,
 	);
@@ -1355,6 +1377,43 @@ async function handleRequest(
 				item.node_id === nodeId ? updated : item,
 			);
 			return jsonResponse(clone(updated));
+		}
+		if (method === "DELETE") {
+			const deleteEndpoints =
+				url.searchParams.get("delete_endpoints") === "true";
+			const endpoints = state.endpoints.filter(
+				(endpoint) => endpoint.node_id === nodeId,
+			);
+			if (endpoints.length > 0 && !deleteEndpoints) {
+				return errorResponse(
+					409,
+					"conflict",
+					`node is still referenced by endpoints: node_id=${nodeId} endpoint_id=${endpoints[0].endpoint_id}`,
+				);
+			}
+			const expectedEndpointIds = new Set(
+				(url.searchParams.get("expected_endpoint_ids") ?? "")
+					.split(",")
+					.filter(Boolean),
+			);
+			if (
+				endpoints.length > 0 &&
+				(endpoints.length !== expectedEndpointIds.size ||
+					endpoints.some(
+						(endpoint) => !expectedEndpointIds.has(endpoint.endpoint_id),
+					))
+			) {
+				return errorResponse(
+					409,
+					"conflict",
+					`node endpoint set changed since delete preview: node_id=${nodeId}`,
+				);
+			}
+			state.endpoints = state.endpoints.filter(
+				(endpoint) => endpoint.node_id !== nodeId,
+			);
+			state.nodes = state.nodes.filter((item) => item.node_id !== nodeId);
+			return new Response(null, { status: 204 });
 		}
 	}
 

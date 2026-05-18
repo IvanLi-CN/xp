@@ -29,6 +29,9 @@ pub enum DomainError {
         node_id: String,
         endpoint_id: String,
     },
+    NodeEndpointSetChanged {
+        node_id: String,
+    },
     InvalidRealityServerName {
         server_name: String,
         reason: String,
@@ -62,7 +65,7 @@ impl DomainError {
             | Self::MissingNode { .. }
             | Self::MissingEndpoint { .. } => "invalid_request",
             Self::RealityDomainNotFound { .. } => "not_found",
-            Self::NodeInUse { .. } => "conflict",
+            Self::NodeInUse { .. } | Self::NodeEndpointSetChanged { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
             | Self::VlessRealityServerNamesEmpty { .. }
@@ -94,6 +97,10 @@ impl std::fmt::Display for DomainError {
             } => write!(
                 f,
                 "node is still referenced by endpoints: node_id={node_id} endpoint_id={endpoint_id}"
+            ),
+            Self::NodeEndpointSetChanged { node_id } => write!(
+                f,
+                "node endpoint set changed since delete preview: node_id={node_id}"
             ),
             Self::InvalidRealityServerName {
                 server_name,

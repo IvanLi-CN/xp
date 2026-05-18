@@ -597,12 +597,14 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
+            DomainError::NodeInUse { .. } | DomainError::NodeEndpointSetChanged { .. } => {
+                ClientResponse::Err {
+                    status: 409,
+                    code: "conflict".to_string(),
+                    message: domain.to_string(),
+                }
+            }
             DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
-                status: 409,
-                code: "conflict".to_string(),
-                message: domain.to_string(),
-            },
-            DomainError::NodeInUse { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
                 message: domain.to_string(),

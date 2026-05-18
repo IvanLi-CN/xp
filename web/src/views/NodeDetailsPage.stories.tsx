@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, screen, userEvent, within } from "@storybook/test";
 
+import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 
@@ -30,6 +31,30 @@ const node: AdminNode = {
 		error_summary: null,
 	},
 };
+
+const nodeEndpoints: AdminEndpoint[] = [
+	{
+		endpoint_id: "01J00000000000000000000E01",
+		node_id: node.node_id,
+		tag: "node-a-ss",
+		kind: "ss2022_2022_blake3_aes_128_gcm",
+		port: 8388,
+		meta: {},
+	},
+	{
+		endpoint_id: "01J00000000000000000000E02",
+		node_id: node.node_id,
+		tag: "node-a-reality",
+		kind: "vless_reality_vision_tcp",
+		port: 443,
+		meta: {
+			dest: "www.cloudflare.com:443",
+			server_names: ["node-a.example.invalid"],
+			server_names_source: "manual",
+			fingerprint: "chrome",
+		},
+	},
+];
 
 const ipUsageReports = buildDenseNodeIpUsageStories(node);
 
@@ -103,5 +128,38 @@ export const MetadataEgressProbe: Story = {
 		).toBeInTheDocument();
 		await expect(await canvas.findAllByText("203.0.113.8")).toHaveLength(2);
 		await expect(await canvas.findByText("HiNet")).toBeInTheDocument();
+	},
+};
+
+export const DeleteWithEndpointCleanup: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [node],
+				endpoints: nodeEndpoints,
+				nodeIpUsageByNodeId: {
+					[node.node_id]: ipUsageReports,
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Danger zone" }),
+		);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Delete node" }),
+		);
+		await expect(
+			await screen.findByText("Endpoints to delete: 2"),
+		).toBeVisible();
+		await expect(await screen.findByText("node-a-ss")).toBeVisible();
+		await expect(await screen.findByText("node-a-reality")).toBeVisible();
+		await expect(
+			await screen.findByRole("button", {
+				name: "Delete node and endpoints",
+			}),
+		).toBeVisible();
 	},
 };

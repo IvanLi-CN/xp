@@ -1232,6 +1232,236 @@ async fn delete_node_rejects_if_endpoints_exist() {
 }
 
 #[tokio::test]
+async fn get_node_delete_preview_lists_referenced_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let endpoint = {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+        store
+            .create_endpoint(
+                node.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+    };
+
+    let uri = format!("/api/admin/nodes/{}/delete-preview", node.node_id);
+    let res = app.oneshot(req_authed("GET", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["node_id"], json!(node.node_id));
+    assert_eq!(json["endpoints"].as_array().unwrap().len(), 1);
+    assert_eq!(json["endpoints"][0]["endpoint_id"], json!(endpoint.endpoint_id));
+    assert_eq!(json["endpoints"][0]["tag"], json!(endpoint.tag));
+    assert_eq!(
+        json["endpoints"][0]["kind"],
+        json!("ss2022_2022_blake3_aes_128_gcm")
+    );
+    assert_eq!(json["endpoints"][0]["port"], json!(8388));
+}
+
+#[tokio::test]
+async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let endpoint = {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+        store
+            .create_endpoint(
+                node.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+    };
+
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids={}",
+        node.node_id, endpoint.endpoint_id
+    );
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert!(json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["node_id"] != json!(node.node_id)));
+
+    let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
+    let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    assert_eq!(
+        drain_reconcile_requests(&mut rx),
+        vec![
+            ReconcileRequest::RemoveInbound { tag: endpoint.tag },
+            ReconcileRequest::Full
+        ]
+    );
+}
+
+#[tokio::test]
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let endpoint = {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+        store
+            .create_endpoint(
+                node.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+    };
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let node_raft_id = raft_node_id_from_ulid(&node.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    nodes.insert(
+        node_raft_id,
+        RaftNodeMeta {
+            name: node.node_name.clone(),
+            api_base_url: node.api_base_url.clone(),
+            raft_endpoint: node.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        panic_on_add_learner: false,
+        panic_on_change_membership: true,
+    });
+    let app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store,
+        raft,
+        ReconcileHandle::noop(),
+    );
+
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=stale-preview",
+        node.node_id
+    );
+    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
+    let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_removed_preview_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+    }
+
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=already-removed",
+        node.node_id
+    );
+    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    let res = app
+        .oneshot(req_authed("GET", &format!("/api/admin/nodes/{}", node.node_id)))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn delete_node_rejects_local_node() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
