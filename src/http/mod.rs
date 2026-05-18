@@ -3234,6 +3234,41 @@ async fn admin_patch_node(
     Ok(Json(admin_node_response(node, probe)))
 }
 
+async fn remove_raft_node_membership(
+    state: &AppState,
+    raft_node_id: u64,
+    metrics: &openraft::RaftMetrics<u64, crate::raft::types::NodeMeta>,
+) -> Result<(), ApiError> {
+    let membership = metrics.membership_config.membership();
+    if membership.get_node(&raft_node_id).is_some() {
+        let is_voter = membership
+            .voter_ids()
+            .any(|voter_id| voter_id == raft_node_id);
+
+        if is_voter {
+            state
+                .raft
+                .change_membership(
+                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+                    true,
+                )
+                .await
+                .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
+        }
+
+        state
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
+                true,
+            )
+            .await
+            .map_err(|e| ApiError::internal(format!("change_membership remove_nodes: {e}")))?;
+    }
+
+    Ok(())
+}
+
 async fn admin_delete_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
@@ -3294,31 +3329,8 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
 
-    let membership = metrics.membership_config.membership();
-    if membership.get_node(&raft_node_id).is_some() {
-        let is_voter = membership
-            .voter_ids()
-            .any(|voter_id| voter_id == raft_node_id);
-
-        if is_voter {
-            state
-                .raft
-                .change_membership(
-                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
-                    true,
-                )
-                .await
-                .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
-        }
-
-        state
-            .raft
-            .change_membership(
-                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
-                true,
-            )
-            .await
-            .map_err(|e| ApiError::internal(format!("change_membership remove_nodes: {e}")))?;
+    if !query.delete_endpoints {
+        remove_raft_node_membership(&state, raft_node_id, &metrics).await?;
     }
 
     let out = raft_write(
@@ -3339,6 +3351,10 @@ async fn admin_delete_node(
     };
     if !deleted {
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
+    }
+
+    if query.delete_endpoints {
+        remove_raft_node_membership(&state, raft_node_id, &metrics).await?;
     }
 
     for tag in deleted_endpoint_tags {
