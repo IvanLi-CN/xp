@@ -3243,25 +3243,48 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete local node"));
     }
 
+    let expected_endpoint_ids = query
+        .expected_endpoint_ids
+        .unwrap_or_default()
+        .split(',')
+        .filter(|endpoint_id| !endpoint_id.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
     // Preflight validation before touching Raft membership, to avoid partial updates.
     {
         let store = state.store.lock().await;
         if store.get_node(&node_id).is_none() {
             return Err(ApiError::not_found(format!("node not found: {node_id}")));
         }
-        if !query.delete_endpoints
-            && let Some(endpoint) = store
-                .list_endpoints()
-                .into_iter()
-                .find(|endpoint| endpoint.node_id == node_id)
-        {
-            return Err(ApiError::conflict(
-                crate::domain::DomainError::NodeInUse {
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id,
-                }
-                .to_string(),
-            ));
+        let node_endpoint_ids = store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == node_id)
+            .map(|endpoint| endpoint.endpoint_id)
+            .collect::<Vec<_>>();
+        if let Some(endpoint_id) = node_endpoint_ids.first() {
+            if !query.delete_endpoints {
+                return Err(ApiError::conflict(
+                    crate::domain::DomainError::NodeInUse {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                    }
+                    .to_string(),
+                ));
+            }
+
+            let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+            let expected_endpoint_ids_set =
+                expected_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+            if actual_endpoint_ids != expected_endpoint_ids_set {
+                return Err(ApiError::conflict(
+                    crate::domain::DomainError::NodeEndpointSetChanged {
+                        node_id: node_id.clone(),
+                    }
+                    .to_string(),
+                ));
+            }
         }
     }
 
@@ -3305,13 +3328,7 @@ async fn admin_delete_node(
         crate::state::DesiredStateCommand::DeleteNode {
             node_id: node_id.clone(),
             delete_endpoints: query.delete_endpoints,
-            expected_endpoint_ids: query
-                .expected_endpoint_ids
-                .unwrap_or_default()
-                .split(',')
-                .filter(|endpoint_id| !endpoint_id.is_empty())
-                .map(str::to_string)
-                .collect(),
+            expected_endpoint_ids,
         },
     )
     .await?;

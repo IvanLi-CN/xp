@@ -1339,7 +1339,18 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
 #[tokio::test]
 async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
 
     let node = Node {
         node_id: new_ulid_string(),
@@ -1361,6 +1372,46 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
             )
             .unwrap()
     };
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let node_raft_id = raft_node_id_from_ulid(&node.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    nodes.insert(
+        node_raft_id,
+        RaftNodeMeta {
+            name: node.node_name.clone(),
+            api_base_url: node.api_base_url.clone(),
+            raft_endpoint: node.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        panic_on_add_learner: false,
+        panic_on_change_membership: true,
+    });
+    let app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store,
+        raft,
+        ReconcileHandle::noop(),
+    );
 
     let uri = format!(
         "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=stale-preview",
