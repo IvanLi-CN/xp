@@ -21,7 +21,8 @@ use crate::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
-        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_reality_server_name,
+        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_reality_dest,
+        validate_reality_server_name,
     },
 };
 
@@ -2491,7 +2492,16 @@ impl DesiredStateCommand {
                     };
 
                     meta.reality.server_names = server_names;
-                    meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                    if meta.reality.server_names_source == RealityServerNamesSource::Global {
+                        meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                    } else {
+                        validate_reality_dest(&meta.reality.dest).map_err(|reason| {
+                            DomainError::InvalidRealityServerName {
+                                server_name: meta.reality.dest.clone(),
+                                reason: reason.to_string(),
+                            }
+                        })?;
+                    }
                     endpoint.meta = serde_json::to_value(meta)?;
                 }
 
@@ -5150,7 +5160,7 @@ rules: []
     }
 
     #[test]
-    fn upsert_vless_endpoint_manual_enforces_dest_from_primary() {
+    fn upsert_vless_endpoint_manual_preserves_dest() {
         let mut state = PersistedState::empty();
 
         let endpoint_id = "endpoint_1".to_string();
@@ -5196,7 +5206,80 @@ rules: []
             meta.reality.server_names,
             vec!["b.example.com".to_string(), "a.example.com".to_string()]
         );
-        assert_eq!(meta.reality.dest, "b.example.com:443");
+        assert_eq!(meta.reality.dest, "ignored.example.com:443");
+    }
+
+    #[test]
+    fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
+        let mut state = PersistedState::empty();
+
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: String::new(),
+                server_names: vec!["example.com".to_string()],
+                server_names_source: RealityServerNamesSource::Manual,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        let endpoint = Endpoint {
+            endpoint_id: "endpoint_1".to_string(),
+            node_id: "node_1".to_string(),
+            tag: "vless-test".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        };
+
+        let err = DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap_err();
+        assert!(err.to_string().contains("dest is required"));
+        assert!(state.endpoints.is_empty());
+    }
+
+    #[test]
+    fn upsert_vless_endpoint_manual_accepts_tcp_prefixed_dest() {
+        let mut state = PersistedState::empty();
+
+        let endpoint_id = "endpoint_1".to_string();
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: "tcp://oneclient.sfx.ms:443".to_string(),
+                server_names: vec!["public.sn.files.1drv.com".to_string()],
+                server_names_source: RealityServerNamesSource::Manual,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        };
+
+        let endpoint = Endpoint {
+            endpoint_id: endpoint_id.clone(),
+            node_id: "node_1".to_string(),
+            tag: "vless-test".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        };
+
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap();
+        let saved = state.endpoints.get(&endpoint_id).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(saved.meta.clone()).expect("vless meta");
+        assert_eq!(meta.reality.dest, "tcp://oneclient.sfx.ms:443");
     }
 
     #[test]
