@@ -3263,20 +3263,10 @@ async fn admin_delete_node(
             .filter(|endpoint| endpoint.node_id == node_id)
             .map(|endpoint| endpoint.endpoint_id)
             .collect::<Vec<_>>();
-        if let Some(endpoint_id) = node_endpoint_ids.first() {
-            if !query.delete_endpoints {
-                return Err(ApiError::conflict(
-                    crate::domain::DomainError::NodeInUse {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_id.clone(),
-                    }
-                    .to_string(),
-                ));
-            }
-
-            let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
-            let expected_endpoint_ids_set =
-                expected_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let expected_endpoint_ids_set =
+            expected_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+        if query.delete_endpoints {
             if actual_endpoint_ids != expected_endpoint_ids_set {
                 return Err(ApiError::conflict(
                     crate::domain::DomainError::NodeEndpointSetChanged {
@@ -3285,6 +3275,14 @@ async fn admin_delete_node(
                     .to_string(),
                 ));
             }
+        } else if let Some(endpoint_id) = node_endpoint_ids.first() {
+            return Err(ApiError::conflict(
+                crate::domain::DomainError::NodeInUse {
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint_id.clone(),
+                }
+                .to_string(),
+            ));
         }
     }
 

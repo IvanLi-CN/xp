@@ -2390,7 +2390,7 @@ impl DesiredStateCommand {
                     .into());
                 }
 
-                if !endpoint_refs.is_empty() && *delete_endpoints {
+                if *delete_endpoints {
                     let actual_endpoint_ids = endpoint_refs
                         .iter()
                         .map(|(endpoint_id, _tag)| endpoint_id.clone())
@@ -6405,6 +6405,38 @@ rules: []
         ));
         assert!(state.nodes.contains_key("node_drop"));
         assert!(state.endpoints.contains_key("endpoint_new"));
+    }
+
+    #[test]
+    fn desired_state_apply_delete_node_rejects_removed_preview_endpoint_set() {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_drop".to_string(),
+            Node {
+                node_id: "node_drop".to_string(),
+                node_name: "node_drop".to_string(),
+                access_host: "node-drop.example.invalid".to_string(),
+                api_base_url: "https://node-drop.example.invalid".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+
+        let err = DesiredStateCommand::DeleteNode {
+            node_id: "node_drop".to_string(),
+            delete_endpoints: true,
+            expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Domain(crate::domain::DomainError::NodeEndpointSetChanged {
+                node_id
+            }) if node_id == "node_drop"
+        ));
+        assert!(state.nodes.contains_key("node_drop"));
     }
 
     #[test]

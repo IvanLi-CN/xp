@@ -1428,6 +1428,40 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
 }
 
 #[tokio::test]
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_removed_preview_endpoints() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+    }
+
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=already-removed",
+        node.node_id
+    );
+    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    let res = app
+        .oneshot(req_authed("GET", &format!("/api/admin/nodes/{}", node.node_id)))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn delete_node_rejects_local_node() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
