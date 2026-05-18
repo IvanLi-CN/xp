@@ -18,10 +18,12 @@ import {
 } from "../api/adminNodeRuntime";
 import {
 	type AdminNode,
+	type AdminNodeDeletePreviewEndpoint,
 	type AdminNodeEgressProbe,
 	type AdminNodePatchRequest,
 	deleteAdminNode,
 	fetchAdminNode,
+	fetchAdminNodeDeletePreview,
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
@@ -258,6 +260,19 @@ function formatSubscriptionRegion(
 	}
 }
 
+function formatEndpointKind(
+	value: AdminNodeDeletePreviewEndpoint["kind"],
+): string {
+	switch (value) {
+		case "vless_reality_vision_tcp":
+			return "VLESS Reality";
+		case "ss2022_2022_blake3_aes_128_gcm":
+			return "SS2022";
+		default:
+			return value;
+	}
+}
+
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
@@ -308,6 +323,10 @@ export function NodeDetailsPage() {
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [isPreparingDelete, setIsPreparingDelete] = useState(false);
+	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
+		AdminNodeDeletePreviewEndpoint[]
+	>([]);
 
 	const quotaForm = useForm<QuotaResetFormValues>({
 		resolver: zodResolver(quotaResetSchema),
@@ -527,6 +546,22 @@ export function NodeDetailsPage() {
 			});
 		} finally {
 			setIsRefreshingEgressProbe(false);
+		}
+	};
+
+	const handleOpenDeleteDialog = async () => {
+		setIsPreparingDelete(true);
+		try {
+			const preview = await fetchAdminNodeDeletePreview(adminToken, nodeId);
+			setDeletePreviewEndpoints(preview.endpoints);
+			setDeleteOpen(true);
+		} catch (error) {
+			pushToast({
+				variant: "error",
+				message: formatErrorMessage(error),
+			});
+		} finally {
+			setIsPreparingDelete(false);
 		}
 	};
 
@@ -1288,13 +1323,14 @@ export function NodeDetailsPage() {
 								<h2 className="xp-card-title text-destructive">Danger zone</h2>
 								<p className="text-sm text-muted-foreground">
 									Deleting a node removes it from the cluster membership and
-									inventory. This action cannot be undone. Only delete nodes
-									that have no endpoints.
+									inventory. If the node still owns endpoints, the next step
+									shows exactly what will be deleted.
 								</p>
 								<div>
 									<Button
 										variant="danger"
-										onClick={() => setDeleteOpen(true)}
+										onClick={() => void handleOpenDeleteDialog()}
+										loading={isPreparingDelete}
 										disabled={isDeleting}
 									>
 										Delete node
@@ -1308,7 +1344,49 @@ export function NodeDetailsPage() {
 				<ConfirmDialog
 					open={deleteOpen}
 					title="Delete node?"
-					description="This action cannot be undone. The node must have no endpoints."
+					description={
+						deletePreviewEndpoints.length > 0
+							? "This node still owns endpoints. Confirming will delete the node and the endpoints listed below."
+							: "This action cannot be undone."
+					}
+					body={
+						deletePreviewEndpoints.length > 0 ? (
+							<div className="space-y-3">
+								<p className="text-sm font-medium">
+									Endpoints to delete: {deletePreviewEndpoints.length}
+								</p>
+								<div className="max-h-56 overflow-auto rounded-md border border-border">
+									<table className="w-full text-left text-sm">
+										<thead className="bg-muted text-xs uppercase text-muted-foreground">
+											<tr>
+												<th className="px-3 py-2 font-medium">Tag</th>
+												<th className="px-3 py-2 font-medium">Kind</th>
+												<th className="px-3 py-2 font-medium">Port</th>
+											</tr>
+										</thead>
+										<tbody>
+											{deletePreviewEndpoints.map((endpoint) => (
+												<tr
+													key={endpoint.endpoint_id}
+													className="border-t border-border"
+												>
+													<td className="px-3 py-2 font-mono text-xs">
+														{endpoint.tag}
+													</td>
+													<td className="px-3 py-2">
+														{formatEndpointKind(endpoint.kind)}
+													</td>
+													<td className="px-3 py-2 font-mono">
+														{endpoint.port}
+													</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+							</div>
+						) : null
+					}
 					onCancel={() => setDeleteOpen(false)}
 					footer={
 						<div className="flex justify-end gap-2">
@@ -1325,7 +1403,9 @@ export function NodeDetailsPage() {
 								onClick={async () => {
 									setIsDeleting(true);
 									try {
-										await deleteAdminNode(adminToken, nodeId);
+										await deleteAdminNode(adminToken, nodeId, {
+											deleteEndpoints: deletePreviewEndpoints.length > 0,
+										});
 										pushToast({
 											variant: "success",
 											message: "Node deleted.",
@@ -1342,7 +1422,9 @@ export function NodeDetailsPage() {
 									}
 								}}
 							>
-								Delete
+								{deletePreviewEndpoints.length > 0
+									? "Delete node and endpoints"
+									: "Delete"}
 							</Button>
 						</div>
 					}

@@ -533,6 +533,26 @@ struct AdminNodeResponse {
     egress_probe: Option<AdminNodeEgressProbeResponse>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AdminNodeDeletePreviewEndpoint {
+    endpoint_id: String,
+    tag: String,
+    kind: EndpointKind,
+    port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminNodeDeletePreviewResponse {
+    node_id: String,
+    endpoints: Vec<AdminNodeDeletePreviewEndpoint>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeleteNodeQuery {
+    #[serde(default)]
+    delete_endpoints: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminNodeEgressProbeRefreshResponse {
     node_id: String,
@@ -788,6 +808,10 @@ pub fn build_router(
         .route("/config", get(admin_get_config))
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
+        .route(
+            "/nodes/:node_id/delete-preview",
+            get(admin_get_node_delete_preview),
+        )
         .route(
             "/nodes/:node_id/egress-probe/refresh",
             post(admin_refresh_node_egress_probe),
@@ -3146,6 +3170,31 @@ async fn admin_get_node(
     Ok(Json(admin_node_response(node, probe)))
 }
 
+async fn admin_get_node_delete_preview(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminNodeDeletePreviewResponse>, ApiError> {
+    let store = state.store.lock().await;
+    if store.get_node(&node_id).is_none() {
+        return Err(ApiError::not_found(format!("node not found: {node_id}")));
+    }
+
+    Ok(Json(AdminNodeDeletePreviewResponse {
+        node_id: node_id.clone(),
+        endpoints: store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == node_id)
+            .map(|endpoint| AdminNodeDeletePreviewEndpoint {
+                endpoint_id: endpoint.endpoint_id,
+                tag: endpoint.tag,
+                kind: endpoint.kind,
+                port: endpoint.port,
+            })
+            .collect(),
+    }))
+}
+
 async fn admin_patch_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
@@ -3186,6 +3235,7 @@ async fn admin_patch_node(
 async fn admin_delete_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
+    Query(query): Query<DeleteNodeQuery>,
 ) -> Result<StatusCode, ApiError> {
     if node_id == state.cluster.node_id {
         return Err(ApiError::invalid_request("cannot delete local node"));
@@ -3197,18 +3247,20 @@ async fn admin_delete_node(
         if store.get_node(&node_id).is_none() {
             return Err(ApiError::not_found(format!("node not found: {node_id}")));
         }
-        if let Some(endpoint) = store
-            .list_endpoints()
-            .into_iter()
-            .find(|endpoint| endpoint.node_id == node_id)
-        {
-            return Err(ApiError::conflict(
-                crate::domain::DomainError::NodeInUse {
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id,
-                }
-                .to_string(),
-            ));
+        if !query.delete_endpoints {
+            if let Some(endpoint) = store
+                .list_endpoints()
+                .into_iter()
+                .find(|endpoint| endpoint.node_id == node_id)
+            {
+                return Err(ApiError::conflict(
+                    crate::domain::DomainError::NodeInUse {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id,
+                    }
+                    .to_string(),
+                ));
+            }
         }
     }
 
@@ -3251,15 +3303,25 @@ async fn admin_delete_node(
         &state,
         crate::state::DesiredStateCommand::DeleteNode {
             node_id: node_id.clone(),
+            delete_endpoints: query.delete_endpoints,
         },
     )
     .await?;
-    let crate::state::DesiredStateApplyResult::NodeDeleted { deleted } = out else {
+    let crate::state::DesiredStateApplyResult::NodeDeleted {
+        deleted,
+        deleted_endpoint_tags,
+    } = out
+    else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     if !deleted {
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
     }
+
+    for tag in deleted_endpoint_tags {
+        state.reconcile.request_remove_inbound(tag);
+    }
+    state.reconcile.request_full();
 
     Ok(StatusCode::NO_CONTENT)
 }
