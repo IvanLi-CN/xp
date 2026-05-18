@@ -392,6 +392,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(deleteAdminNode).toHaveBeenCalledWith("admintoken", "node-tokyo", {
 				deleteEndpoints: true,
+				expectedEndpointIds: ["endpoint-ss"],
 			});
 		});
 		expect(mockNavigate).toHaveBeenCalledWith({ to: "/nodes" });

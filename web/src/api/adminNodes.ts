@@ -190,10 +190,20 @@ export async function refreshAdminNodeEgressProbe(
 export async function deleteAdminNode(
 	adminToken: string,
 	nodeId: string,
-	options?: { deleteEndpoints?: boolean },
+	options?: { deleteEndpoints?: boolean; expectedEndpointIds?: string[] },
 	signal?: AbortSignal,
 ): Promise<void> {
-	const query = options?.deleteEndpoints ? "?delete_endpoints=true" : "";
+	const params = new URLSearchParams();
+	if (options?.deleteEndpoints) {
+		params.set("delete_endpoints", "true");
+		if (options.expectedEndpointIds && options.expectedEndpointIds.length > 0) {
+			params.set(
+				"expected_endpoint_ids",
+				options.expectedEndpointIds.join(","),
+			);
+		}
+	}
+	const query = params.size > 0 ? `?${params.toString()}` : "";
 	const res = await fetch(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}${query}`,
 		{

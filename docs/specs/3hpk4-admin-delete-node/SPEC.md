@@ -39,7 +39,7 @@
   - `endpoints: Array<{ endpoint_id, tag, kind, port }>`
 - 删除不存在节点时，preview 与 delete 都必须返回 `404 not_found`。
 - `DELETE /api/admin/nodes/:node_id` 未带确认参数且节点仍有 endpoints 时必须继续返回 `409 conflict`。
-- `DELETE /api/admin/nodes/:node_id?delete_endpoints=true` 必须删除节点与该节点拥有的 endpoints。
+- `DELETE /api/admin/nodes/:node_id?delete_endpoints=true&expected_endpoint_ids=<id,id>` 必须只在当前 endpoint 集合与预览确认集合一致时删除节点与该节点拥有的 endpoints。
 - 确认删除后必须对被删除 endpoints 触发 remove-inbound，并触发 full reconcile。
 - Web UI 必须在确认弹窗中展示将被删除的 endpoint 数量、tag、kind 与 port。
 
@@ -71,8 +71,9 @@
   - Response: `{ "node_id": string, "endpoints": [{ "endpoint_id": string, "tag": string, "kind": EndpointKind, "port": number }] }`
 - `DELETE /api/admin/nodes/:node_id`
   - 默认行为：若仍有 endpoints，返回 `409 conflict`。
-- `DELETE /api/admin/nodes/:node_id?delete_endpoints=true`
+- `DELETE /api/admin/nodes/:node_id?delete_endpoints=true&expected_endpoint_ids=<id,id>`
   - 确认清理行为：删除节点及其 endpoints，成功返回 `204 No Content`。
+  - `expected_endpoint_ids` 是逗号分隔 endpoint ID 列表；当节点仍有 endpoints 时，后端必须验证当前 endpoint ID 集合与请求中的确认集合完全一致，否则返回 `409 conflict`。
 
 ## 验收标准（Acceptance Criteria）
 

@@ -1391,6 +1391,24 @@ async function handleRequest(
 					`node is still referenced by endpoints: node_id=${nodeId} endpoint_id=${endpoints[0].endpoint_id}`,
 				);
 			}
+			const expectedEndpointIds = new Set(
+				(url.searchParams.get("expected_endpoint_ids") ?? "")
+					.split(",")
+					.filter(Boolean),
+			);
+			if (
+				endpoints.length > 0 &&
+				(endpoints.length !== expectedEndpointIds.size ||
+					endpoints.some(
+						(endpoint) => !expectedEndpointIds.has(endpoint.endpoint_id),
+					))
+			) {
+				return errorResponse(
+					409,
+					"conflict",
+					`node endpoint set changed since delete preview: node_id=${nodeId}`,
+				);
+			}
 			state.endpoints = state.endpoints.filter(
 				(endpoint) => endpoint.node_id !== nodeId,
 			);

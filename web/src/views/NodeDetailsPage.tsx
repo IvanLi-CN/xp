@@ -1405,6 +1405,9 @@ export function NodeDetailsPage() {
 									try {
 										await deleteAdminNode(adminToken, nodeId, {
 											deleteEndpoints: deletePreviewEndpoints.length > 0,
+											expectedEndpointIds: deletePreviewEndpoints.map(
+												(endpoint) => endpoint.endpoint_id,
+											),
 										});
 										pushToast({
 											variant: "success",

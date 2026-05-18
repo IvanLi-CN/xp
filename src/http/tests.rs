@@ -1299,7 +1299,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
             .unwrap()
     };
 
-    let uri = format!("/api/admin/nodes/{}?delete_endpoints=true", node.node_id);
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids={}",
+        node.node_id, endpoint.endpoint_id
+    );
     let res = app
         .clone()
         .oneshot(req_authed("DELETE", &uri))
@@ -1331,6 +1334,46 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
             ReconcileRequest::Full
         ]
     );
+}
+
+#[tokio::test]
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://127.0.0.1:62416".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let endpoint = {
+        let mut store = store.lock().await;
+        store.upsert_node(node.clone()).unwrap();
+        store
+            .create_endpoint(
+                node.node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+    };
+
+    let uri = format!(
+        "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=stale-preview",
+        node.node_id
+    );
+    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
+    let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 #[tokio::test]

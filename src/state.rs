@@ -1791,6 +1791,8 @@ pub enum DesiredStateCommand {
         node_id: String,
         #[serde(default, skip_serializing_if = "is_false")]
         delete_endpoints: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        expected_endpoint_ids: Vec<String>,
     },
     UpsertEndpoint {
         endpoint: Endpoint,
@@ -1923,6 +1925,8 @@ enum DesiredStateCommandCompat {
         node_id: String,
         #[serde(default)]
         delete_endpoints: bool,
+        #[serde(default)]
+        expected_endpoint_ids: Vec<String>,
     },
     UpsertEndpoint {
         endpoint: Endpoint,
@@ -2049,9 +2053,11 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::DeleteNode {
                 node_id,
                 delete_endpoints,
+                expected_endpoint_ids,
             } => Self::DeleteNode {
                 node_id,
                 delete_endpoints,
+                expected_endpoint_ids,
             },
             DesiredStateCommandCompat::UpsertEndpoint { endpoint } => {
                 Self::UpsertEndpoint { endpoint }
@@ -2360,6 +2366,7 @@ impl DesiredStateCommand {
             Self::DeleteNode {
                 node_id,
                 delete_endpoints,
+                expected_endpoint_ids,
             } => {
                 if !state.nodes.contains_key(node_id) {
                     return Ok(DesiredStateApplyResult::NodeDeleted {
@@ -2381,6 +2388,21 @@ impl DesiredStateCommand {
                         endpoint_id: endpoint_refs[0].0.clone(),
                     }
                     .into());
+                }
+
+                if !endpoint_refs.is_empty() && *delete_endpoints {
+                    let actual_endpoint_ids = endpoint_refs
+                        .iter()
+                        .map(|(endpoint_id, _tag)| endpoint_id.clone())
+                        .collect::<BTreeSet<_>>();
+                    let expected_endpoint_ids =
+                        expected_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+                    if actual_endpoint_ids != expected_endpoint_ids {
+                        return Err(crate::domain::DomainError::NodeEndpointSetChanged {
+                            node_id: node_id.clone(),
+                        }
+                        .into());
+                    }
                 }
 
                 for (endpoint_id, _tag) in &endpoint_refs {
@@ -6277,6 +6299,7 @@ rules: []
         DesiredStateCommand::DeleteNode {
             node_id: "node_drop".to_string(),
             delete_endpoints: false,
+            expected_endpoint_ids: Vec::new(),
         }
         .apply(&mut state)
         .unwrap();
@@ -6323,6 +6346,7 @@ rules: []
         let out = DesiredStateCommand::DeleteNode {
             node_id: "node_drop".to_string(),
             delete_endpoints: true,
+            expected_endpoint_ids: vec!["endpoint_drop".to_string()],
         }
         .apply(&mut state)
         .unwrap();
@@ -6337,6 +6361,50 @@ rules: []
         assert!(!state.nodes.contains_key("node_drop"));
         assert!(!state.endpoints.contains_key("endpoint_drop"));
         assert!(!state.endpoint_probe_history.contains_key("endpoint_drop"));
+    }
+
+    #[test]
+    fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
+        let mut state = PersistedState::empty();
+        state.nodes.insert(
+            "node_drop".to_string(),
+            Node {
+                node_id: "node_drop".to_string(),
+                node_name: "node_drop".to_string(),
+                access_host: "node-drop.example.invalid".to_string(),
+                api_base_url: "https://node-drop.example.invalid".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.endpoints.insert(
+            "endpoint_new".to_string(),
+            Endpoint {
+                endpoint_id: "endpoint_new".to_string(),
+                node_id: "node_drop".to_string(),
+                tag: "endpoint-new".to_string(),
+                kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port: 8388,
+                meta: serde_json::json!({}),
+            },
+        );
+
+        let err = DesiredStateCommand::DeleteNode {
+            node_id: "node_drop".to_string(),
+            delete_endpoints: true,
+            expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
+        }
+        .apply(&mut state)
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Domain(crate::domain::DomainError::NodeEndpointSetChanged {
+                node_id
+            }) if node_id == "node_drop"
+        ));
+        assert!(state.nodes.contains_key("node_drop"));
+        assert!(state.endpoints.contains_key("endpoint_new"));
     }
 
     #[test]

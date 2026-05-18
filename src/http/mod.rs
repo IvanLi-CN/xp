@@ -551,6 +551,8 @@ struct AdminNodeDeletePreviewResponse {
 struct DeleteNodeQuery {
     #[serde(default)]
     delete_endpoints: bool,
+    #[serde(default)]
+    expected_endpoint_ids: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3303,6 +3305,13 @@ async fn admin_delete_node(
         crate::state::DesiredStateCommand::DeleteNode {
             node_id: node_id.clone(),
             delete_endpoints: query.delete_endpoints,
+            expected_endpoint_ids: query
+                .expected_endpoint_ids
+                .unwrap_or_default()
+                .split(',')
+                .filter(|endpoint_id| !endpoint_id.is_empty())
+                .map(str::to_string)
+                .collect(),
         },
     )
     .await?;
