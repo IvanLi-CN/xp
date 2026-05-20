@@ -48,6 +48,7 @@ struct PanickingRaft {
     inner: LocalRaft,
     panic_on_add_learner: bool,
     panic_on_change_membership: bool,
+    hang_on_change_membership: bool,
 }
 
 impl crate::raft::app::RaftFacade for PanickingRaft {
@@ -88,6 +89,12 @@ impl crate::raft::app::RaftFacade for PanickingRaft {
         changes: openraft::ChangeMembers<u64, crate::raft::types::NodeMeta>,
         retain: bool,
     ) -> crate::raft::app::BoxFuture<'_, anyhow::Result<()>> {
+        if self.hang_on_change_membership {
+            return Box::pin(async move {
+                let _ = (changes, retain);
+                std::future::pending::<anyhow::Result<()>>().await
+            });
+        }
         if self.panic_on_change_membership {
             return Box::pin(async move {
                 let _ = (changes, retain);
@@ -1404,6 +1411,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
         inner: LocalRaft::new(store.clone(), rx),
         panic_on_add_learner: false,
         panic_on_change_membership: true,
+        hang_on_change_membership: false,
     });
     let app = build_app_with_cluster_store_and_raft(
         config,
@@ -1732,6 +1740,7 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         inner: LocalRaft::new(store.clone(), rx),
         panic_on_add_learner: true,
         panic_on_change_membership: false,
+        hang_on_change_membership: false,
     });
     let app = build_app_with_cluster_store_and_raft(
         config,
@@ -1855,6 +1864,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
         inner: LocalRaft::new(store.clone(), rx),
         panic_on_add_learner: false,
         panic_on_change_membership: true,
+        hang_on_change_membership: false,
     });
     let app = build_app_with_cluster_store_and_raft(
         config,
@@ -1874,6 +1884,94 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
             .as_str()
             .unwrap()
             .contains("change_membership remove_nodes: raft change_membership panicked"),
+        "unexpected error: {}",
+        body["error"]["message"].as_str().unwrap()
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node(&extra_node.node_id).is_some());
+}
+
+#[tokio::test]
+async fn delete_node_times_out_when_change_membership_hangs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let extra_node = Node {
+        node_id: new_ulid_string(),
+        node_name: "extra-node".to_string(),
+        access_host: "".to_string(),
+        api_base_url: "https://node-2.internal:8443".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut locked = store.lock().await;
+        locked.upsert_node(extra_node.clone()).unwrap();
+    }
+
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let extra_raft_id = raft_node_id_from_ulid(&extra_node.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    nodes.insert(
+        extra_raft_id,
+        RaftNodeMeta {
+            name: extra_node.node_name.clone(),
+            api_base_url: extra_node.api_base_url.clone(),
+            raft_endpoint: extra_node.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        panic_on_add_learner: false,
+        panic_on_change_membership: false,
+        hang_on_change_membership: true,
+    });
+    let app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store.clone(),
+        raft,
+        ReconcileHandle::noop(),
+    );
+
+    let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
+    let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "timeout");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("delete node timed out while removing raft membership"),
         "unexpected error: {}",
         body["error"]["message"].as_str().unwrap()
     );
