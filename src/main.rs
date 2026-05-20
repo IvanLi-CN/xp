@@ -218,6 +218,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         cloudflared_health.clone(),
         ddns_health,
     );
+    let node_history = xp::node_history::NodeHistoryHandle::from_config(&config);
+    let _node_history_local_task = xp::node_history::spawn_node_history_local_worker(
+        config_arc.clone(),
+        cluster.node_id.clone(),
+        store.clone(),
+        node_runtime.clone(),
+        node_history.clone(),
+    );
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
     let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
@@ -281,6 +289,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         reconcile.clone(),
         geo_db_update.resolver(),
     );
+    let _node_history_remote_sync_task = xp::node_history::spawn_node_history_remote_sync_worker(
+        cluster.node_id.clone(),
+        store.clone(),
+        node_history.clone(),
+        cluster_ca_pem.clone(),
+        cluster_ca_key_pem_required.clone(),
+    );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
     let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(
@@ -305,6 +320,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xray_health,
         cloudflared_health,
         node_runtime,
+        node_history,
         endpoint_probe,
         node_egress_probe,
         cluster,

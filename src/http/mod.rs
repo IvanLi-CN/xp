@@ -48,6 +48,7 @@ use crate::{
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
     mihomo_redact,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
+    node_history::{NodeHistoryHandle, NodeHistorySnapshot},
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -80,6 +81,7 @@ pub struct AppState {
     pub xray_health: XrayHealthHandle,
     pub cloudflared_health: CloudflaredHealthHandle,
     pub node_runtime: NodeRuntimeHandle,
+    pub node_history: NodeHistoryHandle,
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     pub node_egress_probe: NodeEgressProbeHandle,
     pub cluster: Arc<ClusterMetadata>,
@@ -750,6 +752,7 @@ pub fn build_router(
     xray_health: XrayHealthHandle,
     cloudflared_health: CloudflaredHealthHandle,
     node_runtime: NodeRuntimeHandle,
+    node_history: NodeHistoryHandle,
     endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     node_egress_probe: NodeEgressProbeHandle,
     cluster: ClusterMetadata,
@@ -784,6 +787,7 @@ pub fn build_router(
         xray_health,
         cloudflared_health,
         node_runtime,
+        node_history,
         endpoint_probe,
         node_egress_probe,
         cluster: Arc::new(cluster),
@@ -825,6 +829,7 @@ pub fn build_router(
         )
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
+        .route("/nodes/:node_id/history", get(admin_get_node_history))
         .route("/nodes/:node_id/ip-usage", get(admin_get_node_ip_usage))
         .route(
             "/nodes/:node_id/runtime/events",
@@ -967,6 +972,10 @@ pub fn build_router(
         .route(
             "/_internal/nodes/runtime/local/events",
             get(admin_internal_stream_local_node_runtime_events),
+        )
+        .route(
+            "/_internal/nodes/history/local",
+            get(admin_internal_get_local_node_history),
         )
         .route(
             "/_internal/users/:user_id/ip-usage/local",
@@ -1896,6 +1905,12 @@ struct AdminNodeRuntimeDetailResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminNodeHistoryResponse {
+    node: Node,
+    history: Option<NodeHistorySnapshot>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminInternalNodeRuntimeLocalResponse {
     node_id: String,
     summary: NodeRuntimeSummary,
@@ -2255,6 +2270,20 @@ async fn admin_get_node_runtime(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(node_runtime_detail_from_snapshot(node, snapshot)))
+}
+
+async fn admin_get_node_history(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminNodeHistoryResponse>, ApiError> {
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    let history = state.node_history.snapshot(&node_id).await;
+    Ok(Json(AdminNodeHistoryResponse { node, history }))
 }
 
 fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError> {
@@ -2982,6 +3011,21 @@ async fn admin_internal_get_local_node_runtime(
     let event_limit = runtime_event_limit(&query);
     let snapshot = state.node_runtime.snapshot(event_limit).await;
     Ok(Json(snapshot.into()))
+}
+
+async fn admin_internal_get_local_node_history(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<NodeHistorySnapshot>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    state
+        .node_history
+        .snapshot(&state.cluster.node_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("node history is not available yet"))
 }
 
 async fn admin_internal_stream_local_node_runtime_events(

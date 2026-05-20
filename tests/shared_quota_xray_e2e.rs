@@ -305,6 +305,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -570,6 +571,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -840,6 +842,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),

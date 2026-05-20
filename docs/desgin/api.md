@@ -291,16 +291,71 @@ SSE 事件类型：
 - `node_error`：跨节点代理错误
 - `lagged`：客户端消费落后
 
-### 2.9 节点运行态内部接口（internal signature）
+### 2.9 查询单节点历史镜像（管理员）
+
+`GET /api/admin/nodes/{node_id}/history`
+
+返回：
+
+```json
+{
+  "node": {
+    "node_id": "01J...",
+    "node_name": "node-1",
+    "access_host": "example.com",
+    "api_base_url": "https://node-1.internal:8443"
+  },
+  "history": {
+    "node_id": "01J...",
+    "last_synced_at": "RFC3339|null",
+    "last_sync_error": "string|null",
+    "daily_traffic": [
+      {
+        "date": "2026-05-20",
+        "uplink_bytes": 123,
+        "downlink_bytes": 456,
+        "updated_at": "RFC3339"
+      }
+    ],
+    "daily_component_status": [
+      {
+        "date": "2026-05-20",
+        "components": [
+          {
+            "component": "xp|xray|cloudflared|ddns",
+            "status": "disabled|up|degraded|down|unknown",
+            "observed_at": "RFC3339"
+          }
+        ]
+      }
+    ],
+    "component_status_events": [
+      {
+        "event_id": "01J...",
+        "occurred_at": "RFC3339",
+        "component": "xp|xray|cloudflared|ddns",
+        "message": "xray status changed: up -> down",
+        "from_status": "disabled|up|degraded|down|unknown|null",
+        "to_status": "disabled|up|degraded|down|unknown|null"
+      }
+    ]
+  }
+}
+```
+
+> `history=null` 表示当前面板节点尚未同步到该节点的历史镜像。历史镜像保留 90 天日级流量与每日组件状态；组件状态变化日志保留最近 7 天且每节点最多 50 条。
+
+### 2.10 节点运行态内部接口（internal signature）
 
 - `GET /api/admin/_internal/nodes/runtime/local?events_limit=200`
 - `GET /api/admin/_internal/nodes/runtime/local/events`（SSE）
+- `GET /api/admin/_internal/nodes/history/local`
 - `GET /api/admin/_internal/nodes/egress-probe/local`
 - `POST /api/admin/_internal/nodes/egress-probe/local/refresh`
 
 仅接受 internal signature 鉴权，用于 leader/follower 之间跨节点聚合与事件转发。
 
-### 2.10 更新节点（管理员）
+### 2.11 更新节点（管理员）
 
 > 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `access_host`），**不涉及** Raft membership 变更与节点移除。
 

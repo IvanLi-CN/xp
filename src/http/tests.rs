@@ -229,12 +229,13 @@ fn app_with(
     );
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let router = build_router(
-        config,
+        config.clone(),
         store.clone(),
         reconcile,
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -278,12 +279,13 @@ fn build_app_with_cluster_store_and_raft(
     );
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     build_router(
-        config,
+        config.clone(),
         store.clone(),
         reconcile,
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -2040,12 +2042,13 @@ async fn follower_admin_write_does_not_redirect() {
     );
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
-        config,
+        config.clone(),
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -4154,12 +4157,13 @@ async fn grant_usage_includes_warning_fields() {
         false,
     );
     let app = build_router(
-        config,
+        config.clone(),
         store,
         ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -4365,12 +4369,13 @@ async fn grant_usage_warns_on_quota_mismatch() {
     );
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
-        config,
+        config.clone(),
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -6842,12 +6847,13 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         .unwrap_err();
 
     let app = build_router(
-        config,
+        config.clone(),
         store.clone(),
         ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -7163,6 +7169,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -7221,12 +7228,13 @@ async fn persistence_smoke_user_roundtrip_via_api() {
     );
     let geo_db_update = test_geo_db_update_handle(&config, store.clone());
     let app = build_router(
-        config,
+        config.clone(),
         store.clone(),
         crate::reconcile::ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
