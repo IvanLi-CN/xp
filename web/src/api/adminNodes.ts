@@ -82,6 +82,8 @@ export type AdminNodeEgressProbeRefreshResponse = z.infer<
 	typeof AdminNodeEgressProbeRefreshResponseSchema
 >;
 
+const DELETE_ADMIN_NODE_TIMEOUT_MS = 30_000;
+
 export async function fetchAdminNodes(
 	adminToken: string,
 	signal?: AbortSignal,
@@ -193,6 +195,18 @@ export async function deleteAdminNode(
 	options?: { deleteEndpoints?: boolean; expectedEndpointIds?: string[] },
 	signal?: AbortSignal,
 ): Promise<void> {
+	const controller = new AbortController();
+	let timedOut = false;
+	const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, DELETE_ADMIN_NODE_TIMEOUT_MS);
+	const abort = () => controller.abort(signal?.reason);
+	signal?.addEventListener("abort", abort, { once: true });
+	if (signal?.aborted) {
+		controller.abort(signal.reason);
+	}
+
 	const params = new URLSearchParams();
 	if (options?.deleteEndpoints) {
 		params.set("delete_endpoints", "true");
@@ -204,17 +218,29 @@ export async function deleteAdminNode(
 		}
 	}
 	const query = params.size > 0 ? `?${params.toString()}` : "";
-	const res = await fetch(
-		`/api/admin/nodes/${encodeURIComponent(nodeId)}${query}`,
-		{
-			method: "DELETE",
-			headers: {
-				Accept: "application/json",
-				Authorization: `Bearer ${adminToken}`,
+	try {
+		const res = await fetch(
+			`/api/admin/nodes/${encodeURIComponent(nodeId)}${query}`,
+			{
+				method: "DELETE",
+				headers: {
+					Accept: "application/json",
+					Authorization: `Bearer ${adminToken}`,
+				},
+				signal: controller.signal,
 			},
-			signal,
-		},
-	);
+		);
 
-	await throwIfNotOk(res);
+		await throwIfNotOk(res);
+	} catch (error) {
+		if (timedOut) {
+			throw new Error(
+				"Delete node request timed out after 30 seconds. Check Raft peer reachability.",
+			);
+		}
+		throw error;
+	} finally {
+		clearTimeout(timeoutId);
+		signal?.removeEventListener("abort", abort);
+	}
 }

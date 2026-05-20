@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     convert::Infallible,
+    future::Future,
     sync::Arc,
 };
 
@@ -133,6 +134,10 @@ impl ApiError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new("internal", StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+
+    pub fn gateway_timeout(message: impl Into<String>) -> Self {
+        Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
 }
 
@@ -1224,6 +1229,10 @@ struct VersionCheckCacheEntry {
 
 const VERSION_CHECK_TTL: Duration = Duration::from_secs(60 * 60);
 const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);
+#[cfg(not(test))]
+const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_secs(20);
+#[cfg(test)]
+const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Serialize)]
 struct VersionCheckResponse {
@@ -3301,6 +3310,19 @@ async fn restore_raft_node_membership(
     Ok(())
 }
 
+async fn admin_delete_node_raft_op<T>(
+    operation: &'static str,
+    future: impl Future<Output = Result<T, ApiError>>,
+) -> Result<T, ApiError> {
+    tokio::time::timeout(ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT, future)
+        .await
+        .map_err(|_| {
+            ApiError::gateway_timeout(format!(
+                "delete node timed out while {operation}; check Raft peer reachability"
+            ))
+        })?
+}
+
 async fn admin_delete_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
@@ -3361,23 +3383,33 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
 
-    let mut removed_membership =
-        remove_raft_node_membership(&state, raft_node_id, &metrics).await?;
+    let mut removed_membership = admin_delete_node_raft_op(
+        "removing raft membership",
+        remove_raft_node_membership(&state, raft_node_id, &metrics),
+    )
+    .await?;
 
-    let out = match raft_write(
-        &state,
-        crate::state::DesiredStateCommand::DeleteNode {
-            node_id: node_id.clone(),
-            delete_endpoints: query.delete_endpoints,
-            expected_endpoint_ids,
-        },
+    let out = match admin_delete_node_raft_op(
+        "applying desired-state delete",
+        raft_write(
+            &state,
+            crate::state::DesiredStateCommand::DeleteNode {
+                node_id: node_id.clone(),
+                delete_endpoints: query.delete_endpoints,
+                expected_endpoint_ids,
+            },
+        ),
     )
     .await
     {
         Ok(out) => out,
         Err(err) => {
             if let Some(removed) = removed_membership.take() {
-                restore_raft_node_membership(&state, raft_node_id, removed).await?;
+                admin_delete_node_raft_op(
+                    "restoring raft membership",
+                    restore_raft_node_membership(&state, raft_node_id, removed),
+                )
+                .await?;
             }
             return Err(err);
         }
@@ -3388,13 +3420,21 @@ async fn admin_delete_node(
     } = out
     else {
         if let Some(removed) = removed_membership.take() {
-            restore_raft_node_membership(&state, raft_node_id, removed).await?;
+            admin_delete_node_raft_op(
+                "restoring raft membership",
+                restore_raft_node_membership(&state, raft_node_id, removed),
+            )
+            .await?;
         }
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     if !deleted {
         if let Some(removed) = removed_membership.take() {
-            restore_raft_node_membership(&state, raft_node_id, removed).await?;
+            admin_delete_node_raft_op(
+                "restoring raft membership",
+                restore_raft_node_membership(&state, raft_node_id, removed),
+            )
+            .await?;
         }
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
     }
