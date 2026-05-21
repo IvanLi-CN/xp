@@ -42,6 +42,7 @@ pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
+    FullRebuildVless,
     RemoveInbound { tag: String },
     RemoveUser { tag: String, email: String },
     RebuildInbound { endpoint_id: String },
@@ -50,6 +51,7 @@ pub enum ReconcileRequest {
 #[derive(Debug, Default)]
 struct PendingBatch {
     full: bool,
+    force_rebuild_vless_inbounds: bool,
     remove_inbounds: BTreeSet<String>,
     remove_users: BTreeSet<(String, String)>,
     rebuild_inbounds: BTreeSet<String>,
@@ -58,6 +60,7 @@ struct PendingBatch {
 impl PendingBatch {
     fn has_any(&self) -> bool {
         self.full
+            || self.force_rebuild_vless_inbounds
             || !self.remove_inbounds.is_empty()
             || !self.remove_users.is_empty()
             || !self.rebuild_inbounds.is_empty()
@@ -70,6 +73,10 @@ impl PendingBatch {
     fn add(&mut self, req: ReconcileRequest) {
         match req {
             ReconcileRequest::Full => self.full = true,
+            ReconcileRequest::FullRebuildVless => {
+                self.full = true;
+                self.force_rebuild_vless_inbounds = true;
+            }
             ReconcileRequest::RemoveInbound { tag } => {
                 self.remove_inbounds.insert(tag);
             }
@@ -106,6 +113,10 @@ impl ReconcileHandle {
 
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
+    }
+
+    pub fn request_full_rebuild_vless(&self) {
+        self.request(ReconcileRequest::FullRebuildVless);
     }
 
     pub fn request_remove_inbound(&self, tag: impl Into<String>) {
@@ -253,6 +264,7 @@ async fn reconciler_task<R: RngCore>(
 ) {
     let mut pending = PendingBatch {
         full: true,
+        force_rebuild_vless_inbounds: true,
         ..Default::default()
     };
     let mut debounce_until: Option<Instant> = Some(Instant::now());
@@ -502,7 +514,7 @@ async fn reconcile_once(
     if should_force_rebuild_vless_inbounds {
         forced_rebuild_inbounds.extend(local_vless_endpoint_ids.clone());
     }
-    if pending.full {
+    if pending.force_rebuild_vless_inbounds {
         forced_rebuild_inbounds.extend(local_vless_endpoint_ids.clone());
     }
     if should_force_rebuild_remove_grants {
@@ -1891,7 +1903,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_reconcile_rebuilds_vless_reality_inbound() {
+    async fn periodic_full_reconcile_does_not_remove_unchanged_vless_reality_inbound() {
+        let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
+        let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, store) = test_store_init(tmp.path(), addr);
+
+        let endpoint_tag = {
+            let mut store = store.lock().await;
+            let local_node_id = store.list_nodes()[0].node_id.clone();
+            let endpoint = store
+                .create_endpoint(
+                    local_node_id,
+                    EndpointKind::VlessRealityVisionTcp,
+                    8443,
+                    serde_json::json!({
+                        "reality": {
+                            "dest": "example.com:443",
+                            "server_names": ["example.com"],
+                            "fingerprint": "chrome"
+                        }
+                    }),
+                )
+                .unwrap();
+            endpoint.tag
+        };
+
+        let pending = PendingBatch {
+            full: true,
+            ..Default::default()
+        };
+        let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
+        )
+        .await
+        .unwrap();
+
+        calls.lock().await.clear();
+
+        reconcile_once(
+            &config,
+            &store,
+            &pending,
+            &mut last_applied_hash_by_endpoint_id,
+            TEST_CLUSTER_CA_KEY_PEM,
+        )
+        .await
+        .unwrap();
+
+        let calls = calls.lock().await.clone();
+        assert!(!calls.iter().any(|call| {
+            matches!(
+                call,
+                Call::RemoveInbound { tag } if tag == &endpoint_tag
+            )
+        }));
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn forced_full_reconcile_rebuilds_vless_reality_inbound() {
         let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
         let (addr, shutdown) = start_server(calls.clone(), Behavior::default()).await;
 
@@ -1920,6 +1998,7 @@ mod tests {
 
         let pending = PendingBatch {
             full: true,
+            force_rebuild_vless_inbounds: true,
             ..Default::default()
         };
         let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();

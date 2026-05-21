@@ -305,7 +305,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
             }
 
             if request_full {
-                reconcile.request_full();
+                reconcile.request_full_rebuild_vless();
             }
 
             if automatic_restart_enabled {
@@ -674,11 +674,11 @@ mod tests {
             });
         let server_handle = tokio::spawn(server);
 
-        // Expect a Full reconcile request after the down -> up edge.
+        // Expect a full reconcile with VLESS rebuild after the down -> up edge.
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if let Some(req) = rx.recv().await
-                    && req == ReconcileRequest::Full
+                    && req == ReconcileRequest::FullRebuildVless
                 {
                     break;
                 }
