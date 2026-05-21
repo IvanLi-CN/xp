@@ -18,7 +18,7 @@ pub struct HttpNetworkFactory {
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder().build().expect("reqwest client");
+        let client = raft_http_client_builder().build().expect("reqwest client");
         Self { client }
     }
 
@@ -37,7 +37,7 @@ impl HttpNetworkFactory {
         let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
             .context("parse node identity pem")?;
 
-        let client = reqwest::Client::builder()
+        let client = raft_http_client_builder()
             .add_root_certificate(ca)
             .identity(identity)
             .build()
@@ -50,6 +50,12 @@ impl Default for HttpNetworkFactory {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn raft_http_client_builder() -> reqwest::ClientBuilder {
+    // Raft heartbeats are sparse in WAN mode. Cloudflare Tunnel can close idle
+    // TLS connections between heartbeats, so do not reuse idle connections.
+    reqwest::Client::builder().pool_max_idle_per_host(0)
 }
 
 #[derive(Clone)]
