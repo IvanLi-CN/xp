@@ -101,7 +101,6 @@ proxies:
     alpn:
       - h2
       - http/1.1
-    fingerprint: "<FP>"
     client-fingerprint: "<FP>"
     skip-cert-verify: true
     reality-opts:
@@ -155,7 +154,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 ### 6.3 Provider 方案
 
 - provider 方案中，系统直连节点（`{base}-ss` / `{base}-reality`）与链式节点（`{base}-ss-chain` / `{base}-reality-chain`）都由 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload 动态承载。
-- provider payload 中所有系统 VLESS Reality proxy 必须输出与 `5.1 VLESS（Reality）` 相同的 Mihomo 运行时字段；`{base}-reality-chain` 仅额外带 `dialer-proxy`。
+- provider payload 中所有系统 VLESS Reality proxy 必须输出与 `5.1 VLESS（Reality）` 相同的 Mihomo 运行时字段；`{base}-reality-chain` 仅额外带 `dialer-proxy`。不得把 Reality/uTLS `fingerprint` 写入 Mihomo 的证书 pinning `fingerprint` 字段。
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`

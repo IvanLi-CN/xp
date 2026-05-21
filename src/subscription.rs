@@ -3150,7 +3150,6 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
                     alpn: vec!["h2".to_string(), "http/1.1".to_string()],
-                    fingerprint: meta.reality.fingerprint.clone(),
                     client_fingerprint: meta.reality.fingerprint,
                     skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
@@ -3197,7 +3196,6 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
                     alpn: vec!["h2".to_string(), "http/1.1".to_string()],
-                    fingerprint: meta.reality.fingerprint.clone(),
                     client_fingerprint: meta.reality.fingerprint,
                     skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
@@ -3400,7 +3398,6 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
                     alpn: vec!["h2".to_string(), "http/1.1".to_string()],
-                    fingerprint: fp.to_string(),
                     client_fingerprint: fp.to_string(),
                     skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
@@ -3541,7 +3538,6 @@ struct ClashVlessProxy {
     packet_encoding: String,
     servername: String,
     alpn: Vec<String>,
-    fingerprint: String,
     #[serde(rename = "client-fingerprint")]
     client_fingerprint: String,
     #[serde(rename = "skip-cert-verify")]
@@ -4530,7 +4526,7 @@ rules: []
             reality.get("skip-cert-verify").and_then(Value::as_bool),
             Some(true)
         );
-        assert_eq!(reality.get("fingerprint").and_then(Value::as_str), Some("chrome"));
+        assert!(reality.get("fingerprint").is_none());
         assert_eq!(
             reality
                 .get("client-fingerprint")
