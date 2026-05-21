@@ -71,6 +71,17 @@ proxies:
     # ...
   - name: tokyo-reality-chain
     type: vless
+    encryption: ""
+    packet-encoding: xudp
+    tls: true
+    fingerprint: chrome
+    client-fingerprint: chrome
+    skip-cert-verify: true
+    reality-opts:
+      public-key: "<PBK>"
+      short-id: "<SID>"
+    smux:
+      enabled: false
     dialer-proxy: 🛣️ JP/HK/SG
     # ...
 ```
@@ -78,6 +89,7 @@ proxies:
 Rules:
 
 - 包含系统直连与链式节点：`{base}-ss`、`{base}-reality`、`{base}-ss-chain`、`{base}-reality-chain`。
+- 所有 VLESS Reality 节点必须携带 Mihomo 运行时字段：`encryption: ""`、`packet-encoding: xudp`、`tls: true`、`fingerprint`、`client-fingerprint`、`skip-cert-verify: true`、`reality-opts` 与 `smux.enabled: false`。
 - 同一 `{base}` 在 provider payload 中应稳定排序，使 `🛬 {base}` 过滤链式节点后的候选顺序为 `{base}-ss-chain`、`{base}-reality-chain`。
 - provider payload 可被 Mihomo `proxy-providers.type=http` 直接消费。
 - 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统隐藏直连节点。

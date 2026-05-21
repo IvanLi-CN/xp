@@ -82,7 +82,7 @@ Content-Type：`text/yaml; charset=utf-8`
 
 ### 5.1 VLESS（Reality）
 
-> 下面字段名对齐 Mihomo/Meta 常用 schema：`reality-opts.public-key` 与 `reality-opts.short-id`，以及 `client-fingerprint`。
+> 下面字段名对齐 Mihomo/Meta schema：`reality-opts.public-key` 与 `reality-opts.short-id`，以及 Reality 运行时字段。
 
 ```yaml
 proxies:
@@ -91,15 +91,24 @@ proxies:
     server: "<HOST>"
     port: <PORT>
     uuid: "<UUID>"
+    encryption: ""
     network: tcp
     udp: true
     tls: true
     flow: xtls-rprx-vision
+    packet-encoding: xudp
     servername: "<SNI>"
+    alpn:
+      - h2
+      - http/1.1
+    fingerprint: "<FP>"
     client-fingerprint: "<FP>"
+    skip-cert-verify: true
     reality-opts:
       public-key: "<PBK>"
       short-id: "<SID>"
+    smux:
+      enabled: false
 ```
 
 ### 5.2 Shadowsocks 2022
@@ -146,6 +155,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 ### 6.3 Provider 方案
 
 - provider 方案中，系统直连节点（`{base}-ss` / `{base}-reality`）与链式节点（`{base}-ss-chain` / `{base}-reality-chain`）都由 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload 动态承载。
+- provider payload 中所有系统 VLESS Reality proxy 必须输出与 `5.1 VLESS（Reality）` 相同的 Mihomo 运行时字段；`{base}-reality-chain` 仅额外带 `dialer-proxy`。
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`

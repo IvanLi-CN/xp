@@ -3142,17 +3142,23 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     server: node.access_host.clone(),
                     port: endpoint.port,
                     uuid: vless_uuid.clone(),
+                    encryption: String::new(),
                     network: "tcp".to_string(),
                     udp: true,
                     tls: true,
                     flow: "xtls-rprx-vision".to_string(),
+                    packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
+                    alpn: vec!["h2".to_string(), "http/1.1".to_string()],
+                    fingerprint: meta.reality.fingerprint.clone(),
                     client_fingerprint: meta.reality.fingerprint,
+                    skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
                         public_key: meta.reality_keys.public_key,
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
+                    smux: ClashSmux { enabled: false },
                 });
                 out.push(serde_yaml::to_value(proxy).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -3183,17 +3189,23 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     server: node.access_host.clone(),
                     port: endpoint.port,
                     uuid: vless_uuid.clone(),
+                    encryption: String::new(),
                     network: "tcp".to_string(),
                     udp: true,
                     tls: true,
                     flow: "xtls-rprx-vision".to_string(),
+                    packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
+                    alpn: vec!["h2".to_string(), "http/1.1".to_string()],
+                    fingerprint: meta.reality.fingerprint.clone(),
                     client_fingerprint: meta.reality.fingerprint,
+                    skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
                         public_key: meta.reality_keys.public_key,
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: Some(MIHOMO_OUTER_GROUP.to_string()),
+                    smux: ClashSmux { enabled: false },
                 });
                 out.push(serde_yaml::to_value(chain).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -3380,17 +3392,23 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     server: host.to_string(),
                     port,
                     uuid: vless_uuid.clone(),
+                    encryption: String::new(),
                     network: "tcp".to_string(),
                     udp: true,
                     tls: true,
                     flow: "xtls-rprx-vision".to_string(),
+                    packet_encoding: "xudp".to_string(),
                     servername: sni.to_string(),
+                    alpn: vec!["h2".to_string(), "http/1.1".to_string()],
+                    fingerprint: fp.to_string(),
                     client_fingerprint: fp.to_string(),
+                    skip_cert_verify: true,
                     reality_opts: ClashRealityOpts {
                         public_key: pbk.to_string(),
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
+                    smux: ClashSmux { enabled: false },
                 });
 
                 (uri, proxy)
@@ -3514,17 +3532,25 @@ struct ClashVlessProxy {
     server: String,
     port: u16,
     uuid: String,
+    encryption: String,
     network: String,
     udp: bool,
     tls: bool,
     flow: String,
+    #[serde(rename = "packet-encoding")]
+    packet_encoding: String,
     servername: String,
+    alpn: Vec<String>,
+    fingerprint: String,
     #[serde(rename = "client-fingerprint")]
     client_fingerprint: String,
+    #[serde(rename = "skip-cert-verify")]
+    skip_cert_verify: bool,
     #[serde(rename = "reality-opts")]
     reality_opts: ClashRealityOpts,
     #[serde(rename = "dialer-proxy", skip_serializing_if = "Option::is_none")]
     dialer_proxy: Option<String>,
+    smux: ClashSmux,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -3533,6 +3559,11 @@ struct ClashRealityOpts {
     public_key: String,
     #[serde(rename = "short-id")]
     short_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+struct ClashSmux {
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -4455,6 +4486,87 @@ rules: []
                 "Tokyo-A-reality-chain",
                 "Tokyo-A-ss"
             ]
+        );
+    }
+
+    #[test]
+    fn build_mihomo_provider_system_yaml_contains_vless_reality_runtime_fields() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![endpoint_vless(
+            "e2",
+            "n1",
+            "vless",
+            8443,
+            serde_json::json!({
+              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+              "short_ids": ["0123456789abcdef"],
+              "active_short_id": "0123456789abcdef"
+            }),
+        )];
+        let memberships = vec![membership("u1", "n1", "e2")];
+
+        let yaml =
+            build_mihomo_provider_system_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let proxies = root
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .unwrap();
+        let reality = proxies
+            .iter()
+            .find(|proxy| proxy.get("name").and_then(Value::as_str) == Some("Tokyo-A-reality"))
+            .unwrap();
+
+        assert_eq!(reality.get("type").and_then(Value::as_str), Some("vless"));
+        assert_eq!(reality.get("encryption").and_then(Value::as_str), Some(""));
+        assert_eq!(
+            reality.get("packet-encoding").and_then(Value::as_str),
+            Some("xudp")
+        );
+        assert_eq!(reality.get("tls").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            reality.get("skip-cert-verify").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(reality.get("fingerprint").and_then(Value::as_str), Some("chrome"));
+        assert_eq!(
+            reality
+                .get("client-fingerprint")
+                .and_then(Value::as_str),
+            Some("chrome")
+        );
+        assert_eq!(
+            reality
+                .get("alpn")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec!["h2", "http/1.1"]
+        );
+        assert_eq!(
+            reality
+                .get("reality-opts")
+                .and_then(|opts| opts.get("public-key"))
+                .and_then(Value::as_str),
+            Some("PBK")
+        );
+        assert_eq!(
+            reality
+                .get("reality-opts")
+                .and_then(|opts| opts.get("short-id"))
+                .and_then(Value::as_str),
+            Some("0123456789abcdef")
+        );
+        assert_eq!(
+            reality
+                .get("smux")
+                .and_then(|smux| smux.get("enabled"))
+                .and_then(Value::as_bool),
+            Some(false)
         );
     }
 
