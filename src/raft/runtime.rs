@@ -33,13 +33,13 @@ pub async fn start_raft(
         #[cfg(not(test))]
         {
             // Production defaults: tuned for WAN-ish latencies (Cloudflare tunnels, etc.).
-            // OpenRaft uses `heartbeat_interval` as the hard TTL for replication RPCs, so 50ms
-            // is far too aggressive outside local networks.
+            // OpenRaft uses `heartbeat_interval` as the hard TTL for replication RPCs, so keep
+            // it above the normal tail latency of Cloudflare Tunnel-backed node endpoints.
             openraft::Config {
                 cluster_name,
-                heartbeat_interval: 2_000,
-                election_timeout_min: 6_000,
-                election_timeout_max: 12_000,
+                heartbeat_interval: 10_000,
+                election_timeout_min: 30_000,
+                election_timeout_max: 60_000,
                 install_snapshot_timeout: 30_000,
                 ..Default::default()
             }
