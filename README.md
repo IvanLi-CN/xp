@@ -77,6 +77,7 @@ Key facts:
 
 - `xp` binds loopback by default: `127.0.0.1:62416` (HTTP).
 - Inter-node connectivity is based on `Node.api_base_url` (recommended to be an **HTTPS origin**). Provide HTTPS via your reverse proxy / tunnel / mesh and forward to the local loopback HTTP listener.
+- Optional control-plane relay: set `XP_MESH_PROXY_URL` / `--mesh-proxy-url` to route Raft RPC and node-to-node admin fan-out through a local proxy such as the `xp-ops init` Xray SOCKS listener (`socks5h://127.0.0.1:10808`). `Node.api_base_url` remains the bootstrap and fallback origin.
 - `xray` runs locally and should expose its gRPC API on loopback (default: `127.0.0.1:10085`). See `docs/desgin/xray.md`.
 
 ## Quickstart (local development)
@@ -145,6 +146,7 @@ VITE_BACKEND_PROXY=http://127.0.0.1:62416 bun run dev
 | `--xray-restart-timeout-secs <SECS>`  | `XP_XRAY_RESTART_TIMEOUT_SECS`     | `5`                       | Restart command timeout                            |
 | `--xray-systemd-unit <UNIT>`          | `XP_XRAY_SYSTEMD_UNIT`             | `xray.service`            | systemd unit name                                  |
 | `--xray-openrc-service <NAME>`        | `XP_XRAY_OPENRC_SERVICE`           | `xray`                    | OpenRC service name                                |
+| `--mesh-proxy-url <URL>`              | `XP_MESH_PROXY_URL`                | unset                     | Optional proxy for xp-to-xp control-plane requests |
 | `--admin-token <TOKEN>`               | `XP_ADMIN_TOKEN`                   | `""`                      | Admin bearer token                                 |
 | `--node-name <NAME>`                  | -                                  | `node-1`                  | Node display name                                  |
 | `--access-host <HOST>`                | -                                  | `""`                      | Host used for subscription output                  |

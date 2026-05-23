@@ -138,11 +138,22 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
           "protocol": "dokodemo-door",
           "settings": { "address": "127.0.0.1" },
           "tag": "api"
+        },
+        {
+          "listen": "127.0.0.1",
+          "port": 10808,
+          "protocol": "socks",
+          "settings": {
+            "auth": "noauth",
+            "udp": true
+          },
+          "tag": "mesh-proxy"
         }
       ],
       "routing": {
         "rules": [
-          { "inboundTag": ["api"], "outboundTag": "api" }
+          { "inboundTag": ["api"], "outboundTag": "api" },
+          { "inboundTag": ["mesh-proxy"], "outboundTag": "direct" }
         ]
       },
       "outbounds": [
@@ -665,5 +676,18 @@ mod tests {
         assert!(script.contains("supervisor=supervise-daemon"));
         assert!(!script.contains("command_background="));
         assert!(!script.contains("pidfile="));
+    }
+
+    #[test]
+    fn static_xray_config_includes_mesh_proxy_inbound() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        write_static_xray_config(&paths).unwrap();
+
+        let content = fs::read_to_string(paths.etc_xray_config()).unwrap();
+        assert!(content.contains("\"tag\": \"mesh-proxy\""));
+        assert!(content.contains("\"port\": 10808"));
+        assert!(content.contains("\"outboundTag\": \"direct\""));
     }
 }

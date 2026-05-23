@@ -27,26 +27,27 @@ xp-ops container run
 
 ### Required environment variables
 
-| Key                                       | Required when                | Notes                                                                                                    |
-| ----------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `XP_NODE_NAME`                            | always                       | Node display name                                                                                        |
-| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH` | bootstrap node               | Required on every bootstrap-node start                                                                   |
-| `XP_JOIN_TOKEN`                           | join node first start        | Safe to keep set after join; restart will not re-run `xp join` if data already exists                    |
-| `XP_API_BASE_URL`                         | `XP_ENABLE_CLOUDFLARE=false` | Must be an HTTPS origin                                                                                  |
-| `XP_ENABLE_CLOUDFLARE=true`               | optional                     | Enables Cloudflare provisioning + local `cloudflared`                                                    |
-| `XP_CLOUDFLARE_ACCOUNT_ID`                | tunnel enabled               | Cloudflare account id                                                                                    |
-| `XP_CLOUDFLARE_HOSTNAME`                  | tunnel enabled               | Public hostname served by Tunnel                                                                         |
-| `XP_CLOUDFLARE_ZONE_ID`                   | optional                     | Strongly recommended to avoid a zone lookup on startup                                                   |
-| `XP_CLOUDFLARE_TUNNEL_NAME`               | optional                     | Defaults to `xp-<node-name>`                                                                             |
-| `XP_ACCESS_HOST`                          | optional                     | Recommended when DDNS is enabled; use the public endpoint hostname (for example `node-1-ep.example.com`) |
-| `XP_CLOUDFLARE_DDNS_ENABLED=true`         | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                |
-| `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                       |
-| `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                          |
-| `XP_DEFAULT_VLESS_REALITY_DEST`           | with `XP_DEFAULT_VLESS_PORT` | REALITY destination origin (for example `oneclient.sfx.ms:443`)                                          |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated SNI hostnames; they may differ from `XP_DEFAULT_VLESS_REALITY_DEST`                      |
-| `XP_DEFAULT_VLESS_FINGERPRINT`            | optional                     | Defaults to `chrome`                                                                                     |
-| `XP_DEFAULT_SS_PORT`                      | optional                     | Enables managed default SS2022 endpoint                                                                  |
-| `CLOUDFLARE_API_TOKEN`                    | tunnel enabled               | Required on every start when Tunnel is enabled                                                           |
+| Key                                       | Required when                | Notes                                                                                                                         |
+| ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `XP_NODE_NAME`                            | always                       | Node display name                                                                                                             |
+| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH` | bootstrap node               | Required on every bootstrap-node start                                                                                        |
+| `XP_JOIN_TOKEN`                           | join node first start        | Safe to keep set after join; restart will not re-run `xp join` if data already exists                                         |
+| `XP_API_BASE_URL`                         | `XP_ENABLE_CLOUDFLARE=false` | Must be an HTTPS origin                                                                                                       |
+| `XP_ENABLE_CLOUDFLARE=true`               | optional                     | Enables Cloudflare provisioning + local `cloudflared`                                                                         |
+| `XP_CLOUDFLARE_ACCOUNT_ID`                | tunnel enabled               | Cloudflare account id                                                                                                         |
+| `XP_CLOUDFLARE_HOSTNAME`                  | tunnel enabled               | Public hostname served by Tunnel                                                                                              |
+| `XP_CLOUDFLARE_ZONE_ID`                   | optional                     | Strongly recommended to avoid a zone lookup on startup                                                                        |
+| `XP_CLOUDFLARE_TUNNEL_NAME`               | optional                     | Defaults to `xp-<node-name>`                                                                                                  |
+| `XP_ACCESS_HOST`                          | optional                     | Recommended when DDNS is enabled; use the public endpoint hostname (for example `node-1-ep.example.com`)                      |
+| `XP_CLOUDFLARE_DDNS_ENABLED=true`         | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                                     |
+| `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                                            |
+| `XP_MESH_PROXY_URL`                       | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config |
+| `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                               |
+| `XP_DEFAULT_VLESS_REALITY_DEST`           | with `XP_DEFAULT_VLESS_PORT` | REALITY destination origin (for example `oneclient.sfx.ms:443`)                                                               |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated SNI hostnames; they may differ from `XP_DEFAULT_VLESS_REALITY_DEST`                                           |
+| `XP_DEFAULT_VLESS_FINGERPRINT`            | optional                     | Defaults to `chrome`                                                                                                          |
+| `XP_DEFAULT_SS_PORT`                      | optional                     | Enables managed default SS2022 endpoint                                                                                       |
+| `CLOUDFLARE_API_TOKEN`                    | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                |
 
 ### Derived values
 
@@ -56,6 +57,7 @@ xp-ops container run
 - When `XP_ENABLE_CLOUDFLARE=true` and `XP_API_BASE_URL` is unset, it becomes `https://<XP_CLOUDFLARE_HOSTNAME>`
 - When `XP_ACCESS_HOST` is unset, it is derived from `XP_CLOUDFLARE_HOSTNAME` or `XP_API_BASE_URL`
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
+- The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional control-plane relay. It is disabled unless `XP_MESH_PROXY_URL` is set.
 
 ### Persistent volumes
 

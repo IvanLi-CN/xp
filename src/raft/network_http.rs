@@ -1,4 +1,7 @@
-use crate::raft::types::{NodeId, NodeMeta, TypeConfig};
+use crate::{
+    control_plane_mesh::{MeshAwareHttpClient, MeshProxyStateHandle, apply_optional_proxy},
+    raft::types::{NodeId, NodeMeta, TypeConfig},
+};
 
 use anyhow::Context;
 use openraft::{
@@ -13,23 +16,53 @@ use openraft::{
 
 #[derive(Clone)]
 pub struct HttpNetworkFactory {
-    client: reqwest::Client,
+    client: MeshAwareHttpClient,
 }
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
-        let client = raft_http_client_builder().build().expect("reqwest client");
-        Self { client }
+        let client = raft_http_client_builder()
+            .build()
+            .expect("reqwest client");
+        let state = MeshProxyStateHandle::disabled();
+        Self {
+            client: MeshAwareHttpClient::new(client, None, state),
+        }
     }
 
     pub fn from_client(client: reqwest::Client) -> Self {
-        Self { client }
+        let state = MeshProxyStateHandle::disabled();
+        Self {
+            client: MeshAwareHttpClient::new(client, None, state),
+        }
     }
 
     pub fn try_new_mtls(
         cluster_ca_pem: &str,
         node_cert_pem: &str,
         node_key_pem: &str,
+        mesh_proxy_url: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let state = if mesh_proxy_url.is_some() {
+            MeshProxyStateHandle::ready()
+        } else {
+            MeshProxyStateHandle::disabled()
+        };
+        Self::try_new_mtls_with_state(
+            cluster_ca_pem,
+            node_cert_pem,
+            node_key_pem,
+            mesh_proxy_url,
+            state,
+        )
+    }
+
+    pub fn try_new_mtls_with_state(
+        cluster_ca_pem: &str,
+        node_cert_pem: &str,
+        node_key_pem: &str,
+        mesh_proxy_url: Option<&str>,
+        state: MeshProxyStateHandle,
     ) -> anyhow::Result<Self> {
         let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
             .context("parse cluster_ca_pem")?;
@@ -37,12 +70,31 @@ impl HttpNetworkFactory {
         let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
             .context("parse node identity pem")?;
 
-        let client = raft_http_client_builder()
+        let direct = raft_http_client_builder()
             .add_root_certificate(ca)
             .identity(identity)
             .build()
             .context("build reqwest client")?;
-        Ok(Self { client })
+        let relay = if let Some(proxy_url) = mesh_proxy_url {
+            let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
+                .context("parse cluster_ca_pem")?;
+            let identity_pem = format!("{node_cert_pem}\n{node_key_pem}");
+            let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
+                .context("parse node identity pem")?;
+            let relay_builder = apply_optional_proxy(
+                raft_http_client_builder()
+                    .add_root_certificate(ca)
+                    .identity(identity),
+                Some(proxy_url),
+            )
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            Some(relay_builder.build().context("build relay reqwest client")?)
+        } else {
+            None
+        };
+        Ok(Self {
+            client: MeshAwareHttpClient::new(direct, relay, state),
+        })
     }
 }
 
@@ -63,7 +115,7 @@ pub struct HttpNetwork {
     target: NodeId,
     target_node: NodeMeta,
     base: String,
-    client: reqwest::Client,
+    client: MeshAwareHttpClient,
 }
 
 impl HttpNetwork {
@@ -123,10 +175,12 @@ impl HttpNetwork {
 
         let resp = self
             .client
-            .post(url.clone())
-            .timeout(option.hard_ttl())
-            .json(req)
-            .send()
+            .send_with_fallback(option.hard_ttl(), |client| {
+                client
+                    .post(url.clone())
+                    .timeout(option.hard_ttl())
+                    .json(req)
+            })
             .await?;
         tracing::trace!(
             target = "xp::raft::network_http",
@@ -197,6 +251,7 @@ mod tests {
             .expect("sign node csr");
 
         let _factory =
-            HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem).expect("mtls");
+            HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem, None)
+                .expect("mtls");
     }
 }
