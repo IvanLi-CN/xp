@@ -335,7 +335,7 @@ impl ContainerSpec {
         let access_host = resolve_access_host(env_map, &api_base_url, cloudflare.as_ref())?;
         let ddns = build_ddns_spec(paths, env_map, &access_host, cloudflare.as_ref()).await?;
         let default_endpoints = ManagedDefaultEndpointsSpec::from_env_map(env_map)?;
-        let runtime_env = build_runtime_env(ddns.as_ref());
+        let runtime_env = build_runtime_env(env_map, ddns.as_ref());
 
         let startup = resolve_startup(existing_meta, join_token.as_deref())?;
         let node_meta_needs_realign = existing_meta
@@ -563,8 +563,11 @@ fn parse_server_names(value: &str) -> Result<Vec<String>, ExitError> {
     Ok(out)
 }
 
-fn build_runtime_env(ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
+fn build_runtime_env(env_map: &BTreeMap<String, String>, ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
+    if let Some(value) = optional_env(env_map, "XP_MESH_PROXY_URL") {
+        out.insert("XP_MESH_PROXY_URL".to_string(), value);
+    }
     if let Some(ddns) = ddns {
         out.insert("XP_CLOUDFLARE_DDNS_ENABLED".to_string(), "true".to_string());
         out.insert(

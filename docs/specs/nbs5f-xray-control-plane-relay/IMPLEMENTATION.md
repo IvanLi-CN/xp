@@ -15,8 +15,12 @@
 - `cargo clippy -- -D warnings`
 - Static Xray config test covers the `mesh-proxy` inbound and route.
 - Unit tests cover proxy URL validation and stable status strings.
+- Shared testbox cluster validation covers a 3-node control-plane setup with Xray SOCKS relay enabled:
+  - node2 `mesh_proxy_status=ready`
+  - node2 `/api/admin/nodes/runtime` fan-out succeeds through the relay-aware client
+  - stopping node2's Xray proxy keeps runtime fan-out working through direct fallback
+  - node2 `mesh_proxy_status=fallback` after the fallback path is used
 
 ## Remaining Gaps
 
-- Docker/Xray live relay e2e remains a manual deployment validation because this feature is a control-plane transport option over the existing Xray process rather than a new dynamic Xray outbound reconciler.
 - v1 does not implement L3 VPN, TUN/TAP, automatic full mesh addressing, or user subscription chaining changes.
