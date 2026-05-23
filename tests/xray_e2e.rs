@@ -320,12 +320,13 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone()).unwrap();
     let app = build_router(
-        config,
+        config.clone(),
         store.clone(),
         reconcile,
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),
@@ -535,6 +536,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),

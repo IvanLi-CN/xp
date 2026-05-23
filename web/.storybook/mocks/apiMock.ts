@@ -10,6 +10,7 @@ import type {
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageResponse,
 } from "../../src/api/adminIpUsage";
+import type { NodeHistorySnapshot } from "../../src/api/adminNodeHistory";
 import type {
 	AdminNodeRuntimeDetailResponse,
 	AdminNodeRuntimeListItem,
@@ -46,6 +47,7 @@ export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
+	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
 };
 
@@ -79,6 +81,7 @@ type MockStateSeed = {
 	userAutoAssignEndpointKindsByUserId: Record<string, AdminEndpointKind[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
+	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
@@ -91,6 +94,7 @@ type MockStateSeed = {
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
 	failAdminConfig: boolean;
+	failNodeRuntimeNodeIds: string[];
 	failVersionCheck: boolean;
 	counters: {
 		endpoint: number;
@@ -378,6 +382,49 @@ function buildNodeRuntimeDetail(
 		components: item.components,
 		recent_slots: item.recent_slots,
 		events: buildRuntimeEvents(node),
+	};
+}
+
+function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
+	const now = new Date();
+	const date = now.toISOString().slice(0, 10);
+	const components = buildRuntimeComponents(node);
+	return {
+		node_id: node.node_id,
+		last_synced_at: now.toISOString(),
+		last_sync_error: node.node_id.endsWith("2")
+			? "request timeout while syncing node history"
+			: null,
+		daily_traffic: [
+			{
+				date,
+				uplink_bytes: node.node_id.endsWith("2")
+					? Math.round(1.4 * 2 ** 30)
+					: 768 * 2 ** 20,
+				downlink_bytes: node.node_id.endsWith("2")
+					? Math.round(4.8 * 2 ** 30)
+					: Math.round(2.2 * 2 ** 30),
+				updated_at: now.toISOString(),
+			},
+		],
+		daily_component_status: [
+			{
+				date,
+				components: components.map((component) => ({
+					component: component.component,
+					status: component.status,
+					observed_at: now.toISOString(),
+				})),
+			},
+		],
+		component_status_events: buildRuntimeEvents(node).map((event) => ({
+			event_id: event.event_id,
+			occurred_at: event.occurred_at,
+			component: event.component,
+			message: event.message,
+			from_status: event.from_status,
+			to_status: event.to_status,
+		})),
 	};
 }
 
@@ -683,6 +730,9 @@ node-2`,
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;
+	const nodeHistoryByNodeId = Object.fromEntries(
+		nodes.map((node) => [node.node_id, buildNodeHistory(node)]),
+	) satisfies Record<string, NodeHistorySnapshot>;
 	const userIpUsageByUserId = Object.fromEntries(
 		users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
 	) satisfies Record<string, AdminUserIpUsageResponse>;
@@ -718,6 +768,7 @@ node-2`,
 		userAutoAssignEndpointKindsByUserId,
 		nodeQuotas: [],
 		nodeIpUsageByNodeId,
+		nodeHistoryByNodeId,
 		userIpUsageByUserId,
 		userNodeWeights,
 		userGlobalWeights,
@@ -752,6 +803,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...base.nodeIpUsageByNodeId,
 			...(overrides?.nodeIpUsageByNodeId ?? {}),
 		},
+		nodeHistoryByNodeId: {
+			...base.nodeHistoryByNodeId,
+			...(overrides?.nodeHistoryByNodeId ?? {}),
+		},
 		userIpUsageByUserId: {
 			...base.userIpUsageByUserId,
 			...(overrides?.userIpUsageByUserId ?? {}),
@@ -785,6 +840,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		...clone(merged),
 		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
+		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
 		counters,
 	};
@@ -1051,7 +1107,29 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
+		if (state.failNodeRuntimeNodeIds.includes(nodeId)) {
+			return errorResponse(
+				504,
+				"node_unreachable",
+				"node runtime request timeout",
+			);
+		}
 		return jsonResponse(clone(buildNodeRuntimeDetail(node)));
+	}
+
+	const nodeHistoryMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/history$/,
+	);
+	if (nodeHistoryMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeHistoryMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		return jsonResponse({
+			node: clone(node),
+			history: clone(state.nodeHistoryByNodeId[nodeId] ?? null),
+		});
 	}
 
 	const nodeRuntimeEventsMatch = path.match(

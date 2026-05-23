@@ -4,21 +4,26 @@ import { AdminNodeSchema } from "./adminNodes";
 import { throwIfNotOk } from "./backendError";
 import { type SseMessage, type SseStreamHandle, startSseStream } from "./sse";
 
-const RuntimeSummaryStatusSchema = z.enum([
+export const RuntimeSummaryStatusSchema = z.enum([
 	"up",
 	"degraded",
 	"down",
 	"unknown",
 ]);
-const RuntimeStatusSchema = z.enum([
+export const RuntimeStatusSchema = z.enum([
 	"disabled",
 	"up",
 	"degraded",
 	"down",
 	"unknown",
 ]);
-const RuntimeComponentSchema = z.enum(["xp", "xray", "cloudflared", "ddns"]);
-const RuntimeEventKindSchema = z.enum([
+export const RuntimeComponentSchema = z.enum([
+	"xp",
+	"xray",
+	"cloudflared",
+	"ddns",
+]);
+export const RuntimeEventKindSchema = z.enum([
 	"status_changed",
 	"restart_requested",
 	"restart_succeeded",
