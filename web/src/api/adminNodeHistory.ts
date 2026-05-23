@@ -60,14 +60,17 @@ export async function fetchAdminNodeHistory(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeHistoryResponse> {
-	const res = await fetch(`/api/admin/nodes/${nodeId}/history`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}/history`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
+	);
 
 	await throwIfNotOk(res);
 	const json: unknown = await res.json();
