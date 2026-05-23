@@ -313,6 +313,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
+        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -369,6 +370,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         raft_facade,
         None,
         geo_db_update,
+        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let admin_server = spawn_server(admin_listener, router)

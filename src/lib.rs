@@ -2,6 +2,7 @@ pub mod admin_token;
 pub mod cloudflared_supervisor;
 pub mod cluster_identity;
 pub mod cluster_metadata;
+pub mod control_plane_mesh;
 pub mod config;
 pub mod credentials;
 pub mod cycle;
