@@ -40,14 +40,13 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 
 ## 3. 推荐的 Xray 基础配置（示例）
 
-> 说明：这是 **基础配置**，不包含业务入站。业务入站由 `xp` 通过 AddInbound 动态下发。
+> 说明：这是 **基础配置**，不包含业务入站。业务入站由 `xp` 通过 AddInbound 动态下发。`mesh-proxy` 是控制面专用 loopback SOCKS 入站，供 `XP_MESH_PROXY_URL=socks5h://127.0.0.1:10808` 使用。
 
 ```json
 {
   "log": { "loglevel": "warning" },
   "api": {
     "tag": "api",
-    "listen": "127.0.0.1:10085",
     "services": ["HandlerService", "StatsService"]
   },
   "stats": {},
@@ -56,7 +55,28 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
       "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true }
     }
   },
-  "inbounds": [],
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": { "address": "127.0.0.1" },
+      "tag": "api"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "auth": "noauth", "udp": true },
+      "tag": "mesh-proxy"
+    }
+  ],
+  "routing": {
+    "rules": [
+      { "inboundTag": ["api"], "outboundTag": "api" },
+      { "inboundTag": ["mesh-proxy"], "outboundTag": "direct" }
+    ]
+  },
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": {} },
     { "tag": "block", "protocol": "blackhole", "settings": {} }
@@ -64,7 +84,7 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 }
 ```
 
-> 如果你更偏向“完全兼容旧版本配置方式”，可以不用 `api.listen`，改为手动添加 `dokodemo-door` api inbound + routing 规则。`xp` 实现阶段会同时支持两种生成模式（默认使用 `api.listen`）。
+`mesh-proxy` 必须绑定 loopback，不能暴露为公网开放代理。它只承载 xp-to-xp 控制面请求，不参与用户 endpoint、订阅输出或 quota 统计。
 
 ## 4. 动态下发：Endpoint 与 Grant 如何落到 Xray
 

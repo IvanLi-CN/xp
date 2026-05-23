@@ -31,6 +31,7 @@ use crate::{
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
     cloudflared_supervisor::CloudflaredHealthHandle,
+    control_plane_mesh::{MeshAwareHttpClient, MeshProxyStateHandle},
     config::Config,
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
@@ -94,6 +95,7 @@ pub struct AppState {
     pub ops_github_repo: Arc<String>,
     pub ops_github_api_base_url: Arc<String>,
     pub ops_github_client: reqwest::Client,
+    pub mesh_proxy_state: MeshProxyStateHandle,
 }
 
 #[derive(Debug)]
@@ -578,6 +580,13 @@ struct AdminServiceConfigResponse {
     node_name: String,
     access_host: String,
     api_base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_proxy_url: Option<String>,
+    mesh_proxy_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_proxy_fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_proxy_last_fallback_at: Option<String>,
     quota_poll_interval_secs: u64,
     quota_auto_unban: bool,
     ip_geo_enabled: bool,
@@ -761,6 +770,7 @@ pub fn build_router(
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     geo_db_update: GeoDbUpdateHandle,
+    mesh_proxy_state: MeshProxyStateHandle,
 ) -> Router {
     let cluster_id = cluster.cluster_id.clone();
     let auth_state = AdminAuthState {
@@ -800,6 +810,7 @@ pub fn build_router(
         ops_github_repo: Arc::new(ops_github_repo),
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
+        mesh_proxy_state,
     };
 
     let admin = Router::new()
@@ -1082,6 +1093,7 @@ struct AdminAuthState {
 async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {
     let snap = state.xray_health.snapshot().await;
     let cloudflared = state.cloudflared_health.snapshot().await;
+    let mesh_proxy = state.mesh_proxy_state.snapshot().await;
     Json(json!({
         "status": "ok",
         "xray": {
@@ -1113,6 +1125,11 @@ async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value
             "restart_backoff_secs": cloudflared.restart_backoff_secs,
             "restart_backoff_attempts": cloudflared.restart_backoff_attempts,
             "automatic_restart_enabled": cloudflared.automatic_restart_enabled,
+        },
+        "mesh_proxy": {
+            "status": mesh_proxy.status.as_str(),
+            "fallback_reason": mesh_proxy.fallback_reason,
+            "last_fallback_at": mesh_proxy.last_fallback_at,
         }
     }))
 }
@@ -2157,15 +2174,16 @@ async fn admin_list_nodes_runtime(
             continue;
         }
 
-        let request = client
-            .get(format!(
-                "{base}/api/admin/_internal/nodes/runtime/local?events_limit=0"
-            ))
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-            .send();
+        let request = client.send_with_fallback(CLUSTER_RUNTIME_FANOUT_TIMEOUT, |client| {
+            client
+                .get(format!(
+                    "{base}/api/admin/_internal/nodes/runtime/local?events_limit=0"
+                ))
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        });
 
         let response = tokio::time::timeout(CLUSTER_RUNTIME_FANOUT_TIMEOUT, request).await;
         let response = match response {
@@ -2244,15 +2262,16 @@ async fn admin_get_node_runtime(
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
         .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
 
-    let request = client
-        .get(format!(
-            "{base}/api/admin/_internal/nodes/runtime/local?events_limit={event_limit}"
-        ))
-        .header(
-            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send();
+    let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+        client
+            .get(format!(
+                "{base}/api/admin/_internal/nodes/runtime/local?events_limit={event_limit}"
+            ))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+    });
     let response = tokio::time::timeout(Duration::from_secs(3), request)
         .await
         .map_err(|_| ApiError::internal("request timeout"))?
@@ -2524,16 +2543,17 @@ async fn admin_get_node_ip_usage(
     let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
         .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
 
-    let request = client
-        .get(format!(
-            "{base}/api/admin/_internal/nodes/ip-usage/local?window={}",
-            window.as_str()
-        ))
-        .header(
-            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send();
+    let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+        client
+            .get(format!(
+                "{base}/api/admin/_internal/nodes/ip-usage/local?window={}",
+                window.as_str()
+            ))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+    });
     let response = tokio::time::timeout(Duration::from_secs(3), request)
         .await
         .map_err(|_| ApiError::internal("request timeout"))?
@@ -2662,7 +2682,7 @@ async fn admin_get_user_ip_usage(
     let mut groups = Vec::<AdminUserIpUsageNodeGroup>::new();
     let mut unreachable_nodes = Vec::<String>::new();
 
-    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let client = build_admin_http_client(&state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -2704,13 +2724,14 @@ async fn admin_get_user_ip_usage(
             "{base}/api/admin/_internal/users/{user_id}/ip-usage/local?window={}",
             window.as_str()
         );
-        let request = client
-            .get(url)
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-            .send();
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
             Ok(Ok(response)) => response,
@@ -2827,19 +2848,21 @@ async fn forward_local_node_runtime_events(
 }
 
 async fn forward_remote_node_runtime_events(
-    client: reqwest::Client,
+    client: MeshAwareHttpClient,
     url: String,
     sig: String,
     node_id: String,
     tx: mpsc::Sender<Event>,
 ) {
     let response = match client
-        .get(url)
-        .header(
-            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send()
+        .send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        })
         .await
     {
         Ok(response) => response,
@@ -3171,15 +3194,16 @@ async fn admin_refresh_node_egress_probe(
     let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
         .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
 
-    let request = client
-        .post(format!(
-            "{base}/api/admin/_internal/nodes/egress-probe/local/refresh"
-        ))
-        .header(
-            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send();
+    let request = client.send_with_fallback(Duration::from_secs(20), |client| {
+        client
+            .post(format!(
+                "{base}/api/admin/_internal/nodes/egress-probe/local/refresh"
+            ))
+            .header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
+    });
     let response = tokio::time::timeout(Duration::from_secs(20), request)
         .await
         .map_err(|_| ApiError::internal("request timeout"))?
@@ -3507,6 +3531,7 @@ async fn build_admin_service_config_response(
         ip_geo_origin
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
+    let mesh_proxy = state.mesh_proxy_state.snapshot().await;
     Ok(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
         xray_api_addr: state.config.xray_api_addr.to_string(),
@@ -3514,6 +3539,10 @@ async fn build_admin_service_config_response(
         node_name: state.config.node_name.clone(),
         access_host: state.config.access_host.clone(),
         api_base_url: state.config.api_base_url.clone(),
+        mesh_proxy_url: state.config.mesh_proxy_url.clone(),
+        mesh_proxy_status: mesh_proxy.status.as_str().to_string(),
+        mesh_proxy_fallback_reason: mesh_proxy.fallback_reason,
+        mesh_proxy_last_fallback_at: mesh_proxy.last_fallback_at,
         quota_poll_interval_secs: state.config.quota_poll_interval_secs,
         quota_auto_unban: state.config.quota_auto_unban,
         ip_geo_enabled: state.config.ip_geo_enabled,
@@ -3999,10 +4028,9 @@ async fn admin_get_endpoint_probe_history(
     )))
 }
 
-fn build_cluster_http_client(state: &AppState) -> Result<reqwest::Client, ApiError> {
+fn build_cluster_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiError> {
     let ca = reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let mut builder = reqwest::Client::builder().add_root_certificate(ca);
 
     // Best effort: if the edge requires mTLS, attach node identity.
     let cert = state
@@ -4016,11 +4044,36 @@ fn build_cluster_http_client(state: &AppState) -> Result<reqwest::Client, ApiErr
     let identity_pem = format!("{cert}\n{key}");
     let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    builder = builder.identity(identity);
-
-    builder
+    let direct = reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
+            .map_err(|e| ApiError::internal(e.to_string()))?)
+        .identity(reqwest::Identity::from_pem(identity_pem.as_bytes())
+            .map_err(|e| ApiError::internal(e.to_string()))?)
         .build()
-        .map_err(|e| ApiError::internal(format!("build cluster reqwest client: {e}")))
+        .map_err(|e| ApiError::internal(format!("build cluster reqwest client: {e}")))?;
+
+    let relay = if let Some(mesh_proxy_url) = state.config.mesh_proxy_url.as_deref() {
+        let relay_builder = crate::control_plane_mesh::apply_optional_proxy(
+            reqwest::Client::builder()
+                .add_root_certificate(ca)
+                .identity(identity),
+            Some(mesh_proxy_url),
+        )
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        Some(
+            relay_builder
+                .build()
+                .map_err(|e| ApiError::internal(format!("build relay reqwest client: {e}")))?,
+        )
+    } else {
+        None
+    };
+
+    Ok(MeshAwareHttpClient::new(
+        direct,
+        relay,
+        state.mesh_proxy_state.clone(),
+    ))
 }
 
 async fn admin_run_endpoint_probe_run(
@@ -4093,14 +4146,15 @@ async fn admin_run_endpoint_probe_run(
         );
 
         tasks.push(tokio::spawn(async move {
-            let request = client
-                .post(url)
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig,
-                )
-                .json(&req_body)
-                .send();
+            let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+                client
+                    .post(url.clone())
+                    .header(
+                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                        sig.clone(),
+                    )
+                    .json(&req_body)
+            });
 
             let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
             let resp = match resp {
@@ -4334,13 +4388,14 @@ async fn admin_get_endpoint_probe_run_status(
         );
 
         tasks.push(tokio::spawn(async move {
-            let request = client
-                .get(url)
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig,
-                )
-                .send();
+            let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+                client
+                    .get(url.clone())
+                    .header(
+                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                        sig.clone(),
+                    )
+            });
 
             let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
             let resp = match resp {
@@ -4563,7 +4618,7 @@ async fn forward_local_endpoint_probe_run_events(
 }
 
 async fn forward_remote_endpoint_probe_run_events(
-    client: reqwest::Client,
+    client: MeshAwareHttpClient,
     url: String,
     sig: String,
     node_id: String,
@@ -4571,12 +4626,14 @@ async fn forward_remote_endpoint_probe_run_events(
     tx: mpsc::Sender<Event>,
 ) {
     let resp = match client
-        .get(url)
-        .header(
-            header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send()
+        .send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        })
         .await
     {
         Ok(resp) => resp,
@@ -5840,7 +5897,7 @@ async fn admin_list_user_quota_summaries(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let client = build_admin_http_client(&state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -5874,13 +5931,14 @@ async fn admin_list_user_quota_summaries(
             continue;
         }
         let url = format!("{base}/api/admin/users/quota-summaries?scope=local");
-        let request = client
-            .get(url)
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-            .send();
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
             Ok(Ok(response)) => response,
@@ -6113,7 +6171,7 @@ async fn admin_get_user_node_quota_status(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let client = build_admin_http_client(&state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -6141,13 +6199,14 @@ async fn admin_get_user_node_quota_status(
             continue;
         }
         let url = format!("{base}/api/admin/users/{user_id}/node-quotas/status?scope=local");
-        let request = client
-            .get(url)
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-            .send();
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
             Ok(Ok(response)) => response,
@@ -6503,13 +6562,36 @@ fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<Ale
     items
 }
 
-fn build_admin_http_client(cluster_ca_pem: &str) -> Result<reqwest::Client, ApiError> {
+fn build_admin_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiError> {
+    let cluster_ca_pem = state.cluster_ca_pem.as_str();
     let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    reqwest::Client::builder()
+    let direct = reqwest::Client::builder()
         .add_root_certificate(ca)
         .build()
-        .map_err(|e| ApiError::internal(e.to_string()))
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let relay = if let Some(mesh_proxy_url) = state.config.mesh_proxy_url.as_deref() {
+        let relay_builder = crate::control_plane_mesh::apply_optional_proxy(
+            reqwest::Client::builder().add_root_certificate(
+                reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
+                    .map_err(|e| ApiError::internal(e.to_string()))?,
+            ),
+            Some(mesh_proxy_url),
+        )
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        Some(
+            relay_builder
+                .build()
+                .map_err(|e| ApiError::internal(e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    Ok(MeshAwareHttpClient::new(
+        direct,
+        relay,
+        state.mesh_proxy_state.clone(),
+    ))
 }
 
 async fn admin_get_alerts(
@@ -6542,7 +6624,7 @@ async fn admin_get_alerts(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(state.cluster_ca_pem.as_str())?;
+    let client = build_admin_http_client(&state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -6568,13 +6650,14 @@ async fn admin_get_alerts(
             continue;
         }
         let url = format!("{base}/api/admin/alerts?scope=local");
-        let request = client
-            .get(url)
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-            .send();
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .get(url.clone())
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
+        });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
             Ok(Ok(response)) => response,

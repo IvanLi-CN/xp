@@ -191,6 +191,11 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let node_key_pem = cluster.read_node_key_pem(&config.data_dir)?;
 
     let config_arc = Arc::new(config.clone());
+    let mesh_proxy_state = if config.mesh_proxy_url.is_some() {
+        xp::control_plane_mesh::MeshProxyStateHandle::ready()
+    } else {
+        xp::control_plane_mesh::MeshProxyStateHandle::disabled()
+    };
     let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(cluster.node_id.clone()),
@@ -228,10 +233,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     );
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
-    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls(
+    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_state(
         &cluster_ca_pem,
         &node_cert_pem,
         &node_key_pem,
+        config.mesh_proxy_url.as_deref(),
+        mesh_proxy_state.clone(),
     )?;
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
@@ -329,6 +336,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         raft_facade,
         Some(raft.raft()),
         geo_db_update,
+        mesh_proxy_state,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

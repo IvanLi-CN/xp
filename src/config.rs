@@ -258,6 +258,14 @@ pub struct Config {
     pub api_base_url: String,
 
     #[arg(
+        long = "mesh-proxy-url",
+        global = true,
+        env = "XP_MESH_PROXY_URL",
+        value_name = "URL"
+    )]
+    pub mesh_proxy_url: Option<String>,
+
+    #[arg(
         long = "cloudflare-ddns-enabled",
         global = true,
         env = "XP_CLOUDFLARE_DDNS_ENABLED",
@@ -463,6 +471,7 @@ mod tests {
         assert_eq!(cli.config.cloudflare_ddns_fast_interval_secs, 30);
         assert_eq!(cli.config.cloudflare_ddns_fast_window_secs, 300);
         assert_eq!(cli.config.cloudflare_ddns_family_missing_grace, 3);
+        assert_eq!(cli.config.mesh_proxy_url, None);
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);

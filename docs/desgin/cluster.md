@@ -16,6 +16,14 @@
 
 > 你明确要求绑定回环且只提供 HTTP；因此“互访可达性 + HTTPS”由你的组网/隧道/反代提供，`xp` 只要求最终能通过 HTTPS 被其他节点访问到。
 
+### 2.1 可选控制面 relay
+
+`xp` 可以通过 `XP_MESH_PROXY_URL` / `--mesh-proxy-url` 为节点间控制面 HTTP 请求配置本机代理出口。启用后，Raft RPC、leader 转发、节点 runtime fan-out、endpoint probe fan-out 等 xp-to-xp 请求会优先经该代理发送；代理不可用时回退到原有 `Node.api_base_url` 直连路径。
+
+`xp-ops init` 生成的静态 Xray 配置包含一个 loopback SOCKS 入站（默认 `127.0.0.1:10808`，tag 为 `mesh-proxy`），可作为 `XP_MESH_PROXY_URL=socks5h://127.0.0.1:10808` 的默认候选。该入口只用于控制面出站代理，不进入用户订阅、不计用户 quota，也不替代 join token 中的 `leader_api_base_url`。
+
+该 relay 不是 L3 VPN 或 full mesh 控制面。公网/隧道/反代提供的 HTTPS `api_base_url` 仍是 bootstrap、管理入口和恢复 fallback。
+
 ## 3. 一致性模型：Raft
 
 ### 3.1 角色

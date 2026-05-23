@@ -316,9 +316,13 @@ impl ContainerSpec {
         let bind = socket_addr_env(env_map, "XP_BIND", DEFAULT_BIND)?;
         let xray_api_addr = socket_addr_env(env_map, "XP_XRAY_API_ADDR", DEFAULT_XRAY_API_ADDR)?;
         let join_token = optional_env(env_map, "XP_JOIN_TOKEN");
-        let join_leader_api_base_url = join_token
-            .as_deref()
-            .and_then(decode_join_token_leader_api_base_url);
+        let join_leader_api_base_url = if existing_meta.is_none() {
+            join_token
+                .as_deref()
+                .and_then(decode_join_token_leader_api_base_url)
+        } else {
+            None
+        };
         let cloudflare_enabled = bool_env(env_map, "XP_ENABLE_CLOUDFLARE", false)?;
 
         let cloudflare = if cloudflare_enabled {
@@ -331,7 +335,7 @@ impl ContainerSpec {
         let access_host = resolve_access_host(env_map, &api_base_url, cloudflare.as_ref())?;
         let ddns = build_ddns_spec(paths, env_map, &access_host, cloudflare.as_ref()).await?;
         let default_endpoints = ManagedDefaultEndpointsSpec::from_env_map(env_map)?;
-        let runtime_env = build_runtime_env(ddns.as_ref());
+        let runtime_env = build_runtime_env(env_map, ddns.as_ref());
 
         let startup = resolve_startup(existing_meta, join_token.as_deref())?;
         let node_meta_needs_realign = existing_meta
@@ -559,8 +563,11 @@ fn parse_server_names(value: &str) -> Result<Vec<String>, ExitError> {
     Ok(out)
 }
 
-fn build_runtime_env(ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
+fn build_runtime_env(env_map: &BTreeMap<String, String>, ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
+    if let Some(value) = optional_env(env_map, "XP_MESH_PROXY_URL") {
+        out.insert("XP_MESH_PROXY_URL".to_string(), value);
+    }
     if let Some(ddns) = ddns {
         out.insert("XP_CLOUDFLARE_DDNS_ENABLED".to_string(), "true".to_string());
         out.insert(
@@ -2050,6 +2057,43 @@ mod tests {
             decode_join_token_leader_api_base_url(&token).as_deref(),
             Some("https://leader.example.com")
         );
+    }
+
+    #[tokio::test]
+    async fn existing_container_metadata_ignores_stale_join_token_leader() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let token = crate::cluster_identity::JoinToken {
+            cluster_id: "cluster".to_string(),
+            leader_api_base_url: "https://stale-leader.example.com".to_string(),
+            cluster_ca_pem: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+                .to_string(),
+            token_id: "token-id".to_string(),
+            one_time_secret: "secret".to_string(),
+            expires_at: chrono::Utc::now(),
+        }
+        .encode_base64url_json();
+        let meta = ClusterMetadata {
+            schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
+            cluster_id: "cluster".to_string(),
+            node_id: "token-id".to_string(),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.com".to_string(),
+            api_base_url: "https://node-1.example.com".to_string(),
+            has_cluster_ca_key: true,
+            is_bootstrap_node: Some(false),
+        };
+        let env = env_map(&[
+            ("XP_NODE_NAME", "node-1"),
+            ("XP_API_BASE_URL", "https://node-1.example.com"),
+            ("XP_JOIN_TOKEN", &token),
+        ]);
+
+        let spec = ContainerSpec::from_env_map(&paths, &env, Some(&meta))
+            .await
+            .unwrap();
+
+        assert!(spec.join_leader_api_base_url.is_none());
     }
 
     #[test]

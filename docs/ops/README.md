@@ -13,6 +13,7 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
+- `xp` can optionally route xp-to-xp control-plane HTTP requests through a local proxy with `XP_MESH_PROXY_URL`; `xp-ops init` provisions a loopback-only Xray SOCKS listener at `127.0.0.1:10808` for this purpose.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
@@ -191,6 +192,9 @@ Required (or commonly set):
   - Duration of the fast-mode DDNS polling window.
 - `XP_CLOUDFLARE_DDNS_FAMILY_MISSING_GRACE` (default: `3`, allowed range `1..=10`)
   - Consecutive hard-missing observations before deleting an `A` or `AAAA` record.
+- `XP_MESH_PROXY_URL` (default: unset)
+  - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
+  - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
 
 DDNS runtime notes:
 

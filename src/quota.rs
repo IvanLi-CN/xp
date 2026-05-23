@@ -1384,6 +1384,7 @@ mod tests {
             node_name: "node-1".to_string(),
             access_host: "".to_string(),
             api_base_url: "https://127.0.0.1:62416".to_string(),
+            mesh_proxy_url: None,
             cloudflare_ddns_enabled: false,
             cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
             cloudflare_ddns_zone_id: String::new(),

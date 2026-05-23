@@ -130,6 +130,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -247,6 +248,7 @@ fn app_with(
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store)
 }
@@ -297,6 +299,7 @@ fn build_app_with_cluster_store_and_raft(
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     )
 }
 
@@ -2060,6 +2063,7 @@ async fn follower_admin_write_does_not_redirect() {
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -4175,6 +4179,7 @@ async fn grant_usage_includes_warning_fields() {
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -4387,6 +4392,7 @@ async fn grant_usage_warns_on_quota_mismatch() {
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -6865,6 +6871,7 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = {
@@ -7181,6 +7188,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -7246,6 +7254,7 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
