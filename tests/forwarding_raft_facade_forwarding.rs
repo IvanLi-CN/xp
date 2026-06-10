@@ -353,12 +353,13 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         xp::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), leader_store.clone())
             .unwrap();
     let router = build_router(
-        config,
+        config.clone(),
         leader_store.clone(),
         ReconcileHandle::noop(),
         xray_health,
         cloudflared_health,
         node_runtime,
+        xp::node_history::NodeHistoryHandle::from_config(&config),
         endpoint_probe,
         xp::node_egress_probe::NodeEgressProbeHandle::new_noop(
             cluster.node_id.clone(),

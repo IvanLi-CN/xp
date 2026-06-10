@@ -163,3 +163,79 @@ export const DeleteWithEndpointCleanup: Story = {
 		).toBeVisible();
 	},
 };
+
+export const RuntimeHistoryFallback: Story = {
+	parameters: {
+		router: {
+			initialEntry: `/nodes/${node.node_id}`,
+		},
+		mockApi: {
+			data: {
+				nodes: [node],
+				nodeIpUsageByNodeId: {
+					[node.node_id]: ipUsageReports,
+				},
+				nodeHistoryByNodeId: {
+					[node.node_id]: {
+						node_id: node.node_id,
+						last_synced_at: "2026-05-20T08:00:00Z",
+						last_sync_error: "request timeout while syncing node history",
+						daily_traffic: [
+							{
+								date: "2026-05-20",
+								uplink_bytes: 1536 * 2 ** 20,
+								downlink_bytes: 4096 * 2 ** 20,
+								updated_at: "2026-05-20T08:00:00Z",
+							},
+						],
+						daily_component_status: [
+							{
+								date: "2026-05-20",
+								components: [
+									{
+										component: "xp",
+										status: "up",
+										observed_at: "2026-05-20T08:00:00Z",
+									},
+									{
+										component: "xray",
+										status: "down",
+										observed_at: "2026-05-20T08:00:00Z",
+									},
+									{
+										component: "cloudflared",
+										status: "up",
+										observed_at: "2026-05-20T08:00:00Z",
+									},
+								],
+							},
+						],
+						component_status_events: [
+							{
+								event_id: "fallback-event-1",
+								occurred_at: "2026-05-20T07:42:00Z",
+								component: "xray",
+								message: "xray status changed: up -> down",
+								from_status: "up",
+								to_status: "down",
+							},
+						],
+					},
+				},
+			},
+			failNodeRuntimeNodeIds: [node.node_id],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText(/Live node API is unavailable/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText("Daily traffic mirror"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText("Daily component snapshot"),
+		).toBeInTheDocument();
+	},
+};

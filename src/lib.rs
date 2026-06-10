@@ -17,6 +17,7 @@ pub mod ip_geo_db;
 pub mod login_token;
 pub mod mihomo_redact;
 pub mod node_egress_probe;
+pub mod node_history;
 pub mod node_runtime;
 mod openrc_process;
 pub mod ops;

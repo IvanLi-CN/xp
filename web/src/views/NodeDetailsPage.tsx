@@ -10,6 +10,10 @@ import {
 	fetchAdminNodeIpUsage,
 } from "../api/adminIpUsage";
 import {
+	type NodeHistorySnapshot,
+	fetchAdminNodeHistory,
+} from "../api/adminNodeHistory";
+import {
 	type AdminNodeRuntimeDetailResponse,
 	type NodeRuntimeEvent,
 	type NodeRuntimeHistorySlot,
@@ -57,6 +61,7 @@ import {
 	SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { formatQuotaBytesHuman } from "../utils/quota";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -242,6 +247,177 @@ function formatTime(value: string | null | undefined): string {
 	return dt.toLocaleString();
 }
 
+function latestItems<T extends { date: string }>(
+	items: T[],
+	limit: number,
+): T[] {
+	return [...items]
+		.sort((a, b) => b.date.localeCompare(a.date))
+		.slice(0, limit);
+}
+
+function NodeHistoryFallbackPanel({
+	history,
+	loading,
+	onRefresh,
+}: {
+	history: NodeHistorySnapshot;
+	loading: boolean;
+	onRefresh: () => void;
+}) {
+	const traffic = latestItems(history.daily_traffic, 90);
+	const componentDays = latestItems(history.daily_component_status, 90);
+
+	return (
+		<div className="space-y-4">
+			<div className={alertClass("warning", "py-2")}>
+				<span>
+					Live node API is unavailable. Showing the last synchronized history
+					mirror from {formatTime(history.last_synced_at)}.
+				</span>
+			</div>
+			{history.last_sync_error ? (
+				<div className={alertClass("info", "py-2")}>
+					<span>Last sync error: {history.last_sync_error}</span>
+				</div>
+			) : null}
+
+			<div className="grid gap-3 lg:grid-cols-2">
+				<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+					<div className="mb-2 flex items-center justify-between gap-2">
+						<p className="text-xs uppercase tracking-wide text-muted-foreground">
+							Daily traffic mirror
+						</p>
+						<Badge variant="outline">90d retained</Badge>
+					</div>
+					<div className="max-h-72 overflow-auto">
+						<table className="xp-table xp-table-compact">
+							<thead>
+								<tr>
+									<th>Date</th>
+									<th>Out</th>
+									<th>In</th>
+								</tr>
+							</thead>
+							<tbody>
+								{traffic.length === 0 ? (
+									<tr>
+										<td colSpan={3} className="opacity-60">
+											No mirrored traffic yet.
+										</td>
+									</tr>
+								) : (
+									traffic.map((day) => (
+										<tr key={day.date}>
+											<td className="font-mono text-xs">{day.date}</td>
+											<td>{formatQuotaBytesHuman(day.uplink_bytes)}</td>
+											<td>{formatQuotaBytesHuman(day.downlink_bytes)}</td>
+										</tr>
+									))
+								)}
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+					<div className="mb-2 flex items-center justify-between gap-2">
+						<p className="text-xs uppercase tracking-wide text-muted-foreground">
+							Daily component snapshot
+						</p>
+						<Badge variant="outline">90d retained</Badge>
+					</div>
+					<div className="max-h-72 overflow-auto">
+						<table className="xp-table xp-table-compact">
+							<thead>
+								<tr>
+									<th>Date</th>
+									<th>Components</th>
+								</tr>
+							</thead>
+							<tbody>
+								{componentDays.length === 0 ? (
+									<tr>
+										<td colSpan={2} className="opacity-60">
+											No mirrored component snapshots yet.
+										</td>
+									</tr>
+								) : (
+									componentDays.map((day) => (
+										<tr key={day.date}>
+											<td className="font-mono text-xs">{day.date}</td>
+											<td>
+												<div className="flex flex-wrap gap-1">
+													{day.components.map((component) => (
+														<Badge
+															key={`${day.date}-${component.component}`}
+															variant={componentBadgeVariant(component.status)}
+															size="sm"
+														>
+															{component.component}: {component.status}
+														</Badge>
+													))}
+												</div>
+											</td>
+										</tr>
+									))
+								)}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+			<div className="space-y-2">
+				<div className="flex items-center justify-between gap-2">
+					<p className="text-xs uppercase tracking-wide text-muted-foreground">
+						Status change log mirror
+					</p>
+					<Button variant="secondary" loading={loading} onClick={onRefresh}>
+						Refresh history
+					</Button>
+				</div>
+				<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+					<table className="xp-table xp-table-compact">
+						<thead>
+							<tr>
+								<th>Time</th>
+								<th>Component</th>
+								<th>Change</th>
+								<th>Message</th>
+							</tr>
+						</thead>
+						<tbody>
+							{history.component_status_events.length === 0 ? (
+								<tr>
+									<td colSpan={4} className="opacity-60">
+										No mirrored status changes in the 7-day window.
+									</td>
+								</tr>
+							) : (
+								history.component_status_events.map((event) => (
+									<tr key={event.event_id}>
+										<td className="font-mono text-xs">
+											{formatTime(event.occurred_at)}
+										</td>
+										<td className="font-mono text-xs">{event.component}</td>
+										<td className="font-mono text-xs">
+											{event.from_status ?? "-"}
+											{" -> "}
+											{event.to_status ?? "-"}
+										</td>
+										<td className="text-xs">{event.message}</td>
+									</tr>
+								))
+							)}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function formatSubscriptionRegion(
 	value: AdminNodeEgressProbe["subscription_region"],
 ): string {
@@ -291,6 +467,11 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeRuntime(adminToken, nodeId, { eventsLimit: 200, signal }),
+	});
+	const historyQuery = useQuery({
+		queryKey: ["adminNodeHistory", adminToken, nodeId],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
 
 	const [runtimeLive, setRuntimeLive] =
@@ -616,6 +797,7 @@ export function NodeDetailsPage() {
 		}
 
 		const runtime = runtimeLive ?? runtimeQuery.data;
+		const history = historyQuery.data?.history ?? null;
 		const quotaPolicy = quotaForm.watch("resetPolicy");
 		const egressProbe = nodeQuery.data.egress_probe;
 
@@ -701,7 +883,7 @@ export function NodeDetailsPage() {
 									/>
 								) : null}
 
-								{runtimeQuery.isError && !runtime ? (
+								{runtimeQuery.isError && !runtime && !history ? (
 									<PageState
 										variant="error"
 										title="Failed to load runtime"
@@ -715,6 +897,14 @@ export function NodeDetailsPage() {
 												Retry
 											</Button>
 										}
+									/>
+								) : null}
+
+								{runtimeQuery.isError && !runtime && history ? (
+									<NodeHistoryFallbackPanel
+										history={history}
+										loading={historyQuery.isFetching}
+										onRefresh={() => historyQuery.refetch()}
 									/>
 								) : null}
 

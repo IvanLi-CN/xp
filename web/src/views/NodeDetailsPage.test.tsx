@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminNodeIpUsage } from "../api/adminIpUsage";
+import { fetchAdminNodeHistory } from "../api/adminNodeHistory";
 import {
 	fetchAdminNodeRuntime,
 	startNodeRuntimeEvents,
@@ -54,6 +55,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminNodeRuntime");
+vi.mock("../api/adminNodeHistory");
 vi.mock("../api/adminIpUsage");
 
 vi.mock("../components/auth", async (importOriginal) => {
@@ -178,6 +180,44 @@ function setupMocks(args?: {
 				to_status: "up",
 			},
 		],
+	});
+	vi.mocked(fetchAdminNodeHistory).mockResolvedValue({
+		node,
+		history: {
+			node_id: node.node_id,
+			last_synced_at: "2026-03-08T00:59:00Z",
+			last_sync_error: null,
+			daily_traffic: [
+				{
+					date: "2026-03-08",
+					uplink_bytes: 1048576,
+					downlink_bytes: 2097152,
+					updated_at: "2026-03-08T00:59:00Z",
+				},
+			],
+			daily_component_status: [
+				{
+					date: "2026-03-08",
+					components: [
+						{
+							component: "xray",
+							status: "down",
+							observed_at: "2026-03-08T00:59:00Z",
+						},
+					],
+				},
+			],
+			component_status_events: [
+				{
+					event_id: "history-evt-1",
+					occurred_at: "2026-03-08T00:55:00Z",
+					component: "xray",
+					message: "xray status changed: up -> down",
+					from_status: "up",
+					to_status: "down",
+				},
+			],
+		},
 	});
 	vi.mocked(startNodeRuntimeEvents).mockImplementation(() => ({
 		close: vi.fn(),
@@ -434,6 +474,19 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("tab", "IP usage"));
 		expect(await screenByText("Online snapshots are unavailable")).toBeTruthy();
 	});
+
+	it("shows mirrored history when live runtime is unavailable", async () => {
+		setupMocks();
+		vi.mocked(fetchAdminNodeRuntime).mockRejectedValue(
+			new Error("request timeout"),
+		);
+		renderPage();
+
+		expect(await screenByText(/Live node API is unavailable/)).toBeTruthy();
+		expect(await screenByText("Daily traffic mirror")).toBeTruthy();
+		expect(await screenByText("Daily component snapshot")).toBeTruthy();
+		expect(await screenByText("xray status changed: up -> down")).toBeTruthy();
+	});
 });
 
 async function screenByRole(role: string, name: string): Promise<HTMLElement> {
@@ -446,7 +499,7 @@ async function screenByLabel(label: string): Promise<HTMLElement> {
 	return findByLabelText(document.body, label);
 }
 
-async function screenByText(text: string): Promise<HTMLElement> {
+async function screenByText(text: string | RegExp): Promise<HTMLElement> {
 	const { findByText } = await import("@testing-library/react");
 	return findByText(document.body, text);
 }
