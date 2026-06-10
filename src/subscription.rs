@@ -4554,6 +4554,86 @@ rules: []
     }
 
     #[test]
+    fn build_mihomo_provider_yaml_keeps_unprobed_singapore_nodes_in_other_group() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Singapore A", "example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "🌟 Singapore"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 Other"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_provider_yaml_with_node_probes(
+            SEED,
+            &u,
+            &memberships,
+            &endpoints,
+            &[n],
+            &BTreeMap::new(),
+            &profile,
+            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        )
+        .unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let groups = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must exist");
+
+        let other_refs = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Other"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Other group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(other_refs, vec!["🛬 Singapore-A"]);
+
+        let singapore_refs = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Singapore"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .map(|seq| seq.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert!(
+            singapore_refs.is_empty(),
+            "unprobed Singapore nodes should stay in Other until a successful probe exists"
+        );
+    }
+
+    #[test]
     fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
         let u = user("u1", "alice");
         let n = node("n1", "Tokyo A", "example.com");
