@@ -481,6 +481,7 @@ pub fn build_mihomo_yaml_with_node_probes(
         &mut root,
         &provider_names,
         &generated_proxy_name_set,
+        &proxy_name_set,
         &base_region_map,
     );
     // Make the resulting subscription self-contained: avoid leaving template references to
@@ -907,17 +908,37 @@ fn stored_subscription_region(probe: &NodeEgressProbeState) -> Option<NodeSubscr
 
 #[allow(dead_code)]
 fn legacy_subscription_region_from_base(base: &str) -> Option<NodeSubscriptionRegion> {
+    subscription_region_from_base_with_groups(base, &MIHOMO_LEGACY_FALLBACK_REGION_GROUPS)
+}
+
+fn managed_subscription_region_from_base(base: &str) -> NodeSubscriptionRegion {
+    subscription_region_from_base_with_groups(base, &MIHOMO_REGION_GROUPS)
+        .unwrap_or(NodeSubscriptionRegion::Other)
+}
+
+fn subscription_region_from_base_with_groups(
+    base: &str,
+    groups: &[MihomoRegionGroup],
+) -> Option<NodeSubscriptionRegion> {
     let lower = base.to_ascii_lowercase();
     let normalized = lower.replace('-', " ");
-    MIHOMO_LEGACY_FALLBACK_REGION_GROUPS
-        .iter()
-        .find_map(|region| {
+    groups.iter().find_map(|region| {
         region
             .slug_hints
             .iter()
             .any(|hint| lower.contains(hint) || normalized.contains(hint))
             .then_some(region.subscription_region)
-        })
+    })
+}
+
+fn resolved_subscription_region_for_base(
+    base: &str,
+    base_region_map: &std::collections::BTreeMap<String, NodeSubscriptionRegion>,
+) -> NodeSubscriptionRegion {
+    base_region_map
+        .get(base)
+        .copied()
+        .unwrap_or_else(|| managed_subscription_region_from_base(base))
 }
 
 fn canonical_visible_region_name(name: &str) -> Option<&'static str> {
@@ -944,7 +965,8 @@ fn is_mihomo_outer_group_reference(name: &str) -> bool {
 fn inject_mihomo_proxy_groups(
     root: &mut serde_yaml::Mapping,
     provider_names: &[String],
-    generated_proxy_name_set: &std::collections::BTreeSet<String>,
+    landing_proxy_name_set: &std::collections::BTreeSet<String>,
+    region_proxy_name_set: &std::collections::BTreeSet<String>,
     base_region_map: &std::collections::BTreeMap<String, NodeSubscriptionRegion>,
 ) {
     let mut groups = match root.remove(serde_yaml::Value::String("proxy-groups".to_string())) {
@@ -952,7 +974,7 @@ fn inject_mihomo_proxy_groups(
         _ => Vec::new(),
     };
 
-    let base_names = collect_mihomo_base_names(generated_proxy_name_set);
+    let base_names = collect_mihomo_base_names(landing_proxy_name_set);
 
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.insert(MIHOMO_OUTER_GROUP.to_string());
@@ -995,11 +1017,11 @@ fn inject_mihomo_proxy_groups(
 
     inject_mihomo_outer_group(&mut groups, &outer_provider_values);
     let landing_groups =
-        inject_mihomo_landing_groups(&mut groups, generated_proxy_name_set, &base_names);
+        inject_mihomo_landing_groups(&mut groups, landing_proxy_name_set, &base_names);
     inject_mihomo_region_groups(
         &mut groups,
         &provider_values,
-        generated_proxy_name_set,
+        region_proxy_name_set,
         base_region_map,
         &landing_groups,
     );
@@ -1188,7 +1210,7 @@ fn landing_group_values_for_region(
         .iter()
         .filter_map(|name| {
             let base = name.strip_prefix("🛬 ")?;
-            (base_region_map.get(base).copied() == Some(region))
+            (resolved_subscription_region_for_base(base, base_region_map) == region)
                 .then(|| serde_yaml::Value::String(name.clone()))
         })
         .collect()
@@ -1204,7 +1226,8 @@ fn proxy_ref_names_for_region(
         .iter()
         .filter_map(|name| {
             let (kind, base) = classify_proxy_ref_name(name)?;
-            (kinds.contains(&kind) && base_region_map.get(&base).copied() == Some(region))
+            (kinds.contains(&kind)
+                && resolved_subscription_region_for_base(&base, base_region_map) == region)
                 .then(|| name.clone())
         })
         .collect()
@@ -6188,6 +6211,61 @@ rules: []
             .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
             .collect::<Vec<_>>();
         assert_eq!(proxies, vec!["Legacy-ss"]);
+    }
+
+    #[test]
+    fn build_mihomo_yaml_keeps_region_labeled_extra_proxies_in_managed_groups() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            extra_proxies_yaml: r#"
+- name: Singapore-A-reality
+  type: ss
+  server: sg.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+- name: Legacy-reality
+  type: ss
+  server: other.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let groups = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must exist");
+
+        let singapore_refs = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Singapore"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Singapore group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(singapore_refs, vec!["Singapore-A-reality"]);
+
+        let other_refs = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Other"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Other group proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(other_refs, vec!["Legacy-reality"]);
     }
 
     #[test]
