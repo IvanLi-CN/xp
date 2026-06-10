@@ -1143,12 +1143,40 @@ fn inject_mihomo_outer_group(
 }
 
 fn known_non_other_region_filter() -> String {
-    MIHOMO_REGION_GROUPS
-        .iter()
-        .filter(|region| region.subscription_region != NodeSubscriptionRegion::Other)
-        .map(|region| format!("(?:{})", region.filter))
-        .collect::<Vec<_>>()
-        .join("|")
+    [
+        "日本",
+        "🇯🇵",
+        "Japan",
+        r"\bJP\b",
+        "香港",
+        "🇭🇰",
+        "HongKong",
+        "Hong Kong",
+        r"\bHK\b",
+        "台湾",
+        "台灣",
+        "🇹🇼",
+        "Taiwan",
+        r"\bTW\b",
+        "韩国",
+        "韓國",
+        "🇰🇷",
+        "Korea",
+        r"\bKR\b",
+        "新加坡",
+        "🇸🇬",
+        "Singapore",
+        r"\bSG\b",
+        "美国",
+        "🇺🇸",
+        "United States",
+        "USA",
+        r"\bUS\b",
+    ]
+    .into_iter()
+    .map(|fragment| format!("(?:{fragment})"))
+    .collect::<Vec<_>>()
+    .join("|")
 }
 
 fn landing_group_values_for_region(
@@ -4631,6 +4659,66 @@ rules: []
             singapore_refs.is_empty(),
             "unprobed Singapore nodes should stay in Other until a successful probe exists"
         );
+    }
+
+    #[test]
+    fn build_mihomo_yaml_helper_order_keeps_other_aliases() {
+        let u = user("u1", "alice");
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+proxy-group:
+  proxies:
+    - 🌟 US
+    - 🌟 Other
+    - Manual
+port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["Manual", "🌟 Other", "🌟 US"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: r#"
+- name: Manual
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+"#
+            .to_string(),
+            extra_proxy_providers_yaml: "".to_string(),
+        };
+
+        let yaml = build_mihomo_yaml(SEED, &u, &[], &[], &[], &profile).unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let refs = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("Auto"))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("Auto proxies should exist")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(refs, vec!["🌟 US", "🌟 Other", "Manual"]);
+    }
+
+    #[test]
+    fn known_non_other_region_filter_avoids_matching_embedded_us_fragments() {
+        let regex = Regex::new(&known_non_other_region_filter()).unwrap();
+
+        assert!(regex.is_match("US-1"));
+        assert!(regex.is_match("Singapore A"));
+        assert!(!regex.is_match("AUS-1"));
+        assert!(!regex.is_match("PLUS"));
     }
 
     #[test]
