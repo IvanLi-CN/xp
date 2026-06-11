@@ -65,6 +65,7 @@
   - `🛣️ JP/HK/SG`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
+- 启动与 Xray down->up 恢复触发的 full reconcile 必须重建本机 VLESS Reality inbound，避免 Xray 运行态保留过期 Reality key / short id / server names 后继续 fallback 到伪装站证书；周期性 full reconcile 不得重建未变化的 VLESS inbound。
 - `🛣️ JP/HK/SG` 不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；外部 provider 为空时回落 `DIRECT`。该外层隧道只从外部 provider 中筛选日本/香港/新加坡节点，台湾节点不进入外层候选池。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
@@ -110,6 +111,7 @@
 - Given 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy`，Then 不再返回 legacy Mihomo 主配置。
 - Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统直连与链式节点（`-ss` / `-reality` / `-ss-chain` / `-reality-chain`）。
+- Given `/mihomo/provider/system` 返回 VLESS Reality 节点，Then 每个 VLESS Reality proxy 携带 Mihomo 运行时字段 `encryption`、`packet-encoding`、`tls`、`client-fingerprint`、`skip-cert-verify`、`reality-opts` 与 `smux`，且不得把 Reality/uTLS 指纹写入 Mihomo 证书 pinning `fingerprint` 字段。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组只通过 provider filter 暴露 `{base}-ss-chain` / `{base}-reality-chain`，并在 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 {Region}`，Then 对应地区组能动态包含 `{base}-reality` 接入点。
