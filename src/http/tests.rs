@@ -551,6 +551,31 @@ fn leader_raft(
     Arc::new(LocalRaft::new(store, rx))
 }
 
+fn no_leader_raft(
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    cluster: &ClusterMetadata,
+) -> Arc<dyn crate::raft::app::RaftFacade> {
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Follower;
+    metrics.current_leader = None;
+    let mut nodes = std::collections::BTreeMap::new();
+    nodes.insert(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    );
+    let membership =
+        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
+    let (_tx, rx) = watch::channel(metrics);
+    Arc::new(LocalRaft::new(store, rx))
+}
+
 fn app(tmp: &TempDir) -> axum::Router {
     app_with(tmp, ReconcileHandle::noop()).0
 }
@@ -4607,6 +4632,95 @@ async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
     let yaml: YamlValue = serde_yaml::from_str(&body).unwrap();
     let proxies = yaml.get("proxies").and_then(|v| v.as_sequence()).unwrap();
     assert!(!proxies.is_empty());
+}
+
+#[tokio::test]
+async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(
+        &config,
+        Some(cluster.node_id.clone()),
+    ))
+    .unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    let leader_app = build_app_with_cluster_store_and_raft(
+        config.clone(),
+        cluster.clone(),
+        store.clone(),
+        leader_raft(store.clone(), &cluster),
+        ReconcileHandle::noop(),
+    );
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &leader_app).await;
+    let put_res = leader_app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!(
+                "/api/admin/users/{}/subscription-mihomo-profile",
+                fixtures.user_id
+            ),
+            json!({
+                "mixin_yaml": "port: 0\nrules: []\n",
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let follower_raft = no_leader_raft(store.clone(), &cluster);
+    let follower_app = build_app_with_cluster_store_and_raft(
+        config,
+        cluster,
+        store,
+        follower_raft,
+        ReconcileHandle::noop(),
+    );
+
+    let res = follower_app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{}?format=mihomo", fixtures.subscription_token),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/yaml; charset=utf-8"
+    );
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let system_provider_url = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|providers| {
+            providers.get(YamlValue::String(
+                crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string(),
+            ))
+        })
+        .and_then(YamlValue::as_mapping)
+        .and_then(|provider| provider.get(YamlValue::String("url".to_string())))
+        .and_then(YamlValue::as_str)
+        .unwrap();
+    assert_eq!(
+        system_provider_url,
+        format!(
+            "https://127.0.0.1:62416/api/sub/{}/mihomo/provider/system",
+            fixtures.subscription_token
+        )
+    );
 }
 
 #[tokio::test]
