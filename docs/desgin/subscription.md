@@ -150,8 +150,9 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`
 - `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
-- `🛣️ JP/HK/TW` 只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；无外部 provider 时回落 `DIRECT`。
-- 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯/🛣️ {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
+- per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
+- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，健康检查 URL 使用对应落地服务器的 API health URL；无外部 provider 时回落 `DIRECT`。
+- 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯 {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
@@ -163,21 +164,21 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 系统节点：
     - reality direct：`<node_slug>-reality`
     - ss direct：`<node_slug>-ss`
-    - ss chain：`<node_slug>-ss-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
-    - reality chain：`<node_slug>-reality-chain`，并设置 `dialer-proxy` 到单一外层候选组 `🛣️ JP/HK/TW`
+    - ss chain：`<node_slug>-ss-chain`，并设置 `dialer-proxy` 到该节点 `access_host` 对应的 per-base relay 组 `🛣️ {relay-base}`
+    - reality chain：`<node_slug>-reality-chain`，并设置 `dialer-proxy` 到该节点 `access_host` 对应的 per-base relay 组 `🛣️ {relay-base}`
   - 用户扩展：
     - 追加 `extra_proxies_yaml` 到主配置顶层 `proxies`
     - 以 `extra_proxy_providers_yaml` 追加到最终 `proxy-providers`
 - 名称冲突自动重命名（追加稳定后缀 `-dupN`）并记录告警日志。
-- 所有 provider 名称会注入固定外层候选组 `🛣️ JP/HK/TW` 的 `use` 列表，并用单一 filter 在日本/香港/台湾节点中选最低延迟的外层入口。
+- 所有外部 provider 名称会注入每个 per-base relay 组的 `use` 列表，并用日本/香港/新加坡 filter 选择外层中转节点。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
-  - 外层候选组：`🛣️ JP/HK/TW`
+  - per-base relay 组：`🛣️ {relay-base}`，按 `Node.access_host` 聚合，同机共享
   - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-  - 兼容地区组：`🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速
+  - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速；`🛣️ {Region}` 兼容别名不再生成
   - 聚合组：`💎 高质量`、`🚀 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
-- 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 `🛣️ JP/HK/TW` 或 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。`🔒/🤯/🛣️ {Region}` 仍只作为内部隐藏组使用。
+- 对所有非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 中引用了 legacy 地区组名，则最终输出会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放这些选项：系统管理地区名会折叠为可直接使用的 `🌟 {Japan|Korea|HongKong|Taiwan|Singapore|US|Other}`；若对应 helper 缺失，则退回到该组原始 `proxies` 顺序做最小替换。旧共享外层组 `🛣️ JP/HK/TW` / `🛣️ JP/HK/SG` 只会被清理，不再展开成 Japan/HongKong/Singapore 或任何共享 relay 语义。
 - `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回的规范化结果会自动剥离系统托管引用（系统地区组、`🛬 *`、系统 `-ss/-reality/-chain`、失效 provider），用户模板仅保留偏好层与额外静态内容。
 - `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
 - 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`；同一 base 的 system provider payload 顺序必须保证过滤后 ss-chain 在 reality-chain 前。

@@ -5061,24 +5061,24 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let outer_group = groups
+    let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/SG"))
-        .expect("outer group missing");
-    let outer_use = outer_group
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
+        .expect("relay group missing");
+    let outer_use = relay_group
         .get("use")
         .and_then(YamlValue::as_sequence)
-        .expect("outer group use missing")
+        .expect("relay group use missing")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
     assert!(outer_use.contains(&"providerA"));
     assert!(
         !outer_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
-        "outer dialer group must not consume generated chain proxies recursively"
+        "relay group must not consume generated chain proxies recursively"
     );
 
-    for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
+    for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
             groups
                 .iter()
@@ -5201,15 +5201,15 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let outer_group = groups
+    let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/SG"))
-        .expect("expected built-in outer group 🛣️ JP/HK/SG");
-    assert!(outer_group.get("use").is_none());
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
+        .expect("expected built-in relay group 🛣️ node-1");
+    assert!(relay_group.get("use").is_none());
     assert_eq!(
-        outer_group.get("proxies").and_then(YamlValue::as_sequence),
+        relay_group.get("proxies").and_then(YamlValue::as_sequence),
         Some(&vec![YamlValue::String("DIRECT".to_string())]),
-        "outer group should fall back to DIRECT without external providers"
+        "relay group should fall back to DIRECT without external providers"
     );
 }
 
@@ -5497,10 +5497,10 @@ rules: []
     assert!(
         groups
             .iter()
-            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/SG")),
-        "rendered legacy profile should inject the combined outer group"
+            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1")),
+        "rendered legacy profile should inject the per-base relay group"
     );
-    for expected in ["🛣️ Japan", "🔒 Japan"] {
+    for expected in ["🔒 Japan"] {
         let group = groups
             .iter()
             .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected))
@@ -5772,17 +5772,17 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let outer_group = groups
+    let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ JP/HK/SG"))
-        .expect("expected built-in outer group 🛣️ JP/HK/SG");
-    assert!(outer_group.get("use").is_none());
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
+        .expect("expected built-in relay group 🛣️ node-1");
+    assert!(relay_group.get("use").is_none());
     assert_eq!(
-        outer_group.get("proxies").and_then(YamlValue::as_sequence),
+        relay_group.get("proxies").and_then(YamlValue::as_sequence),
         Some(&vec![YamlValue::String("DIRECT".to_string())]),
-        "expected 🛣️ JP/HK/SG to fall back to DIRECT without external providers"
+        "expected per-base relay group to fall back to DIRECT without external providers"
     );
-    for expected in ["🛣️ Japan", "🌟 Japan", "🔒 Japan", "🤯 Japan"] {
+    for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
             groups
                 .iter()
@@ -5938,13 +5938,7 @@ rules: []
 
     assert_eq!(
         group_refs("🚀 节点选择"),
-        vec![
-            "🌟 Japan",
-            "🌟 Singapore",
-            "🌟 HongKong",
-            "🌟 US",
-            "💎 高质量",
-        ]
+        vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
     );
     assert_eq!(
         group_refs("🐟 漏网之鱼"),
@@ -5952,9 +5946,7 @@ rules: []
             "🚀 节点选择",
             "💎 高质量",
             "🗽 大流量",
-            "🌟 Japan",
             "🌟 Singapore",
-            "🌟 HongKong",
             "🌟 US",
             "🎯 全球直连",
             "🛑 全球拦截",
@@ -5966,22 +5958,14 @@ rules: []
             "🚀 节点选择",
             "💎 高质量",
             "🗽 大流量",
-            "🌟 Japan",
             "🌟 Singapore",
-            "🌟 HongKong",
             "🌟 US",
             "🎯 全球直连",
         ]
     );
     assert_eq!(
         group_refs("Hidden Auto"),
-        vec![
-            "🌟 Japan",
-            "🌟 Singapore",
-            "🌟 HongKong",
-            "🌟 US",
-            "💎 高质量",
-        ]
+        vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
     );
 }
 
@@ -6069,9 +6053,7 @@ rules: []
     assert_eq!(
         refs,
         vec![
-            "🌟 Japan",
             "🌟 Singapore",
-            "🌟 HongKong",
             "🌟 US",
             "🛬 node-1",
             "💎 高质量",
@@ -6165,9 +6147,7 @@ rules: []
     assert_eq!(
         refs,
         vec![
-            "🌟 Japan",
             "🌟 Singapore",
-            "🌟 HongKong",
             "🌟 US",
             "🛬 node-1",
             "💎 高质量",

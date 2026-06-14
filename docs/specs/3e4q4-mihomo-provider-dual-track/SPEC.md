@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-05-02
+- Last: 2026-06-14
 
 ## 背景 / 问题陈述
 
@@ -21,7 +21,7 @@
   - `GET /api/sub/{token}/mihomo/provider`
   - `GET /api/sub/{token}/mihomo/provider/system`
 - provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点与链式节点都移入 provider payload。
-- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，继续复用 `dialer-proxy: 🛣️ JP/HK/SG`。
+- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，`dialer-proxy` 指向按 `Node.access_host` 聚合生成的 per-base relay 组 `🛣️ {relay-base}`。
 - provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 
@@ -62,10 +62,12 @@
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
-  - `🛣️ JP/HK/SG`、`🌟/🔒/🤯/🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+  - per-base relay 组 `🛣️ {relay-base}`、`🌟/🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+- provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称；命中保留名时必须加内部前缀做消歧。
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
-- `🛣️ JP/HK/SG` 不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；外部 provider 为空时回落 `DIRECT`。该外层隧道只从外部 provider 中筛选日本/香港/新加坡节点，台湾节点不进入外层候选池。
+- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，无外部 provider 时回落 `DIRECT`。relay 组的健康检查 URL 使用对应落地服务器的 API health URL。
+- 输出不得再生成共享 `🛣️ JP/HK/SG` 主路径，也不得生成 `🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除，不得重新展开为共享中转语义。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
 
@@ -82,7 +84,7 @@
 - 管理员在 `Settings / Service config` 查看 Mihomo provider-only 状态。
 - 普通 Mihomo 客户端继续使用 canonical URL；其实际返回 provider 主配置。
 - 回归/测试场景通过 canonical/provider URL 与 provider system payload 验证。
-- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连与链式节点；链式代理仍经 `🛣️ JP/HK/SG` 做外层中转。
+- provider 主配置加载后，Mihomo 自动拉取 `/mihomo/provider/system` 获取系统直连与链式节点；链式代理经按 `access_host` 聚合的 `🛣️ {relay-base}` 做外层中转。
 
 ### Edge cases / errors
 
@@ -113,10 +115,14 @@
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组只通过 provider filter 暴露 `{base}-ss-chain` / `{base}-reality-chain`，并在 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 {Region}`，Then 对应地区组能动态包含 `{base}-reality` 接入点。
+- Given 两个落地节点共享同一 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 只生成一个 per-base relay 组，且两个节点的 `*-chain.dialer-proxy` 都指向该组。
+- Given 两个落地节点使用不同 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 生成不同 per-base relay 组，且链式节点不会合并到共享 `🛣️ JP/HK/SG`。
+- Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
+- Given provider 主配置，When 检查 `proxy-groups` 与用户组引用，Then 不再出现 `🛣️ {Region}` 兼容地区别名，也不再出现共享 `🛣️ JP/HK/SG` 主路径。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
-- Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 `🛣️ JP/HK/SG`。
+- Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 per-base relay 组 `🛣️ {relay-base}`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -161,7 +167,7 @@
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
-  - result: provider-hosted `*-ss-chain` can reference main-config `dialer-proxy: 🛣️ JP/HK/SG`; missing main-config dialer fails immediately, proving the chain depends on the stable main group.
+  - result: provider-hosted `*-ss-chain` can reference a main-config `dialer-proxy`; missing main-config dialer fails immediately, proving provider payload chains depend on main-config relay groups.
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
@@ -186,3 +192,4 @@
 - 2026-04-24: provider 主配置的系统地区组切换为 probe-derived 固定地区面，并补充 `🌟 Other`、`💎 高质量` / `🚀 节点选择` 自动补点语义。
 - 2026-05-02: 冻结 provider-only Mihomo 口径；系统 provider 动态输出直连与链式节点，主配置通过 provider filter 消费链式候选。
 - 2026-05-02: 修正 provider-only 高质量与地区接入点口径；`🔒 高质量` / `🔒 {Region}` 动态包含系统 `{base}-reality`，`🛬 {base}` 通过 system provider payload 顺序保证 ss-chain 先于 reality-chain。
+- 2026-06-14: relay 外层中转从共享 `🛣️ JP/HK/SG` 改为按 `Node.access_host` 聚合的 per-base relay 组，并删除 `🛣️ {Region}` 兼容地区别名。
