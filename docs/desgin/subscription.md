@@ -150,8 +150,8 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`
 - `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
-- per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
-- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，健康检查 URL 使用对应落地服务器的 API health URL；无外部 provider 时回落 `DIRECT`。
+- per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 的 host slug 会保留 `.` 与 `-` 等分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 随当前订阅集合发生计数式重命名；若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
+- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空。无外部 provider 时同样回落 `DIRECT`。同一 `access_host` 下只有一个公开 `api_base_url` 时，健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测，避免泄露私有 API 地址或假设 `access_host` 承载 HTTP API。
 - 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯 {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。

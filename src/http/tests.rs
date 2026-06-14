@@ -5177,7 +5177,7 @@ rules: []
         .expect("proxy-groups must exist");
     let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
         .expect("relay group missing");
     let outer_use = relay_group
         .get("use")
@@ -5317,8 +5317,8 @@ rules: []
         .expect("proxy-groups must exist");
     let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
-        .expect("expected built-in relay group 🛣️ node-1");
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
+        .expect("expected built-in relay group 🛣️ example-com");
     assert!(relay_group.get("use").is_none());
     assert_eq!(
         relay_group.get("proxies").and_then(YamlValue::as_sequence),
@@ -5611,7 +5611,7 @@ rules: []
     assert!(
         groups
             .iter()
-            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1")),
+            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com")),
         "rendered legacy profile should inject the per-base relay group"
     );
     for expected in ["🔒 Japan"] {
@@ -5888,8 +5888,8 @@ rules: []
         .expect("proxy-groups must exist");
     let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ node-1"))
-        .expect("expected built-in relay group 🛣️ node-1");
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
+        .expect("expected built-in relay group 🛣️ example-com");
     assert!(relay_group.get("use").is_none());
     assert_eq!(
         relay_group.get("proxies").and_then(YamlValue::as_sequence),
@@ -5980,7 +5980,7 @@ proxy-groups:
   - name: "🛑 全球拦截"
     type: select
     proxies: ["REJECT"]
-  - name: "🚀 节点选择"
+  - name: "Custom Select"
     type: select
     proxies:
       - 💎 高质量
@@ -6052,7 +6052,17 @@ rules: []
 
     assert_eq!(
         group_refs("🚀 节点选择"),
-        vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
+        vec![
+            "🌟 Japan",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 US",
+            "🌟 Other",
+            "🛬 node-1",
+            "💎 高质量",
+        ]
     );
     assert_eq!(
         group_refs("🐟 漏网之鱼"),
@@ -6123,7 +6133,7 @@ proxy-groups:
   - name: "💎 高质量"
     type: select
     proxies: ["DIRECT"]
-  - name: "🚀 节点选择"
+  - name: "Custom Select"
     type: select
     proxies:
       - Legacy-A-ss
@@ -6156,10 +6166,10 @@ rules: []
 
     let refs = groups
         .iter()
-        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("🚀 节点选择"))
+        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Custom Select"))
         .and_then(|group| group.get("proxies"))
         .and_then(YamlValue::as_sequence)
-        .expect("🚀 节点选择 refs must exist")
+        .expect("Custom Select refs must exist")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
@@ -6218,7 +6228,7 @@ proxy-groups:
   - name: "💎 高质量"
     type: select
     proxies: ["DIRECT"]
-  - name: "🚀 节点选择"
+  - name: "Custom Select"
     type: select
     proxies:
       - 💎 高质量
@@ -6250,10 +6260,10 @@ rules: []
 
     let refs = groups
         .iter()
-        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("🚀 节点选择"))
+        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Custom Select"))
         .and_then(|group| group.get("proxies"))
         .and_then(YamlValue::as_sequence)
-        .expect("🚀 节点选择 refs must exist")
+        .expect("Custom Select refs must exist")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();

@@ -63,10 +63,10 @@
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
   - per-base relay 组 `🛣️ {relay-base}`、`🌟/🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
-- provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称；命中保留名时必须加内部前缀做消歧。
+- provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
-- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，无外部 provider 时回落 `DIRECT`。relay 组的健康检查 URL 使用对应落地服务器的 API health URL。
+- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；无外部 provider 时回落 `DIRECT`。同一 `access_host` 下只有一个公开 `api_base_url` 时，relay 组的健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测，避免泄露私有 API 地址或假设 `access_host` 承载 HTTP API。
 - 输出不得再生成共享 `🛣️ JP/HK/SG` 主路径，也不得生成 `🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除，不得重新展开为共享中转语义。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
