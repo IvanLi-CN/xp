@@ -4731,7 +4731,6 @@ async fn mihomo_subscription_paths_are_provider_only() {
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
-    let token = fixtures.subscription_token.clone();
 
     let vless_res = app
         .clone()
@@ -4771,6 +4770,7 @@ async fn mihomo_subscription_paths_are_provider_only() {
         .await
         .unwrap();
     assert_eq!(access_res.status(), StatusCode::OK);
+    let token = fixtures.subscription_token.clone();
 
     let put_res = app
         .clone()
@@ -5045,7 +5045,6 @@ async fn mihomo_provider_route_rejects_reserved_system_provider_name_in_extra_pr
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
-    let token = fixtures.subscription_token.clone();
 
     let put_res = app
         .clone()
@@ -5064,14 +5063,8 @@ async fn mihomo_provider_route_rejects_reserved_system_provider_name_in_extra_pr
         ))
         .await
         .unwrap();
-    assert_eq!(put_res.status(), StatusCode::OK);
-
-    let res = app
-        .oneshot(req("GET", &format!("/api/sub/{token}/mihomo/provider")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(res).await;
+    assert_eq!(put_res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(put_res).await;
     assert_eq!(json["error"]["code"], "invalid_request");
     assert!(
         json["error"]["message"]
@@ -5090,7 +5083,7 @@ async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
-    let token = fixtures.subscription_token;
+    let token = fixtures.subscription_token.clone();
 
     let put_res = app
         .clone()
@@ -5273,7 +5266,7 @@ async fn admin_user_mihomo_profile_rendering_without_proxy_providers_still_works
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
-    let token = fixtures.subscription_token;
+    let token = fixtures.subscription_token.clone();
 
     let res = app
         .clone()
@@ -5328,15 +5321,13 @@ rules: []
 }
 
 #[tokio::test]
-async fn admin_user_mihomo_profile_put_autosplits_full_config_template() {
+async fn admin_user_mihomo_profile_put_rejects_full_config_with_legacy_relay_refs() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id;
-    let token = fixtures.subscription_token;
-
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -5376,113 +5367,18 @@ rules: []
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let res = app
-        .clone()
-        .oneshot(req_authed(
-            "GET",
-            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let profile = body_json(res).await;
-
-    let mixin_yaml = profile["mixin_yaml"].as_str().unwrap();
-    let template_root: YamlValue = serde_yaml::from_str(mixin_yaml).unwrap();
-    let template_map = template_root
-        .as_mapping()
-        .expect("template must be a mapping");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        !template_map.contains_key(YamlValue::String("proxies".to_string())),
-        "expected top-level proxies to be removed from mixin_yaml"
+        message.contains("providerA") || message.contains("🛣️ Japan"),
+        "full config with embedded providers/legacy relay aliases should fail final-config validation, got: {message}"
     );
-    assert!(
-        !template_map.contains_key(YamlValue::String("proxy-providers".to_string())),
-        "expected top-level proxy-providers to be removed from mixin_yaml"
-    );
-
-    let extra_proxies_yaml = profile["extra_proxies_yaml"].as_str().unwrap();
-    let extra_proxies_root: YamlValue = serde_yaml::from_str(extra_proxies_yaml).unwrap();
-    let extra_proxies = extra_proxies_root
-        .as_sequence()
-        .expect("extra_proxies_yaml must be a sequence");
-    assert!(
-        extra_proxies.iter().any(|proxy| {
-            proxy
-                .get("name")
-                .and_then(YamlValue::as_str)
-                .is_some_and(|name| name == "custom-direct")
-        }),
-        "expected extracted extra_proxies_yaml to include custom-direct"
-    );
-
-    let extra_providers_yaml = profile["extra_proxy_providers_yaml"].as_str().unwrap();
-    let extra_providers_root: YamlValue = serde_yaml::from_str(extra_providers_yaml).unwrap();
-    let extra_providers = extra_providers_root
-        .as_mapping()
-        .expect("extra_proxy_providers_yaml must be a mapping");
-    assert!(
-        extra_providers.contains_key(YamlValue::String("providerA".to_string())),
-        "expected extracted extra_proxy_providers_yaml to include providerA"
-    );
-    assert!(
-        profile.get("template_yaml").is_none(),
-        "response should only expose mixin_yaml after autosplit"
-    );
-
-    let res = app
-        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let sub_text = body_text(res).await;
-    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
-
-    let providers = yaml
-        .get("proxy-providers")
-        .and_then(YamlValue::as_mapping)
-        .expect("proxy-providers must exist");
-    assert!(
-        providers.contains_key(YamlValue::String("providerA".to_string())),
-        "expected subscription output proxy-providers to include providerA"
-    );
-
-    let proxies = yaml
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxies must exist");
-    assert!(
-        proxies.iter().any(|proxy| {
-            proxy
-                .get("name")
-                .and_then(YamlValue::as_str)
-                .is_some_and(|name| name == "custom-direct")
-        }),
-        "expected subscription output to include custom-direct"
-    );
-
-    let groups = yaml
-        .get("proxy-groups")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-    let auto_group = groups
-        .iter()
-        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Auto"))
-        .expect("Auto group should exist in rendered subscription");
-    let auto_refs = auto_group
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("Auto proxies must exist")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(auto_refs, vec!["DIRECT", "🌟 Japan"]);
 }
 
 #[tokio::test]
-async fn admin_user_mihomo_profile_get_and_render_autosplit_legacy_stored_full_config() {
+async fn admin_user_mihomo_profile_get_returns_raw_stored_full_config_and_render_preserves_it() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
@@ -5535,96 +5431,63 @@ rules: []
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let profile = body_json(res).await;
-
-    let mixin_yaml = profile["mixin_yaml"].as_str().unwrap();
-    let mixin_root: YamlValue = serde_yaml::from_str(mixin_yaml).unwrap();
-    let mixin_map = mixin_root.as_mapping().expect("mixin must be a mapping");
-    assert!(
-        !mixin_map.contains_key(YamlValue::String("proxies".to_string())),
-        "legacy stored full config should be normalized on GET"
-    );
-    assert!(
-        !mixin_map.contains_key(YamlValue::String("proxy-providers".to_string())),
-        "legacy stored full config should expose split provider data on GET"
-    );
-
-    let extra_proxies_root: YamlValue =
-        serde_yaml::from_str(profile["extra_proxies_yaml"].as_str().unwrap()).unwrap();
-    assert!(
-        extra_proxies_root
-            .as_sequence()
-            .expect("extra_proxies_yaml must be a sequence")
-            .iter()
-            .any(|proxy| {
-                proxy
-                    .get("name")
-                    .and_then(YamlValue::as_str)
-                    .is_some_and(|name| name == "custom-direct")
-            }),
-        "legacy stored proxies should be extracted on GET"
-    );
-
-    let extra_providers_root: YamlValue =
-        serde_yaml::from_str(profile["extra_proxy_providers_yaml"].as_str().unwrap()).unwrap();
-    assert!(
-        extra_providers_root
-            .as_mapping()
-            .expect("extra_proxy_providers_yaml must be a mapping")
-            .contains_key(YamlValue::String("providerA".to_string())),
-        "legacy stored provider map should be extracted on GET"
-    );
+    assert_eq!(profile["mixin_yaml"], r#"port: 0
+proxies:
+  - name: "custom-direct"
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: "abc:def"
+    udp: true
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a.yaml
+    url: https://example.com/sub-a
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+    proxies: ["DIRECT"]
+rules: []
+"#);
+    assert_eq!(profile["extra_proxies_yaml"], "");
+    assert_eq!(profile["extra_proxy_providers_yaml"], "");
 
     let res = app
         .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let sub_text = body_text(res).await;
-    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
-
-    assert!(
-        yaml.get("proxy-providers")
-            .and_then(YamlValue::as_mapping)
-            .is_some_and(|providers| {
-                providers.contains_key(YamlValue::String("providerA".to_string()))
-            }),
-        "legacy stored full config should also be normalized on render"
-    );
-    assert!(
-        yaml.get("proxies")
-            .and_then(YamlValue::as_sequence)
-            .is_some_and(|proxies| {
-                proxies.iter().any(|proxy| {
-                    proxy
-                        .get("name")
-                        .and_then(YamlValue::as_str)
-                        .is_some_and(|name| name == "custom-direct")
-                })
-            }),
-        "legacy stored extra proxies should remain visible in rendered subscriptions"
-    );
-
-    let groups = yaml
-        .get("proxy-groups")
+    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let custom_direct = yaml
+        .get("proxies")
         .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-    assert!(
-        groups
-            .iter()
-            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com")),
-        "rendered legacy profile should inject the per-base relay group"
+        .and_then(|proxies| {
+            proxies.iter().find(|proxy| {
+                proxy.get("name").and_then(YamlValue::as_str) == Some("custom-direct")
+            })
+        })
+        .expect("custom-direct should render from stored mixin");
+    assert_eq!(
+        custom_direct
+            .get("server")
+            .and_then(YamlValue::as_str),
+        Some("custom.example.com")
     );
-    for expected in ["🔒 Japan"] {
-        let group = groups
-            .iter()
-            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected))
-            .expect("compat region group should survive render");
-        assert_eq!(
-            group.get("type").and_then(YamlValue::as_str),
-            Some("select"),
-            "compat region group should be passive: {expected}"
-        );
-    }
+    let provider_a = yaml
+        .get("proxy-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|map| map.get(YamlValue::String("providerA".to_string())))
+        .and_then(YamlValue::as_mapping)
+        .expect("providerA should render from stored mixin");
+    assert_eq!(
+        provider_a
+            .get(YamlValue::String("path".to_string()))
+            .and_then(YamlValue::as_str),
+        Some("./provider-a.yaml")
+    );
 }
 
 #[tokio::test]
@@ -5738,20 +5601,13 @@ rules: []
         .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
-    let provider_a = yaml
-        .get("proxy-providers")
-        .and_then(YamlValue::as_mapping)
-        .and_then(|map| map.get(YamlValue::String("providerA".to_string())))
-        .and_then(YamlValue::as_mapping)
-        .expect("providerA should still render from extra providers");
-    assert_eq!(
-        provider_a
-            .get(YamlValue::String("path".to_string()))
-            .and_then(YamlValue::as_str),
-        Some("./provider-a-from-extra.yaml")
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("providerA"),
+        "conflicting provider definitions should fail validation, got: {message}"
     );
 }
 
@@ -5833,8 +5689,6 @@ async fn subscription_format_mihomo_renders_without_proxy_providers() {
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id;
-    let token = fixtures.subscription_token;
-
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -5861,63 +5715,102 @@ rules: []
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let res = app
-        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let sub_text = body_text(res).await;
-    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
-
-    let providers = yaml
-        .get("proxy-providers")
-        .and_then(YamlValue::as_mapping)
-        .expect("proxy-providers must exist");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        providers.contains_key(YamlValue::String(
-            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME.to_string()
-        )),
-        "provider-only output should inject xp-system-generated"
+        message.contains("🛣️ JP/HK/TW"),
+        "legacy shared relay alias should be rejected, got: {message}"
     );
+}
 
-    let groups = yaml
-        .get("proxy-groups")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-    let relay_group = groups
-        .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
-        .expect("expected built-in relay group 🛣️ example-com");
-    assert!(relay_group.get("use").is_none());
-    assert_eq!(
-        relay_group.get("proxies").and_then(YamlValue::as_sequence),
-        Some(&vec![YamlValue::String("DIRECT".to_string())]),
-        "expected per-base relay group to fall back to DIRECT without external providers"
-    );
-    for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
+#[tokio::test]
+async fn admin_user_mihomo_profile_put_rejects_undefined_final_proxy_refs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+
+    let cases = vec![
+        (
+            json!({
+              "mixin_yaml": r#"port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    proxies: ["MissingGroup"]
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "proxy-groups[0].proxies",
+        ),
+        (
+            json!({
+              "mixin_yaml": r#"port: 0
+proxy-groups:
+  - name: "Auto"
+    type: select
+    use: ["providerA"]
+rules: []
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "proxy-groups[0].use",
+        ),
+        (
+            json!({
+              "mixin_yaml": "port: 0\nrules: []\n",
+              "extra_proxies_yaml": r#"- name: "custom-direct"
+  type: ss
+  server: custom.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: "abc:def"
+  udp: true
+  dialer-proxy: MissingDialer
+"#,
+              "extra_proxy_providers_yaml": "",
+            }),
+            "proxy-groups[0].dialer-proxy",
+        ),
+        (
+            json!({
+              "mixin_yaml": r#"port: 0
+rules:
+  - MATCH,MissingTarget
+"#,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+            "rules[0]",
+        ),
+    ];
+
+    for (payload, expected_site) in cases {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PUT",
+                &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+                payload,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(res).await;
+        assert_eq!(body["error"]["code"], "invalid_request");
+        let message = body["error"]["message"].as_str().unwrap_or_default();
         assert!(
-            groups
-                .iter()
-                .any(|g| g.get("name").and_then(YamlValue::as_str) == Some(expected)),
-            "compat region group missing from output: {expected}"
+            message.contains(expected_site),
+            "expected validation site in message: {expected_site}, got: {message}"
         );
     }
-
-    let proxies = yaml
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxies must exist");
-    assert!(
-        proxies.iter().any(|proxy| {
-            proxy
-                .get("name")
-                .and_then(YamlValue::as_str)
-                .is_some_and(|name| name == "custom-direct")
-        }),
-        "expected extra_proxies_yaml to remain visible without proxy-providers"
-    );
 }
 
 #[tokio::test]
@@ -5928,8 +5821,7 @@ async fn mihomo_subscription_replays_helper_template_order_for_user_groups() {
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id;
-    let token = fixtures.subscription_token;
-
+    let token = fixtures.subscription_token.clone();
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -5985,7 +5877,7 @@ proxy-groups:
     proxies:
       - 💎 高质量
       - 🌟 US
-      - 🛣️ JP/HK/TW
+      - 🌟 Japan
       - 🌟 Singapore
   - name: "🐟 漏网之鱼"
     type: select
@@ -5994,7 +5886,7 @@ proxy-groups:
       - 🗽 大流量
       - 🌟 US
       - 🚀 节点选择
-      - 🛣️ JP/HK/TW
+      - 🌟 Japan
       - 🎯 全球直连
       - 💎 高质量
       - 🌟 Singapore
@@ -6003,7 +5895,7 @@ proxy-groups:
     proxies:
       - 🌟 US
       - 🎯 全球直连
-      - 🛣️ JP/HK/TW
+      - 🌟 Japan
       - 🗽 大流量
       - 🚀 节点选择
       - 💎 高质量
@@ -6014,7 +5906,7 @@ proxy-groups:
     proxies:
       - 💎 高质量
       - 🌟 US
-      - 🛣️ JP/HK/TW
+      - 🌟 Japan
       - 🌟 Singapore
 rules: []
 "#,
@@ -6065,11 +5957,16 @@ rules: []
         ]
     );
     assert_eq!(
+        group_refs("Custom Select"),
+        vec!["🌟 Japan", "🌟 Singapore", "🌟 US", "💎 高质量",]
+    );
+    assert_eq!(
         group_refs("🐟 漏网之鱼"),
         vec![
             "🚀 节点选择",
             "💎 高质量",
             "🗽 大流量",
+            "🌟 Japan",
             "🌟 Singapore",
             "🌟 US",
             "🎯 全球直连",
@@ -6082,6 +5979,7 @@ rules: []
             "🚀 节点选择",
             "💎 高质量",
             "🗽 大流量",
+            "🌟 Japan",
             "🌟 Singapore",
             "🌟 US",
             "🎯 全球直连",
@@ -6089,19 +5987,18 @@ rules: []
     );
     assert_eq!(
         group_refs("Hidden Auto"),
-        vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
+        vec!["🌟 Japan", "🌟 Singapore", "🌟 US", "💎 高质量"]
     );
 }
 
 #[tokio::test]
-async fn mihomo_subscription_remaps_legacy_landing_refs_before_replaying_helper_order() {
+async fn admin_user_mihomo_profile_put_rejects_legacy_landing_refs_before_helper_replay() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id;
-    let token = fixtures.subscription_token;
 
     let res = app
         .clone()
@@ -6150,54 +6047,24 @@ rules: []
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let res = app
-        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let sub_text = body_text(res).await;
-    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
-    let groups = yaml
-        .get("proxy-groups")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-
-    let refs = groups
-        .iter()
-        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Custom Select"))
-        .and_then(|group| group.get("proxies"))
-        .and_then(YamlValue::as_sequence)
-        .expect("Custom Select refs must exist")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        refs,
-        vec![
-            "🌟 Singapore",
-            "🌟 US",
-            "🛬 node-1",
-            "💎 高质量",
-        ]
-    );
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        refs.iter().all(|name| *name != "🛬 Legacy-A"),
-        "legacy landing ref should be remapped before final render"
+        message.contains("🛬 Legacy-A") && message.contains(".proxies["),
+        "legacy relay references should fail generic final-config validation, got: {message}"
     );
 }
 
 #[tokio::test]
-async fn mihomo_subscription_remaps_landing_only_legacy_refs_before_helper_replay() {
+async fn admin_user_mihomo_profile_put_rejects_landing_only_legacy_refs_before_helper_replay() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
 
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id;
-    let token = fixtures.subscription_token;
 
     let res = app
         .clone()
@@ -6244,42 +6111,13 @@ rules: []
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let res = app
-        .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let sub_text = body_text(res).await;
-    let yaml: YamlValue = serde_yaml::from_str(&sub_text).unwrap();
-    let groups = yaml
-        .get("proxy-groups")
-        .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-
-    let refs = groups
-        .iter()
-        .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("Custom Select"))
-        .and_then(|group| group.get("proxies"))
-        .and_then(YamlValue::as_sequence)
-        .expect("Custom Select refs must exist")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        refs,
-        vec![
-            "🌟 Singapore",
-            "🌟 US",
-            "🛬 node-1",
-            "💎 高质量",
-        ]
-    );
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        refs.iter().all(|name| *name != "🛬 Legacy-A"),
-        "landing-only legacy ref should be remapped before final render"
+        message.contains("🛬 Legacy-A") && message.contains(".proxies["),
+        "legacy relay references should fail generic final-config validation, got: {message}"
     );
 }
 
