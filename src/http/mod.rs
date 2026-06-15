@@ -6344,80 +6344,42 @@ fn ensure_yaml_mapping_or_empty(raw: &str, field_name: &str) -> Result<(), ApiEr
 fn validate_user_mihomo_profile_payload(
     req: PutUserMihomoProfileRequest,
 ) -> Result<crate::state::UserMihomoProfile, ApiError> {
-    normalize_user_mihomo_profile_payload(req)
-}
-
-fn normalize_user_mihomo_profile_payload(
-    req: PutUserMihomoProfileRequest,
-) -> Result<crate::state::UserMihomoProfile, ApiError> {
     if req.mixin_yaml.trim().is_empty() {
         return Err(ApiError::invalid_request("mixin_yaml is required"));
     }
 
     let mixin_root: serde_yaml::Value = serde_yaml::from_str(&req.mixin_yaml)
         .map_err(|e| ApiError::invalid_request(format!("mixin_yaml must be valid yaml: {e}")))?;
-    let serde_yaml::Value::Mapping(mut mixin_map) = mixin_root else {
+    let serde_yaml::Value::Mapping(mixin_map) = mixin_root else {
         return Err(ApiError::invalid_request(
             "mixin_yaml must be a yaml mapping",
         ));
     };
-
-    let mut mixin_yaml = req.mixin_yaml;
-    let mut extra_proxies_yaml = req.extra_proxies_yaml;
-    let mut extra_proxy_providers_yaml = req.extra_proxy_providers_yaml;
-    let mut extracted = false;
-
-    if let Some(value) = mixin_map.remove(serde_yaml::Value::String("proxies".to_string())) {
-        if !matches!(value, serde_yaml::Value::Sequence(_)) {
-            return Err(ApiError::invalid_request(
-                "mixin_yaml.proxies must be a yaml sequence",
-            ));
-        }
-        if !extra_proxies_yaml.trim().is_empty() {
-            return Err(ApiError::invalid_request(
-                "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
-            ));
-        }
-        extra_proxies_yaml = serde_yaml::to_string(&value).map_err(|e| {
-            ApiError::invalid_request(format!("mixin_yaml.proxies must be valid yaml: {e}"))
-        })?;
-        extracted = true;
-    }
-
-    if let Some(value) = mixin_map.remove(serde_yaml::Value::String("proxy-providers".to_string()))
+    if mixin_map.contains_key(serde_yaml::Value::String("proxies".to_string()))
+        && !req.extra_proxies_yaml.trim().is_empty()
     {
-        if !matches!(value, serde_yaml::Value::Mapping(_)) {
-            return Err(ApiError::invalid_request(
-                "mixin_yaml.proxy-providers must be a yaml mapping",
-            ));
-        }
-        if !extra_proxy_providers_yaml.trim().is_empty() {
-            return Err(ApiError::invalid_request(
-                "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
-            ));
-        }
-        extra_proxy_providers_yaml = serde_yaml::to_string(&value).map_err(|e| {
-            ApiError::invalid_request(format!(
-                "mixin_yaml.proxy-providers must be valid yaml: {e}"
-            ))
-        })?;
-        extracted = true;
+        return Err(ApiError::invalid_request(
+            "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+        ));
+    }
+    if mixin_map.contains_key(serde_yaml::Value::String("proxy-providers".to_string()))
+        && !req.extra_proxy_providers_yaml.trim().is_empty()
+    {
+        return Err(ApiError::invalid_request(
+            "mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
+        ));
     }
 
-    if extracted {
-        mixin_yaml =
-            serde_yaml::to_string(&serde_yaml::Value::Mapping(mixin_map)).map_err(|e| {
-                ApiError::invalid_request(format!("mixin_yaml must be valid yaml: {e}"))
-            })?;
-    }
-
-    ensure_yaml_sequence_or_empty(&extra_proxies_yaml, "extra_proxies_yaml")?;
-    ensure_yaml_mapping_or_empty(&extra_proxy_providers_yaml, "extra_proxy_providers_yaml")?;
+    ensure_yaml_sequence_or_empty(&req.extra_proxies_yaml, "extra_proxies_yaml")?;
+    ensure_yaml_mapping_or_empty(
+        &req.extra_proxy_providers_yaml,
+        "extra_proxy_providers_yaml",
+    )?;
 
     Ok(crate::state::UserMihomoProfile {
-        mixin_yaml,
-        extra_proxies_yaml,
-        extra_proxy_providers_yaml,
+        mixin_yaml: req.mixin_yaml,
+        extra_proxies_yaml: req.extra_proxies_yaml,
+        extra_proxy_providers_yaml: req.extra_proxy_providers_yaml,
     })
 }
 
@@ -6429,18 +6391,9 @@ async fn admin_get_user_mihomo_profile(
     if store.get_user(&user_id).is_none() {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
-    let profile = match store.get_user_mihomo_profile(&user_id) {
-        Some(profile) => {
-            match crate::subscription::normalize_user_mihomo_profile_for_admin_get(&profile) {
-                Ok(normalized) => normalized,
-                Err(error) => {
-                    tracing::warn!(%user_id, %error, "returning raw stored mihomo profile after normalization failed");
-                    profile
-                }
-            }
-        }
-        None => crate::state::UserMihomoProfile::default(),
-    };
+    let profile = store
+        .get_user_mihomo_profile(&user_id)
+        .unwrap_or_default();
     Ok(Json(profile.into()))
 }
 
@@ -6450,6 +6403,7 @@ async fn admin_put_user_mihomo_profile(
     ApiJson(req): ApiJson<PutUserMihomoProfileRequest>,
 ) -> Result<Json<AdminUserMihomoProfileResponse>, ApiError> {
     let profile = validate_user_mihomo_profile_payload(req)?;
+    validate_user_mihomo_profile_final_render(&state, &user_id, &profile).await?;
     let _ = raft_write(
         &state,
         DesiredStateCommand::SetUserMihomoProfile {
@@ -6460,6 +6414,44 @@ async fn admin_put_user_mihomo_profile(
     .await?;
 
     Ok(Json(profile.into()))
+}
+
+async fn validate_user_mihomo_profile_final_render(
+    state: &AppState,
+    user_id: &str,
+    profile: &crate::state::UserMihomoProfile,
+) -> Result<(), ApiError> {
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is unavailable"));
+    };
+
+    let (user, memberships, endpoints, nodes, node_egress_probes) = {
+        let store = state.store.lock().await;
+        let user = store
+            .get_user(user_id)
+            .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
+        let memberships = store.list_user_access(&user.user_id).map_err(ApiError::from)?;
+        let endpoints = store.list_endpoints();
+        let nodes = store.list_nodes();
+        let node_egress_probes = store.list_node_egress_probes();
+        (user, memberships, endpoints, nodes, node_egress_probes)
+    };
+
+    let system_provider_url = format!(
+        "https://127.0.0.1:62416/api/sub/{}/mihomo/provider/system",
+        user.subscription_token
+    );
+    crate::subscription::validate_mihomo_profile_via_provider_render(
+        ca_key_pem,
+        &user,
+        &memberships,
+        &endpoints,
+        &nodes,
+        &node_egress_probes,
+        profile,
+        &system_provider_url,
+    )
+    .map_err(|err| ApiError::invalid_request(err.to_string()))
 }
 
 async fn admin_reset_user_credentials(
@@ -6861,6 +6853,12 @@ async fn load_subscription_context(
 fn map_subscription_render_error(err: subscription::SubscriptionError) -> ApiError {
     match err {
         other @ subscription::SubscriptionError::MihomoReservedProxyProviderNameConflict {
+            ..
+        }
+        | other @ subscription::SubscriptionError::MihomoReservedProxyNameConflict { .. }
+        | other @ subscription::SubscriptionError::MihomoExtraProxyConflict { .. }
+        | other @ subscription::SubscriptionError::MihomoExtraProxyProviderConflict { .. }
+        | other @ subscription::SubscriptionError::MihomoInvalidFinalConfigReference {
             ..
         } => ApiError::invalid_request(other.to_string()),
         other => ApiError::internal(format!("failed to build subscription: {other}")),
