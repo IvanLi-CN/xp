@@ -460,17 +460,12 @@ fn derive_host_managed_vless_spec(
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let mut marked = Vec::new();
-    let mut legacy = Vec::new();
     for endpoint in node_endpoints {
         if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
             continue;
         }
         if managed_default_vless_endpoint(endpoint).is_some() {
             marked.push(endpoint);
-            continue;
-        }
-        if endpoint_meta_missing_managed_default_flag(endpoint) {
-            legacy.push(endpoint);
         }
     }
 
@@ -480,11 +475,7 @@ fn derive_host_managed_vless_spec(
         _ => bail!("multiple managed-default VLESS endpoints are marked on this node"),
     }
 
-    match legacy.as_slice() {
-        [endpoint] => Ok(Some(default_vless_spec_from_endpoint(endpoint, vless_canary_bind)?)),
-        [] => Ok(None),
-        _ => Ok(None),
-    }
+    Ok(None)
 }
 
 fn derive_host_managed_ss_spec(
@@ -752,11 +743,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn host_managed_single_legacy_vless_is_adopted_and_rewritten_to_canary_dest() {
+    async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest() {
         let tempdir = tempfile::tempdir().unwrap();
         let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
         let mut writes = Vec::<DesiredStateCommand>::new();
-        let spec = ManagedDefaultEndpointsSpec::default();
+        let spec = ManagedDefaultEndpointsSpec {
+            vless: Some(DefaultVlessEndpointSpec {
+                port: 53844,
+                reality_dest: "127.0.0.1:39043".to_string(),
+                server_names: vec!["example.com".to_string()],
+                fingerprint: "chrome".to_string(),
+            }),
+            ss: None,
+        };
         let bind = "127.0.0.1:39043".parse().unwrap();
 
         {
@@ -792,8 +791,8 @@ mod tests {
     }
 
     #[test]
-    fn host_managed_manual_vless_is_not_adopted_as_managed_default() {
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(false));
+    fn host_managed_legacy_vless_is_not_auto_adopted_without_explicit_config() {
+        let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
         let spec =
             resolve_host_managed_default_endpoints_spec(
                 &ManagedDefaultEndpointsSpec::default(),
