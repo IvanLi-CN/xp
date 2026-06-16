@@ -1348,7 +1348,7 @@ fn inject_mihomo_proxy_groups(
     let landing_groups =
         inject_mihomo_landing_groups(&mut groups, landing_proxy_name_set, &base_names);
     inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
-    inject_mihomo_region_groups(
+    inject_mihomo_legacy_region_groups(
         &mut groups,
         &provider_values,
         region_proxy_name_set,
@@ -1774,7 +1774,9 @@ fn proxy_ref_names_for_region(
         .collect()
 }
 
-fn inject_mihomo_region_groups(
+// Legacy non-provider delivery keeps system-backed landing/reality region semantics.
+// Provider-only delivery uses `inject_mihomo_provider_region_groups`.
+fn inject_mihomo_legacy_region_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
     proxy_name_set: &std::collections::BTreeSet<String>,
@@ -2110,6 +2112,8 @@ fn inject_mihomo_provider_landing_groups(
     out
 }
 
+// Provider-only transit buckets must only consume outer providers plus user-defined transit
+// proxies, never `xp-system-generated`.
 fn inject_mihomo_provider_region_groups(
     groups: &mut Vec<serde_yaml::Value>,
     outer_provider_values: &[serde_yaml::Value],
@@ -4580,6 +4584,7 @@ fn build_node_prefix_map(nodes: &[Node]) -> std::collections::BTreeMap<String, S
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
     cluster_ca_key_pem: &str,
     user: &User,
@@ -5870,6 +5875,16 @@ providerA:
         assert_eq!(
             japan_url_test.get("type").and_then(Value::as_str),
             Some("url-test")
+        );
+        assert_eq!(
+            japan_url_test
+                .get("use")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec!["providerA"]
         );
         assert_eq!(
             japan_url_test.get("interval"),
