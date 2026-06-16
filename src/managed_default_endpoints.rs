@@ -438,7 +438,7 @@ fn parse_default_vless_server_names(raw: &str) -> anyhow::Result<Vec<String>> {
     Ok(out)
 }
 
-fn resolve_host_managed_default_endpoints_spec(
+pub fn resolve_host_managed_default_endpoints_spec(
     explicit: &ManagedDefaultEndpointsSpec,
     node_endpoints: &[Endpoint],
     vless_canary_bind: SocketAddr,
@@ -789,6 +789,21 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn host_managed_manual_vless_is_not_adopted_as_managed_default() {
+        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(false));
+        let spec =
+            resolve_host_managed_default_endpoints_spec(
+                &ManagedDefaultEndpointsSpec::default(),
+                &[endpoint],
+                "127.0.0.1:39043".parse().unwrap(),
+            )
+            .unwrap();
+
+        assert!(spec.vless.is_none());
+        assert!(spec.ss.is_none());
     }
 
     #[tokio::test]

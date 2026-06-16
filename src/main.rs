@@ -280,16 +280,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         }
     }
 
-    let vless_https_canary_task = xp::vless_https_canary::spawn(config_arc.clone()).await?;
-
-    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
-        Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
-            raft.raft(),
-            cluster_ca_key_pem_required.clone(),
-            &cluster_ca_pem,
-            Some(&node_cert_pem),
-            Some(&node_key_pem),
-        )?);
     let explicit_managed_default_spec =
         xp::managed_default_endpoints::ManagedDefaultEndpointsSpec {
             vless: xp::managed_default_endpoints::build_default_vless_endpoint_spec(
@@ -302,27 +292,47 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
                 config.default_ss_port,
             ),
         };
-    {
-        let endpoints = {
-            let store = store.lock().await;
-            store
-                .list_endpoints()
-                .into_iter()
-                .filter(|endpoint| endpoint.node_id == cluster.node_id)
-                .collect::<Vec<_>>()
-        };
+    let endpoints = {
+        let store = store.lock().await;
+        store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == cluster.node_id)
+            .collect::<Vec<_>>()
+    };
+    let resolved_managed_default_spec =
+        xp::managed_default_endpoints::resolve_host_managed_default_endpoints_spec(
+            &explicit_managed_default_spec,
+            &endpoints,
+            config.vless_canary_bind,
+        )?;
+    let vless_https_canary_task = if resolved_managed_default_spec.vless.is_some() {
+        xp::vless_https_canary::spawn(config_arc.clone()).await?
+    } else {
+        xp::vless_https_canary::persist_disabled_status(&config.data_dir, config.vless_canary_bind)?;
+        None
+    };
+
+    let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
+        Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
+            raft.raft(),
+            cluster_ca_key_pem_required.clone(),
+            &cluster_ca_pem,
+            Some(&node_cert_pem),
+            Some(&node_key_pem),
+        )?);
+    if resolved_managed_default_spec.vless.is_some() || resolved_managed_default_spec.ss.is_some() {
         let mut writer = |cmd| async {
             raft_facade
                 .client_write(cmd)
                 .await
                 .map(|_| ())
         };
-        xp::managed_default_endpoints::reconcile_host_managed_default_endpoints(
+        xp::managed_default_endpoints::reconcile_managed_default_endpoints(
             &config.data_dir,
             &cluster.node_id,
             &endpoints,
-            &explicit_managed_default_spec,
-            config.vless_canary_bind,
+            &resolved_managed_default_spec,
             &mut writer,
             "xp startup",
         )

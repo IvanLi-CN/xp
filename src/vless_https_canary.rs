@@ -161,6 +161,13 @@ pub fn persist_status(data_dir: &Path, status: &VlessHttpsCanaryStatus) -> anyho
     Ok(())
 }
 
+pub fn persist_disabled_status(
+    data_dir: &Path,
+    bind: std::net::SocketAddr,
+) -> anyhow::Result<()> {
+    persist_status(data_dir, &VlessHttpsCanaryStatus::disabled(bind))
+}
+
 #[derive(Clone)]
 struct RepoCloudflareDns01Solver {
     api_base: String,
