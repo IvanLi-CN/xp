@@ -1622,10 +1622,6 @@ fn build_mihomo_relay_group(
         );
     } else {
         map.insert(
-            serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("DIRECT".to_string())]),
-        );
-        map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(MIHOMO_OUTER_FILTER.to_string()),
         );
@@ -7276,14 +7272,7 @@ providerA:
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
         assert_eq!(use_values, vec!["providerA"]);
-        let proxy_values = relay
-            .get("proxies")
-            .and_then(Value::as_sequence)
-            .expect("relay group must include DIRECT fallback")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        assert_eq!(proxy_values, vec!["DIRECT"]);
+        assert!(relay.get("proxies").is_none());
         assert_eq!(
             relay.get("url").and_then(Value::as_str),
             Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)

@@ -5212,14 +5212,7 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
         .expect("relay group missing");
-    let outer_proxies = relay_group
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("relay group proxies missing")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(outer_proxies, vec!["DIRECT"]);
+    assert!(relay_group.get("proxies").is_none());
     assert_eq!(
         relay_group.get("url").and_then(YamlValue::as_str),
         Some("https://www.gstatic.com/generate_204")
@@ -5238,6 +5231,10 @@ rules: []
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
     assert_eq!(relay_use, vec!["providerA"]);
+    assert!(
+        !relay_use.iter().any(|value| *value == crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
+        "outer relay should only test outer providers, not the system provider"
+    );
 
     for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(

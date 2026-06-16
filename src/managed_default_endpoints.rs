@@ -174,7 +174,7 @@ where
 {
     let mut state = load_managed_default_endpoints_state(data_dir)?;
 
-    state.vless_endpoint_id = reconcile_one_managed_endpoint(
+    let next_vless_endpoint_id = reconcile_one_managed_endpoint(
         node_id,
         ManagedDefaultEndpointKind::Vless,
         spec.vless.as_ref(),
@@ -184,8 +184,12 @@ where
         log_label,
     )
     .await?;
+    if next_vless_endpoint_id != state.vless_endpoint_id {
+        state.vless_endpoint_id = next_vless_endpoint_id;
+        persist_managed_default_endpoints_state(data_dir, &state)?;
+    }
 
-    state.ss_endpoint_id = reconcile_one_managed_endpoint(
+    let next_ss_endpoint_id = reconcile_one_managed_endpoint(
         node_id,
         ManagedDefaultEndpointKind::Ss,
         spec.ss.as_ref(),
@@ -195,8 +199,12 @@ where
         log_label,
     )
     .await?;
+    if next_ss_endpoint_id != state.ss_endpoint_id {
+        state.ss_endpoint_id = next_ss_endpoint_id;
+        persist_managed_default_endpoints_state(data_dir, &state)?;
+    }
 
-    persist_managed_default_endpoints_state(data_dir, &state)
+    Ok(())
 }
 
 async fn reconcile_one_managed_endpoint<T, W, Fut>(
@@ -725,6 +733,24 @@ mod tests {
         }
     }
 
+    fn endpoint_ss(endpoint_id: &str, port: u16, managed_default: Option<bool>) -> Endpoint {
+        let mut meta = serde_json::json!({
+            "method": SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
+            "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+        });
+        if let Some(value) = managed_default {
+            meta["managed_default"] = serde_json::Value::Bool(value);
+        }
+        Endpoint {
+            endpoint_id: endpoint_id.to_string(),
+            node_id: "n1".to_string(),
+            tag: format!("ss2022-{endpoint_id}"),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port,
+            meta,
+        }
+    }
+
     #[tokio::test]
     async fn host_managed_single_legacy_vless_is_adopted_and_rewritten_to_canary_dest() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -763,5 +789,50 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn persists_adopted_endpoint_ids_before_later_kind_fails() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let endpoints = vec![
+            endpoint_vless("e1", 53844, &["example.com"], None),
+            endpoint_ss("s1", 443, None),
+            endpoint_ss("s2", 8443, None),
+        ];
+        let spec = ManagedDefaultEndpointsSpec {
+            vless: Some(DefaultVlessEndpointSpec {
+                port: 53844,
+                reality_dest: "127.0.0.1:39043".to_string(),
+                server_names: vec!["example.com".to_string()],
+                fingerprint: "chrome".to_string(),
+            }),
+            ss: Some(DefaultSsEndpointSpec { port: 9443 }),
+        };
+        let mut writes = Vec::<DesiredStateCommand>::new();
+
+        let err = {
+            let mut writer = |cmd| {
+                writes.push(cmd);
+                std::future::ready(Ok(()))
+            };
+            reconcile_managed_default_endpoints(
+                tempdir.path(),
+                "n1",
+                &endpoints,
+                &spec,
+                &mut writer,
+                "test",
+            )
+            .await
+            .expect_err("ss ambiguity should still fail after vless adoption")
+        };
+
+        assert!(err
+            .to_string()
+            .contains("multiple ss2022_2022_blake3_aes_128_gcm endpoints already exist"));
+        assert_eq!(writes.len(), 1);
+        let state = load_managed_default_endpoints_state(tempdir.path()).unwrap();
+        assert_eq!(state.vless_endpoint_id.as_deref(), Some("e1"));
+        assert_eq!(state.ss_endpoint_id, None);
     }
 }

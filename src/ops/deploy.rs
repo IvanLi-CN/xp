@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const DEFAULT_ORIGIN_URL: &str = "http://127.0.0.1:62416";
+const DEFAULT_VLESS_CANARY_ACME_DIRECTORY_URL: &str =
+    "https://acme-v02.api.letsencrypt.org/directory";
 const HOSTNAME_SUFFIX_LEN: usize = 4;
 const PUBLIC_API_PROBE_ATTEMPTS: usize = 60;
 const PUBLIC_API_PROBE_DELAY: Duration = Duration::from_secs(2);
@@ -81,11 +83,19 @@ struct DeployPlan {
 }
 
 struct ManagedDefaultsWriteValues<'a> {
-    vless_canary_acme_contact_email: Cow<'a, str>,
+    vless_canary_acme_contact_email: Option<Cow<'a, str>>,
     default_vless_port: Option<Cow<'a, str>>,
     default_vless_server_names: Option<Cow<'a, str>>,
     default_vless_fingerprint: Option<Cow<'a, str>>,
     default_ss_port: Option<Cow<'a, str>>,
+}
+
+struct VlessCanaryWriteValues {
+    bind: String,
+    acme_directory_url: String,
+    acme_contact_email: String,
+    cloudflare_token_file: String,
+    cloudflare_zone_id: String,
 }
 
 pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitError> {
@@ -1773,6 +1783,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
     let p = paths.etc_xp_env();
     let existing = fs::read_to_string(&p).ok();
     let parsed = crate::ops::xp_env::parse_xp_env(existing);
+    let vless_canary = resolve_vless_canary_write_values(&parsed, managed_defaults);
 
     if let Some(v) = parsed.node_name.as_deref()
         && v != node_name
@@ -1819,11 +1830,11 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-                vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-                vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-                vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                vless_canary_cloudflare_zone_id: "",
+                vless_canary_bind: vless_canary.bind.as_str(),
+                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
                 default_vless_port: managed_defaults.default_vless_port.as_deref(),
                 default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
                 default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -1849,11 +1860,11 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-                vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-                vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-                vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                vless_canary_cloudflare_zone_id: "",
+                vless_canary_bind: vless_canary.bind.as_str(),
+                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
                 default_vless_port: managed_defaults.default_vless_port.as_deref(),
                 default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
                 default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -1879,11 +1890,11 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
             node_name,
             access_host,
             api_base_url,
-            vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-            vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-            vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-            vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-            vless_canary_cloudflare_zone_id: "",
+            vless_canary_bind: vless_canary.bind.as_str(),
+            vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+            vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+            vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+            vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
             default_vless_port: managed_defaults.default_vless_port.as_deref(),
             default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
             default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -1916,6 +1927,7 @@ fn ensure_xp_env_admin_token_hash_join(
     let p = paths.etc_xp_env();
     let existing = fs::read_to_string(&p).ok();
     let parsed = crate::ops::xp_env::parse_xp_env(existing);
+    let vless_canary = resolve_vless_canary_write_values(&parsed, managed_defaults);
 
     if let Some(v) = parsed.node_name.as_deref()
         && v != node_name
@@ -1968,11 +1980,11 @@ fn ensure_xp_env_admin_token_hash_join(
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-                vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-                vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-                vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                vless_canary_cloudflare_zone_id: "",
+                vless_canary_bind: vless_canary.bind.as_str(),
+                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
                 default_vless_port: managed_defaults.default_vless_port.as_deref(),
                 default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
                 default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -2005,11 +2017,11 @@ fn ensure_xp_env_admin_token_hash_join(
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-                vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-                vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-                vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                vless_canary_cloudflare_zone_id: "",
+                vless_canary_bind: vless_canary.bind.as_str(),
+                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
                 default_vless_port: managed_defaults.default_vless_port.as_deref(),
                 default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
                 default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -2032,11 +2044,11 @@ fn ensure_xp_env_admin_token_hash_join(
             node_name,
             access_host,
             api_base_url,
-            vless_canary_bind: crate::config::DEFAULT_VLESS_CANARY_BIND,
-            vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-            vless_canary_acme_contact_email: managed_defaults.vless_canary_acme_contact_email.as_ref(),
-            vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-            vless_canary_cloudflare_zone_id: "",
+            vless_canary_bind: vless_canary.bind.as_str(),
+            vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+            vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+            vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+            vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
             default_vless_port: managed_defaults.default_vless_port.as_deref(),
             default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
             default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
@@ -2090,9 +2102,10 @@ fn ensure_ddns_runtime_token_file(paths: &Paths, mode: Mode, token: &str) -> Res
 
 fn managed_defaults_write_values<'a>(args: &'a DeployArgs) -> ManagedDefaultsWriteValues<'a> {
     ManagedDefaultsWriteValues {
-        vless_canary_acme_contact_email: Cow::Borrowed(
-            args.vless_canary_acme_contact_email.as_deref().unwrap_or(""),
-        ),
+        vless_canary_acme_contact_email: args
+            .vless_canary_acme_contact_email
+            .as_deref()
+            .map(Cow::Borrowed),
         default_vless_port: args
             .default_vless_port
             .map(|value| Cow::Owned(value.to_string())),
@@ -2102,6 +2115,40 @@ fn managed_defaults_write_values<'a>(args: &'a DeployArgs) -> ManagedDefaultsWri
             .map(Cow::Borrowed),
         default_vless_fingerprint: args.default_vless_fingerprint.as_deref().map(Cow::Borrowed),
         default_ss_port: args.default_ss_port.map(|value| Cow::Owned(value.to_string())),
+    }
+}
+
+fn resolve_vless_canary_write_values<'a>(
+    parsed: &'a crate::ops::xp_env::ParsedXpEnv,
+    managed_defaults: &'a ManagedDefaultsWriteValues<'a>,
+) -> VlessCanaryWriteValues {
+    VlessCanaryWriteValues {
+        bind: parsed
+            .vless_canary_bind
+            .clone()
+            .unwrap_or_else(|| crate::config::DEFAULT_VLESS_CANARY_BIND.to_string()),
+        acme_directory_url: parsed
+            .vless_canary_acme_directory_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_VLESS_CANARY_ACME_DIRECTORY_URL.to_string()),
+        acme_contact_email: managed_defaults
+            .vless_canary_acme_contact_email
+            .as_ref()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| {
+                parsed
+                    .vless_canary_acme_contact_email
+                    .clone()
+                    .unwrap_or_default()
+            }),
+        cloudflare_token_file: parsed
+            .vless_canary_cloudflare_token_file
+            .clone()
+            .unwrap_or_else(|| crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string()),
+        cloudflare_zone_id: parsed
+            .vless_canary_cloudflare_zone_id
+            .clone()
+            .unwrap_or_default(),
     }
 }
 
@@ -2147,7 +2194,7 @@ mod tests {
 
     fn empty_managed_defaults() -> ManagedDefaultsWriteValues<'static> {
         ManagedDefaultsWriteValues {
-            vless_canary_acme_contact_email: Cow::Borrowed(""),
+            vless_canary_acme_contact_email: None,
             default_vless_port: None,
             default_vless_server_names: None,
             default_vless_fingerprint: None,
@@ -2301,7 +2348,7 @@ XP_CLOUDFLARED_RESTART_MODE=none\n",
         .unwrap();
 
         let managed_defaults = ManagedDefaultsWriteValues {
-            vless_canary_acme_contact_email: Cow::Borrowed("ops@example.com"),
+            vless_canary_acme_contact_email: Some(Cow::Borrowed("ops@example.com")),
             default_vless_port: Some(Cow::Borrowed("53842")),
             default_vless_server_names: Some(Cow::Borrowed(
                 "public.sn.files.1drv.com,public.bn.files.1drv.com",
@@ -2329,6 +2376,48 @@ XP_CLOUDFLARED_RESTART_MODE=none\n",
         assert!(env.contains("XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'"));
         assert!(env.contains("XP_DEFAULT_VLESS_FINGERPRINT='chrome'"));
         assert!(env.contains("XP_DEFAULT_SS_PORT='53843'"));
+    }
+
+    #[test]
+    fn ensure_xp_env_admin_token_hash_preserves_existing_vless_canary_overrides() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            format!(
+                "XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n\
+XP_VLESS_CANARY_BIND=127.0.0.1:49043\n\
+XP_VLESS_CANARY_ACME_DIRECTORY_URL=https://acme-staging-v02.api.letsencrypt.org/directory\n\
+XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com\n\
+XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE=/custom/token\n\
+XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=zone-123\n",
+            ),
+        )
+        .unwrap();
+
+        ensure_xp_env_admin_token_hash_bootstrap(
+            &paths,
+            Mode::Real,
+            "node-1",
+            "example.com",
+            "https://example.com",
+            false,
+            "",
+            &empty_managed_defaults(),
+            false,
+        )
+        .unwrap();
+
+        let env = read_env(&paths);
+        assert!(env.contains("XP_VLESS_CANARY_BIND='127.0.0.1:49043'"));
+        assert!(env.contains(
+            "XP_VLESS_CANARY_ACME_DIRECTORY_URL='https://acme-staging-v02.api.letsencrypt.org/directory'"
+        ));
+        assert!(env.contains("XP_VLESS_CANARY_ACME_CONTACT_EMAIL='ops@example.com'"));
+        assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE='/custom/token'"));
+        assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID='zone-123'"));
     }
 
     #[tokio::test]
