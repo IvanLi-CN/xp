@@ -1786,6 +1786,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
     let p = paths.etc_xp_env();
     let existing = fs::read_to_string(&p).ok();
     let parsed = crate::ops::xp_env::parse_xp_env(existing);
+    let resolved_managed_defaults = resolve_managed_defaults_write_values(&parsed, managed_defaults);
     let vless_canary = resolve_vless_canary_write_values(&parsed, managed_defaults);
 
     if let Some(v) = parsed.node_name.as_deref()
@@ -1838,10 +1839,14 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
                 vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
                 vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-                default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-                default_ss_port: managed_defaults.default_ss_port.as_deref(),
+                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+                default_vless_server_names: resolved_managed_defaults
+                    .default_vless_server_names
+                    .as_deref(),
+                default_vless_fingerprint: resolved_managed_defaults
+                    .default_vless_fingerprint
+                    .as_deref(),
+                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1868,10 +1873,14 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
                 vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
                 vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-                default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-                default_ss_port: managed_defaults.default_ss_port.as_deref(),
+                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+                default_vless_server_names: resolved_managed_defaults
+                    .default_vless_server_names
+                    .as_deref(),
+                default_vless_fingerprint: resolved_managed_defaults
+                    .default_vless_fingerprint
+                    .as_deref(),
+                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1898,10 +1907,14 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
             vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
             vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
             vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-            default_vless_port: managed_defaults.default_vless_port.as_deref(),
-            default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-            default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-            default_ss_port: managed_defaults.default_ss_port.as_deref(),
+            default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+            default_vless_server_names: resolved_managed_defaults
+                .default_vless_server_names
+                .as_deref(),
+            default_vless_fingerprint: resolved_managed_defaults
+                .default_vless_fingerprint
+                .as_deref(),
+            default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
             cloudflare_ddns_enabled: ddns_enabled,
             cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
             cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1930,6 +1943,7 @@ fn ensure_xp_env_admin_token_hash_join(
     let p = paths.etc_xp_env();
     let existing = fs::read_to_string(&p).ok();
     let parsed = crate::ops::xp_env::parse_xp_env(existing);
+    let resolved_managed_defaults = resolve_managed_defaults_write_values(&parsed, managed_defaults);
     let vless_canary = resolve_vless_canary_write_values(&parsed, managed_defaults);
 
     if let Some(v) = parsed.node_name.as_deref()
@@ -1988,10 +2002,14 @@ fn ensure_xp_env_admin_token_hash_join(
                 vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
                 vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
                 vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-                default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-                default_ss_port: managed_defaults.default_ss_port.as_deref(),
+                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+                default_vless_server_names: resolved_managed_defaults
+                    .default_vless_server_names
+                    .as_deref(),
+                default_vless_fingerprint: resolved_managed_defaults
+                    .default_vless_fingerprint
+                    .as_deref(),
+                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -2025,10 +2043,14 @@ fn ensure_xp_env_admin_token_hash_join(
                 vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
                 vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
                 vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-                default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-                default_ss_port: managed_defaults.default_ss_port.as_deref(),
+                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+                default_vless_server_names: resolved_managed_defaults
+                    .default_vless_server_names
+                    .as_deref(),
+                default_vless_fingerprint: resolved_managed_defaults
+                    .default_vless_fingerprint
+                    .as_deref(),
+                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -2052,10 +2074,14 @@ fn ensure_xp_env_admin_token_hash_join(
             vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
             vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
             vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-            default_vless_port: managed_defaults.default_vless_port.as_deref(),
-            default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
-            default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
-            default_ss_port: managed_defaults.default_ss_port.as_deref(),
+            default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
+            default_vless_server_names: resolved_managed_defaults
+                .default_vless_server_names
+                .as_deref(),
+            default_vless_fingerprint: resolved_managed_defaults
+                .default_vless_fingerprint
+                .as_deref(),
+            default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
             cloudflare_ddns_enabled: ddns_enabled,
             cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
             cloudflare_ddns_zone_id: ddns_zone_id,
@@ -2118,6 +2144,44 @@ fn managed_defaults_write_values<'a>(args: &'a DeployArgs) -> ManagedDefaultsWri
             .map(Cow::Borrowed),
         default_vless_fingerprint: args.default_vless_fingerprint.as_deref().map(Cow::Borrowed),
         default_ss_port: args.default_ss_port.map(|value| Cow::Owned(value.to_string())),
+    }
+}
+
+fn resolve_managed_defaults_write_values(
+    parsed: &crate::ops::xp_env::ParsedXpEnv,
+    managed_defaults: &ManagedDefaultsWriteValues<'_>,
+) -> ManagedDefaultsWriteValues<'static> {
+    ManagedDefaultsWriteValues {
+        vless_canary_acme_contact_email: managed_defaults
+            .vless_canary_acme_contact_email
+            .as_ref()
+            .map(|value| Cow::Owned(value.to_string()))
+            .or_else(|| {
+                parsed
+                    .vless_canary_acme_contact_email
+                    .clone()
+                    .map(Cow::Owned)
+            }),
+        default_vless_port: managed_defaults
+            .default_vless_port
+            .as_ref()
+            .map(|value| Cow::Owned(value.to_string()))
+            .or_else(|| parsed.default_vless_port.clone().map(Cow::Owned)),
+        default_vless_server_names: managed_defaults
+            .default_vless_server_names
+            .as_ref()
+            .map(|value| Cow::Owned(value.to_string()))
+            .or_else(|| parsed.default_vless_server_names.clone().map(Cow::Owned)),
+        default_vless_fingerprint: managed_defaults
+            .default_vless_fingerprint
+            .as_ref()
+            .map(|value| Cow::Owned(value.to_string()))
+            .or_else(|| parsed.default_vless_fingerprint.clone().map(Cow::Owned)),
+        default_ss_port: managed_defaults
+            .default_ss_port
+            .as_ref()
+            .map(|value| Cow::Owned(value.to_string()))
+            .or_else(|| parsed.default_ss_port.clone().map(Cow::Owned)),
     }
 }
 
@@ -2421,6 +2485,72 @@ XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=zone-123\n",
         assert!(env.contains("XP_VLESS_CANARY_ACME_CONTACT_EMAIL='ops@example.com'"));
         assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE='/custom/token'"));
         assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID='zone-123'"));
+    }
+
+    #[test]
+    fn ensure_xp_env_admin_token_hash_preserves_existing_managed_default_endpoint_keys() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            format!(
+                "XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n\
+XP_DEFAULT_VLESS_PORT=53842\n\
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com\n\
+XP_DEFAULT_VLESS_FINGERPRINT=chrome\n\
+XP_DEFAULT_SS_PORT=53843\n",
+            ),
+        )
+        .unwrap();
+
+        ensure_xp_env_admin_token_hash_bootstrap(
+            &paths,
+            Mode::Real,
+            "node-1",
+            "example.com",
+            "https://example.com",
+            false,
+            "",
+            &empty_managed_defaults(),
+            false,
+        )
+        .unwrap();
+
+        let env = read_env(&paths);
+        assert!(env.contains("XP_DEFAULT_VLESS_PORT='53842'"));
+        assert!(env.contains(
+            "XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'"
+        ));
+        assert!(env.contains("XP_DEFAULT_VLESS_FINGERPRINT='chrome'"));
+        assert!(env.contains("XP_DEFAULT_SS_PORT='53843'"));
+    }
+
+    #[test]
+    fn resolve_managed_defaults_write_values_preserves_existing_endpoint_settings() {
+        let parsed = crate::ops::xp_env::parse_xp_env(Some(
+            "XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com\n\
+XP_DEFAULT_VLESS_PORT=53842\n\
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com\n\
+XP_DEFAULT_VLESS_FINGERPRINT=chrome\n\
+XP_DEFAULT_SS_PORT=53843\n"
+                .to_string(),
+        ));
+        let defaults = empty_managed_defaults();
+        let resolved = resolve_managed_defaults_write_values(&parsed, &defaults);
+
+        assert_eq!(
+            resolved.vless_canary_acme_contact_email.as_deref(),
+            Some("ops@example.com")
+        );
+        assert_eq!(resolved.default_vless_port.as_deref(), Some("53842"));
+        assert_eq!(
+            resolved.default_vless_server_names.as_deref(),
+            Some("public.sn.files.1drv.com,public.bn.files.1drv.com")
+        );
+        assert_eq!(resolved.default_vless_fingerprint.as_deref(), Some("chrome"));
+        assert_eq!(resolved.default_ss_port.as_deref(), Some("53843"));
     }
 
     #[test]

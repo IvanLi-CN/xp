@@ -290,7 +290,6 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
                         .to_string(),
                 );
             }
-            retained_lines.push(line.to_string());
             continue;
         }
         if line.starts_with("XP_DEFAULT_VLESS_SERVER_NAMES=") {
@@ -303,7 +302,6 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
                     .to_string(),
                 );
             }
-            retained_lines.push(line.to_string());
             continue;
         }
         if line.starts_with("XP_DEFAULT_VLESS_FINGERPRINT=") {
@@ -316,7 +314,6 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
                     .to_string(),
                 );
             }
-            retained_lines.push(line.to_string());
             continue;
         }
         if line.starts_with("XP_DEFAULT_SS_PORT=") {
@@ -327,7 +324,6 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
                         .to_string(),
                 );
             }
-            retained_lines.push(line.to_string());
             continue;
         }
         if line.starts_with("XP_CLOUDFLARE_DDNS_ENABLED=") {
