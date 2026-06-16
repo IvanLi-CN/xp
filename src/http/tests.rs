@@ -4620,6 +4620,7 @@ async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
         .subscription_token;
 
     let res = app
+        .clone()
         .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
         .await
         .unwrap();
@@ -4862,20 +4863,8 @@ async fn mihomo_subscription_paths_are_provider_only() {
     assert!(
         provider_system_proxy_names
             .iter()
-            .any(|name| name.ends_with("-ss-chain")),
-        "provider payload should expose ss chain proxies"
-    );
-    assert!(
-        provider_system_proxy_names
-            .iter()
             .any(|name| name.ends_with("-reality")),
         "provider payload should expose reality direct proxies"
-    );
-    assert!(
-        provider_system_proxy_names
-            .iter()
-            .any(|name| name.ends_with("-reality-chain")),
-        "provider payload should expose reality chain proxies"
     );
 }
 
@@ -4953,6 +4942,7 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
     assert_eq!(res.status(), StatusCode::OK);
 
     let res = app
+        .clone()
         .oneshot(req(
             "GET",
             &format!("/api/sub/{}?format=mihomo", fixtures.subscription_token),
@@ -4960,29 +4950,25 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
-    let groups = yaml
-        .get("proxy-groups")
+    let _yaml: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+    let provider_system_res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{}/mihomo/provider/system", fixtures.subscription_token),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(provider_system_res.status(), StatusCode::OK);
+    let provider_system_yaml: YamlValue =
+        serde_yaml::from_str(&body_text(provider_system_res).await).unwrap();
+    let proxy_names = provider_system_yaml
+        .get("proxies")
         .and_then(YamlValue::as_sequence)
-        .expect("proxy-groups must exist");
-    let group_refs = |name: &str| {
-        groups
-            .iter()
-            .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
-            .and_then(|group| group.get("proxies"))
-            .and_then(YamlValue::as_sequence)
-            .into_iter()
-            .flatten()
-            .filter_map(YamlValue::as_str)
-            .collect::<Vec<_>>()
-    };
-
-    let group_names = groups
+        .unwrap()
         .iter()
-        .filter_map(|group| group.get("name").and_then(YamlValue::as_str))
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
-    assert!(group_names.contains(&"🛬 hinetlh"));
-    assert!(group_refs("🔒 落地").contains(&"🛬 hinetlh"));
+    assert!(proxy_names.contains(&"hinetlh-ss"));
 }
 
 #[tokio::test]
@@ -5172,18 +5158,15 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
         .expect("relay group missing");
-    let outer_use = relay_group
-        .get("use")
+    let outer_proxies = relay_group
+        .get("proxies")
         .and_then(YamlValue::as_sequence)
-        .expect("relay group use missing")
+        .expect("relay group proxies missing")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    assert!(outer_use.contains(&"providerA"));
-    assert!(
-        !outer_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
-        "relay group must not consume generated chain proxies recursively"
-    );
+    assert!(outer_proxies.contains(&"🌟 Japan"));
+    assert_eq!(relay_group.get("use"), None);
 
     for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
@@ -5241,6 +5224,19 @@ rules: []
         .expect("landing group chain filter missing");
     assert!(landing_filter.contains("node\\-1\\-ss\\-chain"));
 
+    let japan_group = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected transit region group");
+    let japan_use = japan_group
+        .get("use")
+        .and_then(YamlValue::as_sequence)
+        .expect("Japan group use missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(japan_use, vec!["providerA"]);
+
     let landing_pool = groups
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 落地"))
@@ -5286,6 +5282,7 @@ rules: []
     assert_eq!(res.status(), StatusCode::OK);
 
     let res = app
+        .clone()
         .oneshot(req("GET", &format!("/api/sub/{token}?format=mihomo")))
         .await
         .unwrap();
@@ -5308,15 +5305,35 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    let relay_group = groups
+    assert!(
+        !groups
+            .iter()
+            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com")),
+        "relay group should be omitted when no transit candidates exist"
+    );
+
+    let provider_system_res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}/mihomo/provider/system"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(provider_system_res.status(), StatusCode::OK);
+    let provider_system_yaml: YamlValue =
+        serde_yaml::from_str(&body_text(provider_system_res).await).unwrap();
+    let provider_system_proxy_names = provider_system_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
-        .expect("expected built-in relay group 🛣️ example-com");
-    assert!(relay_group.get("use").is_none());
-    assert_eq!(
-        relay_group.get("proxies").and_then(YamlValue::as_sequence),
-        Some(&vec![YamlValue::String("DIRECT".to_string())]),
-        "relay group should fall back to DIRECT without external providers"
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .all(|name| !name.ends_with("-ss-chain") && !name.ends_with("-reality-chain")),
+        "system payload should prune chain proxies when relay candidates are unavailable"
     );
 }
 
@@ -5952,7 +5969,6 @@ rules: []
             "🌟 Singapore",
             "🌟 US",
             "🌟 Other",
-            "🛬 node-1",
             "💎 高质量",
         ]
     );

@@ -149,10 +149,15 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`
-- `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
+- `🔒 高质量` 继续通过 `use:` 消费 system provider 中的 `{base}-reality` 直连接入点；但 transit-only `🔒/🤯/🌟 {Region}` 不再消费 system provider，也不再吃系统落地组或系统 `*-chain`。
 - per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 的 host slug 会保留 `.` 与 `-` 等分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 随当前订阅集合发生计数式重命名；若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
-- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空。无外部 provider 时同样回落 `DIRECT`。同一 `access_host` 下只有一个公开 `api_base_url` 时，健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测，避免泄露私有 API 地址或假设 `access_host` 承载 HTTP API。
-- 系统托管的地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯 {Region}` 别名、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
+- transit-only 地区面固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `🔒/🤯 {Region}`、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
+- 地区组固定语义：
+  - `🔒 {Region}` = `select`
+  - `🤯 {Region}` = 同候选集的 `url-test`，`interval: 120`、`lazy: true`
+  - `🌟 {Region}` = `fallback([🔒 {Region}, 🤯 {Region}])`
+- per-base relay 组只比较当前订阅里实际可用的 `🌟 {Region}`，是唯一保留的自动层：hidden `url-test`，`interval: 300`、`lazy: true`，不再直接扫 provider，也不再保留运行时 `DIRECT` 中转兜底。同一 `access_host` 下只有一个公开 `api_base_url` 时，健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测。
+- 若某地区没有 transit 候选，该地区组仍输出为可加载占位，但不会进入任何 relay 候选集合；若某个 `relay-base` 没有任何 transit 候选，则主配置不生成对应 relay，system payload 也不生成依赖它的 `*-chain`。
 - `💎 高质量` 必须保留 owner-facing 兜底层语义，不能退化成只剩 `🔒 高质量` 的单层入口；若 `💎 高质量` 本身不直接挂 `🤯 All`，则最终输出必须另有一个稳定包装入口同时暴露 `💎 高质量` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
@@ -171,14 +176,13 @@ MVP 建议输出“可直接导入”的最小 YAML：
     - 追加 `extra_proxies_yaml` 到主配置顶层 `proxies`
     - 以 `extra_proxy_providers_yaml` 追加到最终 `proxy-providers`
 - 用户输入若命中系统保留 proxy / provider 名称，或最终配置中存在未定义引用，保存阶段直接返回 `400 invalid_request`；服务端不做自动重命名。
-- 所有外部 provider 名称会注入每个 per-base relay 组的 `use` 列表，并用日本/香港/新加坡 filter 选择外层中转节点。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
   - per-base relay 组：`🛣️ {relay-base}`，按 `Node.access_host` 聚合，同机共享
   - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-  - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为被动 `select` 组，避免恢复多地区主动测速；`🛣️ {Region}` 兼容别名不再生成
+  - transit-only 地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；`🛣️ {Region}` 兼容别名不再生成
   - 聚合组：`💎 高质量`、`🚀 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
-- 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
+- 地区 transit 组成员只来自外部 `proxy-providers` 与命中地区 regex 的 `extra_proxies_yaml`；system provider 的主动探测结果只继续影响系统落地组与 `🔒 高质量`，不再直接喂给 transit-only 地区桶。
 - 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
 - `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只做 YAML 结构校验与最终渲染校验，不做自动抽取或规范化。
 - `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
@@ -186,7 +190,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - hidden per-base relay 组 `🛣️ {relay-base}` 会在最终 `proxy-groups` 中统一移动到系统托管组尾部，位于地区组、`🛬 {base}`、`🔒 落地`、`🤯 All`、`🚀 节点选择` 之后。
 - `💎 高质量` 的兜底要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
-- Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
+- Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案把主动探测速率压缩到两层且更低频：地区 transit 桶 `120s`，per-base relay `300s`，避免过去链式落地因多层自动组而产生过多探测请求。
 
 ### 6.5 缺失混入配置回退
 

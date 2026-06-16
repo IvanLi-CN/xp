@@ -6945,6 +6945,7 @@ fn render_mihomo_subscription(
             &ctx.memberships,
             &ctx.endpoints,
             &ctx.nodes,
+            ctx.mihomo_profile.as_ref(),
         )
         .map(text_yaml_utf8)
         .map_err(map_subscription_render_error),
