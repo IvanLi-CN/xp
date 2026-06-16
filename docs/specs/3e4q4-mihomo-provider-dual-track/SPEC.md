@@ -73,7 +73,7 @@
   - `🌟 {Region}` = `fallback([🔒 {Region}, 🤯 {Region}])`
 - per-base relay 组 `🛣️ {relay-base}` 成为唯一保留的自动层：固定为 hidden `url-test`，只允许比较当前订阅里实际纳入的 `🌟 {Region}`，固定 `interval: 300`、`lazy: true`，不得 `use` `xp-system-generated`，也不得再保留运行时 `DIRECT` 中转兜底。同一 `access_host` 下只有一个公开 `api_base_url` 时，relay 组的健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测。
 - 当某地区没有 transit 候选时，该地区组仍必须输出并保持配置可加载；但空地区组不得进入任何 `🛣️ {relay-base}` 候选集合。
-- 当某个 `relay-base` 没有任何 transit 候选时，服务端不得生成对应 `🛣️ {relay-base}`，且 `/mihomo/provider/system` 也不得继续输出依赖该 relay 的 `*-ss-chain` / `*-reality-chain`；客户端只保留对应直连落地入口。
+- 当某个 `relay-base` 没有任何 transit 候选时，服务端不得生成对应 `🛣️ {relay-base}`；若当前订阅已配置 Mihomo profile，则 `/mihomo/provider/system` 也不得继续输出依赖该 relay 的 `*-ss-chain` / `*-reality-chain`，客户端只保留对应直连落地入口。
 - 输出不得再生成共享 `🛣️ JP/HK/SG` 主路径，也不得生成 `🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除，不得重新展开为共享中转语义。
 - `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 必须先做最终 provider 主配置 + `/mihomo/provider/system` payload 的联合预渲染校验；任何未定义的 `proxies`、`use`、`dialer-proxy` 或 `rules` 引用都必须返回 `400 invalid_request`，不得静默 remap、裁剪或回退。
 - 服务端不得自动抽取、重写或规范化用户输入中的 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不得把 legacy relay alias、旧 landing 引用或保留名冲突转换成“兼容修复”。
@@ -98,7 +98,7 @@
 
 ### Edge cases / errors
 
-- 用户未配置 Mihomo profile 时，canonical `?format=mihomo` 与显式 provider 路径回退 clash；`/mihomo/provider/system` 始终返回系统 provider payload，不依赖用户 mixin。
+- 用户未配置 Mihomo profile 时，canonical `?format=mihomo` 与显式 provider 路径回退 clash；`/mihomo/provider/system` 始终返回系统 provider payload，不依赖用户 mixin，且继续保留系统直连与链式节点。
 - 当 `extra_proxy_providers_yaml` 已包含 `xp-system-generated` 时，保存 profile 成功但渲染 provider 路径返回 `400 invalid_request`，提示保留名冲突。
 - 当请求头无法推导外部 origin 时，provider 主配置回退到 `Config.api_base_url` 的规范化 origin。
 
@@ -121,7 +121,7 @@
 
 - Given 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy`，Then 不再返回 legacy Mihomo 主配置。
-- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且在 relay 可用时包含系统直连与链式节点（`-ss` / `-reality` / `-ss-chain` / `-reality-chain`）；当 relay 被裁掉时只保留系统直连节点。
+- Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML；未配置 Mihomo profile 时保留系统直连与链式节点（`-ss` / `-reality` / `-ss-chain` / `-reality-chain`），已配置 profile 且 relay 被裁掉时只保留系统直连节点。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组只通过 provider filter 暴露 `{base}-ss-chain` / `{base}-reality-chain`，并在 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 主配置存在外部 provider 或命中地区 regex 的 `extra_proxies_yaml`，When 检查 `🔒/🤯/🌟 {Region}`，Then 这三组必须共享同一批 transit-only 候选，其中 `🔒` 为 `select`、`🤯` 为 `url-test`、`🌟` 为 `fallback([🔒, 🤯])`。
@@ -134,7 +134,7 @@
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。
 - Given 用户在 `mixin_yaml` 内写入 `proxies` 或 `proxy-providers`，When 保存 profile，Then 服务端保留原始输入，不做自动抽取；坏数据只在最终渲染校验阶段失败。
 - Given provider 主配置，When 检查 `proxy-groups` 顺序，Then hidden `🛣️ {relay-base}` 必须排在 `🚀 节点选择` 之后。
-- Given provider 主配置没有外部 provider，且 `extra_proxies_yaml` 也没有命中地区 regex 的 transit 候选，When 请求主配置与 `/mihomo/provider/system`，Then 不生成对应 `🛣️ {relay-base}`，且 system payload 不输出 `*-ss-chain` / `*-reality-chain`。
+- Given provider 主配置没有外部 provider，且 `extra_proxies_yaml` 也没有命中地区 regex 的 transit 候选，When 请求主配置与 `/mihomo/provider/system`，Then 不生成对应 `🛣️ {relay-base}`；若当前订阅已配置 Mihomo profile，则 system payload 不输出 `*-ss-chain` / `*-reality-chain`。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个 owner-facing 包装组稳定同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终可见入口缺失全局兜底。
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。

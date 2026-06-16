@@ -59,7 +59,7 @@ Response:
 - `💎 高质量` 作为 owner-facing 高质量入口不得失去兜底层；最终主配置必须稳定提供“高质量入口 + 全局兜底入口”两层语义。若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个稳定 owner-facing 包装组同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终入口仅剩 `🔒 高质量` 单一路径。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
 - per-base relay 组 `🛣️ {relay-base}` 为 hidden `url-test`，只比较当前订阅里实际纳入的 `🌟 {Region}`，固定 `interval: 300`、`lazy: true`，不得 `use` `xp-system-generated`，也不再保留运行时 `DIRECT` 中转兜底；同一 `access_host` 下只有一个公开 `api_base_url` 时，健康检查 URL 使用该 API health URL，否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测。
-- 当某个 `relay-base` 没有任何 transit 候选时，主配置不得生成对应 relay 组；对应 `/mihomo/provider/system` payload 也不得输出依赖该 relay 的 `*-ss-chain` / `*-reality-chain`。
+- 当某个 `relay-base` 没有任何 transit 候选时，主配置不得生成对应 relay 组；若当前订阅已配置 Mihomo profile，则对应 `/mihomo/provider/system` payload 也不得输出依赖该 relay 的 `*-ss-chain` / `*-reality-chain`。
 - 系统托管的可见地区组固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成 `💎 高质量`、`🚀 节点选择` 与 `🤯 All`；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
 - 输出不得生成共享 `🛣️ JP/HK/SG` 主路径或 `🛣️ {Region}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除。
 - PUT 保存阶段不会自动抽取 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不会把 legacy relay alias、旧 landing 引用或保留名冲突做隐含转换。
@@ -92,7 +92,7 @@ Rules:
 - `{base}-ss-chain` 与 `{base}-reality-chain` 的 `dialer-proxy` 必须指向该节点 `access_host` 对应的 per-base relay 组；同一 `access_host` 的多个 base 共享同一个 relay 组名。
 - 同一 `{base}` 在 provider payload 中应稳定排序，使 `🛬 {base}` 过滤链式节点后的候选顺序为 `{base}-ss-chain`、`{base}-reality-chain`。
 - provider payload 可被 Mihomo `proxy-providers.type=http` 直接消费。
-- 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统隐藏直连节点。
+- 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回 system payload。未配置 profile 时，payload 继续保留系统直连与链式节点；只有在已配置 profile 且 relay 无候选时，才裁掉 `*-chain`。
 - 新节点一旦拥有 system payload entry 且主动探测得到地区归类，就会自动通过系统落地组进入 `🚀 节点选择`；若用户额外配置了外部 provider 或命中地区 regex 的手写 transit 节点，则对应 `🌟 {Region}` / relay 也会在下次主配置拉取后参与比较。
 
 Response:

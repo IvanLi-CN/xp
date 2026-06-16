@@ -157,7 +157,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `🤯 {Region}` = 同候选集的 `url-test`，`interval: 120`、`lazy: true`
   - `🌟 {Region}` = `fallback([🔒 {Region}, 🤯 {Region}])`
 - per-base relay 组只比较当前订阅里实际可用的 `🌟 {Region}`，是唯一保留的自动层：hidden `url-test`，`interval: 300`、`lazy: true`，不再直接扫 provider，也不再保留运行时 `DIRECT` 中转兜底。同一 `access_host` 下只有一个公开 `api_base_url` 时，健康检查 URL 使用该 API health URL；否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204` 探测。
-- 若某地区没有 transit 候选，该地区组仍输出为可加载占位，但不会进入任何 relay 候选集合；若某个 `relay-base` 没有任何 transit 候选，则主配置不生成对应 relay，system payload 也不生成依赖它的 `*-chain`。
+- 若某地区没有 transit 候选，该地区组仍输出为可加载占位，但不会进入任何 relay 候选集合；若某个 `relay-base` 没有任何 transit 候选，则主配置不生成对应 relay，且在用户已配置 Mihomo profile 的前提下，system payload 也不生成依赖该 relay 的 `*-chain`。当用户未配置 Mihomo profile 时，`/mihomo/provider/system` 继续返回完整 system payload，不提前裁掉 chain。
 - `💎 高质量` 必须保留 owner-facing 兜底层语义，不能退化成只剩 `🔒 高质量` 的单层入口；若 `💎 高质量` 本身不直接挂 `🤯 All`，则最终输出必须另有一个稳定包装入口同时暴露 `💎 高质量` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。

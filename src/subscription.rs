@@ -629,7 +629,7 @@ pub fn build_mihomo_provider_system_yaml(
         build_provider_system_render_plan(
             &relay_groups,
             &std::collections::BTreeSet::new(),
-            false,
+            true,
         )
     };
     let mut generated_direct_proxies = build_mihomo_generated_proxies(
@@ -7228,8 +7228,28 @@ rules: []
             proxy_names,
             vec![
                 "Tokyo-A-reality",
+                "Tokyo-A-ss-chain",
+                "Tokyo-A-reality-chain",
                 "Tokyo-A-ss"
             ]
+        );
+
+        let proxy_dialer = |name: &str| {
+            root.get("proxies")
+                .and_then(Value::as_sequence)
+                .and_then(|proxies| {
+                    proxies
+                        .iter()
+                        .find(|proxy| proxy.get("name").and_then(Value::as_str) == Some(name))
+                })
+                .and_then(|proxy| proxy.get("dialer-proxy"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        assert_eq!(proxy_dialer("Tokyo-A-ss-chain").as_deref(), Some("🛣️ example-com"));
+        assert_eq!(
+            proxy_dialer("Tokyo-A-reality-chain").as_deref(),
+            Some("🛣️ example-com")
         );
     }
 

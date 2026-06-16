@@ -4633,6 +4633,30 @@ async fn subscription_format_mihomo_without_profile_falls_back_to_clash_yaml() {
     let yaml: YamlValue = serde_yaml::from_str(&body).unwrap();
     let proxies = yaml.get("proxies").and_then(|v| v.as_sequence()).unwrap();
     assert!(!proxies.is_empty());
+
+    let provider_system_res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}/mihomo/provider/system"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(provider_system_res.status(), StatusCode::OK);
+    let provider_system_yaml: YamlValue =
+        serde_yaml::from_str(&body_text(provider_system_res).await).unwrap();
+    let provider_system_proxy_names = provider_system_yaml
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .unwrap()
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-ss-chain")),
+        "provider system payload should preserve chain proxies even without a saved Mihomo profile"
+    );
 }
 
 #[tokio::test]
