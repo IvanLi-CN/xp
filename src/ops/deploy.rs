@@ -139,11 +139,13 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         args.join_token_stdin_value = Some(token);
     }
 
+    let managed_vless_enabled = args.default_vless_port.is_some();
+
     if args.cloudflare_token_stdin {
-        if !cloudflare_enabled && !ddns_enabled {
+        if !cloudflare_enabled && !ddns_enabled && !managed_vless_enabled {
             return Err(ExitError::new(
                 2,
-                "invalid_args: --cloudflare-token-stdin requires --cloudflare or --ddns",
+                "invalid_args: --cloudflare-token-stdin requires --cloudflare, --ddns, or managed default vless",
             ));
         }
         if io::stdin().is_terminal() {
@@ -166,10 +168,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         args.cloudflare_token_stdin_value = Some(token);
     }
 
-    if args.cloudflare_token.is_some() && !cloudflare_enabled && !ddns_enabled {
+    if args.cloudflare_token.is_some() && !cloudflare_enabled && !ddns_enabled && !managed_vless_enabled {
         return Err(ExitError::new(
             2,
-            "invalid_args: --cloudflare-token requires --cloudflare or --ddns",
+            "invalid_args: --cloudflare-token requires --cloudflare, --ddns, or managed default vless",
         ));
     }
 
@@ -634,8 +636,8 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let mut cloudflare_plan = None;
     let mut cloudflare_token_source: Option<CloudflareTokenSource> = None;
     let mut ddns_zone_id = args.ddns_zone_id.clone();
-
     let managed_vless_enabled = args.default_vless_port.is_some();
+
     let token = if cloudflare_enabled || ddns_enabled || managed_vless_enabled {
         match cloudflare::load_cloudflare_token_for_deploy(
             paths,
