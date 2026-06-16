@@ -1983,7 +1983,11 @@ fn provider_relay_group_candidate_names(
     render_plan: &MihomoProviderRenderPlan,
     extra_proxy_names: &std::collections::BTreeSet<String>,
 ) -> Vec<String> {
-    if render_plan.has_outer_providers {
+    // Outer providers are runtime transit sources that Mihomo expands after loading the
+    // provider payload. The server can enumerate only `extra_proxies_yaml` candidates itself,
+    // so once any outer provider exists we must keep the relay's managed region set and let the
+    // runtime provider filters decide which provider-backed nodes actually participate.
+    if render_plan.has_dynamic_provider_candidates {
         return relay_group
             .candidate_regions
             .iter()
@@ -2016,16 +2020,16 @@ fn collect_transit_candidate_proxy_names(
 fn build_provider_system_render_plan(
     relay_groups: &[MihomoRelayGroup],
     extra_transit_proxy_names: &std::collections::BTreeSet<String>,
-    has_outer_providers: bool,
+    has_dynamic_provider_candidates: bool,
 ) -> MihomoProviderRenderPlan {
     let relay_group_names = relay_groups
         .iter()
         .filter(|relay_group| {
-            has_outer_providers
+            has_dynamic_provider_candidates
                 || !provider_relay_group_candidate_names(
                     relay_group,
                     &MihomoProviderRenderPlan {
-                        has_outer_providers: false,
+                        has_dynamic_provider_candidates: false,
                         relay_group_names: std::collections::BTreeSet::new(),
                     },
                     extra_transit_proxy_names,
@@ -2035,14 +2039,14 @@ fn build_provider_system_render_plan(
         .map(|relay_group| relay_group.name.clone())
         .collect::<std::collections::BTreeSet<_>>();
     MihomoProviderRenderPlan {
-        has_outer_providers,
+        has_dynamic_provider_candidates,
         relay_group_names,
     }
 }
 
 #[derive(Debug, Clone, Default)]
 struct MihomoProviderRenderPlan {
-    has_outer_providers: bool,
+    has_dynamic_provider_candidates: bool,
     relay_group_names: std::collections::BTreeSet<String>,
 }
 
@@ -5776,7 +5780,7 @@ providerA:
             &u,
             &memberships,
             &endpoints,
-            &[n],
+            &[n.clone()],
             &probes,
             &profile,
             "https://sub.example.com/api/sub/token/mihomo/provider/system",
@@ -5907,6 +5911,31 @@ providerA:
                 .collect::<Vec<_>>(),
             vec!["🔒 Japan", "🤯 Japan"]
         );
+
+        let system_yaml =
+            build_mihomo_provider_system_yaml(SEED, &u, &memberships, &endpoints, &[n], Some(&profile))
+                .expect("provider system yaml should keep dynamic relay chains when outer providers exist");
+        let system_root: Value = serde_yaml::from_str(&system_yaml).unwrap();
+        let system_proxy_names = system_root
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .unwrap()
+            .iter()
+            .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(system_proxy_names.contains(&"Tokyo-A-ss-chain"));
+        assert!(system_proxy_names.contains(&"Tokyo-A-reality-chain"));
+        let chain_dialer = system_root
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .and_then(|proxies| {
+                proxies
+                    .iter()
+                    .find(|proxy| proxy.get("name").and_then(Value::as_str) == Some("Tokyo-A-ss-chain"))
+            })
+            .and_then(|proxy| proxy.get("dialer-proxy"))
+            .and_then(Value::as_str);
+        assert_eq!(chain_dialer, Some("🛣️ example-com"));
 
         let high_quality_group = proxy_groups
             .iter()
