@@ -1,20 +1,17 @@
 use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash};
 use crate::cluster_metadata::{ClusterMetadata, ClusterPaths};
-use crate::domain::{Endpoint, EndpointKind};
-use crate::id::new_ulid_string;
+use crate::domain::Endpoint;
+use crate::managed_default_endpoints::{
+    DefaultSsEndpointSpec, DefaultVlessEndpointSpec, ManagedDefaultEndpointsSpec,
+    build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
+    reconcile_managed_default_endpoints as reconcile_managed_default_endpoints_shared,
+};
 use crate::ops::cli::{CloudflareProvisionArgs, ContainerRunArgs, ExitError};
 use crate::ops::cloudflare::{self, CloudflareTokenSource, ZoneLookup};
 use crate::ops::init;
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, ensure_dir, write_string_if_changed};
-use crate::protocol::{
-    RealityConfig, RealityKeys, RealityServerNamesSource, SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-    Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
-    generate_short_id_16hex, generate_ss2022_psk_b64, validate_reality_dest,
-    validate_reality_server_name,
-};
 use futures_util::future::pending;
-use rand::rngs::OsRng;
 use reqwest::Url;
 use std::collections::BTreeMap;
 use std::env;
@@ -45,8 +42,6 @@ const LOCAL_API_READY_DELAY: Duration = Duration::from_millis(300);
 const PUBLIC_API_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PUBLIC_API_PROBE_DELAY: Duration = Duration::from_secs(2);
 const PUBLIC_API_PROBE_ATTEMPTS: usize = 60;
-const MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION: u32 = 1;
-
 #[derive(Debug, Clone)]
 struct BinaryPaths {
     xp: PathBuf,
@@ -134,44 +129,6 @@ struct ContainerDdns {
     zone_id: String,
     token: String,
     token_file: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DefaultVlessEndpointSpec {
-    port: u16,
-    reality_dest: String,
-    server_names: Vec<String>,
-    fingerprint: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DefaultSsEndpointSpec {
-    port: u16,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ManagedDefaultEndpointsSpec {
-    vless: Option<DefaultVlessEndpointSpec>,
-    ss: Option<DefaultSsEndpointSpec>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-struct ManagedDefaultEndpointsState {
-    schema_version: u32,
-    #[serde(default)]
-    vless_endpoint_id: Option<String>,
-    #[serde(default)]
-    ss_endpoint_id: Option<String>,
-}
-
-impl Default for ManagedDefaultEndpointsState {
-    fn default() -> Self {
-        Self {
-            schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
-            vless_endpoint_id: None,
-            ss_endpoint_id: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -483,84 +440,30 @@ fn parse_default_vless_endpoint_spec(
     env_map: &BTreeMap<String, String>,
 ) -> Result<Option<DefaultVlessEndpointSpec>, ExitError> {
     let port = optional_port_env(env_map, "XP_DEFAULT_VLESS_PORT")?;
-    let reality_dest = optional_env(env_map, "XP_DEFAULT_VLESS_REALITY_DEST");
     let server_names_raw = optional_env(env_map, "XP_DEFAULT_VLESS_SERVER_NAMES");
     let fingerprint = optional_env(env_map, "XP_DEFAULT_VLESS_FINGERPRINT");
+    let vless_canary_bind = socket_addr_env(
+        env_map,
+        "XP_VLESS_CANARY_BIND",
+        crate::config::DEFAULT_VLESS_CANARY_BIND,
+    )?;
 
-    if port.is_none()
-        && reality_dest.is_none()
-        && server_names_raw.is_none()
-        && fingerprint.is_none()
-    {
-        return Ok(None);
-    }
-
-    let port = port.ok_or_else(|| {
-        ExitError::new(
-            2,
-            "invalid_args: XP_DEFAULT_VLESS_PORT is required when managing the default VLESS endpoint",
-        )
-    })?;
-    let reality_dest = reality_dest.ok_or_else(|| {
-        ExitError::new(
-            2,
-            "invalid_args: XP_DEFAULT_VLESS_REALITY_DEST is required when managing the default VLESS endpoint",
-        )
-    })?;
-    validate_reality_dest(&reality_dest).map_err(|reason| {
-        ExitError::new(
-            2,
-            format!("invalid_args: XP_DEFAULT_VLESS_REALITY_DEST is invalid: {reason}"),
-        )
-    })?;
-    let server_names_raw = server_names_raw.ok_or_else(|| {
-        ExitError::new(
-            2,
-            "invalid_args: XP_DEFAULT_VLESS_SERVER_NAMES is required when managing the default VLESS endpoint",
-        )
-    })?;
-    let server_names = parse_server_names(&server_names_raw)?;
-    let fingerprint = fingerprint.unwrap_or_else(|| "chrome".to_string());
-
-    Ok(Some(DefaultVlessEndpointSpec {
+    build_default_vless_endpoint_spec(
         port,
-        reality_dest,
-        server_names,
-        fingerprint,
-    }))
+        server_names_raw.as_deref(),
+        fingerprint.as_deref(),
+        vless_canary_bind,
+    )
+    .map_err(|err| ExitError::new(2, format!("invalid_args: {err}")))
 }
 
 fn parse_default_ss_endpoint_spec(
     env_map: &BTreeMap<String, String>,
 ) -> Result<Option<DefaultSsEndpointSpec>, ExitError> {
-    Ok(
-        optional_port_env(env_map, "XP_DEFAULT_SS_PORT")?
-            .map(|port| DefaultSsEndpointSpec { port }),
-    )
-}
-
-fn parse_server_names(value: &str) -> Result<Vec<String>, ExitError> {
-    let mut out = Vec::new();
-    for raw in value.split(',') {
-        let item = raw.trim();
-        if item.is_empty() {
-            continue;
-        }
-        validate_reality_server_name(item).map_err(|reason| {
-            ExitError::new(
-                2,
-                format!("invalid_args: XP_DEFAULT_VLESS_SERVER_NAMES contains invalid server name {item}: {reason}"),
-            )
-        })?;
-        out.push(item.to_string());
-    }
-    if out.is_empty() {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: XP_DEFAULT_VLESS_SERVER_NAMES must contain at least one hostname",
-        ));
-    }
-    Ok(out)
+    Ok(build_default_ss_endpoint_spec(optional_port_env(
+        env_map,
+        "XP_DEFAULT_SS_PORT",
+    )?))
 }
 
 fn build_runtime_env(env_map: &BTreeMap<String, String>, ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
@@ -833,17 +736,12 @@ fn ensure_container_layout(
     mode: Mode,
 ) -> Result<(), ExitError> {
     let data_dir = paths.map_abs(&spec.data_dir);
-    let container_state_dir = managed_default_endpoints_state_path(&data_dir)
-        .parent()
-        .expect("managed endpoints state file has a parent")
-        .to_path_buf();
     let xp_dir = paths.etc_xp_dir();
     let xray_dir = paths.etc_xray_dir();
     let cloudflared_dir = paths.etc_cloudflared_dir();
     let xp_ops_cloudflare_dir = paths.etc_xp_ops_cloudflare_dir();
     let dirs = [
         data_dir.as_path(),
-        container_state_dir.as_path(),
         xp_dir.as_path(),
         xray_dir.as_path(),
         cloudflared_dir.as_path(),
@@ -919,6 +817,12 @@ async fn reconcile_runtime_state(paths: &Paths, spec: &ContainerSpec) -> Result<
             &spec.node_name,
             &spec.access_host,
             &spec.api_base_url,
+            &spec.default_endpoints,
+            socket_addr_env(
+                &spec.runtime_env,
+                "XP_VLESS_CANARY_BIND",
+                crate::config::DEFAULT_VLESS_CANARY_BIND,
+            )?,
             control_plane_base_url,
             Mode::Real,
         )
@@ -953,349 +857,21 @@ async fn reconcile_managed_default_endpoints(
         .filter(|endpoint| endpoint.node_id == cluster_meta.node_id)
         .collect();
 
-    let mut state = load_managed_default_endpoints_state(&abs_data_dir)?;
-
-    state.vless_endpoint_id = reconcile_one_managed_endpoint(
-        &client,
-        xp_base_url,
-        &cluster_ca_key_pem,
-        &cluster_meta.node_id,
-        ManagedDefaultEndpointKind::Vless,
-        spec.default_endpoints.vless.as_ref(),
-        state.vless_endpoint_id.as_deref(),
-        &node_endpoints,
-    )
-    .await?;
-
-    state.ss_endpoint_id = reconcile_one_managed_endpoint(
-        &client,
-        xp_base_url,
-        &cluster_ca_key_pem,
-        &cluster_meta.node_id,
-        ManagedDefaultEndpointKind::Ss,
-        spec.default_endpoints.ss.as_ref(),
-        state.ss_endpoint_id.as_deref(),
-        &node_endpoints,
-    )
-    .await?;
-
-    persist_managed_default_endpoints_state(&abs_data_dir, &state)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ManagedDefaultEndpointKind {
-    Vless,
-    Ss,
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn reconcile_one_managed_endpoint<T>(
-    client: &reqwest::Client,
-    xp_base_url: &str,
-    cluster_ca_key_pem: &str,
-    node_id: &str,
-    kind: ManagedDefaultEndpointKind,
-    desired: Option<&T>,
-    managed_endpoint_id: Option<&str>,
-    node_endpoints: &[Endpoint],
-) -> Result<Option<String>, ExitError>
-where
-    T: ManagedEndpointSpec,
-{
-    let same_kind: Vec<&Endpoint> = node_endpoints
-        .iter()
-        .filter(|endpoint| endpoint_matches_kind(endpoint, kind))
-        .collect();
-    let managed_current = managed_endpoint_id.and_then(|endpoint_id| {
-        same_kind
-            .iter()
-            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-            .copied()
-    });
-
-    let Some(desired) = desired else {
-        if let Some(endpoint) = managed_current {
-            eprintln!(
-                "container reconcile: deleting managed {} endpoint {}",
-                kind.label(),
-                endpoint.endpoint_id
-            );
-            crate::ops::xp::internal_client_write(
-                client,
-                xp_base_url,
-                cluster_ca_key_pem,
-                crate::state::DesiredStateCommand::DeleteEndpoint {
-                    endpoint_id: endpoint.endpoint_id.clone(),
-                },
-            )
-            .await?;
-        }
-        return Ok(None);
+    let mut writer = |cmd| async {
+        crate::ops::xp::internal_client_write(&client, xp_base_url, &cluster_ca_key_pem, cmd)
+            .await
+            .map_err(|err| anyhow::anyhow!(err.message))
     };
-
-    if let Some(endpoint) = managed_current {
-        let next = desired.reconcile_existing(endpoint)?;
-        if &next != endpoint {
-            eprintln!(
-                "container reconcile: updating managed {} endpoint {}",
-                kind.label(),
-                endpoint.endpoint_id
-            );
-            crate::ops::xp::internal_client_write(
-                client,
-                xp_base_url,
-                cluster_ca_key_pem,
-                crate::state::DesiredStateCommand::UpsertEndpoint { endpoint: next },
-            )
-            .await?;
-        }
-        return Ok(Some(endpoint.endpoint_id.clone()));
-    }
-
-    match same_kind.as_slice() {
-        [] => {
-            let endpoint = desired.create_new(node_id.to_string())?;
-            let endpoint_id = endpoint.endpoint_id.clone();
-            eprintln!(
-                "container reconcile: creating managed {} endpoint {}",
-                kind.label(),
-                endpoint_id
-            );
-            crate::ops::xp::internal_client_write(
-                client,
-                xp_base_url,
-                cluster_ca_key_pem,
-                crate::state::DesiredStateCommand::UpsertEndpoint { endpoint },
-            )
-            .await?;
-            Ok(Some(endpoint_id))
-        }
-        [endpoint] => {
-            let next = desired.reconcile_existing(endpoint)?;
-            let endpoint_id = endpoint.endpoint_id.clone();
-            if &next != *endpoint {
-                eprintln!(
-                    "container reconcile: adopting and updating {} endpoint {}",
-                    kind.label(),
-                    endpoint_id
-                );
-                crate::ops::xp::internal_client_write(
-                    client,
-                    xp_base_url,
-                    cluster_ca_key_pem,
-                    crate::state::DesiredStateCommand::UpsertEndpoint { endpoint: next },
-                )
-                .await?;
-            } else {
-                eprintln!(
-                    "container reconcile: adopting existing {} endpoint {}",
-                    kind.label(),
-                    endpoint_id
-                );
-            }
-            Ok(Some(endpoint_id))
-        }
-        _ => Err(ExitError::new(
-            5,
-            format!(
-                "container_reconcile_failed: multiple {} endpoints already exist on this node; set only one managed endpoint or clean them up manually",
-                kind.label()
-            ),
-        )),
-    }
-}
-
-trait ManagedEndpointSpec {
-    fn create_new(&self, node_id: String) -> Result<Endpoint, ExitError>;
-    fn reconcile_existing(&self, endpoint: &Endpoint) -> Result<Endpoint, ExitError>;
-}
-
-impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
-    fn create_new(&self, node_id: String) -> Result<Endpoint, ExitError> {
-        let endpoint_id = new_ulid_string();
-        let tag = managed_endpoint_tag(ManagedDefaultEndpointKind::Vless, &endpoint_id);
-        let mut rng = OsRng;
-        let keypair = generate_reality_keypair(&mut rng);
-        let short_id = generate_short_id_16hex(&mut rng);
-        let meta = VlessRealityVisionTcpEndpointMeta {
-            reality: self.reality_config(),
-            reality_keys: RealityKeys {
-                private_key: keypair.private_key,
-                public_key: keypair.public_key,
-            },
-            short_ids: vec![short_id.clone()],
-            active_short_id: short_id,
-        };
-        Ok(Endpoint {
-            endpoint_id,
-            node_id,
-            tag,
-            kind: EndpointKind::VlessRealityVisionTcp,
-            port: self.port,
-            meta: serde_json::to_value(meta)
-                .map_err(|e| ExitError::new(5, format!("json_error: {e}")))?,
-        })
-    }
-
-    fn reconcile_existing(&self, endpoint: &Endpoint) -> Result<Endpoint, ExitError> {
-        if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
-            return Err(ExitError::new(
-                5,
-                format!(
-                    "container_reconcile_failed: endpoint {} is not a VLESS endpoint",
-                    endpoint.endpoint_id
-                ),
-            ));
-        }
-        let mut meta: VlessRealityVisionTcpEndpointMeta =
-            serde_json::from_value(endpoint.meta.clone()).map_err(|e| {
-                ExitError::new(
-                    5,
-                    format!(
-                        "container_reconcile_failed: parse VLESS endpoint {} metadata: {e}",
-                        endpoint.endpoint_id
-                    ),
-                )
-            })?;
-        meta.reality = self.reality_config();
-
-        let mut next = endpoint.clone();
-        next.port = self.port;
-        next.meta = serde_json::to_value(meta)
-            .map_err(|e| ExitError::new(5, format!("json_error: {e}")))?;
-        Ok(next)
-    }
-}
-
-impl DefaultVlessEndpointSpec {
-    fn reality_config(&self) -> RealityConfig {
-        RealityConfig {
-            dest: self.reality_dest.clone(),
-            server_names: self.server_names.clone(),
-            server_names_source: RealityServerNamesSource::Manual,
-            fingerprint: self.fingerprint.clone(),
-        }
-    }
-}
-
-impl ManagedEndpointSpec for DefaultSsEndpointSpec {
-    fn create_new(&self, node_id: String) -> Result<Endpoint, ExitError> {
-        let endpoint_id = new_ulid_string();
-        let tag = managed_endpoint_tag(ManagedDefaultEndpointKind::Ss, &endpoint_id);
-        let mut rng = OsRng;
-        let meta = Ss2022EndpointMeta {
-            method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-            server_psk_b64: generate_ss2022_psk_b64(&mut rng),
-        };
-        Ok(Endpoint {
-            endpoint_id,
-            node_id,
-            tag,
-            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-            port: self.port,
-            meta: serde_json::to_value(meta)
-                .map_err(|e| ExitError::new(5, format!("json_error: {e}")))?,
-        })
-    }
-
-    fn reconcile_existing(&self, endpoint: &Endpoint) -> Result<Endpoint, ExitError> {
-        if endpoint.kind != EndpointKind::Ss2022_2022Blake3Aes128Gcm {
-            return Err(ExitError::new(
-                5,
-                format!(
-                    "container_reconcile_failed: endpoint {} is not an SS2022 endpoint",
-                    endpoint.endpoint_id
-                ),
-            ));
-        }
-        let _: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone()).map_err(|e| {
-            ExitError::new(
-                5,
-                format!(
-                    "container_reconcile_failed: parse SS2022 endpoint {} metadata: {e}",
-                    endpoint.endpoint_id
-                ),
-            )
-        })?;
-        let mut next = endpoint.clone();
-        next.port = self.port;
-        Ok(next)
-    }
-}
-
-fn endpoint_matches_kind(endpoint: &Endpoint, kind: ManagedDefaultEndpointKind) -> bool {
-    match kind {
-        ManagedDefaultEndpointKind::Vless => endpoint.kind == EndpointKind::VlessRealityVisionTcp,
-        ManagedDefaultEndpointKind::Ss => endpoint.kind == EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-    }
-}
-
-fn managed_endpoint_tag(kind: ManagedDefaultEndpointKind, endpoint_id: &str) -> String {
-    let prefix = match kind {
-        ManagedDefaultEndpointKind::Vless => "vless-vision",
-        ManagedDefaultEndpointKind::Ss => "ss2022",
-    };
-    format!("{prefix}-{endpoint_id}")
-}
-
-impl ManagedDefaultEndpointKind {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Vless => "vless_reality_vision_tcp",
-            Self::Ss => "ss2022_2022_blake3_aes_128_gcm",
-        }
-    }
-}
-
-fn managed_default_endpoints_state_path(data_dir: &Path) -> PathBuf {
-    data_dir
-        .join("container")
-        .join("managed_default_endpoints.json")
-}
-
-fn load_managed_default_endpoints_state(
-    data_dir: &Path,
-) -> Result<ManagedDefaultEndpointsState, ExitError> {
-    let path = managed_default_endpoints_state_path(data_dir);
-    if !path.exists() {
-        return Ok(ManagedDefaultEndpointsState::default());
-    }
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    let state: ManagedDefaultEndpointsState = serde_json::from_str(&raw)
-        .map_err(|e| ExitError::new(5, format!("container_state_error: {e}")))?;
-    if state.schema_version != MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION {
-        return Err(ExitError::new(
-            5,
-            format!(
-                "container_state_error: unsupported managed endpoint state schema_version {}",
-                state.schema_version
-            ),
-        ));
-    }
-    Ok(state)
-}
-
-fn persist_managed_default_endpoints_state(
-    data_dir: &Path,
-    state: &ManagedDefaultEndpointsState,
-) -> Result<(), ExitError> {
-    let path = managed_default_endpoints_state_path(data_dir);
-    if state.vless_endpoint_id.is_none() && state.ss_endpoint_id.is_none() {
-        match fs::remove_file(&path) {
-            Ok(()) => return Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(ExitError::new(4, format!("filesystem_error: {err}"))),
-        }
-    }
-    if let Some(parent) = path.parent() {
-        ensure_dir(parent).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    }
-    let raw = serde_json::to_string_pretty(state)
-        .map_err(|e| ExitError::new(5, format!("container_state_error: {e}")))?;
-    write_string_if_changed(&path, &(raw + "\n"))
-        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    Ok(())
+    reconcile_managed_default_endpoints_shared(
+        &abs_data_dir,
+        &cluster_meta.node_id,
+        &node_endpoints,
+        &spec.default_endpoints,
+        &mut writer,
+        "container reconcile",
+    )
+    .await
+    .map_err(|err| ExitError::new(5, format!("container_reconcile_failed: {err}")))
 }
 
 fn local_xp_base_url(port: u16) -> String {
@@ -1975,6 +1551,10 @@ fn render_dry_run(spec: &ContainerSpec, binaries: &BinaryPaths) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::managed_default_endpoints::{
+        build_managed_default_vless_endpoint, reconcile_managed_default_vless_endpoint,
+    };
+    use crate::protocol::VlessRealityVisionTcpEndpointMeta;
     use tempfile::tempdir;
     use tokio::process::Command;
 
@@ -2133,7 +1713,6 @@ mod tests {
     fn parses_default_endpoint_specs_from_env() {
         let env = env_map(&[
             ("XP_DEFAULT_VLESS_PORT", "53842"),
-            ("XP_DEFAULT_VLESS_REALITY_DEST", "oneclient.sfx.ms:443"),
             (
                 "XP_DEFAULT_VLESS_SERVER_NAMES",
                 "public.sn.files.1drv.com, public.bn.files.1drv.com",
@@ -2144,7 +1723,7 @@ mod tests {
         assert_eq!(spec.vless.as_ref().unwrap().port, 53842);
         assert_eq!(
             spec.vless.as_ref().unwrap().reality_dest,
-            "oneclient.sfx.ms:443"
+            crate::config::DEFAULT_VLESS_CANARY_BIND
         );
         assert_eq!(
             spec.vless.as_ref().unwrap().server_names,
@@ -2155,62 +1734,61 @@ mod tests {
     }
 
     #[test]
-    fn rejects_default_vless_reality_dest_without_port() {
+    fn default_vless_canary_bind_must_be_socket_addr() {
         let env = env_map(&[
             ("XP_DEFAULT_VLESS_PORT", "53842"),
-            ("XP_DEFAULT_VLESS_REALITY_DEST", "oneclient.sfx.ms"),
             ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+            ("XP_VLESS_CANARY_BIND", "bad-bind"),
         ]);
 
         let err = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap_err();
-        assert!(err.message.contains("dest must include port"));
+        assert!(err.message.contains("XP_VLESS_CANARY_BIND"));
     }
 
     #[test]
-    fn accepts_default_vless_reality_dest_with_tcp_prefix() {
+    fn default_vless_canary_bind_can_be_overridden() {
         let env = env_map(&[
             ("XP_DEFAULT_VLESS_PORT", "53842"),
-            ("XP_DEFAULT_VLESS_REALITY_DEST", "tcp://oneclient.sfx.ms:443"),
             ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+            ("XP_VLESS_CANARY_BIND", "127.0.0.1:49043"),
         ]);
 
         let spec = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap();
         assert_eq!(
             spec.vless.as_ref().unwrap().reality_dest,
-            "tcp://oneclient.sfx.ms:443"
+            "127.0.0.1:49043"
         );
     }
 
     #[test]
     fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
-        let endpoint = DefaultVlessEndpointSpec {
+        let current = DefaultVlessEndpointSpec {
             port: 53842,
-            reality_dest: "oneclient.sfx.ms:443".to_string(),
+            reality_dest: crate::config::DEFAULT_VLESS_CANARY_BIND.to_string(),
             server_names: vec![
                 "public.sn.files.1drv.com".to_string(),
                 "public.bn.files.1drv.com".to_string(),
             ],
             fingerprint: "chrome".to_string(),
-        }
-        .create_new("node-id".to_string())
-        .unwrap();
+        };
+        let endpoint = build_managed_default_vless_endpoint(&current, "node-id".to_string()).unwrap();
 
         let desired = DefaultVlessEndpointSpec {
             port: 60000,
-            reality_dest: "oneclient.sfx.ms:443".to_string(),
+            reality_dest: "127.0.0.1:49043".to_string(),
             server_names: vec![
                 "public.sn.files.1drv.com".to_string(),
                 "public.bn.files.1drv.com".to_string(),
             ],
             fingerprint: "firefox".to_string(),
         };
-        let updated = desired.reconcile_existing(&endpoint).unwrap();
+        let updated = reconcile_managed_default_vless_endpoint(&desired, &endpoint).unwrap();
         let old_meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone()).unwrap();
         let new_meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(updated.meta.clone()).unwrap();
         assert_eq!(updated.port, 60000);
-        assert_eq!(new_meta.reality.dest, "oneclient.sfx.ms:443");
+        assert_eq!(new_meta.reality.dest, "127.0.0.1:49043");
         assert_eq!(
             new_meta.reality.server_names,
             vec!["public.sn.files.1drv.com", "public.bn.files.1drv.com"]

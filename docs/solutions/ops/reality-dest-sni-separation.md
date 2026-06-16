@@ -22,5 +22,5 @@ Keep the derived behavior for global domain mode. When `server_names_source=glob
 
 - Add state-machine coverage proving manual endpoints keep their explicit `dest` when `server_names` changes.
 - Keep state-machine coverage proving global endpoints still derive `dest` from the first global hostname.
-- Cover container-managed defaults with an explicit `XP_DEFAULT_VLESS_REALITY_DEST` that differs from `XP_DEFAULT_VLESS_SERVER_NAMES`.
+- Cover container-managed defaults proving `reality.dest` is derived from `XP_VLESS_CANARY_BIND` while `XP_DEFAULT_VLESS_SERVER_NAMES` only controls client SNI candidates.
 - Before changing production, test the exact destination/SNI pair from an external node; do not infer that a successful SNI also works as the destination origin.

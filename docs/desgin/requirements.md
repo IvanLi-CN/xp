@@ -17,7 +17,7 @@
 - 系统内只运行 **两** 个进程：`xp` + `xray`（无外部依赖服务）
 - 节点间通信仅使用 **HTTPS**（尽量减少端口与协议面）
 - `xp` 默认只绑定 `127.0.0.1`（方案 A），由组网/隧道/反代实现互访与对外访问
-- `xp` 默认只提供 **HTTP** 服务（回环），对外 **HTTPS** 由反代/隧道终止（如 Cloudflare Tunnel / Caddy）
+- `xp` 的管理面默认仍只提供 **HTTP** 回环服务；如需让 Mihomo relay 直接探测接入面，则由 xp 托管 VLESS/REALITY endpoint 通过未认证 fallback 承接 `https://<access_host[:port]>/generate_204`，并转发到 xp 进程内的 loopback TLS canary
 
 ## 2. 术语定义
 
@@ -113,8 +113,12 @@
 
 ### 4.3 可运维性
 
-- 运行环境：Arch/Debian/Alpine
-- 能在 systemd（以及 Alpine 的 openrc）下以服务形式运行
+- 运行环境支持矩阵：
+  - host-managed Linux 节点：systemd
+  - host-managed Linux 节点：OpenRC
+  - single-image Docker / Compose 节点：`xp-ops container run`
+- Host-managed 运行时兼容目标不应被容器路径替代；既有 host-managed 节点升级后必须能继续使用新特性，而不是只保证“老功能还能跑”。
+- 宿主机自动化工具链当前覆盖 Arch/Debian/Ubuntu/RHEL-family/Alpine；若历史 host-managed 节点运行在其它发行版家族，文档必须明确其首次 provisioning / 升级分支和必要人工步骤。
 - 可观测：基本日志、节点健康、错误可定位
 
 ## 5. 关键设计选择（已确认）

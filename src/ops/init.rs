@@ -511,7 +511,7 @@ fn ensure_user_group(distro: Distro, user: &str, home: &Path) -> Result<(), Exit
     }
 
     match distro {
-        Distro::Arch | Distro::Debian => {
+        Distro::Arch | Distro::Debian | Distro::Rhel => {
             let home_str = home.to_string_lossy();
             let args = vec![
                 "--system".to_string(),

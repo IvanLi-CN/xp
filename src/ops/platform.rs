@@ -5,6 +5,7 @@ use std::fs;
 pub enum Distro {
     Arch,
     Debian,
+    Rhel,
     Alpine,
 }
 
@@ -63,6 +64,11 @@ pub fn detect_distro(paths: &Paths) -> Result<Distro, String> {
     match id.as_deref() {
         Some("arch") => Ok(Distro::Arch),
         Some("debian") | Some("ubuntu") => Ok(Distro::Debian),
+        Some("rhel")
+        | Some("centos")
+        | Some("rocky")
+        | Some("almalinux")
+        | Some("ol") => Ok(Distro::Rhel),
         Some("alpine") => Ok(Distro::Alpine),
         Some(other) => Err(format!("unsupported distro: ID={other}")),
         None => Err("unsupported distro: missing ID in /etc/os-release".to_string()),
@@ -73,6 +79,7 @@ fn parse_distro(v: &str) -> Option<Distro> {
     match v {
         "arch" => Some(Distro::Arch),
         "debian" => Some(Distro::Debian),
+        "rhel" => Some(Distro::Rhel),
         "alpine" => Some(Distro::Alpine),
         _ => None,
     }
@@ -84,6 +91,30 @@ pub fn detect_init_system(distro: Distro, requested: Option<InitSystem>) -> Init
     }
     match distro {
         Distro::Alpine => InitSystem::OpenRc,
-        Distro::Arch | Distro::Debian => InitSystem::Systemd,
+        Distro::Arch | Distro::Debian | Distro::Rhel => InitSystem::Systemd,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::paths::Paths;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn detect_distro_maps_centos_family_to_rhel() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let os_release = paths.map_abs(std::path::Path::new("/etc/os-release"));
+        fs::create_dir_all(os_release.parent().unwrap()).unwrap();
+        fs::write(os_release, "ID=centos\n").unwrap();
+
+        assert_eq!(detect_distro(&paths).unwrap(), Distro::Rhel);
+    }
+
+    #[test]
+    fn rhel_defaults_to_systemd() {
+        assert_eq!(detect_init_system(Distro::Rhel, None), InitSystem::Systemd);
     }
 }

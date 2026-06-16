@@ -288,6 +288,44 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
+    let explicit_managed_default_spec =
+        xp::managed_default_endpoints::ManagedDefaultEndpointsSpec {
+            vless: xp::managed_default_endpoints::build_default_vless_endpoint_spec(
+                config.default_vless_port,
+                config.default_vless_server_names.as_deref(),
+                config.default_vless_fingerprint.as_deref(),
+                config.vless_canary_bind,
+            )?,
+            ss: xp::managed_default_endpoints::build_default_ss_endpoint_spec(
+                config.default_ss_port,
+            ),
+        };
+    {
+        let endpoints = {
+            let store = store.lock().await;
+            store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == cluster.node_id)
+                .collect::<Vec<_>>()
+        };
+        let mut writer = |cmd| async {
+            raft_facade
+                .client_write(cmd)
+                .await
+                .map(|_| ())
+        };
+        xp::managed_default_endpoints::reconcile_host_managed_default_endpoints(
+            &config.data_dir,
+            &cluster.node_id,
+            &endpoints,
+            &explicit_managed_default_spec,
+            config.vless_canary_bind,
+            &mut writer,
+            "xp startup",
+        )
+        .await?;
+    }
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
     let _quota = xp::quota::spawn_quota_worker(
@@ -319,6 +357,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             store.clone(),
             raft_facade.clone(),
         )?;
+    let _vless_https_canary_task = xp::vless_https_canary::spawn(config_arc.clone());
 
     let app = xp::http::build_router(
         config.clone(),

@@ -6,6 +6,22 @@ This directory contains both the traditional host-managed service examples and t
 - Single-image Docker runtime: `docs/ops/docker.md`
 - Owner-facing Docker deployment walkthrough: `docs/ops/docker-deployment-guide.md`
 
+## Supported deployment matrix
+
+`xp` is expected to remain deployable across these owner-facing environments:
+
+| Deployment shape            | Runtime manager              | Status          | Typical node class                                                    | Notes                                                                                                 |
+| --------------------------- | ---------------------------- | --------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Host-managed service node   | systemd                      | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by systemd             |
+| Host-managed service node   | OpenRC                       | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by OpenRC              |
+| Single-image container node | Docker Compose / OCI runtime | fully supported | official single-image container node                                  | `xp-ops container run` owns bootstrap/join, child process supervision, and default endpoint reconcile |
+
+Current support boundaries that operators must know:
+
+- Host-managed automation in `xp-ops` currently recognizes Arch/Debian/Ubuntu/RHEL-family/Alpine distro families. Historical CentOS 7 / RHEL-family host-managed nodes are first-class host-managed targets and should use the host-managed deployment / upgrade paths in this document.
+- Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
+- When a deployment environment needs manual intervention, document the exact branch and operator steps instead of implying the generic path will work.
+
 ## Minimal runtime assumptions
 
 Host-managed mode assumptions:
@@ -19,6 +35,7 @@ Host-managed mode assumptions:
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
 - `xp` records runtime status transitions/restart outcomes to `${XP_DATA_DIR}/service_runtime.json` for the Web runtime pages.
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp` also reconciles `XP_ACCESS_HOST` against Cloudflare DNS (`A` / `AAAA`) and stores local DDNS state in `${XP_DATA_DIR}/ddns_state.json`.
+- `xp` can also run a loopback-only VLESS HTTPS canary (`XP_VLESS_CANARY_BIND`, default `127.0.0.1:39043`). xp-managed VLESS/REALITY endpoints send unauthenticated HTTPS fallback traffic to this canary and expose its runtime / certificate state through `GET /api/health` and `GET /api/admin/config`.
 
 ## Low-memory host defaults
 
@@ -52,6 +69,76 @@ Notes:
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 - `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
+
+## Optional: managed VLESS HTTPS canary
+
+If you want Mihomo relay `url-test` to probe the actual managed VLESS ingress instead of the admin API origin, configure the loopback TLS canary:
+
+- `XP_VLESS_CANARY_BIND=127.0.0.1:39043` by default.
+- `XP_VLESS_CANARY_ACME_DIRECTORY_URL` defaults to Let's Encrypt production.
+- `XP_VLESS_CANARY_ACME_CONTACT_EMAIL` is optional but recommended.
+- `XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE` defaults to `/etc/xp/cloudflare_ddns_api_token` so host-managed nodes can reuse the same xp-readable Cloudflare runtime token as DDNS.
+- `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` is optional; when empty, `xp` derives the Cloudflare zone from `XP_ACCESS_HOST`.
+
+Contract:
+
+- `xp` terminates TLS for `GET/HEAD /generate_204` on the loopback canary and returns `204`.
+- xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, so ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary response through the VLESS ingress itself.
+- Host-managed and container-managed nodes use the same managed-default endpoint contract. On host-managed nodes, `xp` startup and `xp-ops xp sync-node-meta` both reconcile the local default endpoint set; on container-managed nodes, `xp-ops container run` does the same after the local control plane is ready.
+- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade, so deploying the new version and restarting `xp` is sufficient to switch that ingress to the loopback canary semantics.
+- This does not move the admin UI / cluster API onto the VLESS port.
+- Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
+- Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
+
+Host-managed upgrade note:
+
+- If `/etc/xp/xp.env` already declares `XP_DEFAULT_VLESS_*`, startup uses those values as the source of truth.
+- If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary while preserving the existing client SNI list.
+- If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
+
+Deployment note:
+
+- `xp-ops deploy` now writes the managed-default endpoint contract into `/etc/xp/xp.env` when you pass `--default-vless-port` + `--default-vless-server-names` and/or `--default-ss-port`.
+- `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
+- The host-managed deploy path is therefore no longer container-only; the same one-shot flow now covers host-managed service nodes as well as official single-image container nodes.
+
+Example host-managed bootstrap (systemd / RHEL-family included):
+
+```bash
+sudo -E xp-ops deploy \
+  --node-name host-node-1 \
+  --access-host edge-node-1.example.net \
+  --account-id <cloudflare-account-id> \
+  --hostname admin-node-1.example.com \
+  --ddns \
+  --default-vless-port 443 \
+  --default-vless-server-names 'public.sn.files.1drv.com,public.bn.files.1drv.com' \
+  --default-vless-fingerprint chrome \
+  --default-ss-port 53843 \
+  --vless-canary-acme-contact-email ops@example.com \
+  --enable-services \
+  -y
+```
+
+Expected result:
+
+- `/etc/xp/xp.env` contains `XP_DEFAULT_VLESS_*`, `XP_DEFAULT_SS_PORT`, `XP_VLESS_CANARY_*`, and `XP_CLOUDFLARE_DDNS_*`.
+- `xp`, `xray`, and optional `cloudflared` are installed and started under the host init system.
+- Post-bootstrap relay probing uses `https://<access_host[:managed_vless_port]>/generate_204` instead of the admin origin.
+
+Operational audit:
+
+```bash
+# 1. Verify loopback canary runtime state after restart
+ssh <alias> 'curl -fsS http://127.0.0.1:62416/api/health | jq .vless_https_canary'
+ssh <alias> 'curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status'
+
+# 2. Verify loopback TLS canary locally on the node
+curl --resolve <access_host>:39043:127.0.0.1 https://<access_host>:39043/generate_204
+
+# 3. Verify live reachability through the managed VLESS ingress port
+curl -Ik https://<access_host[:vless_port]>/generate_204
+```
 
 ## Single-image Docker runtime
 
@@ -114,6 +201,7 @@ xp-ops mihomo redact "https://example.com/sub?token=..." --timeout-secs 30
 Note:
 
 - The TUI assumes `xp` is already installed at `/usr/local/bin/xp` (e.g., via `scripts/install-from-github.sh`).
+- The TUI covers the same host-managed managed-default inputs as `xp-ops deploy`, including `XP_DEFAULT_VLESS_*`, `XP_DEFAULT_SS_PORT`, and `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`.
 
 Persistence:
 
@@ -148,8 +236,8 @@ Required (or commonly set):
   - Path to the node data directory. See layout below.
 - `XP_ADMIN_TOKEN` (default: empty string)
   - Optional bearer token for admin endpoints. Leaving it empty effectively disables token checks.
-  - If you deployed via `xp-ops deploy`, the token is stored in `/etc/xp/xp.env` as `XP_ADMIN_TOKEN`.
-    - Show it on the server: `sudo xp-ops admin-token show` (or `--redacted`).
+  - If you bootstrap via `xp-ops deploy`, the plaintext token is printed once for the operator, while the server stores only `XP_ADMIN_TOKEN_HASH` in `/etc/xp/xp.env`.
+    - Show the current configured state on the server: `sudo xp-ops admin-token show` (or `--redacted`).
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
@@ -192,6 +280,16 @@ Required (or commonly set):
   - Duration of the fast-mode DDNS polling window.
 - `XP_CLOUDFLARE_DDNS_FAMILY_MISSING_GRACE` (default: `3`, allowed range `1..=10`)
   - Consecutive hard-missing observations before deleting an `A` or `AAAA` record.
+- `XP_VLESS_CANARY_BIND` (default: `127.0.0.1:39043`)
+  - Loopback bind address for the TLS canary used by xp-managed VLESS/REALITY fallback.
+- `XP_VLESS_CANARY_ACME_DIRECTORY_URL` (default: `https://acme-v02.api.letsencrypt.org/directory`)
+  - ACME directory for DNS-01 certificate issuance.
+- `XP_VLESS_CANARY_ACME_CONTACT_EMAIL` (default: empty)
+  - Optional ACME contact email.
+- `XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE` (default: `/etc/xp/cloudflare_ddns_api_token`)
+  - Path to the Cloudflare API token file used for DNS-01 challenges. By default it reuses the same xp-readable runtime token file as DDNS.
+- `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` (default: empty)
+  - Optional explicit Cloudflare zone id for DNS-01; when empty, `xp` derives the zone from `XP_ACCESS_HOST`.
 - `XP_MESH_PROXY_URL` (default: unset)
   - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
   - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
@@ -352,6 +450,71 @@ Rollback notes:
 
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
 - On upgrade failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
+
+### Deployment-specific upgrade paths
+
+Use the path that matches the node shape instead of mixing procedures:
+
+- Host-managed systemd/OpenRC nodes:
+  - Upgrade binaries with `xp-ops upgrade` when the distro family is officially supported by `xp-ops`.
+  - Arch/Debian/Ubuntu/RHEL-family nodes are covered by the supported automation path.
+  - If a host-managed node falls outside those distro families, upgrade the `xp` and `xp-ops` binaries manually, then restart `xp` and verify the post-upgrade checks below.
+- Docker / Compose nodes:
+  - Update the image tag or digest, then restart the container.
+  - Let `xp-ops container run` perform runtime reconcile on startup.
+
+Post-upgrade validation for nodes expected to expose a managed-default VLESS ingress:
+
+1. `curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status`
+2. `curl -Ik https://<access_host[:vless_port]>/generate_204`
+3. Re-render a Mihomo provider subscription and confirm the relay group for that `access_host` now uses `https://<access_host[:port]>/generate_204`
+
+### Release-ready checklist: host-managed systemd node with Tunnel/DDNS
+
+Ideal post-release path:
+
+1. Install/upgrade `xp-ops` and `xp` on the node with the standard host-managed path.
+2. Run `xp-ops deploy` with:
+   - `--node-name`
+   - `--access-host`
+   - `--account-id`
+   - `--hostname` when Tunnel is enabled
+   - `--ddns` when `XP_ACCESS_HOST` should be maintained by Cloudflare
+   - `--default-vless-port`
+   - `--default-vless-server-names`
+   - optional `--default-vless-fingerprint`
+   - optional `--default-ss-port`
+   - recommended `--vless-canary-acme-contact-email`
+   - `--enable-services -y`
+3. Confirm `/etc/xp/xp.env` now contains the managed-default endpoint keys and the canary/DDNS keys.
+4. Restart validation:
+   - `curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status`
+   - `curl -Ik https://<access_host[:vless_port]>/generate_204`
+   - render a Mihomo provider subscription and confirm the relay URL points at the managed VLESS ingress
+5. If the node was an older single-VLESS deployment without `XP_DEFAULT_VLESS_*`, verify that startup auto-adopted the lone endpoint.
+6. If the node has multiple legacy VLESS endpoints and no managed-default marker, stop and choose the owner-facing default explicitly before expecting Mihomo relay probing to switch over.
+
+### Release-ready checklist: official single-image container node
+
+Ideal post-release path:
+
+1. Update the image tag/digest for the official single-image runtime.
+2. Ensure the container env includes:
+   - `XP_NODE_NAME`
+   - `XP_ACCESS_HOST` when the node has public ingress
+   - `XP_CLOUDFLARE_DDNS_ENABLED=true` when DDNS should manage `XP_ACCESS_HOST`
+   - `XP_DEFAULT_VLESS_PORT`
+   - `XP_DEFAULT_VLESS_SERVER_NAMES`
+   - optional `XP_DEFAULT_VLESS_FINGERPRINT`
+   - optional `XP_DEFAULT_SS_PORT`
+   - optional `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`
+3. Restart the container so `xp-ops container run` replays bootstrap/join, runtime reconcile, and default endpoint reconcile.
+4. Validate:
+   - container logs show successful `xp-ops container run`
+   - `GET /api/admin/config` returns healthy `vless_https_canary_status`
+   - `curl -Ik https://<access_host[:vless_port]>/generate_204` succeeds from outside the node path you actually use
+   - Mihomo provider render uses `https://<access_host[:managed_vless_port]>/generate_204`
+5. If the env intentionally removes `XP_DEFAULT_VLESS_*` or `XP_DEFAULT_SS_PORT`, expect the corresponding managed-default endpoint to be removed on next reconcile.
 
 ## Disaster recovery: quorum lost (single-node leader recovery)
 

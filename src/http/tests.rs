@@ -130,9 +130,20 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
+        vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], crate::config::DEFAULT_VLESS_CANARY_BIND_PORT)),
+        vless_canary_acme_directory_url:
+            "https://acme-v02.api.letsencrypt.org/directory".to_string(),
+        vless_canary_acme_contact_email: String::new(),
+        vless_canary_cloudflare_token_file:
+            crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
+        vless_canary_cloudflare_zone_id: String::new(),
+        default_vless_port: None,
+        default_vless_server_names: None,
+        default_vless_fingerprint: None,
+        default_ss_port: None,
         mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
-        cloudflare_ddns_token_file: "/etc/xp/cloudflare_ddns_api_token".to_string(),
+        cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
         cloudflare_ddns_ipv4_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
         cloudflare_ddns_ipv6_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
@@ -2788,6 +2799,11 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert_eq!(json["node_name"], "node-1");
     assert_eq!(json["access_host"], "");
     assert_eq!(json["api_base_url"], "https://127.0.0.1:62416");
+    assert_eq!(
+        json["vless_https_canary_bind"],
+        crate::config::DEFAULT_VLESS_CANARY_BIND
+    );
+    assert!(json.get("vless_https_canary_status").is_some());
     assert_eq!(json["quota_poll_interval_secs"], 10);
     assert_eq!(json["quota_auto_unban"], true);
     assert!(json.get("mihomo_delivery_mode").is_none());
@@ -2813,6 +2829,20 @@ async fn admin_config_patch_is_removed() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn health_includes_vless_https_canary_view() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app.clone().oneshot(req("GET", "/api/health")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let canary = body
+        .get("vless_https_canary")
+        .expect("missing vless_https_canary field");
+    assert_eq!(canary["enabled"], false);
 }
 
 #[tokio::test]
@@ -5189,8 +5219,25 @@ rules: []
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    assert!(outer_proxies.contains(&"🌟 Japan"));
-    assert_eq!(relay_group.get("use"), None);
+    assert_eq!(outer_proxies, vec!["DIRECT"]);
+    assert_eq!(
+        relay_group.get("url").and_then(YamlValue::as_str),
+        Some("https://www.gstatic.com/generate_204")
+    );
+    assert_eq!(
+        relay_group.get("filter").and_then(YamlValue::as_str),
+        Some(
+            "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)"
+        )
+    );
+    let relay_use = relay_group
+        .get("use")
+        .and_then(YamlValue::as_sequence)
+        .expect("relay group provider use missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(relay_use, vec!["providerA"]);
 
     for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
         assert!(
@@ -5250,8 +5297,8 @@ rules: []
 
     let japan_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
-        .expect("expected transit region group");
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🌟 Japan"))
+        .expect("expected visible Japan region group");
     let japan_use = japan_group
         .get("use")
         .and_then(YamlValue::as_sequence)
@@ -5259,7 +5306,23 @@ rules: []
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(japan_use, vec!["providerA"]);
+    assert_eq!(
+        japan_use,
+        vec![crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
+    );
+
+    let japan_alias = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 Japan"))
+        .expect("expected transit region alias group");
+    let japan_alias_proxies = japan_alias
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("Japan alias proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(japan_alias_proxies, vec!["🌟 Japan"]);
 
     let landing_pool = groups
         .iter()
@@ -5329,12 +5392,19 @@ rules: []
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
         .expect("proxy-groups must exist");
-    assert!(
-        !groups
-            .iter()
-            .any(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com")),
-        "relay group should be omitted when no transit candidates exist"
-    );
+    let relay_group = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
+        .expect("relay group should still exist as a DIRECT fallback");
+    let relay_proxies = relay_group
+        .get("proxies")
+        .and_then(YamlValue::as_sequence)
+        .expect("relay group proxies missing")
+        .iter()
+        .filter_map(YamlValue::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(relay_proxies, vec!["DIRECT"]);
+    assert!(relay_group.get("use").is_none());
 
     let provider_system_res = app
         .oneshot(req(
@@ -5354,10 +5424,8 @@ rules: []
         .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
     assert!(
-        provider_system_proxy_names
-            .iter()
-            .all(|name| !name.ends_with("-ss-chain") && !name.ends_with("-reality-chain")),
-        "system payload should prune chain proxies when relay candidates are unavailable"
+        provider_system_proxy_names.iter().any(|name| name.ends_with("-ss")),
+        "system payload should still include direct system proxies"
     );
 }
 
@@ -5993,6 +6061,7 @@ rules: []
             "🌟 Singapore",
             "🌟 US",
             "🌟 Other",
+            "🛬 node-1",
             "💎 高质量",
         ]
     );

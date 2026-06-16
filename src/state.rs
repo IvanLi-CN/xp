@@ -4205,6 +4205,7 @@ fn build_endpoint_meta(
                 },
                 short_ids: vec![short_id.clone()],
                 active_short_id: short_id,
+                managed_default: false,
             };
 
             Ok(serde_json::to_value(meta)?)
@@ -4214,6 +4215,7 @@ fn build_endpoint_meta(
             Ok(serde_json::to_value(Ss2022EndpointMeta {
                 method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
                 server_psk_b64,
+                managed_default: false,
             })?)
         }
     }
@@ -4339,6 +4341,7 @@ mod tests {
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         Endpoint {
@@ -5205,6 +5208,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5248,6 +5252,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5284,6 +5289,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5341,6 +5347,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5392,6 +5399,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         store.state_mut().endpoints.insert(

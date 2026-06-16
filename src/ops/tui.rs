@@ -70,6 +70,11 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
         tunnel_name: None,
         origin_url: values.origin_url,
         ddns_zone_id: values.ddns_zone_id,
+        vless_canary_acme_contact_email: values.vless_canary_acme_contact_email,
+        default_vless_port: values.default_vless_port,
+        default_vless_server_names: values.default_vless_server_names,
+        default_vless_fingerprint: values.default_vless_fingerprint,
+        default_ss_port: values.default_ss_port,
         join_token: None,
         join_token_stdin: false,
         join_token_stdin_value: None,
@@ -128,7 +133,13 @@ fn run_action(app: &mut App, action: AppAction) -> Option<TuiOutcome> {
     match action {
         AppAction::Quit => return Some(TuiOutcome::Quit),
         AppAction::Save { exit_after } => {
-            let values = app.to_values();
+            let values = match app.to_values() {
+                Ok(values) => values,
+                Err(e) => {
+                    app.status_message = Some(format!("save failed: {}", e.message));
+                    return None;
+                }
+            };
             if let Err(e) = save_tui_config(&app.paths, &values) {
                 app.status_message = Some(format!("save failed: {}", e.message));
                 return None;
@@ -144,7 +155,13 @@ fn run_action(app: &mut App, action: AppAction) -> Option<TuiOutcome> {
             }
         }
         AppAction::Deploy => {
-            let values = app.to_values();
+            let values = match app.to_values() {
+                Ok(values) => values,
+                Err(e) => {
+                    app.status_message = Some(format!("autosave failed: {}", e.message));
+                    return None;
+                }
+            };
             if let Err(e) = save_tui_config(&app.paths, &values) {
                 app.status_message = Some(format!("autosave failed: {}", e.message));
                 return None;
@@ -204,6 +221,11 @@ struct AppValues {
     hostname: Option<String>,
     origin_url: Option<String>,
     api_base_url: Option<String>,
+    vless_canary_acme_contact_email: Option<String>,
+    default_vless_port: Option<u16>,
+    default_vless_server_names: Option<String>,
+    default_vless_fingerprint: Option<String>,
+    default_ss_port: Option<u16>,
     xray_version: String,
     cloudflare_token: String,
     enable_services: bool,
@@ -233,6 +255,11 @@ struct AppSnapshot {
     hostname: String,
     origin_url: String,
     api_base_url: String,
+    vless_canary_acme_contact_email: String,
+    default_vless_port: String,
+    default_vless_server_names: String,
+    default_vless_fingerprint: String,
+    default_ss_port: String,
     xray_version: String,
     cloudflare_token: String,
     enable_services: bool,
@@ -265,6 +292,11 @@ struct App {
     hostname: String,
     origin_url: String,
     api_base_url: String,
+    vless_canary_acme_contact_email: String,
+    default_vless_port: String,
+    default_vless_server_names: String,
+    default_vless_fingerprint: String,
+    default_ss_port: String,
 
     xray_version: String,
     cloudflare_token: String,
@@ -290,6 +322,11 @@ impl App {
                 hostname: String::new(),
                 origin_url: String::new(),
                 api_base_url: String::new(),
+                vless_canary_acme_contact_email: String::new(),
+                default_vless_port: String::new(),
+                default_vless_server_names: String::new(),
+                default_vless_fingerprint: String::new(),
+                default_ss_port: String::new(),
                 xray_version: String::new(),
                 cloudflare_token: String::new(),
                 enable_services: true,
@@ -307,6 +344,11 @@ impl App {
             hostname: String::new(),
             origin_url: "http://127.0.0.1:62416".to_string(),
             api_base_url: String::new(),
+            vless_canary_acme_contact_email: String::new(),
+            default_vless_port: String::new(),
+            default_vless_server_names: String::new(),
+            default_vless_fingerprint: String::new(),
+            default_ss_port: String::new(),
             xray_version: "latest".to_string(),
             cloudflare_token: String::new(),
             enable_services: true,
@@ -321,7 +363,7 @@ impl App {
     }
 
     fn items_len(&self) -> usize {
-        13
+        18
     }
 
     fn render_items(&self) -> Vec<ListItem<'static>> {
@@ -376,6 +418,47 @@ impl App {
             v.push(item("hostname (disabled)", "-"));
             v.push(item("origin_url (disabled)", "-"));
         }
+
+        v.push(item(
+            "vless_canary_acme_contact_email",
+            if self.vless_canary_acme_contact_email.trim().is_empty() {
+                "-"
+            } else {
+                &self.vless_canary_acme_contact_email
+            },
+        ));
+        v.push(item(
+            "default_vless_port",
+            if self.default_vless_port.trim().is_empty() {
+                "-"
+            } else {
+                &self.default_vless_port
+            },
+        ));
+        v.push(item(
+            "default_vless_server_names",
+            if self.default_vless_server_names.trim().is_empty() {
+                "-"
+            } else {
+                &self.default_vless_server_names
+            },
+        ));
+        v.push(item(
+            "default_vless_fingerprint",
+            if self.default_vless_fingerprint.trim().is_empty() {
+                "-"
+            } else {
+                &self.default_vless_fingerprint
+            },
+        ));
+        v.push(item(
+            "default_ss_port",
+            if self.default_ss_port.trim().is_empty() {
+                "-"
+            } else {
+                &self.default_ss_port
+            },
+        ));
 
         v.push(item("cloudflare_token", &self.token_display()));
         v.push(item(
@@ -497,8 +580,8 @@ impl App {
         match self.focus {
             2 => self.cloudflare_enabled = !self.cloudflare_enabled,
             3 => self.ddns_enabled = !self.ddns_enabled,
-            11 => self.enable_services = !self.enable_services,
-            12 => self.dry_run = !self.dry_run,
+            16 => self.enable_services = !self.enable_services,
+            17 => self.dry_run = !self.dry_run,
             _ => {}
         }
     }
@@ -509,7 +592,7 @@ impl App {
             4 => self.ddns_enabled,
             5 => !self.cloudflare_enabled,
             6..=9 => self.cloudflare_enabled,
-            10 => true,
+            10..=15 => true,
             _ => false,
         }
     }
@@ -524,7 +607,12 @@ impl App {
             7 if self.cloudflare_enabled => self.zone_id.push(c),
             8 if self.cloudflare_enabled => self.hostname.push(c),
             9 if self.cloudflare_enabled => self.origin_url.push(c),
-            10 => self.cloudflare_token.push(c),
+            10 => self.vless_canary_acme_contact_email.push(c),
+            11 => self.default_vless_port.push(c),
+            12 => self.default_vless_server_names.push(c),
+            13 => self.default_vless_fingerprint.push(c),
+            14 => self.default_ss_port.push(c),
+            15 => self.cloudflare_token.push(c),
             _ => {}
         }
     }
@@ -575,14 +663,29 @@ impl App {
                 self.origin_url.pop();
             }
             10 => {
+                self.vless_canary_acme_contact_email.pop();
+            }
+            11 => {
+                self.default_vless_port.pop();
+            }
+            12 => {
+                self.default_vless_server_names.pop();
+            }
+            13 => {
+                self.default_vless_fingerprint.pop();
+            }
+            14 => {
+                self.default_ss_port.pop();
+            }
+            15 => {
                 self.cloudflare_token.pop();
             }
             _ => {}
         }
     }
 
-    fn to_values(&self) -> AppValues {
-        AppValues {
+    fn to_values(&self) -> Result<AppValues, crate::ops::cli::ExitError> {
+        Ok(AppValues {
             node_name: self.node_name.clone(),
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
@@ -617,11 +720,22 @@ impl App {
             } else {
                 Some(self.api_base_url.clone()).filter(|s| !s.trim().is_empty())
             },
+            vless_canary_acme_contact_email: Some(self.vless_canary_acme_contact_email.clone())
+                .filter(|s| !s.trim().is_empty()),
+            default_vless_port: parse_optional_port(
+                "default_vless_port",
+                &self.default_vless_port,
+            )?,
+            default_vless_server_names: Some(self.default_vless_server_names.clone())
+                .filter(|s| !s.trim().is_empty()),
+            default_vless_fingerprint: Some(self.default_vless_fingerprint.clone())
+                .filter(|s| !s.trim().is_empty()),
+            default_ss_port: parse_optional_port("default_ss_port", &self.default_ss_port)?,
             xray_version: self.xray_version.clone(),
             cloudflare_token: self.cloudflare_token.clone(),
             enable_services: self.enable_services,
             dry_run: self.dry_run,
-        }
+        })
     }
 
     fn snapshot(&self) -> AppSnapshot {
@@ -636,6 +750,11 @@ impl App {
             hostname: self.hostname.clone(),
             origin_url: self.origin_url.clone(),
             api_base_url: self.api_base_url.clone(),
+            vless_canary_acme_contact_email: self.vless_canary_acme_contact_email.clone(),
+            default_vless_port: self.default_vless_port.clone(),
+            default_vless_server_names: self.default_vless_server_names.clone(),
+            default_vless_fingerprint: self.default_vless_fingerprint.clone(),
+            default_ss_port: self.default_ss_port.clone(),
             xray_version: self.xray_version.clone(),
             cloudflare_token: self.cloudflare_token.clone(),
             enable_services: self.enable_services,
@@ -678,6 +797,21 @@ impl App {
         if let Some(v) = cfg.api_base_url {
             self.api_base_url = v;
         }
+        if let Some(v) = cfg.vless_canary_acme_contact_email {
+            self.vless_canary_acme_contact_email = v;
+        }
+        if let Some(v) = cfg.default_vless_port {
+            self.default_vless_port = v;
+        }
+        if let Some(v) = cfg.default_vless_server_names {
+            self.default_vless_server_names = v;
+        }
+        if let Some(v) = cfg.default_vless_fingerprint {
+            self.default_vless_fingerprint = v;
+        }
+        if let Some(v) = cfg.default_ss_port {
+            self.default_ss_port = v;
+        }
         if let Some(v) = cfg.xray_version {
             self.xray_version = v;
         }
@@ -699,6 +833,19 @@ fn mask_token(token: &str) -> String {
         return String::new();
     }
     "*".repeat(token.chars().count())
+}
+
+fn parse_optional_port(
+    field: &str,
+    raw: &str,
+) -> Result<Option<u16>, crate::ops::cli::ExitError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed.parse::<u16>().map(Some).map_err(|err| {
+        crate::ops::cli::ExitError::new(2, format!("invalid_input: {field} must be a valid port: {err}"))
+    })
 }
 
 fn help_text(app: &App) -> String {
@@ -763,6 +910,11 @@ struct TuiConfig {
     hostname: Option<String>,
     origin_url: Option<String>,
     api_base_url: Option<String>,
+    vless_canary_acme_contact_email: Option<String>,
+    default_vless_port: Option<String>,
+    default_vless_server_names: Option<String>,
+    default_vless_fingerprint: Option<String>,
+    default_ss_port: Option<String>,
     xray_version: Option<String>,
     enable_services: Option<bool>,
 }
@@ -793,6 +945,11 @@ fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::
         hostname: values.hostname.clone(),
         origin_url: values.origin_url.clone(),
         api_base_url: values.api_base_url.clone(),
+        vless_canary_acme_contact_email: values.vless_canary_acme_contact_email.clone(),
+        default_vless_port: values.default_vless_port.map(|value| value.to_string()),
+        default_vless_server_names: values.default_vless_server_names.clone(),
+        default_vless_fingerprint: values.default_vless_fingerprint.clone(),
+        default_ss_port: values.default_ss_port.map(|value| value.to_string()),
         xray_version: Some(values.xray_version.clone()),
         enable_services: Some(values.enable_services),
     };
@@ -929,6 +1086,11 @@ mod tests {
             hostname: Some("node-1.example.com".to_string()),
             origin_url: Some("http://127.0.0.1:62416".to_string()),
             api_base_url: None,
+            vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
+            default_vless_port: Some(443),
+            default_vless_server_names: Some("public.sn.files.1drv.com,public.bn.files.1drv.com".to_string()),
+            default_vless_fingerprint: Some("chrome".to_string()),
+            default_ss_port: Some(53843),
             xray_version: "latest".to_string(),
             cloudflare_token: String::new(),
             enable_services: true,
@@ -953,6 +1115,53 @@ mod tests {
     }
 
     #[test]
+    fn save_tui_config_persists_managed_default_fields() {
+        let (tmp, paths) = test_paths();
+        let values = AppValues {
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_enabled: true,
+            ddns_enabled: true,
+            ddns_zone_id: Some("zone-ddns".to_string()),
+            account_id: Some("acc".to_string()),
+            zone_id: Some("zone".to_string()),
+            hostname: Some("node-1.example.com".to_string()),
+            origin_url: Some("http://127.0.0.1:62416".to_string()),
+            api_base_url: None,
+            vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
+            default_vless_port: Some(443),
+            default_vless_server_names: Some(
+                "public.sn.files.1drv.com,public.bn.files.1drv.com".to_string(),
+            ),
+            default_vless_fingerprint: Some("chrome".to_string()),
+            default_ss_port: Some(53843),
+            xray_version: "latest".to_string(),
+            cloudflare_token: String::new(),
+            enable_services: true,
+            dry_run: false,
+        };
+
+        save_tui_config(&paths, &values).unwrap();
+        let raw = fs::read_to_string(tmp.path().join("etc/xp-ops/deploy/settings.json")).unwrap();
+        assert!(raw.contains("\"vless_canary_acme_contact_email\": \"ops@example.com\""));
+        assert!(raw.contains("\"default_vless_port\": \"443\""));
+        assert!(raw.contains("\"default_vless_server_names\""));
+        assert!(raw.contains("\"default_vless_fingerprint\": \"chrome\""));
+        assert!(raw.contains("\"default_ss_port\": \"53843\""));
+    }
+
+    #[test]
+    fn to_values_rejects_invalid_managed_default_port() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        app.default_vless_port = "not-a-port".to_string();
+
+        let err = app.to_values().unwrap_err();
+        assert_eq!(err.code, 2);
+        assert!(err.message.contains("default_vless_port"));
+    }
+
+    #[test]
     fn save_token_empty_keeps_existing_token_unchanged() {
         let (tmp, paths) = test_paths();
         let token_path = tmp.path().join("etc/xp-ops/cloudflare_tunnel/api_token");
@@ -970,6 +1179,11 @@ mod tests {
             hostname: None,
             origin_url: None,
             api_base_url: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
             xray_version: "latest".to_string(),
             cloudflare_token: String::new(),
             enable_services: true,
@@ -999,6 +1213,11 @@ mod tests {
             hostname: None,
             origin_url: None,
             api_base_url: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
             xray_version: "latest".to_string(),
             cloudflare_token: " newtoken \n".to_string(),
             enable_services: true,
@@ -1028,6 +1247,11 @@ mod tests {
             hostname: None,
             origin_url: None,
             api_base_url: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
             xray_version: "latest".to_string(),
             cloudflare_token: String::new(),
             enable_services: true,
@@ -1057,6 +1281,11 @@ mod tests {
             hostname: None,
             origin_url: None,
             api_base_url: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
             xray_version: "latest".to_string(),
             cloudflare_token: "tok".to_string(),
             enable_services: true,

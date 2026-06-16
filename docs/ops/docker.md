@@ -41,10 +41,12 @@ xp-ops container run
 | `XP_ACCESS_HOST`                          | optional                     | Recommended when DDNS is enabled; use the public endpoint hostname (for example `node-1-ep.example.com`)                      |
 | `XP_CLOUDFLARE_DDNS_ENABLED=true`         | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                                     |
 | `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                                            |
+| `XP_VLESS_CANARY_BIND`                    | optional                     | Loopback TLS canary bind for xp-managed VLESS fallback; defaults to `127.0.0.1:39043`                                         |
+| `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`      | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                   |
+| `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`      | optional                     | Strongly recommended when VLESS canary DNS-01 should skip zone auto-discovery                                                 |
 | `XP_MESH_PROXY_URL`                       | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config |
 | `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                               |
-| `XP_DEFAULT_VLESS_REALITY_DEST`           | with `XP_DEFAULT_VLESS_PORT` | REALITY destination origin (for example `oneclient.sfx.ms:443`)                                                               |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated SNI hostnames; they may differ from `XP_DEFAULT_VLESS_REALITY_DEST`                                           |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated client SNI hostnames used by the managed VLESS endpoint                                                       |
 | `XP_DEFAULT_VLESS_FINGERPRINT`            | optional                     | Defaults to `chrome`                                                                                                          |
 | `XP_DEFAULT_SS_PORT`                      | optional                     | Enables managed default SS2022 endpoint                                                                                       |
 | `CLOUDFLARE_API_TOKEN`                    | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                |
@@ -56,6 +58,7 @@ xp-ops container run
 - `XP_DATA_DIR` defaults to `/var/lib/xp/data`
 - When `XP_ENABLE_CLOUDFLARE=true` and `XP_API_BASE_URL` is unset, it becomes `https://<XP_CLOUDFLARE_HOSTNAME>`
 - When `XP_ACCESS_HOST` is unset, it is derived from `XP_CLOUDFLARE_HOSTNAME` or `XP_API_BASE_URL`
+- `XP_VLESS_CANARY_BIND` defaults to `127.0.0.1:39043`
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
 - The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional control-plane relay. It is disabled unless `XP_MESH_PROXY_URL` is set.
 
@@ -70,6 +73,7 @@ Mount all three of these paths:
 They persist:
 
 - cluster metadata / raft state / certificates
+- VLESS HTTPS canary ACME account key / cert / key under `/var/lib/xp/data/vless-https-canary`
 - `cloudflared` credentials and config
 - Cloudflare Tunnel settings (`settings.json`)
 
@@ -87,10 +91,10 @@ The container entrypoint treats the mounted data volume as the source of truth f
 
 The managed default endpoint contract is:
 
-- VLESS: set `XP_DEFAULT_VLESS_PORT`, `XP_DEFAULT_VLESS_REALITY_DEST`, and `XP_DEFAULT_VLESS_SERVER_NAMES`
+- VLESS: set `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_VLESS_SERVER_NAMES`
 - SS2022: set `XP_DEFAULT_SS_PORT`
 
-For managed VLESS REALITY endpoints, `XP_DEFAULT_VLESS_REALITY_DEST` is the Xray destination origin and `XP_DEFAULT_VLESS_SERVER_NAMES` is the client SNI candidate list. Keep them explicit. For OneDrive-based camouflage, use `oneclient.sfx.ms:443` as the destination and prefer `public.sn.files.1drv.com,public.bn.files.1drv.com` as SNI candidates.
+For managed VLESS REALITY endpoints, `XP_DEFAULT_VLESS_SERVER_NAMES` is the client SNI candidate list, while `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. This changes xp-managed/default VLESS camouflage semantics from “external disguise site” to “local HTTPS canary behind fallback”. Manual VLESS endpoints are not rewritten.
 
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 
@@ -113,8 +117,8 @@ export XP_CLOUDFLARE_HOSTNAME=node-1.example.com
 export XP_ACCESS_HOST=node-1-ep.example.com
 export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
+export XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 export XP_DEFAULT_VLESS_PORT=53842
-export XP_DEFAULT_VLESS_REALITY_DEST='oneclient.sfx.ms:443'
 export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
@@ -153,8 +157,8 @@ export XP_CLOUDFLARE_HOSTNAME=node-2.example.com
 export XP_ACCESS_HOST=node-2-ep.example.com
 export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
+export XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 export XP_DEFAULT_VLESS_PORT=53842
-export XP_DEFAULT_VLESS_REALITY_DEST='oneclient.sfx.ms:443'
 export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
@@ -205,5 +209,6 @@ Pre-releases publish:
 - Tunnel enabled but startup fails before join: confirm `CLOUDFLARE_API_TOKEN`, account id, hostname, and zone id
 - Container restarts with unexpected node identity: inspect logs for the automatic node-meta realignment and verify `XP_NODE_NAME`, `XP_ACCESS_HOST`, and `XP_API_BASE_URL`
 - DDNS is enabled but `XP_ACCESS_HOST` does not update: confirm `XP_CLOUDFLARE_DDNS_ENABLED=true`, `XP_CLOUDFLARE_DDNS_ZONE_ID`, and `CLOUDFLARE_API_TOKEN`
+- Managed VLESS HTTPS canary fails on `https://<access_host[:vless_port]>/generate_204`: confirm `GET /api/admin/config` shows a healthy `vless_https_canary_status`, the managed VLESS endpoint exists on that host, and `XP_DEFAULT_VLESS_PORT` matches the probed ingress port
 - Default endpoint reconcile fails: ensure only one VLESS / one SS2022 endpoint exists on the node before asking the container to adopt them
 - Healthcheck fails but container is up: inspect `docker logs` for `xray` or `xp` child-process exits

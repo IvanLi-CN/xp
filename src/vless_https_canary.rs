@@ -1,0 +1,545 @@
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use anyhow::Context;
+use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
+use chrono::{DateTime, Utc};
+use lers::{
+    Account, Certificate, Directory, Error as LersError, LETS_ENCRYPT_PRODUCTION_URL,
+    solver::Solver,
+};
+use openssl::{
+    pkey::{PKey, Private},
+    x509::X509,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::{config::Config, ops::cloudflare};
+
+pub const GENERATE_204_PATH: &str = "/generate_204";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VlessHttpsCanaryStatus {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acme_directory_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_not_after: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_renewed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+impl VlessHttpsCanaryStatus {
+    pub fn disabled(bind: std::net::SocketAddr) -> Self {
+        Self {
+            enabled: false,
+            bind: Some(bind.to_string()),
+            acme_directory_url: None,
+            cert_not_after: None,
+            last_renewed_at: None,
+            last_error: None,
+        }
+    }
+}
+
+pub struct VlessHttpsCanaryPaths {
+    pub dir: PathBuf,
+    pub status_json: PathBuf,
+    pub account_key_pem: PathBuf,
+    pub cert_pem: PathBuf,
+    pub key_pem: PathBuf,
+}
+
+impl VlessHttpsCanaryPaths {
+    pub fn new(data_dir: &Path) -> Self {
+        let dir = data_dir.join("vless-https-canary");
+        Self {
+            status_json: dir.join("status.json"),
+            account_key_pem: dir.join("account_key.pem"),
+            cert_pem: dir.join("cert.pem"),
+            key_pem: dir.join("key.pem"),
+            dir,
+        }
+    }
+}
+
+pub fn read_cloudflare_token_from_file(path: &Path) -> anyhow::Result<String> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("read cloudflare token file {}", path.display()))?;
+    let token = raw.trim();
+    if token.is_empty() {
+        anyhow::bail!("cloudflare token file is empty");
+    }
+    Ok(token.to_string())
+}
+
+pub async fn resolve_zone_id_for_host(
+    api_base: &str,
+    token: &str,
+    configured_zone_id: &str,
+    hostname: &str,
+) -> anyhow::Result<String> {
+    if !configured_zone_id.trim().is_empty() {
+        return Ok(configured_zone_id.trim().to_string());
+    }
+
+    let candidates = zone_name_candidates(hostname);
+    if candidates.is_empty() {
+        anyhow::bail!("vless https canary hostname is empty");
+    }
+    for candidate in candidates {
+        let mut zones = cloudflare::find_zone_by_name(api_base, token, &candidate)
+            .await
+            .map_err(|e| anyhow::anyhow!(e.message))?;
+        if zones.is_empty() {
+            continue;
+        }
+        if zones.len() == 1 {
+            return Ok(zones.remove(0).id);
+        }
+        anyhow::bail!(
+            "multiple Cloudflare zones matched {candidate}; set XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID explicitly"
+        );
+    }
+
+    anyhow::bail!("no Cloudflare zone matched vless https canary hostname {hostname}")
+}
+
+fn zone_name_candidates(domain: &str) -> Vec<String> {
+    let trimmed = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    let parts: Vec<&str> = trimmed.split('.').filter(|p| !p.is_empty()).collect();
+    let mut out = Vec::new();
+    for i in 0..parts.len() {
+        out.push(parts[i..].join("."));
+    }
+    out
+}
+
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp_path = path.with_extension("tmp");
+    fs::write(&tmp_path, bytes)?;
+    fs::rename(tmp_path, path)?;
+    Ok(())
+}
+
+pub fn load_status(data_dir: &Path, bind: std::net::SocketAddr) -> VlessHttpsCanaryStatus {
+    let paths = VlessHttpsCanaryPaths::new(data_dir);
+    let Ok(raw) = fs::read(&paths.status_json) else {
+        return VlessHttpsCanaryStatus::disabled(bind);
+    };
+    serde_json::from_slice(&raw).unwrap_or_else(|_| VlessHttpsCanaryStatus::disabled(bind))
+}
+
+pub fn persist_status(data_dir: &Path, status: &VlessHttpsCanaryStatus) -> anyhow::Result<()> {
+    let paths = VlessHttpsCanaryPaths::new(data_dir);
+    fs::create_dir_all(&paths.dir)
+        .with_context(|| format!("create vless https canary dir {}", paths.dir.display()))?;
+    let raw = serde_json::to_vec_pretty(status).context("serialize vless https canary status")?;
+    write_atomic(&paths.status_json, &raw).with_context(|| {
+        format!(
+            "write vless https canary status {}",
+            paths.status_json.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[derive(Clone)]
+struct RepoCloudflareDns01Solver {
+    api_base: String,
+    token: String,
+    zone_id: String,
+    client: reqwest::Client,
+    records: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl RepoCloudflareDns01Solver {
+    fn new(api_base: String, token: String, zone_id: String) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent("xp-vless-https-canary")
+            .build()
+            .context("build cloudflare dns01 client")?;
+        Ok(Self {
+            api_base,
+            token,
+            zone_id,
+            client,
+            records: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    async fn create_txt_record(&self, fqdn: &str, content: &str) -> anyhow::Result<String> {
+        let url = format!(
+            "{}/client/v4/zones/{}/dns_records",
+            self.api_base.trim_end_matches('/'),
+            self.zone_id
+        );
+        let body = serde_json::json!({
+            "type": "TXT",
+            "name": fqdn,
+            "content": content,
+            "ttl": 120
+        });
+        let resp = self
+            .client
+            .post(url)
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await?;
+        let value: serde_json::Value = resp.json().await?;
+        let ok = value
+            .get("success")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !ok {
+            anyhow::bail!("cloudflare create txt record failed: {value}");
+        }
+        value
+            .get("result")
+            .and_then(|v| v.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .ok_or_else(|| anyhow::anyhow!("cloudflare create txt record missing id"))
+    }
+}
+
+#[derive(Debug)]
+struct VlessHttpsCanaryDnsError(String);
+
+impl std::fmt::Display for VlessHttpsCanaryDnsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for VlessHttpsCanaryDnsError {}
+
+#[async_trait::async_trait]
+impl Solver for RepoCloudflareDns01Solver {
+    async fn present(
+        &self,
+        domain: String,
+        token: String,
+        key_authorization: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let domain = domain.trim_start_matches("*.").to_string();
+        let fqdn = format!("_acme-challenge.{domain}");
+        let record_id = self
+            .create_txt_record(&fqdn, &key_authorization)
+            .await
+            .map_err(|err| lers::solver::boxed_err(VlessHttpsCanaryDnsError(err.to_string())))?;
+        self.records
+            .lock()
+            .expect("dns01 record lock")
+            .insert(token, record_id);
+        Ok(())
+    }
+
+    async fn cleanup(
+        &self,
+        token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let Some(record_id) = self.records.lock().expect("dns01 record lock").remove(token) else {
+            return Ok(());
+        };
+        let client = cloudflare::CloudflareClient::new(self.api_base.clone(), self.token.clone());
+        client
+            .delete_dns_record(&self.zone_id, &record_id)
+            .await
+            .map_err(|err| lers::solver::boxed_err(VlessHttpsCanaryDnsError(err.to_string())))?;
+        Ok(())
+    }
+
+    fn attempts(&self) -> usize {
+        60
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(2)
+    }
+}
+
+pub fn spawn(config: Arc<Config>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build vless https canary runtime");
+        runtime.block_on(async move {
+            if let Err(err) = run_supervisor(config.clone()).await {
+                let mut status = base_status(&config);
+                status.last_error = Some(err.to_string());
+                let _ = persist_status(&config.data_dir, &status);
+                tracing::error!(error = %err, "vless https canary supervisor failed");
+            }
+        });
+    })
+}
+
+async fn run_supervisor(config: Arc<Config>) -> anyhow::Result<()> {
+    let mut status = base_status(&config);
+    persist_status(&config.data_dir, &status)?;
+
+    if config.access_host.trim().is_empty() {
+        return Ok(());
+    }
+
+    let paths = VlessHttpsCanaryPaths::new(&config.data_dir);
+    fs::create_dir_all(&paths.dir)
+        .with_context(|| format!("create vless https canary dir {}", paths.dir.display()))?;
+
+    let cert = ensure_certificate(&config, &paths, &mut status).await?;
+    let rustls = axum_server::tls_rustls::RustlsConfig::from_pem(
+        cert.fullchain_to_pem()?,
+        cert.private_key_to_pem()?,
+    )
+    .await
+    .context("build rustls config from vless https canary cert")?;
+
+    persist_status(&config.data_dir, &status)?;
+
+    let app = Router::new().route(GENERATE_204_PATH, get(generate_204).head(generate_204));
+    let bind = config.vless_canary_bind;
+    let rustls_reload = rustls.clone();
+    let data_dir = config.data_dir.clone();
+    tokio::spawn(async move {
+        if let Err(err) = axum_server::bind_rustls(bind, rustls)
+            .serve(app.into_make_service())
+            .await
+        {
+            let mut status = load_status(&data_dir, bind);
+            status.last_error = Some(err.to_string());
+            let _ = persist_status(&data_dir, &status);
+        }
+    });
+
+    loop {
+        let current = load_existing_certificate(&paths).ok();
+        let Some(current) = current else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+        let renew_after = renewal_sleep_duration(&current)?;
+        tokio::time::sleep(renew_after).await;
+        match renew_certificate(&config, &paths, current).await {
+            Ok(cert) => {
+                rustls_reload
+                    .reload_from_pem(cert.fullchain_to_pem()?, cert.private_key_to_pem()?)
+                    .await
+                    .context("reload vless https canary rustls config")?;
+                let mut status = base_status(&config);
+                status.cert_not_after = certificate_not_after_rfc3339(cert.x509())?;
+                status.last_renewed_at = Some(Utc::now().to_rfc3339());
+                status.last_error = None;
+                persist_status(&config.data_dir, &status)?;
+            }
+            Err(err) => {
+                let mut status = load_status(&config.data_dir, config.vless_canary_bind);
+                status.last_error = Some(err.to_string());
+                persist_status(&config.data_dir, &status)?;
+                tokio::time::sleep(Duration::from_secs(300)).await;
+            }
+        }
+    }
+}
+
+fn base_status(config: &Config) -> VlessHttpsCanaryStatus {
+    let enabled = !config.access_host.trim().is_empty();
+    VlessHttpsCanaryStatus {
+        enabled,
+        bind: Some(config.vless_canary_bind.to_string()),
+        acme_directory_url: enabled.then(|| config.vless_canary_acme_directory_url.clone()),
+        cert_not_after: None,
+        last_renewed_at: None,
+        last_error: None,
+    }
+}
+
+async fn generate_204() -> impl IntoResponse {
+    StatusCode::NO_CONTENT
+}
+
+async fn ensure_certificate(
+    config: &Config,
+    paths: &VlessHttpsCanaryPaths,
+    status: &mut VlessHttpsCanaryStatus,
+) -> anyhow::Result<Certificate> {
+    if let Ok(cert) = load_existing_certificate(paths)
+        && !certificate_needs_renewal(cert.x509())?
+    {
+        status.cert_not_after = certificate_not_after_rfc3339(cert.x509())?;
+        status.last_error = None;
+        return Ok(cert);
+    }
+
+    let cert = obtain_certificate(config, paths).await?;
+    write_certificate(paths, &cert)?;
+    status.cert_not_after = certificate_not_after_rfc3339(cert.x509())?;
+    status.last_renewed_at = Some(Utc::now().to_rfc3339());
+    status.last_error = None;
+    Ok(cert)
+}
+
+async fn renew_certificate(
+    config: &Config,
+    paths: &VlessHttpsCanaryPaths,
+    current: Certificate,
+) -> anyhow::Result<Certificate> {
+    if !certificate_needs_renewal(current.x509())? {
+        return Ok(current);
+    }
+    let account = load_or_create_account(config, paths).await?;
+    let renewed = account
+        .renew_certificate(current)
+        .await
+        .map_err(map_lers_error)?;
+    write_certificate(paths, &renewed)?;
+    Ok(renewed)
+}
+
+async fn obtain_certificate(
+    config: &Config,
+    paths: &VlessHttpsCanaryPaths,
+) -> anyhow::Result<Certificate> {
+    let account = load_or_create_account(config, paths).await?;
+    let host = config.access_host.trim();
+    if host.is_empty() {
+        anyhow::bail!("XP_ACCESS_HOST is empty while vless https canary is enabled");
+    }
+    let cert = account
+        .certificate()
+        .add_domain(host)
+        .obtain()
+        .await
+        .map_err(map_lers_error)?;
+    Ok(cert)
+}
+
+async fn load_or_create_account(
+    config: &Config,
+    paths: &VlessHttpsCanaryPaths,
+) -> anyhow::Result<Account> {
+    let token = read_cloudflare_token_from_file(Path::new(
+        config.vless_canary_cloudflare_token_file.as_str(),
+    ))?;
+    let zone_id = resolve_zone_id_for_host(
+        &cloudflare::cloudflare_api_base(),
+        &token,
+        &config.vless_canary_cloudflare_zone_id,
+        &config.access_host,
+    )
+    .await?;
+    let solver =
+        RepoCloudflareDns01Solver::new(cloudflare::cloudflare_api_base(), token, zone_id)?;
+    let directory_url = if config.vless_canary_acme_directory_url.trim().is_empty() {
+        LETS_ENCRYPT_PRODUCTION_URL.to_string()
+    } else {
+        config.vless_canary_acme_directory_url.trim().to_string()
+    };
+    let directory = Directory::builder(directory_url)
+        .dns01_solver(Box::new(solver))
+        .build()
+        .await
+        .map_err(map_lers_error)?;
+    let mut builder = directory.account().terms_of_service_agreed(true);
+    let email = config.vless_canary_acme_contact_email.trim();
+    if !email.is_empty() {
+        builder = builder.contacts(vec![format!("mailto:{email}")]);
+    }
+    if paths.account_key_pem.exists() {
+        let raw = fs::read(&paths.account_key_pem).with_context(|| {
+            format!(
+                "read vless https canary account key {}",
+                paths.account_key_pem.display()
+            )
+        })?;
+        let key = PKey::<Private>::private_key_from_pem(&raw)
+            .context("parse vless https canary account key")?;
+        let account = builder
+            .private_key(key)
+            .create_if_not_exists()
+            .await
+            .map_err(map_lers_error)?;
+        return Ok(account);
+    }
+
+    let account = builder.create_if_not_exists().await.map_err(map_lers_error)?;
+    let pem = account
+        .private_key()
+        .private_key_to_pem_pkcs8()
+        .context("export vless https canary account key")?;
+    write_atomic(&paths.account_key_pem, &pem).with_context(|| {
+        format!(
+            "write vless https canary account key {}",
+            paths.account_key_pem.display()
+        )
+    })?;
+    Ok(account)
+}
+
+fn load_existing_certificate(paths: &VlessHttpsCanaryPaths) -> anyhow::Result<Certificate> {
+    let cert_pem = fs::read(&paths.cert_pem)
+        .with_context(|| format!("read vless https canary cert {}", paths.cert_pem.display()))?;
+    let key_pem = fs::read(&paths.key_pem)
+        .with_context(|| format!("read vless https canary key {}", paths.key_pem.display()))?;
+    Certificate::from_chain_and_private_key(
+        lers::Format::Pem(&cert_pem),
+        lers::Format::Pem(&key_pem),
+    )
+    .map_err(map_lers_error)
+}
+
+fn write_certificate(paths: &VlessHttpsCanaryPaths, cert: &Certificate) -> anyhow::Result<()> {
+    write_atomic(&paths.cert_pem, &cert.fullchain_to_pem()?).with_context(|| {
+        format!(
+            "write vless https canary cert {}",
+            paths.cert_pem.display()
+        )
+    })?;
+    write_atomic(&paths.key_pem, &cert.private_key_to_pem()?).with_context(|| {
+        format!("write vless https canary key {}", paths.key_pem.display())
+    })?;
+    Ok(())
+}
+
+fn certificate_not_after_rfc3339(cert: &X509) -> anyhow::Result<Option<String>> {
+    let not_after = cert.not_after().to_string();
+    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
+        .with_context(|| format!("parse certificate notAfter {not_after}"))?;
+    Ok(Some(dt.with_timezone(&Utc).to_rfc3339()))
+}
+
+fn certificate_needs_renewal(cert: &X509) -> anyhow::Result<bool> {
+    let not_after = cert.not_after().to_string();
+    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
+        .with_context(|| format!("parse certificate notAfter {not_after}"))?;
+    Ok(dt.with_timezone(&Utc) <= Utc::now() + chrono::Duration::days(30))
+}
+
+fn renewal_sleep_duration(cert: &Certificate) -> anyhow::Result<Duration> {
+    let not_after = cert.x509().not_after().to_string();
+    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
+        .with_context(|| format!("parse certificate notAfter {not_after}"))?
+        .with_timezone(&Utc);
+    let renew_at = dt - chrono::Duration::days(30);
+    let now = Utc::now();
+    if renew_at <= now {
+        return Ok(Duration::from_secs(1));
+    }
+    let diff = renew_at - now;
+    Ok(Duration::from_secs(diff.num_seconds().max(1) as u64))
+}
+
+fn map_lers_error(err: LersError) -> anyhow::Error {
+    anyhow::anyhow!(err.to_string())
+}

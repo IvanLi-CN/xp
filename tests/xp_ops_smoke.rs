@@ -206,6 +206,62 @@ fn deploy_join_dry_run_succeeds_without_join_side_effects() {
 }
 
 #[test]
+fn deploy_dry_run_prints_managed_default_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Satisfy `xp` dry-run prerequisite: `/usr/local/bin/xp` exists.
+    let xp_bin = root.join("usr/local/bin/xp");
+    fs::create_dir_all(xp_bin.parent().unwrap()).unwrap();
+    fs::write(&xp_bin, b"#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut p = fs::metadata(&xp_bin).unwrap().permissions();
+        p.set_mode(0o755);
+        fs::set_permissions(&xp_bin, p).unwrap();
+    }
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
+    cmd.env("XP_OPS_DISTRO", "arch");
+    cmd.args([
+        "--root",
+        &root.to_string_lossy(),
+        "deploy",
+        "--node-name",
+        "node1",
+        "--access-host",
+        "node1.example.invalid",
+        "--api-base-url",
+        "https://api.example.invalid",
+        "--no-cloudflare",
+        "--no-ddns",
+        "--default-vless-port",
+        "53842",
+        "--default-vless-server-names",
+        "public.sn.files.1drv.com,public.bn.files.1drv.com",
+        "--default-vless-fingerprint",
+        "chrome",
+        "--default-ss-port",
+        "53843",
+        "--vless-canary-acme-contact-email",
+        "ops@example.com",
+        "--dry-run",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("vless_canary_acme_contact_email: ops@example.com"))
+        .stderr(predicate::str::contains("default_vless_port: 53842"))
+        .stderr(predicate::str::contains(
+            "default_vless_server_names: public.sn.files.1drv.com,public.bn.files.1drv.com",
+        ))
+        .stderr(predicate::str::contains("default_vless_fingerprint: chrome"))
+        .stderr(predicate::str::contains("default_ss_port: 53843"))
+        .stderr(predicate::str::contains("deploy plan:"));
+}
+
+#[test]
 fn init_writes_xray_config_under_test_root() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();

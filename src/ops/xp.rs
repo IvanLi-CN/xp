@@ -2,6 +2,10 @@ use crate::ops::cli::{
     ExitError, XpBootstrapArgs, XpInstallArgs, XpRecoverSingleNodeArgs, XpRestartArgs,
     XpSyncNodeMetaArgs,
 };
+use crate::managed_default_endpoints::{
+    ManagedDefaultEndpointsSpec, build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
+    reconcile_host_managed_default_endpoints,
+};
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
 use axum::http::{Method, Uri, header::HeaderName};
@@ -203,6 +207,12 @@ pub async fn cmd_xp_sync_node_meta(
     let raw_env = fs::read_to_string(&env_path)
         .map_err(|_| ExitError::new(2, "invalid_input: /etc/xp/xp.env not found"))?;
     let parsed = crate::ops::xp_env::parse_xp_env(Some(raw_env));
+    if parsed.has_legacy_relay_probe_vars() {
+        return Err(ExitError::new(
+            2,
+            "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly",
+        ));
+    }
 
     let node_name = parsed.node_name.ok_or_else(|| {
         ExitError::new(2, "invalid_input: XP_NODE_NAME missing in /etc/xp/xp.env")
@@ -221,6 +231,94 @@ pub async fn cmd_xp_sync_node_meta(
         return Err(ExitError::new(2, "invalid_input: XP_NODE_NAME is empty"));
     }
     validate_https_origin_xp_env(&api_base_url, "XP_API_BASE_URL")?;
+    if let Some(url) = parsed.vless_canary_acme_directory_url.as_deref()
+        && !url.trim().is_empty()
+    {
+        reqwest::Url::parse(url).map_err(|err| {
+            ExitError::new(
+                2,
+                format!(
+                    "invalid_input: XP_VLESS_CANARY_ACME_DIRECTORY_URL must be valid URL: {err}"
+                ),
+            )
+        })?;
+    }
+    if let Some(email) = parsed.vless_canary_acme_contact_email.as_deref()
+        && !email.trim().is_empty()
+        && !email.contains('@')
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_input: XP_VLESS_CANARY_ACME_CONTACT_EMAIL must look like an email",
+        ));
+    }
+    if let Some(path) = parsed.vless_canary_cloudflare_token_file.as_deref()
+        && path.trim().is_empty()
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE is empty",
+        ));
+    }
+    if let Some(zone_id) = parsed.vless_canary_cloudflare_zone_id.as_deref()
+        && zone_id.trim().contains(char::is_whitespace)
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID must not contain whitespace",
+        ));
+    }
+    if let Some(bind) = parsed.vless_canary_bind.as_deref() {
+        bind.parse::<std::net::SocketAddr>().map_err(|err| {
+            ExitError::new(
+                2,
+                format!("invalid_input: XP_VLESS_CANARY_BIND must be socket address: {err}"),
+            )
+        })?;
+    }
+    let vless_canary_bind = parsed
+        .vless_canary_bind
+        .as_deref()
+        .unwrap_or(crate::config::DEFAULT_VLESS_CANARY_BIND)
+        .parse::<std::net::SocketAddr>()
+        .map_err(|err| {
+            ExitError::new(
+                2,
+                format!("invalid_input: XP_VLESS_CANARY_BIND must be socket address: {err}"),
+            )
+        })?;
+    let managed_default_spec = ManagedDefaultEndpointsSpec {
+        vless: build_default_vless_endpoint_spec(
+            parsed
+                .default_vless_port
+                .as_deref()
+                .map(|value| value.parse::<u16>())
+                .transpose()
+                .map_err(|err| {
+                    ExitError::new(
+                        2,
+                        format!("invalid_input: XP_DEFAULT_VLESS_PORT must be a valid port: {err}"),
+                    )
+                })?,
+            parsed.default_vless_server_names.as_deref(),
+            parsed.default_vless_fingerprint.as_deref(),
+            vless_canary_bind,
+        )
+        .map_err(|err| ExitError::new(2, format!("invalid_input: {err}")))?,
+        ss: build_default_ss_endpoint_spec(
+            parsed
+                .default_ss_port
+                .as_deref()
+                .map(|value| value.parse::<u16>())
+                .transpose()
+                .map_err(|err| {
+                    ExitError::new(
+                        2,
+                        format!("invalid_input: XP_DEFAULT_SS_PORT must be a valid port: {err}"),
+                    )
+                })?,
+        ),
+    };
 
     let data_dir = parsed
         .data_dir
@@ -234,18 +332,23 @@ pub async fn cmd_xp_sync_node_meta(
         &node_name,
         &access_host,
         &api_base_url,
+        &managed_default_spec,
+        vless_canary_bind,
         &args.xp_base_url,
         mode,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn sync_node_meta_runtime(
     paths: &Paths,
     data_dir: &Path,
     node_name: &str,
     access_host: &str,
     api_base_url: &str,
+    managed_default_spec: &ManagedDefaultEndpointsSpec,
+    vless_canary_bind: std::net::SocketAddr,
     xp_base_url: &str,
     mode: Mode,
 ) -> Result<(), ExitError> {
@@ -265,6 +368,11 @@ pub(crate) async fn sync_node_meta_runtime(
         .read_cluster_ca_pem(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_ca_error: {e}")))?;
     let client = build_xp_ops_http_client(xp_base_url, &cluster_ca_pem)?;
+    let endpoints = fetch_admin_endpoints_internal(&client, xp_base_url, &ca_key_pem).await?;
+    let node_endpoints = endpoints
+        .into_iter()
+        .filter(|endpoint| endpoint.node_id == node_id)
+        .collect::<Vec<_>>();
 
     let current_node =
         fetch_admin_node_internal(&client, xp_base_url, &ca_key_pem, &node_id).await?;
@@ -333,12 +441,29 @@ pub(crate) async fn sync_node_meta_runtime(
         set_nodes_base_url,
         &ca_key_pem,
         vec![InternalSetNodeArgs {
-            node_id,
+            node_id: node_id.clone(),
             node_name: node_name.to_string(),
             api_base_url: api_base_url.to_string(),
         }],
     )
     .await?;
+
+    let mut writer = |cmd| async {
+        internal_client_write(&client, xp_base_url, &ca_key_pem, cmd)
+            .await
+            .map_err(|err| anyhow::anyhow!(err.message))
+    };
+    reconcile_host_managed_default_endpoints(
+        &abs_data_dir,
+        &node_id,
+        &node_endpoints,
+        managed_default_spec,
+        vless_canary_bind,
+        &mut writer,
+        "xp sync-node-meta",
+    )
+    .await
+    .map_err(|err| ExitError::new(5, format!("managed_default_reconcile_failed: {err}")))?;
 
     Ok(())
 }

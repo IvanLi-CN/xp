@@ -580,6 +580,9 @@ struct AdminServiceConfigResponse {
     node_name: String,
     access_host: String,
     api_base_url: String,
+    vless_https_canary_bind: String,
+    vless_https_canary_acme_directory_url: String,
+    vless_https_canary_status: crate::vless_https_canary::VlessHttpsCanaryStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     mesh_proxy_url: Option<String>,
     mesh_proxy_status: String,
@@ -1094,6 +1097,10 @@ async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value
     let snap = state.xray_health.snapshot().await;
     let cloudflared = state.cloudflared_health.snapshot().await;
     let mesh_proxy = state.mesh_proxy_state.snapshot().await;
+    let vless_https_canary = crate::vless_https_canary::load_status(
+        &state.config.data_dir,
+        state.config.vless_canary_bind,
+    );
     Json(json!({
         "status": "ok",
         "xray": {
@@ -1130,7 +1137,8 @@ async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value
             "status": mesh_proxy.status.as_str(),
             "fallback_reason": mesh_proxy.fallback_reason,
             "last_fallback_at": mesh_proxy.last_fallback_at,
-        }
+        },
+        "vless_https_canary": vless_https_canary
     }))
 }
 
@@ -3532,6 +3540,10 @@ async fn build_admin_service_config_response(
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
     let mesh_proxy = state.mesh_proxy_state.snapshot().await;
+    let vless_https_canary_status = crate::vless_https_canary::load_status(
+        &state.config.data_dir,
+        state.config.vless_canary_bind,
+    );
     Ok(AdminServiceConfigResponse {
         bind: state.config.bind.to_string(),
         xray_api_addr: state.config.xray_api_addr.to_string(),
@@ -3539,6 +3551,12 @@ async fn build_admin_service_config_response(
         node_name: state.config.node_name.clone(),
         access_host: state.config.access_host.clone(),
         api_base_url: state.config.api_base_url.clone(),
+        vless_https_canary_bind: state.config.vless_canary_bind.to_string(),
+        vless_https_canary_acme_directory_url: state
+            .config
+            .vless_canary_acme_directory_url
+            .clone(),
+        vless_https_canary_status,
         mesh_proxy_url: state.config.mesh_proxy_url.clone(),
         mesh_proxy_status: mesh_proxy.status.as_str().to_string(),
         mesh_proxy_fallback_reason: mesh_proxy.fallback_reason,
@@ -6945,7 +6963,6 @@ fn render_mihomo_subscription(
             &ctx.memberships,
             &ctx.endpoints,
             &ctx.nodes,
-            ctx.mihomo_profile.as_ref(),
         )
         .map(text_yaml_utf8)
         .map_err(map_subscription_render_error),

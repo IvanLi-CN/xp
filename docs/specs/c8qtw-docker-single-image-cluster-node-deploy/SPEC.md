@@ -102,23 +102,23 @@
 
 ### Container env contract
 
-| Key                                                                                         | Required when   | Description                                      |
-| ------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------ |
-| `XP_NODE_NAME`                                                                              | always          | 节点名                                           |
-| `XP_ADMIN_TOKEN` / `XP_ADMIN_TOKEN_HASH`                                                    | bootstrap       | bootstrap 节点 admin token/hash                  |
-| `XP_JOIN_TOKEN`                                                                             | join            | join token                                       |
-| `XP_API_BASE_URL`                                                                           | tunnel disabled | 节点可达 HTTPS origin                            |
-| `XP_ENABLE_CLOUDFLARE`                                                                      | optional        | `true/false`                                     |
-| `XP_CLOUDFLARE_ACCOUNT_ID`                                                                  | tunnel enabled  | Cloudflare account id                            |
-| `XP_CLOUDFLARE_ZONE_ID`                                                                     | optional        | 显式 zone id；未提供时可由 hostname 解析         |
-| `XP_CLOUDFLARE_HOSTNAME`                                                                    | tunnel enabled  | Tunnel 对外 hostname                             |
-| `XP_CLOUDFLARE_TUNNEL_NAME`                                                                 | optional        | Tunnel 名称；默认 `xp-<node-name>`               |
-| `XP_ACCESS_HOST`                                                                            | optional        | 对外 endpoint hostname；启用 DDNS 时推荐显式设置 |
-| `XP_CLOUDFLARE_DDNS_ENABLED`                                                                | optional        | 是否启用 `XP_ACCESS_HOST` 的 runtime DDNS        |
-| `XP_CLOUDFLARE_DDNS_ZONE_ID`                                                                | DDNS enabled    | DDNS zone id；与 Tunnel 同 zone 时可自动复用     |
-| `XP_DEFAULT_VLESS_PORT` / `XP_DEFAULT_VLESS_REALITY_DEST` / `XP_DEFAULT_VLESS_SERVER_NAMES` | optional        | 默认托管 VLESS endpoint 契约                     |
-| `XP_DEFAULT_SS_PORT`                                                                        | optional        | 默认托管 SS2022 endpoint 契约                    |
-| `CLOUDFLARE_API_TOKEN`                                                                      | tunnel enabled  | Cloudflare API token                             |
+| Key                                                                             | Required when   | Description                                      |
+| ------------------------------------------------------------------------------- | --------------- | ------------------------------------------------ |
+| `XP_NODE_NAME`                                                                  | always          | 节点名                                           |
+| `XP_ADMIN_TOKEN` / `XP_ADMIN_TOKEN_HASH`                                        | bootstrap       | bootstrap 节点 admin token/hash                  |
+| `XP_JOIN_TOKEN`                                                                 | join            | join token                                       |
+| `XP_API_BASE_URL`                                                               | tunnel disabled | 节点可达 HTTPS origin                            |
+| `XP_ENABLE_CLOUDFLARE`                                                          | optional        | `true/false`                                     |
+| `XP_CLOUDFLARE_ACCOUNT_ID`                                                      | tunnel enabled  | Cloudflare account id                            |
+| `XP_CLOUDFLARE_ZONE_ID`                                                         | optional        | 显式 zone id；未提供时可由 hostname 解析         |
+| `XP_CLOUDFLARE_HOSTNAME`                                                        | tunnel enabled  | Tunnel 对外 hostname                             |
+| `XP_CLOUDFLARE_TUNNEL_NAME`                                                     | optional        | Tunnel 名称；默认 `xp-<node-name>`               |
+| `XP_ACCESS_HOST`                                                                | optional        | 对外 endpoint hostname；启用 DDNS 时推荐显式设置 |
+| `XP_CLOUDFLARE_DDNS_ENABLED`                                                    | optional        | 是否启用 `XP_ACCESS_HOST` 的 runtime DDNS        |
+| `XP_CLOUDFLARE_DDNS_ZONE_ID`                                                    | DDNS enabled    | DDNS zone id；与 Tunnel 同 zone 时可自动复用     |
+| `XP_DEFAULT_VLESS_PORT` / `XP_DEFAULT_VLESS_SERVER_NAMES` / `XP_VLESS_CANARY_*` | optional        | 默认托管 VLESS endpoint 与 loopback HTTPS canary |
+| `XP_DEFAULT_SS_PORT`                                                            | optional        | 默认托管 SS2022 endpoint 契约                    |
+| `CLOUDFLARE_API_TOKEN`                                                          | tunnel enabled  | Cloudflare API token                             |
 
 ### Volume contract
 

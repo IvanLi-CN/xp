@@ -85,6 +85,32 @@ async fn install_cloudflared(
             }
             verify_cloudflared(paths, mode, Path::new("/usr/bin/cloudflared"))?;
         }
+        Distro::Rhel => {
+            let repo_path = paths.map_abs(Path::new("/etc/yum.repos.d/cloudflared.repo"));
+
+            if mode == Mode::DryRun {
+                eprintln!("would write: {}", repo_path.display());
+                eprintln!("would download: https://pkg.cloudflare.com/cloudflared.repo");
+                eprintln!("would run: yum install -y cloudflared");
+            } else {
+                if let Some(parent) = repo_path.parent() {
+                    ensure_dir(parent)
+                        .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+                }
+                download_to_path("https://pkg.cloudflare.com/cloudflared.repo", &repo_path)
+                    .await
+                    .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+                chmod(&repo_path, 0o644).ok();
+
+                run_or_print(
+                    mode,
+                    "yum",
+                    &["install", "-y", "cloudflared"],
+                    "install cloudflared via yum",
+                )?;
+            }
+            verify_cloudflared(paths, mode, Path::new("/usr/bin/cloudflared"))?;
+        }
         Distro::Alpine => {
             let (asset, install_path) = match arch {
                 CpuArch::X86_64 => (

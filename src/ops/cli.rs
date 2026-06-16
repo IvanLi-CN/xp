@@ -29,6 +29,7 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 pub enum Command {
     Install(InstallArgs),
@@ -291,6 +292,21 @@ pub struct DeployArgs {
 
     #[arg(long, value_name = "ID")]
     pub ddns_zone_id: Option<String>,
+
+    #[arg(long, value_name = "EMAIL")]
+    pub vless_canary_acme_contact_email: Option<String>,
+
+    #[arg(long, value_name = "PORT")]
+    pub default_vless_port: Option<u16>,
+
+    #[arg(long, value_name = "HOSTS")]
+    pub default_vless_server_names: Option<String>,
+
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub default_vless_fingerprint: Option<String>,
+
+    #[arg(long, value_name = "PORT")]
+    pub default_ss_port: Option<u16>,
 
     #[arg(long, value_name = "TOKEN", conflicts_with = "join_token_stdin")]
     pub join_token: Option<String>,

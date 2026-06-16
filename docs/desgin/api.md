@@ -68,11 +68,58 @@
     "restart_backoff_secs": 0,
     "restart_backoff_attempts": 0,
     "automatic_restart_enabled": false
+  },
+  "vless_https_canary": {
+    "enabled": true,
+    "bind": "127.0.0.1:39043",
+    "acme_directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+    "cert_not_after": "RFC3339|null",
+    "last_renewed_at": "RFC3339|null",
+    "last_error": "string|null"
   }
 }
 ```
 
 `restart_*` 字段描述 `xp` 通过 init system 请求恢复的状态；字段缺失不应用于判断存活，监控应优先看 `status` / `consecutive_failures` / `next_restart_at`。
+
+`vless_https_canary` 是增量字段：用于 VLESS/REALITY HTTPS canary（`GET /generate_204`）的运行态可观测信息。它描述的是 xp 进程内 loopback TLS canary，而不是额外公网监听器。即使证书获取失败，`/api/health` 仍保持服务存活语义。
+
+### 1.4 服务配置只读视图
+
+`GET /api/admin/config`
+
+返回：
+
+```json
+{
+  "bind": "127.0.0.1:62416",
+  "xray_api_addr": "127.0.0.1:10085",
+  "data_dir": "/var/lib/xp/data",
+  "node_name": "node-1",
+  "access_host": "edge.example.com",
+  "api_base_url": "https://node-1.example.com",
+  "vless_https_canary_bind": "127.0.0.1:39043",
+  "vless_https_canary_acme_directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+  "vless_https_canary_status": {
+    "enabled": true,
+    "bind": "127.0.0.1:39043",
+    "acme_directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+    "cert_not_after": "RFC3339|null",
+    "last_renewed_at": "RFC3339|null",
+    "last_error": "string|null"
+  },
+  "quota_poll_interval_secs": 10,
+  "quota_auto_unban": true,
+  "ip_geo_enabled": false,
+  "ip_geo_origin": "https://api.country.is",
+  "admin_token_present": true,
+  "admin_token_masked": "********"
+}
+```
+
+说明：
+
+- `vless_https_canary_status` 为运行态快照；管理接口不提供直接写入接入面 probe URL 或证书状态的入口。
 
 ## 2. 集群与节点
 
