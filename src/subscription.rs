@@ -836,19 +836,11 @@ fn build_mihomo_subscribed_node_ids(
 }
 
 fn build_mihomo_relay_groups(
-    memberships: &[NodeUserEndpointMembership],
+    _memberships: &[NodeUserEndpointMembership],
     endpoints: &[Endpoint],
     nodes: &[Node],
     relay_node_ids: &std::collections::BTreeSet<String>,
 ) -> Vec<MihomoRelayGroup> {
-    let nodes_by_id = nodes
-        .iter()
-        .map(|node| (node.node_id.as_str(), node))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let endpoints_by_id = endpoints
-        .iter()
-        .map(|endpoint| (endpoint.endpoint_id.as_str(), endpoint))
-        .collect::<std::collections::BTreeMap<_, _>>();
     let mut managed_vless_ports_by_access_host =
         std::collections::BTreeMap::<String, std::collections::BTreeSet<u16>>::new();
     let mut api_bases_by_access_host =
@@ -868,27 +860,23 @@ fn build_mihomo_relay_groups(
             .insert(node.api_base_url.trim().to_string());
     }
 
-    for membership in memberships {
-        if !relay_node_ids.contains(&membership.node_id) {
+    for node in nodes {
+        if !relay_node_ids.contains(&node.node_id) {
             continue;
         }
-        let Some(endpoint) = endpoints_by_id.get(membership.endpoint_id.as_str()).copied() else {
-            continue;
-        };
-        if managed_default_vless_endpoint(endpoint).is_none() {
-            continue;
-        }
-        let Some(node) = nodes_by_id.get(endpoint.node_id.as_str()).copied() else {
-            continue;
-        };
         let access_host = node.access_host.trim();
         if access_host.is_empty() {
             continue;
         }
-        managed_vless_ports_by_access_host
-            .entry(access_host.to_string())
-            .or_default()
-            .insert(endpoint.port);
+        for endpoint in endpoints.iter().filter(|endpoint| endpoint.node_id == node.node_id) {
+            if managed_default_vless_endpoint(endpoint).is_none() {
+                continue;
+            }
+            managed_vless_ports_by_access_host
+                .entry(access_host.to_string())
+                .or_default()
+                .insert(endpoint.port);
+        }
     }
 
     let base_by_access_host = api_bases_by_access_host
@@ -5995,6 +5983,59 @@ providerA:
             vless_meta("example.com:443", &["example.com"], true),
         )];
         let memberships = vec![membership("u1", "n1", "e1")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: "port: 0\nrules: []\n".to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: String::new(),
+        };
+
+        let yaml = build_mihomo_provider_yaml(
+            SEED,
+            &u,
+            &memberships,
+            &endpoints,
+            &[n],
+            &profile,
+            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        )
+        .unwrap();
+        let root: Value = serde_yaml::from_str(&yaml).unwrap();
+        let relay = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .and_then(|groups| {
+                groups.iter().find(|group| {
+                    group.get("name").and_then(Value::as_str)
+                        == Some("🛣️ hinet-dash-ep-example-com")
+                })
+            })
+            .expect("relay group should exist");
+        assert_eq!(
+            relay.get("url").and_then(Value::as_str),
+            Some("https://hinet-ep.example.com:53844/generate_204")
+        );
+    }
+
+    #[test]
+    fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has_ss_membership() {
+        let u = user("u1", "alice");
+        let n = node_with_api_base(
+            "n1",
+            "Hinet",
+            "hinet-ep.example.com",
+            "https://hinet-xp.example.com",
+        );
+        let endpoints = vec![
+            endpoint_vless(
+                "e1",
+                "n1",
+                "vless-vision-e1",
+                53844,
+                vless_meta("example.com:443", &["example.com"], true),
+            ),
+            endpoint_ss("e2", "n1", "ss", 53843, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        ];
+        let memberships = vec![membership("u1", "n1", "e2")];
         let profile = UserMihomoProfile {
             mixin_yaml: "port: 0\nrules: []\n".to_string(),
             extra_proxies_yaml: "".to_string(),

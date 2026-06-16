@@ -280,6 +280,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         }
     }
 
+    let vless_https_canary_task = xp::vless_https_canary::spawn(config_arc.clone()).await?;
+
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
@@ -357,7 +359,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             store.clone(),
             raft_facade.clone(),
         )?;
-    let _vless_https_canary_task = xp::vless_https_canary::spawn(config_arc.clone());
+    let _vless_https_canary_task = vless_https_canary_task;
 
     let app = xp::http::build_router(
         config.clone(),

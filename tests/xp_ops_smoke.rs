@@ -186,6 +186,7 @@ fn deploy_join_dry_run_succeeds_without_join_side_effects() {
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
     cmd.env("XP_OPS_DISTRO", "arch");
+    cmd.env("CLOUDFLARE_API_TOKEN", "testtoken");
     cmd.args([
         "--root",
         &root.to_string_lossy(),
@@ -224,6 +225,7 @@ fn deploy_dry_run_prints_managed_default_fields() {
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("xp-ops");
     cmd.env("XP_OPS_DISTRO", "arch");
+    cmd.env("CLOUDFLARE_API_TOKEN", "testtoken");
     cmd.args([
         "--root",
         &root.to_string_lossy(),

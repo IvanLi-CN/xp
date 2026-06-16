@@ -22,6 +22,14 @@ use serde::{Deserialize, Serialize};
 use crate::{config::Config, ops::cloudflare};
 
 pub const GENERATE_204_PATH: &str = "/generate_204";
+const READY_ATTEMPTS: usize = 60;
+const READY_DELAY: Duration = Duration::from_secs(1);
+
+struct PreparedCanaryRuntime {
+    paths: VlessHttpsCanaryPaths,
+    rustls: axum_server::tls_rustls::RustlsConfig,
+    listener: std::net::TcpListener,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VlessHttpsCanaryStatus {
@@ -269,36 +277,54 @@ impl Solver for RepoCloudflareDns01Solver {
     }
 }
 
-pub fn spawn(config: Arc<Config>) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+pub async fn spawn(config: Arc<Config>) -> anyhow::Result<Option<std::thread::JoinHandle<()>>> {
+    let prepared = match prepare_runtime(config.as_ref()).await {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            let mut status = base_status(&config);
+            status.last_error = Some(err.to_string());
+            let _ = persist_status(&config.data_dir, &status);
+            return Err(err);
+        }
+    };
+
+    let Some(prepared) = prepared else {
+        return Ok(None);
+    };
+
+    let bind = prepared.listener.local_addr().unwrap_or(config.vless_canary_bind);
+    let config_for_thread = config.clone();
+    let handle = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("build vless https canary runtime");
         runtime.block_on(async move {
-            if let Err(err) = run_supervisor(config.clone()).await {
-                let mut status = base_status(&config);
+            if let Err(err) = run_supervisor(config_for_thread.clone(), prepared).await {
+                let mut status = base_status(&config_for_thread);
                 status.last_error = Some(err.to_string());
-                let _ = persist_status(&config.data_dir, &status);
+                let _ = persist_status(&config_for_thread.data_dir, &status);
                 tracing::error!(error = %err, "vless https canary supervisor failed");
             }
         });
-    })
+    });
+    wait_until_ready(&config.access_host, bind, READY_ATTEMPTS, READY_DELAY).await?;
+    Ok(Some(handle))
 }
 
-async fn run_supervisor(config: Arc<Config>) -> anyhow::Result<()> {
-    let mut status = base_status(&config);
+async fn prepare_runtime(config: &Config) -> anyhow::Result<Option<PreparedCanaryRuntime>> {
+    let mut status = base_status(config);
     persist_status(&config.data_dir, &status)?;
 
     if config.access_host.trim().is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let paths = VlessHttpsCanaryPaths::new(&config.data_dir);
     fs::create_dir_all(&paths.dir)
         .with_context(|| format!("create vless https canary dir {}", paths.dir.display()))?;
 
-    let cert = ensure_certificate(&config, &paths, &mut status).await?;
+    let cert = ensure_certificate(config, &paths, &mut status).await?;
     let rustls = axum_server::tls_rustls::RustlsConfig::from_pem(
         cert.fullchain_to_pem()?,
         cert.private_key_to_pem()?,
@@ -308,15 +334,72 @@ async fn run_supervisor(config: Arc<Config>) -> anyhow::Result<()> {
 
     persist_status(&config.data_dir, &status)?;
 
+    let listener = std::net::TcpListener::bind(config.vless_canary_bind)
+        .with_context(|| format!("bind vless https canary listener {}", config.vless_canary_bind))?;
+    listener
+        .set_nonblocking(true)
+        .with_context(|| format!("set vless https canary listener nonblocking {}", config.vless_canary_bind))?;
+
+    Ok(Some(PreparedCanaryRuntime {
+        paths,
+        rustls,
+        listener,
+    }))
+}
+
+pub async fn wait_until_ready(
+    access_host: &str,
+    bind: std::net::SocketAddr,
+    attempts: usize,
+    delay: Duration,
+) -> anyhow::Result<()> {
+    let host = access_host.trim().to_string();
+    if host.is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::Client::builder()
+        .resolve(&host, bind)
+        .timeout(Duration::from_secs(2))
+        .build()
+        .context("build vless https canary readiness client")?;
+    let url = format!("https://{host}{GENERATE_204_PATH}");
+    let mut last_error = None;
+    for _ in 0..attempts {
+        if let Ok(resp) = client.get(&url).send().await
+            && resp.status() == StatusCode::NO_CONTENT
+        {
+            return Ok(());
+        }
+        last_error = Some(format!("readiness probe did not return 204 for {url} via {bind}"));
+        tokio::time::sleep(delay).await;
+    }
+    Err(anyhow::anyhow!(
+        "{}",
+        last_error.unwrap_or_else(|| {
+            format!("vless https canary readiness probe timed out for {url} via {bind}")
+        })
+    ))
+}
+
+async fn run_supervisor(
+    config: Arc<Config>,
+    prepared: PreparedCanaryRuntime,
+) -> anyhow::Result<()> {
+    let PreparedCanaryRuntime {
+        paths,
+        rustls,
+        listener,
+    } = prepared;
+
     let app = Router::new().route(GENERATE_204_PATH, get(generate_204).head(generate_204));
     let bind = config.vless_canary_bind;
     let rustls_reload = rustls.clone();
     let data_dir = config.data_dir.clone();
+    let server = axum_server::from_tcp_rustls(listener, rustls)
+        .context("build vless https canary rustls server")?;
     tokio::spawn(async move {
-        if let Err(err) = axum_server::bind_rustls(bind, rustls)
-            .serve(app.into_make_service())
-            .await
-        {
+        if let Err(err) = server.serve(app.into_make_service()).await {
             let mut status = load_status(&data_dir, bind);
             status.last_error = Some(err.to_string());
             let _ = persist_status(&data_dir, &status);

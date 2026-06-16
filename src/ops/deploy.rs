@@ -338,7 +338,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     )
     .await?;
 
-    if plan.ddns_enabled {
+    if plan.ddns_enabled || plan.default_vless_port.is_some() {
         let token = cloudflare::load_cloudflare_token_for_deploy(
             &paths,
             args.cloudflare_token.as_deref(),
@@ -635,7 +635,8 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let mut cloudflare_token_source: Option<CloudflareTokenSource> = None;
     let mut ddns_zone_id = args.ddns_zone_id.clone();
 
-    let token = if cloudflare_enabled || ddns_enabled {
+    let managed_vless_enabled = args.default_vless_port.is_some();
+    let token = if cloudflare_enabled || ddns_enabled || managed_vless_enabled {
         match cloudflare::load_cloudflare_token_for_deploy(
             paths,
             args.cloudflare_token.as_deref(),
@@ -2418,6 +2419,17 @@ XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=zone-123\n",
         assert!(env.contains("XP_VLESS_CANARY_ACME_CONTACT_EMAIL='ops@example.com'"));
         assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE='/custom/token'"));
         assert!(env.contains("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID='zone-123'"));
+    }
+
+    #[test]
+    fn ensure_ddns_runtime_token_file_writes_xp_readable_token() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        ensure_ddns_runtime_token_file(&paths, Mode::Real, "  test-token  ").unwrap();
+
+        let written = fs::read_to_string(paths.etc_xp_cloudflare_ddns_token()).unwrap();
+        assert_eq!(written, "test-token\n");
     }
 
     #[tokio::test]

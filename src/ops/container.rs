@@ -143,6 +143,7 @@ struct ContainerSpec {
     bootstrap_admin_token_hash: Option<String>,
     cloudflare: Option<ContainerCloudflare>,
     ddns: Option<ContainerDdns>,
+    vless_canary_token: Option<String>,
     node_meta_needs_realign: bool,
     default_endpoints: ManagedDefaultEndpointsSpec,
     join_leader_api_base_url: Option<String>,
@@ -292,6 +293,12 @@ impl ContainerSpec {
         let access_host = resolve_access_host(env_map, &api_base_url, cloudflare.as_ref())?;
         let ddns = build_ddns_spec(paths, env_map, &access_host, cloudflare.as_ref()).await?;
         let default_endpoints = ManagedDefaultEndpointsSpec::from_env_map(env_map)?;
+        let vless_canary_token = load_vless_canary_runtime_token(
+            paths,
+            &default_endpoints,
+            cloudflare.as_ref(),
+            ddns.as_ref(),
+        )?;
         let runtime_env = build_runtime_env(env_map, ddns.as_ref());
 
         let startup = resolve_startup(existing_meta, join_token.as_deref())?;
@@ -315,6 +322,7 @@ impl ContainerSpec {
             bootstrap_admin_token_hash,
             cloudflare,
             ddns,
+            vless_canary_token,
             node_meta_needs_realign,
             default_endpoints,
             join_leader_api_base_url,
@@ -466,10 +474,28 @@ fn parse_default_ss_endpoint_spec(
     )?))
 }
 
-fn build_runtime_env(env_map: &BTreeMap<String, String>, ddns: Option<&ContainerDdns>) -> BTreeMap<String, String> {
+fn build_runtime_env(
+    env_map: &BTreeMap<String, String>,
+    ddns: Option<&ContainerDdns>,
+) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     if let Some(value) = optional_env(env_map, "XP_MESH_PROXY_URL") {
         out.insert("XP_MESH_PROXY_URL".to_string(), value);
+    }
+    for key in [
+        "XP_VLESS_CANARY_BIND",
+        "XP_VLESS_CANARY_ACME_DIRECTORY_URL",
+        "XP_VLESS_CANARY_ACME_CONTACT_EMAIL",
+        "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE",
+        "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID",
+        "XP_DEFAULT_VLESS_PORT",
+        "XP_DEFAULT_VLESS_SERVER_NAMES",
+        "XP_DEFAULT_VLESS_FINGERPRINT",
+        "XP_DEFAULT_SS_PORT",
+    ] {
+        if let Some(value) = optional_env(env_map, key) {
+            out.insert(key.to_string(), value);
+        }
     }
     if let Some(ddns) = ddns {
         out.insert("XP_CLOUDFLARE_DDNS_ENABLED".to_string(), "true".to_string());
@@ -668,6 +694,9 @@ fn prepare_runtime_inputs(
     if let Some(ddns) = spec.ddns.as_ref() {
         ensure_ddns_runtime_token_file(paths, ddns, mode)?;
     }
+    if let Some(token) = spec.vless_canary_token.as_deref() {
+        ensure_xp_runtime_token_file(paths, mode, token)?;
+    }
 
     if spec.node_meta_needs_realign
         && let Some(meta) = existing_meta
@@ -699,6 +728,19 @@ fn ensure_ddns_runtime_token_file(
     mode: Mode,
 ) -> Result<(), ExitError> {
     let target = paths.map_abs(&ddns.token_file);
+    write_runtime_token_file(&target, &ddns.token, mode)
+}
+
+fn ensure_xp_runtime_token_file(
+    paths: &Paths,
+    mode: Mode,
+    token: &str,
+) -> Result<(), ExitError> {
+    let target = paths.etc_xp_cloudflare_ddns_token();
+    write_runtime_token_file(&target, token, mode)
+}
+
+fn write_runtime_token_file(target: &Path, token: &str, mode: Mode) -> Result<(), ExitError> {
     if mode == Mode::DryRun {
         eprintln!("would write: {}", target.display());
         return Ok(());
@@ -706,9 +748,38 @@ fn ensure_ddns_runtime_token_file(
     if let Some(parent) = target.parent() {
         ensure_dir(parent).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     }
-    write_string_if_changed(&target, &(ddns.token.trim().to_string() + "\n"))
+    write_string_if_changed(target, &(token.trim().to_string() + "\n"))
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     Ok(())
+}
+
+fn load_vless_canary_runtime_token(
+    paths: &Paths,
+    default_endpoints: &ManagedDefaultEndpointsSpec,
+    cloudflare: Option<&ContainerCloudflare>,
+    ddns: Option<&ContainerDdns>,
+) -> Result<Option<String>, ExitError> {
+    if default_endpoints.vless.is_none() {
+        return Ok(None);
+    }
+    if let Some(ddns) = ddns {
+        return Ok(Some(ddns.token.clone()));
+    }
+    if let Some(cloudflare) = cloudflare {
+        return Ok(Some(cloudflare.token.clone()));
+    }
+    cloudflare::load_cloudflare_token_for_deploy(paths, None, None)
+        .map(|(token, _)| Some(token))
+        .map_err(|err| {
+            if err.message == "token_missing" {
+                ExitError::new(
+                    2,
+                    "cloudflare_token_missing: managed default VLESS canary requires CLOUDFLARE_API_TOKEN or persisted tunnel token state",
+                )
+            } else {
+                ExitError::new(2, format!("cloudflare token error: {}", err.message))
+            }
+        })
 }
 
 fn read_cluster_admin_token_hash(paths: &Paths, data_dir: &Path) -> Result<String, ExitError> {
@@ -1558,6 +1629,8 @@ mod tests {
     use tempfile::tempdir;
     use tokio::process::Command;
 
+    const VALID_ADMIN_TOKEN_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
+
     fn env_map(values: &[(&str, &str)]) -> BTreeMap<String, String> {
         values
             .iter()
@@ -1757,6 +1830,127 @@ mod tests {
         assert_eq!(
             spec.vless.as_ref().unwrap().reality_dest,
             "127.0.0.1:49043"
+        );
+    }
+
+    #[tokio::test]
+    async fn container_runtime_env_includes_vless_canary_settings() {
+        let env = env_map(&[
+            ("XP_NODE_NAME", "node-1"),
+            ("XP_API_BASE_URL", "https://node-1.example.com"),
+            ("XP_ACCESS_HOST", "node-1.example.com"),
+            ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
+            ("XP_VLESS_CANARY_BIND", "127.0.0.1:49043"),
+            (
+                "XP_VLESS_CANARY_ACME_DIRECTORY_URL",
+                "https://acme-staging-v02.api.letsencrypt.org/directory",
+            ),
+            ("XP_VLESS_CANARY_ACME_CONTACT_EMAIL", "ops@example.com"),
+            ("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE", "/custom/token"),
+            ("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID", "zone-123"),
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+            ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ]);
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::write(paths.etc_xp_ops_cloudflare_token(), "cloudflare-token").unwrap();
+        let spec = ContainerSpec::from_env_map(&paths, &env, None).await.unwrap();
+        assert_eq!(
+            spec.runtime_env.get("XP_VLESS_CANARY_BIND").map(String::as_str),
+            Some("127.0.0.1:49043")
+        );
+        assert_eq!(
+            spec.runtime_env
+                .get("XP_VLESS_CANARY_ACME_DIRECTORY_URL")
+                .map(String::as_str),
+            Some("https://acme-staging-v02.api.letsencrypt.org/directory")
+        );
+        assert_eq!(
+            spec.runtime_env
+                .get("XP_VLESS_CANARY_ACME_CONTACT_EMAIL")
+                .map(String::as_str),
+            Some("ops@example.com")
+        );
+        assert_eq!(
+            spec.runtime_env
+                .get("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE")
+                .map(String::as_str),
+            Some("/custom/token")
+        );
+        assert_eq!(
+            spec.runtime_env
+                .get("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID")
+                .map(String::as_str),
+            Some("zone-123")
+        );
+    }
+
+    #[test]
+    fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
+        let env = env_map(&[
+            ("XP_VLESS_CANARY_BIND", "127.0.0.1:49043"),
+            (
+                "XP_VLESS_CANARY_ACME_DIRECTORY_URL",
+                "https://acme-staging-v02.api.letsencrypt.org/directory",
+            ),
+            ("XP_VLESS_CANARY_ACME_CONTACT_EMAIL", "ops@example.com"),
+            ("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE", "/custom/token"),
+            ("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID", "zone-123"),
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+            ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+            ("XP_DEFAULT_VLESS_FINGERPRINT", "firefox"),
+            ("XP_DEFAULT_SS_PORT", "53843"),
+        ]);
+
+        let runtime_env = build_runtime_env(&env, None);
+        assert_eq!(
+            runtime_env.get("XP_VLESS_CANARY_BIND").map(String::as_str),
+            Some("127.0.0.1:49043")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_VLESS_CANARY_ACME_DIRECTORY_URL")
+                .map(String::as_str),
+            Some("https://acme-staging-v02.api.letsencrypt.org/directory")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_VLESS_CANARY_ACME_CONTACT_EMAIL")
+                .map(String::as_str),
+            Some("ops@example.com")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE")
+                .map(String::as_str),
+            Some("/custom/token")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID")
+                .map(String::as_str),
+            Some("zone-123")
+        );
+        assert_eq!(
+            runtime_env.get("XP_DEFAULT_VLESS_PORT").map(String::as_str),
+            Some("53842")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_DEFAULT_VLESS_SERVER_NAMES")
+                .map(String::as_str),
+            Some("public.sn.files.1drv.com")
+        );
+        assert_eq!(
+            runtime_env
+                .get("XP_DEFAULT_VLESS_FINGERPRINT")
+                .map(String::as_str),
+            Some("firefox")
+        );
+        assert_eq!(
+            runtime_env.get("XP_DEFAULT_SS_PORT").map(String::as_str),
+            Some("53843")
         );
     }
 
