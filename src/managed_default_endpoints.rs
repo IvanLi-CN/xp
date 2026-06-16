@@ -460,12 +460,17 @@ fn derive_host_managed_vless_spec(
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let mut marked = Vec::new();
+    let mut legacy = Vec::new();
     for endpoint in node_endpoints {
         if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
             continue;
         }
         if managed_default_vless_endpoint(endpoint).is_some() {
             marked.push(endpoint);
+            continue;
+        }
+        if endpoint_meta_missing_managed_default_flag(endpoint) {
+            legacy.push(endpoint);
         }
     }
 
@@ -475,7 +480,11 @@ fn derive_host_managed_vless_spec(
         _ => bail!("multiple managed-default VLESS endpoints are marked on this node"),
     }
 
-    Ok(None)
+    match legacy.as_slice() {
+        [endpoint] => Ok(Some(default_vless_spec_from_endpoint(endpoint, vless_canary_bind)?)),
+        [] => Ok(None),
+        _ => Ok(None),
+    }
 }
 
 fn derive_host_managed_ss_spec(
@@ -791,7 +800,7 @@ mod tests {
     }
 
     #[test]
-    fn host_managed_legacy_vless_is_not_auto_adopted_without_explicit_config() {
+    fn host_managed_legacy_vless_is_auto_adopted_without_explicit_config() {
         let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
         let spec =
             resolve_host_managed_default_endpoints_spec(
@@ -800,6 +809,26 @@ mod tests {
                 "127.0.0.1:39043".parse().unwrap(),
             )
             .unwrap();
+
+        let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
+        assert_eq!(vless.port, 53844);
+        assert_eq!(vless.reality_dest, "127.0.0.1:39043");
+        assert_eq!(vless.server_names, vec!["example.com"]);
+        assert!(spec.ss.is_none());
+    }
+
+    #[test]
+    fn host_managed_multiple_legacy_vless_are_not_auto_adopted() {
+        let endpoints = vec![
+            endpoint_vless("e1", 53844, &["example.com"], None),
+            endpoint_vless("e2", 53845, &["example.org"], None),
+        ];
+        let spec = resolve_host_managed_default_endpoints_spec(
+            &ManagedDefaultEndpointsSpec::default(),
+            &endpoints,
+            "127.0.0.1:39043".parse().unwrap(),
+        )
+        .unwrap();
 
         assert!(spec.vless.is_none());
         assert!(spec.ss.is_none());
