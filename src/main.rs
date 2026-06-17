@@ -12,6 +12,13 @@ use tracing_subscriber::{EnvFilter, fmt};
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Duration, Instant};
 
+fn disable_managed_vless_reconcile_for_canary_result(
+    vless_enabled: bool,
+    canary_result: &anyhow::Result<Option<std::thread::JoinHandle<()>>>,
+) -> bool {
+    vless_enabled && matches!(canary_result, Ok(None) | Err(_))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
@@ -308,16 +315,30 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         )?;
     let mut managed_default_spec_for_reconcile = resolved_managed_default_spec.clone();
     let vless_https_canary_task = if resolved_managed_default_spec.vless.is_some() {
-        match xp::vless_https_canary::spawn(config_arc.clone()).await {
-            Ok(handle) => handle,
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "vless https canary preparation failed; skipping managed default VLESS reconcile"
-                );
-                managed_default_spec_for_reconcile.vless = None;
-                None
+        let canary_result = xp::vless_https_canary::spawn(config_arc.clone()).await;
+        if disable_managed_vless_reconcile_for_canary_result(
+            resolved_managed_default_spec.vless.is_some(),
+            &canary_result,
+        ) {
+            match &canary_result {
+                Ok(None) => {
+                    tracing::warn!(
+                        "vless https canary is disabled; skipping managed default VLESS reconcile"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "vless https canary preparation failed; skipping managed default VLESS reconcile"
+                    );
+                }
+                Ok(Some(_)) => {}
             }
+            managed_default_spec_for_reconcile.vless = None;
+        }
+        match canary_result {
+            Ok(Some(handle)) => Some(handle),
+            Ok(None) | Err(_) => None,
         }
     } else {
         xp::vless_https_canary::persist_disabled_status(&config.data_dir, config.vless_canary_bind)?;
@@ -491,5 +512,36 @@ fn best_effort_chmod_0600(path: &std::path::Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn disable_managed_vless_reconcile_when_canary_is_disabled() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);
+        assert!(super::disable_managed_vless_reconcile_for_canary_result(
+            true, &result
+        ));
+    }
+
+    #[test]
+    fn keep_managed_vless_reconcile_when_canary_handle_exists() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(Some(
+            std::thread::spawn(|| {}),
+        ));
+        assert!(!super::disable_managed_vless_reconcile_for_canary_result(
+            true, &result
+        ));
+        let handle = result.unwrap().unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn do_not_disable_when_vless_is_not_managed() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);
+        assert!(!super::disable_managed_vless_reconcile_for_canary_result(
+            false, &result
+        ));
     }
 }

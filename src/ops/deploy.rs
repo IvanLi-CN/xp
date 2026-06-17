@@ -2134,12 +2134,15 @@ fn ensure_runtime_token_file(
     token_file: &Path,
 ) -> Result<(), ExitError> {
     let path = paths.map_abs(token_file);
+    let parent = path
+        .parent()
+        .ok_or_else(|| ExitError::new(4, "filesystem_error: token file path has no parent"))?;
     if mode == Mode::DryRun {
         eprintln!("would write: {}", path.display());
         return Ok(());
     }
 
-    ensure_dir(&paths.etc_xp_dir())
+    ensure_dir(parent)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&path, &(token.trim().to_string() + "\n"))
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
@@ -2601,9 +2604,15 @@ XP_DEFAULT_SS_PORT=53843\n"
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
 
-        ensure_runtime_token_file(&paths, Mode::Real, "test-token", Path::new("/custom/token")).unwrap();
+        ensure_runtime_token_file(
+            &paths,
+            Mode::Real,
+            "test-token",
+            Path::new("/custom/nested/token"),
+        )
+        .unwrap();
 
-        let written = fs::read_to_string(paths.map_abs(Path::new("/custom/token"))).unwrap();
+        let written = fs::read_to_string(paths.map_abs(Path::new("/custom/nested/token"))).unwrap();
         assert_eq!(written, "test-token\n");
     }
 
