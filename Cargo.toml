@@ -41,7 +41,7 @@ ulid = "1.2.1"
 nanoid = "0.4"
 maxminddb = "0.27.3"
 lers = { version = "0.4.0", default-features = false, features = ["dns-01", "dns-01-cloudflare"] }
-openssl = "0.10"
+openssl = { version = "0.10", features = ["vendored"] }
 uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zip = "7.1.0"
