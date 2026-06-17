@@ -25,6 +25,18 @@
 
 不需要进入容器执行初始化、接入点创建、Tunnel 启动或节点元数据修复。
 
+## 适用范围
+
+这份文档只描述官方单镜像容器运行时，也就是“官方单镜像容器节点”这一类环境。
+
+如果你的节点是：
+
+- 直接在宿主机上运行 `xp + xray + cloudflared`
+- 使用 systemd 或 OpenRC 管理服务
+- 历史上不是通过 `xp-ops container run` 接管
+
+那它属于 host-managed 部署，应改看 `docs/ops/README.md`，不要把本页流程硬套到宿主机托管节点上。
+
 ## 部署模型
 
 一个容器对应一个 `xp` 集群节点。
@@ -187,9 +199,9 @@ https://<XP_CLOUDFLARE_HOSTNAME>
 当你设置这些变量时，容器会托管一个默认 VLESS endpoint：
 
 - `XP_DEFAULT_VLESS_PORT`
-- `XP_DEFAULT_VLESS_REALITY_DEST`
 - `XP_DEFAULT_VLESS_SERVER_NAMES`
 - `XP_DEFAULT_VLESS_FINGERPRINT`（可选，默认 `chrome`）
+- `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`（可选，但建议设置）
 
 ### 默认 SS2022
 
@@ -248,9 +260,9 @@ CLOUDFLARE_API_TOKEN=...
 XP_CLOUDFLARE_DDNS_ENABLED=true
 XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
+XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_REALITY_DEST=oneclient.sfx.ms:443
-XP_DEFAULT_VLESS_SERVER_NAMES=oneclient.sfx.ms,skyapi.onedrive.com
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_VLESS_FINGERPRINT=chrome
 
 XP_DEFAULT_SS_PORT=53843
@@ -284,9 +296,9 @@ XP_ACCESS_HOST=node-1-ep.example.com
 XP_CLOUDFLARE_DDNS_ENABLED=true
 XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
+XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_REALITY_DEST=oneclient.sfx.ms:443
-XP_DEFAULT_VLESS_SERVER_NAMES=oneclient.sfx.ms,skyapi.onedrive.com
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_VLESS_FINGERPRINT=chrome
 XP_DEFAULT_SS_PORT=53843
 
@@ -338,9 +350,9 @@ CLOUDFLARE_API_TOKEN=...
 如果你希望 join 后立即带上默认接入点，再继续加：
 
 ```env
+XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_REALITY_DEST=oneclient.sfx.ms:443
-XP_DEFAULT_VLESS_SERVER_NAMES=oneclient.sfx.ms,skyapi.onedrive.com
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 
 XP_DEFAULT_SS_PORT=53843
 ```
@@ -370,9 +382,9 @@ XP_ACCESS_HOST=node-2-ep.example.com
 XP_CLOUDFLARE_DDNS_ENABLED=true
 XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
+XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_REALITY_DEST=oneclient.sfx.ms:443
-XP_DEFAULT_VLESS_SERVER_NAMES=oneclient.sfx.ms,skyapi.onedrive.com
+XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_SS_PORT=53843
 
 CLOUDFLARE_API_TOKEN=...
@@ -396,8 +408,9 @@ join 场景下，容器入口会自动完成：
 - 修改 `XP_NODE_NAME`
 - 修改 `XP_ACCESS_HOST`
 - 修改 `XP_API_BASE_URL`
+- 修改 `XP_VLESS_CANARY_BIND`
+- 修改 `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`
 - 修改 `XP_DEFAULT_VLESS_PORT`
-- 修改 `XP_DEFAULT_VLESS_REALITY_DEST`
 - 修改 `XP_DEFAULT_VLESS_SERVER_NAMES`
 - 修改 `XP_DEFAULT_SS_PORT`
 
@@ -428,7 +441,17 @@ join 场景下，容器入口会自动完成：
 
 - `GET /api/health` 返回 `200`
 - `GET /api/cluster/info` 返回当前节点信息
-- `GET /` 能打开嵌入版 Web UI
+- `GET /api/health` 里的 `vless_https_canary` 有合理运行态
+- 对托管 VLESS 端口执行 `curl -Ik https://<access_host[:vless_port]>/generate_204` 返回 `204`
+
+## 托管 VLESS HTTPS canary 语义
+
+对于 xp 托管/default VLESS endpoint：
+
+- `XP_DEFAULT_VLESS_SERVER_NAMES` 只负责客户端 SNI 候选列表
+- `reality.dest` 不再来自外部伪装站点，而是自动指向 `XP_VLESS_CANARY_BIND`
+- 普通 HTTPS client 访问 `https://<access_host[:vless_port]>/generate_204` 时，会经由 REALITY 未认证 fallback 命中 xp 进程内 loopback TLS canary
+- 手工创建的 VLESS endpoint 不会被自动改写它的 `reality.dest`
 
 如果开启了 Tunnel，还应确认：
 
@@ -441,18 +464,18 @@ join 场景下，容器入口会自动完成：
 
 ## 常见错误对照表
 
-| 现象                                                        | 常见原因                                                                                                           | 应该怎么处理                                                                         |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| 容器一启动就退出，日志提示缺少 bootstrap token              | bootstrap 节点没给 `XP_ADMIN_TOKEN` 或 `XP_ADMIN_TOKEN_HASH`                                                       | 补上其中一个，再重新 `docker compose up -d`                                          |
-| 容器一启动就退出，日志提示缺少 join token                   | join 节点没给 `XP_JOIN_TOKEN`                                                                                      | 重新生成或填入正确 token，再重启容器                                                 |
-| 开启 Tunnel 后一直起不来                                    | `CLOUDFLARE_API_TOKEN`、`XP_CLOUDFLARE_ACCOUNT_ID`、`XP_CLOUDFLARE_HOSTNAME`、`XP_CLOUDFLARE_ZONE_ID` 其中之一不对 | 先检查这四个值，再看容器日志里的 Cloudflare API 报错                                 |
-| 重启后节点像是“变成新机器”了                                | `/var/lib/xp/data` 没持久化，或被换成新卷                                                                          | 保留原数据卷；不要把节点身份卷当临时目录                                             |
-| 重启后重复创建 Tunnel / DNS                                 | `/etc/cloudflared` 或 `/etc/xp-ops/cloudflare_tunnel` 没保留                                                       | 把这两个卷改成持久化卷，避免每次首启化                                               |
-| `XP_ACCESS_HOST` 没更新到 DNS                               | 没开 `XP_CLOUDFLARE_DDNS_ENABLED=true`，或没给 `XP_CLOUDFLARE_DDNS_ZONE_ID`                                        | 补齐 DDNS 变量，并确认 `CLOUDFLARE_API_TOKEN` 仍可用                                 |
-| 默认 VLESS / SS 没自动创建                                  | 没给完整的默认 endpoint 环境变量                                                                                   | VLESS 至少补齐端口、REALITY dest、server names；SS 至少给 `XP_DEFAULT_SS_PORT`       |
-| 默认 endpoint reconcile 失败                                | 当前节点上同类型 endpoint 已经有多条，容器入口不敢自动接管                                                         | 先手动清理到只剩一条，或明确决定保留哪条                                             |
-| 改了 `.env` 但实例没对齐                                    | 只是改了 env 文件，没有重新启动容器                                                                                | 执行 `docker compose up -d` 让容器入口重新跑一次 reconcile                           |
-| `GET /api/health` 正常，但网页运行页看不到 cloudflared 状态 | 容器模式下 `cloudflared` 由容器入口托管，不走 `xp` 内建 runtime supervisor                                         | 这属于预期行为；排查时看容器日志和编排器状态，不看 Web 里的 cloudflared runtime 卡片 |
+| 现象                                                        | 常见原因                                                                                                           | 应该怎么处理                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| 容器一启动就退出，日志提示缺少 bootstrap token              | bootstrap 节点没给 `XP_ADMIN_TOKEN` 或 `XP_ADMIN_TOKEN_HASH`                                                       | 补上其中一个，再重新 `docker compose up -d`                                                               |
+| 容器一启动就退出，日志提示缺少 join token                   | join 节点没给 `XP_JOIN_TOKEN`                                                                                      | 重新生成或填入正确 token，再重启容器                                                                      |
+| 开启 Tunnel 后一直起不来                                    | `CLOUDFLARE_API_TOKEN`、`XP_CLOUDFLARE_ACCOUNT_ID`、`XP_CLOUDFLARE_HOSTNAME`、`XP_CLOUDFLARE_ZONE_ID` 其中之一不对 | 先检查这四个值，再看容器日志里的 Cloudflare API 报错                                                      |
+| 重启后节点像是“变成新机器”了                                | `/var/lib/xp/data` 没持久化，或被换成新卷                                                                          | 保留原数据卷；不要把节点身份卷当临时目录                                                                  |
+| 重启后重复创建 Tunnel / DNS                                 | `/etc/cloudflared` 或 `/etc/xp-ops/cloudflare_tunnel` 没保留                                                       | 把这两个卷改成持久化卷，避免每次首启化                                                                    |
+| `XP_ACCESS_HOST` 没更新到 DNS                               | 没开 `XP_CLOUDFLARE_DDNS_ENABLED=true`，或没给 `XP_CLOUDFLARE_DDNS_ZONE_ID`                                        | 补齐 DDNS 变量，并确认 `CLOUDFLARE_API_TOKEN` 仍可用                                                      |
+| 默认 VLESS / SS 没自动创建                                  | 没给完整的默认 endpoint 环境变量                                                                                   | VLESS 至少补齐 `XP_DEFAULT_VLESS_PORT` 与 `XP_DEFAULT_VLESS_SERVER_NAMES`；SS 至少给 `XP_DEFAULT_SS_PORT` |
+| 默认 endpoint reconcile 失败                                | 当前节点上同类型 endpoint 已经有多条，容器入口不敢自动接管                                                         | 先手动清理到只剩一条，或明确决定保留哪条                                                                  |
+| 改了 `.env` 但实例没对齐                                    | 只是改了 env 文件，没有重新启动容器                                                                                | 执行 `docker compose up -d` 让容器入口重新跑一次 reconcile                                                |
+| `GET /api/health` 正常，但网页运行页看不到 cloudflared 状态 | 容器模式下 `cloudflared` 由容器入口托管，不走 `xp` 内建 runtime supervisor                                         | 这属于预期行为；排查时看容器日志和编排器状态，不看 Web 里的 cloudflared runtime 卡片                      |
 
 ## 当前推荐的操作者心智模型
 

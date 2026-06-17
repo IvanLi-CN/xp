@@ -4,6 +4,10 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::admin_token::{AdminTokenHash, parse_admin_token_hash};
 
+pub const DEFAULT_VLESS_CANARY_BIND: &str = "127.0.0.1:39043";
+pub const DEFAULT_VLESS_CANARY_BIND_PORT: u16 = 39043;
+pub const DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE: &str = "/etc/xp/cloudflare_ddns_api_token";
+
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XrayRestartMode {
     None,
@@ -258,6 +262,83 @@ pub struct Config {
     pub api_base_url: String,
 
     #[arg(
+        long = "vless-canary-bind",
+        global = true,
+        env = "XP_VLESS_CANARY_BIND",
+        value_name = "ADDR",
+        default_value = DEFAULT_VLESS_CANARY_BIND
+    )]
+    pub vless_canary_bind: SocketAddr,
+
+    #[arg(
+        long = "vless-canary-acme-directory-url",
+        global = true,
+        env = "XP_VLESS_CANARY_ACME_DIRECTORY_URL",
+        value_name = "URL",
+        default_value = "https://acme-v02.api.letsencrypt.org/directory"
+    )]
+    pub vless_canary_acme_directory_url: String,
+
+    #[arg(
+        long = "vless-canary-acme-contact-email",
+        global = true,
+        env = "XP_VLESS_CANARY_ACME_CONTACT_EMAIL",
+        value_name = "EMAIL",
+        default_value = ""
+    )]
+    pub vless_canary_acme_contact_email: String,
+
+    #[arg(
+        long = "vless-canary-cloudflare-token-file",
+        global = true,
+        env = "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE",
+        value_name = "PATH",
+        default_value = DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
+    )]
+    pub vless_canary_cloudflare_token_file: String,
+
+    #[arg(
+        long = "vless-canary-cloudflare-zone-id",
+        global = true,
+        env = "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID",
+        value_name = "ID",
+        default_value = ""
+    )]
+    pub vless_canary_cloudflare_zone_id: String,
+
+    #[arg(
+        long = "default-vless-port",
+        global = true,
+        env = "XP_DEFAULT_VLESS_PORT",
+        value_name = "PORT"
+    )]
+    pub default_vless_port: Option<u16>,
+
+    #[arg(
+        long = "default-vless-server-names",
+        global = true,
+        env = "XP_DEFAULT_VLESS_SERVER_NAMES",
+        value_name = "CSV"
+    )]
+    pub default_vless_server_names: Option<String>,
+
+    #[arg(
+        long = "default-vless-fingerprint",
+        global = true,
+        env = "XP_DEFAULT_VLESS_FINGERPRINT",
+        value_name = "NAME"
+    )]
+    pub default_vless_fingerprint: Option<String>,
+
+    #[arg(
+        long = "default-ss-port",
+        global = true,
+        env = "XP_DEFAULT_SS_PORT",
+        value_name = "PORT"
+    )]
+    pub default_ss_port: Option<u16>,
+
+    #[arg(
         long = "mesh-proxy-url",
         global = true,
         env = "XP_MESH_PROXY_URL",
@@ -281,7 +362,7 @@ pub struct Config {
         global = true,
         env = "XP_CLOUDFLARE_DDNS_TOKEN_FILE",
         value_name = "PATH",
-        default_value = "/etc/xp/cloudflare_ddns_api_token"
+        default_value = DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
     )]
     pub cloudflare_ddns_token_file: String,
 
@@ -455,7 +536,11 @@ mod tests {
         assert!(!cli.config.cloudflare_ddns_enabled);
         assert_eq!(
             cli.config.cloudflare_ddns_token_file,
-            "/etc/xp/cloudflare_ddns_api_token"
+            DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
+        );
+        assert_eq!(
+            cli.config.vless_canary_cloudflare_token_file,
+            DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
         );
         assert_eq!(cli.config.cloudflare_ddns_zone_id, "");
         assert_eq!(
@@ -471,12 +556,25 @@ mod tests {
         assert_eq!(cli.config.cloudflare_ddns_fast_interval_secs, 30);
         assert_eq!(cli.config.cloudflare_ddns_fast_window_secs, 300);
         assert_eq!(cli.config.cloudflare_ddns_family_missing_grace, 3);
+        assert_eq!(
+            cli.config.vless_canary_bind,
+            DEFAULT_VLESS_CANARY_BIND.parse().unwrap()
+        );
         assert_eq!(cli.config.mesh_proxy_url, None);
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);
         assert!(!cli.config.ip_geo_enabled);
         assert_eq!(cli.config.ip_geo_origin, "https://api.country.is");
+    }
+
+    #[test]
+    fn default_vless_canary_bind_is_loopback_high_port() {
+        let cli = Cli::try_parse_from(["xp"]).unwrap();
+        assert_eq!(
+            cli.config.vless_canary_bind,
+            DEFAULT_VLESS_CANARY_BIND.parse().unwrap()
+        );
     }
 
     #[test]

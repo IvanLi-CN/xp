@@ -1,7 +1,7 @@
 #[cfg(xp_missing_web_dist)]
 compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -12,9 +12,24 @@ use tracing_subscriber::{EnvFilter, fmt};
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Duration, Instant};
 
+fn reject_legacy_relay_probe_env() -> Result<()> {
+    if xp::ops::process_env_has_legacy_relay_probe_vars() {
+        anyhow::bail!(xp::ops::LEGACY_RELAY_PROBE_REMOVED_MESSAGE);
+    }
+    Ok(())
+}
+
+fn disable_managed_vless_reconcile_for_canary_result(
+    vless_enabled: bool,
+    canary_result: &anyhow::Result<Option<std::thread::JoinHandle<()>>>,
+) -> bool {
+    vless_enabled && matches!(canary_result, Ok(None) | Err(_))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
+    reject_legacy_relay_probe_env()?;
 
     let cli = xp::config::Cli::parse();
     let cmd = cli.command.clone().unwrap_or(xp::config::Command::Run);
@@ -280,6 +295,74 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         }
     }
 
+    let explicit_managed_default_spec =
+        xp::managed_default_endpoints::ManagedDefaultEndpointsSpec {
+            vless: xp::managed_default_endpoints::build_default_vless_endpoint_spec(
+                config.default_vless_port,
+                config.default_vless_server_names.as_deref(),
+                config.default_vless_fingerprint.as_deref(),
+                config.vless_canary_bind,
+            )?,
+            ss: xp::managed_default_endpoints::build_default_ss_endpoint_spec(
+                config.default_ss_port,
+            )?,
+        };
+    let endpoints = {
+        let store = store.lock().await;
+        store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == cluster.node_id)
+            .collect::<Vec<_>>()
+    };
+    let managed_default_state =
+        xp::managed_default_endpoints::load_managed_default_endpoints_state(&config.data_dir)
+            .context("load managed default endpoint state")?;
+    let mut managed_default_intent =
+        xp::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
+            &explicit_managed_default_spec,
+            &endpoints,
+            config.vless_canary_bind,
+            &managed_default_state,
+        )?;
+    let vless_https_canary_task = if matches!(
+        managed_default_intent.vless,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+    ) {
+        let canary_result = xp::vless_https_canary::spawn(config_arc.clone()).await;
+        if disable_managed_vless_reconcile_for_canary_result(
+            matches!(
+                managed_default_intent.vless,
+                xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+            ),
+            &canary_result,
+        ) {
+            match &canary_result {
+                Ok(None) => {
+                    tracing::warn!(
+                        "vless https canary is disabled; skipping managed default VLESS reconcile"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "vless https canary preparation failed; skipping managed default VLESS reconcile"
+                    );
+                }
+                Ok(Some(_)) => {}
+            }
+            managed_default_intent.vless =
+                xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
+        }
+        match canary_result {
+            Ok(Some(handle)) => Some(handle),
+            Ok(None) | Err(_) => None,
+        }
+    } else {
+        xp::vless_https_canary::persist_disabled_status(&config.data_dir, config.vless_canary_bind)?;
+        None
+    };
+
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
@@ -288,6 +371,30 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
+    if !matches!(
+        managed_default_intent.vless,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    ) || !matches!(
+        managed_default_intent.ss,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    )
+    {
+        let mut writer = |cmd| async {
+            raft_facade
+                .client_write(cmd)
+                .await
+                .map(|_| ())
+        };
+        xp::managed_default_endpoints::reconcile_managed_default_endpoints(
+            &config.data_dir,
+            &cluster.node_id,
+            &endpoints,
+            &managed_default_intent,
+            &mut writer,
+            "xp startup",
+        )
+        .await?;
+    }
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
     let _quota = xp::quota::spawn_quota_worker(
@@ -319,6 +426,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             store.clone(),
             raft_facade.clone(),
         )?;
+    let _vless_https_canary_task = vless_https_canary_task;
 
     let app = xp::http::build_router(
         config.clone(),
@@ -427,5 +535,56 @@ fn best_effort_chmod_0600(path: &std::path::Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reject_legacy_relay_probe_env_fails_when_old_vars_exist() {
+        let key = "XP_RELAY_PROBE_BIND";
+        let original = std::env::var_os(key);
+        unsafe { std::env::set_var(key, "127.0.0.1:443") };
+
+        let result = super::reject_legacy_relay_probe_env();
+
+        match original {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+
+        let err = result.expect_err("legacy relay-probe env must be rejected");
+        assert!(
+            err.to_string().contains("XP_RELAY_PROBE_* has been removed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn disable_managed_vless_reconcile_when_canary_is_disabled() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);
+        assert!(super::disable_managed_vless_reconcile_for_canary_result(
+            true, &result
+        ));
+    }
+
+    #[test]
+    fn keep_managed_vless_reconcile_when_canary_handle_exists() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(Some(
+            std::thread::spawn(|| {}),
+        ));
+        assert!(!super::disable_managed_vless_reconcile_for_canary_result(
+            true, &result
+        ));
+        let handle = result.unwrap().unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn do_not_disable_when_vless_is_not_managed() {
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);
+        assert!(!super::disable_managed_vless_reconcile_for_canary_result(
+            false, &result
+        ));
     }
 }

@@ -10,6 +10,19 @@
 - `scripts/`: repo tooling and helper scripts.
 - Build artifacts: `target/`, `web/dist/` (generated; don’t edit).
 
+## Deployment Contract
+
+- Owner-facing deployment truth lives in `docs/ops/README.md` and the active `docs/specs/**/SPEC.md` files, not in ad hoc chat decisions.
+- The project must keep these deployment environments first-class:
+- Host-managed `xp + xray + cloudflared` on `systemd` Linux nodes.
+- Host-managed `xp + xray + cloudflared` on `OpenRC` Linux nodes.
+- Single-image Docker / Compose nodes driven by `xp-ops container run`.
+- Host-managed upgrades must not be treated as a compatibility afterthought for container-only features. If a managed-default VLESS / Mihomo relay / canary behavior is shipped, the expected host-managed upgrade path must be explicit and tested.
+- Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
+- Docker Compose deployments using the official single-image runtime are first-class supported environments.
+- If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.
+- When deployment or upgrade behavior changes, update `AGENTS.md`, `docs/ops/**`, and the owning spec together so the supported-environment matrix stays aligned.
+
 ## Build, Test, and Development Commands
 
 - Install repo tooling (commitlint + dprint): `bun install`

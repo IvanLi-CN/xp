@@ -2335,7 +2335,9 @@ fn build_global_vless_meta_updates(
         }
 
         meta.reality.server_names = derived;
-        meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+        if !meta.managed_default {
+            meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+        }
         out.insert(endpoint_id.clone(), serde_json::to_value(meta)?);
     }
     Ok(out)
@@ -2515,7 +2517,9 @@ impl DesiredStateCommand {
 
                     meta.reality.server_names = server_names;
                     if meta.reality.server_names_source == RealityServerNamesSource::Global {
-                        meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                        if !meta.managed_default {
+                            meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
+                        }
                     } else {
                         validate_reality_dest(&meta.reality.dest).map_err(|reason| {
                             DomainError::InvalidRealityServerName {
@@ -4205,6 +4209,7 @@ fn build_endpoint_meta(
                 },
                 short_ids: vec![short_id.clone()],
                 active_short_id: short_id,
+                managed_default: false,
             };
 
             Ok(serde_json::to_value(meta)?)
@@ -4214,6 +4219,7 @@ fn build_endpoint_meta(
             Ok(serde_json::to_value(Ss2022EndpointMeta {
                 method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
                 server_psk_b64,
+                managed_default: false,
             })?)
         }
     }
@@ -4339,6 +4345,7 @@ mod tests {
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         Endpoint {
@@ -5205,6 +5212,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5248,6 +5256,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5284,6 +5293,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5341,6 +5351,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5371,6 +5382,68 @@ rules: []
     }
 
     #[test]
+    fn upsert_managed_default_vless_global_preserves_canary_dest() {
+        let mut state = PersistedState::empty();
+
+        state.reality_domains = vec![
+            crate::domain::RealityDomain {
+                domain_id: "d1".to_string(),
+                server_name: "first.example.com".to_string(),
+                disabled_node_ids: BTreeSet::new(),
+            },
+            crate::domain::RealityDomain {
+                domain_id: "d2".to_string(),
+                server_name: "third.example.com".to_string(),
+                disabled_node_ids: BTreeSet::new(),
+            },
+        ];
+
+        let endpoint_id = "endpoint_1".to_string();
+
+        let meta = VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: "127.0.0.1:39043".to_string(),
+                server_names: vec![],
+                server_names_source: RealityServerNamesSource::Global,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: "priv".to_string(),
+                public_key: "pub".to_string(),
+            },
+            short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
+            active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+            managed_default: true,
+        };
+
+        let endpoint = Endpoint {
+            endpoint_id: endpoint_id.clone(),
+            node_id: "node_1".to_string(),
+            tag: "vless-test".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        };
+
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(&mut state)
+            .unwrap();
+
+        let saved = state.endpoints.get(&endpoint_id).unwrap();
+        let meta: VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(saved.meta.clone()).expect("vless meta");
+
+        assert_eq!(
+            meta.reality.server_names,
+            vec![
+                "first.example.com".to_string(),
+                "third.example.com".to_string()
+            ]
+        );
+        assert_eq!(meta.reality.dest, "127.0.0.1:39043");
+    }
+
+    #[test]
     fn rotate_vless_reality_short_id_updates_meta_and_persists() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
@@ -5392,6 +5465,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        managed_default: false,
         };
 
         store.state_mut().endpoints.insert(

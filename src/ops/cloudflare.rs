@@ -309,7 +309,7 @@ async fn ensure_cloudflared_present(
     mode: Mode,
 ) -> Result<(), ExitError> {
     let bin_abs: &Path = match distro {
-        Distro::Arch | Distro::Debian => Path::new("/usr/bin/cloudflared"),
+        Distro::Arch | Distro::Debian | Distro::Rhel => Path::new("/usr/bin/cloudflared"),
         Distro::Alpine => Path::new("/usr/local/bin/cloudflared"),
     };
     let bin = paths.map_abs(bin_abs);
@@ -358,7 +358,7 @@ fn ensure_cloudflared_service(
                     ])
                     .status()
             }
-            Distro::Arch | Distro::Debian => Command::new("useradd")
+            Distro::Arch | Distro::Debian | Distro::Rhel => Command::new("useradd")
                 .args([
                     "--system",
                     "--home",

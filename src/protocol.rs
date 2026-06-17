@@ -39,12 +39,16 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub reality_keys: RealityKeys,
     pub short_ids: Vec<String>,
     pub active_short_id: String,
+    #[serde(default)]
+    pub managed_default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Ss2022EndpointMeta {
     pub method: String,
     pub server_psk_b64: String,
+    #[serde(default)]
+    pub managed_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

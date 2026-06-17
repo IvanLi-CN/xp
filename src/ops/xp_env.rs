@@ -7,11 +7,40 @@ use crate::ops::util::{
     write_string_if_changed,
 };
 
+const LEGACY_RELAY_PROBE_ENV_VARS: &[&str] = &[
+    "XP_RELAY_PROBE_ENABLED",
+    "XP_RELAY_PROBE_BIND",
+    "XP_RELAY_PROBE_ORIGIN",
+    "XP_RELAY_PROBE_ACME_DIRECTORY_URL",
+    "XP_RELAY_PROBE_ACME_CONTACT_EMAIL",
+    "XP_RELAY_PROBE_CLOUDFLARE_TOKEN_FILE",
+    "XP_RELAY_PROBE_CLOUDFLARE_ZONE_ID",
+];
+
+pub const LEGACY_RELAY_PROBE_REMOVED_MESSAGE: &str =
+    "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly";
+
 #[derive(Default, Debug, Clone)]
 pub struct XpEnvFlags {
     pub has_node_name: bool,
     pub has_access_host: bool,
     pub has_api_base_url: bool,
+    pub has_legacy_relay_probe_enabled: bool,
+    pub has_legacy_relay_probe_bind: bool,
+    pub has_legacy_relay_probe_origin: bool,
+    pub has_legacy_relay_probe_acme_directory_url: bool,
+    pub has_legacy_relay_probe_acme_contact_email: bool,
+    pub has_legacy_relay_probe_cloudflare_token_file: bool,
+    pub has_legacy_relay_probe_cloudflare_zone_id: bool,
+    pub has_vless_canary_bind: bool,
+    pub has_vless_canary_acme_directory_url: bool,
+    pub has_vless_canary_acme_contact_email: bool,
+    pub has_vless_canary_cloudflare_token_file: bool,
+    pub has_vless_canary_cloudflare_zone_id: bool,
+    pub has_default_vless_port: bool,
+    pub has_default_vless_server_names: bool,
+    pub has_default_vless_fingerprint: bool,
+    pub has_default_ss_port: bool,
 
     pub has_data_dir: bool,
     pub has_xray_addr: bool,
@@ -52,6 +81,15 @@ pub struct ParsedXpEnv {
     pub node_name: Option<String>,
     pub access_host: Option<String>,
     pub api_base_url: Option<String>,
+    pub vless_canary_bind: Option<String>,
+    pub vless_canary_acme_directory_url: Option<String>,
+    pub vless_canary_acme_contact_email: Option<String>,
+    pub vless_canary_cloudflare_token_file: Option<String>,
+    pub vless_canary_cloudflare_zone_id: Option<String>,
+    pub default_vless_port: Option<String>,
+    pub default_vless_server_names: Option<String>,
+    pub default_vless_fingerprint: Option<String>,
+    pub default_ss_port: Option<String>,
     pub data_dir: Option<String>,
     pub flags: XpEnvFlags,
 }
@@ -61,6 +99,15 @@ pub struct XpEnvWriteValues<'a> {
     pub node_name: &'a str,
     pub access_host: &'a str,
     pub api_base_url: &'a str,
+    pub vless_canary_bind: &'a str,
+    pub vless_canary_acme_directory_url: &'a str,
+    pub vless_canary_acme_contact_email: &'a str,
+    pub vless_canary_cloudflare_token_file: &'a str,
+    pub vless_canary_cloudflare_zone_id: &'a str,
+    pub default_vless_port: Option<&'a str>,
+    pub default_vless_server_names: Option<&'a str>,
+    pub default_vless_fingerprint: Option<&'a str>,
+    pub default_ss_port: Option<&'a str>,
     pub cloudflare_ddns_enabled: bool,
     pub cloudflare_ddns_token_file: &'a str,
     pub cloudflare_ddns_zone_id: &'a str,
@@ -73,6 +120,15 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
     let mut node_name: Option<String> = None;
     let mut access_host: Option<String> = None;
     let mut api_base_url: Option<String> = None;
+    let mut vless_canary_bind: Option<String> = None;
+    let mut vless_canary_acme_directory_url: Option<String> = None;
+    let mut vless_canary_acme_contact_email: Option<String> = None;
+    let mut vless_canary_cloudflare_token_file: Option<String> = None;
+    let mut vless_canary_cloudflare_zone_id: Option<String> = None;
+    let mut default_vless_port: Option<String> = None;
+    let mut default_vless_server_names: Option<String> = None;
+    let mut default_vless_fingerprint: Option<String> = None;
+    let mut default_ss_port: Option<String> = None;
     let mut data_dir: Option<String> = None;
     let mut flags = XpEnvFlags::default();
 
@@ -84,6 +140,15 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             node_name,
             access_host,
             api_base_url,
+            vless_canary_bind,
+            vless_canary_acme_directory_url,
+            vless_canary_acme_contact_email,
+            vless_canary_cloudflare_token_file,
+            vless_canary_cloudflare_zone_id,
+            default_vless_port,
+            default_vless_server_names,
+            default_vless_fingerprint,
+            default_ss_port,
             data_dir,
             flags,
         };
@@ -139,6 +204,136 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             if line.len() > "XP_API_BASE_URL=".len() {
                 api_base_url = Some(
                     shell_unquote_wrapping_quotes(line.trim_start_matches("XP_API_BASE_URL="))
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_ENABLED=") {
+            flags.has_legacy_relay_probe_enabled = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_BIND=") {
+            flags.has_legacy_relay_probe_bind = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_ORIGIN=") {
+            flags.has_legacy_relay_probe_origin = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_ACME_DIRECTORY_URL=") {
+            flags.has_legacy_relay_probe_acme_directory_url = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_ACME_CONTACT_EMAIL=") {
+            flags.has_legacy_relay_probe_acme_contact_email = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_CLOUDFLARE_TOKEN_FILE=") {
+            flags.has_legacy_relay_probe_cloudflare_token_file = true;
+            continue;
+        }
+        if line.starts_with("XP_RELAY_PROBE_CLOUDFLARE_ZONE_ID=") {
+            flags.has_legacy_relay_probe_cloudflare_zone_id = true;
+            continue;
+        }
+        if line.starts_with("XP_VLESS_CANARY_BIND=") {
+            flags.has_vless_canary_bind = true;
+            if line.len() > "XP_VLESS_CANARY_BIND=".len() {
+                vless_canary_bind = Some(
+                    shell_unquote_wrapping_quotes(line.trim_start_matches("XP_VLESS_CANARY_BIND="))
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_VLESS_CANARY_ACME_DIRECTORY_URL=") {
+            flags.has_vless_canary_acme_directory_url = true;
+            if line.len() > "XP_VLESS_CANARY_ACME_DIRECTORY_URL=".len() {
+                vless_canary_acme_directory_url = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_VLESS_CANARY_ACME_DIRECTORY_URL="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_VLESS_CANARY_ACME_CONTACT_EMAIL=") {
+            flags.has_vless_canary_acme_contact_email = true;
+            if line.len() > "XP_VLESS_CANARY_ACME_CONTACT_EMAIL=".len() {
+                vless_canary_acme_contact_email = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_VLESS_CANARY_ACME_CONTACT_EMAIL="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE=") {
+            flags.has_vless_canary_cloudflare_token_file = true;
+            if line.len() > "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE=".len() {
+                vless_canary_cloudflare_token_file = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=") {
+            flags.has_vless_canary_cloudflare_zone_id = true;
+            if line.len() > "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=".len() {
+                vless_canary_cloudflare_zone_id = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_DEFAULT_VLESS_PORT=") {
+            flags.has_default_vless_port = true;
+            if line.len() > "XP_DEFAULT_VLESS_PORT=".len() {
+                default_vless_port = Some(
+                    shell_unquote_wrapping_quotes(line.trim_start_matches("XP_DEFAULT_VLESS_PORT="))
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_DEFAULT_VLESS_SERVER_NAMES=") {
+            flags.has_default_vless_server_names = true;
+            if line.len() > "XP_DEFAULT_VLESS_SERVER_NAMES=".len() {
+                default_vless_server_names = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_DEFAULT_VLESS_SERVER_NAMES="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_DEFAULT_VLESS_FINGERPRINT=") {
+            flags.has_default_vless_fingerprint = true;
+            if line.len() > "XP_DEFAULT_VLESS_FINGERPRINT=".len() {
+                default_vless_fingerprint = Some(
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_DEFAULT_VLESS_FINGERPRINT="),
+                    )
+                    .to_string(),
+                );
+            }
+            continue;
+        }
+        if line.starts_with("XP_DEFAULT_SS_PORT=") {
+            flags.has_default_ss_port = true;
+            if line.len() > "XP_DEFAULT_SS_PORT=".len() {
+                default_ss_port = Some(
+                    shell_unquote_wrapping_quotes(line.trim_start_matches("XP_DEFAULT_SS_PORT="))
                         .to_string(),
                 );
             }
@@ -293,9 +488,38 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
         node_name,
         access_host,
         api_base_url,
+        vless_canary_bind,
+        vless_canary_acme_directory_url,
+        vless_canary_acme_contact_email,
+        vless_canary_cloudflare_token_file,
+        vless_canary_cloudflare_zone_id,
+        default_vless_port,
+        default_vless_server_names,
+        default_vless_fingerprint,
+        default_ss_port,
         data_dir,
         flags,
     }
+}
+
+impl ParsedXpEnv {
+    pub fn has_legacy_relay_probe_vars(&self) -> bool {
+        self.flags.has_legacy_relay_probe_enabled
+            || self.flags.has_legacy_relay_probe_bind
+            || self.flags.has_legacy_relay_probe_origin
+            || self.flags.has_legacy_relay_probe_acme_directory_url
+            || self.flags.has_legacy_relay_probe_acme_contact_email
+            || self.flags.has_legacy_relay_probe_cloudflare_token_file
+            || self.flags.has_legacy_relay_probe_cloudflare_zone_id
+    }
+}
+
+fn is_legacy_relay_probe_env_key(key: &str) -> bool {
+    LEGACY_RELAY_PROBE_ENV_VARS.contains(&key)
+}
+
+pub fn process_env_has_legacy_relay_probe_vars() -> bool {
+    std::env::vars_os().any(|(key, _)| key.to_str().is_some_and(is_legacy_relay_probe_env_key))
 }
 
 fn default_managed_restart_mode(paths: &Paths) -> &'static str {
@@ -357,6 +581,109 @@ pub fn write_xp_env(
     lines.push(format!("XP_NODE_NAME={node_name}"));
     lines.push(format!("XP_ACCESS_HOST={access_host}"));
     lines.push(format!("XP_API_BASE_URL={api_base_url}"));
+    let vless_canary_bind = shell_quote_single(values.vless_canary_bind).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: XP_VLESS_CANARY_BIND cannot be written safely: {e}"),
+        )
+    })?;
+    lines.push(format!("XP_VLESS_CANARY_BIND={vless_canary_bind}"));
+    let vless_canary_acme_directory_url =
+        shell_quote_single(values.vless_canary_acme_directory_url).map_err(|e| {
+            ExitError::new(
+                2,
+                format!(
+                    "invalid_input: XP_VLESS_CANARY_ACME_DIRECTORY_URL cannot be written safely: {e}"
+                ),
+            )
+        })?;
+    lines.push(format!(
+        "XP_VLESS_CANARY_ACME_DIRECTORY_URL={vless_canary_acme_directory_url}"
+    ));
+    let vless_canary_acme_contact_email =
+        shell_quote_single(values.vless_canary_acme_contact_email).map_err(|e| {
+            ExitError::new(
+                2,
+                format!(
+                    "invalid_input: XP_VLESS_CANARY_ACME_CONTACT_EMAIL cannot be written safely: {e}"
+                ),
+            )
+        })?;
+    lines.push(format!(
+        "XP_VLESS_CANARY_ACME_CONTACT_EMAIL={vless_canary_acme_contact_email}"
+    ));
+    let vless_canary_cloudflare_token_file =
+        shell_quote_single(values.vless_canary_cloudflare_token_file).map_err(|e| {
+            ExitError::new(
+                2,
+                format!(
+                    "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE cannot be written safely: {e}"
+                ),
+            )
+        })?;
+    lines.push(format!(
+        "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE={vless_canary_cloudflare_token_file}"
+    ));
+    let vless_canary_cloudflare_zone_id =
+        shell_quote_single(values.vless_canary_cloudflare_zone_id).map_err(|e| {
+            ExitError::new(
+                2,
+                format!(
+                    "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID cannot be written safely: {e}"
+                ),
+            )
+        })?;
+    lines.push(format!(
+        "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID={vless_canary_cloudflare_zone_id}"
+    ));
+    if let Some(default_vless_port) = values.default_vless_port {
+        let default_vless_port = shell_quote_single(default_vless_port).map_err(|e| {
+            ExitError::new(
+                2,
+                format!("invalid_input: XP_DEFAULT_VLESS_PORT cannot be written safely: {e}"),
+            )
+        })?;
+        lines.push(format!("XP_DEFAULT_VLESS_PORT={default_vless_port}"));
+    } else if !flags.has_default_vless_port {
+        // Leave unmanaged when not explicitly configured.
+    }
+    if let Some(default_vless_server_names) = values.default_vless_server_names {
+        let default_vless_server_names =
+            shell_quote_single(default_vless_server_names).map_err(|e| {
+                ExitError::new(
+                    2,
+                    format!(
+                        "invalid_input: XP_DEFAULT_VLESS_SERVER_NAMES cannot be written safely: {e}"
+                    ),
+                )
+            })?;
+        lines.push(format!(
+            "XP_DEFAULT_VLESS_SERVER_NAMES={default_vless_server_names}"
+        ));
+    }
+    if let Some(default_vless_fingerprint) = values.default_vless_fingerprint {
+        let default_vless_fingerprint =
+            shell_quote_single(default_vless_fingerprint).map_err(|e| {
+                ExitError::new(
+                    2,
+                    format!(
+                        "invalid_input: XP_DEFAULT_VLESS_FINGERPRINT cannot be written safely: {e}"
+                    ),
+                )
+            })?;
+        lines.push(format!(
+            "XP_DEFAULT_VLESS_FINGERPRINT={default_vless_fingerprint}"
+        ));
+    }
+    if let Some(default_ss_port) = values.default_ss_port {
+        let default_ss_port = shell_quote_single(default_ss_port).map_err(|e| {
+            ExitError::new(
+                2,
+                format!("invalid_input: XP_DEFAULT_SS_PORT cannot be written safely: {e}"),
+            )
+        })?;
+        lines.push(format!("XP_DEFAULT_SS_PORT={default_ss_port}"));
+    }
     lines.push(format!(
         "XP_CLOUDFLARE_DDNS_ENABLED={}",
         if values.cloudflare_ddns_enabled {
