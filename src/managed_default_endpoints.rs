@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, anyhow, bail};
 use rand::rngs::OsRng;
 
+use crate::domain::validate_port;
 use crate::domain::{Endpoint, EndpointKind};
 use crate::id::new_ulid_string;
 use crate::protocol::{
@@ -139,6 +140,7 @@ pub fn build_default_vless_endpoint_spec(
         }
         return Ok(None);
     };
+    validate_port(port).map_err(|err| anyhow!("{err}"))?;
 
     let Some(server_names_raw) = server_names_raw else {
         bail!("XP_DEFAULT_VLESS_SERVER_NAMES is required when managing the default VLESS endpoint");
@@ -159,8 +161,12 @@ pub fn build_default_vless_endpoint_spec(
     }))
 }
 
-pub fn build_default_ss_endpoint_spec(port: Option<u16>) -> Option<DefaultSsEndpointSpec> {
-    port.map(|port| DefaultSsEndpointSpec { port })
+pub fn build_default_ss_endpoint_spec(port: Option<u16>) -> anyhow::Result<Option<DefaultSsEndpointSpec>> {
+    let Some(port) = port else {
+        return Ok(None);
+    };
+    validate_port(port).map_err(|err| anyhow!("{err}"))?;
+    Ok(Some(DefaultSsEndpointSpec { port }))
 }
 
 pub fn load_explicit_managed_default_endpoints_from_env(
@@ -178,7 +184,7 @@ pub fn load_explicit_managed_default_endpoints_from_env(
             default_vless_fingerprint.as_deref(),
             vless_canary_bind,
         )?,
-        ss: build_default_ss_endpoint_spec(default_ss_port),
+        ss: build_default_ss_endpoint_spec(default_ss_port)?,
     })
 }
 
@@ -931,6 +937,25 @@ mod tests {
             port,
             meta,
         }
+    }
+
+    #[test]
+    fn build_default_vless_endpoint_spec_rejects_zero_port() {
+        let err = build_default_vless_endpoint_spec(
+            Some(0),
+            Some("public.sn.files.1drv.com"),
+            None,
+            "127.0.0.1:39043".parse().unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("invalid port: 0"));
+    }
+
+    #[test]
+    fn build_default_ss_endpoint_spec_rejects_zero_port() {
+        let err = build_default_ss_endpoint_spec(Some(0)).unwrap_err();
+        assert!(err.to_string().contains("invalid port: 0"));
     }
 
     #[tokio::test]

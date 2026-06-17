@@ -314,9 +314,10 @@ pub async fn cmd_xp_sync_node_meta(
                     ExitError::new(
                         2,
                         format!("invalid_input: XP_DEFAULT_SS_PORT must be a valid port: {err}"),
-                    )
-                })?,
-        ),
+                )
+            })?,
+        )
+        .map_err(|err| ExitError::new(2, format!("invalid_input: {err}")))?,
     };
 
     let data_dir = parsed

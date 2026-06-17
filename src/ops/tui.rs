@@ -843,9 +843,19 @@ fn parse_optional_port(
     if trimmed.is_empty() {
         return Ok(None);
     }
-    trimmed.parse::<u16>().map(Some).map_err(|err| {
-        crate::ops::cli::ExitError::new(2, format!("invalid_input: {field} must be a valid port: {err}"))
-    })
+    let port = trimmed.parse::<u16>().map_err(|err| {
+        crate::ops::cli::ExitError::new(
+            2,
+            format!("invalid_input: {field} must be a valid port: {err}"),
+        )
+    })?;
+    if port == 0 {
+        return Err(crate::ops::cli::ExitError::new(
+            2,
+            format!("invalid_input: {field} must be between 1 and 65535"),
+        ));
+    }
+    Ok(Some(port))
 }
 
 fn help_text(app: &App) -> String {
@@ -1159,6 +1169,18 @@ mod tests {
         let err = app.to_values().unwrap_err();
         assert_eq!(err.code, 2);
         assert!(err.message.contains("default_vless_port"));
+    }
+
+    #[test]
+    fn to_values_rejects_zero_managed_default_port() {
+        let (_tmp, paths) = test_paths();
+        let mut app = App::new(&paths);
+        app.default_ss_port = "0".to_string();
+
+        let err = app.to_values().unwrap_err();
+        assert_eq!(err.code, 2);
+        assert!(err.message.contains("default_ss_port"));
+        assert!(err.message.contains("between 1 and 65535"));
     }
 
     #[test]

@@ -305,7 +305,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             )?,
             ss: xp::managed_default_endpoints::build_default_ss_endpoint_spec(
                 config.default_ss_port,
-            ),
+            )?,
         };
     let endpoints = {
         let store = store.lock().await;

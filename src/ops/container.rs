@@ -470,10 +470,11 @@ fn parse_default_vless_endpoint_spec(
 fn parse_default_ss_endpoint_spec(
     env_map: &BTreeMap<String, String>,
 ) -> Result<Option<DefaultSsEndpointSpec>, ExitError> {
-    Ok(build_default_ss_endpoint_spec(optional_port_env(
+    build_default_ss_endpoint_spec(optional_port_env(
         env_map,
         "XP_DEFAULT_SS_PORT",
-    )?))
+    )?)
+    .map_err(|err| ExitError::new(2, format!("invalid_args: {err}")))
 }
 
 fn build_runtime_env(

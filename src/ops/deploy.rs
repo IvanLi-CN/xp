@@ -656,6 +656,18 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let mut ddns_zone_id = args.ddns_zone_id.clone();
     let existing_env = fs::read_to_string(paths.etc_xp_env()).ok();
     let parsed_env = crate::ops::xp_env::parse_xp_env(existing_env);
+    validate_managed_default_port_value(
+        "default_vless_port",
+        args.default_vless_port,
+        parsed_env.default_vless_port.as_deref(),
+        &mut errors,
+    );
+    validate_managed_default_port_value(
+        "default_ss_port",
+        args.default_ss_port,
+        parsed_env.default_ss_port.as_deref(),
+        &mut errors,
+    );
     let managed_vless_enabled =
         args.default_vless_port.is_some() || parsed_env.default_vless_port.is_some();
 
@@ -935,6 +947,25 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         warnings,
         errors,
     })
+}
+
+fn validate_managed_default_port_value(
+    field: &str,
+    explicit: Option<u16>,
+    existing_env: Option<&str>,
+    errors: &mut Vec<String>,
+) {
+    let value = explicit.or_else(|| existing_env.and_then(|raw| raw.parse::<u16>().ok()));
+    if let Some(port) = value
+        && let Err(err) = crate::domain::validate_port(port)
+    {
+        let scope = if explicit.is_some() {
+            format!("--{}", field.replace('_', "-"))
+        } else {
+            format!("existing XP_{}", field.to_ascii_uppercase())
+        };
+        errors.push(format!("{scope} {err}"));
+    }
 }
 
 async fn resolve_hostname_conflict(
@@ -2735,6 +2766,130 @@ XP_DEFAULT_SS_PORT=53843\n"
                 .iter()
                 .any(|e| e.contains("--default-vless-server-names")),
             "expected actionable default vless validation error, got: {:?}",
+            plan.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn build_plan_rejects_zero_managed_default_ports() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let xp_bin = tmp.path().join("xp");
+        fs::write(&xp_bin, b"dummy").unwrap();
+
+        let args = DeployArgs {
+            xp_bin: Some(xp_bin),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
+            ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            tunnel_name: None,
+            origin_url: None,
+            ddns_zone_id: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: Some(0),
+            default_vless_server_names: Some("public.sn.files.1drv.com".to_string()),
+            default_vless_fingerprint: None,
+            default_ss_port: Some(0),
+            join_token: None,
+            join_token_stdin: false,
+            join_token_stdin_value: None,
+            cloudflare_token: None,
+            cloudflare_token_stdin: false,
+            cloudflare_token_stdin_value: None,
+            api_base_url: Some("https://node-1.example.net".to_string()),
+            xray_version: "latest".to_string(),
+            enable_services_toggle: crate::ops::cli::EnableServicesToggle {
+                enable_services: false,
+                no_enable_services: false,
+            },
+            yes: false,
+            overwrite_existing: false,
+            non_interactive: true,
+            dry_run: true,
+        };
+
+        let plan = build_plan(&paths, &args).await.unwrap();
+        assert!(
+            plan.errors
+                .iter()
+                .any(|e| e.contains("--default-vless-port") && e.contains("invalid port: 0")),
+            "expected zero VLESS port validation error, got: {:?}",
+            plan.errors
+        );
+        assert!(
+            plan.errors
+                .iter()
+                .any(|e| e.contains("--default-ss-port") && e.contains("invalid port: 0")),
+            "expected zero SS port validation error, got: {:?}",
+            plan.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let xp_bin = tmp.path().join("xp");
+        fs::write(&xp_bin, b"dummy").unwrap();
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            "XP_DEFAULT_VLESS_PORT=0\nXP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com\nXP_DEFAULT_SS_PORT=0\n",
+        )
+        .unwrap();
+
+        let args = DeployArgs {
+            xp_bin: Some(xp_bin),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
+            ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            tunnel_name: None,
+            origin_url: None,
+            ddns_zone_id: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
+            join_token: None,
+            join_token_stdin: false,
+            join_token_stdin_value: None,
+            cloudflare_token: None,
+            cloudflare_token_stdin: false,
+            cloudflare_token_stdin_value: None,
+            api_base_url: Some("https://node-1.example.net".to_string()),
+            xray_version: "latest".to_string(),
+            enable_services_toggle: crate::ops::cli::EnableServicesToggle {
+                enable_services: false,
+                no_enable_services: false,
+            },
+            yes: false,
+            overwrite_existing: false,
+            non_interactive: true,
+            dry_run: true,
+        };
+
+        let plan = build_plan(&paths, &args).await.unwrap();
+        assert!(
+            plan.errors
+                .iter()
+                .any(|e| e.contains("existing XP_DEFAULT_VLESS_PORT") && e.contains("invalid port: 0")),
+            "expected existing VLESS env validation error, got: {:?}",
+            plan.errors
+        );
+        assert!(
+            plan.errors
+                .iter()
+                .any(|e| e.contains("existing XP_DEFAULT_SS_PORT") && e.contains("invalid port: 0")),
+            "expected existing SS env validation error, got: {:?}",
             plan.errors
         );
     }
