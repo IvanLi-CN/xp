@@ -4,7 +4,6 @@ use crate::ops::cli::{
 };
 use crate::managed_default_endpoints::{
     ManagedDefaultEndpointsSpec, build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
-    reconcile_host_managed_default_endpoints,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
@@ -455,19 +454,33 @@ pub(crate) async fn sync_node_meta_runtime(
             .await
             .map_err(|err| anyhow::anyhow!(err.message))
     };
-    let mut reconcile_spec = managed_default_spec.clone();
-    if reconcile_spec.vless.is_some() && !canary_ready {
+    let managed_default_state =
+        crate::managed_default_endpoints::load_managed_default_endpoints_state(&abs_data_dir)
+            .map_err(|e| ExitError::new(5, format!("managed_default_state_error: {e}")))?;
+    let mut reconcile_intent =
+        crate::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
+            managed_default_spec,
+            &node_endpoints,
+            vless_canary_bind,
+            &managed_default_state,
+        )
+        .map_err(|e| ExitError::new(5, format!("managed_default_resolve_failed: {e}")))?;
+    if matches!(
+        reconcile_intent.vless,
+        crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+    ) && !canary_ready
+    {
         eprintln!(
             "xp sync-node-meta: skip managed-default VLESS reconcile because vless https canary is not ready"
         );
-        reconcile_spec.vless = None;
+        reconcile_intent.vless =
+            crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
     }
-    reconcile_host_managed_default_endpoints(
+    crate::managed_default_endpoints::reconcile_managed_default_endpoints(
         &abs_data_dir,
         &node_id,
         &node_endpoints,
-        &reconcile_spec,
-        vless_canary_bind,
+        &reconcile_intent,
         &mut writer,
         "xp sync-node-meta",
     )

@@ -967,15 +967,36 @@ async fn reconcile_managed_default_endpoints(
             .await
             .map_err(|err| anyhow::anyhow!(err.message))
     };
-    let mut reconcile_spec = spec.default_endpoints.clone();
-    if reconcile_spec.vless.is_some() && !canary_ready {
-        reconcile_spec.vless = None;
+    let mut reconcile_intent =
+        crate::managed_default_endpoints::ManagedDefaultEndpointsIntent {
+            vless: match spec.default_endpoints.vless.clone() {
+                Some(spec) => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                    spec,
+                    source: crate::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+                },
+                None => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+            },
+            ss: match spec.default_endpoints.ss.clone() {
+                Some(spec) => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                    spec,
+                    source: crate::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+                },
+                None => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+            },
+        };
+    if matches!(
+        reconcile_intent.vless,
+        crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+    ) && !canary_ready
+    {
+        reconcile_intent.vless =
+            crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
     }
     reconcile_managed_default_endpoints_shared(
         &abs_data_dir,
         &cluster_meta.node_id,
         &node_endpoints,
-        &reconcile_spec,
+        &reconcile_intent,
         &mut writer,
         "container reconcile",
     )

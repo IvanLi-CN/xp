@@ -1,7 +1,7 @@
 #[cfg(xp_missing_web_dist)]
 compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -307,17 +307,26 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             .filter(|endpoint| endpoint.node_id == cluster.node_id)
             .collect::<Vec<_>>()
     };
-    let resolved_managed_default_spec =
-        xp::managed_default_endpoints::resolve_host_managed_default_endpoints_spec(
+    let managed_default_state =
+        xp::managed_default_endpoints::load_managed_default_endpoints_state(&config.data_dir)
+            .context("load managed default endpoint state")?;
+    let mut managed_default_intent =
+        xp::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
             &explicit_managed_default_spec,
             &endpoints,
             config.vless_canary_bind,
+            &managed_default_state,
         )?;
-    let mut managed_default_spec_for_reconcile = resolved_managed_default_spec.clone();
-    let vless_https_canary_task = if resolved_managed_default_spec.vless.is_some() {
+    let vless_https_canary_task = if matches!(
+        managed_default_intent.vless,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+    ) {
         let canary_result = xp::vless_https_canary::spawn(config_arc.clone()).await;
         if disable_managed_vless_reconcile_for_canary_result(
-            resolved_managed_default_spec.vless.is_some(),
+            matches!(
+                managed_default_intent.vless,
+                xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+            ),
             &canary_result,
         ) {
             match &canary_result {
@@ -334,7 +343,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
                 }
                 Ok(Some(_)) => {}
             }
-            managed_default_spec_for_reconcile.vless = None;
+            managed_default_intent.vless =
+                xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
         }
         match canary_result {
             Ok(Some(handle)) => Some(handle),
@@ -353,8 +363,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    if managed_default_spec_for_reconcile.vless.is_some()
-        || managed_default_spec_for_reconcile.ss.is_some()
+    if !matches!(
+        managed_default_intent.vless,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    ) || !matches!(
+        managed_default_intent.ss,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    )
     {
         let mut writer = |cmd| async {
             raft_facade
@@ -366,7 +381,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             &config.data_dir,
             &cluster.node_id,
             &endpoints,
-            &managed_default_spec_for_reconcile,
+            &managed_default_intent,
             &mut writer,
             "xp startup",
         )

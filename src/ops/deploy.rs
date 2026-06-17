@@ -654,7 +654,10 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     let mut cloudflare_plan = None;
     let mut cloudflare_token_source: Option<CloudflareTokenSource> = None;
     let mut ddns_zone_id = args.ddns_zone_id.clone();
-    let managed_vless_enabled = args.default_vless_port.is_some();
+    let existing_env = fs::read_to_string(paths.etc_xp_env()).ok();
+    let parsed_env = crate::ops::xp_env::parse_xp_env(existing_env);
+    let managed_vless_enabled =
+        args.default_vless_port.is_some() || parsed_env.default_vless_port.is_some();
 
     let token = if cloudflare_enabled || ddns_enabled || managed_vless_enabled {
         match cloudflare::load_cloudflare_token_for_deploy(
@@ -2732,6 +2735,66 @@ XP_DEFAULT_SS_PORT=53843\n"
                 .iter()
                 .any(|e| e.contains("--default-vless-server-names")),
             "expected actionable default vless validation error, got: {:?}",
+            plan.errors
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
+        let _lock = crate::ops::util::ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("CLOUDFLARE_API_TOKEN") };
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let xp_bin = tmp.path().join("xp");
+        fs::write(&xp_bin, b"dummy").unwrap();
+        fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_env(),
+            "XP_DEFAULT_VLESS_PORT=53842\nXP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com\n",
+        )
+        .unwrap();
+
+        let args = DeployArgs {
+            xp_bin: Some(xp_bin),
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.net".to_string(),
+            cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
+            ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+            tunnel_name: None,
+            origin_url: None,
+            ddns_zone_id: None,
+            vless_canary_acme_contact_email: None,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
+            join_token: None,
+            join_token_stdin: false,
+            join_token_stdin_value: None,
+            cloudflare_token: None,
+            cloudflare_token_stdin: false,
+            cloudflare_token_stdin_value: None,
+            api_base_url: Some("https://node-1.example.net".to_string()),
+            xray_version: "latest".to_string(),
+            enable_services_toggle: crate::ops::cli::EnableServicesToggle {
+                enable_services: false,
+                no_enable_services: false,
+            },
+            yes: false,
+            overwrite_existing: false,
+            non_interactive: true,
+            dry_run: true,
+        };
+
+        let plan = build_plan(&paths, &args).await.unwrap();
+        assert!(
+            plan.errors.iter().any(|e| e.contains("cloudflare token missing")),
+            "expected existing managed vless env to require cloudflare token, got: {:?}",
             plan.errors
         );
     }
