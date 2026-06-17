@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-06-16
-- Last: 2026-06-16
+- Last: 2026-06-17
 
 ## 背景 / 问题陈述
 
@@ -49,6 +49,8 @@
 - `xp-ops upgrade` 必须先锁定 target release；若 `xp-ops` 需要升级，则先升级自身，再由新二进制继续完成后半段。
 - 后半段必须升级 `xp`、备份并重写 `/etc/xray/config.json`、重启 `xray`。
 - `xray` restart 失败时，必须恢复旧 config，并做一次 rollback restart 尝试，不能把节点留在半收敛状态。
+- 若静态 config rewrite 后 `xray` restart 失败，upgrade 还必须把 `xp` 二进制恢复到升级前版本，并重启 `xp` 回到旧运行面。
+- 静态 config rewrite 不得重置节点已有的控制面 listener 绑定：若 `/etc/xp/xp.env` 已声明 `XP_XRAY_API_ADDR`，则重写后的 `api` inbound 必须继续匹配该地址；既有 `mesh-proxy` inbound 也必须保持原 listener 语义。
 - 共享测试机必须在同一次隔离 run 里顺序执行 `tests/xray_e2e` 与 `tests/shared_quota_xray_e2e` 的 ignored real-Xray 用例。
 
 ### SHOULD
@@ -69,6 +71,8 @@
 
 - `api` 与 `mesh-proxy` 必须继续保持 loopback 控制面语义，不参与 stale WAN session 修复。
 - `xray` restart 失败且旧 config 能恢复时，upgrade 必须失败退出，但节点应回到旧 config。
+- `xray` restart 失败且旧 config 能恢复时，upgrade 也必须把 `xp` 回滚到旧二进制，不能留下“新 xp + 旧 xray config”的半升级状态。
+- 若节点已经自定义 `XP_XRAY_API_ADDR` 或 `mesh-proxy` listener，静态 config rewrite 后这些控制面 listener 必须保持兼容，不得被默认端口覆盖。
 - 若恢复旧 config 后 rollback restart 仍失败，也必须明确报失败，不得吞错。
 
 ## 验收标准（Acceptance Criteria）
@@ -78,6 +82,7 @@
 - Given `api` 或 `mesh-proxy` 静态 listener，When 本次变更完成，Then 它们的 listener 范围与无 `sockopt` 语义保持不变。
 - Given 旧版本节点执行 `xp-ops upgrade`，When upgrade 成功，Then 新 `xp`、新静态 config 与 `xray` restart 都已完成。
 - Given `xray` restart 失败，When upgrade 返回错误，Then 原静态 config 已恢复，并执行过一次 rollback restart 尝试。
+- Given `XP_XRAY_API_ADDR` 已自定义，When `xp-ops upgrade` 重写静态 Xray config，Then `api` inbound 仍与该地址一致，且既有 `mesh-proxy` inbound listener 不被默认值覆盖。
 - Given 共享测试机隔离 run，When 顺序执行 `cargo test --test xray_e2e -- --ignored` 与 `cargo test --test shared_quota_xray_e2e -- --ignored`，Then reconcile/grant、流量 roundtrip、quota ban/unban 等现有行为不回归。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
@@ -101,10 +106,10 @@
 
 ## 实现里程碑（Milestones）
 
-- [ ] M1: 静态 Xray 基线与仓内 fixtures 对齐 reclaim defaults
-- [ ] M2: 业务 inbound `socket_settings` 默认值落地并有单元测试
-- [ ] M3: `xp-ops upgrade` 两阶段 rollout + xray config rollback 落地
-- [ ] M4: shared testbox real-Xray 验证与 current-truth docs 同步
+- [x] M1: 静态 Xray 基线与仓内 fixtures 对齐 reclaim defaults
+- [x] M2: 业务 inbound `socket_settings` 默认值落地并有单元测试
+- [x] M3: `xp-ops upgrade` 两阶段 rollout + xray/xp rollback 落地
+- [x] M4: shared testbox real-Xray 验证与 current-truth docs 同步
 
 ## 风险与开放问题
 

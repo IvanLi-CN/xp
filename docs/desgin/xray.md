@@ -43,7 +43,7 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 - `xp` 只做**每分钟一次**的 online 快照采样，不解析 access log。
 - 极短连接如果发生在两次采样之间，不会出现在历史中；这属于采样口径的已知限制。
 - 如果 Xray 未开启 `statsUserOnline`，`xp` 会保留 warning 并继续 quota 主流程，但 IP usage 图表会进入 explanation 空态。
-- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认写入完整 reclaim profile（`handshake=4`、`connIdle=300`、`uplinkOnly=2`、`downlinkOnly=5`）并打开 `statsUserOnline=true`；旧节点升级时需要确认静态配置已同步。
+- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认写入完整 reclaim profile（`handshake=4`、`connIdle=300`、`uplinkOnly=2`、`downlinkOnly=5`）并打开 `statsUserOnline=true`；旧节点通过 `xp-ops upgrade` 收敛静态配置时，也必须保留当前控制面 listener 绑定（例如自定义 `XP_XRAY_API_ADDR` 与既有 `mesh-proxy` listener）。
 
 ## 3. 推荐的 Xray 基础配置（示例）
 

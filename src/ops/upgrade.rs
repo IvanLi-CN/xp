@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -358,8 +359,10 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         return reexec_after_xp_ops_upgrade(&locked_release, &args, &xp_ops_dest);
     }
 
-    upgrade_xp(&paths, &release, &checksums, xp_asset_name).await?;
-    reconcile_static_xray_config_and_restart(&paths)?;
+    upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
+    if let Err(err) = reconcile_static_xray_config_and_restart(&paths) {
+        return rollback_xp_after_xray_failure(&paths, &xp_backup, err);
+    }
 
     if locked.is_some() {
         clear_upgrade_resume_env();
@@ -375,6 +378,7 @@ async fn upgrade_xp(
     release: &GitHubRelease,
     checksums: &HashMap<String, [u8; 32]>,
     asset_name: &str,
+    backup: &Path,
 ) -> Result<(), ExitError> {
     let Some(asset_url) = find_asset_url(release, asset_name) else {
         return Err(ExitError::new(
@@ -390,8 +394,6 @@ async fn upgrade_xp(
     };
 
     let dest = paths.usr_local_bin_xp();
-    let backup = backup_path(&dest);
-
     let staged = tmp_path_next_to(&dest);
     download_to_path(asset_url, &staged).await.map_err(|e| {
         match e.downcast_ref::<std::io::Error>() {
@@ -409,7 +411,7 @@ async fn upgrade_xp(
     }
     chmod(&staged, 0o755).ok();
 
-    fs::rename(&dest, &backup).map_err(|e| match e.kind() {
+    fs::rename(&dest, backup).map_err(|e| match e.kind() {
         std::io::ErrorKind::PermissionDenied => {
             ExitError::new(4, format!("permission_denied: {e}"))
         }
@@ -417,44 +419,25 @@ async fn upgrade_xp(
     })?;
 
     if let Err(e) = fs::rename(&staged, &dest) {
-        let _ = fs::rename(&backup, &dest);
+        let _ = fs::rename(backup, &dest);
         let _ = fs::remove_file(&staged);
         return Err(ExitError::new(7, format!("service_error: {e}")));
     }
 
     chmod(&dest, 0o755).ok();
 
-    if !is_test_root(paths.root()) || test_enable_service_restart() {
-        let status = Command::new("systemctl")
-            .args(["restart", "xp.service"])
-            .status()
-            .ok()
-            .filter(|s| s.success());
-        let restarted = status.is_some()
-            || Command::new("rc-service")
-                .args(["xp", "restart"])
-                .status()
-                .ok()
-                .is_some_and(|s| s.success());
-
-        if !restarted {
-            let _ = fs::rename(
-                &dest,
-                dest.with_extension(format!("failed.{}", now_unix_secs())),
-            );
-            let rollback_ok = fs::rename(&backup, &dest).is_ok();
-            if rollback_ok {
-                let _ = Command::new("systemctl")
-                    .args(["restart", "xp.service"])
-                    .status();
-                let _ = Command::new("rc-service").args(["xp", "restart"]).status();
-                return Err(ExitError::new(
-                    7,
-                    "service_error: restart failed; rolled back",
-                ));
-            }
-            return Err(ExitError::new(8, "rollback_failed"));
+    if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
+    {
+        let _ = fs::rename(
+            &dest,
+            dest.with_extension(format!("failed.{}", now_unix_secs())),
+        );
+        let rollback_ok = fs::rename(backup, &dest).is_ok();
+        if rollback_ok {
+            let _ = restart_xp_service(paths);
+            return Err(ExitError::new(7, "service_error: restart failed; rolled back"));
         }
+        return Err(ExitError::new(8, "rollback_failed"));
     }
 
     Ok(())
@@ -641,16 +624,71 @@ fn clear_upgrade_resume_env() {
     }
 }
 
+fn rollback_xp_after_xray_failure(
+    paths: &Paths,
+    backup: &Path,
+    original_err: ExitError,
+) -> Result<(), ExitError> {
+    let dest = paths.usr_local_bin_xp();
+    if dest.exists() {
+        let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));
+        fs::rename(&dest, &failed).map_err(|e| {
+            ExitError::new(
+                8,
+                format!(
+                    "rollback_failed: stash upgraded xp after xray failure: {e}; original error: {}",
+                    original_err.message
+                ),
+            )
+        })?;
+    }
+
+    fs::rename(backup, &dest).map_err(|e| {
+        ExitError::new(
+            8,
+            format!(
+                "rollback_failed: restore xp after xray failure: {e}; original error: {}",
+                original_err.message
+            ),
+        )
+    })?;
+
+    if !restart_xp_service(paths) {
+        return Err(ExitError::new(
+            8,
+            format!(
+                "rollback_failed: xp rollback restart failed after xray failure; original error: {}",
+                original_err.message
+            ),
+        ));
+    }
+
+    Err(ExitError::new(
+        original_err.code,
+        format!("{}; rolled back xp", original_err.message),
+    ))
+}
+
 fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitError> {
     let config_path = paths.etc_xray_config();
     let backup = backup_path(&config_path);
     let had_old = config_path.exists();
+    let existing_config = if had_old {
+        Some(
+            fs::read_to_string(&config_path)
+                .map_err(|e| ExitError::new(7, format!("service_error: read xray config: {e}")))?,
+        )
+    } else {
+        None
+    };
     if had_old {
         fs::copy(&config_path, &backup)
             .map_err(|e| ExitError::new(7, format!("service_error: backup xray config: {e}")))?;
     }
 
-    if let Err(err) = write_static_xray_config(paths) {
+    if let Err(err) = write_static_xray_config(paths).and_then(|_| {
+        preserve_control_plane_listeners(paths, existing_config.as_deref())
+    }) {
         if had_old {
             let _ = fs::copy(&backup, &config_path);
             let _ = fs::remove_file(&backup);
@@ -666,6 +704,7 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
     }
 
     if !had_old {
+        let _ = fs::remove_file(&config_path);
         return Err(ExitError::new(7, "service_error: xray restart failed"));
     }
 
@@ -682,6 +721,115 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
             "service_error: xray restart failed; restored previous config; rollback restart failed"
         },
     ))
+}
+
+fn preserve_control_plane_listeners(
+    paths: &Paths,
+    existing_config: Option<&str>,
+) -> Result<(), ExitError> {
+    let config_path = paths.etc_xray_config();
+    let raw = fs::read_to_string(&config_path)
+        .map_err(|e| ExitError::new(7, format!("service_error: read xray config: {e}")))?;
+    let mut current: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| ExitError::new(7, format!("service_error: parse xray config: {e}")))?;
+
+    let mut changed = false;
+    if let Some(api_addr) = read_xray_api_addr(paths) {
+        changed |= apply_api_inbound_addr(&mut current, api_addr);
+    }
+
+    if let Some(existing_raw) = existing_config
+        && let Ok(existing) = serde_json::from_str::<serde_json::Value>(existing_raw)
+    {
+        if read_xray_api_addr(paths).is_none() {
+            changed |= replace_inbound_by_tag(&mut current, &existing, "api");
+        }
+        changed |= replace_inbound_by_tag(&mut current, &existing, "mesh-proxy");
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    let content = serde_json::to_string_pretty(&current)
+        .map_err(|e| ExitError::new(7, format!("service_error: serialize xray config: {e}")))?;
+    fs::write(&config_path, format!("{content}\n"))
+        .map_err(|e| ExitError::new(7, format!("service_error: write xray config: {e}")))?;
+    chmod(&config_path, 0o644).ok();
+    Ok(())
+}
+
+fn apply_api_inbound_addr(config: &mut serde_json::Value, addr: SocketAddr) -> bool {
+    let Some(inbounds) = config.get_mut("inbounds").and_then(serde_json::Value::as_array_mut) else {
+        return false;
+    };
+    let Some(api) = inbounds.iter_mut().find(|inbound| inbound_tag(inbound) == Some("api")) else {
+        return false;
+    };
+    let host = serde_json::Value::String(addr.ip().to_string());
+    let port = serde_json::Value::from(addr.port());
+    let listen_changed = api.get("listen") != Some(&host);
+    let port_changed = api.get("port") != Some(&port);
+    api["listen"] = host;
+    api["port"] = port;
+    listen_changed || port_changed
+}
+
+fn replace_inbound_by_tag(
+    current: &mut serde_json::Value,
+    existing: &serde_json::Value,
+    tag: &str,
+) -> bool {
+    let Some(existing_inbound) = existing
+        .get("inbounds")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|inbounds| inbounds.iter().find(|inbound| inbound_tag(inbound) == Some(tag)))
+        .cloned()
+    else {
+        return false;
+    };
+
+    let Some(inbounds) = current
+        .get_mut("inbounds")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return false;
+    };
+    let Some(current_inbound) =
+        inbounds.iter_mut().find(|inbound| inbound_tag(inbound) == Some(tag))
+    else {
+        return false;
+    };
+    if *current_inbound == existing_inbound {
+        return false;
+    }
+    *current_inbound = existing_inbound;
+    true
+}
+
+fn inbound_tag(inbound: &serde_json::Value) -> Option<&str> {
+    inbound.get("tag").and_then(serde_json::Value::as_str)
+}
+
+fn restart_xp_service(paths: &Paths) -> bool {
+    if is_test_root(paths.root()) && !test_enable_service_restart() {
+        return true;
+    }
+
+    if Command::new("systemctl")
+        .args(["restart", "xp.service"])
+        .status()
+        .ok()
+        .is_some_and(|status| status.success())
+    {
+        return true;
+    }
+
+    Command::new("rc-service")
+        .args(["xp", "restart"])
+        .status()
+        .ok()
+        .is_some_and(|status| status.success())
 }
 
 fn restart_xray_service(paths: &Paths) -> bool {
@@ -709,6 +857,10 @@ fn restart_xray_service(paths: &Paths) -> bool {
 
 fn read_xray_systemd_unit(paths: &Paths) -> String {
     read_xp_env_value(paths, "XP_XRAY_SYSTEMD_UNIT").unwrap_or_else(|| "xray.service".to_string())
+}
+
+fn read_xray_api_addr(paths: &Paths) -> Option<SocketAddr> {
+    read_xp_env_value(paths, "XP_XRAY_API_ADDR")?.parse().ok()
 }
 
 fn read_xray_openrc_service(paths: &Paths) -> String {
