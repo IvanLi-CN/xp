@@ -26,6 +26,7 @@ pub struct DefaultVlessEndpointSpec {
     pub port: u16,
     pub reality_dest: String,
     pub server_names: Vec<String>,
+    pub server_names_source: RealityServerNamesSource,
     pub fingerprint: String,
 }
 
@@ -153,6 +154,7 @@ pub fn build_default_vless_endpoint_spec(
         port,
         reality_dest: vless_canary_bind.to_string(),
         server_names,
+        server_names_source: RealityServerNamesSource::Manual,
         fingerprint,
     }))
 }
@@ -462,7 +464,7 @@ impl DefaultVlessEndpointSpec {
         RealityConfig {
             dest: self.reality_dest.clone(),
             server_names: self.server_names.clone(),
-            server_names_source: RealityServerNamesSource::Manual,
+            server_names_source: self.server_names_source,
             fingerprint: self.fingerprint.clone(),
         }
     }
@@ -709,6 +711,7 @@ fn default_vless_spec_from_endpoint(
         port: endpoint.port,
         reality_dest: vless_canary_bind.to_string(),
         server_names: meta.reality.server_names,
+        server_names_source: meta.reality.server_names_source,
         fingerprint: meta.reality.fingerprint,
     })
 }
@@ -940,6 +943,7 @@ mod tests {
                 port: 53844,
                 reality_dest: "127.0.0.1:39043".to_string(),
                 server_names: vec!["example.com".to_string()],
+                server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             }),
             ss: None,
@@ -993,6 +997,7 @@ mod tests {
         assert_eq!(vless.port, 53844);
         assert_eq!(vless.reality_dest, "127.0.0.1:39043");
         assert_eq!(vless.server_names, vec!["example.com"]);
+        assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
         assert!(spec.ss.is_none());
     }
 
@@ -1038,6 +1043,23 @@ mod tests {
     }
 
     #[test]
+    fn host_managed_auto_adopted_vless_preserves_global_server_name_mode() {
+        let mut endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
+        endpoint.meta["reality"]["server_names_source"] =
+            serde_json::Value::String("global".to_string());
+        let spec = resolve_host_managed_default_endpoints_spec(
+            &ManagedDefaultEndpointsSpec::default(),
+            &[endpoint],
+            "127.0.0.1:39043".parse().unwrap(),
+        )
+        .unwrap();
+
+        let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
+        assert_eq!(vless.server_names_source, RealityServerNamesSource::Global);
+        assert_eq!(vless.reality_dest, "127.0.0.1:39043");
+    }
+
+    #[test]
     fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config() {
         let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
         let state = ManagedDefaultEndpointsState {
@@ -1077,6 +1099,7 @@ mod tests {
                 port: 53844,
                 reality_dest: "127.0.0.1:39043".to_string(),
                 server_names: vec!["example.com".to_string()],
+                server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             }),
             ss: Some(DefaultSsEndpointSpec { port: 9443 }),

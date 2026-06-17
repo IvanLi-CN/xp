@@ -192,7 +192,10 @@ pub fn persist_disabled_status_with_error(
 
 pub fn ready_for_managed_vless(data_dir: &Path, bind: std::net::SocketAddr) -> bool {
     let status = load_status(data_dir, bind);
-    status.enabled && status.last_error.is_none() && status.cert_not_after.is_some()
+    status.enabled
+        && status.bind.as_deref() == Some(bind.to_string().as_str())
+        && status.last_error.is_none()
+        && status.cert_not_after.is_some()
 }
 
 #[derive(Clone)]
@@ -683,6 +686,28 @@ mod tests {
         assert!(!status.enabled);
         assert_eq!(status.bind.as_deref(), Some("127.0.0.1:39043"));
         assert_eq!(status.last_error.as_deref(), Some("dns setup failed"));
+    }
+
+    #[test]
+    fn ready_for_managed_vless_rejects_status_for_different_bind() {
+        let tmp = tempdir().unwrap();
+        let expected_bind: std::net::SocketAddr = "127.0.0.1:39043".parse().unwrap();
+        let stale_bind: std::net::SocketAddr = "127.0.0.1:49043".parse().unwrap();
+
+        persist_status(
+            tmp.path(),
+            &VlessHttpsCanaryStatus {
+                enabled: true,
+                bind: Some(stale_bind.to_string()),
+                acme_directory_url: Some(LETS_ENCRYPT_PRODUCTION_URL.to_string()),
+                cert_not_after: Some("2030-01-01T00:00:00Z".to_string()),
+                last_renewed_at: None,
+                last_error: None,
+            },
+        )
+        .unwrap();
+
+        assert!(!ready_for_managed_vless(tmp.path(), expected_bind));
     }
 
     #[cfg(unix)]

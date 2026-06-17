@@ -2,7 +2,8 @@ use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash};
 use crate::cluster_metadata::{ClusterMetadata, ClusterPaths};
 use crate::domain::Endpoint;
 use crate::managed_default_endpoints::{
-    DefaultSsEndpointSpec, DefaultVlessEndpointSpec, ManagedDefaultEndpointsSpec,
+    DefaultSsEndpointSpec, DefaultVlessEndpointSpec, ManagedDefaultEndpointIntent,
+    ManagedDefaultEndpointSource, ManagedDefaultEndpointsSpec,
     build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
     reconcile_managed_default_endpoints as reconcile_managed_default_endpoints_shared,
 };
@@ -970,27 +971,26 @@ async fn reconcile_managed_default_endpoints(
     let mut reconcile_intent =
         crate::managed_default_endpoints::ManagedDefaultEndpointsIntent {
             vless: match spec.default_endpoints.vless.clone() {
-                Some(spec) => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                Some(spec) => ManagedDefaultEndpointIntent::Manage {
                     spec,
-                    source: crate::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+                    source: ManagedDefaultEndpointSource::Explicit,
                 },
-                None => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+                None => ManagedDefaultEndpointIntent::Remove,
             },
             ss: match spec.default_endpoints.ss.clone() {
-                Some(spec) => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                Some(spec) => ManagedDefaultEndpointIntent::Manage {
                     spec,
-                    source: crate::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+                    source: ManagedDefaultEndpointSource::Explicit,
                 },
-                None => crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+                None => ManagedDefaultEndpointIntent::Remove,
             },
         };
     if matches!(
         reconcile_intent.vless,
-        crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+        ManagedDefaultEndpointIntent::Manage { .. }
     ) && !canary_ready
     {
-        reconcile_intent.vless =
-            crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
+        reconcile_intent.vless = ManagedDefaultEndpointIntent::Skip;
     }
     reconcile_managed_default_endpoints_shared(
         &abs_data_dir,
@@ -2075,6 +2075,7 @@ mod tests {
                 "public.sn.files.1drv.com".to_string(),
                 "public.bn.files.1drv.com".to_string(),
             ],
+            server_names_source: crate::protocol::RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         };
         let endpoint = build_managed_default_vless_endpoint(&current, "node-id".to_string()).unwrap();
@@ -2086,6 +2087,7 @@ mod tests {
                 "public.sn.files.1drv.com".to_string(),
                 "public.bn.files.1drv.com".to_string(),
             ],
+            server_names_source: crate::protocol::RealityServerNamesSource::Manual,
             fingerprint: "firefox".to_string(),
         };
         let updated = reconcile_managed_default_vless_endpoint(&desired, &endpoint).unwrap();
@@ -2103,6 +2105,29 @@ mod tests {
         assert_eq!(new_meta.reality_keys, old_meta.reality_keys);
         assert_eq!(new_meta.short_ids, old_meta.short_ids);
         assert_eq!(new_meta.active_short_id, old_meta.active_short_id);
+    }
+
+    #[test]
+    fn container_unset_defaults_map_to_remove_intent() {
+        let reconcile_intent = crate::managed_default_endpoints::ManagedDefaultEndpointsIntent {
+            vless: match None::<DefaultVlessEndpointSpec> {
+                Some(spec) => ManagedDefaultEndpointIntent::Manage {
+                    spec,
+                    source: ManagedDefaultEndpointSource::Explicit,
+                },
+                None => ManagedDefaultEndpointIntent::Remove,
+            },
+            ss: match None::<DefaultSsEndpointSpec> {
+                Some(spec) => ManagedDefaultEndpointIntent::Manage {
+                    spec,
+                    source: ManagedDefaultEndpointSource::Explicit,
+                },
+                None => ManagedDefaultEndpointIntent::Remove,
+            },
+        };
+
+        assert!(matches!(reconcile_intent.vless, ManagedDefaultEndpointIntent::Remove));
+        assert!(matches!(reconcile_intent.ss, ManagedDefaultEndpointIntent::Remove));
     }
 
     #[tokio::test]
