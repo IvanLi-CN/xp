@@ -85,8 +85,8 @@ cleanup() {
   set +e
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     cd "$REMOTE_RUN/scripts/e2e" || exit 0
-    if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ]; then
-      docker compose -p "$COMPOSE_PROJECT" -f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" down -v --remove-orphans >/dev/null 2>&1 || true
+    if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
+      docker compose -p "$COMPOSE_PROJECT" -f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml" down -v --remove-orphans >/dev/null 2>&1 || true
     fi
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
@@ -96,6 +96,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$REMOTE_RUN/scripts/e2e"
+
+if ! command -v make >/dev/null 2>&1; then
+  echo "missing 'make' on codex-testbox; vendored OpenSSL builds require it" >&2
+  echo "repair with shared-testbox-bootstrap before running real-Xray suites" >&2
+  exit 2
+fi
 
 # Random host ports (avoid collisions).
 XP_E2E_XRAY_API_PORT="$(python3 - <<'PY'
@@ -122,6 +128,7 @@ COMPOSE_FILE="docker-compose.xray.yml"
 # LXC quirk: CAP_SETFCAP is not available. Default Docker caps include it.
 # Workaround: drop ALL caps, then add back a known-good set (default minus SETFCAP).
 caps_override=".codex.caps-compat.yaml"
+net_override=".codex.net-compat.yaml"
 services="$(docker compose -f "$COMPOSE_FILE" config --services)"
 {
   echo "services:"
@@ -148,8 +155,66 @@ YAML
   done
 } > "$caps_override"
 
+TESTBOX_SUBNET="$(
+  python3 - <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+used = []
+
+try:
+    docker_ids = subprocess.check_output(
+        ["docker", "network", "ls", "-q"],
+        text=True,
+    ).split()
+except subprocess.CalledProcessError:
+    docker_ids = []
+
+if docker_ids:
+    inspect = json.loads(
+        subprocess.check_output(["docker", "network", "inspect", *docker_ids], text=True)
+    )
+    for network in inspect:
+        for cfg in (network.get("IPAM") or {}).get("Config") or []:
+            subnet = cfg.get("Subnet")
+            if subnet:
+                try:
+                    used.append(ipaddress.ip_network(subnet, strict=False))
+                except ValueError:
+                    pass
+
+for line in subprocess.check_output(["ip", "-o", "-4", "addr", "show"], text=True).splitlines():
+    parts = line.split()
+    if len(parts) >= 4:
+        try:
+            used.append(ipaddress.ip_network(parts[3], strict=False))
+        except ValueError:
+            pass
+
+for octet in range(0, 256):
+    candidate = ipaddress.ip_network(f"10.203.{octet}.0/24")
+    if all(not candidate.overlaps(existing) for existing in used):
+        print(candidate)
+        sys.exit(0)
+
+print("failed to find free subnet for shared testbox compose run", file=sys.stderr)
+sys.exit(1)
+PY
+)"
+
+cat > "$net_override" <<YAML
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${TESTBOX_SUBNET}
+YAML
+
+echo "selected subnet: $TESTBOX_SUBNET"
 echo "starting xray: api_port=$XP_E2E_XRAY_API_PORT ss_port=$XP_E2E_SS_PORT"
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" -f "$caps_override" up -d
+docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" -f "$caps_override" -f "$net_override" up -d
 
 echo "waiting for xray gRPC on 127.0.0.1:$XP_E2E_XRAY_API_PORT..."
 python3 - <<'PY'

@@ -87,6 +87,9 @@ while ! port_open >/dev/null 2>&1; do
   sleep 0.1
 done
 
+# These ignored suites share one external Xray instance and forwarded ports.
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
 cargo test --test xray_e2e -- --ignored
