@@ -340,7 +340,14 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     )
     .await?;
 
-    if plan.ddns_enabled || plan.default_vless_port.is_some() {
+    let managed_defaults = managed_defaults_write_values(&args);
+    let existing_env = fs::read_to_string(paths.etc_xp_env()).ok();
+    let parsed_env = crate::ops::xp_env::parse_xp_env(existing_env);
+    let vless_canary = resolve_vless_canary_write_values(&parsed_env, &managed_defaults);
+
+    let managed_vless_canary_enabled = plan.default_vless_port.is_some()
+        || parsed_env.default_vless_port.is_some();
+    if plan.ddns_enabled || managed_vless_canary_enabled {
         let token = cloudflare::load_cloudflare_token_for_deploy(
             &paths,
             args.cloudflare_token.as_deref(),
@@ -357,10 +364,21 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 e
             }
         })?;
-        ensure_ddns_runtime_token_file(&paths, mode, &token)?;
+        ensure_runtime_token_file(
+            &paths,
+            mode,
+            &token,
+            Path::new(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE),
+        )?;
+        if managed_vless_canary_enabled {
+            ensure_runtime_token_file(
+                &paths,
+                mode,
+                &token,
+                Path::new(vless_canary.cloudflare_token_file.as_str()),
+            )?;
+        }
     }
-
-    let managed_defaults = managed_defaults_write_values(&args);
 
     // After `xp-ops init`, we know the `xp` group exists (so `chown root:xp` is reliable).
     let bootstrap_admin_token = if plan.join_token_present {
@@ -2109,8 +2127,13 @@ fn read_cluster_admin_token_hash(paths: &Paths, data_dir: &Path) -> Result<Strin
     Ok(hash.to_string())
 }
 
-fn ensure_ddns_runtime_token_file(paths: &Paths, mode: Mode, token: &str) -> Result<(), ExitError> {
-    let path = paths.etc_xp_cloudflare_ddns_token();
+fn ensure_runtime_token_file(
+    paths: &Paths,
+    mode: Mode,
+    token: &str,
+    token_file: &Path,
+) -> Result<(), ExitError> {
+    let path = paths.map_abs(token_file);
     if mode == Mode::DryRun {
         eprintln!("would write: {}", path.display());
         return Ok(());
@@ -2554,13 +2577,33 @@ XP_DEFAULT_SS_PORT=53843\n"
     }
 
     #[test]
-    fn ensure_ddns_runtime_token_file_writes_xp_readable_token() {
+    fn ensure_runtime_token_file_writes_xp_readable_token() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
 
-        ensure_ddns_runtime_token_file(&paths, Mode::Real, "  test-token  ").unwrap();
+        ensure_runtime_token_file(
+            &paths,
+            Mode::Real,
+            "  test-token  ",
+            Path::new(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE),
+        )
+        .unwrap();
 
-        let written = fs::read_to_string(paths.etc_xp_cloudflare_ddns_token()).unwrap();
+        let written = fs::read_to_string(
+            paths.map_abs(Path::new(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE)),
+        )
+        .unwrap();
+        assert_eq!(written, "test-token\n");
+    }
+
+    #[test]
+    fn ensure_runtime_token_file_honors_custom_canary_path() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        ensure_runtime_token_file(&paths, Mode::Real, "test-token", Path::new("/custom/token")).unwrap();
+
+        let written = fs::read_to_string(paths.map_abs(Path::new("/custom/token"))).unwrap();
         assert_eq!(written, "test-token\n");
     }
 

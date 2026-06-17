@@ -695,7 +695,12 @@ fn prepare_runtime_inputs(
         ensure_ddns_runtime_token_file(paths, ddns, mode)?;
     }
     if let Some(token) = spec.vless_canary_token.as_deref() {
-        ensure_xp_runtime_token_file(paths, mode, token)?;
+        let token_file = spec
+            .runtime_env
+            .get("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE));
+        ensure_xp_runtime_token_file(paths, &token_file, mode, token)?;
     }
 
     if spec.node_meta_needs_realign
@@ -733,10 +738,11 @@ fn ensure_ddns_runtime_token_file(
 
 fn ensure_xp_runtime_token_file(
     paths: &Paths,
+    token_file: &Path,
     mode: Mode,
     token: &str,
 ) -> Result<(), ExitError> {
-    let target = paths.etc_xp_cloudflare_ddns_token();
+    let target = paths.map_abs(token_file);
     write_runtime_token_file(&target, token, mode)
 }
 
@@ -1952,6 +1958,37 @@ mod tests {
             runtime_env.get("XP_DEFAULT_SS_PORT").map(String::as_str),
             Some("53843")
         );
+    }
+
+    #[test]
+    fn prepare_runtime_inputs_honors_custom_canary_token_file() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let spec = ContainerSpec {
+            node_name: "node-1".to_string(),
+            access_host: "node-1.example.com".to_string(),
+            api_base_url: "https://node-1.example.com".to_string(),
+            data_dir: PathBuf::from("/var/lib/xp/data"),
+            bind: "127.0.0.1:62416".parse().unwrap(),
+            xray_api_addr: "127.0.0.1:10085".parse().unwrap(),
+            startup: ContainerStartup::Bootstrap { needs_init: true },
+            bootstrap_admin_token_hash: Some(VALID_ADMIN_TOKEN_HASH.to_string()),
+            cloudflare: None,
+            ddns: None,
+            vless_canary_token: Some("custom-token".to_string()),
+            node_meta_needs_realign: false,
+            default_endpoints: ManagedDefaultEndpointsSpec::default(),
+            join_leader_api_base_url: None,
+            runtime_env: BTreeMap::from([(
+                "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE".to_string(),
+                "/custom/token".to_string(),
+            )]),
+        };
+
+        prepare_runtime_inputs(&paths, &spec, None, Mode::Real).unwrap();
+
+        let written = fs::read_to_string(paths.map_abs(Path::new("/custom/token"))).unwrap();
+        assert_eq!(written, "custom-token\n");
     }
 
     #[test]

@@ -168,6 +168,16 @@ pub fn persist_disabled_status(
     persist_status(data_dir, &VlessHttpsCanaryStatus::disabled(bind))
 }
 
+pub fn persist_disabled_status_with_error(
+    data_dir: &Path,
+    bind: std::net::SocketAddr,
+    error: impl ToString,
+) -> anyhow::Result<()> {
+    let mut status = VlessHttpsCanaryStatus::disabled(bind);
+    status.last_error = Some(error.to_string());
+    persist_status(data_dir, &status)
+}
+
 #[derive(Clone)]
 struct RepoCloudflareDns01Solver {
     api_base: String,
@@ -288,10 +298,13 @@ pub async fn spawn(config: Arc<Config>) -> anyhow::Result<Option<std::thread::Jo
     let prepared = match prepare_runtime(config.as_ref()).await {
         Ok(prepared) => prepared,
         Err(err) => {
-            let mut status = base_status(&config);
-            status.last_error = Some(err.to_string());
-            let _ = persist_status(&config.data_dir, &status);
-            return Err(err);
+            let _ = persist_disabled_status_with_error(
+                &config.data_dir,
+                config.vless_canary_bind,
+                err.to_string(),
+            );
+            tracing::warn!(error = %err, "vless https canary preparation failed");
+            return Ok(None);
         }
     };
 
@@ -632,4 +645,23 @@ fn renewal_sleep_duration(cert: &Certificate) -> anyhow::Result<Duration> {
 
 fn map_lers_error(err: LersError) -> anyhow::Error {
     anyhow::anyhow!(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn persist_disabled_status_with_error_records_error() {
+        let tmp = tempdir().unwrap();
+        let bind: std::net::SocketAddr = "127.0.0.1:39043".parse().unwrap();
+
+        persist_disabled_status_with_error(tmp.path(), bind, "dns setup failed").unwrap();
+
+        let status = load_status(tmp.path(), bind);
+        assert!(!status.enabled);
+        assert_eq!(status.bind.as_deref(), Some("127.0.0.1:39043"));
+        assert_eq!(status.last_error.as_deref(), Some("dns setup failed"));
+    }
 }
