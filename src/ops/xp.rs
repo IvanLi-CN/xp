@@ -209,7 +209,7 @@ pub async fn cmd_xp_sync_node_meta(
     if parsed.has_legacy_relay_probe_vars() {
         return Err(ExitError::new(
             2,
-            "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly",
+            crate::ops::xp_env::LEGACY_RELAY_PROBE_REMOVED_MESSAGE,
         ));
     }
 

@@ -12,6 +12,13 @@ use tracing_subscriber::{EnvFilter, fmt};
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Duration, Instant};
 
+fn reject_legacy_relay_probe_env() -> Result<()> {
+    if xp::ops::process_env_has_legacy_relay_probe_vars() {
+        anyhow::bail!(xp::ops::LEGACY_RELAY_PROBE_REMOVED_MESSAGE);
+    }
+    Ok(())
+}
+
 fn disable_managed_vless_reconcile_for_canary_result(
     vless_enabled: bool,
     canary_result: &anyhow::Result<Option<std::thread::JoinHandle<()>>>,
@@ -22,6 +29,7 @@ fn disable_managed_vless_reconcile_for_canary_result(
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
+    reject_legacy_relay_probe_env()?;
 
     let cli = xp::config::Cli::parse();
     let cmd = cli.command.clone().unwrap_or(xp::config::Command::Run);
@@ -532,6 +540,26 @@ fn best_effort_chmod_0600(path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reject_legacy_relay_probe_env_fails_when_old_vars_exist() {
+        let key = "XP_RELAY_PROBE_BIND";
+        let original = std::env::var_os(key);
+        unsafe { std::env::set_var(key, "127.0.0.1:443") };
+
+        let result = super::reject_legacy_relay_probe_env();
+
+        match original {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+
+        let err = result.expect_err("legacy relay-probe env must be rejected");
+        assert!(
+            err.to_string().contains("XP_RELAY_PROBE_* has been removed"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn disable_managed_vless_reconcile_when_canary_is_disabled() {
         let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);

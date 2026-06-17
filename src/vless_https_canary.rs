@@ -399,6 +399,7 @@ pub async fn wait_until_ready(
 
     let client = reqwest::Client::builder()
         .resolve(&host, bind)
+        .danger_accept_invalid_certs(true)
         .timeout(Duration::from_secs(2))
         .build()
         .context("build vless https canary readiness client")?;
@@ -671,9 +672,25 @@ fn map_lers_error(err: LersError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cluster_identity::generate_cluster_ca;
+    use axum::routing::get;
+    use rcgen::{
+        CertificateParams, DistinguishedName, DnType, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256,
+    };
+    use rustls::crypto::aws_lc_rs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Once;
+    use time::OffsetDateTime;
     use tempfile::tempdir;
+
+    static RUSTLS_PROVIDER: Once = Once::new();
+
+    fn install_test_crypto_provider() {
+        RUSTLS_PROVIDER.call_once(|| {
+            let _ = aws_lc_rs::default_provider().install_default();
+        });
+    }
 
     #[test]
     fn persist_disabled_status_with_error_records_error() {
@@ -731,5 +748,59 @@ mod tests {
 
         assert_eq!(account_mode, 0o600);
         assert_eq!(key_mode, 0o600);
+    }
+
+    #[tokio::test]
+    async fn wait_until_ready_accepts_self_signed_canary_cert() {
+        install_test_crypto_provider();
+
+        let ca = generate_cluster_ca("cluster-1").unwrap();
+        let ca_key = KeyPair::from_pem(&ca.key_pem).unwrap();
+        let ca_cert = Issuer::from_ca_cert_pem(&ca.cert_pem, ca_key).unwrap();
+
+        let mut params =
+            CertificateParams::new(vec!["canary.example.com".to_string()]).unwrap();
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, "canary.example.com");
+        params.distinguished_name = dn;
+        let now = OffsetDateTime::now_utc();
+        params.not_before = now - time::Duration::days(1);
+        params.not_after = now + time::Duration::days(30);
+
+        let cert_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert = params.signed_by(&cert_key, &ca_cert).unwrap();
+        let cert_pem = cert.pem();
+        let key_pem = cert_key.serialize_pem();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let bind = listener.local_addr().unwrap();
+        let rustls = axum_server::tls_rustls::RustlsConfig::from_pem(
+            cert_pem.into_bytes(),
+            key_pem.into_bytes(),
+        )
+            .await
+            .unwrap();
+
+        let app = Router::new().route(
+            GENERATE_204_PATH,
+            get(|| async { StatusCode::NO_CONTENT.into_response() }),
+        );
+        let server = axum_server::from_tcp_rustls(listener, rustls)
+            .unwrap()
+            .serve(app.into_make_service());
+        let handle = tokio::spawn(server.into_future());
+
+        let result = wait_until_ready(
+            "canary.example.com",
+            bind,
+            5,
+            Duration::from_millis(100),
+        )
+        .await;
+
+        handle.abort();
+
+        assert!(result.is_ok(), "unexpected readiness error: {result:?}");
     }
 }

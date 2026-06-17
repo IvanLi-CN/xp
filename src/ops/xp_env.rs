@@ -7,6 +7,19 @@ use crate::ops::util::{
     write_string_if_changed,
 };
 
+const LEGACY_RELAY_PROBE_ENV_VARS: &[&str] = &[
+    "XP_RELAY_PROBE_ENABLED",
+    "XP_RELAY_PROBE_BIND",
+    "XP_RELAY_PROBE_ORIGIN",
+    "XP_RELAY_PROBE_ACME_DIRECTORY_URL",
+    "XP_RELAY_PROBE_ACME_CONTACT_EMAIL",
+    "XP_RELAY_PROBE_CLOUDFLARE_TOKEN_FILE",
+    "XP_RELAY_PROBE_CLOUDFLARE_ZONE_ID",
+];
+
+pub const LEGACY_RELAY_PROBE_REMOVED_MESSAGE: &str =
+    "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly";
+
 #[derive(Default, Debug, Clone)]
 pub struct XpEnvFlags {
     pub has_node_name: bool,
@@ -499,6 +512,14 @@ impl ParsedXpEnv {
             || self.flags.has_legacy_relay_probe_cloudflare_token_file
             || self.flags.has_legacy_relay_probe_cloudflare_zone_id
     }
+}
+
+fn is_legacy_relay_probe_env_key(key: &str) -> bool {
+    LEGACY_RELAY_PROBE_ENV_VARS.contains(&key)
+}
+
+pub fn process_env_has_legacy_relay_probe_vars() -> bool {
+    std::env::vars_os().any(|(key, _)| key.to_str().is_some_and(is_legacy_relay_probe_env_key))
 }
 
 fn default_managed_restart_mode(paths: &Paths) -> &'static str {

@@ -777,24 +777,23 @@ fn load_vless_canary_runtime_token(
     if let Some(cloudflare) = cloudflare {
         return Ok(Some(cloudflare.token.clone()));
     }
-    if let Some(token_file) = runtime_env
+    let token_file = runtime_env
         .get("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE")
         .map(PathBuf::from)
-    {
-        let token_path = paths.map_abs(&token_file);
-        if token_path.exists() {
-            return crate::vless_https_canary::read_cloudflare_token_from_file(&token_path)
-                .map(Some)
-                .map_err(|err| {
-                    ExitError::new(
-                        2,
-                        format!(
-                            "cloudflare token error: read vless canary token file {}: {err}",
-                            token_path.display()
-                        ),
-                    )
-                });
-        }
+        .unwrap_or_else(|| PathBuf::from(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE));
+    let token_path = paths.map_abs(&token_file);
+    if token_path.exists() {
+        return crate::vless_https_canary::read_cloudflare_token_from_file(&token_path)
+            .map(Some)
+            .map_err(|err| {
+                ExitError::new(
+                    2,
+                    format!(
+                        "cloudflare token error: read vless canary token file {}: {err}",
+                        token_path.display()
+                    ),
+                )
+            });
     }
     cloudflare::load_cloudflare_token_for_deploy(paths, None, None)
         .map(|(token, _)| Some(token))
@@ -2064,6 +2063,31 @@ mod tests {
 
         let spec = ContainerSpec::from_env_map(&paths, &env, None).await.unwrap();
         assert_eq!(spec.vless_canary_token.as_deref(), Some("runtime-token"));
+    }
+
+    #[tokio::test]
+    async fn container_spec_loads_canary_token_from_default_runtime_path() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let runtime_token =
+            paths.map_abs(Path::new(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE));
+        fs::create_dir_all(runtime_token.parent().unwrap()).unwrap();
+        fs::write(&runtime_token, "default-runtime-token\n").unwrap();
+
+        let env = env_map(&[
+            ("XP_NODE_NAME", "node-1"),
+            ("XP_API_BASE_URL", "https://node-1.example.com"),
+            ("XP_ACCESS_HOST", "node-1.example.com"),
+            ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+            ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ]);
+
+        let spec = ContainerSpec::from_env_map(&paths, &env, None).await.unwrap();
+        assert_eq!(
+            spec.vless_canary_token.as_deref(),
+            Some("default-runtime-token")
+        );
     }
 
     #[test]
