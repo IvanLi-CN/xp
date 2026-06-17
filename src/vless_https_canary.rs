@@ -139,6 +139,18 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+fn best_effort_chmod_0600(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = fs::metadata(path) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o600);
+            let _ = fs::set_permissions(path, perms);
+        }
+    }
+}
+
 pub fn load_status(data_dir: &Path, bind: std::net::SocketAddr) -> VlessHttpsCanaryStatus {
     let paths = VlessHttpsCanaryPaths::new(data_dir);
     let Ok(raw) = fs::read(&paths.status_json) else {
@@ -176,6 +188,11 @@ pub fn persist_disabled_status_with_error(
     let mut status = VlessHttpsCanaryStatus::disabled(bind);
     status.last_error = Some(error.to_string());
     persist_status(data_dir, &status)
+}
+
+pub fn ready_for_managed_vless(data_dir: &Path, bind: std::net::SocketAddr) -> bool {
+    let status = load_status(data_dir, bind);
+    status.enabled && status.last_error.is_none() && status.cert_not_after.is_some()
 }
 
 #[derive(Clone)]
@@ -303,8 +320,7 @@ pub async fn spawn(config: Arc<Config>) -> anyhow::Result<Option<std::thread::Jo
                 config.vless_canary_bind,
                 err.to_string(),
             );
-            tracing::warn!(error = %err, "vless https canary preparation failed");
-            return Ok(None);
+            return Err(err);
         }
     };
 
@@ -587,6 +603,7 @@ async fn load_or_create_account(
             paths.account_key_pem.display()
         )
     })?;
+    best_effort_chmod_0600(&paths.account_key_pem);
     Ok(account)
 }
 
@@ -612,6 +629,7 @@ fn write_certificate(paths: &VlessHttpsCanaryPaths, cert: &Certificate) -> anyho
     write_atomic(&paths.key_pem, &cert.private_key_to_pem()?).with_context(|| {
         format!("write vless https canary key {}", paths.key_pem.display())
     })?;
+    best_effort_chmod_0600(&paths.key_pem);
     Ok(())
 }
 
@@ -650,6 +668,8 @@ fn map_lers_error(err: LersError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
     #[test]
@@ -663,5 +683,28 @@ mod tests {
         assert!(!status.enabled);
         assert_eq!(status.bind.as_deref(), Some("127.0.0.1:39043"));
         assert_eq!(status.last_error.as_deref(), Some("dns setup failed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_key_material_is_chmodded_0600() {
+        let tmp = tempdir().unwrap();
+        let paths = VlessHttpsCanaryPaths::new(tmp.path());
+        fs::create_dir_all(&paths.dir).unwrap();
+
+        write_atomic(&paths.account_key_pem, b"account-key").unwrap();
+        best_effort_chmod_0600(&paths.account_key_pem);
+        write_atomic(&paths.key_pem, b"tls-key").unwrap();
+        best_effort_chmod_0600(&paths.key_pem);
+
+        let account_mode = fs::metadata(&paths.account_key_pem)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let key_mode = fs::metadata(&paths.key_pem).unwrap().permissions().mode() & 0o777;
+
+        assert_eq!(account_mode, 0o600);
+        assert_eq!(key_mode, 0o600);
     }
 }

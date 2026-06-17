@@ -355,6 +355,8 @@ pub(crate) async fn sync_node_meta_runtime(
     validate_https_origin(api_base_url)?;
 
     let abs_data_dir = paths.map_abs(data_dir);
+    let canary_ready =
+        crate::vless_https_canary::ready_for_managed_vless(&abs_data_dir, vless_canary_bind);
     let mut meta = crate::cluster_metadata::ClusterMetadata::load(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
     let node_id = meta.node_id.clone();
@@ -453,11 +455,18 @@ pub(crate) async fn sync_node_meta_runtime(
             .await
             .map_err(|err| anyhow::anyhow!(err.message))
     };
+    let mut reconcile_spec = managed_default_spec.clone();
+    if reconcile_spec.vless.is_some() && !canary_ready {
+        eprintln!(
+            "xp sync-node-meta: skip managed-default VLESS reconcile because vless https canary is not ready"
+        );
+        reconcile_spec.vless = None;
+    }
     reconcile_host_managed_default_endpoints(
         &abs_data_dir,
         &node_id,
         &node_endpoints,
-        managed_default_spec,
+        &reconcile_spec,
         vless_canary_bind,
         &mut writer,
         "xp sync-node-meta",

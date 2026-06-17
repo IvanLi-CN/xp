@@ -306,8 +306,19 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             &endpoints,
             config.vless_canary_bind,
         )?;
+    let mut managed_default_spec_for_reconcile = resolved_managed_default_spec.clone();
     let vless_https_canary_task = if resolved_managed_default_spec.vless.is_some() {
-        xp::vless_https_canary::spawn(config_arc.clone()).await?
+        match xp::vless_https_canary::spawn(config_arc.clone()).await {
+            Ok(handle) => handle,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "vless https canary preparation failed; skipping managed default VLESS reconcile"
+                );
+                managed_default_spec_for_reconcile.vless = None;
+                None
+            }
+        }
     } else {
         xp::vless_https_canary::persist_disabled_status(&config.data_dir, config.vless_canary_bind)?;
         None
@@ -321,7 +332,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    if resolved_managed_default_spec.vless.is_some() || resolved_managed_default_spec.ss.is_some() {
+    if managed_default_spec_for_reconcile.vless.is_some()
+        || managed_default_spec_for_reconcile.ss.is_some()
+    {
         let mut writer = |cmd| async {
             raft_facade
                 .client_write(cmd)
@@ -332,7 +345,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             &config.data_dir,
             &cluster.node_id,
             &endpoints,
-            &resolved_managed_default_spec,
+            &managed_default_spec_for_reconcile,
             &mut writer,
             "xp startup",
         )

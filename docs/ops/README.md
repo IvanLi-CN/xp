@@ -85,7 +85,7 @@ Contract:
 - `xp` terminates TLS for `GET/HEAD /generate_204` on the loopback canary and returns `204`.
 - xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, so ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary response through the VLESS ingress itself.
 - Host-managed and container-managed nodes use the same managed-default endpoint contract. On host-managed nodes, `xp` startup and `xp-ops xp sync-node-meta` both reconcile the local default endpoint set; on container-managed nodes, `xp-ops container run` does the same after the local control plane is ready.
-- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade, so deploying the new version and restarting `xp` is sufficient to switch that ingress to the loopback canary semantics.
+- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade, but the runtime only rewrites that ingress to the loopback canary semantics after the canary itself is ready; if canary preparation fails, the old ingress stays untouched and `vless_https_canary_status.last_error` explains the blocker.
 - This does not move the admin UI / cluster API onto the VLESS port.
 - Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
@@ -93,7 +93,7 @@ Contract:
 Host-managed upgrade note:
 
 - If `/etc/xp/xp.env` already declares `XP_DEFAULT_VLESS_*`, startup uses those values as the source of truth.
-- If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary while preserving the existing client SNI list.
+- If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary only after the canary is healthy; when canary preparation is blocked, startup/sync leave the existing endpoint untouched and surface the error via `vless_https_canary_status`.
 - If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
 
 Deployment note:
