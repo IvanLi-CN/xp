@@ -128,7 +128,15 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
       "stats": {},
       "policy": {
         "levels": {
-          "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true }
+          "0": {
+            "handshake": 4,
+            "connIdle": 300,
+            "uplinkOnly": 2,
+            "downlinkOnly": 5,
+            "statsUserUplink": true,
+            "statsUserDownlink": true,
+            "statsUserOnline": true
+          }
         }
       },
       "inbounds": [
@@ -686,6 +694,15 @@ mod tests {
         write_static_xray_config(&paths).unwrap();
 
         let content = fs::read_to_string(paths.etc_xray_config()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(value["policy"]["levels"]["0"]["handshake"], 4);
+        assert_eq!(value["policy"]["levels"]["0"]["connIdle"], 300);
+        assert_eq!(value["policy"]["levels"]["0"]["uplinkOnly"], 2);
+        assert_eq!(value["policy"]["levels"]["0"]["downlinkOnly"], 5);
+        assert_eq!(value["policy"]["levels"]["0"]["statsUserUplink"], true);
+        assert_eq!(value["policy"]["levels"]["0"]["statsUserDownlink"], true);
+        assert_eq!(value["policy"]["levels"]["0"]["statsUserOnline"], true);
         assert!(content.contains("\"tag\": \"mesh-proxy\""));
         assert!(content.contains("\"port\": 10808"));
         assert!(content.contains("\"outboundTag\": \"direct\""));

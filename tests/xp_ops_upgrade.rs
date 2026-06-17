@@ -56,6 +56,31 @@ mod linux {
         format!("{}:{}", dir.display(), old)
     }
 
+    fn current_xp_ops_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("xp-ops")
+    }
+
+    fn current_xp_ops_bytes() -> Vec<u8> {
+        fs::read(current_xp_ops_path()).unwrap()
+    }
+
+    fn copy_current_xp_ops(dest: &Path) {
+        fs::copy(current_xp_ops_path(), dest).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut p = fs::metadata(dest).unwrap().permissions();
+            p.set_mode(0o755);
+            fs::set_permissions(dest, p).unwrap();
+        }
+    }
+
+    fn seed_xray_config(root: &Path, content: &str) {
+        let path = root.join("etc/xray/config.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
     #[tokio::test]
     async fn upgrade_rejects_checksum_mismatch_and_keeps_old_binaries() {
         let server = MockServer::start().await;
@@ -103,17 +128,10 @@ mod linux {
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(tmp.path(), "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n");
 
-        let src = assert_cmd::cargo::cargo_bin("xp-ops");
         let dest = tmp.path().join("xp-ops-copy");
-        fs::copy(src, &dest).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut p = fs::metadata(&dest).unwrap().permissions();
-            p.set_mode(0o755);
-            fs::set_permissions(&dest, p).unwrap();
-        }
+        copy_current_xp_ops(&dest);
         let original_xp_ops = fs::read(&dest).unwrap();
 
         let mut cmd = assert_cmd::Command::new(&dest);
@@ -172,21 +190,23 @@ mod linux {
         cmd.assert()
             .success()
             .stderr(predicates::str::contains("resolved release"))
-            .stderr(predicates::str::contains("would download"));
+            .stderr(predicates::str::contains("would download"))
+            .stderr(predicates::str::contains("would rewrite static xray config"))
+            .stderr(predicates::str::contains("would restart service: xray"));
     }
 
     #[tokio::test]
-    async fn upgrade_downloads_verifies_and_replaces_xp_and_xp_ops_binaries() {
+    async fn upgrade_self_reexecs_then_rewrites_xray_config_and_restarts_services() {
         let server = MockServer::start().await;
 
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
 
         let new_xp = b"xp-new-binary";
-        let new_xp_ops = b"#!/bin/sh\nexit 0\n";
+        let new_xp_ops = current_xp_ops_bytes();
 
         let xp_checksum = sha256_hex(new_xp);
-        let xp_ops_checksum = sha256_hex(new_xp_ops);
+        let xp_ops_checksum = sha256_hex(&new_xp_ops);
 
         Mock::given(method("GET"))
             .and(path("/repos/o/r/releases/latest"))
@@ -211,7 +231,7 @@ mod linux {
 
         Mock::given(method("GET"))
             .and(path(format!("/download/{xp_ops_asset}")))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops.clone()))
             .mount(&server)
             .await;
 
@@ -226,25 +246,36 @@ mod linux {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_string_lossy().to_string();
 
+        let marker = tmp.path().join("marker.txt");
+        let bin_dir = tmp.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        write_executable(
+            &bin_dir.join("systemctl"),
+            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
+        );
+        write_executable(
+            &bin_dir.join("rc-service"),
+            "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
+        );
+
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
 
-        let src = assert_cmd::cargo::cargo_bin("xp-ops");
         let dest = tmp.path().join("xp-ops-copy");
-        fs::copy(src, &dest).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut p = fs::metadata(&dest).unwrap().permissions();
-            p.set_mode(0o755);
-            fs::set_permissions(&dest, p).unwrap();
-        }
+        copy_current_xp_ops(&dest);
 
         let original_xp_ops = fs::read(&dest).unwrap();
 
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_MARKER", &marker);
+        cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args([
             "--root",
             &root,
@@ -263,8 +294,19 @@ mod linux {
         let xp_backup_bytes = fs::read(xp_backup).unwrap();
         assert_eq!(xp_backup_bytes, b"xp-old-binary");
 
+        let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
+        assert!(xray_config.contains("\"handshake\": 4"));
+        assert!(xray_config.contains("\"connIdle\": 300"));
+        assert!(xray_config.contains("\"uplinkOnly\": 2"));
+        assert!(xray_config.contains("\"downlinkOnly\": 5"));
+        assert!(xray_config.contains("\"statsUserOnline\": true"));
+
+        let marker_raw = fs::read_to_string(&marker).unwrap();
+        assert!(marker_raw.contains("systemctl restart xp.service"));
+        assert!(marker_raw.contains("systemctl restart xray.service"));
+
         let new_xp_ops_bytes = fs::read(&dest).unwrap();
-        assert_eq!(new_xp_ops_bytes, new_xp_ops);
+        assert_eq!(new_xp_ops_bytes, original_xp_ops);
 
         let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
         let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();
@@ -389,17 +431,13 @@ mod linux {
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
 
-        let src = assert_cmd::cargo::cargo_bin("xp-ops");
         let dest = tmp.path().join("xp-ops-copy");
-        fs::copy(src, &dest).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut p = fs::metadata(&dest).unwrap().permissions();
-            p.set_mode(0o755);
-            fs::set_permissions(&dest, p).unwrap();
-        }
+        copy_current_xp_ops(&dest);
 
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
@@ -412,6 +450,7 @@ mod linux {
 
         let marker_raw = fs::read_to_string(&marker).unwrap();
         assert!(marker_raw.contains("systemctl restart xp.service"));
+        assert!(marker_raw.contains("systemctl restart xray.service"));
     }
 
     #[tokio::test]
@@ -422,9 +461,9 @@ mod linux {
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
 
-        let new_xp_ops = b"#!/bin/sh\nexit 0\n";
+        let new_xp_ops = current_xp_ops_bytes();
         let xp_checksum = sha256_hex(new_xp);
-        let xp_ops_checksum = sha256_hex(new_xp_ops);
+        let xp_ops_checksum = sha256_hex(&new_xp_ops);
 
         Mock::given(method("GET"))
             .and(path("/repos/o/r/releases/latest"))
@@ -449,7 +488,7 @@ mod linux {
 
         Mock::given(method("GET"))
             .and(path(format!("/download/{xp_ops_asset}")))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops.clone()))
             .mount(&server)
             .await;
 
@@ -479,17 +518,13 @@ mod linux {
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
 
-        let src = assert_cmd::cargo::cargo_bin("xp-ops");
         let dest = tmp.path().join("xp-ops-copy");
-        fs::copy(src, &dest).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut p = fs::metadata(&dest).unwrap().permissions();
-            p.set_mode(0o755);
-            fs::set_permissions(&dest, p).unwrap();
-        }
+        copy_current_xp_ops(&dest);
         let original_xp_ops = fs::read(&dest).unwrap();
 
         let mut cmd = assert_cmd::Command::new(&dest);
@@ -510,10 +545,14 @@ mod linux {
 
         assert!(find_backup(xp_path.parent().unwrap(), "xp.bak.").is_none());
 
+        let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
+        assert_eq!(
+            xray_config,
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n"
+        );
+
         let xp_ops_bytes = fs::read(&dest).unwrap();
         assert_eq!(xp_ops_bytes, original_xp_ops);
-        let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
-        assert!(find_backup(tmp.path(), &prefix).is_none());
     }
 
     #[tokio::test]

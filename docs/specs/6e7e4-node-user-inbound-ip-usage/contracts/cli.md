@@ -8,6 +8,10 @@ Inbound IP usage Geo enrichment no longer exposes dedicated Geo DB env vars. Run
 
 `xp-ops init` 生成的 `/etc/xray/config.json` 必须在 `policy.levels.0` 中同时启用：
 
+- `handshake=4`
+- `connIdle=300`
+- `uplinkOnly=2`
+- `downlinkOnly=5`
 - `statsUserUplink=true`
 - `statsUserDownlink=true`
 - `statsUserOnline=true`

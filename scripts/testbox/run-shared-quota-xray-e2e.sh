@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run shared-quota real-xray e2e tests on the shared testbox (codex-testbox).
+# Run real-xray e2e tests on the shared testbox (codex-testbox).
 #
 # This follows the shared-testbox-runner rules:
 # - per-run isolation under /srv/codex/workspaces/$USER
@@ -176,8 +176,8 @@ export RUST_TEST_THREADS=1
 export XP_E2E_XRAY_MODE=external
 export XP_E2E_XRAY_API_ADDR="127.0.0.1:$XP_E2E_XRAY_API_PORT"
 
+cargo test --test xray_e2e -- --ignored
 cargo test --test shared_quota_xray_e2e -- --ignored
 REMOTE
 
-echo "OK: shared_quota_xray_e2e on $TESTBOX"
-
+echo "OK: xray_e2e + shared_quota_xray_e2e on $TESTBOX"

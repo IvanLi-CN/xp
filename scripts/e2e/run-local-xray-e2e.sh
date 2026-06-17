@@ -90,3 +90,7 @@ done
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
 cargo test --test xray_e2e -- --ignored
+
+XP_E2E_XRAY_MODE=external \
+XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+cargo test --test shared_quota_xray_e2e -- --ignored

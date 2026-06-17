@@ -131,6 +131,15 @@ fn tcp_transport_settings() -> xray::transport::internet::TransportConfig {
     }
 }
 
+fn business_inbound_socket_settings() -> xray::transport::internet::SocketConfig {
+    xray::transport::internet::SocketConfig {
+        tcp_keep_alive_interval: 30,
+        tcp_keep_alive_idle: 300,
+        tcp_user_timeout: 10_000,
+        ..Default::default()
+    }
+}
+
 fn decode_reality_private_key_b64url_nopad(
     endpoint: &Endpoint,
     private_key_b64url_nopad: &str,
@@ -333,7 +342,7 @@ pub fn build_add_inbound_request(
                 transport_settings: vec![tcp_transport_settings()],
                 security_type: TYPE_REALITY_SECURITY_CONFIG.to_string(),
                 security_settings: vec![to_typed_message(TYPE_REALITY_SECURITY_CONFIG, &reality)],
-                socket_settings: None,
+                socket_settings: Some(business_inbound_socket_settings()),
             };
 
             let receiver_settings = xray::app::proxyman::ReceiverConfig {
@@ -392,7 +401,7 @@ pub fn build_add_inbound_request(
                 transport_settings: vec![tcp_transport_settings()],
                 security_type: String::new(),
                 security_settings: vec![],
-                socket_settings: None,
+                socket_settings: Some(business_inbound_socket_settings()),
             };
 
             let receiver_settings = xray::app::proxyman::ReceiverConfig {
@@ -553,6 +562,10 @@ mod tests {
         assert_eq!(stream.protocol_name, "tcp");
         assert_eq!(stream.security_type, TYPE_REALITY_SECURITY_CONFIG);
         assert_eq!(stream.security_settings.len(), 1);
+        let socket_settings = stream.socket_settings.unwrap();
+        assert_eq!(socket_settings.tcp_keep_alive_idle, 300);
+        assert_eq!(socket_settings.tcp_keep_alive_interval, 30);
+        assert_eq!(socket_settings.tcp_user_timeout, 10_000);
 
         let reality_tm = &stream.security_settings[0];
         assert_eq!(reality_tm.r#type, TYPE_REALITY_SECURITY_CONFIG);
@@ -595,6 +608,11 @@ mod tests {
         assert_eq!(receiver_tm.r#type, TYPE_PROXYMAN_RECEIVER_CONFIG);
         let receiver: xray::app::proxyman::ReceiverConfig = decode_typed(&receiver_tm);
         assert_eq!(receiver.port_list.unwrap().range[0].from, 8388);
+        let stream = receiver.stream_settings.unwrap();
+        let socket_settings = stream.socket_settings.unwrap();
+        assert_eq!(socket_settings.tcp_keep_alive_idle, 300);
+        assert_eq!(socket_settings.tcp_keep_alive_interval, 30);
+        assert_eq!(socket_settings.tcp_user_timeout, 10_000);
 
         let proxy_tm = inbound.proxy_settings.unwrap();
         assert_eq!(proxy_tm.r#type, TYPE_SS2022_MULTIUSER_SERVER_CONFIG);
