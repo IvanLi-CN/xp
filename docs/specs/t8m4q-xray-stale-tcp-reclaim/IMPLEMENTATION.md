@@ -9,6 +9,7 @@
 - Static config rewrite preserves existing control-plane listener bindings: custom `XP_XRAY_API_ADDR` stays authoritative for the `api` inbound, and an existing `mesh-proxy` inbound is kept intact.
 - The local real-Xray CI helper now pins `RUST_TEST_THREADS=1` so the ignored external-Xray suites do not race each other against one shared Xray process and forwarded SS port.
 - The shared testbox runner now allocates an explicit free `10.203.x.0/24` subnet per isolated compose run and preflights host `make` availability before compiling vendored OpenSSL dependencies.
+- Shared testbox subnet allocation is now serialized through a remote claim directory under `/srv/codex/shared-testbox/subnet-claims`, so concurrent real-Xray runs cannot select the same subnet between inspection and `docker compose up`.
 
 ## Coverage Target
 

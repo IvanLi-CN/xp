@@ -20,12 +20,14 @@ That combination makes the real-Xray harness look flaky even though the product 
 
 - Force `RUST_TEST_THREADS=1` in `scripts/e2e/run-local-xray-e2e.sh` before running the ignored real-Xray suites.
 - Keep the shared testbox runner on one isolated compose run, but generate a per-run override that pins the default Docker network to a free `10.203.x.0/24` subnet.
+- Serialize that subnet allocation through a shared remote claim directory so concurrent runs cannot observe the same subnet as free before either compose network is created.
 - Fail fast on the shared testbox if `make` is missing, because vendored `openssl-sys` now needs it during remote `cargo test`.
 
 ## Guardrails / Reuse notes
 
 - Any future real-Xray helper that reuses one external Xray process across multiple ignored test cases should pin test threads explicitly instead of relying on libtest defaults.
 - Shared Docker hosts with many compose projects should not depend on the daemon's predefined address pools remaining available forever; pick an explicit per-run subnet from an agreed private range.
+- If multiple agents can launch compose runs concurrently on the same Docker host, subnet selection needs a cross-run lock or persisted claim path; a pure "scan then pick" algorithm is still racy.
 - When the repo depends on vendored OpenSSL, shared Linux runners need the minimal host build toolchain (`cc`, `ar`, `ranlib`, `perl`, `make`) even if the project itself is otherwise pure Rust.
 - If the shared testbox is reprovisioned, repair it through the shared-testbox bootstrap path before blaming the Xray tests.
 
