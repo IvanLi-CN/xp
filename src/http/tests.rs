@@ -5240,7 +5240,7 @@ rules: []
         .collect::<Vec<_>>();
     assert_eq!(relay_use, vec!["providerA"]);
     assert!(
-        !relay_use.iter().any(|value| *value == crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
+        !relay_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
         "outer relay should only test outer providers, not the system provider"
     );
 

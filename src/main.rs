@@ -570,13 +570,14 @@ mod tests {
 
     #[test]
     fn keep_managed_vless_reconcile_when_canary_handle_exists() {
-        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(Some(
-            std::thread::spawn(|| {}),
-        ));
+        let handle = std::thread::spawn(|| {});
+        let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(Some(handle));
         assert!(!super::disable_managed_vless_reconcile_for_canary_result(
             true, &result
         ));
-        let handle = result.unwrap().unwrap();
+        let Ok(Some(handle)) = result else {
+            panic!("test fixture should keep the canary handle");
+        };
         handle.join().unwrap();
     }
 
