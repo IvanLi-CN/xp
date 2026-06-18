@@ -31,6 +31,12 @@ const READY_ATTEMPTS: usize = 60;
 const READY_DELAY: Duration = Duration::from_secs(1);
 const DNS_PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthoritativeNameserver {
+    host: String,
+    ips: Vec<IpAddr>,
+}
+
 struct PreparedCanaryRuntime {
     paths: VlessHttpsCanaryPaths,
     rustls: axum_server::tls_rustls::RustlsConfig,
@@ -281,7 +287,7 @@ impl RepoCloudflareDns01Solver {
         loop {
             let mut all_visible = true;
             for nameserver in &nameservers {
-                if !authoritative_txt_contains(nameserver, &fqdn, content).await? {
+                if !authoritative_txt_contains_any_ip(nameserver, &fqdn, content).await? {
                     all_visible = false;
                     break;
                 }
@@ -739,7 +745,9 @@ fn ensure_fqdn(name: &str) -> String {
     format!("{trimmed}.")
 }
 
-async fn authoritative_nameservers_for_fqdn(fqdn: &str) -> anyhow::Result<Vec<IpAddr>> {
+async fn authoritative_nameservers_for_fqdn(
+    fqdn: &str,
+) -> anyhow::Result<Vec<AuthoritativeNameserver>> {
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default())
         .context("build public recursive resolver for canary NS discovery")?;
     for candidate in zone_name_candidates(fqdn) {
@@ -752,24 +760,53 @@ async fn authoritative_nameservers_for_fqdn(fqdn: &str) -> anyhow::Result<Vec<Ip
             Err(_) => continue,
         };
 
-        let mut ips = Vec::new();
+        let mut nameservers = Vec::new();
         for record in response.iter() {
             let host = ensure_fqdn(&record.to_string());
             let lookup = resolver
                 .lookup_ip(host.clone())
                 .await
                 .with_context(|| format!("lookup IP for authoritative nameserver {host}"))?;
+            let mut ips = Vec::new();
             for ip in lookup.iter() {
                 ips.push(ip);
             }
+            ips.sort();
+            ips.dedup();
+            if !ips.is_empty() {
+                nameservers.push(AuthoritativeNameserver { host, ips });
+            }
         }
-        ips.sort();
-        ips.dedup();
-        if !ips.is_empty() {
-            return Ok(ips);
+        nameservers.sort_by(|a, b| a.host.cmp(&b.host));
+        nameservers.dedup_by(|a, b| a.host == b.host);
+        if !nameservers.is_empty() {
+            return Ok(nameservers);
         }
     }
     anyhow::bail!("could not discover authoritative nameservers for {fqdn}")
+}
+
+async fn authoritative_txt_contains_any_ip(
+    nameserver: &AuthoritativeNameserver,
+    fqdn: &str,
+    expected: &str,
+) -> anyhow::Result<bool> {
+    let mut saw_reachable = false;
+    for ip in &nameserver.ips {
+        match authoritative_txt_contains(ip, fqdn, expected).await {
+            Ok(true) => return Ok(true),
+            Ok(false) => {
+                saw_reachable = true;
+            }
+            Err(_) => {
+                continue;
+            }
+        }
+    }
+    if !saw_reachable {
+        return Ok(false);
+    }
+    Ok(false)
 }
 
 async fn authoritative_txt_contains(
