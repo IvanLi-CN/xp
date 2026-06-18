@@ -26,7 +26,14 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 要得到“按用户（client/email）”统计，必须满足：
 
 - 配置中存在 `stats: {}`
-- `policy.levels.<level>.statsUserUplink=true`、`statsUserDownlink=true`、`statsUserOnline=true`
+- `policy.levels.<level>` 至少包含：
+  - `handshake=4`
+  - `connIdle=300`
+  - `uplinkOnly=2`
+  - `downlinkOnly=5`
+  - `statsUserUplink=true`
+  - `statsUserDownlink=true`
+  - `statsUserOnline=true`
 - 每个 client 必须设置 `email`（否则无法按 membership 区分流量/IP 统计）
 
 `xp` 约定：所有 membership 的 client email 固定为 `m:{user_id}::{endpoint_id}`。
@@ -36,7 +43,7 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 - `xp` 只做**每分钟一次**的 online 快照采样，不解析 access log。
 - 极短连接如果发生在两次采样之间，不会出现在历史中；这属于采样口径的已知限制。
 - 如果 Xray 未开启 `statsUserOnline`，`xp` 会保留 warning 并继续 quota 主流程，但 IP usage 图表会进入 explanation 空态。
-- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认打开 `statsUserOnline=true`；旧节点升级时需要确认静态配置已同步。
+- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认写入完整 reclaim profile（`handshake=4`、`connIdle=300`、`uplinkOnly=2`、`downlinkOnly=5`）并打开 `statsUserOnline=true`；旧节点通过 `xp-ops upgrade` 收敛静态配置时，也必须保留当前控制面 listener 绑定（例如自定义 `XP_XRAY_API_ADDR` 与既有 `mesh-proxy` listener）。
 
 ## 3. 推荐的 Xray 基础配置（示例）
 
@@ -52,7 +59,15 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
   "stats": {},
   "policy": {
     "levels": {
-      "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true }
+      "0": {
+        "handshake": 4,
+        "connIdle": 300,
+        "uplinkOnly": 2,
+        "downlinkOnly": 5,
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
     }
   },
   "inbounds": [
@@ -85,6 +100,15 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 ```
 
 `mesh-proxy` 必须绑定 loopback，不能暴露为公网开放代理。它只承载 xp-to-xp 控制面请求，不参与用户 endpoint、订阅输出或 quota 统计。
+
+## 3.1 业务入站的 stale TCP reclaim 默认
+
+- `xp` 通过 AddInbound 动态创建的业务 listener（当前仅 `VlessRealityVisionTcp` 与 `Ss2022_2022Blake3Aes128Gcm`）会固定下发：
+  - `tcp_keep_alive_idle=300`
+  - `tcp_keep_alive_interval=30`
+  - `tcp_user_timeout=10000`
+- 该 `socket_settings` 只作用于业务 inbound。
+- 静态控制面 listener（`api`、`mesh-proxy`）保持现状，不增加 `sockopt`。
 
 ## 4. 动态下发：Endpoint 与 Grant 如何落到 Xray
 

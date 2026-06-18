@@ -321,7 +321,7 @@ An example env file is provided at `docs/ops/env/xp.env.example`.
 
 To expose minute-level inbound IP usage in the admin UI, the node must enable Xray online stats. Geo enrichment can optionally use the free `country.is` hosted API (`XP_IP_GEO_ENABLED=true`) and no longer requires local MMDB files or a dedicated Geo settings page.
 
-1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats.
+1. Required: Xray static config enables `statsUserOnline=true` together with the existing traffic stats and reclaim profile (`handshake=4`, `connIdle=300`, `uplinkOnly=2`, `downlinkOnly=5`).
 2. When `XP_IP_GEO_ENABLED=true`, nodes need outbound HTTPS access to `https://api.country.is/` so new public IPs can be resolved on first sight.
 3. The node egress probe used by Mihomo region auto-grouping also relies on outbound HTTPS access to the public IP trace endpoint (default `https://cloudflare.com/cdn-cgi/trace`) and to `https://api.country.is/`.
 4. `xp` caches resolved IP geo/operator fields inside `inbound_ip_usage.json`; API lookup failures only leave the affected fields empty and do not interrupt quota collection (the admin UI will show an `ip_geo_lookup_failed` warning after failed lookups).
@@ -331,7 +331,7 @@ Operational notes:
 - No local Geo DB download/update job runs anymore, so `${XP_DATA_DIR}/geoip` is not used by the default IP usage pipeline.
 - Upgrades from releases that used managed DB-IP geo enrichment must opt in again via `XP_IP_GEO_ENABLED=true`; otherwise `geo_source=missing` and geo fields stay empty.
 - `statsUserOnline` is required for the online IP snapshot itself. If it is missing, `xp` keeps quota collection running and returns an `online_stats_unavailable` warning to the admin UI.
-- `xp-ops init` now writes `/etc/xray/config.json` with `statsUserOnline=true` by default; nodes provisioned before this change should verify their static config before rollout.
+- `xp-ops init` now writes `/etc/xray/config.json` with the level-0 reclaim profile and `statsUserOnline=true` by default; nodes provisioned before this change should verify their static config before rollout.
 
 Quick checks on a node:
 
@@ -428,11 +428,19 @@ sudo rc-service xp start
 
 `xp-ops` can upgrade both `xp` and `xp-ops` from GitHub Releases (Linux musl assets).
 
-Upgrade both `xp` (installs to `/usr/local/bin/xp` and restarts the service) and `xp-ops`:
+Upgrade both `xp` and `xp-ops`:
 
 ```
 sudo xp-ops upgrade --version latest
 ```
+
+Current rollout semantics:
+
+- `xp-ops upgrade` first locks the target release.
+- If `xp-ops` itself needs an update, it upgrades the local `xp-ops` binary and re-executes the same command against the locked release.
+- The resumed phase upgrades `xp`, rewrites `/etc/xray/config.json` to the current static baseline, and restarts `xray`.
+- During static config rewrite, `xp-ops upgrade` preserves control-plane listener bindings that are already authoritative on the node: `XP_XRAY_API_ADDR` remains the source of truth for the `api` inbound, and an existing `mesh-proxy` inbound keeps its previous listener shape.
+- If the `xray` restart fails, `xp-ops upgrade` restores the previous `/etc/xray/config.json`, attempts one rollback restart, restores the previous `xp` binary, and if the run came through a self-upgrade resume path also restores the previous `xp-ops` binary before returning failure.
 
 Useful flags:
 
@@ -449,7 +457,9 @@ UI notes:
 Rollback notes:
 
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
-- On upgrade failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
+- On `xp` restart failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
+- On `xray` restart failures after static config rewrite, `xp-ops upgrade` restores the previous `/etc/xray/config.json`, then rolls back `xp` to the previous binary before returning failure.
+- If that failure happened after a self-upgrade re-exec, `xp-ops upgrade` also restores the previous `xp-ops` binary instead of leaving the node on the newer operator binary.
 
 ### Deployment-specific upgrade paths
 
