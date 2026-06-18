@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs, io,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -18,12 +19,23 @@ use openssl::{
     x509::X509,
 };
 use serde::{Deserialize, Serialize};
+use trust_dns_resolver::{
+    TokioAsyncResolver,
+    config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
+};
 
 use crate::{config::Config, ops::cloudflare};
 
 pub const GENERATE_204_PATH: &str = "/generate_204";
 const READY_ATTEMPTS: usize = 60;
 const READY_DELAY: Duration = Duration::from_secs(1);
+const DNS_PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthoritativeNameserver {
+    host: String,
+    ips: Vec<IpAddr>,
+}
 
 struct PreparedCanaryRuntime {
     paths: VlessHttpsCanaryPaths,
@@ -205,10 +217,16 @@ struct RepoCloudflareDns01Solver {
     zone_id: String,
     client: reqwest::Client,
     records: Arc<Mutex<HashMap<String, String>>>,
+    propagation_timeout: Duration,
 }
 
 impl RepoCloudflareDns01Solver {
-    fn new(api_base: String, token: String, zone_id: String) -> anyhow::Result<Self> {
+    fn new(
+        api_base: String,
+        token: String,
+        zone_id: String,
+        propagation_timeout: Duration,
+    ) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent("xp-vless-https-canary")
             .build()
@@ -219,6 +237,7 @@ impl RepoCloudflareDns01Solver {
             zone_id,
             client,
             records: Arc::new(Mutex::new(HashMap::new())),
+            propagation_timeout,
         })
     }
 
@@ -256,6 +275,35 @@ impl RepoCloudflareDns01Solver {
             .map(ToString::to_string)
             .ok_or_else(|| anyhow::anyhow!("cloudflare create txt record missing id"))
     }
+
+    async fn wait_until_txt_visible(&self, fqdn: &str, content: &str) -> anyhow::Result<()> {
+        let nameservers = authoritative_nameservers_for_fqdn(fqdn).await?;
+        if nameservers.is_empty() {
+            anyhow::bail!("no authoritative nameservers discovered for {fqdn}");
+        }
+
+        let deadline = tokio::time::Instant::now() + self.propagation_timeout;
+        let fqdn = ensure_fqdn(fqdn);
+        loop {
+            let mut all_visible = true;
+            for nameserver in &nameservers {
+                if !authoritative_txt_contains_any_ip(nameserver, &fqdn, content).await? {
+                    all_visible = false;
+                    break;
+                }
+            }
+            if all_visible {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "cloudflare TXT record {fqdn} did not become visible on authoritative nameservers within {}s",
+                    self.propagation_timeout.as_secs()
+                );
+            }
+            tokio::time::sleep(DNS_PROPAGATION_POLL_INTERVAL).await;
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -286,7 +334,18 @@ impl Solver for RepoCloudflareDns01Solver {
         self.records
             .lock()
             .expect("dns01 record lock")
-            .insert(token, record_id);
+            .insert(token.clone(), record_id.clone());
+        if let Err(err) = self.wait_until_txt_visible(&fqdn, &key_authorization).await {
+            self.records.lock().expect("dns01 record lock").remove(&token);
+            let client =
+                cloudflare::CloudflareClient::new(self.api_base.clone(), self.token.clone());
+            let cleanup_error = client.delete_dns_record(&self.zone_id, &record_id).await;
+            let detail = match cleanup_error {
+                Ok(()) => err.to_string(),
+                Err(cleanup_err) => format!("{err}; cleanup failed: {cleanup_err}"),
+            };
+            return Err(lers::solver::boxed_err(VlessHttpsCanaryDnsError(detail)));
+        }
         Ok(())
     }
 
@@ -558,12 +617,16 @@ async fn load_or_create_account(
     let zone_id = resolve_zone_id_for_host(
         &cloudflare::cloudflare_api_base(),
         &token,
-        &config.vless_canary_cloudflare_zone_id,
+        effective_vless_canary_zone_id(config),
         &config.access_host,
     )
     .await?;
-    let solver =
-        RepoCloudflareDns01Solver::new(cloudflare::cloudflare_api_base(), token, zone_id)?;
+    let solver = RepoCloudflareDns01Solver::new(
+        cloudflare::cloudflare_api_base(),
+        token,
+        zone_id,
+        Duration::from_secs(config.vless_canary_dns_propagation_timeout_secs),
+    )?;
     let directory_url = if config.vless_canary_acme_directory_url.trim().is_empty() {
         LETS_ENCRYPT_PRODUCTION_URL.to_string()
     } else {
@@ -669,10 +732,114 @@ fn map_lers_error(err: LersError) -> anyhow::Error {
     anyhow::anyhow!(err.to_string())
 }
 
+fn effective_vless_canary_zone_id(config: &Config) -> &str {
+    let configured = config.vless_canary_cloudflare_zone_id.trim();
+    if !configured.is_empty() {
+        return configured;
+    }
+    config.cloudflare_ddns_zone_id.trim()
+}
+
+fn ensure_fqdn(name: &str) -> String {
+    let trimmed = name.trim().trim_end_matches('.');
+    format!("{trimmed}.")
+}
+
+async fn authoritative_nameservers_for_fqdn(
+    fqdn: &str,
+) -> anyhow::Result<Vec<AuthoritativeNameserver>> {
+    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default())
+        .context("build public recursive resolver for canary NS discovery")?;
+    for candidate in zone_name_candidates(fqdn) {
+        if candidate.split('.').count() < 2 {
+            continue;
+        }
+        let zone = ensure_fqdn(&candidate);
+        let response = match resolver.ns_lookup(zone.clone()).await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+
+        let mut nameservers = Vec::new();
+        for record in response.iter() {
+            let host = ensure_fqdn(&record.to_string());
+            let lookup = resolver
+                .lookup_ip(host.clone())
+                .await
+                .with_context(|| format!("lookup IP for authoritative nameserver {host}"))?;
+            let mut ips = Vec::new();
+            for ip in lookup.iter() {
+                ips.push(ip);
+            }
+            ips.sort();
+            ips.dedup();
+            if !ips.is_empty() {
+                nameservers.push(AuthoritativeNameserver { host, ips });
+            }
+        }
+        nameservers.sort_by(|a, b| a.host.cmp(&b.host));
+        nameservers.dedup_by(|a, b| a.host == b.host);
+        if !nameservers.is_empty() {
+            return Ok(nameservers);
+        }
+    }
+    anyhow::bail!("could not discover authoritative nameservers for {fqdn}")
+}
+
+async fn authoritative_txt_contains_any_ip(
+    nameserver: &AuthoritativeNameserver,
+    fqdn: &str,
+    expected: &str,
+) -> anyhow::Result<bool> {
+    let mut saw_reachable = false;
+    for ip in &nameserver.ips {
+        match authoritative_txt_contains(ip, fqdn, expected).await {
+            Ok(true) => return Ok(true),
+            Ok(false) => {
+                saw_reachable = true;
+            }
+            Err(_) => {
+                continue;
+            }
+        }
+    }
+    if !saw_reachable {
+        return Ok(false);
+    }
+    Ok(false)
+}
+
+async fn authoritative_txt_contains(
+    nameserver: &IpAddr,
+    fqdn: &str,
+    expected: &str,
+) -> anyhow::Result<bool> {
+    let config = ResolverConfig::from_parts(
+        None,
+        vec![],
+        NameServerConfigGroup::from_ips_clear(&[*nameserver], 53, true),
+    );
+    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default())
+        .context("build authoritative TXT resolver")?;
+    let lookup = match resolver.txt_lookup(fqdn).await {
+        Ok(lookup) => lookup,
+        Err(_) => return Ok(false),
+    };
+    for txt in lookup.iter() {
+        for chunk in txt.txt_data() {
+            if chunk.as_ref() == expected.as_bytes() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cluster_identity::generate_cluster_ca;
+    use crate::config::{Config, DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE, XrayRestartMode};
     use axum::routing::get;
     use rcgen::{
         CertificateParams, DistinguishedName, DnType, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256,
@@ -680,7 +847,7 @@ mod tests {
     use rustls::crypto::aws_lc_rs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::Once;
+    use std::{net::SocketAddr, sync::Once};
     use time::OffsetDateTime;
     use tempfile::tempdir;
 
@@ -690,6 +857,59 @@ mod tests {
         RUSTLS_PROVIDER.call_once(|| {
             let _ = aws_lc_rs::default_provider().install_default();
         });
+    }
+
+    fn test_config(data_dir: PathBuf) -> Config {
+        Config {
+            bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+            xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
+            xray_health_interval_secs: 5,
+            xray_health_fails_before_down: 4,
+            xray_restart_mode: XrayRestartMode::None,
+            xray_restart_cooldown_secs: 30,
+            xray_restart_timeout_secs: 20,
+            xray_systemd_unit: "xray.service".to_string(),
+            xray_openrc_service: "xray".to_string(),
+            cloudflared_health_interval_secs: 5,
+            cloudflared_health_fails_before_down: 3,
+            cloudflared_monitor_mode: Some(XrayRestartMode::None),
+            cloudflared_restart_mode: XrayRestartMode::None,
+            cloudflared_restart_cooldown_secs: 30,
+            cloudflared_restart_timeout_secs: 20,
+            cloudflared_systemd_unit: "cloudflared.service".to_string(),
+            cloudflared_openrc_service: "cloudflared".to_string(),
+            data_dir,
+            admin_token_hash: "hash".to_string(),
+            node_name: "node-1".to_string(),
+            access_host: "example.com".to_string(),
+            api_base_url: "https://127.0.0.1:62416".to_string(),
+            vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], 39043)),
+            vless_canary_acme_directory_url: LETS_ENCRYPT_PRODUCTION_URL.to_string(),
+            vless_canary_acme_contact_email: String::new(),
+            vless_canary_cloudflare_token_file: DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
+            vless_canary_cloudflare_zone_id: String::new(),
+            vless_canary_dns_propagation_timeout_secs: 180,
+            default_vless_port: None,
+            default_vless_server_names: None,
+            default_vless_fingerprint: None,
+            default_ss_port: None,
+            mesh_proxy_url: None,
+            cloudflare_ddns_enabled: false,
+            cloudflare_ddns_token_file: DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
+            cloudflare_ddns_zone_id: String::new(),
+            cloudflare_ddns_ipv4_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
+            cloudflare_ddns_ipv6_url: crate::public_ip_probe::DEFAULT_TRACE_URL.to_string(),
+            cloudflare_ddns_interval_secs_with_monitor: 300,
+            cloudflare_ddns_interval_secs_no_monitor: 60,
+            cloudflare_ddns_fast_interval_secs: 30,
+            cloudflare_ddns_fast_window_secs: 300,
+            cloudflare_ddns_family_missing_grace: 3,
+            endpoint_probe_skip_self_test: false,
+            quota_poll_interval_secs: 10,
+            quota_auto_unban: true,
+            ip_geo_enabled: false,
+            ip_geo_origin: "https://api.country.is".to_string(),
+        }
     }
 
     #[test]
@@ -725,6 +945,43 @@ mod tests {
         .unwrap();
 
         assert!(!ready_for_managed_vless(tmp.path(), expected_bind));
+    }
+
+    #[test]
+    fn effective_zone_id_prefers_explicit_canary_zone() {
+        let mut config = test_config(tempdir().unwrap().path().to_path_buf());
+        config.cloudflare_ddns_zone_id = "ddns-zone".to_string();
+        config.vless_canary_cloudflare_zone_id = "canary-zone".to_string();
+
+        assert_eq!(effective_vless_canary_zone_id(&config), "canary-zone");
+    }
+
+    #[test]
+    fn effective_zone_id_falls_back_to_ddns_zone() {
+        let mut config = test_config(tempdir().unwrap().path().to_path_buf());
+        config.cloudflare_ddns_zone_id = "ddns-zone".to_string();
+        config.vless_canary_cloudflare_zone_id = String::new();
+
+        assert_eq!(effective_vless_canary_zone_id(&config), "ddns-zone");
+    }
+
+    #[test]
+    fn ensure_fqdn_appends_trailing_dot_once() {
+        assert_eq!(ensure_fqdn("example.com"), "example.com.");
+        assert_eq!(ensure_fqdn("example.com."), "example.com.");
+    }
+
+    #[test]
+    fn zone_name_candidates_walks_toward_zone_apex() {
+        assert_eq!(
+            zone_name_candidates("_acme-challenge.foo.example.com."),
+            vec![
+                "_acme-challenge.foo.example.com".to_string(),
+                "foo.example.com".to_string(),
+                "example.com".to_string(),
+                "com".to_string(),
+            ]
+        );
     }
 
     #[cfg(unix)]

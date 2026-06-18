@@ -1027,6 +1027,21 @@ mod tests {
     }
 
     #[test]
+    fn host_managed_vless_with_false_flag_is_not_auto_adopted() {
+        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(false));
+        let spec =
+            resolve_host_managed_default_endpoints_spec(
+                &ManagedDefaultEndpointsSpec::default(),
+                &[endpoint],
+                "127.0.0.1:39043".parse().unwrap(),
+            )
+            .unwrap();
+
+        assert!(spec.vless.is_none());
+        assert!(spec.ss.is_none());
+    }
+
+    #[test]
     fn host_managed_multiple_legacy_vless_are_not_auto_adopted() {
         let endpoints = vec![
             endpoint_vless("e1", 53844, &["example.com"], None),

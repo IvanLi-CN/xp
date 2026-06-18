@@ -27,29 +27,30 @@ xp-ops container run
 
 ### Required environment variables
 
-| Key                                       | Required when                | Notes                                                                                                                         |
-| ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `XP_NODE_NAME`                            | always                       | Node display name                                                                                                             |
-| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH` | bootstrap node               | Required on every bootstrap-node start                                                                                        |
-| `XP_JOIN_TOKEN`                           | join node first start        | Safe to keep set after join; restart will not re-run `xp join` if data already exists                                         |
-| `XP_API_BASE_URL`                         | `XP_ENABLE_CLOUDFLARE=false` | Must be an HTTPS origin                                                                                                       |
-| `XP_ENABLE_CLOUDFLARE=true`               | optional                     | Enables Cloudflare provisioning + local `cloudflared`                                                                         |
-| `XP_CLOUDFLARE_ACCOUNT_ID`                | tunnel enabled               | Cloudflare account id                                                                                                         |
-| `XP_CLOUDFLARE_HOSTNAME`                  | tunnel enabled               | Public hostname served by Tunnel                                                                                              |
-| `XP_CLOUDFLARE_ZONE_ID`                   | optional                     | Strongly recommended to avoid a zone lookup on startup                                                                        |
-| `XP_CLOUDFLARE_TUNNEL_NAME`               | optional                     | Defaults to `xp-<node-name>`                                                                                                  |
-| `XP_ACCESS_HOST`                          | optional                     | Recommended when DDNS is enabled; use the public endpoint hostname (for example `node-1-ep.example.com`)                      |
-| `XP_CLOUDFLARE_DDNS_ENABLED=true`         | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                                     |
-| `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                                            |
-| `XP_VLESS_CANARY_BIND`                    | optional                     | Loopback TLS canary bind for xp-managed VLESS fallback; defaults to `127.0.0.1:39043`                                         |
-| `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`      | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                   |
-| `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`      | optional                     | Strongly recommended when VLESS canary DNS-01 should skip zone auto-discovery                                                 |
-| `XP_MESH_PROXY_URL`                       | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config |
-| `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                               |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated client SNI hostnames used by the managed VLESS endpoint                                                       |
-| `XP_DEFAULT_VLESS_FINGERPRINT`            | optional                     | Defaults to `chrome`                                                                                                          |
-| `XP_DEFAULT_SS_PORT`                      | optional                     | Enables managed default SS2022 endpoint                                                                                       |
-| `CLOUDFLARE_API_TOKEN`                    | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                |
+| Key                                            | Required when                | Notes                                                                                                                                   |
+| ---------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `XP_NODE_NAME`                                 | always                       | Node display name                                                                                                                       |
+| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH`      | bootstrap node               | Required on every bootstrap-node start                                                                                                  |
+| `XP_JOIN_TOKEN`                                | join node first start        | Safe to keep set after join; restart will not re-run `xp join` if data already exists                                                   |
+| `XP_API_BASE_URL`                              | `XP_ENABLE_CLOUDFLARE=false` | Must be an HTTPS origin                                                                                                                 |
+| `XP_ENABLE_CLOUDFLARE=true`                    | optional                     | Enables Cloudflare provisioning + local `cloudflared`                                                                                   |
+| `XP_CLOUDFLARE_ACCOUNT_ID`                     | tunnel enabled               | Cloudflare account id                                                                                                                   |
+| `XP_CLOUDFLARE_HOSTNAME`                       | tunnel enabled               | Public hostname served by Tunnel                                                                                                        |
+| `XP_CLOUDFLARE_ZONE_ID`                        | optional                     | Strongly recommended to avoid a zone lookup on startup                                                                                  |
+| `XP_CLOUDFLARE_TUNNEL_NAME`                    | optional                     | Defaults to `xp-<node-name>`                                                                                                            |
+| `XP_ACCESS_HOST`                               | optional                     | Recommended when DDNS is enabled; use the public endpoint hostname (for example `node-1-ep.example.com`)                                |
+| `XP_CLOUDFLARE_DDNS_ENABLED=true`              | optional                     | Enables runtime DDNS for `XP_ACCESS_HOST`                                                                                               |
+| `XP_CLOUDFLARE_DDNS_ZONE_ID`                   | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                                                      |
+| `XP_VLESS_CANARY_BIND`                         | optional                     | Loopback TLS canary bind for xp-managed VLESS fallback; defaults to `127.0.0.1:39043`                                                   |
+| `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`           | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                             |
+| `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`           | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
+| `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                     | DNS-01 authoritative visibility wait budget; defaults to `180` seconds                                                                  |
+| `XP_MESH_PROXY_URL`                            | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config           |
+| `XP_DEFAULT_VLESS_PORT`                        | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                                         |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`                | with `XP_DEFAULT_VLESS_PORT` | Comma-separated client SNI hostnames used by the managed VLESS endpoint                                                                 |
+| `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
+| `XP_DEFAULT_SS_PORT`                           | optional                     | Enables managed default SS2022 endpoint                                                                                                 |
+| `CLOUDFLARE_API_TOKEN`                         | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                          |
 
 ### Derived values
 
