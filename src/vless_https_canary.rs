@@ -279,10 +279,15 @@ impl RepoCloudflareDns01Solver {
         let deadline = tokio::time::Instant::now() + self.propagation_timeout;
         let fqdn = ensure_fqdn(fqdn);
         loop {
+            let mut all_visible = true;
             for nameserver in &nameservers {
-                if authoritative_txt_contains(nameserver, &fqdn, content).await? {
-                    return Ok(());
+                if !authoritative_txt_contains(nameserver, &fqdn, content).await? {
+                    all_visible = false;
+                    break;
                 }
+            }
+            if all_visible {
+                return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
                 anyhow::bail!(
@@ -908,6 +913,12 @@ mod tests {
         config.vless_canary_cloudflare_zone_id = String::new();
 
         assert_eq!(effective_vless_canary_zone_id(&config), "ddns-zone");
+    }
+
+    #[test]
+    fn ensure_fqdn_appends_trailing_dot_once() {
+        assert_eq!(ensure_fqdn("example.com"), "example.com.");
+        assert_eq!(ensure_fqdn("example.com."), "example.com.");
     }
 
     #[cfg(unix)]
