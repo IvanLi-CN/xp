@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Context;
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use lers::{
     Account, Certificate, Directory, Error as LersError, LETS_ENCRYPT_PRODUCTION_URL,
     solver::Solver,
@@ -701,24 +701,17 @@ fn write_certificate(paths: &VlessHttpsCanaryPaths, cert: &Certificate) -> anyho
 }
 
 fn certificate_not_after_rfc3339(cert: &X509) -> anyhow::Result<Option<String>> {
-    let not_after = cert.not_after().to_string();
-    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
-        .with_context(|| format!("parse certificate notAfter {not_after}"))?;
+    let dt = certificate_not_after_utc(cert)?;
     Ok(Some(dt.with_timezone(&Utc).to_rfc3339()))
 }
 
 fn certificate_needs_renewal(cert: &X509) -> anyhow::Result<bool> {
-    let not_after = cert.not_after().to_string();
-    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
-        .with_context(|| format!("parse certificate notAfter {not_after}"))?;
+    let dt = certificate_not_after_utc(cert)?;
     Ok(dt.with_timezone(&Utc) <= Utc::now() + chrono::Duration::days(30))
 }
 
 fn renewal_sleep_duration(cert: &Certificate) -> anyhow::Result<Duration> {
-    let not_after = cert.x509().not_after().to_string();
-    let dt = DateTime::parse_from_str(&not_after, "%b %e %H:%M:%S %Y GMT")
-        .with_context(|| format!("parse certificate notAfter {not_after}"))?
-        .with_timezone(&Utc);
+    let dt = certificate_not_after_utc(cert.x509())?.with_timezone(&Utc);
     let renew_at = dt - chrono::Duration::days(30);
     let now = Utc::now();
     if renew_at <= now {
@@ -726,6 +719,17 @@ fn renewal_sleep_duration(cert: &Certificate) -> anyhow::Result<Duration> {
     }
     let diff = renew_at - now;
     Ok(Duration::from_secs(diff.num_seconds().max(1) as u64))
+}
+
+fn parse_openssl_not_after(not_after: &str) -> anyhow::Result<DateTime<chrono::FixedOffset>> {
+    let naive = NaiveDateTime::parse_from_str(not_after, "%b %e %H:%M:%S %Y GMT")
+        .or_else(|_| NaiveDateTime::parse_from_str(not_after, "%b %d %H:%M:%S %Y GMT"))
+        .with_context(|| format!("parse certificate notAfter {not_after}"))?;
+    Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc).fixed_offset())
+}
+
+fn certificate_not_after_utc(cert: &X509) -> anyhow::Result<DateTime<chrono::FixedOffset>> {
+    parse_openssl_not_after(&cert.not_after().to_string())
 }
 
 fn map_lers_error(err: LersError) -> anyhow::Error {
@@ -1084,5 +1088,12 @@ mod tests {
         assert!(!reduce(&[Ok(true), Ok(false)]));
         assert!(reduce(&[Ok(true), Err(())]));
         assert!(!reduce(&[Err(()), Err(())]));
+    }
+
+    #[test]
+    fn parse_openssl_not_after_accepts_double_digit_day() {
+        let parsed = parse_openssl_not_after("Sep 16 09:13:04 2026 GMT")
+            .expect("double-digit day should parse");
+        assert_eq!(parsed.to_rfc3339(), "2026-09-16T09:13:04+00:00");
     }
 }
