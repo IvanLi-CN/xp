@@ -271,9 +271,9 @@ impl RepoCloudflareDns01Solver {
     }
 
     async fn wait_until_txt_visible(&self, fqdn: &str, content: &str) -> anyhow::Result<()> {
-        let nameservers = authoritative_nameservers_for_zone(&self.zone_id, &self.token).await?;
+        let nameservers = authoritative_nameservers_for_fqdn(fqdn).await?;
         if nameservers.is_empty() {
-            anyhow::bail!("cloudflare zone {} returned no authoritative nameservers", self.zone_id);
+            anyhow::bail!("no authoritative nameservers discovered for {fqdn}");
         }
 
         let deadline = tokio::time::Instant::now() + self.propagation_timeout;
@@ -325,13 +325,21 @@ impl Solver for RepoCloudflareDns01Solver {
             .create_txt_record(&fqdn, &key_authorization)
             .await
             .map_err(|err| lers::solver::boxed_err(VlessHttpsCanaryDnsError(err.to_string())))?;
-        self.wait_until_txt_visible(&fqdn, &key_authorization)
-            .await
-            .map_err(|err| lers::solver::boxed_err(VlessHttpsCanaryDnsError(err.to_string())))?;
         self.records
             .lock()
             .expect("dns01 record lock")
-            .insert(token, record_id);
+            .insert(token.clone(), record_id.clone());
+        if let Err(err) = self.wait_until_txt_visible(&fqdn, &key_authorization).await {
+            self.records.lock().expect("dns01 record lock").remove(&token);
+            let client =
+                cloudflare::CloudflareClient::new(self.api_base.clone(), self.token.clone());
+            let cleanup_error = client.delete_dns_record(&self.zone_id, &record_id).await;
+            let detail = match cleanup_error {
+                Ok(()) => err.to_string(),
+                Err(cleanup_err) => format!("{err}; cleanup failed: {cleanup_err}"),
+            };
+            return Err(lers::solver::boxed_err(VlessHttpsCanaryDnsError(detail)));
+        }
         Ok(())
     }
 
@@ -731,32 +739,37 @@ fn ensure_fqdn(name: &str) -> String {
     format!("{trimmed}.")
 }
 
-async fn authoritative_nameservers_for_zone(zone_id: &str, token: &str) -> anyhow::Result<Vec<IpAddr>> {
-    let zone = cloudflare::fetch_zone_info(&cloudflare::cloudflare_api_base(), token, zone_id)
-        .await
-        .map_err(|e| anyhow::anyhow!(e.message))?;
-    let name = ensure_fqdn(&zone.name);
+async fn authoritative_nameservers_for_fqdn(fqdn: &str) -> anyhow::Result<Vec<IpAddr>> {
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default())
         .context("build public recursive resolver for canary NS discovery")?;
-    let response = resolver
-        .ns_lookup(name.clone())
-        .await
-        .with_context(|| format!("lookup NS for zone {name}"))?;
+    for candidate in zone_name_candidates(fqdn) {
+        if candidate.split('.').count() < 2 {
+            continue;
+        }
+        let zone = ensure_fqdn(&candidate);
+        let response = match resolver.ns_lookup(zone.clone()).await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
 
-    let mut ips = Vec::new();
-    for record in response.iter() {
-        let host = ensure_fqdn(&record.to_string());
-        let lookup = resolver
-            .lookup_ip(host.clone())
-            .await
-            .with_context(|| format!("lookup IP for authoritative nameserver {host}"))?;
-        for ip in lookup.iter() {
-            ips.push(ip);
+        let mut ips = Vec::new();
+        for record in response.iter() {
+            let host = ensure_fqdn(&record.to_string());
+            let lookup = resolver
+                .lookup_ip(host.clone())
+                .await
+                .with_context(|| format!("lookup IP for authoritative nameserver {host}"))?;
+            for ip in lookup.iter() {
+                ips.push(ip);
+            }
+        }
+        ips.sort();
+        ips.dedup();
+        if !ips.is_empty() {
+            return Ok(ips);
         }
     }
-    ips.sort();
-    ips.dedup();
-    Ok(ips)
+    anyhow::bail!("could not discover authoritative nameservers for {fqdn}")
 }
 
 async fn authoritative_txt_contains(
@@ -919,6 +932,19 @@ mod tests {
     fn ensure_fqdn_appends_trailing_dot_once() {
         assert_eq!(ensure_fqdn("example.com"), "example.com.");
         assert_eq!(ensure_fqdn("example.com."), "example.com.");
+    }
+
+    #[test]
+    fn zone_name_candidates_walks_toward_zone_apex() {
+        assert_eq!(
+            zone_name_candidates("_acme-challenge.foo.example.com."),
+            vec![
+                "_acme-challenge.foo.example.com".to_string(),
+                "foo.example.com".to_string(),
+                "example.com".to_string(),
+                "com".to_string(),
+            ]
+        );
     }
 
     #[cfg(unix)]
