@@ -6586,7 +6586,7 @@ providerA:
             &u,
             &memberships,
             &endpoints,
-            &[n.clone()],
+            std::slice::from_ref(&n),
             &probes,
             &profile,
             "https://sub.example.com/api/sub/token/mihomo/provider/system",

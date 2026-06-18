@@ -794,19 +794,21 @@ async fn authoritative_txt_contains_any_ip(
     let mut saw_reachable = false;
     for ip in &nameserver.ips {
         match authoritative_txt_contains(ip, fqdn, expected).await {
-            Ok(true) => return Ok(true),
-            Ok(false) => {
+            Ok(true) => {
                 saw_reachable = true;
+            }
+            Ok(false) => {
+                // Require all reachable addresses behind the same authoritative nameserver host
+                // to agree before telling ACME the TXT is ready; otherwise multi-IP/anycast NS
+                // pools can yield false positives.
+                return Ok(false);
             }
             Err(_) => {
                 continue;
             }
         }
     }
-    if !saw_reachable {
-        return Ok(false);
-    }
-    Ok(false)
+    Ok(saw_reachable)
 }
 
 async fn authoritative_txt_contains(
@@ -1059,5 +1061,28 @@ mod tests {
         handle.abort();
 
         assert!(result.is_ok(), "unexpected readiness error: {result:?}");
+    }
+
+    #[test]
+    fn authoritative_txt_policy_requires_all_reachable_ips_to_match() {
+        fn reduce(results: &[Result<bool, ()>]) -> bool {
+            let mut saw_reachable = false;
+            for result in results {
+                match result {
+                    Ok(true) => {
+                        saw_reachable = true;
+                    }
+                    Ok(false) => {
+                        return false;
+                    }
+                    Err(()) => continue,
+                }
+            }
+            saw_reachable
+        }
+
+        assert!(!reduce(&[Ok(true), Ok(false)]));
+        assert!(reduce(&[Ok(true), Err(())]));
+        assert!(!reduce(&[Err(()), Err(())]));
     }
 }

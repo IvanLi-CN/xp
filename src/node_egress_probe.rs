@@ -372,8 +372,10 @@ mod tests {
 
     #[test]
     fn stale_detection_uses_last_success_time() {
-        let mut state = NodeEgressProbeState::default();
-        state.last_success_at = Some("2026-04-24T00:00:00Z".to_string());
+        let state = NodeEgressProbeState {
+            last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+            ..NodeEgressProbeState::default()
+        };
         assert!(!is_node_egress_probe_stale(
             &state,
             DateTime::parse_from_rfc3339("2026-04-24T00:59:59Z")
