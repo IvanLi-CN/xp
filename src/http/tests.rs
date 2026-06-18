@@ -137,6 +137,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         vless_canary_cloudflare_token_file:
             crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         vless_canary_cloudflare_zone_id: String::new(),
+        vless_canary_dns_propagation_timeout_secs: 180,
         default_vless_port: None,
         default_vless_server_names: None,
         default_vless_fingerprint: None,

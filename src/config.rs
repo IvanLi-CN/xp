@@ -307,6 +307,16 @@ pub struct Config {
     pub vless_canary_cloudflare_zone_id: String,
 
     #[arg(
+        long = "vless-canary-dns-propagation-timeout-secs",
+        global = true,
+        env = "XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS",
+        value_name = "SECS",
+        default_value_t = 180,
+        value_parser = clap::value_parser!(u64).range(5..=600)
+    )]
+    pub vless_canary_dns_propagation_timeout_secs: u64,
+
+    #[arg(
         long = "default-vless-port",
         global = true,
         env = "XP_DEFAULT_VLESS_PORT",
@@ -543,6 +553,8 @@ mod tests {
             DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
         );
         assert_eq!(cli.config.cloudflare_ddns_zone_id, "");
+        assert_eq!(cli.config.vless_canary_cloudflare_zone_id, "");
+        assert_eq!(cli.config.vless_canary_dns_propagation_timeout_secs, 180);
         assert_eq!(
             cli.config.cloudflare_ddns_ipv4_url,
             crate::public_ip_probe::DEFAULT_TRACE_URL

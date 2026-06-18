@@ -43,7 +43,8 @@ xp-ops container run
 | `XP_CLOUDFLARE_DDNS_ZONE_ID`              | DDNS enabled                 | Optional when Tunnel and DDNS share the same zone; otherwise provide it explicitly                                            |
 | `XP_VLESS_CANARY_BIND`                    | optional                     | Loopback TLS canary bind for xp-managed VLESS fallback; defaults to `127.0.0.1:39043`                                         |
 | `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`      | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                   |
-| `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`      | optional                     | Strongly recommended when VLESS canary DNS-01 should skip zone auto-discovery                                                 |
+| `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`      | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
+| `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                | DNS-01 authoritative visibility wait budget; defaults to `180` seconds                                                       |
 | `XP_MESH_PROXY_URL`                       | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config |
 | `XP_DEFAULT_VLESS_PORT`                   | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                               |
 | `XP_DEFAULT_VLESS_SERVER_NAMES`           | with `XP_DEFAULT_VLESS_PORT` | Comma-separated client SNI hostnames used by the managed VLESS endpoint                                                       |

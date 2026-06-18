@@ -78,14 +78,15 @@ If you want Mihomo relay `url-test` to probe the actual managed VLESS ingress in
 - `XP_VLESS_CANARY_ACME_DIRECTORY_URL` defaults to Let's Encrypt production.
 - `XP_VLESS_CANARY_ACME_CONTACT_EMAIL` is optional but recommended.
 - `XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE` defaults to `/etc/xp/cloudflare_ddns_api_token` so host-managed nodes can reuse the same xp-readable Cloudflare runtime token as DDNS.
-- `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` is optional; when empty, `xp` derives the Cloudflare zone from `XP_ACCESS_HOST`.
+- `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` is optional; when empty, `xp` first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID` when present, and only falls back to deriving the Cloudflare zone from `XP_ACCESS_HOST` when the DDNS zone is also unset.
+- `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` defaults to `180`; `xp` waits for the DNS-01 TXT to become visible on the zone's authoritative nameservers before asking the ACME server to validate it.
 
 Contract:
 
 - `xp` terminates TLS for `GET/HEAD /generate_204` on the loopback canary and returns `204`.
 - xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, so ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary response through the VLESS ingress itself.
 - Host-managed and container-managed nodes use the same managed-default endpoint contract. On host-managed nodes, `xp` startup and `xp-ops xp sync-node-meta` both reconcile the local default endpoint set; on container-managed nodes, `xp-ops container run` does the same after the local control plane is ready.
-- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade, but the runtime only rewrites that ingress to the loopback canary semantics after the canary itself is ready; if canary preparation fails, the old ingress stays untouched and `vless_https_canary_status.last_error` explains the blocker.
+- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade, including older xp-created defaults that still carry `managed_default=false`; the runtime only rewrites that ingress to the loopback canary semantics after the canary itself is ready, and if canary preparation fails the old ingress stays untouched while `vless_https_canary_status.last_error` explains the blocker.
 - This does not move the admin UI / cluster API onto the VLESS port.
 - Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
@@ -289,7 +290,9 @@ Required (or commonly set):
 - `XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE` (default: `/etc/xp/cloudflare_ddns_api_token`)
   - Path to the Cloudflare API token file used for DNS-01 challenges. By default it reuses the same xp-readable runtime token file as DDNS.
 - `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` (default: empty)
-  - Optional explicit Cloudflare zone id for DNS-01; when empty, `xp` derives the zone from `XP_ACCESS_HOST`.
+  - Optional explicit Cloudflare zone id for DNS-01; when empty, `xp` first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID` when present, and only falls back to deriving the zone from `XP_ACCESS_HOST` when the DDNS zone is also unset.
+- `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` (default: `180`)
+  - Maximum wait budget for the DNS-01 TXT to become visible on the zone's authoritative nameservers before ACME validation starts.
 - `XP_MESH_PROXY_URL` (default: unset)
   - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
   - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.

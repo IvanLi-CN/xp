@@ -31,6 +31,7 @@ sha2 = "0.10"
 futures-util = "0.3"
 flate2 = "1.1"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+trust-dns-resolver = "0.22.0"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tonic = { version = "0.14", features = ["transport"] }
 tonic-prost = "0.14"

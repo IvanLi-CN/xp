@@ -656,7 +656,9 @@ fn derive_host_managed_vless_spec(
             marked.push(endpoint);
             continue;
         }
-        if endpoint_meta_missing_managed_default_flag(endpoint) {
+        if endpoint_meta_missing_managed_default_flag(endpoint)
+            || endpoint_looks_like_host_managed_legacy_vless(endpoint)
+        {
             legacy.push(endpoint);
         }
     }
@@ -759,6 +761,18 @@ fn endpoint_is_marked_managed_default(
 
 fn endpoint_meta_missing_managed_default_flag(endpoint: &Endpoint) -> bool {
     endpoint.meta.get("managed_default").is_none()
+}
+
+fn endpoint_looks_like_host_managed_legacy_vless(endpoint: &Endpoint) -> bool {
+    if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+        return false;
+    }
+    if !endpoint.tag.starts_with("vless-vision-") {
+        return false;
+    }
+    serde_json::from_value::<VlessRealityVisionTcpEndpointMeta>(endpoint.meta.clone())
+        .map(|meta| !meta.managed_default)
+        .unwrap_or(false)
 }
 
 fn adopt_marked_endpoint<'a>(managed_marked: &[&'a Endpoint]) -> Option<&'a Endpoint> {
@@ -1024,6 +1038,25 @@ mod tests {
         assert_eq!(vless.server_names, vec!["example.com"]);
         assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
         assert!(spec.ss.is_none());
+    }
+
+    #[test]
+    fn host_managed_default_tagged_vless_with_false_flag_is_auto_adopted() {
+        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(false));
+        let spec =
+            resolve_host_managed_default_endpoints_spec(
+                &ManagedDefaultEndpointsSpec::default(),
+                &[endpoint],
+                "127.0.0.1:39043".parse().unwrap(),
+            )
+            .unwrap();
+
+        let vless = spec
+            .vless
+            .expect("xp-tagged historical default VLESS should be auto-adopted");
+        assert_eq!(vless.port, 53844);
+        assert_eq!(vless.reality_dest, "127.0.0.1:39043");
+        assert_eq!(vless.server_names, vec!["example.com"]);
     }
 
     #[test]
