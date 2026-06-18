@@ -54,6 +54,9 @@ s=re.sub(r'[^a-z0-9_-]+','_',s).strip('_')
 print(s[:63] if len(s)>63 else s)
 PY
 )"
+REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
+SUBNET_CLAIM_ROOT_B64="$(printf '%s' "$REMOTE_SUBNET_CLAIMS" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -76,12 +79,12 @@ rsync -az --delete \
 
 # 5) Run on testbox.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN='$REMOTE_RUN' COMPOSE_PROJECT='$COMPOSE_PROJECT' SUBNET_CLAIM_ROOT='$REMOTE_SUBNET_CLAIMS' bash -s" <<'REMOTE'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' bash -s" <<'REMOTE'
 set -euo pipefail
 
-REMOTE_RUN="${REMOTE_RUN:?}"
-COMPOSE_PROJECT="${COMPOSE_PROJECT:?}"
-SUBNET_CLAIM_ROOT="${SUBNET_CLAIM_ROOT:?}"
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
+SUBNET_CLAIM_ROOT="$(printf '%s' "${SUBNET_CLAIM_ROOT_B64:?}" | base64 -d)"
 
 cleanup() {
   set +e

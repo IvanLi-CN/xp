@@ -21,6 +21,8 @@ const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
 const UPGRADE_RESUME_TAG: &str = "XP_OPS_UPGRADE_RESUME_TAG";
 const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
+const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
+const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
 
 #[derive(Debug, Clone, Copy)]
 enum Platform {
@@ -125,6 +127,13 @@ impl LockedRelease {
             repo: Some(format!("{}/{}", self.owner, self.repo)),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct ResumeContext {
+    release: LockedRelease,
+    xp_ops_dest: PathBuf,
+    xp_ops_backup: PathBuf,
 }
 
 async fn fetch_release(
@@ -271,19 +280,21 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         Mode::Real
     };
     let platform = detect_platform()?;
+    let current_exe = std::env::current_exe()
+        .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
 
-    let locked = load_locked_release(args.release.repo.as_deref())?;
-    let release_args = locked
+    let resume = load_resume_context(args.release.repo.as_deref())?;
+    let release_args = resume
         .as_ref()
-        .map(LockedRelease::release_args)
+        .map(|ctx| ctx.release.release_args())
         .unwrap_or_else(|| args.release.clone());
-    let (owner, repo) = locked
+    let (owner, repo) = resume
         .as_ref()
-        .map(|v| (v.owner.clone(), v.repo.clone()))
+        .map(|ctx| (ctx.release.owner.clone(), ctx.release.repo.clone()))
         .unwrap_or(resolve_repo(release_args.repo.as_deref())?);
-    let api_base = locked
+    let api_base = resume
         .as_ref()
-        .map(|v| v.api_base.clone())
+        .map(|ctx| ctx.release.api_base.clone())
         .unwrap_or_else(github_api_base);
     let release = fetch_release(&api_base, &owner, &repo, &release_args)
         .await
@@ -304,9 +315,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let xp_dest = paths.usr_local_bin_xp();
     let xp_backup = backup_path(&xp_dest);
     let xp_asset_name = platform.xp_asset_name();
-    let xp_ops_dest = std::env::current_exe()
-        .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
-    let xp_ops_backup = backup_path(&xp_ops_dest);
+    let xp_ops_dest = resume
+        .as_ref()
+        .map(|ctx| ctx.xp_ops_dest.clone())
+        .unwrap_or_else(|| current_exe.clone());
+    let xp_ops_backup = resume
+        .as_ref()
+        .map(|ctx| ctx.xp_ops_backup.clone())
+        .unwrap_or_else(|| backup_path(&xp_ops_dest));
     let xp_ops_asset_name = platform.xp_ops_asset_name();
 
     if mode == Mode::DryRun {
@@ -353,24 +369,42 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         tag: release.tag_name.clone(),
     };
 
-    if locked.is_none()
+    if resume.is_none()
         && install_xp_ops_binary(&paths, &release, &checksums, xp_ops_asset_name, true).await?
     {
-        return reexec_after_xp_ops_upgrade(&locked_release, &args, &xp_ops_dest);
+        return reexec_after_xp_ops_upgrade(&locked_release, &args, &xp_ops_dest, &xp_ops_backup);
     }
 
-    upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
-    if let Err(err) = reconcile_static_xray_config_and_restart(&paths) {
-        return rollback_xp_after_xray_failure(&paths, &xp_backup, err);
-    }
+    let phase_result = async {
+        upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
+        if let Err(err) = reconcile_static_xray_config_and_restart(&paths) {
+            return rollback_xp_after_xray_failure(&paths, &xp_backup, err);
+        }
 
-    if locked.is_some() {
-        clear_upgrade_resume_env();
-    } else {
-        let _ = upgrade_xp_ops(&paths, &release, &checksums, xp_ops_asset_name).await?;
-    }
+        if resume.is_some() {
+            clear_upgrade_resume_env();
+        } else {
+            let _ = upgrade_xp_ops(&paths, &release, &checksums, xp_ops_asset_name).await?;
+        }
 
-    Ok(())
+        Ok(())
+    }
+    .await;
+
+    match phase_result {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            if let Some(resume) = resume.as_ref() {
+                clear_upgrade_resume_env();
+                return rollback_xp_ops_after_resumed_failure(
+                    &resume.xp_ops_dest,
+                    &resume.xp_ops_backup,
+                    err,
+                );
+            }
+            Err(err)
+        }
+    }
 }
 
 async fn upgrade_xp(
@@ -561,7 +595,7 @@ fn verify_upgraded_xp_ops(
     Err(ExitError::new(7, "install_failed: verify failed"))
 }
 
-fn load_locked_release(repo_override: Option<&str>) -> Result<Option<LockedRelease>, ExitError> {
+fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeContext>, ExitError> {
     let Some(tag) = std::env::var(UPGRADE_RESUME_TAG).ok() else {
         return Ok(None);
     };
@@ -585,11 +619,21 @@ fn load_locked_release(repo_override: Option<&str>) -> Result<Option<LockedRelea
             "invalid_args: invalid resumed repo (expected owner/repo)",
         ));
     };
-    Ok(Some(LockedRelease {
-        owner,
-        repo: name,
-        api_base,
-        tag,
+    let xp_ops_dest = PathBuf::from(std::env::var(UPGRADE_RESUME_XP_OPS_DEST).map_err(|_| {
+        ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_DEST")
+    })?);
+    let xp_ops_backup = PathBuf::from(std::env::var(UPGRADE_RESUME_XP_OPS_BACKUP).map_err(
+        |_| ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP"),
+    )?);
+    Ok(Some(ResumeContext {
+        release: LockedRelease {
+            owner,
+            repo: name,
+            api_base,
+            tag,
+        },
+        xp_ops_dest,
+        xp_ops_backup,
     }))
 }
 
@@ -597,6 +641,7 @@ fn reexec_after_xp_ops_upgrade(
     locked_release: &LockedRelease,
     args: &UpgradeArgs,
     exe: &Path,
+    backup: &Path,
 ) -> Result<(), ExitError> {
     let mut cmd = Command::new(exe);
     cmd.env(UPGRADE_RESUME_TAG, &locked_release.tag);
@@ -605,6 +650,8 @@ fn reexec_after_xp_ops_upgrade(
         format!("{}/{}", locked_release.owner, locked_release.repo),
     );
     cmd.env(UPGRADE_RESUME_API_BASE, &locked_release.api_base);
+    cmd.env(UPGRADE_RESUME_XP_OPS_DEST, exe);
+    cmd.env(UPGRADE_RESUME_XP_OPS_BACKUP, backup);
     cmd.args(std::env::args_os().skip(1));
     if args.dry_run {
         cmd.arg("--dry-run");
@@ -621,7 +668,43 @@ fn clear_upgrade_resume_env() {
         std::env::remove_var(UPGRADE_RESUME_TAG);
         std::env::remove_var(UPGRADE_RESUME_REPO);
         std::env::remove_var(UPGRADE_RESUME_API_BASE);
+        std::env::remove_var(UPGRADE_RESUME_XP_OPS_DEST);
+        std::env::remove_var(UPGRADE_RESUME_XP_OPS_BACKUP);
     }
+}
+
+fn rollback_xp_ops_after_resumed_failure(
+    dest: &Path,
+    backup: &Path,
+    original_err: ExitError,
+) -> Result<(), ExitError> {
+    if dest.exists() {
+        let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));
+        fs::rename(dest, &failed).map_err(|e| {
+            ExitError::new(
+                8,
+                format!(
+                    "rollback_failed: stash upgraded xp-ops after resumed failure: {e}; original error: {}",
+                    original_err.message
+                ),
+            )
+        })?;
+    }
+
+    fs::rename(backup, dest).map_err(|e| {
+        ExitError::new(
+            8,
+            format!(
+                "rollback_failed: restore xp-ops after resumed failure: {e}; original error: {}",
+                original_err.message
+            ),
+        )
+    })?;
+
+    Err(ExitError::new(
+        original_err.code,
+        format!("{}; rolled back xp-ops", original_err.message),
+    ))
 }
 
 fn rollback_xp_after_xray_failure(

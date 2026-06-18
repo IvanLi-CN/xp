@@ -629,6 +629,107 @@ mod linux {
     }
 
     #[tokio::test]
+    async fn resumed_upgrade_rolls_back_xp_ops_when_xray_restart_fails() {
+        let server = MockServer::start().await;
+
+        let new_xp = b"xp-new-binary";
+        let xp_asset = xp_asset_name();
+        let xp_ops_asset = xp_ops_asset_name();
+
+        let new_xp_ops = current_xp_ops_bytes();
+        let xp_checksum = sha256_hex(new_xp);
+        let xp_ops_checksum = sha256_hex(&new_xp_ops);
+
+        mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_ops_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops.clone()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/download/checksums.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "{xp_checksum}  {xp_asset}\n{xp_ops_checksum}  {xp_ops_asset}\n"
+            )))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let marker = tmp.path().join("marker.txt");
+        let xray_restart_count = tmp.path().join("xray-restart-count.txt");
+        let bin_dir = tmp.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        write_executable(
+            &bin_dir.join("systemctl"),
+            &format!(
+                "#!/bin/sh\n\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
+                count_file = xray_restart_count.display()
+            ),
+        );
+        write_executable(
+            &bin_dir.join("rc-service"),
+            "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
+        );
+
+        let xp_path = tmp.path().join("usr/local/bin/xp");
+        fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
+        fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
+
+        let dest = tmp.path().join("xp-ops-copy");
+        copy_current_xp_ops(&dest);
+        let upgraded_xp_ops = fs::read(&dest).unwrap();
+
+        let backup = tmp.path().join("xp-ops-copy.bak.resume");
+        let original_xp_ops = b"xp-ops-old-backup".to_vec();
+        fs::write(&backup, &original_xp_ops).unwrap();
+
+        let mut cmd = assert_cmd::Command::new(&dest);
+        cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_MARKER", &marker);
+        cmd.env("PATH", prepend_path(&bin_dir));
+        cmd.env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999");
+        cmd.env("XP_OPS_UPGRADE_RESUME_REPO", "o/r");
+        cmd.env("XP_OPS_UPGRADE_RESUME_API_BASE", server.uri());
+        cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest);
+        cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup);
+        cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
+
+        cmd.assert()
+            .failure()
+            .code(7)
+            .stderr(predicates::str::contains(
+                "service_error: xray restart failed; restored previous config; rolled back xp; rolled back xp-ops",
+            ));
+
+        assert_eq!(fs::read(&xp_path).unwrap(), b"xp-old-binary");
+        assert_eq!(fs::read(&dest).unwrap(), original_xp_ops);
+        assert!(!backup.exists());
+
+        let failed_xp_ops = find_backup(tmp.path(), "xp-ops-copy.failed.").unwrap();
+        assert_eq!(fs::read(failed_xp_ops).unwrap(), upgraded_xp_ops);
+
+        let marker_raw = fs::read_to_string(&marker).unwrap();
+        assert!(marker_raw.contains("systemctl restart xp.service"));
+        assert!(marker_raw.contains("systemctl restart xray.service"));
+        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "2");
+    }
+
+    #[tokio::test]
     async fn upgrade_removes_new_xray_config_when_restart_fails_without_previous_config() {
         let server = MockServer::start().await;
 

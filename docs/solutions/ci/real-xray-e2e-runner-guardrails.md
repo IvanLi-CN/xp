@@ -21,6 +21,7 @@ That combination makes the real-Xray harness look flaky even though the product 
 - Force `RUST_TEST_THREADS=1` in `scripts/e2e/run-local-xray-e2e.sh` before running the ignored real-Xray suites.
 - Keep the shared testbox runner on one isolated compose run, but generate a per-run override that pins the default Docker network to a free `10.203.x.0/24` subnet.
 - Serialize that subnet allocation through a shared remote claim directory so concurrent runs cannot observe the same subnet as free before either compose network is created.
+- Pass remote claim paths through encoded environment values instead of raw shell interpolation, so shared-testbox launch commands stay safe even when the local user name is not shell-safe.
 - Fail fast on the shared testbox if `make` is missing, because vendored `openssl-sys` now needs it during remote `cargo test`.
 
 ## Guardrails / Reuse notes

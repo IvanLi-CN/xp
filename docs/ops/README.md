@@ -440,7 +440,7 @@ Current rollout semantics:
 - If `xp-ops` itself needs an update, it upgrades the local `xp-ops` binary and re-executes the same command against the locked release.
 - The resumed phase upgrades `xp`, rewrites `/etc/xray/config.json` to the current static baseline, and restarts `xray`.
 - During static config rewrite, `xp-ops upgrade` preserves control-plane listener bindings that are already authoritative on the node: `XP_XRAY_API_ADDR` remains the source of truth for the `api` inbound, and an existing `mesh-proxy` inbound keeps its previous listener shape.
-- If the `xray` restart fails, `xp-ops upgrade` restores the previous `/etc/xray/config.json`, attempts one rollback restart, and restores the previous `xp` binary before returning failure.
+- If the `xray` restart fails, `xp-ops upgrade` restores the previous `/etc/xray/config.json`, attempts one rollback restart, restores the previous `xp` binary, and if the run came through a self-upgrade resume path also restores the previous `xp-ops` binary before returning failure.
 
 Useful flags:
 
@@ -459,6 +459,7 @@ Rollback notes:
 - The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
 - On `xp` restart failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
 - On `xray` restart failures after static config rewrite, `xp-ops upgrade` restores the previous `/etc/xray/config.json`, then rolls back `xp` to the previous binary before returning failure.
+- If that failure happened after a self-upgrade re-exec, `xp-ops upgrade` also restores the previous `xp-ops` binary instead of leaving the node on the newer operator binary.
 
 ### Deployment-specific upgrade paths
 
