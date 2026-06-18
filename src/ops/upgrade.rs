@@ -370,7 +370,16 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     };
 
     if resume.is_none()
-        && install_xp_ops_binary(&paths, &release, &checksums, xp_ops_asset_name, true).await?
+        && install_xp_ops_binary(
+            &paths,
+            &release,
+            &checksums,
+            xp_ops_asset_name,
+            &xp_ops_dest,
+            &xp_ops_backup,
+            true,
+        )
+        .await?
     {
         return reexec_after_xp_ops_upgrade(&locked_release, &args, &xp_ops_dest, &xp_ops_backup);
     }
@@ -384,7 +393,15 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         if resume.is_some() {
             clear_upgrade_resume_env();
         } else {
-            let _ = upgrade_xp_ops(&paths, &release, &checksums, xp_ops_asset_name).await?;
+            let _ = upgrade_xp_ops(
+                &paths,
+                &release,
+                &checksums,
+                xp_ops_asset_name,
+                &xp_ops_dest,
+                &xp_ops_backup,
+            )
+            .await?;
         }
 
         Ok(())
@@ -482,8 +499,10 @@ async fn upgrade_xp_ops(
     release: &GitHubRelease,
     checksums: &HashMap<String, [u8; 32]>,
     asset_name: &str,
+    dest: &Path,
+    backup: &Path,
 ) -> Result<bool, ExitError> {
-    install_xp_ops_binary(paths, release, checksums, asset_name, false).await
+    install_xp_ops_binary(paths, release, checksums, asset_name, dest, backup, false).await
 }
 
 async fn install_xp_ops_binary(
@@ -491,6 +510,8 @@ async fn install_xp_ops_binary(
     release: &GitHubRelease,
     checksums: &HashMap<String, [u8; 32]>,
     asset_name: &str,
+    dest: &Path,
+    backup: &Path,
     skip_verify_under_test: bool,
 ) -> Result<bool, ExitError> {
     let current = crate::version::VERSION;
@@ -514,11 +535,7 @@ async fn install_xp_ops_binary(
         ));
     };
 
-    let dest = std::env::current_exe()
-        .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
-    let backup = backup_path(&dest);
-
-    let staged = tmp_path_next_to(&dest);
+    let staged = tmp_path_next_to(dest);
     download_to_path(asset_url, &staged).await.map_err(|e| {
         match e.downcast_ref::<std::io::Error>() {
             Some(ioe) if ioe.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -535,7 +552,7 @@ async fn install_xp_ops_binary(
     }
     chmod(&staged, 0o755).ok();
 
-    let moved_old = fs::rename(&dest, &backup).map_err(|e| match e.kind() {
+    let moved_old = fs::rename(dest, backup).map_err(|e| match e.kind() {
         std::io::ErrorKind::PermissionDenied => {
             ExitError::new(4, format!("permission_denied: {e}"))
         }
@@ -547,16 +564,16 @@ async fn install_xp_ops_binary(
         return Err(e);
     }
 
-    if let Err(e) = fs::rename(&staged, &dest) {
-        let _ = fs::rename(&backup, &dest);
+    if let Err(e) = fs::rename(&staged, dest) {
+        let _ = fs::rename(backup, dest);
         let _ = fs::remove_file(&staged);
         return Err(ExitError::new(7, format!("install_failed: {e}")));
     }
 
-    chmod(&dest, 0o755).ok();
+    chmod(dest, 0o755).ok();
 
     if !is_test_root(paths.root()) {
-        verify_upgraded_xp_ops(&dest, &backup, skip_verify_under_test)?;
+        verify_upgraded_xp_ops(dest, backup, skip_verify_under_test)?;
     }
 
     Ok(true)
