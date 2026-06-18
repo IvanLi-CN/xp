@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 
 use clap::Parser;
+use rustls::crypto::aws_lc_rs;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -19,6 +20,10 @@ fn reject_legacy_relay_probe_env() -> Result<()> {
     Ok(())
 }
 
+fn install_rustls_crypto_provider() {
+    let _ = aws_lc_rs::default_provider().install_default();
+}
+
 fn disable_managed_vless_reconcile_for_canary_result(
     vless_enabled: bool,
     canary_result: &anyhow::Result<Option<std::thread::JoinHandle<()>>>,
@@ -29,6 +34,7 @@ fn disable_managed_vless_reconcile_for_canary_result(
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
+    install_rustls_crypto_provider();
     reject_legacy_relay_probe_env()?;
 
     let cli = xp::config::Cli::parse();
@@ -540,6 +546,33 @@ fn best_effort_chmod_0600(path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use rcgen::{CertificateParams, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
+    use rustls::crypto::CryptoProvider;
+    use time::OffsetDateTime;
+
+    #[tokio::test]
+    async fn installs_rustls_provider_before_tls_setup() {
+        install_rustls_crypto_provider();
+        assert!(CryptoProvider::get_default().is_some());
+
+        let mut params = CertificateParams::new(vec!["canary.example.com".to_string()]).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "canary.example.com");
+        params.not_before = OffsetDateTime::now_utc() - time::Duration::days(1);
+        params.not_after = OffsetDateTime::now_utc() + time::Duration::days(30);
+
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        let _ = axum_server::tls_rustls::RustlsConfig::from_pem(
+            cert.pem().into_bytes(),
+            key.serialize_pem().into_bytes(),
+        )
+        .await
+        .unwrap();
+    }
+
     #[test]
     fn reject_legacy_relay_probe_env_fails_when_old_vars_exist() {
         let key = "XP_RELAY_PROBE_BIND";
