@@ -31,6 +31,18 @@ fn disable_managed_vless_reconcile_for_canary_result(
     vless_enabled && matches!(canary_result, Ok(None) | Err(_))
 }
 
+fn should_reconcile_managed_defaults_at_startup(
+    intent: &xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
+) -> bool {
+    !matches!(
+        intent.vless,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    ) || !matches!(
+        intent.ss,
+        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    )
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
@@ -377,30 +389,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    if !matches!(
-        managed_default_intent.vless,
-        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
-    ) || !matches!(
-        managed_default_intent.ss,
-        xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
+    let pending_managed_default_reconcile = should_reconcile_managed_defaults_at_startup(
+        &managed_default_intent,
     )
-    {
-        let mut writer = |cmd| async {
-            raft_facade
-                .client_write(cmd)
-                .await
-                .map(|_| ())
-        };
-        xp::managed_default_endpoints::reconcile_managed_default_endpoints(
-            &config.data_dir,
-            &cluster.node_id,
-            &endpoints,
-            &managed_default_intent,
-            &mut writer,
-            "xp startup",
-        )
-        .await?;
-    }
+    .then_some((endpoints, managed_default_intent));
+    let startup_raft_facade = raft_facade.clone();
+    let startup_node_id = cluster.node_id.clone();
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
     let _quota = xp::quota::spawn_quota_worker(
@@ -461,6 +455,36 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         "starting xp"
     );
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
+    if let Some((startup_endpoints, startup_managed_default_intent)) =
+        pending_managed_default_reconcile
+    {
+        let data_dir = config.data_dir.clone();
+        let raft_facade = startup_raft_facade;
+        let node_id = startup_node_id;
+        tokio::spawn(async move {
+            let mut writer = |cmd| async {
+                raft_facade
+                    .client_write(cmd)
+                    .await
+                    .map(|_| ())
+            };
+            if let Err(err) = xp::managed_default_endpoints::reconcile_managed_default_endpoints(
+                &data_dir,
+                &node_id,
+                &startup_endpoints,
+                &startup_managed_default_intent,
+                &mut writer,
+                "xp startup",
+            )
+            .await
+            {
+                tracing::error!(
+                    error = %err,
+                    "managed default endpoint reconcile failed after startup"
+                );
+            }
+        });
+    }
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -619,6 +643,49 @@ mod tests {
         let result: anyhow::Result<Option<std::thread::JoinHandle<()>>> = Ok(None);
         assert!(!super::disable_managed_vless_reconcile_for_canary_result(
             false, &result
+        ));
+    }
+
+    #[test]
+    fn startup_reconcile_runs_when_any_managed_default_intent_is_not_skip() {
+        let manage_vless = xp::managed_default_endpoints::ManagedDefaultEndpointsIntent {
+            vless: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                spec: xp::managed_default_endpoints::DefaultVlessEndpointSpec {
+                    port: 53844,
+                    reality_dest: "127.0.0.1:39043".to_string(),
+                    server_names: vec!["example.com".to_string()],
+                    server_names_source:
+                        xp::protocol::RealityServerNamesSource::Manual,
+                    fingerprint: "chrome".to_string(),
+                },
+                source: xp::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+            },
+            ss: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+        };
+        assert!(super::should_reconcile_managed_defaults_at_startup(
+            &manage_vless
+        ));
+
+        let manage_ss = xp::managed_default_endpoints::ManagedDefaultEndpointsIntent {
+            vless: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+            ss: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage {
+                spec: xp::managed_default_endpoints::DefaultSsEndpointSpec { port: 53845 },
+                source: xp::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,
+            },
+        };
+        assert!(super::should_reconcile_managed_defaults_at_startup(
+            &manage_ss
+        ));
+    }
+
+    #[test]
+    fn startup_reconcile_skips_when_all_managed_default_intents_are_skip() {
+        let intent = xp::managed_default_endpoints::ManagedDefaultEndpointsIntent {
+            vless: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+            ss: xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip,
+        };
+        assert!(!super::should_reconcile_managed_defaults_at_startup(
+            &intent
         ));
     }
 }
