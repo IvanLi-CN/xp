@@ -359,6 +359,27 @@ export function normalizeMockMihomoProfilePayload(
 		return { ok: false, message: "mixin_yaml must be a yaml mapping" };
 	}
 
+	const mixinMap = mixinRoot;
+	if (
+		Object.prototype.hasOwnProperty.call(mixinMap, "proxies") &&
+		canonical.extra_proxies_yaml.trim() !== ""
+	) {
+		return {
+			ok: false,
+			message: "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+		};
+	}
+	if (
+		Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers") &&
+		canonical.extra_proxy_providers_yaml.trim() !== ""
+	) {
+		return {
+			ok: false,
+			message:
+				"mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
+		};
+	}
+
 	const extraProxies = parseYamlSequenceField(
 		canonical.extra_proxies_yaml,
 		"extra_proxies_yaml",

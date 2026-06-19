@@ -38,6 +38,36 @@ rules: []
 		expect(result.profile.extra_proxy_providers_yaml).toBe("");
 	});
 
+	it("rejects mixed legacy top-level sections when extra fields are also present", () => {
+		expect(
+			normalizeMockMihomoProfilePayload({
+				mixin_yaml: `port: 0
+proxies:
+  - name: custom-direct
+    type: ss
+    server: custom.example.com
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: abc:def
+    udp: true
+rules: []
+`,
+				extra_proxies_yaml: `- name: existing-extra
+  type: ss
+  server: extra.example.com
+  port: 443
+  cipher: 2022-blake3-aes-128-gcm
+  password: extra:def
+  udp: true
+`,
+				extra_proxy_providers_yaml: "",
+			}),
+		).toEqual({
+			ok: false,
+			message: "mixin_yaml.proxies cannot be combined with extra_proxies_yaml",
+		});
+	});
+
 	it("rejects empty mixin and legacy template fields", () => {
 		expect(
 			normalizeMockMihomoProfilePayload({
