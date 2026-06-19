@@ -68,7 +68,7 @@
 - provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。`🔒/🤯 {Region}` 只保留隐藏 alias 语义，不再直接暴露系统直连或链式候选。
-- `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须稳定暴露可见地区组、隐藏兼容层 `🔒 高质量`，以及非地区直连接入面的全局兜底入口 `🤯 All`。若未来重命名或替换聚合组，仍必须保留“高质量入口之上存在全局兜底层”的语义，不能让 `💎 高质量` 退化成仅剩单一路径且无兜底的壳组。
+- `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须稳定暴露隐藏兼容层 `🔒 高质量`，以及非地区直连接入面的全局兜底入口 `🤯 All`。地区入口继续由 `🔒 高质量` 承载；若未来重命名或替换聚合组，仍必须保留“高质量入口 + 全局兜底入口”的两层语义，不能让最终可见入口退化成仅剩单一路径且无兜底的壳组。
 - per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；健康检查 URL 选择顺序必须是：
   - 同一 `access_host` 下存在至少一个托管 VLESS endpoint 时，使用最小 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`
   - 否则当同一 `access_host` 下只有一个公开 `api_base_url` 时，使用该 API health URL
@@ -136,8 +136,8 @@
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。
 - Given 用户在 `mixin_yaml` 内写入 `proxies` 或 `proxy-providers`，When 保存 profile，Then 服务端保留原始输入，不做自动抽取；坏数据只在最终渲染校验阶段失败。
 - Given provider 主配置，When 检查 `proxy-groups` 顺序，Then hidden `🛣️ {relay-base}` 必须排在 `🚀 节点选择` 之后。
-- Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
-- Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；当前合同下 `💎 高质量` 本身应稳定同时暴露可见地区组、`🔒 高质量` 与 `🤯 All`，不能让最终可见入口缺失全局兜底。
+- Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，且 `🔒 高质量` 会稳定暴露该地区入口，无需更新用户模板。
+- Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；当前合同下 `💎 高质量` 应稳定暴露 `🔒 高质量` 与 `🤯 All`，而地区入口由 `🔒 高质量` 承载，不能让最终可见入口缺失全局兜底。
 - Given 托管 VLESS endpoint 已启用，When 请求 `https://<access_host[:port]>/generate_204`，Then 现有 VLESS/REALITY 接入点会把未认证 HTTPS 流量转到 xp 进程内 loopback TLS canary 并返回 `204`，且不新增公网 probe listener。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
@@ -225,4 +225,4 @@
 - 2026-06-15: Mihomo profile 保存收紧为“预渲染联合校验 + 明确 invalid_request”；移除静默 remap / prune / autosplit，hidden relay 组统一移到系统托管组尾部。
 - 2026-06-15: 明确补充高质量入口兜底合同；`💎 高质量` 之上必须存在稳定的全局兜底聚合入口，不能因 mixin 缺失或系统组收敛而消失。
 - 2026-06-16: relay 外层健康检查切到托管 VLESS 端口自身的 HTTPS canary（`https://<access_host[:port]>/generate_204`），并把 `🌟 {Region}` 明确冻结为 owner-facing 可见地区入口；`🔒/🤯 {Region}` 只保留兼容 alias 语义。
-- 2026-06-19: 收紧 owner-facing 地区组与高质量入口合同；provider 模式下 `🌟 {Region}` 只暴露 `🛬 {base}`，不再混入直连/链式候选，`💎 高质量` 变为可见入口并稳定暴露地区组、`🔒 高质量` 与 `🤯 All`。
+- 2026-06-19: 收紧 owner-facing 地区组与高质量入口合同；provider 模式下 `🌟 {Region}` 只暴露 `🛬 {base}`，不再混入直连/链式候选，`💎 高质量` 作为可见入口只暴露 `🔒 高质量` 与 `🤯 All`，地区入口收敛到 `🔒 高质量`。

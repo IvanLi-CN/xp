@@ -154,7 +154,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
   - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`
 - 系统托管的地区面固定为 owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；`🔒/🤯 {Region}` 只保留隐藏 alias 语义。
-- `💎 高质量` 是可见的 owner-facing 高质量入口，必须稳定同时暴露可见地区组、隐藏兼容层 `🔒 高质量` 与全局兜底层 `🤯 All`；不能退化成只剩 `🔒 高质量` 的单层入口。
+- `💎 高质量` 是可见的 owner-facing 高质量入口，必须稳定暴露隐藏兼容层 `🔒 高质量` 与全局兜底层 `🤯 All`；地区入口由 `🔒 高质量` 继续承载，不能退化成只剩单一路径且缺少兜底层。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。

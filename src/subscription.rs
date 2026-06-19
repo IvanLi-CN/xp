@@ -2223,11 +2223,8 @@ fn default_all_region_group_names() -> impl Iterator<Item = String> {
         .map(|region| format!("🤯 {}", region.name))
 }
 
-fn default_owner_facing_high_quality_group_names() -> Vec<String> {
-    let mut proxies = default_visible_region_group_names().collect::<Vec<_>>();
-    proxies.push("🔒 高质量".to_string());
-    proxies.push("🤯 All".to_string());
-    proxies
+fn default_high_quality_region_group_names() -> Vec<String> {
+    default_visible_region_group_names().collect::<Vec<_>>()
 }
 
 fn inject_mihomo_default_aggregate_groups(
@@ -2254,7 +2251,11 @@ fn inject_mihomo_default_aggregate_groups(
 
     let generated = vec![
         mihomo_high_quality_group(existing_high_quality, provider_values, high_quality_proxies),
-        mihomo_select_group("💎 高质量", false, default_owner_facing_high_quality_group_names()),
+        mihomo_select_group(
+            "💎 高质量",
+            false,
+            ["🔒 高质量".to_string(), "🤯 All".to_string()],
+        ),
         mihomo_select_group("🤯 All", true, default_all_region_group_names()),
     ];
     let insert_at = insert_at.unwrap_or(remaining.len());
@@ -2277,6 +2278,12 @@ fn mihomo_high_quality_group(
     provider_values: &[serde_yaml::Value],
     high_quality_proxies: Vec<String>,
 ) -> serde_yaml::Value {
+    let proxies = if high_quality_proxies.is_empty() {
+        default_high_quality_region_group_names()
+    } else {
+        high_quality_proxies
+    };
+
     let Some(serde_yaml::Value::Mapping(mut map)) = existing else {
         let mut map = serde_yaml::Mapping::new();
         map.insert(
@@ -2295,11 +2302,11 @@ fn mihomo_high_quality_group(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        if !high_quality_proxies.is_empty() {
+        if !proxies.is_empty() {
             map.insert(
                 serde_yaml::Value::String("proxies".to_string()),
                 serde_yaml::Value::Sequence(
-                    high_quality_proxies
+                    proxies
                         .into_iter()
                         .map(serde_yaml::Value::String)
                         .collect(),
@@ -2325,11 +2332,11 @@ fn mihomo_high_quality_group(
         serde_yaml::Value::String("use".to_string()),
         serde_yaml::Value::Sequence(provider_values.to_vec()),
     );
-    if !high_quality_proxies.is_empty() {
+    if !proxies.is_empty() {
         map.insert(
             serde_yaml::Value::String("proxies".to_string()),
             serde_yaml::Value::Sequence(
-                high_quality_proxies
+                proxies
                     .into_iter()
                     .map(serde_yaml::Value::String)
                     .collect(),
@@ -5746,17 +5753,7 @@ providerA:
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec![
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
-                "🔒 高质量",
-                "🤯 All",
-            ]
+            vec!["🔒 高质量", "🤯 All"]
         );
     }
 
@@ -6776,8 +6773,9 @@ providerA:
                 .collect::<Vec<_>>()
         };
 
+        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
         assert_eq!(
-            group_refs("💎 高质量"),
+            group_refs("🔒 高质量"),
             vec![
                 "🌟 Japan",
                 "🌟 HongKong",
@@ -6786,8 +6784,6 @@ providerA:
                 "🌟 Singapore",
                 "🌟 US",
                 "🌟 Other",
-                "🔒 高质量",
-                "🤯 All",
             ]
         );
         assert_eq!(
@@ -7025,8 +7021,9 @@ providerA:
                 .collect::<Vec<_>>()
         };
 
+        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
         assert_eq!(
-            group_refs("💎 高质量"),
+            group_refs("🔒 高质量"),
             vec![
                 "🌟 Japan",
                 "🌟 HongKong",
@@ -7035,8 +7032,6 @@ providerA:
                 "🌟 Singapore",
                 "🌟 US",
                 "🌟 Other",
-                "🔒 高质量",
-                "🤯 All",
             ]
         );
 
@@ -8304,17 +8299,7 @@ rules: []
         assert_eq!(group_refs("🔒 高质量"), vec!["Tokyo-A-reality"]);
         assert_eq!(
             group_refs("💎 高质量"),
-            vec![
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
-                "🔒 高质量",
-                "🤯 All",
-            ]
+            vec!["🔒 高质量", "🤯 All"]
         );
     }
 

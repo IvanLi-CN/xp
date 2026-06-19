@@ -132,7 +132,7 @@
 - Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
 - Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then 外层候选组 `🛣️ JP/HK/SG` 的 `use` 包含这些 provider，并带有 `url-test` 高可用探测参数。
 - Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then `🛣️ JP/HK/SG` 仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
-- Given 新增节点已拥有 membership 与系统 provider 入口，When 该节点完成首次主动探测并映射到 `Taiwan`，Then 无需修改任何用户模板，`🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 都会自动包含 `🛬 {base}`。
+- Given 新增节点已拥有 membership 与系统 provider 入口，When 该节点完成首次主动探测并映射到 `Taiwan`，Then 无需修改任何用户模板，`🌟 Taiwan` 与 `🚀 节点选择` 都会自动包含 `🛬 {base}`，且 `🔒 高质量` 会稳定暴露该地区入口。
 - Given 旧集群升级后某历史节点暂时还没有成功探测记录，When 其旧节点名 slug 原本会命中 `Japan/HongKong/Taiwan/Korea`，Then 订阅渲染仍保持该 legacy 地区归类，直到首次成功探测结果落盘。
 - Given 某节点主动探测暂时失败，When 该节点存在最近一次成功归类且该结果仍在 stale 窗口内，Then 订阅仍保留其上一轮地区归类，不会立即从系统托管分组中消失；一旦 probe 进入 stale，渲染回退到 legacy slug fallback / `Other`。
 - Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
