@@ -6942,6 +6942,134 @@ rules: []
     }
 
     #[test]
+    fn build_mihomo_provider_yaml_rebuilds_mixin_region_groups_as_owner_facing_aliases() {
+        let u = user("u1", "alice");
+        let n = node("n1", "Tokyo A", "example.com");
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "💎 高质量"
+    type: select
+    hidden: true
+    proxies: ["DIRECT"]
+  - name: "🌟 Japan"
+    type: select
+    hidden: true
+    proxies: ["Tokyo-A-reality", "Tokyo-A-ss-chain", "DIRECT"]
+  - name: "🔒 Japan"
+    type: select
+    proxies: ["Tokyo-A-reality-chain"]
+  - name: "🤯 Japan"
+    type: select
+    proxies: ["Tokyo-A-ss"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: file
+  path: ./provider-a.yaml
+"#
+            .to_string(),
+        };
+
+        let probes = probe_map(&[("n1", NodeSubscriptionRegion::Japan)]);
+        let yaml = build_mihomo_provider_yaml_with_node_probes(
+            SEED,
+            &u,
+            &memberships,
+            &endpoints,
+            &[n],
+            &probes,
+            &profile,
+            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        )
+        .expect("build mihomo provider yaml should succeed");
+        let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let groups = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups should exist");
+
+        let group = |name: &str| {
+            groups
+                .iter()
+                .find(|group| group.get("name").and_then(Value::as_str) == Some(name))
+                .expect("group should exist")
+        };
+        let group_refs = |name: &str| {
+            group(name)
+                .get("proxies")
+                .and_then(Value::as_sequence)
+                .expect("group proxies should exist")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            group_refs("💎 高质量"),
+            vec![
+                "🌟 Japan",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 US",
+                "🌟 Other",
+                "🔒 高质量",
+                "🤯 All",
+            ]
+        );
+
+        let japan_group = group("🌟 Japan");
+        assert_eq!(japan_group.get("hidden"), None);
+        assert_eq!(group_refs("🌟 Japan"), vec!["🛬 Tokyo-A"]);
+        assert_eq!(
+            japan_group
+                .get("use")
+                .and_then(Value::as_sequence)
+                .expect("Japan group use should exist")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
+        );
+        let japan_exclude_filter = japan_group
+            .get("exclude-filter")
+            .and_then(Value::as_str)
+            .expect("Japan group should exclude system leaf candidates");
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss\\-chain"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality\\-chain"));
+
+        for alias_name in ["🔒 Japan", "🤯 Japan"] {
+            let alias = group(alias_name);
+            assert_eq!(alias.get("hidden"), Some(&Value::Bool(true)));
+            assert_eq!(group_refs(alias_name), vec!["🌟 Japan"]);
+        }
+    }
+
+    #[test]
     fn build_mihomo_provider_yaml_moves_hidden_relay_groups_after_system_visible_groups() {
         let u = user("u1", "alice");
         let n = node("n1", "Tokyo A", "relay.example.com");
