@@ -823,12 +823,12 @@ export function UserDetailsPage() {
 		setIsSavingMihomoProfile(true);
 		setMihomoProfileSaveError(null);
 		try {
-			const normalizedProfile = normalizeMihomoProfileDraftForSave({
+			const profile = normalizeMihomoProfileDraftForSave({
 				mixin_yaml: mihomoMixinYaml,
 				extra_proxies_yaml: mihomoExtraProxiesYaml,
 				extra_proxy_providers_yaml: mihomoExtraProxyProvidersYaml,
 			});
-			await putAdminUserMihomoProfile(adminToken, userId, normalizedProfile);
+			await putAdminUserMihomoProfile(adminToken, userId, profile);
 			await mihomoProfileQuery.refetch();
 			pushToast({ variant: "success", message: "Mihomo mixin updated" });
 		} catch (error) {
@@ -1119,7 +1119,7 @@ export function UserDetailsPage() {
 								label="mixin_yaml"
 								value={mihomoMixinYaml}
 								onChange={setMihomoMixinYaml}
-								placeholder="Paste Mihomo mixin YAML (top-level proxies/proxy-providers will be extracted on save)"
+								placeholder="Paste Mihomo mixin YAML"
 								minRows={14}
 								showShortcutHint
 							/>

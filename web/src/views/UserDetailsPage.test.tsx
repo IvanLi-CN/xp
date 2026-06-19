@@ -671,7 +671,48 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
-	it("normalizes legacy dynamic sections before saving mihomo profile", async () => {
+	it("normalizes legacy mixed mihomo profile before save", async () => {
+		setupMocks({
+			mihomoProfile: {
+				mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+`,
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: "",
+			},
+		});
+		renderPage();
+
+		await waitFor(() => {
+			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
+		});
+		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+
+		await waitFor(() => {
+			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
+				"admintoken",
+				"u_01HUSERAAAAAA",
+				{
+					mixin_yaml: `port: 0
+rules: []
+`,
+					extra_proxies_yaml: "",
+					extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-mixin.yaml
+  url: https://example.com/sub-a-from-mixin
+`,
+				},
+			);
+		});
+	});
+
+	it("keeps extra proxy-providers authoritative when normalizing legacy mixed save", async () => {
 		setupMocks({
 			mihomoProfile: {
 				mixin_yaml: `port: 0
@@ -702,7 +743,9 @@ rules: []
 				"admintoken",
 				"u_01HUSERAAAAAA",
 				{
-					mixin_yaml: "port: 0\nrules: []\n",
+					mixin_yaml: `port: 0
+rules: []
+`,
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: `providerA:
   type: http
