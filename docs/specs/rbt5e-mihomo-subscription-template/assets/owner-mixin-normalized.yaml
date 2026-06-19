@@ -1,0 +1,552 @@
+sub-rules:
+  bt:
+    - RULE-SET,LocalAreaNetwork,🎯 全球直连
+    - RULE-SET,ProxyGFWlist,📥 BT
+    - GEOIP,CN,🎯 全球直连
+    - MATCH,📥 BT
+  ai-socks:
+    - RULE-SET,OwnerAI,🤖 AI
+    - MATCH,🎯 全球直连
+
+rules:
+  - DOMAIN-SUFFIX,bingparachute.com,Ⓜ️ 微软服务
+  - DOMAIN-KEYWORD,codeium,👨‍💻 Dev
+  - DOMAIN-KEYWORD,marscode,👨‍💻 Dev
+  - DOMAIN-SUFFIX,cn.bing.com,REJECT
+  - DOMAIN-SUFFIX,region1.v2.argotunnel.com,🌟 节点选择
+  - RULE-SET,OwnerProxy,🌟 节点选择
+  - RULE-SET,OwnerDirect,🎯 全球直连
+  - RULE-SET,OwnerDownload,🗽 大流量
+  - RULE-SET,OwnerQuality,🔒 高质量
+  - RULE-SET,OwnerAI,🤖 AI
+  - RULE-SET,OwnerSTUN,💥 STUN
+  - RULE-SET,LocalAreaNetwork,🎯 全球直连
+  - RULE-SET,UnBan,🎯 全球直连
+  - RULE-SET,BanAD,🛑 全球拦截
+  - RULE-SET,BanProgramAD,🍃 应用净化
+  - RULE-SET,GoogleFCM,📢 谷歌FCM
+  - RULE-SET,GoogleCN,🎯 全球直连
+  - RULE-SET,Microsoft,Ⓜ️ 微软服务
+  - RULE-SET,Steam,🎮 Steam
+  - RULE-SET,SteamCN,🎮 Steam CN
+  - RULE-SET,Spotify,🎶 Spotify
+  - RULE-SET,BilibiliPcdn,🛑 全球拦截
+  - RULE-SET,Apple,🍎 苹果服务
+  - RULE-SET,Telegram,📲 电报信息
+  - RULE-SET,ProxyLite,🌟 节点选择
+  - RULE-SET,ProxyMedia,🌍 国外媒体
+  - RULE-SET,ChinaDomain,🎯 全球直连
+  - RULE-SET,ChinaCompanyIp,🎯 全球直连
+  - RULE-SET,STUN,💥 STUN
+  - AND,((DST-PORT,22),(GEOIP,CN)),🎯 全球直连
+  - DST-PORT,22,🔒 高质量
+  - RULE-SET,GitHub,👨‍💻 Dev
+  - RULE-SET,GitLab,👨‍💻 Dev
+  - RULE-SET,Npmjs,👨‍💻 Dev
+  - RULE-SET,Docker,👨‍💻 Dev
+  - RULE-SET,Jfrog,👨‍💻 Dev
+  - RULE-SET,Jsdelivr,👨‍💻 Dev
+  - RULE-SET,Jetbrains,👨‍💻 Dev
+  - RULE-SET,SourceForge,👨‍💻 Dev
+  - RULE-SET,Stackexchange,👨‍💻 Dev
+  - RULE-SET,DigitalOcean,👨‍💻 Dev
+  - RULE-SET,Python,👨‍💻 Dev
+  - RULE-SET,Unity,👨‍💻 Dev
+  - SRC-PORT,9993,🎯 全球直连
+  - DST-PORT,9993,🎯 全球直连
+  - DST-PORT,3478,🎯 全球直连
+  - GEOIP,CN,🎯 全球直连
+  - DOMAIN-SUFFIX,akamaized.net,🌟 节点选择
+  - DOMAIN-SUFFIX,app-measurement.com,🌟 节点选择
+  - RULE-SET,ProxyGFWlist,🌟 节点选择
+  - MATCH,🐟 漏网之鱼
+
+rule-providers:
+  LocalAreaNetwork:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/LocalAreaNetwork.yaml
+    interval: 86400
+    path: ./ACL4SSR/LocalAreaNetwork.yaml
+  UnBan:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/UnBan.yaml
+    interval: 86400
+    path: ./ACL4SSR/UnBan.yaml
+  BanAD:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/BanAD.yaml
+    interval: 86400
+    path: ./ACL4SSR/BanAD.yaml
+  BanProgramAD:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/BanProgramAD.yaml
+    interval: 86400
+    path: ./ACL4SSR/BanProgramAD.yaml
+  GoogleFCM:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/GoogleFCM.yaml
+    interval: 86400
+    path: ./ACL4SSR/GoogleFCM.yaml
+  GoogleCN:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/GoogleCN.yaml
+    interval: 86400
+    path: ./ACL4SSR/GoogleCN.yaml
+  Microsoft:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/Microsoft.yaml
+    interval: 86400
+    path: ./ACL4SSR/Microsoft.yaml
+  Apple:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/Apple.yaml
+    interval: 86400
+    path: ./ACL4SSR/Apple.yaml
+  Telegram:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/Telegram.yaml
+    interval: 86400
+    path: ./ACL4SSR/Telegram.yaml
+  SteamCN:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/SteamCN/SteamCN.yaml
+    interval: 86400
+    path: ./ios_rule_script/SteamCN.yaml
+  Steam:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Steam/Steam.yaml
+    interval: 86400
+    path: ./ios_rule_script/Steam.yaml
+  ProxyGFWlist:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ProxyGFWlist.yaml
+    interval: 86400
+    path: ./ACL4SSR/ProxyGFWlist.yaml
+  ProxyLite:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ProxyLite.yaml
+    interval: 86400
+    path: ./ACL4SSR/ProxyLite.yaml
+  ProxyMedia:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ProxyMedia.yaml
+    interval: 86400
+    path: ./ACL4SSR/ProxyMedia.yaml
+  ChinaDomain:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ChinaDomain.yaml
+    interval: 86400
+    path: ./ACL4SSR/ChinaDomain.yaml
+  ChinaCompanyIp:
+    behavior: ipcidr
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ChinaCompanyIp.yaml
+    interval: 86400
+    path: ./ACL4SSR/ChinaCompanyIp.yaml
+  STUN:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/STUN/STUN.yaml
+    interval: 86400
+    path: ./ios_rule_script/STUN.yaml
+  GitHub:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/Ruleset/Github.yaml
+    interval: 86400
+    path: ./ACL4SSR/GitHub.yaml
+  GitLab:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GitLab/GitLab.yaml
+    interval: 86400
+    path: ./ios_rule_script/GitLab.yaml
+  Npmjs:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Npmjs/Npmjs.yaml
+    interval: 86400
+    path: ./ios_rule_script/Npmjs.yaml
+  Docker:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Docker/Docker.yaml
+    interval: 86400
+    path: ./ios_rule_script/Docker.yaml
+  Jfrog:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Jfrog/Jfrog.yaml
+    interval: 86400
+    path: ./ios_rule_script/Jfrog.yaml
+  Jsdelivr:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Jsdelivr/Jsdelivr.yaml
+    interval: 86400
+    path: ./ios_rule_script/Jsdelivr.yaml
+  Jetbrains:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Jetbrains/Jetbrains.yaml
+    interval: 86400
+    path: ./ios_rule_script/Jetbrains.yaml
+  SourceForge:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/SourceForge/SourceForge.yaml
+    interval: 86400
+    path: ./ios_rule_script/SourceForge.yaml
+  Stackexchange:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Stackexchange/Stackexchange.yaml
+    interval: 86400
+    path: ./ios_rule_script/Stackexchange.yaml
+  DigitalOcean:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/DigitalOcean/DigitalOcean.yaml
+    interval: 86400
+    path: ./ios_rule_script/DigitalOcean.yaml
+  Python:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Python/Python.yaml
+    interval: 86400
+    path: ./ios_rule_script/Python.yaml
+  Unity:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Unity/Unity.yaml
+    interval: 86400
+    path: ./ios_rule_script/Unity.yaml
+  Spotify:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Spotify/Spotify.yaml
+    interval: 86400
+    path: ./ios_rule_script/Spotify.yaml
+  BilibiliPcdn:
+    behavior: classical
+    type: http
+    url: https://raw.githubusercontent.com/elysias123/bilibili-rule/refs/heads/main/bilibili-pcdn.yaml
+    interval: 86400
+    path: ./bilibili-rule/bilibili-pcdn.yaml
+  OwnerProxy:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/proxy.yaml
+    interval: 86400
+    path: ./owner-rule/proxy.yaml
+  OwnerDirect:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/direct.yaml
+    interval: 86400
+    path: ./owner-rule/direct.yaml
+  OwnerDownload:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/download.yaml
+    interval: 86400
+    path: ./owner-rule/download.yaml
+  OwnerQuality:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/quality.yaml
+    interval: 86400
+    path: ./owner-rule/quality.yaml
+  OwnerAI:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/ai.yaml
+    interval: 86400
+    path: ./owner-rule/ai.yaml
+  OwnerSTUN:
+    behavior: classical
+    type: http
+    url: https://example.com/rules/stun.yaml
+    interval: 86400
+    path: ./owner-rule/stun.yaml
+
+proxy-providers:
+  ProviderA:
+    type: http
+    path: ./ProviderA.yaml
+    url: https://provider-a.example.com/subscription
+    interval: 60
+    health-check:
+      enable: true
+      url: https://cp.cloudflare.com
+      interval: 30
+      timeout: 1000
+      expected-status: 204
+      lazy: false
+  ProviderB:
+    type: http
+    path: ./ProviderB.yaml
+    url: https://provider-b.example.com/subscription
+    interval: 60
+    health-check:
+      enable: true
+      url: https://cp.cloudflare.com
+      interval: 30
+      timeout: 1000
+      expected-status: 204
+      lazy: false
+
+listeners:
+  - name: bt-socks-in
+    type: socks
+    port: 7897
+    listen: 127.0.0.1
+    udp: true
+    rule: bt
+  - name: ai-socks-in
+    type: socks
+    port: 7898
+    listen: 127.0.0.1
+    udp: true
+    rule: ai-socks
+
+port: 0
+socks-port: 0
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:5050
+tcp-concurrent: true
+unified-delay: true
+global-client-fingerprint: chrome
+
+tun:
+  enable: true
+  stack: mixed
+  dns-hijack:
+    - any:53
+    - any:853
+
+dns:
+  enable: true
+  prefer-h3: false
+  listen: 127.0.0.1:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - +.lan
+    - +.local
+    - localhost.ptlogin2.qq.com
+    - +.msftconnecttest.com
+    - +.msftncsi.com
+    - +.googleapis.com
+    - +.googleapis.cn
+    - +.argotunnel.com
+    - alt1-mtalk.google.com
+    - alt2-mtalk.google.com
+    - alt3-mtalk.google.com
+    - alt4-mtalk.google.com
+    - alt5-mtalk.google.com
+    - alt6-mtalk.google.com
+    - alt7-mtalk.google.com
+    - alt8-mtalk.google.com
+    - mtalk.google.com
+  use-hosts: true
+  default-nameserver:
+    - 114.114.114.114#DIRECT
+    - 223.5.5.5#DIRECT
+    - 119.29.29.29#DIRECT
+    - 180.76.76.76#DIRECT
+  proxy-server-nameserver:
+    - https://dns.alidns.com/dns-query#DIRECT
+    - https://doh.pub/dns-query#DIRECT
+  nameserver:
+    - https://cloudflare-dns.com/dns-query#🌟 节点选择
+  fallback:
+    - https://doh.pub/dns-query#DIRECT
+    - https://cloudflare-dns.com/dns-query#DIRECT
+  nameserver-policy:
+    ntp.aliyun.com: https://dns.alidns.com/dns-query#DIRECT
+    +.jsdmirror.com: https://dns.alidns.com/dns-query#DIRECT
+    fastly.jsdelivr.net: https://dns.alidns.com/dns-query#DIRECT
+    +.msftconnecttest.com,+.msftncsi.com: https://cloudflare-dns.com/dns-query#🌟 节点选择
+    +.googleapis.com,+.googleapis.cn: https://cloudflare-dns.com/dns-query#🌟 节点选择
+    rule-set:ProxyGFWlist: https://cloudflare-dns.com/dns-query#🌟 节点选择
+    rule-set:ChinaDomain: https://dns.alidns.com/dns-query#DIRECT
+    rule-set:OwnerDirect: https://dns.alidns.com/dns-query#DIRECT
+
+proxy-groups:
+  - name: 🐟 漏网之鱼
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🗽 大流量
+    type: fallback
+    use:
+      - ProviderB
+    timeout: 300
+    filter: 新加坡|🇸🇬|Singapore|SG|日本|🇯🇵|Japan|JP|美国|🇺🇸|USA|US|United States
+    exclude-filter: 倍|x[2-9]|[2-9]x|x\d{2,}|\d{2,}x|\.\dx
+    lazy: true
+    disable-udp: false
+    interval: 60
+    url: https://hub.docker.com/v2/namespaces/library/repositories/hello-world/tags
+    expected-status: 200
+  - name: 📥 BT
+    type: select
+    proxies:
+      - 🎯 全球直连
+      - 🗽 大流量
+  - name: 🤖 AI
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🎥 NETFLIX
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🌍 国外媒体
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🌏 国内媒体
+    type: select
+    proxies:
+      - 🎯 全球直连
+      - 🌟 节点选择
+  - name: Ⓜ️ 微软服务
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: Xbox
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🎮 Steam
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🎮 Steam CN
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 🎶 Spotify
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 📲 电报信息
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 👨‍💻 Dev
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 💥 STUN
+    type: select
+    proxies:
+      - 🎯 全球直连
+      - 🌟 节点选择
+      - 🛑 全球拦截
+  - name: 🍎 苹果服务
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: 📢 谷歌FCM
+    type: select
+    proxies:
+      - 🌟 节点选择
+      - 🔒 高质量
+      - 🗽 大流量
+      - 🎯 全球直连
+      - 🛑 全球拦截
+  - name: ⛔️ 广告拦截
+    type: select
+    proxies:
+      - 🛑 全球拦截
+      - 🎯 全球直连
+      - 🌟 节点选择
+  - name: 🚫 运营劫持
+    type: select
+    proxies:
+      - 🛑 全球拦截
+      - 🎯 全球直连
+      - 🌟 节点选择
+  - name: 🎯 全球直连
+    type: select
+    proxies:
+      - DIRECT
+  - name: 🛑 全球拦截
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+  - name: 🍃 应用净化
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT

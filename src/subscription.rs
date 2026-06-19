@@ -1160,8 +1160,13 @@ const MIHOMO_LEGACY_FALLBACK_REGION_GROUPS: [MihomoRegionGroup; 4] = [
 ];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
-const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 4] =
-    ["💎 节点选择", "🗽 大流量", "🎯 全球直连", "🛑 全球拦截"];
+const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 5] = [
+    "🌟 节点选择",
+    "💎 节点选择",
+    "🗽 大流量",
+    "🎯 全球直连",
+    "🛑 全球拦截",
+];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct MihomoProxyGroupOrderHints {
@@ -2232,7 +2237,14 @@ fn inject_mihomo_default_aggregate_groups(
     provider_values: &[serde_yaml::Value],
     high_quality_proxies: Vec<String>,
 ) {
-    const SYSTEM_AGGREGATE_GROUPS: [&str; 4] = ["🔒 高质量", "💎 高质量", "🤯 All", "🚀 节点选择"];
+    const SYSTEM_AGGREGATE_GROUPS: [&str; 6] = [
+        "🔒 高质量",
+        "💎 高质量",
+        "🚀 节点选择",
+        "🌟 节点选择",
+        "💎 节点选择",
+        "🤯 All",
+    ];
     let mut remaining = Vec::with_capacity(groups.len());
     let mut insert_at = None;
     let mut existing_high_quality = None;
@@ -2253,8 +2265,18 @@ fn inject_mihomo_default_aggregate_groups(
         mihomo_high_quality_group(existing_high_quality, provider_values, high_quality_proxies),
         mihomo_select_group(
             "💎 高质量",
-            false,
+            true,
             ["🔒 高质量".to_string(), "🤯 All".to_string()],
+        ),
+        mihomo_select_group(
+            "🌟 节点选择",
+            true,
+            ["🚀 节点选择".to_string(), "🤯 All".to_string()],
+        ),
+        mihomo_select_group(
+            "💎 节点选择",
+            true,
+            ["🚀 节点选择".to_string(), "🤯 All".to_string()],
         ),
         mihomo_select_group("🤯 All", true, default_all_region_group_names()),
     ];
@@ -2269,7 +2291,7 @@ fn inject_mihomo_default_node_selector_group(
 ) {
     let mut proxies = default_visible_region_group_names().collect::<Vec<_>>();
     proxies.extend(landing_groups.iter().cloned());
-    proxies.push("💎 高质量".to_string());
+    proxies.push("🔒 高质量".to_string());
     groups.push(mihomo_select_group("🚀 节点选择", false, proxies));
 }
 
@@ -2293,10 +2315,6 @@ fn mihomo_high_quality_group(
         map.insert(
             serde_yaml::Value::String("type".to_string()),
             serde_yaml::Value::String("select".to_string()),
-        );
-        map.insert(
-            serde_yaml::Value::String("hidden".to_string()),
-            serde_yaml::Value::Bool(true),
         );
         map.insert(
             serde_yaml::Value::String("use".to_string()),
@@ -2324,10 +2342,7 @@ fn mihomo_high_quality_group(
         serde_yaml::Value::String("type".to_string()),
         serde_yaml::Value::String("select".to_string()),
     );
-    map.insert(
-        serde_yaml::Value::String("hidden".to_string()),
-        serde_yaml::Value::Bool(true),
-    );
+    map.remove(serde_yaml::Value::String("hidden".to_string()));
     map.insert(
         serde_yaml::Value::String("use".to_string()),
         serde_yaml::Value::Sequence(provider_values.to_vec()),
@@ -2363,6 +2378,9 @@ fn is_mihomo_system_proxy_group(
 ) -> bool {
     name.starts_with("🛬 ")
         || name == "🚀 节点选择"
+        || name == "🌟 节点选择"
+        || name == "💎 节点选择"
+        || name == "💎 高质量"
         || name == "🤯 All"
         || is_mihomo_system_region_cluster_group(name, relay_group_names)
 }
@@ -2371,9 +2389,19 @@ fn canonical_system_visible_region_option(name: &str) -> Option<&'static str> {
     canonical_visible_region_name(name)
 }
 
+fn canonical_mihomo_system_proxy_alias(name: &str) -> Option<&'static str> {
+    match name {
+        "💎 高质量" => Some("🔒 高质量"),
+        "🚀 节点选择" => Some("🌟 节点选择"),
+        "💎 节点选择" => Some("🌟 节点选择"),
+        _ => None,
+    }
+}
+
 fn is_managed_region_proxy_reference(name: &str) -> bool {
     is_mihomo_legacy_outer_group_reference(name)
         || canonical_system_visible_region_option(name).is_some()
+        || canonical_mihomo_system_proxy_alias(name).is_some()
 }
 
 fn helper_proxy_order_sequence(root: &serde_yaml::Mapping, key: &str) -> Vec<String> {
@@ -2457,8 +2485,17 @@ fn normalize_proxy_names_in_place(
 ) -> Vec<String> {
     let mut out = Vec::with_capacity(proxy_names.len());
     let mut emitted_regions = std::collections::BTreeSet::<String>::new();
+    let mut emitted_literals = std::collections::BTreeSet::<String>::new();
 
     for proxy_name in proxy_names {
+        if let Some(remapped_name) = canonical_mihomo_system_proxy_alias(proxy_name) {
+            if proxy_group_names.contains(remapped_name)
+                && emitted_literals.insert(remapped_name.to_string())
+            {
+                out.push(remapped_name.to_string());
+            }
+            continue;
+        }
         if is_mihomo_legacy_outer_group_reference(proxy_name) {
             if proxy_group_names.contains(proxy_name) {
                 out.push(proxy_name.clone());
@@ -2485,8 +2522,17 @@ fn normalize_proxy_names_in_place_strict(
 ) -> Vec<String> {
     let mut out = Vec::with_capacity(proxy_names.len());
     let mut emitted_regions = std::collections::BTreeSet::<String>::new();
+    let mut emitted_literals = std::collections::BTreeSet::<String>::new();
 
     for proxy_name in proxy_names {
+        if let Some(remapped_name) = canonical_mihomo_system_proxy_alias(proxy_name) {
+            if proxy_group_names.contains(remapped_name)
+                && emitted_literals.insert(remapped_name.to_string())
+            {
+                out.push(remapped_name.to_string());
+            }
+            continue;
+        }
         if let Some(canonical_name) = canonical_system_visible_region_option(proxy_name) {
             if proxy_group_names.contains(canonical_name)
                 && emitted_regions.insert(canonical_name.to_string())
@@ -2512,6 +2558,16 @@ fn normalize_proxy_names_from_helper(
     let mut matched_any = false;
 
     for helper_name in helper_order {
+        if let Some(remapped_helper_name) = canonical_mihomo_system_proxy_alias(helper_name) {
+            if proxy_group_names.contains(remapped_helper_name)
+                && proxy_names.iter().any(|name| name == helper_name)
+                && used_literals.insert(remapped_helper_name.to_string())
+            {
+                out.push(remapped_helper_name.to_string());
+                matched_any = true;
+            }
+            continue;
+        }
         if is_mihomo_legacy_outer_group_reference(helper_name) {
             if proxy_group_names.contains(helper_name)
                 && proxy_names.iter().any(|name| name == helper_name)
@@ -2569,6 +2625,16 @@ fn normalize_proxy_names_from_helper_strict(
     let mut matched_any = false;
 
     for helper_name in helper_order {
+        if let Some(remapped_helper_name) = canonical_mihomo_system_proxy_alias(helper_name) {
+            if proxy_group_names.contains(remapped_helper_name)
+                && proxy_names.iter().any(|name| name == helper_name)
+                && used_literals.insert(remapped_helper_name.to_string())
+            {
+                out.push(remapped_helper_name.to_string());
+                matched_any = true;
+            }
+            continue;
+        }
         if let Some(canonical_name) = canonical_system_visible_region_option(helper_name) {
             if proxy_group_names.contains(canonical_name)
                 && proxy_group_contains_managed_region(proxy_names, canonical_name)
@@ -2593,7 +2659,9 @@ fn normalize_proxy_names_from_helper_strict(
     }
 
     for proxy_name in proxy_names {
-        if canonical_system_visible_region_option(proxy_name).is_some() {
+        if canonical_system_visible_region_option(proxy_name).is_some()
+            || canonical_mihomo_system_proxy_alias(proxy_name).is_some()
+        {
             continue;
         }
         if used_literals.insert(proxy_name.clone()) {
@@ -2858,7 +2926,10 @@ fn normalize_user_proxy_group_order_strict(
         };
         if !proxy_names
             .iter()
-            .any(|name| canonical_system_visible_region_option(name).is_some())
+            .any(|name| {
+                canonical_system_visible_region_option(name).is_some()
+                    || canonical_mihomo_system_proxy_alias(name).is_some()
+            })
         {
             continue;
         }
@@ -5171,6 +5242,7 @@ mod tests {
     #[test]
     fn app_proxy_group_shape_only_matches_hidden_wrapper_name() {
         assert!(!has_app_proxy_group_shape(&["🚀 节点选择".to_string()]));
+        assert!(has_app_proxy_group_shape(&["🌟 节点选择".to_string()]));
         assert!(has_app_proxy_group_shape(&["💎 节点选择".to_string()]));
     }
 
@@ -5709,10 +5781,7 @@ providerA:
             .iter()
             .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 高质量"))
             .expect("provider route should keep high quality group");
-        assert_eq!(
-            high_quality_group.get("hidden"),
-            Some(&Value::Bool(true))
-        );
+        assert_eq!(high_quality_group.get("hidden"), None);
         assert_eq!(
             high_quality_group
                 .get("use")
@@ -5741,10 +5810,7 @@ providerA:
             .iter()
             .find(|group| group.get("name").and_then(Value::as_str) == Some("💎 高质量"))
             .expect("provider route should keep owner-facing high quality group");
-        assert_eq!(
-            owner_facing_high_quality.get("hidden"),
-            None
-        );
+        assert_eq!(owner_facing_high_quality.get("hidden"), Some(&Value::Bool(true)));
         assert_eq!(
             owner_facing_high_quality
                 .get("proxies")
@@ -6810,7 +6876,7 @@ providerA:
                 "🌟 US",
                 "🌟 Other",
                 "🛬 Tokyo-A",
-                "💎 高质量",
+                "🔒 高质量",
             ]
         );
         assert!(
@@ -6900,7 +6966,7 @@ rules: []
         assert_eq!(
             &visible_names[..9],
             &[
-                "💎 高质量",
+                "🔒 高质量",
                 "🌟 Japan",
                 "🌟 HongKong",
                 "🌟 Taiwan",
@@ -7851,18 +7917,18 @@ rules: []
                 "🌟 US",
                 "🌟 Other",
                 "🛬 Tokyo-A",
-                "💎 高质量",
+                "🔒 高质量",
             ]
         );
         assert_eq!(
             group_proxies("Simple Auto"),
-            vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
+            vec!["🌟 Singapore", "🌟 US", "🔒 高质量"]
         );
         assert_eq!(
             group_proxies("🐟 漏网之鱼"),
             vec![
-                "💎 节点选择",
-                "💎 高质量",
+                "🌟 节点选择",
+                "🔒 高质量",
                 "🗽 大流量",
                 "🌟 Singapore",
                 "🌟 US",
@@ -7873,8 +7939,8 @@ rules: []
         assert_eq!(
             group_proxies("🤖 AI"),
             vec![
-                "💎 节点选择",
-                "💎 高质量",
+                "🌟 节点选择",
+                "🔒 高质量",
                 "🗽 大流量",
                 "🌟 Singapore",
                 "🌟 US",
@@ -8065,7 +8131,7 @@ rules: []
                 "🌟 Singapore",
                 "🌟 US",
                 "🛬 Tokyo-A",
-                "💎 高质量",
+                "🔒 高质量",
                 "Tokyo-A-reality",
                 "Tokyo-A-ss",
             ]
@@ -8152,7 +8218,7 @@ rules: []
             .collect::<Vec<_>>();
         assert_eq!(
             refs,
-            vec!["🌟 Singapore", "🌟 US", "🛬 Tokyo-A", "💎 高质量"]
+            vec!["🌟 Singapore", "🌟 US", "🛬 Tokyo-A", "🔒 高质量"]
         );
     }
 
@@ -8246,7 +8312,7 @@ rules: []
                 "🌟 US",
                 "🛬 Osaka-A",
                 "🛬 Tokyo-B",
-                "💎 高质量",
+                "🔒 高质量",
             ]
         );
     }
@@ -8484,7 +8550,7 @@ rules: []
                 "🛑 全球拦截",
                 "🗽 大流量",
                 "🌟 US",
-                "💎 高质量",
+                "🔒 高质量",
                 "🎯 全球直连",
                 "🌟 Singapore",
             ]

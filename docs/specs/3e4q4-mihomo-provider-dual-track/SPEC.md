@@ -22,7 +22,7 @@
   - `GET /api/sub/{token}/mihomo/provider/system`
 - provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点与链式节点都移入 provider payload。
 - 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，`dialer-proxy` 指向按 `Node.access_host` 聚合生成的 per-base relay 组 `🛣️ {relay-base}`。
-- provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
+- provider 主配置中的地区组、高质量/节点选择聚合组与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 - 冻结部署无关的 relay 健康检查合同：只要节点以“托管默认 VLESS endpoint”身份存在，host-managed 与 container-managed 都必须用同一合同决定 `reality.dest` 改写与 Mihomo relay `url-test` URL 选择。
 
@@ -64,11 +64,11 @@
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
-  - per-base relay 组 `🛣️ {relay-base}`、owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、兼容 alias `🔒/🤯 {Region}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+  - per-base relay 组 `🛣️ {relay-base}`、owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、兼容 alias `🔒/🤯 {Region}`、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`🌟 节点选择`、`💎 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。`🔒/🤯 {Region}` 只保留隐藏 alias 语义，不再直接暴露系统直连或链式候选。
-- `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须稳定暴露隐藏兼容层 `🔒 高质量`，以及非地区直连接入面的全局兜底入口 `🤯 All`。地区入口继续由 `🔒 高质量` 承载；若未来重命名或替换聚合组，仍必须保留“高质量入口 + 全局兜底入口”的两层语义，不能让最终可见入口退化成仅剩单一路径且无兜底的壳组。
+- `🔒 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，最终输出都必须稳定提供 `💎 高质量 -> ["🔒 高质量", "🤯 All"]` 这层 hidden fallback，以及由 `🔒 高质量` 承载的地区入口，不能让最终可见入口退化成无全局兜底的单一路径。
 - per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；健康检查 URL 选择顺序必须是：
   - 同一 `access_host` 下存在至少一个托管 VLESS endpoint 时，使用最小 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`
   - 否则当同一 `access_host` 下只有一个公开 `api_base_url` 时，使用该 API health URL
@@ -76,7 +76,7 @@
 - 输出不得再生成共享 `🛣️ JP/HK/SG` 主路径，也不得生成 `🛣️ {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除，不得重新展开为共享中转语义。
 - `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 必须先做最终 provider 主配置 + `/mihomo/provider/system` payload 的联合预渲染校验；任何未定义的 `proxies`、`use`、`dialer-proxy` 或 `rules` 引用都必须返回 `400 invalid_request`，不得静默 remap、裁剪或回退。
 - 服务端不得自动抽取、重写或规范化用户输入中的 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不得把 legacy relay alias、旧 landing 引用或保留名冲突转换成“兼容修复”。
-- provider 主配置里的 hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在 `💎 高质量` 与地区组之间。
+- provider 主配置里的 hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在可见地区组、`🔒 高质量`、`🚀 节点选择` 之前。
 - provider 主配置里的系统可见地区组必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - `GET /api/health` 与 `GET /api/admin/config` 必须增量暴露 `vless_https_canary` 运行态，包括 enabled/bind、证书到期时间与最近一次续期错误；管理面视图保持只读，不提供手工修改接入面 probe URL 的入口。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
@@ -137,7 +137,7 @@
 - Given 用户在 `mixin_yaml` 内写入 `proxies` 或 `proxy-providers`，When 保存 profile，Then 服务端保留原始输入，不做自动抽取；坏数据只在最终渲染校验阶段失败。
 - Given provider 主配置，When 检查 `proxy-groups` 顺序，Then hidden `🛣️ {relay-base}` 必须排在 `🚀 节点选择` 之后。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，且 `🔒 高质量` 会稳定暴露该地区入口，无需更新用户模板。
-- Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；当前合同下 `💎 高质量` 应稳定暴露 `🔒 高质量` 与 `🤯 All`，而地区入口由 `🔒 高质量` 承载，不能让最终可见入口缺失全局兜底。
+- Given provider 主配置，When 检查高质量相关聚合语义，Then 最终输出必须保留“可见高质量入口 + hidden 全局兜底入口”两层结构；当前合同下 `🔒 高质量` 是可见入口，`💎 高质量` 稳定暴露 `["🔒 高质量", "🤯 All"]`，而地区入口由 `🔒 高质量` 承载。
 - Given 托管 VLESS endpoint 已启用，When 请求 `https://<access_host[:port]>/generate_204`，Then 现有 VLESS/REALITY 接入点会把未认证 HTTPS 流量转到 xp 进程内 loopback TLS canary 并返回 `204`，且不新增公网 probe listener。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
@@ -223,6 +223,6 @@
 - 2026-05-02: 修正 provider-only 高质量与地区接入点口径；`🔒 高质量` / `🔒 {Region}` 动态包含系统 `{base}-reality`，`🛬 {base}` 通过 system provider payload 顺序保证 ss-chain 先于 reality-chain。
 - 2026-06-14: relay 外层中转从共享 `🛣️ JP/HK/SG` 改为按 `Node.access_host` 聚合的 per-base relay 组，并删除 `🛣️ {Region}` 兼容地区别名。
 - 2026-06-15: Mihomo profile 保存收紧为“预渲染联合校验 + 明确 invalid_request”；移除静默 remap / prune / autosplit，hidden relay 组统一移到系统托管组尾部。
-- 2026-06-15: 明确补充高质量入口兜底合同；`💎 高质量` 之上必须存在稳定的全局兜底聚合入口，不能因 mixin 缺失或系统组收敛而消失。
+- 2026-06-15: 明确补充高质量入口兜底合同；系统输出必须稳定保留一层 hidden 全局兜底聚合入口，不能因 mixin 缺失或系统组收敛而消失。
 - 2026-06-16: relay 外层健康检查切到托管 VLESS 端口自身的 HTTPS canary（`https://<access_host[:port]>/generate_204`），并把 `🌟 {Region}` 明确冻结为 owner-facing 可见地区入口；`🔒/🤯 {Region}` 只保留兼容 alias 语义。
-- 2026-06-19: 收紧 owner-facing 地区组与高质量入口合同；provider 模式下 `🌟 {Region}` 只暴露 `🛬 {base}`，不再混入直连/链式候选，`💎 高质量` 作为可见入口只暴露 `🔒 高质量` 与 `🤯 All`，地区入口收敛到 `🔒 高质量`。
+- 2026-06-19: 收紧 owner-facing 地区组与高质量入口合同；provider 模式下 `🌟 {Region}` 只暴露 `🛬 {base}`，不再混入直连/链式候选，`🔒 高质量` 成为可见入口，`💎 高质量` 只保留 `["🔒 高质量", "🤯 All"]` hidden fallback 语义。

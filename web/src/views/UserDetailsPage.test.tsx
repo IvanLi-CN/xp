@@ -671,7 +671,7 @@ describe("<UserDetailsPage />", () => {
 		});
 	});
 
-	it("normalizes legacy dynamic sections before saving mihomo profile", async () => {
+	it("submits mihomo profile raw before backend validation", async () => {
 		setupMocks({
 			mihomoProfile: {
 				mixin_yaml: `port: 0
@@ -702,7 +702,14 @@ rules: []
 				"admintoken",
 				"u_01HUSERAAAAAA",
 				{
-					mixin_yaml: "port: 0\nrules: []\n",
+					mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
+rules: []
+`,
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: `providerA:
   type: http
