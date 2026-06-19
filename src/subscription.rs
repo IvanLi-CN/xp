@@ -1714,9 +1714,9 @@ fn inject_mihomo_region_groups(
             region.subscription_region,
             &[ProxyRefKind::Reality],
         )
-            .into_iter()
-            .map(serde_yaml::Value::String)
-            .collect::<Vec<_>>();
+        .into_iter()
+        .map(serde_yaml::Value::String)
+        .collect::<Vec<_>>();
         proxies.append(&mut reality_names);
 
         let mut select_map = serde_yaml::Mapping::new();
@@ -1948,27 +1948,34 @@ fn inject_mihomo_provider_region_groups(
 
         let proxies =
             landing_group_values_for_region(landing_groups, base_region_map, region.subscription_region);
-        let chain_names = proxy_ref_names_for_region(
-            proxy_name_set,
-            base_region_map,
-            region.subscription_region,
-            &[ProxyRefKind::SsChain, ProxyRefKind::RealityChain],
-        );
-        let reality_names = proxy_ref_names_for_region(
-            proxy_name_set,
-            base_region_map,
-            region.subscription_region,
-            &[ProxyRefKind::Reality],
-        );
-        let ss_direct_names = proxy_ref_names_for_region(
-            proxy_name_set,
-            base_region_map,
-            region.subscription_region,
-            &[ProxyRefKind::SsDirect],
-        );
-        let mut exact_names = Vec::with_capacity(reality_names.len() + chain_names.len());
-        exact_names.extend(reality_names);
-        exact_names.extend(chain_names);
+        let excluded_system_names = if region.subscription_region == NodeSubscriptionRegion::Other {
+            proxy_name_set
+                .iter()
+                .filter_map(|name| {
+                    let (kind, _) = classify_proxy_ref_name(name)?;
+                    matches!(
+                        kind,
+                        ProxyRefKind::SsDirect
+                            | ProxyRefKind::Reality
+                            | ProxyRefKind::SsChain
+                            | ProxyRefKind::RealityChain
+                    )
+                    .then_some(name.clone())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            proxy_ref_names_for_region(
+                proxy_name_set,
+                base_region_map,
+                region.subscription_region,
+                &[
+                    ProxyRefKind::SsDirect,
+                    ProxyRefKind::Reality,
+                    ProxyRefKind::SsChain,
+                    ProxyRefKind::RealityChain,
+                ],
+            )
+        };
 
         let mut select_map = serde_yaml::Mapping::new();
         select_map.insert(
@@ -1983,25 +1990,14 @@ fn inject_mihomo_provider_region_groups(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        let region_filter = if region.subscription_region == NodeSubscriptionRegion::Other {
-            ".*".to_string()
-        } else if exact_names.is_empty() {
-            region.filter.to_string()
-        } else {
-            format!(
-                "(?:{})|(?:{})",
-                region.filter,
-                exact_proxy_names_filter(&exact_names)
-            )
-        };
         select_map.insert(
             serde_yaml::Value::String("filter".to_string()),
-            serde_yaml::Value::String(region_filter),
+            serde_yaml::Value::String(region.filter.to_string()),
         );
         let exclude_filter = if region.subscription_region == NodeSubscriptionRegion::Other {
-            merge_mihomo_regex(Some(known_region_filter.as_str()), &ss_direct_names)
+            merge_mihomo_regex(Some(known_region_filter.as_str()), &excluded_system_names)
         } else {
-            merge_mihomo_regex(None, &ss_direct_names)
+            merge_mihomo_regex(None, &excluded_system_names)
         };
         if let Some(exclude_filter) = exclude_filter {
             select_map.insert(
@@ -2227,6 +2223,13 @@ fn default_all_region_group_names() -> impl Iterator<Item = String> {
         .map(|region| format!("🤯 {}", region.name))
 }
 
+fn default_owner_facing_high_quality_group_names() -> Vec<String> {
+    let mut proxies = default_visible_region_group_names().collect::<Vec<_>>();
+    proxies.push("🔒 高质量".to_string());
+    proxies.push("🤯 All".to_string());
+    proxies
+}
+
 fn inject_mihomo_default_aggregate_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
@@ -2251,11 +2254,7 @@ fn inject_mihomo_default_aggregate_groups(
 
     let generated = vec![
         mihomo_high_quality_group(existing_high_quality, provider_values, high_quality_proxies),
-        mihomo_select_group(
-            "💎 高质量",
-            true,
-            ["🔒 高质量".to_string(), "🤯 All".to_string()],
-        ),
+        mihomo_select_group("💎 高质量", false, default_owner_facing_high_quality_group_names()),
         mihomo_select_group("🤯 All", true, default_all_region_group_names()),
     ];
     let insert_at = insert_at.unwrap_or(remaining.len());
@@ -2289,6 +2288,10 @@ fn mihomo_high_quality_group(
             serde_yaml::Value::String("select".to_string()),
         );
         map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
@@ -2313,6 +2316,10 @@ fn mihomo_high_quality_group(
     map.insert(
         serde_yaml::Value::String("type".to_string()),
         serde_yaml::Value::String("select".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("hidden".to_string()),
+        serde_yaml::Value::Bool(true),
     );
     map.insert(
         serde_yaml::Value::String("use".to_string()),
@@ -5645,18 +5652,16 @@ providerA:
         let japan_filter = japan_group
             .get("filter")
             .and_then(Value::as_str)
-            .expect("Japan group should filter provider-hosted system proxies");
-        assert!(japan_filter.contains("日本|🇯🇵|Japan|JP"));
-        assert!(japan_filter.contains("Tokyo\\-A\\-reality"));
-        assert!(japan_filter.contains("Tokyo\\-A\\-ss\\-chain"));
-        assert!(japan_filter.contains("Tokyo\\-A\\-reality\\-chain"));
-        assert!(!japan_filter.contains("Tokyo\\-A\\-ss|"));
+            .expect("Japan group should keep provider region filter");
+        assert_eq!(japan_filter, "日本|🇯🇵|Japan|JP");
         let japan_exclude_filter = japan_group
             .get("exclude-filter")
             .and_then(Value::as_str)
-            .expect("Japan group should exclude provider-hosted direct ss proxies");
+            .expect("Japan group should exclude provider-hosted managed system proxies");
         assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
-        assert!(!japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss\\-chain"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality\\-chain"));
         assert_eq!(
             japan_group
                 .get("use")
@@ -5698,6 +5703,10 @@ providerA:
             .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 高质量"))
             .expect("provider route should keep high quality group");
         assert_eq!(
+            high_quality_group.get("hidden"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
             high_quality_group
                 .get("use")
                 .and_then(Value::as_sequence)
@@ -5720,6 +5729,35 @@ providerA:
         assert!(high_quality_exclude_filter.contains("剩余|到期"));
         assert!(high_quality_exclude_filter.contains("Tokyo\\-A\\-ss"));
         assert!(!high_quality_exclude_filter.contains("Tokyo\\-A\\-reality"));
+
+        let owner_facing_high_quality = proxy_groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("💎 高质量"))
+            .expect("provider route should keep owner-facing high quality group");
+        assert_eq!(
+            owner_facing_high_quality.get("hidden"),
+            None
+        );
+        assert_eq!(
+            owner_facing_high_quality
+                .get("proxies")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "🌟 Japan",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 US",
+                "🌟 Other",
+                "🔒 高质量",
+                "🤯 All",
+            ]
+        );
     }
 
     #[test]
@@ -6738,7 +6776,20 @@ providerA:
                 .collect::<Vec<_>>()
         };
 
-        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
+        assert_eq!(
+            group_refs("💎 高质量"),
+            vec![
+                "🌟 Japan",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 US",
+                "🌟 Other",
+                "🔒 高质量",
+                "🤯 All",
+            ]
+        );
         assert_eq!(
             groups
                 .iter()
@@ -6853,7 +6904,7 @@ rules: []
         assert_eq!(
             &visible_names[..9],
             &[
-                "🔒 高质量",
+                "💎 高质量",
                 "🌟 Japan",
                 "🌟 HongKong",
                 "🌟 Taiwan",
@@ -8123,7 +8174,20 @@ rules: []
         };
 
         assert_eq!(group_refs("🔒 高质量"), vec!["Tokyo-A-reality"]);
-        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
+        assert_eq!(
+            group_refs("💎 高质量"),
+            vec![
+                "🌟 Japan",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 US",
+                "🌟 Other",
+                "🔒 高质量",
+                "🤯 All",
+            ]
+        );
     }
 
     #[test]

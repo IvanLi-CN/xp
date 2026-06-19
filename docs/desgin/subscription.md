@@ -147,14 +147,14 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - provider 主配置顶层：
   - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - `proxies` = `extra_proxies_yaml`
-- `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
+- provider 方案下，`🔒 高质量` 继续通过 `use:` 消费 provider，并动态包含系统 `{base}-reality` 接入点；`{base}-ss` 不作为接入点目标。
 - per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 的 host slug 会保留 `.` 与 `-` 等分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 随当前订阅集合发生计数式重命名；若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
 - per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空。无外部 provider 时同样回落 `DIRECT`。健康检查 URL 选择顺序为：
   - 同一 `access_host` 下存在托管 VLESS endpoint 时，选择最小 VLESS 端口，并使用 `https://<access_host[:port]>/generate_204`
   - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
   - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`
-- 系统托管的地区面固定为 owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成隐藏 alias `🔒/🤯 {Region}`、`💎 高质量`、`🚀 节点选择` 与 `🤯 All`。
-- `💎 高质量` 必须保留 owner-facing 兜底层语义，不能退化成只剩 `🔒 高质量` 的单层入口；若 `💎 高质量` 本身不直接挂 `🤯 All`，则最终输出必须另有一个稳定包装入口同时暴露 `💎 高质量` 与 `🤯 All`。
+- 系统托管的地区面固定为 owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；`🔒/🤯 {Region}` 只保留隐藏 alias 语义。
+- `💎 高质量` 是可见的 owner-facing 高质量入口，必须稳定同时暴露可见地区组、隐藏兼容层 `🔒 高质量` 与全局兜底层 `🤯 All`；不能退化成只剩 `🔒 高质量` 的单层入口。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
@@ -182,7 +182,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
 - 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
 - `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只做 YAML 结构校验与最终渲染校验，不做自动抽取或规范化。
-- `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
+- `🔒 高质量` 若由用户模板提供，provider 渲染会保留其外部 provider 语义，同时追加 `xp-system-generated`，并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`。
 - 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`；同一 base 的 system provider payload 顺序必须保证过滤后 ss-chain 在 reality-chain 前。
 - hidden per-base relay 组 `🛣️ {relay-base}` 会在最终 `proxy-groups` 中统一移动到系统托管组尾部，位于地区组、`🛬 {base}`、`🔒 落地`、`🤯 All`、`🚀 节点选择` 之后。
 - `💎 高质量` 的兜底要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
