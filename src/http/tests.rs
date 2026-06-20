@@ -5329,6 +5329,15 @@ rules: []
         .collect::<Vec<_>>();
     assert_eq!(japan_alias_proxies, vec!["🌟 Japan"]);
 
+    let japan_crazy = groups
+        .iter()
+        .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 Japan"))
+        .expect("expected crazy region alias group");
+    assert_eq!(
+        japan_crazy.get("type").and_then(YamlValue::as_str),
+        Some("url-test")
+    );
+
     let landing_pool = groups
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 落地"))
@@ -6063,6 +6072,14 @@ rules: []
             .and_then(YamlValue::as_bool)
     };
 
+    let group_type = |name: &str| {
+        groups
+            .iter()
+            .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
+            .and_then(|group| group.get("type"))
+            .and_then(YamlValue::as_str)
+    };
+
     assert_eq!(
         group_refs("🚀 节点选择"),
         vec![
@@ -6078,12 +6095,14 @@ rules: []
         ]
     );
     assert_eq!(group_hidden("🚀 节点选择"), None);
-    assert_eq!(group_hidden("🌟 节点选择"), Some(true));
+    assert_eq!(group_type("💎 节点选择"), Some("fallback"));
+    assert_eq!(group_hidden("💎 节点选择"), Some(true));
     assert_eq!(
-        group_refs("🌟 节点选择"),
+        group_refs("💎 节点选择"),
         vec!["🚀 节点选择", "🤯 All"]
     );
     assert_eq!(group_hidden("🔒 高质量"), None);
+    assert_eq!(group_type("💎 高质量"), Some("fallback"));
     assert_eq!(group_hidden("💎 高质量"), Some(true));
     assert_eq!(
         group_refs("💎 高质量"),
@@ -6096,7 +6115,7 @@ rules: []
     assert_eq!(
         group_refs("🐟 漏网之鱼"),
         vec![
-            "🌟 节点选择",
+            "💎 节点选择",
             "🔒 高质量",
             "🗽 大流量",
             "🌟 Japan",
@@ -6109,7 +6128,7 @@ rules: []
     assert_eq!(
         group_refs("🤖 AI"),
         vec![
-            "🌟 节点选择",
+            "💎 节点选择",
             "🔒 高质量",
             "🗽 大流量",
             "🌟 Japan",
@@ -6207,6 +6226,18 @@ async fn admin_user_mihomo_profile_accepts_normalized_owner_mixin_and_renders_cu
             .and_then(YamlValue::as_bool)
     };
 
+    let group_type = |name: &str| {
+        root.get("proxy-groups")
+            .and_then(YamlValue::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
+            })
+            .and_then(|group| group.get("type"))
+            .and_then(YamlValue::as_str)
+    };
+
     let group_names = root
         .get("proxy-groups")
         .and_then(YamlValue::as_sequence)
@@ -6228,16 +6259,35 @@ async fn admin_user_mihomo_profile_accepts_normalized_owner_mixin_and_renders_cu
     assert!(proxy_provider_names.contains(&"xp-system-generated"));
 
     assert_eq!(group_hidden("🔒 高质量"), None);
+    assert_eq!(group_type("💎 高质量"), Some("fallback"));
     assert_eq!(group_hidden("💎 高质量"), Some(true));
     assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
-    assert_eq!(group_hidden("🌟 节点选择"), Some(true));
-    assert_eq!(group_refs("🌟 节点选择"), vec!["🚀 节点选择", "🤯 All"]);
+    assert_eq!(group_type("💎 节点选择"), Some("fallback"));
+    assert_eq!(group_hidden("💎 节点选择"), Some(true));
+    assert_eq!(group_refs("💎 节点选择"), vec!["🚀 节点选择", "🤯 All"]);
+    assert!(!group_names.contains(&"🌟 节点选择"));
     assert!(group_names.contains(&"🌟 Japan"));
     assert!(group_names.contains(&"🌟 Taiwan"));
-    assert_eq!(group_refs("🌟 Japan"), vec!["🛬 node-1"]);
+    let japan_group = root
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .and_then(|groups| {
+            groups
+                .iter()
+                .find(|group| group.get("name").and_then(YamlValue::as_str) == Some("🌟 Japan"))
+        })
+        .expect("Japan region group must exist");
+    assert_eq!(
+        japan_group.get("type").and_then(YamlValue::as_str),
+        Some("fallback")
+    );
     assert!(
-        group_refs("🐟 漏网之鱼").contains(&"🌟 节点选择"),
-        "fallback business groups should depend on hidden 🌟 节点选择 alias"
+        japan_group.get("proxies").is_none(),
+        "visible region groups should not expose static landing groups"
+    );
+    assert!(
+        group_refs("🐟 漏网之鱼").contains(&"💎 节点选择"),
+        "fallback business groups should depend on hidden 💎 节点选择 alias"
     );
     assert!(
         !group_refs("🐟 漏网之鱼").contains(&"🚀 节点选择"),
@@ -6245,10 +6295,23 @@ async fn admin_user_mihomo_profile_accepts_normalized_owner_mixin_and_renders_cu
     );
     assert_eq!(
         group_refs("🌏 国内媒体"),
-        vec!["🎯 全球直连", "🌟 节点选择"]
+        vec!["🎯 全球直连", "💎 节点选择"]
     );
     assert!(!group_names.contains(&"🛣️ JP/HK/TW"));
     assert!(!group_names.contains(&"🛣️ JP/HK/SG"));
+    let index_of = |name: &str| {
+        group_names
+            .iter()
+            .position(|group_name| *group_name == name)
+            .unwrap_or_else(|| panic!("expected group {name} to exist"))
+    };
+    assert!(index_of("🔒 高质量") < index_of("🐟 漏网之鱼"));
+    assert!(index_of("🌟 Japan") < index_of("🐟 漏网之鱼"));
+    assert!(index_of("🔒 落地") < index_of("🐟 漏网之鱼"));
+    assert!(index_of("🚀 节点选择") < index_of("🐟 漏网之鱼"));
+    assert!(index_of("🔒 高质量") < index_of("🌟 Japan"));
+    assert!(index_of("🌟 Japan") < index_of("🔒 落地"));
+    assert!(index_of("🔒 落地") < index_of("🚀 节点选择"));
 
     let dns_nameserver = root
         .get("dns")
@@ -6258,8 +6321,77 @@ async fn admin_user_mihomo_profile_accepts_normalized_owner_mixin_and_renders_cu
         .and_then(YamlValue::as_str);
     assert_eq!(
         dns_nameserver,
-        Some("https://cloudflare-dns.com/dns-query#🌟 节点选择")
+        Some("https://cloudflare-dns.com/dns-query#💎 节点选择")
     );
+}
+
+#[tokio::test]
+async fn admin_user_mihomo_profile_accepts_legacy_hidden_node_selector_input_but_renders_diamond_alias()
+{
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id;
+
+    let legacy_mixin = include_str!(
+        "../../docs/specs/rbt5e-mihomo-subscription-template/assets/owner-mixin-normalized.yaml"
+    )
+    .replace("💎 节点选择", "🌟 节点选择");
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+              "mixin_yaml": legacy_mixin,
+              "extra_proxies_yaml": "",
+              "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{}?format=mihomo", fixtures.subscription_token),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let root: YamlValue = serde_yaml::from_str(&body_text(res).await).unwrap();
+
+    let group_names = root
+        .get("proxy-groups")
+        .and_then(YamlValue::as_sequence)
+        .expect("proxy-groups must exist")
+        .iter()
+        .filter_map(|group| group.get("name").and_then(YamlValue::as_str))
+        .collect::<Vec<_>>();
+    assert!(!group_names.contains(&"🌟 节点选择"));
+
+    let group_refs = |name: &str| {
+        root.get("proxy-groups")
+            .and_then(YamlValue::as_sequence)
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(YamlValue::as_str) == Some(name))
+            })
+            .and_then(|group| group.get("proxies"))
+            .and_then(YamlValue::as_sequence)
+            .expect("group proxies must exist")
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(group_refs("💎 节点选择"), vec!["🚀 节点选择", "🤯 All"]);
+    assert_eq!(group_refs("🤖 AI")[0], "💎 节点选择");
 }
 
 #[tokio::test]

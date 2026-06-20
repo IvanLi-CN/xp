@@ -13,8 +13,8 @@ rules:
   - DOMAIN-KEYWORD,codeium,👨‍💻 Dev
   - DOMAIN-KEYWORD,marscode,👨‍💻 Dev
   - DOMAIN-SUFFIX,cn.bing.com,REJECT
-  - DOMAIN-SUFFIX,region1.v2.argotunnel.com,🌟 节点选择
-  - RULE-SET,OwnerProxy,🌟 节点选择
+  - DOMAIN-SUFFIX,region1.v2.argotunnel.com,💎 节点选择
+  - RULE-SET,OwnerProxy,💎 节点选择
   - RULE-SET,OwnerDirect,🎯 全球直连
   - RULE-SET,OwnerDownload,🗽 大流量
   - RULE-SET,OwnerQuality,🔒 高质量
@@ -33,7 +33,7 @@ rules:
   - RULE-SET,BilibiliPcdn,🛑 全球拦截
   - RULE-SET,Apple,🍎 苹果服务
   - RULE-SET,Telegram,📲 电报信息
-  - RULE-SET,ProxyLite,🌟 节点选择
+  - RULE-SET,ProxyLite,💎 节点选择
   - RULE-SET,ProxyMedia,🌍 国外媒体
   - RULE-SET,ChinaDomain,🎯 全球直连
   - RULE-SET,ChinaCompanyIp,🎯 全球直连
@@ -56,9 +56,9 @@ rules:
   - DST-PORT,9993,🎯 全球直连
   - DST-PORT,3478,🎯 全球直连
   - GEOIP,CN,🎯 全球直连
-  - DOMAIN-SUFFIX,akamaized.net,🌟 节点选择
-  - DOMAIN-SUFFIX,app-measurement.com,🌟 节点选择
-  - RULE-SET,ProxyGFWlist,🌟 节点选择
+  - DOMAIN-SUFFIX,akamaized.net,💎 节点选择
+  - DOMAIN-SUFFIX,app-measurement.com,💎 节点选择
+  - RULE-SET,ProxyGFWlist,💎 节点选择
   - MATCH,🐟 漏网之鱼
 
 rule-providers:
@@ -377,7 +377,7 @@ dns:
     - https://dns.alidns.com/dns-query#DIRECT
     - https://doh.pub/dns-query#DIRECT
   nameserver:
-    - https://cloudflare-dns.com/dns-query#🌟 节点选择
+    - https://cloudflare-dns.com/dns-query#💎 节点选择
   fallback:
     - https://doh.pub/dns-query#DIRECT
     - https://cloudflare-dns.com/dns-query#DIRECT
@@ -385,9 +385,9 @@ dns:
     ntp.aliyun.com: https://dns.alidns.com/dns-query#DIRECT
     +.jsdmirror.com: https://dns.alidns.com/dns-query#DIRECT
     fastly.jsdelivr.net: https://dns.alidns.com/dns-query#DIRECT
-    +.msftconnecttest.com,+.msftncsi.com: https://cloudflare-dns.com/dns-query#🌟 节点选择
-    +.googleapis.com,+.googleapis.cn: https://cloudflare-dns.com/dns-query#🌟 节点选择
-    rule-set:ProxyGFWlist: https://cloudflare-dns.com/dns-query#🌟 节点选择
+    +.msftconnecttest.com,+.msftncsi.com: https://cloudflare-dns.com/dns-query#💎 节点选择
+    +.googleapis.com,+.googleapis.cn: https://cloudflare-dns.com/dns-query#💎 节点选择
+    rule-set:ProxyGFWlist: https://cloudflare-dns.com/dns-query#💎 节点选择
     rule-set:ChinaDomain: https://dns.alidns.com/dns-query#DIRECT
     rule-set:OwnerDirect: https://dns.alidns.com/dns-query#DIRECT
 
@@ -395,7 +395,7 @@ proxy-groups:
   - name: 🐟 漏网之鱼
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -420,7 +420,7 @@ proxy-groups:
   - name: 🤖 AI
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -428,7 +428,7 @@ proxy-groups:
   - name: 🎥 NETFLIX
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -436,7 +436,7 @@ proxy-groups:
   - name: 🌍 国外媒体
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -445,11 +445,11 @@ proxy-groups:
     type: select
     proxies:
       - 🎯 全球直连
-      - 🌟 节点选择
+      - 💎 节点选择
   - name: Ⓜ️ 微软服务
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -457,7 +457,7 @@ proxy-groups:
   - name: Xbox
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -465,7 +465,7 @@ proxy-groups:
   - name: 🎮 Steam
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -473,7 +473,7 @@ proxy-groups:
   - name: 🎮 Steam CN
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -481,7 +481,7 @@ proxy-groups:
   - name: 🎶 Spotify
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -489,7 +489,7 @@ proxy-groups:
   - name: 📲 电报信息
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -497,7 +497,7 @@ proxy-groups:
   - name: 👨‍💻 Dev
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -506,12 +506,12 @@ proxy-groups:
     type: select
     proxies:
       - 🎯 全球直连
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🛑 全球拦截
   - name: 🍎 苹果服务
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -519,7 +519,7 @@ proxy-groups:
   - name: 📢 谷歌FCM
     type: select
     proxies:
-      - 🌟 节点选择
+      - 💎 节点选择
       - 🔒 高质量
       - 🗽 大流量
       - 🎯 全球直连
@@ -529,13 +529,13 @@ proxy-groups:
     proxies:
       - 🛑 全球拦截
       - 🎯 全球直连
-      - 🌟 节点选择
+      - 💎 节点选择
   - name: 🚫 运营劫持
     type: select
     proxies:
       - 🛑 全球拦截
       - 🎯 全球直连
-      - 🌟 节点选择
+      - 💎 节点选择
   - name: 🎯 全球直连
     type: select
     proxies:

@@ -157,7 +157,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - `🔒 高质量` 是可见的 owner-facing 高质量入口；若用户模板显式提供该组，provider 渲染会保留其外部 provider 语义，同时追加系统 `{base}-reality` 接入点能力。
 - `💎 高质量` 是 hidden fallback 兼容组，稳定暴露 `["🔒 高质量", "🤯 All"]`。
 - `🚀 节点选择` 是可见的 owner-facing 主选择组，稳定包含可见地区组、落地组与 `🔒 高质量`。
-- `🌟 节点选择` 与 `💎 节点选择` 是 hidden fallback 兼容组，稳定暴露 `["🚀 节点选择", "🤯 All"]`。
+- `💎 节点选择` 是 hidden fallback 兼容组，稳定暴露 `["🚀 节点选择", "🤯 All"]`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
@@ -180,7 +180,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - per-base relay 组：`🛣️ {relay-base}`，按 `Node.access_host` 聚合，同机共享
   - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
   - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为隐藏 alias；`🛣️ {Region}` 兼容别名不再生成
-  - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`🌟 节点选择`、`💎 节点选择`、`🤯 All`
+  - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
 - 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
@@ -188,7 +188,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - `🔒 高质量` 若由用户模板提供，provider 渲染会保留其外部 provider 语义，同时追加 `xp-system-generated`，并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`。
 - 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`；同一 base 的 system provider payload 顺序必须保证过滤后 ss-chain 在 reality-chain 前。
 - hidden per-base relay 组 `🛣️ {relay-base}` 会在最终 `proxy-groups` 中统一移动到系统托管组尾部，位于可见地区组、`🛬 {base}`、`🔒 落地`、`🤯 All`、`🚀 节点选择` 之后。
-- `💎 高质量` / `🌟 节点选择` / `💎 节点选择` 的 hidden fallback 要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
+- `💎 高质量` / `💎 节点选择` 的 hidden fallback 要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪，但地区组名会保留为兼容别名，并统一改成被动 `select` 组。
 - `/api/health` 与 `/api/admin/config` 都会增量暴露 `vless_https_canary` 运行态，便于运维审计证书有效期、loopback bind 与最近一次续期错误；这些字段只读。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
