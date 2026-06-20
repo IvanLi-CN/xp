@@ -1734,6 +1734,10 @@ fn inject_mihomo_region_groups(
             serde_yaml::Value::Bool(false),
         );
         select_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        select_map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
@@ -1762,7 +1766,7 @@ fn inject_mihomo_region_groups(
 
         groups.push(mihomo_select_group(
             &format!("🔒 {}", region.name),
-            true,
+            false,
             [select_name.clone()],
         ));
         groups.push(mihomo_url_test_group(
@@ -2011,6 +2015,10 @@ fn inject_mihomo_provider_region_groups(
             serde_yaml::Value::Bool(false),
         );
         select_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        select_map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
@@ -2033,7 +2041,7 @@ fn inject_mihomo_provider_region_groups(
 
         groups.push(mihomo_select_group(
             &format!("🔒 {}", region.name),
-            true,
+            false,
             [select_name.clone()],
         ));
         groups.push(mihomo_url_test_group(
@@ -5812,11 +5820,12 @@ providerB:
         let japan_group = proxy_groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 Japan"))
-            .expect("region Japan group should exist");
+            .expect("region Japan source group should exist");
         assert_eq!(
             japan_group.get("type"),
             Some(&Value::String("fallback".to_string()))
         );
+        assert_eq!(japan_group.get("hidden"), Some(&Value::Bool(true)));
         let japan_refs = japan_group
             .get("proxies")
             .and_then(Value::as_sequence)
@@ -5829,15 +5838,16 @@ providerB:
         let japan_alias = proxy_groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
-            .expect("compat Japan group should exist");
+            .expect("visible Japan group should exist");
         assert_eq!(
             japan_alias.get("type"),
             Some(&Value::String("select".to_string()))
         );
+        assert_eq!(japan_alias.get("hidden"), None);
         let japan_alias_refs = japan_alias
             .get("proxies")
             .and_then(Value::as_sequence)
-            .expect("compat Japan group should point at visible Japan group")
+            .expect("visible Japan group should point at source Japan group")
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
@@ -7223,13 +7233,13 @@ rules: []
             &visible_names[..9],
             &[
                 "🔒 高质量",
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
+                "🔒 Japan",
+                "🔒 HongKong",
+                "🔒 Taiwan",
+                "🔒 Korea",
+                "🔒 Singapore",
+                "🔒 US",
+                "🔒 Other",
                 "🔒 落地",
             ]
         );
@@ -7243,6 +7253,10 @@ rules: []
                     .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Singapore"))
             })
             .expect("🌟 Singapore group should be rebuilt by the system");
+        assert_eq!(
+            singapore_group.get("hidden").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(
             singapore_group
                 .get("use")
@@ -7359,7 +7373,7 @@ providerA:
         );
 
         let japan_group = group("🌟 Japan");
-        assert_eq!(japan_group.get("hidden"), None);
+        assert_eq!(japan_group.get("hidden"), Some(&Value::Bool(true)));
         assert_eq!(
             japan_group.get("type").and_then(Value::as_str),
             Some("fallback")
@@ -7387,7 +7401,15 @@ providerA:
         assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
         assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality\\-chain"));
 
-        for alias_name in ["🔒 Japan", "🤯 Japan"] {
+        let visible_region = group("🔒 Japan");
+        assert_eq!(visible_region.get("hidden"), None);
+        assert_eq!(group_refs("🔒 Japan"), vec!["🌟 Japan"]);
+
+        let hidden_probe_region = group("🤯 Japan");
+        assert_eq!(hidden_probe_region.get("hidden"), Some(&Value::Bool(true)));
+        assert_eq!(group_refs("🤯 Japan"), vec!["🌟 Japan"]);
+
+        for alias_name in ["🤯 Japan"] {
             let alias = group(alias_name);
             assert_eq!(alias.get("hidden"), Some(&Value::Bool(true)));
             assert_eq!(group_refs(alias_name), vec!["🌟 Japan"]);
@@ -8297,7 +8319,7 @@ rules: []
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 Japan"))
             .expect("🌟 Japan group should exist");
-        assert_eq!(star_japan.get("hidden"), None);
+        assert_eq!(star_japan.get("hidden"), Some(&Value::Bool(true)));
         let star_us = groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 US"))

@@ -153,7 +153,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 同一 `access_host` 下存在托管 VLESS endpoint 时，选择最小 VLESS 端口，并使用 `https://<access_host[:port]>/generate_204`
   - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
   - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`
-- 系统托管的地区面固定为 owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；`🔒/🤯 {Region}` 只保留隐藏 alias 语义。
+- 系统托管的地区面固定为 hidden `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；对应的 `🔒 {Region}` 是 owner-facing 可见地区入口，`🤯 {Region}` 保留 hidden probe/url-test 语义。
 - `🔒 高质量` 是可见的 owner-facing 高质量入口；若用户模板显式提供该组，provider 渲染会保留其外部 provider 语义，同时追加系统 `{base}-reality` 接入点能力。
 - `💎 高质量` 是 hidden fallback 兼容组，稳定暴露 `["🔒 高质量", "🤯 All"]`。
 - `🚀 节点选择` 是可见的 owner-facing 主选择组，稳定包含可见地区组、落地组与 `🔒 高质量`。
@@ -178,8 +178,8 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 所有外部 provider 名称会注入每个 per-base relay 组的 `use` 列表，并用日本/香港/新加坡 filter 选择外层中转节点。
 - 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
   - per-base relay 组：`🛣️ {relay-base}`，按 `Node.access_host` 聚合，同机共享
-  - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-  - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，保留名称但统一改为隐藏 alias；`🛣️ {Region}` 兼容别名不再生成
+  - hidden 地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
+  - 地区入口组：`🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 为可见 owner-facing 入口，`🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 为 hidden probe/url-test；`🛣️ {Region}` 兼容别名不再生成
   - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
