@@ -1160,13 +1160,8 @@ const MIHOMO_LEGACY_FALLBACK_REGION_GROUPS: [MihomoRegionGroup; 4] = [
 ];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
-const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 5] = [
-    "🌟 节点选择",
-    "💎 节点选择",
-    "🗽 大流量",
-    "🎯 全球直连",
-    "🛑 全球拦截",
-];
+const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 4] =
+    ["💎 节点选择", "🗽 大流量", "🎯 全球直连", "🛑 全球拦截"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct MihomoProxyGroupOrderHints {
@@ -1254,7 +1249,7 @@ fn resolved_subscription_region_for_base(
         .unwrap_or_else(|| managed_subscription_region_from_base(base))
 }
 
-fn canonical_visible_region_name(name: &str) -> Option<&'static str> {
+fn canonical_region_wrapper_name(name: &str) -> Option<&'static str> {
     match name {
         "🌟 Japan" | "🔒 Japan" | "🤯 Japan" => Some("🌟 Japan"),
         "🌟 Korea" | "🔒 Korea" | "🤯 Korea" => Some("🌟 Korea"),
@@ -1333,13 +1328,17 @@ fn inject_mihomo_proxy_groups(
         .map(|name| serde_yaml::Value::String(name.clone()))
         .collect::<Vec<_>>();
 
-    let landing_group_names = landing_group_names_for_base_names(&base_names);
-    let mut high_quality_proxies = provider_reality_access_names(landing_proxy_name_set);
-    append_unique_proxy_names(&mut high_quality_proxies, landing_group_names);
-    inject_mihomo_default_aggregate_groups(&mut groups, &provider_values, high_quality_proxies);
-    inject_mihomo_relay_groups(&mut groups, &outer_provider_values, relay_context.relay_groups);
     let landing_groups =
         inject_mihomo_landing_groups(&mut groups, landing_proxy_name_set, &base_names);
+    let high_quality_proxies = provider_reality_access_names(landing_proxy_name_set);
+    inject_mihomo_default_aggregate_groups(
+        &mut groups,
+        &provider_values,
+        &landing_groups,
+        high_quality_proxies,
+    );
+    inject_mihomo_relay_groups(&mut groups, &outer_provider_values, relay_context.relay_groups);
+    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
     inject_mihomo_region_groups(
         &mut groups,
         &provider_values,
@@ -1348,7 +1347,6 @@ fn inject_mihomo_proxy_groups(
         &landing_groups,
     );
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
-    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
 
     root.insert(
         serde_yaml::Value::String("proxy-groups".to_string()),
@@ -1416,15 +1414,20 @@ fn inject_mihomo_provider_proxy_groups(
         .map(|name| serde_yaml::Value::String(name.clone()))
         .collect::<Vec<_>>();
 
-    let high_quality_proxies = landing_group_names_for_base_names(&base_names);
-    inject_mihomo_default_aggregate_groups(&mut groups, &provider_values, high_quality_proxies);
-    inject_mihomo_relay_groups(&mut groups, &outer_provider_values, relay_context.relay_groups);
     let landing_groups = inject_mihomo_provider_landing_groups(
         &mut groups,
         &system_provider_values,
         provider_proxy_name_set,
         &base_names,
     );
+    inject_mihomo_default_aggregate_groups(
+        &mut groups,
+        &provider_values,
+        &landing_groups,
+        Vec::new(),
+    );
+    inject_mihomo_relay_groups(&mut groups, &outer_provider_values, relay_context.relay_groups);
+    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
     inject_mihomo_provider_region_groups(
         &mut groups,
         &provider_values,
@@ -1433,7 +1436,6 @@ fn inject_mihomo_provider_proxy_groups(
         &landing_groups,
     );
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
-    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
 
     root.insert(
         serde_yaml::Value::String("proxy-groups".to_string()),
@@ -1696,79 +1698,98 @@ fn inject_mihomo_region_groups(
 ) {
     let known_region_filter = known_non_other_region_filter();
     for region in MIHOMO_REGION_GROUPS {
-        let select_name = format!("🌟 {}", region.name);
-        let proxies = proxy_ref_names_for_region(
+        let source_name = format!("🌟 {}", region.name);
+        let visible_name = format!("🔒 {}", region.name);
+
+        let leaf_proxies = proxy_ref_names_for_region(
             proxy_name_set,
             base_region_map,
             region.subscription_region,
             &[ProxyRefKind::Reality],
-        );
+        )
+            .into_iter()
+            .map(serde_yaml::Value::String)
+            .collect::<Vec<_>>();
 
-        let mut select_map = serde_yaml::Mapping::new();
-        select_map.insert(
+        let mut visible_map = serde_yaml::Mapping::new();
+        visible_map.insert(
             serde_yaml::Value::String("name".to_string()),
-            serde_yaml::Value::String(select_name.clone()),
+            serde_yaml::Value::String(visible_name.clone()),
         );
-        select_map.insert(
+        visible_map.insert(
             serde_yaml::Value::String("type".to_string()),
-            serde_yaml::Value::String("fallback".to_string()),
+            serde_yaml::Value::String("select".to_string()),
         );
-        select_map.insert(
-            serde_yaml::Value::String("url".to_string()),
-            serde_yaml::Value::String(mihomo_default_health_check_url()),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("interval".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(300)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("timeout".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("max-failed-times".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(1)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("lazy".to_string()),
-            serde_yaml::Value::Bool(false),
-        );
-        select_map.insert(
+        visible_map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        select_map.insert(
+        visible_map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(region.filter.to_string()),
         );
         if region.subscription_region == NodeSubscriptionRegion::Other {
-            select_map.insert(
+            visible_map.insert(
                 serde_yaml::Value::String("exclude-filter".to_string()),
                 serde_yaml::Value::String(known_region_filter.clone()),
             );
         }
-        if !proxies.is_empty() {
-            select_map.insert(
+        if !leaf_proxies.is_empty() {
+            visible_map.insert(
                 serde_yaml::Value::String("proxies".to_string()),
-                serde_yaml::Value::Sequence(
-                    proxies
-                        .into_iter()
-                        .map(serde_yaml::Value::String)
-                        .collect(),
-                ),
+                serde_yaml::Value::Sequence(leaf_proxies),
             );
         }
-        groups.push(serde_yaml::Value::Mapping(select_map));
+        groups.push(serde_yaml::Value::Mapping(visible_map));
 
-        groups.push(mihomo_select_group(
-            &format!("🔒 {}", region.name),
-            true,
-            [select_name.clone()],
-        ));
+        let mut source_map = serde_yaml::Mapping::new();
+        source_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(source_name.clone()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("fallback".to_string()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String(MIHOMO_DEFAULT_HEALTH_CHECK_URL.to_string()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(300)),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("tolerance".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(0)),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(region.filter.to_string()),
+        );
+        if region.subscription_region == NodeSubscriptionRegion::Other {
+            source_map.insert(
+                serde_yaml::Value::String("exclude-filter".to_string()),
+                serde_yaml::Value::String(known_region_filter.clone()),
+            );
+        }
+        source_map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(visible_name.clone())]),
+        );
+        groups.push(serde_yaml::Value::Mapping(source_map));
         groups.push(mihomo_url_test_group(
             &format!("🤯 {}", region.name),
             true,
-            [select_name.clone()],
+            [source_name.clone()],
         ));
     }
 }
@@ -1933,15 +1954,6 @@ fn inject_mihomo_provider_landing_groups(
     out
 }
 
-fn landing_group_names_for_base_names(
-    base_names: &std::collections::BTreeSet<String>,
-) -> Vec<String> {
-    base_names
-        .iter()
-        .map(|base| format!("🛬 {base}"))
-        .collect()
-}
-
 fn inject_mihomo_provider_region_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
@@ -1951,95 +1963,112 @@ fn inject_mihomo_provider_region_groups(
 ) {
     let known_region_filter = known_non_other_region_filter();
     for region in MIHOMO_REGION_GROUPS {
-        let select_name = format!("🌟 {}", region.name);
-        let excluded_system_names = if region.subscription_region == NodeSubscriptionRegion::Other {
-            proxy_name_set
-                .iter()
-                .filter_map(|name| {
-                    let (kind, _) = classify_proxy_ref_name(name)?;
-                    matches!(
-                        kind,
-                        ProxyRefKind::SsDirect
-                            | ProxyRefKind::Reality
-                            | ProxyRefKind::SsChain
-                            | ProxyRefKind::RealityChain
-                    )
-                    .then_some(name.clone())
-                })
-                .collect::<Vec<_>>()
-        } else {
-            proxy_ref_names_for_region(
-                proxy_name_set,
-                base_region_map,
-                region.subscription_region,
-                &[
-                    ProxyRefKind::SsDirect,
-                    ProxyRefKind::Reality,
-                    ProxyRefKind::SsChain,
-                    ProxyRefKind::RealityChain,
-                ],
-            )
-        };
+        let source_name = format!("🌟 {}", region.name);
+        let visible_name = format!("🔒 {}", region.name);
 
-        let mut select_map = serde_yaml::Mapping::new();
-        select_map.insert(
+        let reality_names = proxy_ref_names_for_region(
+            proxy_name_set,
+            base_region_map,
+            region.subscription_region,
+            &[ProxyRefKind::Reality],
+        );
+        let ss_direct_names = proxy_ref_names_for_region(
+            proxy_name_set,
+            base_region_map,
+            region.subscription_region,
+            &[ProxyRefKind::SsDirect],
+        );
+        let exact_names = reality_names;
+
+        let mut visible_map = serde_yaml::Mapping::new();
+        visible_map.insert(
             serde_yaml::Value::String("name".to_string()),
-            serde_yaml::Value::String(select_name.clone()),
+            serde_yaml::Value::String(visible_name.clone()),
         );
-        select_map.insert(
+        visible_map.insert(
             serde_yaml::Value::String("type".to_string()),
-            serde_yaml::Value::String("fallback".to_string()),
+            serde_yaml::Value::String("select".to_string()),
         );
-        select_map.insert(
-            serde_yaml::Value::String("url".to_string()),
-            serde_yaml::Value::String(mihomo_default_health_check_url()),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("interval".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(300)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("timeout".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("max-failed-times".to_string()),
-            serde_yaml::Value::Number(serde_yaml::Number::from(1)),
-        );
-        select_map.insert(
-            serde_yaml::Value::String("lazy".to_string()),
-            serde_yaml::Value::Bool(false),
-        );
-        select_map.insert(
+        visible_map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        select_map.insert(
+        let region_filter = if region.subscription_region == NodeSubscriptionRegion::Other {
+            ".*".to_string()
+        } else if exact_names.is_empty() {
+            region.filter.to_string()
+        } else {
+            format!(
+                "(?:{})|(?:{})",
+                region.filter,
+                exact_proxy_names_filter(&exact_names)
+            )
+        };
+        visible_map.insert(
             serde_yaml::Value::String("filter".to_string()),
-            serde_yaml::Value::String(region.filter.to_string()),
+            serde_yaml::Value::String(region_filter.clone()),
         );
         let exclude_filter = if region.subscription_region == NodeSubscriptionRegion::Other {
-            merge_mihomo_regex(Some(known_region_filter.as_str()), &excluded_system_names)
+            merge_mihomo_regex(Some(known_region_filter.as_str()), &ss_direct_names)
         } else {
-            merge_mihomo_regex(None, &excluded_system_names)
+            merge_mihomo_regex(None, &ss_direct_names)
         };
-        if let Some(exclude_filter) = exclude_filter {
-            select_map.insert(
+        if let Some(exclude_filter) = exclude_filter.clone() {
+            visible_map.insert(
                 serde_yaml::Value::String("exclude-filter".to_string()),
                 serde_yaml::Value::String(exclude_filter),
             );
         }
-        groups.push(serde_yaml::Value::Mapping(select_map));
+        groups.push(serde_yaml::Value::Mapping(visible_map));
 
-        groups.push(mihomo_select_group(
-            &format!("🔒 {}", region.name),
-            true,
-            [select_name.clone()],
-        ));
+        let mut source_map = serde_yaml::Mapping::new();
+        source_map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(source_name.clone()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String("fallback".to_string()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("url".to_string()),
+            serde_yaml::Value::String(MIHOMO_DEFAULT_HEALTH_CHECK_URL.to_string()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("interval".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(300)),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("tolerance".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(0)),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("use".to_string()),
+            serde_yaml::Value::Sequence(provider_values.to_vec()),
+        );
+        source_map.insert(
+            serde_yaml::Value::String("filter".to_string()),
+            serde_yaml::Value::String(region_filter),
+        );
+        if let Some(exclude_filter) = exclude_filter {
+            source_map.insert(
+                serde_yaml::Value::String("exclude-filter".to_string()),
+                serde_yaml::Value::String(exclude_filter),
+            );
+        }
+        source_map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(visible_name.clone())]),
+        );
+        groups.push(serde_yaml::Value::Mapping(source_map));
         groups.push(mihomo_url_test_group(
             &format!("🤯 {}", region.name),
             true,
-            [select_name.clone()],
+            [source_name.clone()],
         ));
     }
 }
@@ -2217,6 +2246,18 @@ fn mihomo_select_group(
     serde_yaml::Value::Mapping(map)
 }
 
+fn default_region_wrapper_group_names() -> impl Iterator<Item = String> {
+    MIHOMO_REGION_GROUPS
+        .iter()
+        .map(|region| format!("🌟 {}", region.name))
+}
+
+fn default_all_region_group_names() -> impl Iterator<Item = String> {
+    MIHOMO_REGION_GROUPS
+        .iter()
+        .map(|region| format!("🤯 {}", region.name))
+}
+
 fn mihomo_fallback_group(
     name: &str,
     hidden: bool,
@@ -2239,23 +2280,15 @@ fn mihomo_fallback_group(
     }
     map.insert(
         serde_yaml::Value::String("url".to_string()),
-        serde_yaml::Value::String(mihomo_default_health_check_url()),
+        serde_yaml::Value::String(MIHOMO_DEFAULT_HEALTH_CHECK_URL.to_string()),
     );
     map.insert(
         serde_yaml::Value::String("interval".to_string()),
         serde_yaml::Value::Number(serde_yaml::Number::from(300)),
     );
     map.insert(
-        serde_yaml::Value::String("timeout".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
-    );
-    map.insert(
-        serde_yaml::Value::String("max-failed-times".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(1)),
-    );
-    map.insert(
-        serde_yaml::Value::String("lazy".to_string()),
-        serde_yaml::Value::Bool(false),
+        serde_yaml::Value::String("tolerance".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(0)),
     );
     let proxy_values = proxies
         .into_iter()
@@ -2292,7 +2325,7 @@ fn mihomo_url_test_group(
     }
     map.insert(
         serde_yaml::Value::String("url".to_string()),
-        serde_yaml::Value::String(mihomo_default_health_check_url()),
+        serde_yaml::Value::String(MIHOMO_DEFAULT_HEALTH_CHECK_URL.to_string()),
     );
     map.insert(
         serde_yaml::Value::String("interval".to_string()),
@@ -2315,68 +2348,14 @@ fn mihomo_url_test_group(
     serde_yaml::Value::Mapping(map)
 }
 
-fn default_visible_region_group_names() -> impl Iterator<Item = String> {
-    MIHOMO_REGION_GROUPS
-        .iter()
-        .map(|region| format!("🌟 {}", region.name))
-}
-
-fn default_all_region_group_names() -> impl Iterator<Item = String> {
-    MIHOMO_REGION_GROUPS
-        .iter()
-        .map(|region| format!("🤯 {}", region.name))
-}
-
-fn default_high_quality_region_group_names() -> Vec<String> {
-    default_visible_region_group_names().collect::<Vec<_>>()
-}
-
-fn append_unique_proxy_names(target: &mut Vec<String>, extras: impl IntoIterator<Item = String>) {
-    for name in extras {
-        if !target.contains(&name) {
-            target.push(name);
-        }
-    }
-}
-
-fn mihomo_group_depends_on_generated_system_options(group: &serde_yaml::Value) -> bool {
-    let serde_yaml::Value::Mapping(map) = group else {
-        return false;
-    };
-    let Some(serde_yaml::Value::Sequence(proxies)) =
-        map.get(serde_yaml::Value::String("proxies".to_string()))
-    else {
-        return false;
-    };
-
-    proxies.iter().filter_map(serde_yaml::Value::as_str).any(|name| {
-        name == "🔒 高质量"
-            || name == "💎 高质量"
-            || name == "🚀 节点选择"
-            || name == "🌟 节点选择"
-            || name == "💎 节点选择"
-            || name == "🤯 All"
-            || name == MIHOMO_LANDING_POOL_GROUP
-            || name.starts_with("🛬 ")
-            || canonical_system_visible_region_option(name).is_some()
-            || canonical_mihomo_system_proxy_alias(name).is_some()
-            || is_mihomo_legacy_outer_group_reference(name)
-    })
-}
-
 fn inject_mihomo_default_aggregate_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
+    landing_groups: &[String],
     high_quality_proxies: Vec<String>,
 ) {
-    const SYSTEM_AGGREGATE_GROUPS: [&str; 6] = [
-        "🔒 高质量",
-        "💎 高质量",
-        "🚀 节点选择",
-        "🌟 节点选择",
-        "💎 节点选择",
-        "🤯 All",
-    ];
+    const SYSTEM_AGGREGATE_GROUPS: [&str; 5] =
+        ["🔒 高质量", "💎 高质量", "🤯 All", "🚀 节点选择", "💎 节点选择"];
     let mut remaining = Vec::with_capacity(groups.len());
     let mut insert_at = None;
     let mut existing_high_quality = None;
@@ -2394,25 +2373,20 @@ fn inject_mihomo_default_aggregate_groups(
     }
 
     let generated = vec![
-        mihomo_high_quality_group(existing_high_quality, provider_values, high_quality_proxies),
+        mihomo_high_quality_group(
+            existing_high_quality,
+            provider_values,
+            landing_groups,
+            high_quality_proxies,
+        ),
         mihomo_fallback_group(
             "💎 高质量",
             true,
             ["🔒 高质量".to_string(), "🤯 All".to_string()],
         ),
-        mihomo_fallback_group(
-            "💎 节点选择",
-            true,
-            ["🚀 节点选择".to_string(), "🤯 All".to_string()],
-        ),
         mihomo_url_test_group("🤯 All", true, default_all_region_group_names()),
     ];
-    let insert_at = insert_at.unwrap_or_else(|| {
-        remaining
-            .iter()
-            .position(mihomo_group_depends_on_generated_system_options)
-            .unwrap_or(remaining.len())
-    });
+    let insert_at = insert_at.unwrap_or(remaining.len());
     remaining.splice(insert_at..insert_at, generated);
     *groups = remaining;
 }
@@ -2421,19 +2395,26 @@ fn inject_mihomo_default_node_selector_group(
     groups: &mut Vec<serde_yaml::Value>,
     landing_groups: &[String],
 ) {
-    let mut proxies = default_visible_region_group_names().collect::<Vec<_>>();
+    let mut proxies = default_region_wrapper_group_names().collect::<Vec<_>>();
     proxies.extend(landing_groups.iter().cloned());
-    proxies.push("🔒 高质量".to_string());
+    proxies.push("💎 高质量".to_string());
     groups.push(mihomo_select_group("🚀 节点选择", false, proxies));
+    groups.push(mihomo_fallback_group(
+        "💎 节点选择",
+        true,
+        ["🚀 节点选择".to_string(), "🤯 All".to_string()],
+    ));
 }
 
 fn mihomo_high_quality_group(
     existing: Option<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
+    landing_groups: &[String],
     high_quality_proxies: Vec<String>,
 ) -> serde_yaml::Value {
-    let mut proxies = default_high_quality_region_group_names();
-    append_unique_proxy_names(&mut proxies, high_quality_proxies);
+    let mut system_proxies = default_region_wrapper_group_names().collect::<Vec<_>>();
+    system_proxies.extend(landing_groups.iter().cloned());
+    system_proxies.extend(high_quality_proxies);
 
     let Some(serde_yaml::Value::Mapping(mut map)) = existing else {
         let mut map = serde_yaml::Mapping::new();
@@ -2449,11 +2430,11 @@ fn mihomo_high_quality_group(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
-        if !proxies.is_empty() {
+        if !system_proxies.is_empty() {
             map.insert(
                 serde_yaml::Value::String("proxies".to_string()),
                 serde_yaml::Value::Sequence(
-                    proxies
+                    system_proxies
                         .into_iter()
                         .map(serde_yaml::Value::String)
                         .collect(),
@@ -2471,16 +2452,15 @@ fn mihomo_high_quality_group(
         serde_yaml::Value::String("type".to_string()),
         serde_yaml::Value::String("select".to_string()),
     );
-    map.remove(serde_yaml::Value::String("hidden".to_string()));
     map.insert(
         serde_yaml::Value::String("use".to_string()),
         serde_yaml::Value::Sequence(provider_values.to_vec()),
     );
-    if !proxies.is_empty() {
+    if !system_proxies.is_empty() {
         map.insert(
             serde_yaml::Value::String("proxies".to_string()),
             serde_yaml::Value::Sequence(
-                proxies
+                system_proxies
                     .into_iter()
                     .map(serde_yaml::Value::String)
                     .collect(),
@@ -2501,54 +2481,24 @@ fn is_mihomo_system_region_cluster_group(
         || MIHOMO_REGION_GROUP_NAMES.contains(&name)
 }
 
-fn is_mihomo_system_sequence_cluster_group(
-    name: &str,
-    relay_group_names: &std::collections::BTreeSet<String>,
-) -> bool {
-    name == "💎 高质量"
-        || name == "🚀 节点选择"
-        || name == "🌟 节点选择"
-        || name == "💎 节点选择"
-        || name == "🤯 All"
-        || is_mihomo_system_region_cluster_group(name, relay_group_names)
-}
-
 fn is_mihomo_system_proxy_group(
     name: &str,
     relay_group_names: &std::collections::BTreeSet<String>,
 ) -> bool {
     name.starts_with("🛬 ")
         || name == "🚀 节点选择"
-        || name == "🌟 节点选择"
         || name == "💎 节点选择"
-        || name == "💎 高质量"
         || name == "🤯 All"
         || is_mihomo_system_region_cluster_group(name, relay_group_names)
 }
 
 fn canonical_system_visible_region_option(name: &str) -> Option<&'static str> {
-    canonical_visible_region_name(name)
-}
-
-fn canonical_mihomo_system_proxy_alias(name: &str) -> Option<&'static str> {
-    match name {
-        "💎 高质量" => Some("🔒 高质量"),
-        "🚀 节点选择" | "🌟 节点选择" => Some("💎 节点选择"),
-        _ => None,
-    }
-}
-
-fn legacy_hidden_node_selector_alias(name: &str) -> Option<&'static str> {
-    match name {
-        "🌟 节点选择" => Some("💎 节点选择"),
-        _ => None,
-    }
+    canonical_region_wrapper_name(name)
 }
 
 fn is_managed_region_proxy_reference(name: &str) -> bool {
     is_mihomo_legacy_outer_group_reference(name)
         || canonical_system_visible_region_option(name).is_some()
-        || canonical_mihomo_system_proxy_alias(name).is_some()
 }
 
 fn helper_proxy_order_sequence(root: &serde_yaml::Mapping, key: &str) -> Vec<String> {
@@ -2632,17 +2582,8 @@ fn normalize_proxy_names_in_place(
 ) -> Vec<String> {
     let mut out = Vec::with_capacity(proxy_names.len());
     let mut emitted_regions = std::collections::BTreeSet::<String>::new();
-    let mut emitted_literals = std::collections::BTreeSet::<String>::new();
 
     for proxy_name in proxy_names {
-        if let Some(remapped_name) = canonical_mihomo_system_proxy_alias(proxy_name) {
-            if proxy_group_names.contains(remapped_name)
-                && emitted_literals.insert(remapped_name.to_string())
-            {
-                out.push(remapped_name.to_string());
-            }
-            continue;
-        }
         if is_mihomo_legacy_outer_group_reference(proxy_name) {
             if proxy_group_names.contains(proxy_name) {
                 out.push(proxy_name.clone());
@@ -2669,17 +2610,8 @@ fn normalize_proxy_names_in_place_strict(
 ) -> Vec<String> {
     let mut out = Vec::with_capacity(proxy_names.len());
     let mut emitted_regions = std::collections::BTreeSet::<String>::new();
-    let mut emitted_literals = std::collections::BTreeSet::<String>::new();
 
     for proxy_name in proxy_names {
-        if let Some(remapped_name) = canonical_mihomo_system_proxy_alias(proxy_name) {
-            if proxy_group_names.contains(remapped_name)
-                && emitted_literals.insert(remapped_name.to_string())
-            {
-                out.push(remapped_name.to_string());
-            }
-            continue;
-        }
         if let Some(canonical_name) = canonical_system_visible_region_option(proxy_name) {
             if proxy_group_names.contains(canonical_name)
                 && emitted_regions.insert(canonical_name.to_string())
@@ -2705,16 +2637,6 @@ fn normalize_proxy_names_from_helper(
     let mut matched_any = false;
 
     for helper_name in helper_order {
-        if let Some(remapped_helper_name) = canonical_mihomo_system_proxy_alias(helper_name) {
-            if proxy_group_names.contains(remapped_helper_name)
-                && proxy_names.iter().any(|name| name == helper_name)
-                && used_literals.insert(remapped_helper_name.to_string())
-            {
-                out.push(remapped_helper_name.to_string());
-                matched_any = true;
-            }
-            continue;
-        }
         if is_mihomo_legacy_outer_group_reference(helper_name) {
             if proxy_group_names.contains(helper_name)
                 && proxy_names.iter().any(|name| name == helper_name)
@@ -2772,16 +2694,6 @@ fn normalize_proxy_names_from_helper_strict(
     let mut matched_any = false;
 
     for helper_name in helper_order {
-        if let Some(remapped_helper_name) = canonical_mihomo_system_proxy_alias(helper_name) {
-            if proxy_group_names.contains(remapped_helper_name)
-                && proxy_names.iter().any(|name| name == helper_name)
-                && used_literals.insert(remapped_helper_name.to_string())
-            {
-                out.push(remapped_helper_name.to_string());
-                matched_any = true;
-            }
-            continue;
-        }
         if let Some(canonical_name) = canonical_system_visible_region_option(helper_name) {
             if proxy_group_names.contains(canonical_name)
                 && proxy_group_contains_managed_region(proxy_names, canonical_name)
@@ -2806,9 +2718,7 @@ fn normalize_proxy_names_from_helper_strict(
     }
 
     for proxy_name in proxy_names {
-        if canonical_system_visible_region_option(proxy_name).is_some()
-            || canonical_mihomo_system_proxy_alias(proxy_name).is_some()
-        {
+        if canonical_system_visible_region_option(proxy_name).is_some() {
             continue;
         }
         if used_literals.insert(proxy_name.clone()) {
@@ -2891,7 +2801,7 @@ fn normalize_mihomo_proxy_group_sequence(
             serde_yaml::Value::Mapping(map) => map
                 .get(serde_yaml::Value::String("name".to_string()))
                 .and_then(|value| value.as_str())
-                .map(|name| is_mihomo_system_sequence_cluster_group(name, relay_group_names))
+                .map(|name| is_mihomo_system_region_cluster_group(name, relay_group_names))
                 .unwrap_or(false),
             _ => false,
         };
@@ -3073,10 +2983,7 @@ fn normalize_user_proxy_group_order_strict(
         };
         if !proxy_names
             .iter()
-            .any(|name| {
-                canonical_system_visible_region_option(name).is_some()
-                    || canonical_mihomo_system_proxy_alias(name).is_some()
-            })
+            .any(|name| canonical_system_visible_region_option(name).is_some())
         {
             continue;
         }
@@ -3692,101 +3599,6 @@ fn remap_legacy_mihomo_outer_rule_targets(
     }
 }
 
-fn canonicalize_mihomo_system_proxy_aliases(root: &mut serde_yaml::Mapping) {
-    canonicalize_mihomo_system_proxy_aliases_in_mapping(root);
-}
-
-fn canonicalize_mihomo_system_proxy_aliases_in_mapping(mapping: &mut serde_yaml::Mapping) {
-    let mut pending_group_name_updates = Vec::<(serde_yaml::Value, String)>::new();
-
-    for (key, value) in mapping.iter_mut() {
-        if key.as_str() == Some("name")
-            && let Some(name) = value.as_str()
-            && let Some(remapped_name) = legacy_hidden_node_selector_alias(name)
-        {
-            pending_group_name_updates.push((key.clone(), remapped_name.to_string()));
-            continue;
-        }
-        if key.as_str() == Some("rules") {
-            canonicalize_mihomo_rule_targets(value);
-        } else if key.as_str() == Some("proxies") {
-            canonicalize_mihomo_proxy_ref_sequence(value);
-        }
-        canonicalize_mihomo_system_proxy_aliases_in_value(value);
-    }
-
-    for (key, remapped_name) in pending_group_name_updates {
-        mapping.insert(key, serde_yaml::Value::String(remapped_name));
-    }
-}
-
-fn canonicalize_mihomo_system_proxy_aliases_in_value(value: &mut serde_yaml::Value) {
-    match value {
-        serde_yaml::Value::Mapping(mapping) => {
-            canonicalize_mihomo_system_proxy_aliases_in_mapping(mapping);
-        }
-        serde_yaml::Value::Sequence(seq) => {
-            for item in seq {
-                canonicalize_mihomo_system_proxy_aliases_in_value(item);
-            }
-        }
-        serde_yaml::Value::String(text) => canonicalize_mihomo_proxy_suffix_in_string(text),
-        _ => {}
-    }
-}
-
-fn canonicalize_mihomo_rule_targets(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Sequence(seq) = value else {
-        return;
-    };
-
-    for item in seq {
-        let Some(rule_text) = item.as_str() else {
-            continue;
-        };
-        let parts = rule_text.split(',').map(str::trim).collect::<Vec<_>>();
-        if parts.len() < 2 {
-            continue;
-        }
-        let Some(remapped_target) = legacy_hidden_node_selector_alias(parts[parts.len() - 1])
-        else {
-            continue;
-        };
-        let mut rebuilt = parts[..parts.len() - 1].join(",");
-        if !rebuilt.is_empty() {
-            rebuilt.push(',');
-        }
-        rebuilt.push_str(remapped_target);
-        *item = serde_yaml::Value::String(rebuilt);
-    }
-}
-
-fn canonicalize_mihomo_proxy_ref_sequence(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Sequence(seq) = value else {
-        return;
-    };
-
-    for item in seq {
-        let Some(name) = item.as_str() else {
-            continue;
-        };
-        let Some(remapped_name) = legacy_hidden_node_selector_alias(name) else {
-            continue;
-        };
-        *item = serde_yaml::Value::String(remapped_name.to_string());
-    }
-}
-
-fn canonicalize_mihomo_proxy_suffix_in_string(text: &mut String) {
-    if let Some(suffix) = text.rsplit('#').next()
-        && suffix != text.as_str()
-        && let Some(remapped_suffix) = legacy_hidden_node_selector_alias(suffix)
-    {
-        let prefix_len = text.len() - suffix.len();
-        text.replace_range(prefix_len.., remapped_suffix);
-    }
-}
-
 fn dedupe_proxy_refs_in_mapping(mapping: &mut serde_yaml::Mapping) {
     for (key, value) in mapping.iter_mut() {
         if key.as_str() == Some("proxies") {
@@ -3940,10 +3752,9 @@ fn parse_mixin_mapping(input: &str) -> Result<serde_yaml::Mapping, SubscriptionE
         serde_yaml::from_str(input).map_err(|e| SubscriptionError::MihomoMixinParse {
             reason: e.to_string(),
         })?;
-    let serde_yaml::Value::Mapping(mut map) = root else {
+    let serde_yaml::Value::Mapping(map) = root else {
         return Err(SubscriptionError::MihomoMixinRootNotMapping);
     };
-    canonicalize_mihomo_system_proxy_aliases(&mut map);
     Ok(map)
 }
 
@@ -5485,7 +5296,6 @@ mod tests {
     #[test]
     fn app_proxy_group_shape_only_matches_hidden_wrapper_name() {
         assert!(!has_app_proxy_group_shape(&["🚀 节点选择".to_string()]));
-        assert!(has_app_proxy_group_shape(&["🌟 节点选择".to_string()]));
         assert!(has_app_proxy_group_shape(&["💎 节点选择".to_string()]));
     }
 
@@ -5812,36 +5622,38 @@ providerB:
         let japan_group = proxy_groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 Japan"))
-            .expect("region Japan group should exist");
+            .expect("region Japan source group should exist");
         assert_eq!(
             japan_group.get("type"),
             Some(&Value::String("fallback".to_string()))
         );
+        assert_eq!(japan_group.get("hidden"), Some(&Value::Bool(true)));
         let japan_refs = japan_group
             .get("proxies")
             .and_then(Value::as_sequence)
-            .expect("region Japan group should expose raw reality nodes only")
+            .expect("region Japan source group should wrap visible Japan group")
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(japan_refs, vec!["Tokyo-A-reality"]);
+        assert_eq!(japan_refs, vec!["🔒 Japan"]);
 
         let japan_alias = proxy_groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
-            .expect("compat Japan group should exist");
+            .expect("visible Japan group should exist");
         assert_eq!(
             japan_alias.get("type"),
             Some(&Value::String("select".to_string()))
         );
+        assert_eq!(japan_alias.get("hidden"), None);
         let japan_alias_refs = japan_alias
             .get("proxies")
             .and_then(Value::as_sequence)
-            .expect("compat Japan group should point at visible Japan group")
+            .expect("visible Japan group should expose region leaf proxies")
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(japan_alias_refs, vec!["🌟 Japan"]);
+        assert_eq!(japan_alias_refs, vec!["Tokyo-A-reality"]);
 
         let landing = proxy_groups
             .iter()
@@ -5971,21 +5783,41 @@ providerA:
             .iter()
             .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Japan"))
             .expect("provider route should keep region source group");
-        let japan_filter = japan_group
-            .get("filter")
-            .and_then(Value::as_str)
-            .expect("Japan group should keep provider region filter");
-        assert_eq!(japan_filter, "日本|🇯🇵|Japan|JP");
-        let japan_exclude_filter = japan_group
-            .get("exclude-filter")
-            .and_then(Value::as_str)
-            .expect("Japan group should exclude provider-hosted managed system proxies");
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss\\-chain"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality\\-chain"));
+        assert_eq!(
+            japan_group.get("type"),
+            Some(&Value::String("fallback".to_string()))
+        );
+        assert_eq!(japan_group.get("hidden"), Some(&Value::Bool(true)));
         assert_eq!(
             japan_group
+                .get("proxies")
+                .and_then(Value::as_sequence)
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec!["🔒 Japan"]
+        );
+
+        let japan_visible_group = proxy_groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
+            .expect("provider route should keep visible region group");
+        let japan_filter = japan_visible_group
+            .get("filter")
+            .and_then(Value::as_str)
+            .expect("visible Japan group should filter provider-hosted system proxies");
+        assert!(japan_filter.contains("日本|🇯🇵|Japan|JP"));
+        assert!(japan_filter.contains("Tokyo\\-A\\-reality"));
+        assert!(!japan_filter.contains("Tokyo\\-A\\-ss|"));
+        let japan_exclude_filter = japan_visible_group
+            .get("exclude-filter")
+            .and_then(Value::as_str)
+            .expect("visible Japan group should exclude provider-hosted direct ss proxies");
+        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
+        assert!(!japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
+        assert_eq!(
+            japan_visible_group
                 .get("use")
                 .and_then(Value::as_sequence)
                 .unwrap()
@@ -5994,31 +5826,18 @@ providerA:
                 .collect::<Vec<_>>(),
             vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
         );
-        assert!(
-            japan_group.get("proxies").is_none(),
-            "provider route should not expose static landing proxies inside visible region groups"
-        );
-
-        let japan_alias = proxy_groups
-            .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Japan"))
-            .expect("provider route should keep visible region alias");
         assert_eq!(
-            japan_alias
+            japan_visible_group
                 .get("proxies")
                 .and_then(Value::as_sequence)
-                .unwrap()
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec!["🌟 Japan"]
+                .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            None
         );
 
         let high_quality_group = proxy_groups
             .iter()
             .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 高质量"))
             .expect("provider route should keep high quality group");
-        assert_eq!(high_quality_group.get("hidden"), None);
         assert_eq!(
             high_quality_group
                 .get("use")
@@ -6042,26 +5861,6 @@ providerA:
         assert!(high_quality_exclude_filter.contains("剩余|到期"));
         assert!(high_quality_exclude_filter.contains("Tokyo\\-A\\-ss"));
         assert!(!high_quality_exclude_filter.contains("Tokyo\\-A\\-reality"));
-
-        let owner_facing_high_quality = proxy_groups
-            .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("💎 高质量"))
-            .expect("provider route should keep owner-facing high quality group");
-        assert_eq!(
-            owner_facing_high_quality.get("type"),
-            Some(&Value::String("fallback".to_string()))
-        );
-        assert_eq!(owner_facing_high_quality.get("hidden"), Some(&Value::Bool(true)));
-        assert_eq!(
-            owner_facing_high_quality
-                .get("proxies")
-                .and_then(Value::as_sequence)
-                .unwrap()
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec!["🔒 高质量", "🤯 All"]
-        );
     }
 
     #[test]
@@ -7068,12 +6867,6 @@ providerA:
             .get("proxy-groups")
             .and_then(Value::as_sequence)
             .expect("proxy-groups must exist");
-        let group = |name: &str| {
-            groups
-                .iter()
-                .find(|proxy_group| proxy_group.get("name").and_then(Value::as_str) == Some(name))
-                .expect("group should exist")
-        };
         let group_refs = |name: &str| {
             groups
                 .iter()
@@ -7087,27 +6880,6 @@ providerA:
         };
 
         assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
-        assert_eq!(
-            group("💎 高质量").get("type").and_then(Value::as_str),
-            Some("fallback")
-        );
-        assert_eq!(
-            group("💎 节点选择").get("type").and_then(Value::as_str),
-            Some("fallback")
-        );
-        assert_eq!(
-            group_refs("🔒 高质量"),
-            vec![
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
-                "🛬 Tokyo-A",
-            ]
-        );
         assert_eq!(
             groups
                 .iter()
@@ -7132,7 +6904,7 @@ providerA:
                 "🌟 US",
                 "🌟 Other",
                 "🛬 Tokyo-A",
-                "🔒 高质量",
+                "💎 高质量",
             ]
         );
         assert!(
@@ -7223,18 +6995,18 @@ rules: []
             &visible_names[..9],
             &[
                 "🔒 高质量",
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
+                "🔒 Japan",
+                "🔒 HongKong",
+                "🔒 Taiwan",
+                "🔒 Korea",
+                "🔒 Singapore",
+                "🔒 US",
+                "🔒 Other",
                 "🔒 落地",
             ]
         );
 
-        let singapore_group = root
+        let singapore_source_group = root
             .get("proxy-groups")
             .and_then(Value::as_sequence)
             .and_then(|groups| {
@@ -7244,178 +7016,18 @@ rules: []
             })
             .expect("🌟 Singapore group should be rebuilt by the system");
         assert_eq!(
-            singapore_group
-                .get("use")
+            singapore_source_group.get("hidden").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            singapore_source_group
+                .get("proxies")
                 .and_then(Value::as_sequence)
                 .unwrap()
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec![MIHOMO_SYSTEM_PROVIDER_NAME]
-        );
-        assert_eq!(
-            singapore_group.get("filter").and_then(Value::as_str),
-            Some("新加坡|🇸🇬|Singapore|SG")
-        );
-    }
-
-    #[test]
-    fn build_mihomo_provider_yaml_rebuilds_mixin_region_groups_as_owner_facing_aliases() {
-        let u = user("u1", "alice");
-        let n = node("n1", "Tokyo A", "example.com");
-        let endpoints = vec![
-            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-            endpoint_vless(
-                "e2",
-                "n1",
-                "vless",
-                8443,
-                serde_json::json!({
-                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-                  "short_ids": ["0123456789abcdef"],
-                  "active_short_id": "0123456789abcdef"
-                }),
-            ),
-        ];
-        let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
-        let profile = UserMihomoProfile {
-            mixin_yaml: r#"
-port: 0
-proxy-groups:
-  - name: "💎 高质量"
-    type: select
-    hidden: true
-    proxies: ["DIRECT"]
-  - name: "🌟 Japan"
-    type: select
-    hidden: true
-    proxies: ["Tokyo-A-reality", "Tokyo-A-ss-chain", "DIRECT"]
-  - name: "🔒 Japan"
-    type: select
-    proxies: ["Tokyo-A-reality-chain"]
-  - name: "🤯 Japan"
-    type: select
-    proxies: ["Tokyo-A-ss"]
-rules: []
-"#
-            .to_string(),
-            extra_proxies_yaml: "".to_string(),
-            extra_proxy_providers_yaml: r#"
-providerA:
-  type: file
-  path: ./provider-a.yaml
-"#
-            .to_string(),
-        };
-
-        let probes = probe_map(&[("n1", NodeSubscriptionRegion::Japan)]);
-        let yaml = build_mihomo_provider_yaml_with_node_probes(
-            SEED,
-            &u,
-            &memberships,
-            &endpoints,
-            &[n],
-            &probes,
-            &profile,
-            "https://sub.example.com/api/sub/token/mihomo/provider/system",
-        )
-        .expect("build mihomo provider yaml should succeed");
-        let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
-        let groups = root
-            .get("proxy-groups")
-            .and_then(Value::as_sequence)
-            .expect("proxy-groups should exist");
-
-        let group = |name: &str| {
-            groups
-                .iter()
-                .find(|group| group.get("name").and_then(Value::as_str) == Some(name))
-                .expect("group should exist")
-        };
-        let group_refs = |name: &str| {
-            group(name)
-                .get("proxies")
-                .and_then(Value::as_sequence)
-                .expect("group proxies should exist")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-        };
-
-        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
-        assert_eq!(
-            group_refs("🔒 高质量"),
-            vec![
-                "🌟 Japan",
-                "🌟 HongKong",
-                "🌟 Taiwan",
-                "🌟 Korea",
-                "🌟 Singapore",
-                "🌟 US",
-                "🌟 Other",
-                "🛬 Tokyo-A",
-            ]
-        );
-
-        let japan_group = group("🌟 Japan");
-        assert_eq!(japan_group.get("hidden"), None);
-        assert_eq!(
-            japan_group.get("type").and_then(Value::as_str),
-            Some("fallback")
-        );
-        assert!(
-            japan_group.get("proxies").is_none(),
-            "visible provider-backed region groups should not expose static proxies"
-        );
-        assert_eq!(
-            japan_group
-                .get("use")
-                .and_then(Value::as_sequence)
-                .expect("Japan group use should exist")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
-        );
-        let japan_exclude_filter = japan_group
-            .get("exclude-filter")
-            .and_then(Value::as_str)
-            .expect("Japan group should exclude system leaf candidates");
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-ss\\-chain"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality"));
-        assert!(japan_exclude_filter.contains("Tokyo\\-A\\-reality\\-chain"));
-
-        for alias_name in ["🔒 Japan", "🤯 Japan"] {
-            let alias = group(alias_name);
-            assert_eq!(alias.get("hidden"), Some(&Value::Bool(true)));
-            assert_eq!(group_refs(alias_name), vec!["🌟 Japan"]);
-        }
-        assert_eq!(
-            group("🤯 Japan").get("type").and_then(Value::as_str),
-            Some("url-test")
-        );
-        assert_eq!(
-            group("🤯 Japan").get("url").and_then(Value::as_str),
-            Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
-        );
-        assert_eq!(
-            group("🤯 Japan").get("interval"),
-            Some(&Value::Number(serde_yaml::Number::from(300)))
-        );
-        assert_eq!(
-            group("🤯 Japan").get("tolerance"),
-            Some(&Value::Number(serde_yaml::Number::from(0)))
-        );
-        let all_group = group("🤯 All");
-        assert_eq!(
-            all_group.get("type").and_then(Value::as_str),
-            Some("url-test")
-        );
-        assert_eq!(
-            all_group.get("url").and_then(Value::as_str),
-            Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
+            vec!["🔒 Singapore"]
         );
     }
 
@@ -7482,7 +7094,7 @@ providerA:
     }
 
     #[test]
-    fn build_mihomo_provider_yaml_keeps_unprobed_singapore_groups_filter_backed() {
+    fn build_mihomo_provider_yaml_keeps_unprobed_singapore_nodes_in_other_group() {
         let u = user("u1", "alice");
         let n = node("n1", "Singapore A", "example.com");
         let endpoints = vec![
@@ -7537,32 +7149,28 @@ rules: []
             .and_then(Value::as_sequence)
             .expect("proxy-groups must exist");
 
-        let other_group = groups
+        let other_refs = groups
             .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Other"))
-            .expect("Other group should exist");
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Other"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .map(|seq| seq.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
         assert!(
-            other_group.get("proxies").is_none(),
-            "provider-backed Other group should stay filter-backed"
-        );
-        assert_eq!(
-            other_group
-                .get("use")
-                .and_then(Value::as_sequence)
-                .expect("Other group use should exist")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>(),
-            vec![MIHOMO_SYSTEM_PROVIDER_NAME]
+            other_refs.is_empty(),
+            "provider visible Other group may rely on filter/use only when no explicit landing proxies exist"
         );
 
-        let singapore_group = groups
+        let singapore_refs = groups
             .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Singapore"))
-            .expect("Singapore group should exist");
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Singapore"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .map(|seq| seq.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
         assert!(
-            singapore_group.get("proxies").is_none(),
-            "provider-backed Singapore group should not expose static proxies"
+            singapore_refs.is_empty(),
+            "unprobed Singapore nodes should stay in Other until a successful probe exists"
         );
     }
 
@@ -8016,7 +7624,7 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(japan_group_refs, vec!["🌟 Japan"]);
+        assert_eq!(japan_group_refs, vec!["DIRECT"]);
 
         let relay_group = groups
             .iter()
@@ -8211,18 +7819,18 @@ rules: []
                 "🌟 US",
                 "🌟 Other",
                 "🛬 Tokyo-A",
-                "🔒 高质量",
+                "💎 高质量",
             ]
         );
         assert_eq!(
             group_proxies("Simple Auto"),
-            vec!["🌟 Singapore", "🌟 US", "🔒 高质量"]
+            vec!["🌟 Singapore", "🌟 US", "💎 高质量"]
         );
         assert_eq!(
             group_proxies("🐟 漏网之鱼"),
             vec![
                 "💎 节点选择",
-                "🔒 高质量",
+                "💎 高质量",
                 "🗽 大流量",
                 "🌟 Singapore",
                 "🌟 US",
@@ -8234,16 +7842,12 @@ rules: []
             group_proxies("🤖 AI"),
             vec![
                 "💎 节点选择",
-                "🔒 高质量",
+                "💎 高质量",
                 "🗽 大流量",
                 "🌟 Singapore",
                 "🌟 US",
                 "🎯 全球直连",
             ]
-        );
-        assert_eq!(
-            group_proxies("💎 节点选择"),
-            vec!["🚀 节点选择", "🤯 All"]
         );
         assert_eq!(
             group_proxies("Relay Hidden"),
@@ -8297,7 +7901,7 @@ rules: []
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 Japan"))
             .expect("🌟 Japan group should exist");
-        assert_eq!(star_japan.get("hidden"), None);
+        assert_eq!(star_japan.get("hidden"), Some(&Value::Bool(true)));
         let star_us = groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 US"))
@@ -8309,7 +7913,7 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(star_us_refs, vec!["DIRECT"]);
+        assert_eq!(star_us_refs, vec!["🔒 US"]);
         let star_other = groups
             .iter()
             .find(|g| g.get("name").and_then(Value::as_str) == Some("🌟 Other"))
@@ -8322,7 +7926,7 @@ rules: []
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec!["DIRECT"]
+            vec!["🔒 Other"]
         );
 
         assert!(
@@ -8429,7 +8033,7 @@ rules: []
                 "🌟 Singapore",
                 "🌟 US",
                 "🛬 Tokyo-A",
-                "🔒 高质量",
+                "💎 高质量",
                 "Tokyo-A-reality",
                 "Tokyo-A-ss",
             ]
@@ -8514,10 +8118,7 @@ rules: []
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(
-            refs,
-            vec!["🌟 Singapore", "🌟 US", "🛬 Tokyo-A", "🔒 高质量"]
-        );
+        assert_eq!(refs, vec!["🌟 Singapore", "🌟 US", "🛬 Tokyo-A", "💎 高质量"]);
     }
 
     #[test]
@@ -8610,7 +8211,7 @@ rules: []
                 "🌟 US",
                 "🛬 Osaka-A",
                 "🛬 Tokyo-B",
-                "🔒 高质量",
+                "💎 高质量",
             ]
         );
     }
@@ -8670,14 +8271,11 @@ rules: []
                 "🌟 Singapore",
                 "🌟 US",
                 "🌟 Other",
-                "Tokyo-A-reality",
                 "🛬 Tokyo-A",
+                "Tokyo-A-reality",
             ]
         );
-        assert_eq!(
-            group_refs("💎 高质量"),
-            vec!["🔒 高质量", "🤯 All"]
-        );
+        assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
     }
 
     #[test]
@@ -8861,7 +8459,7 @@ rules: []
                 "🛑 全球拦截",
                 "🗽 大流量",
                 "🌟 US",
-                "🔒 高质量",
+                "💎 高质量",
                 "🎯 全球直连",
                 "🌟 Singapore",
             ]
@@ -9902,7 +9500,7 @@ rules: []
 
         let singapore_refs = groups
             .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Singapore"))
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Singapore"))
             .and_then(|group| group.get("proxies"))
             .and_then(Value::as_sequence)
             .expect("Singapore group proxies should exist")
@@ -9913,7 +9511,7 @@ rules: []
 
         let other_refs = groups
             .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some("🌟 Other"))
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 Other"))
             .and_then(|group| group.get("proxies"))
             .and_then(Value::as_sequence)
             .expect("Other group proxies should exist")
@@ -10206,10 +9804,10 @@ rules: []
                 "🌟 Singapore",
                 "🌟 US",
                 "🌟 Other",
-                "Alpha-reality",
-                "Beta-reality",
                 "🛬 Alpha",
                 "🛬 Beta",
+                "Alpha-reality",
+                "Beta-reality",
             ]
         );
 
@@ -10297,8 +9895,8 @@ rules: []
                 "🌟 Singapore",
                 "🌟 US",
                 "🌟 Other",
-                "Alpha-reality",
                 "🛬 Alpha",
+                "Alpha-reality",
             ]
         );
     }
