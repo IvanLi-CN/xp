@@ -28,7 +28,7 @@
 - 系统内置生成并覆盖 provider-only 模式下的动态地区组与落地组：
   - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
   - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，统一改为隐藏 alias
-  - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`🌟 节点选择`、`💎 节点选择`、`🤯 All`
+  - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
 - 对一份外部提供的脱敏 Mihomo 示例生成可证明的“功能等价”输出，并给出脱敏示例与差异说明。
@@ -65,7 +65,7 @@
 - 对外 API 只接受 `mixin_yaml`；内部状态/WAL/snapshot 继续对旧字段 `template_yaml` 保持读写兼容（内部双写 `mixin_yaml` + `template_yaml`），以保证滚动升级与旧节点回放安全。
 - 用户可输入 `extra_proxies_yaml`（sequence）与 `extra_proxy_providers_yaml`（mapping，可空）。
 - 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
-- 系统保留地区组、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`🌟 节点选择`、`💎 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
+- 系统保留地区组、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
 - 地区面固定为 `Japan / HongKong / Taiwan / Korea / Singapore / US / Other`；首次成功探测前，为避免滚动升级时既有地区组瞬间清空，历史节点继续沿用 legacy slug fallback（JP/HK/TW/KR）归类；一旦存在成功探测结果，则优先使用 `subscription_region`，但仅在 probe 未 stale 时视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
 - `proxy-providers` 视为一个整体普通节点池；provider-only 模式下系统按 `Node.access_host` 聚合 relay，relay 组只消费外部 provider，并在 provider 为空时仍必须生成可加载配置。
 - `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
@@ -129,7 +129,7 @@
 - Given 旧集群升级后某历史节点暂时还没有成功探测记录，When 其旧节点名 slug 原本会命中 `Japan/HongKong/Taiwan/Korea`，Then 订阅渲染仍保持该 legacy 地区归类，直到首次成功探测结果落盘。
 - Given 某节点主动探测暂时失败，When 该节点存在最近一次成功归类且该结果仍在 stale 窗口内，Then 订阅仍保留其上一轮地区归类，不会立即从系统托管分组中消失；一旦 probe 进入 stale，渲染回退到 legacy slug fallback / `Other`。
 - Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
-- Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 legacy 地区组名或系统聚合别名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`🔒 高质量`、`🌟 节点选择`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯 {Region}` 与 hidden alias。
+- Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 legacy 地区组名或系统聚合别名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`🔒 高质量`、`💎 节点选择`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯 {Region}` 与 hidden alias。
 - Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 必须包含 `base-reality`，且不得再把 `base-ss` 暴露为该组成员。
@@ -184,7 +184,7 @@
 - 该样例表示“当前合同下可直接提交的 owner mixin”：
   - 不再携带系统托管 provider、系统地区组、系统高质量组、系统节点选择组与落地组定义
   - 只保留 owner-owned 的规则、rule-providers、listeners、DNS/TUN 与业务分组
-  - 业务分组统一引用当前 owner-facing 合同名（如 `🔒 高质量`、`🌟 节点选择`）
+  - 业务分组统一引用当前 owner-facing 合同名（如 `🔒 高质量`、`💎 节点选择`）
 
 ## 实现里程碑（Milestones / Delivery checklist）
 

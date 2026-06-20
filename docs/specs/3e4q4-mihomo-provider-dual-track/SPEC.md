@@ -64,7 +64,7 @@
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
-  - per-base relay 组 `🛣️ {relay-base}`、owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、兼容 alias `🔒/🤯 {Region}`、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`🌟 节点选择`、`💎 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+  - per-base relay 组 `🛣️ {relay-base}`、owner-facing `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、兼容 alias `🔒/🤯 {Region}`、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
 - provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
 - provider 方案下 `🔒 高质量` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。`🔒/🤯 {Region}` 只保留隐藏 alias 语义，不再直接暴露系统直连或链式候选。
