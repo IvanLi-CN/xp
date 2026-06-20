@@ -153,7 +153,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 同一 `access_host` 下存在托管 VLESS endpoint 时，选择最小 VLESS 端口，并使用 `https://<access_host[:port]>/generate_204`
   - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
   - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`
-- 系统托管的地区面固定为 hidden `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；对应的 `🔒 {Region}` 是 owner-facing 可见地区入口，`🤯 {Region}` 保留 hidden probe/url-test 语义。
+- 系统托管的地区 triplet 固定为 hidden `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、visible `🔒 {Region}`、hidden `🤯 {Region}`；最终 group type、允许成员、引用方向与禁止项以 [docs/specs/3e4q4-mihomo-provider-dual-track/contracts/final-mihomo-config.md](/Users/ivan/.codex/worktrees/xp-wt-region-visibility/docs/specs/3e4q4-mihomo-provider-dual-track/contracts/final-mihomo-config.md) 为准。
 - `🔒 高质量` 是可见的 owner-facing 高质量入口；若用户模板显式提供该组，provider 渲染会保留其外部 provider 语义，同时追加系统 `{base}-reality` 接入点能力。
 - `💎 高质量` 是 hidden fallback 兼容组，稳定暴露 `["🔒 高质量", "🤯 All"]`。
 - `🚀 节点选择` 是可见的 owner-facing 主选择组，稳定包含可见地区组、落地组与 `🔒 高质量`。
@@ -182,6 +182,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - 地区入口组：`🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 为可见 owner-facing 入口，`🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 为 hidden probe/url-test；`🛣️ {Region}` 兼容别名不再生成
   - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
+- 这些 system-managed `proxy-groups` 的最终 YAML 拓扑不是自由实现细节，而是 owner-facing 合同；实现、测试与回归验证都必须对齐 [docs/specs/3e4q4-mihomo-provider-dual-track/contracts/final-mihomo-config.md](/Users/ivan/.codex/worktrees/xp-wt-region-visibility/docs/specs/3e4q4-mihomo-provider-dual-track/contracts/final-mihomo-config.md)。
 - 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
 - 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
 - `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只做 YAML 结构校验与最终渲染校验，不做自动抽取或规范化。
