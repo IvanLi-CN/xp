@@ -89,6 +89,7 @@ Response:
 
 - 始终返回 provider 方案的 Mihomo 主配置。
 - 当用户未配置 Mihomo profile 时，回退到 clash 输出。
+- 最终 `proxy-groups` 拓扑必须满足 [final-mihomo-config.md](./final-mihomo-config.md)。
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
 - 顶层 `proxies` 仅保留 `extra_proxies_yaml`；系统动态节点不写入主配置顶层。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
@@ -99,7 +100,7 @@ Response:
 - `💎 节点选择` 是 hidden fallback 兼容组，稳定暴露 `["🚀 节点选择", "🤯 All"]`。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
 - per-base relay 组只消费外部第三方 provider；无外部 provider 时回落 `DIRECT`，不得 `use` `xp-system-generated`。有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test` 主动探测，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；健康检查 URL 的选择顺序是：最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204` -> 唯一公开 `api_base_url + /api/health` -> `https://www.gstatic.com/generate_204`。
-- 系统托管的可见地区组固定为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，并同时生成隐藏 alias `🔒/🤯 {Region}`、`💎 高质量`、`💎 节点选择` 与 `🤯 All`；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
+- 系统托管的地区 triplet 固定为 hidden `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、visible `🔒 {Region}`、hidden `🤯 {Region}`；其 group type、允许成员、引用方向与禁止项全部由 [final-mihomo-config.md](./final-mihomo-config.md) 冻结。这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
 - 输出不得生成共享 `🛣️ JP/HK/SG` 主路径或 `🛣️ {Region}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除。
 - PUT 保存阶段不会自动抽取 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不会把 legacy relay alias、旧 landing 引用或保留名冲突做隐含转换。
 - hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在可见地区组、`🔒 高质量`、`🚀 节点选择` 之前。
