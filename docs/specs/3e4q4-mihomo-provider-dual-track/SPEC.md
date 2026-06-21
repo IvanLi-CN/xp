@@ -144,6 +144,19 @@
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。
 - Given 用户在 `mixin_yaml` 内写入 `proxies` 或 `proxy-providers`，When 保存 profile，Then 服务端保留原始输入，不做自动抽取；坏数据只在最终渲染校验阶段失败。
 - Given provider 主配置，When 检查 `proxy-groups` 顺序，Then hidden `🛣️ {relay-base}` 必须排在 `🚀 节点选择` 之后。
+- Given provider 主配置，When 检查系统托管 `proxy-groups` 顺序，Then 必须稳定满足：
+  `🔒 高质量`
+  `-> 💎 高质量`
+  `-> 🔒 {Japan..Other}`
+  `-> 🌟 {Japan..Other}`
+  `-> 🤯 {Japan..Other}`
+  `-> 🛬 {base}`
+  `-> 🔒 落地`
+  `-> 🤯 All`
+  `-> 🚀 节点选择`
+  `-> 💎 节点选择`
+  `-> 🛣️ {relay-base}`，
+  且 canonical region order 固定为 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
 - Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个 owner-facing 包装组稳定同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终可见入口缺失全局兜底。
 - Given 任一最终 Mihomo 配置，When 检查地区组三元关系，Then 必须满足 `🤯 {Region} -> 🌟 {Region} -> 🔒 {Region} -> leaf proxies`，且 `🔒` 只能被 `🌟` 作为单跳包装引用。
