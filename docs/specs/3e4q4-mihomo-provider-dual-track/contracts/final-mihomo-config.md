@@ -62,12 +62,12 @@ Required constraints:
   `-> all visible region groups in canonical region order`
   `-> all hidden fallback region groups in canonical region order`
   `-> all hidden probe region groups in canonical region order`
-  `-> all landing groups \`🛬 {base}\` in deterministic base order`
-  `-> 🔒 落地`
-  `-> 🤯 All`
-  `-> 🚀 节点选择`
-  `-> 💎 节点选择`
-  `-> hidden per-base relay groups \`🛣️ {relay-base}\` at the tail`
+- `-> all landing groups \`🛬 {base}\` in deterministic base order`
+- `-> 🔒 落地`
+- `-> 🤯 All`
+- `-> 🚀 节点选择`
+- `-> 💎 节点选择`
+- `-> hidden per-base relay groups \`🛣️ {relay-base}\` at the tail`
 - The canonical region order is exactly:
   `Japan`, `HongKong`, `Taiwan`, `Korea`, `Singapore`, `US`, `Other`.
 - User-defined groups must remain outside that system-owned sequence.
