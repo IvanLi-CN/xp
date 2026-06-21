@@ -127,6 +127,18 @@ html[data-density="compact"] {
 	--xp-form-label-gap: 0.375rem;
 }
 
+@media (max-width: 640px) {
+	:root {
+		--xp-page-padding: 0.75rem;
+		--xp-card-padding: 0.75rem;
+	}
+
+	html[data-density="compact"] {
+		--xp-page-padding: 0.625rem;
+		--xp-card-padding: 0.625rem;
+	}
+}
+
 @layer base {
 	* {
 		@apply border-border;

@@ -14,15 +14,17 @@ export function PageHeader({
 	meta,
 }: PageHeaderProps) {
 	return (
-		<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+		<div className="flex flex-col gap-2 sm:gap-3 md:flex-row md:items-start md:justify-between">
 			<div className="min-w-0">
-				<h1 className="text-2xl font-semibold leading-tight">{title}</h1>
+				<h1 className="text-[1.9rem] font-semibold leading-tight sm:text-2xl">
+					{title}
+				</h1>
 				{description ? (
 					<p className="mt-1 text-sm opacity-70">{description}</p>
 				) : null}
 			</div>
 
-			<div className="flex flex-col gap-2 md:items-end">
+			<div className="flex flex-col gap-1.5 sm:gap-2 md:items-end">
 				{meta ? (
 					<div className="flex flex-wrap items-center gap-2">{meta}</div>
 				) : null}

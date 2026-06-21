@@ -24,6 +24,10 @@ import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyN
 import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type {
+	AdminNodeTcpConnectionsResponse,
+	AdminTcpConnectionUsageWindow,
+} from "../../src/api/adminTcpConnections";
+import type {
 	AdminMihomoRedactRequest,
 	AdminMihomoRedactResponse,
 } from "../../src/api/adminTools";
@@ -65,6 +69,12 @@ type MockWindowedNodeIpUsage =
 	| AdminNodeIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminNodeIpUsageResponse>>;
 
+type MockWindowedNodeTcpConnections =
+	| AdminNodeTcpConnectionsResponse
+	| Partial<
+			Record<AdminTcpConnectionUsageWindow, AdminNodeTcpConnectionsResponse>
+	  >;
+
 type MockWindowedUserIpUsage =
 	| AdminUserIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminUserIpUsageResponse>>;
@@ -81,6 +91,7 @@ type MockStateSeed = {
 	userAutoAssignEndpointKindsByUserId: Record<string, AdminEndpointKind[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
+	nodeTcpConnectionsByNodeId: Record<string, MockWindowedNodeTcpConnections>;
 	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
@@ -133,6 +144,26 @@ function selectWindowedNodeIpUsage(
 	const report = entry[window] ?? entry["24h"] ?? entry["7d"];
 	if (!report) {
 		throw new Error(`missing node IP usage report for window ${window}`);
+	}
+	return {
+		...clone(report),
+		window,
+	};
+}
+
+function selectWindowedNodeTcpConnections(
+	entry: MockWindowedNodeTcpConnections,
+	window: AdminTcpConnectionUsageWindow,
+): AdminNodeTcpConnectionsResponse {
+	if ("window_start" in entry) {
+		return {
+			...clone(entry),
+			window,
+		};
+	}
+	const report = entry[window] ?? entry["24h"] ?? entry["7d"];
+	if (!report) {
+		throw new Error(`missing node TCP connections report for window ${window}`);
 	}
 	return {
 		...clone(report),
@@ -730,6 +761,50 @@ node-2`,
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;
+	const nodeTcpConnectionsByNodeId = Object.fromEntries(
+		nodes.map((node) => [
+			node.node_id,
+			{
+				node,
+				window: "24h" as const,
+				window_start: "2026-03-07T01:00:00Z",
+				window_end: "2026-03-08T00:59:00Z",
+				warnings: [],
+				endpoints: [
+					{
+						endpoint_id: `${node.node_id}-endpoint-a`,
+						endpoint_tag: `${node.node_name}-edge-a`,
+						port: 443,
+					},
+					{
+						endpoint_id: `${node.node_id}-endpoint-b`,
+						endpoint_tag: `${node.node_name}-edge-b`,
+						port: 8388,
+					},
+				],
+				per_endpoint_series: [
+					{
+						endpoint_id: `${node.node_id}-endpoint-a`,
+						endpoint_tag: `${node.node_name}-edge-a`,
+						port: 443,
+						series: [
+							{ minute: "2026-03-08T00:58:00Z", count: 2 },
+							{ minute: "2026-03-08T00:59:00Z", count: 3 },
+						],
+					},
+					{
+						endpoint_id: `${node.node_id}-endpoint-b`,
+						endpoint_tag: `${node.node_name}-edge-b`,
+						port: 8388,
+						series: [
+							{ minute: "2026-03-08T00:58:00Z", count: 1 },
+							{ minute: "2026-03-08T00:59:00Z", count: 2 },
+						],
+					},
+				],
+			},
+		]),
+	) satisfies Record<string, AdminNodeTcpConnectionsResponse>;
 	const nodeHistoryByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildNodeHistory(node)]),
 	) satisfies Record<string, NodeHistorySnapshot>;
@@ -768,6 +843,7 @@ node-2`,
 		userAutoAssignEndpointKindsByUserId,
 		nodeQuotas: [],
 		nodeIpUsageByNodeId,
+		nodeTcpConnectionsByNodeId,
 		nodeHistoryByNodeId,
 		userIpUsageByUserId,
 		userNodeWeights,
@@ -802,6 +878,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		nodeIpUsageByNodeId: {
 			...base.nodeIpUsageByNodeId,
 			...(overrides?.nodeIpUsageByNodeId ?? {}),
+		},
+		nodeTcpConnectionsByNodeId: {
+			...base.nodeTcpConnectionsByNodeId,
+			...(overrides?.nodeTcpConnectionsByNodeId ?? {}),
 		},
 		nodeHistoryByNodeId: {
 			...base.nodeHistoryByNodeId,
@@ -1177,6 +1257,21 @@ async function handleRequest(
 		}
 		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
 		return jsonResponse(selectWindowedNodeIpUsage(report, window));
+	}
+
+	const nodeTcpConnectionsMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/tcp-connections$/,
+	);
+	if (nodeTcpConnectionsMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeTcpConnectionsMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		const report =
+			state.nodeTcpConnectionsByNodeId[nodeId] ?? (node ? null : null);
+		if (!report) {
+			return errorResponse(404, "not_found", "node not found");
+		}
+		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
+		return jsonResponse(selectWindowedNodeTcpConnections(report, window));
 	}
 
 	const userIpUsageMatch = path.match(

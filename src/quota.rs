@@ -13,6 +13,10 @@ use crate::{
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
+    tcp_connection_usage::{
+        TcpConnectionMinuteSample, TcpConnectionUsageWarning,
+        collect_established_inbound_connections_by_port,
+    },
     xray,
 };
 
@@ -146,7 +150,7 @@ async fn run_quota_tick_at_with_geo(
     reconcile: &ReconcileHandle,
     geo_resolver: &SharedGeoResolver,
 ) -> anyhow::Result<()> {
-    let snapshots: Vec<MembershipQuotaSnapshot> = {
+    let (local_node_id, snapshots): (String, Vec<MembershipQuotaSnapshot>) = {
         let store = store.lock().await;
         let Some(local_node_id) = crate::reconcile::resolve_local_node_id(config, &store) else {
             warn!(
@@ -207,8 +211,218 @@ async fn run_quota_tick_at_with_geo(
             });
         }
 
-        out
+        (local_node_id, out)
     };
+
+    let sample_minute = floor_minute(now);
+    let should_collect_minute = {
+        let store = store.lock().await;
+        store.latest_inbound_ip_usage_minute() != Some(sample_minute)
+            || store.latest_tcp_connection_usage_minute() != Some(sample_minute)
+    };
+    if should_collect_minute {
+        let tcp_endpoint_samples = {
+            let store = store.lock().await;
+            store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == local_node_id)
+                .collect::<Vec<_>>()
+        };
+        let mut tcp_samples = Vec::<TcpConnectionMinuteSample>::new();
+        let mut tcp_linux_only = cfg!(target_os = "linux");
+        let mut tcp_warning = if tcp_linux_only {
+            None
+        } else {
+            Some(TcpConnectionUsageWarning {
+                code: "unsupported_platform".to_string(),
+                message:
+                    "TCP connection count history is currently only supported on Linux nodes."
+                        .to_string(),
+            })
+        };
+        if tcp_linux_only {
+            let listen_ports = tcp_endpoint_samples
+                .iter()
+                .map(|endpoint| endpoint.port)
+                .collect::<std::collections::BTreeSet<_>>();
+            match collect_established_inbound_connections_by_port(&listen_ports) {
+                Ok(counts_by_port) => {
+                    tcp_samples = tcp_endpoint_samples
+                        .iter()
+                        .map(|endpoint| TcpConnectionMinuteSample {
+                            node_id: endpoint.node_id.clone(),
+                            endpoint_id: endpoint.endpoint_id.clone(),
+                            endpoint_tag: endpoint.tag.clone(),
+                            port: endpoint.port,
+                            count: counts_by_port.get(&endpoint.port).copied().unwrap_or(0),
+                        })
+                        .collect();
+                }
+                Err(crate::tcp_connection_usage::TcpConnectionUsageError::Unsupported(
+                    message,
+                )) => {
+                    tcp_linux_only = false;
+                    tcp_warning = Some(TcpConnectionUsageWarning {
+                        code: "unsupported_platform".to_string(),
+                        message,
+                    });
+                }
+                Err(err) => {
+                    tcp_warning = Some(TcpConnectionUsageWarning {
+                        code: "socket_inspection_failed".to_string(),
+                        message: format!(
+                            "Failed to inspect local TCP socket state for connection counts: {err}"
+                        ),
+                    });
+                }
+            }
+        }
+
+        let mut store_guard = store.lock().await;
+        if let Err(err) = store_guard.record_tcp_connection_usage_samples(
+            sample_minute,
+            tcp_linux_only,
+            tcp_warning.clone(),
+            &tcp_samples,
+        ) {
+            warn!(%err, "quota tick: failed to persist tcp connection usage snapshot");
+        }
+        drop(store_guard);
+
+        if !snapshots.is_empty() {
+            let mut online_samples = Vec::new();
+            let mut online_stats_unavailable = false;
+            let mut minute_client = match xray::connect(config.xray_api_addr).await {
+                Ok(client) => Some(client),
+                Err(err) => {
+                    warn!(%err, "quota tick: xray connect failed for online ip usage sampling");
+                    None
+                }
+            };
+
+            if let Some(client) = minute_client.as_mut() {
+                for snapshot in &snapshots {
+                    let email = membership_xray_email(&snapshot.user_id, &snapshot.endpoint_id);
+                    let empty_sample = || crate::inbound_ip_usage::InboundIpMinuteSample {
+                        membership_key: snapshot.membership_key.clone(),
+                        user_id: snapshot.user_id.clone(),
+                        node_id: snapshot.node_id.clone(),
+                        endpoint_id: snapshot.endpoint_id.clone(),
+                        endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                        ips: Vec::new(),
+                    };
+
+                    match client.get_user_online_ip_list(&email).await {
+                        Ok(ips) => {
+                            online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
+                                membership_key: snapshot.membership_key.clone(),
+                                user_id: snapshot.user_id.clone(),
+                                node_id: snapshot.node_id.clone(),
+                                endpoint_id: snapshot.endpoint_id.clone(),
+                                endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
+                                ips: ips.into_iter().collect(),
+                            })
+                        }
+                        Err(status) if status.code() == tonic::Code::Unimplemented => {
+                            online_stats_unavailable = true;
+                            warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
+                            break;
+                        }
+                        Err(status) if xray::is_not_found(&status) => {
+                            match client.get_user_online_count(&email).await {
+                                Ok(Some(0)) => online_samples.push(empty_sample()),
+                                Ok(Some(count)) => {
+                                    online_stats_unavailable = true;
+                                    warn!(membership_key = %snapshot.membership_key, online_count = count, "quota tick: xray online ip list missing while online count is non-zero");
+                                    break;
+                                }
+                                Ok(None) => online_samples.push(empty_sample()),
+                                Err(count_status)
+                                    if count_status.code() == tonic::Code::Unimplemented =>
+                                {
+                                    online_stats_unavailable = true;
+                                    warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray online stats are unavailable");
+                                    break;
+                                }
+                                Err(count_status) => {
+                                    warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray get_user_online_count failed after missing online ip list");
+                                    online_samples.push(empty_sample());
+                                }
+                            }
+                        }
+                        Err(status) => {
+                            warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray get_user_online_ip_list failed");
+                            online_samples.push(empty_sample());
+                        }
+                    }
+                }
+            } else {
+                online_stats_unavailable = true;
+            }
+
+            let lookup_candidates = if online_stats_unavailable
+                || geo_resolver.ip_geo_source() == IpGeoSource::Missing
+            {
+                Vec::new()
+            } else {
+                let store_guard = store.lock().await;
+                store_guard
+                    .collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
+            };
+            if !lookup_candidates.is_empty() {
+                geo_resolver.enqueue_pending_ips(&lookup_candidates).await;
+            }
+            if geo_resolver.ip_geo_source() != IpGeoSource::Missing
+                && geo_resolver.has_pending_ips().await
+                && let Some(prime_guard) = geo_resolver.begin_prime()
+            {
+                let store = store.clone();
+                let geo_resolver = geo_resolver.clone();
+                let task = tokio::spawn(async move {
+                    let _prime_guard = prime_guard;
+                    let candidates = geo_resolver.drain_pending_ips().await;
+                    if candidates.is_empty() {
+                        return;
+                    }
+                    if let Err(err) = geo_resolver.prime_ips(candidates.clone()).await {
+                        warn!(%err, "quota tick: country.is lookup failed");
+                    }
+
+                    let mut store = store.lock().await;
+                    if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
+                        usage.backfill_geo_for_ips(&candidates, &geo_resolver)
+                    }) {
+                        warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
+                    }
+                    let unresolved = store
+                        .inbound_ip_usage()
+                        .collect_missing_geo_for_ips(&candidates);
+                    drop(store);
+                    if !unresolved.is_empty() {
+                        geo_resolver.enqueue_pending_ips(&unresolved).await;
+                    }
+                });
+                let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
+            }
+
+            let mut store_guard = store.lock().await;
+            if let Err(err) = store_guard.record_inbound_ip_usage_samples(
+                sample_minute,
+                online_stats_unavailable,
+                if online_stats_unavailable {
+                    &[]
+                } else {
+                    &online_samples
+                },
+                geo_resolver,
+                geo_resolver.ip_geo_source() != IpGeoSource::Missing,
+            ) {
+                warn!(%err, "quota tick: failed to persist inbound ip usage snapshot");
+            }
+        }
+    }
+
     if snapshots.is_empty() {
         return Ok(());
     }
@@ -226,135 +440,6 @@ async fn run_quota_tick_at_with_geo(
         match update_membership_usage_once(now, store, &mut client, snapshot).await {
             Ok(tick) => ticks.push(tick),
             Err(err) => warn!(%err, "quota tick: membership processing failed"),
-        }
-    }
-
-    let sample_minute = floor_minute(now);
-    let should_collect_minute = {
-        let store = store.lock().await;
-        store.latest_inbound_ip_usage_minute() != Some(sample_minute)
-    };
-    if should_collect_minute {
-        let mut online_samples = Vec::new();
-        let mut online_stats_unavailable = false;
-
-        for snapshot in &snapshots {
-            let email = membership_xray_email(&snapshot.user_id, &snapshot.endpoint_id);
-            let empty_sample = || crate::inbound_ip_usage::InboundIpMinuteSample {
-                membership_key: snapshot.membership_key.clone(),
-                user_id: snapshot.user_id.clone(),
-                node_id: snapshot.node_id.clone(),
-                endpoint_id: snapshot.endpoint_id.clone(),
-                endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
-                ips: Vec::new(),
-            };
-
-            match client.get_user_online_ip_list(&email).await {
-                Ok(ips) => online_samples.push(crate::inbound_ip_usage::InboundIpMinuteSample {
-                    membership_key: snapshot.membership_key.clone(),
-                    user_id: snapshot.user_id.clone(),
-                    node_id: snapshot.node_id.clone(),
-                    endpoint_id: snapshot.endpoint_id.clone(),
-                    endpoint_tag: snapshot.endpoint_tag.clone().unwrap_or_default(),
-                    ips: ips.into_iter().collect(),
-                }),
-                Err(status) if status.code() == tonic::Code::Unimplemented => {
-                    online_stats_unavailable = true;
-                    warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray online stats are unavailable");
-                    break;
-                }
-                Err(status) if xray::is_not_found(&status) => {
-                    match client.get_user_online_count(&email).await {
-                        Ok(Some(0)) => online_samples.push(empty_sample()),
-                        Ok(Some(count)) => {
-                            online_stats_unavailable = true;
-                            warn!(membership_key = %snapshot.membership_key, online_count = count, "quota tick: xray online ip list missing while online count is non-zero");
-                            break;
-                        }
-                        // Xray can omit the online stat entirely when the user currently has no
-                        // active sample. Treat this the same as a zero-count minute instead of
-                        // surfacing a misleading "stats unavailable" warning.
-                        Ok(None) => online_samples.push(empty_sample()),
-                        Err(count_status) if count_status.code() == tonic::Code::Unimplemented => {
-                            online_stats_unavailable = true;
-                            warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray online stats are unavailable");
-                            break;
-                        }
-                        Err(count_status) => {
-                            warn!(membership_key = %snapshot.membership_key, status = %count_status, "quota tick: xray get_user_online_count failed after missing online ip list");
-                            online_samples.push(empty_sample());
-                        }
-                    }
-                }
-                Err(status) => {
-                    warn!(membership_key = %snapshot.membership_key, %status, "quota tick: xray get_user_online_ip_list failed");
-                    online_samples.push(empty_sample());
-                }
-            }
-        }
-
-        let lookup_candidates =
-            if online_stats_unavailable || geo_resolver.ip_geo_source() == IpGeoSource::Missing {
-                Vec::new()
-            } else {
-                let store = store.lock().await;
-                store.collect_inbound_ip_usage_lookup_candidates(sample_minute, &online_samples)
-            };
-        if !lookup_candidates.is_empty() {
-            geo_resolver.enqueue_pending_ips(&lookup_candidates).await;
-        }
-        if geo_resolver.ip_geo_source() != IpGeoSource::Missing
-            && geo_resolver.has_pending_ips().await
-        {
-            // Avoid piling up overlapping geo lookup tasks when the upstream is slow or failing.
-            // Geo enrichment is best-effort; queued candidates will be processed on later ticks.
-            if let Some(prime_guard) = geo_resolver.begin_prime() {
-                // Best-effort: do not block quota sampling/enforcement on external geo lookups.
-                let store = store.clone();
-                let geo_resolver = geo_resolver.clone();
-                let task = tokio::spawn(async move {
-                    let _prime_guard = prime_guard;
-                    let candidates = geo_resolver.drain_pending_ips().await;
-                    if candidates.is_empty() {
-                        return;
-                    }
-                    if let Err(err) = geo_resolver.prime_ips(candidates.clone()).await {
-                        warn!(%err, "quota tick: country.is lookup failed");
-                    }
-
-                    // Backfill geo for short-lived IPs that were persisted before the async prime
-                    // completed. This keeps geo enrichment best-effort without blocking quota ticks.
-                    let mut store = store.lock().await;
-                    if let Err(err) = store.maybe_update_inbound_ip_usage(|usage| {
-                        usage.backfill_geo_for_ips(&candidates, &geo_resolver)
-                    }) {
-                        warn!(%err, "quota tick: failed to backfill inbound ip usage geo");
-                    }
-                    let unresolved = store
-                        .inbound_ip_usage()
-                        .collect_missing_geo_for_ips(&candidates);
-                    drop(store);
-                    if !unresolved.is_empty() {
-                        geo_resolver.enqueue_pending_ips(&unresolved).await;
-                    }
-                });
-                let _ = tokio::time::timeout(Duration::from_millis(200), task).await;
-            }
-        }
-
-        let mut store = store.lock().await;
-        if let Err(err) = store.record_inbound_ip_usage_samples(
-            sample_minute,
-            online_stats_unavailable,
-            if online_stats_unavailable {
-                &[]
-            } else {
-                &online_samples
-            },
-            geo_resolver,
-            geo_resolver.ip_geo_source() != IpGeoSource::Missing,
-        ) {
-            warn!(%err, "quota tick: failed to persist inbound ip usage snapshot");
         }
     }
 

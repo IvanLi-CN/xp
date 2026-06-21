@@ -315,9 +315,9 @@ export function AppShell({
 
 	return (
 		<div className="min-h-screen bg-background">
-			<div className="p-4 md:p-5">
-				<div className="mx-auto flex max-w-7xl flex-col gap-4">
-					<header className="xp-panel px-4 py-3">
+			<div className="p-1.5 sm:p-4 md:p-5">
+				<div className="mx-auto flex max-w-7xl flex-col gap-2.5 sm:gap-4">
+					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
 						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
 							<div className="flex min-w-0 items-center gap-3">
 								<Button

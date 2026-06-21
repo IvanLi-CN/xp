@@ -4,6 +4,7 @@ import { expect, screen, userEvent, within } from "@storybook/test";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
+import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
 
 const node: AdminNode = {
 	node_id: "01J000000000000000000000001",
@@ -57,6 +58,7 @@ const nodeEndpoints: AdminEndpoint[] = [
 ];
 
 const ipUsageReports = buildDenseNodeIpUsageStories(node);
+const tcpConnectionReports = buildDenseNodeTcpConnectionStories(node);
 
 const meta = {
 	title: "Pages/NodeDetailsPage",
@@ -70,6 +72,9 @@ const meta = {
 				nodes: [node],
 				nodeIpUsageByNodeId: {
 					[node.node_id]: ipUsageReports,
+				},
+				nodeTcpConnectionsByNodeId: {
+					[node.node_id]: tcpConnectionReports,
 				},
 			},
 		},
@@ -117,6 +122,27 @@ export const IpUsageTab7d: Story = {
 	},
 };
 
+export const TcpConnectionsTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "TCP connections" }),
+		);
+		await expect(
+			await canvas.findByText("TCP connection count"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/Connections per minute/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/node-a-edge-a :443/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/Combined across selected endpoints/i),
+		).toBeInTheDocument();
+	},
+};
+
 export const MetadataEgressProbe: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -139,6 +165,9 @@ export const DeleteWithEndpointCleanup: Story = {
 				endpoints: nodeEndpoints,
 				nodeIpUsageByNodeId: {
 					[node.node_id]: ipUsageReports,
+				},
+				nodeTcpConnectionsByNodeId: {
+					[node.node_id]: tcpConnectionReports,
 				},
 			},
 		},
@@ -174,6 +203,9 @@ export const RuntimeHistoryFallback: Story = {
 				nodes: [node],
 				nodeIpUsageByNodeId: {
 					[node.node_id]: ipUsageReports,
+				},
+				nodeTcpConnectionsByNodeId: {
+					[node.node_id]: tcpConnectionReports,
 				},
 				nodeHistoryByNodeId: {
 					[node.node_id]: {
