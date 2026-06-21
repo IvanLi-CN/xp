@@ -582,7 +582,7 @@ fn build_mihomo_provider_roots_with_node_probes(
         &relay_group_names,
         &proxy_group_order_hints,
     );
-    normalize_mihomo_proxy_group_sequence(&mut root, &relay_group_names);
+    normalize_mihomo_provider_proxy_group_sequence(&mut root, &relay_group_names);
     move_hidden_relay_groups_to_end(&mut root, &relay_group_names);
     dedupe_proxy_refs_in_mapping(&mut root);
     ensure_proxy_groups_have_candidates(&mut root, &provider_name_set);
@@ -2778,6 +2778,54 @@ fn find_mihomo_system_region_anchor(groups: &[serde_yaml::Value]) -> Option<usiz
         .next_back()
 }
 
+fn mihomo_provider_system_group_rank(
+    name: &str,
+    relay_group_names: &std::collections::BTreeSet<String>,
+) -> Option<(u8, usize)> {
+    if name == "🔒 高质量" {
+        return Some((0, 0));
+    }
+    if name == "💎 高质量" {
+        return Some((1, 0));
+    }
+
+    for (idx, region) in MIHOMO_REGION_GROUPS.iter().enumerate() {
+        if name == format!("🔒 {}", region.name) {
+            return Some((2, idx));
+        }
+    }
+    for (idx, region) in MIHOMO_REGION_GROUPS.iter().enumerate() {
+        if name == format!("🌟 {}", region.name) {
+            return Some((3, idx));
+        }
+    }
+    for (idx, region) in MIHOMO_REGION_GROUPS.iter().enumerate() {
+        if name == format!("🤯 {}", region.name) {
+            return Some((4, idx));
+        }
+    }
+
+    if name == MIHOMO_LANDING_POOL_GROUP {
+        return Some((6, 0));
+    }
+    if name == "🤯 All" {
+        return Some((7, 0));
+    }
+    if name == "🚀 节点选择" {
+        return Some((8, 0));
+    }
+    if name == "💎 节点选择" {
+        return Some((9, 0));
+    }
+    if relay_group_names.contains(name) {
+        return Some((10, 0));
+    }
+    if name.strip_prefix("🛬 ").is_some() {
+        return Some((5, 0));
+    }
+    None
+}
+
 fn normalize_mihomo_proxy_group_sequence(
     root: &mut serde_yaml::Mapping,
     relay_group_names: &std::collections::BTreeSet<String>,
@@ -2825,6 +2873,52 @@ fn normalize_mihomo_proxy_group_sequence(
         .min(remaining.len());
     remaining.splice(insert_at..insert_at, cluster);
     *groups = remaining;
+}
+
+fn normalize_mihomo_provider_proxy_group_sequence(
+    root: &mut serde_yaml::Mapping,
+    relay_group_names: &std::collections::BTreeSet<String>,
+) {
+    let Some(serde_yaml::Value::Sequence(groups)) =
+        root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
+    else {
+        return;
+    };
+
+    let mut cluster = Vec::<(u8, usize, String, serde_yaml::Value)>::new();
+    let mut remaining = Vec::<serde_yaml::Value>::with_capacity(groups.len());
+
+    for group in std::mem::take(groups) {
+        let cluster_rank = match &group {
+            serde_yaml::Value::Mapping(map) => map
+                .get(serde_yaml::Value::String("name".to_string()))
+                .and_then(|value| value.as_str())
+                .and_then(|name| {
+                    mihomo_provider_system_group_rank(name, relay_group_names)
+                        .map(|rank| (rank.0, rank.1, name.to_string()))
+                }),
+            _ => None,
+        };
+        if let Some(rank) = cluster_rank {
+            cluster.push((rank.0, rank.1, rank.2, group));
+        } else {
+            remaining.push(group);
+        }
+    }
+
+    if cluster.is_empty() {
+        *groups = remaining;
+        return;
+    }
+
+    cluster.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+
+    let mut reordered = cluster
+        .into_iter()
+        .map(|(_, _, _, group)| group)
+        .collect::<Vec<_>>();
+    reordered.extend(remaining);
+    *groups = reordered;
 }
 
 fn move_hidden_relay_groups_to_end(
@@ -7002,7 +7096,7 @@ rules: []
                 "🔒 Singapore",
                 "🔒 US",
                 "🔒 Other",
-                "🔒 落地",
+                "🛬 Tokyo-A",
             ]
         );
 
@@ -7091,6 +7185,134 @@ providerA:
         assert!(index_of("🛣️ relay-example-com") > index_of("🔒 落地"));
         assert!(index_of("🛣️ relay-example-com") > index_of("🤯 All"));
         assert!(index_of("🛣️ relay-example-com") > index_of("🚀 节点选择"));
+    }
+
+    #[test]
+    fn build_mihomo_provider_yaml_locks_system_proxy_group_sequence() {
+        let u = user("u1", "alice");
+        let nodes = vec![
+            node("n1", "Tokyo A", "relay-a.example.com"),
+            node("n2", "Osaka B", "relay-b.example.com"),
+        ];
+        let endpoints = vec![
+            endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+            endpoint_vless(
+                "e2",
+                "n1",
+                "vless",
+                8443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+            endpoint_ss("e3", "n2", "ss", 443, "BBBBBBBBBBBBBBBBBBBBBB=="),
+            endpoint_vless(
+                "e4",
+                "n2",
+                "vless",
+                9443,
+                serde_json::json!({
+                  "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
+                  "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
+                  "short_ids": ["0123456789abcdef"],
+                  "active_short_id": "0123456789abcdef"
+                }),
+            ),
+        ];
+        let memberships = vec![
+            membership("u1", "n1", "e1"),
+            membership("u1", "n1", "e2"),
+            membership("u1", "n2", "e3"),
+            membership("u1", "n2", "e4"),
+        ];
+        let profile = UserMihomoProfile {
+            mixin_yaml: r#"
+port: 0
+proxy-groups:
+  - name: "Custom Select"
+    type: select
+    proxies: ["DIRECT"]
+rules: []
+"#
+            .to_string(),
+            extra_proxies_yaml: "".to_string(),
+            extra_proxy_providers_yaml: r#"
+providerA:
+  type: http
+  path: ./provider-a.yaml
+  url: https://example.com/a
+"#
+            .to_string(),
+        };
+
+        let probes = probe_map(&[
+            ("n1", NodeSubscriptionRegion::Japan),
+            ("n2", NodeSubscriptionRegion::Korea),
+        ]);
+        let yaml = build_mihomo_provider_yaml_with_node_probes(
+            SEED,
+            &u,
+            &memberships,
+            &endpoints,
+            &nodes,
+            &probes,
+            &profile,
+            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        )
+        .expect("build mihomo provider yaml should succeed");
+        let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
+        let names = root
+            .get("proxy-groups")
+            .and_then(Value::as_sequence)
+            .expect("proxy-groups must exist")
+            .iter()
+            .filter_map(|group| group.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            &names[0..25],
+            &[
+                "🔒 高质量",
+                "💎 高质量",
+                "🔒 Japan",
+                "🔒 HongKong",
+                "🔒 Taiwan",
+                "🔒 Korea",
+                "🔒 Singapore",
+                "🔒 US",
+                "🔒 Other",
+                "🌟 Japan",
+                "🌟 HongKong",
+                "🌟 Taiwan",
+                "🌟 Korea",
+                "🌟 Singapore",
+                "🌟 US",
+                "🌟 Other",
+                "🤯 Japan",
+                "🤯 HongKong",
+                "🤯 Taiwan",
+                "🤯 Korea",
+                "🤯 Singapore",
+                "🤯 US",
+                "🤯 Other",
+                "🛬 Osaka-B",
+                "🛬 Tokyo-A",
+            ]
+        );
+        assert_eq!(
+            &names[25..30],
+            &["🔒 落地", "🤯 All", "🚀 节点选择", "💎 节点选择", "Custom Select"]
+        );
+        assert!(
+            names.ends_with(&[
+                "🛣️ relay-dash-a-example-com",
+                "🛣️ relay-dash-b-example-com",
+            ]),
+            "hidden relay groups must stay at the tail"
+        );
     }
 
     #[test]
@@ -7795,6 +8017,53 @@ rules: []
             .get("proxy-groups")
             .and_then(Value::as_sequence)
             .expect("proxy-groups must be a sequence");
+        let names = groups
+            .iter()
+            .filter_map(|group| group.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "🔒 高质量",
+                "💎 高质量",
+                "🔒 Japan",
+                "🌟 Japan",
+                "🤯 Japan",
+                "🔒 HongKong",
+                "🌟 HongKong",
+                "🤯 HongKong",
+                "🔒 Taiwan",
+                "🌟 Taiwan",
+                "🤯 Taiwan",
+                "🔒 Korea",
+                "🌟 Korea",
+                "🤯 Korea",
+                "🔒 Singapore",
+                "🌟 Singapore",
+                "🤯 Singapore",
+                "🔒 US",
+                "🌟 US",
+                "🤯 US",
+                "🔒 Other",
+                "🌟 Other",
+                "🤯 Other",
+                "🔒 落地",
+                "🤯 All",
+                "🗽 大流量",
+                "🎯 全球直连",
+                "🛑 全球拦截",
+                "Simple Auto",
+                "Custom Select",
+                "🐟 漏网之鱼",
+                "🤖 AI",
+                "Relay Hidden",
+                "🛬 Tokyo-A",
+                "🚀 节点选择",
+                "💎 节点选择",
+                "🛣️ example-com",
+            ]
+        );
 
         let group_proxies = |name: &str| {
             groups
@@ -9699,7 +9968,11 @@ rules: []
         let refs = v
             .get("proxy-groups")
             .and_then(Value::as_sequence)
-            .and_then(|groups| groups.first())
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("Auto"))
+            })
             .and_then(|group| group.get("proxies"))
             .and_then(Value::as_sequence)
             .expect("group proxies should exist")
@@ -9878,7 +10151,11 @@ rules: []
         let refs = v
             .get("proxy-groups")
             .and_then(Value::as_sequence)
-            .and_then(|groups| groups.first())
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("🔒 高质量"))
+            })
             .and_then(|group| group.get("proxies"))
             .and_then(Value::as_sequence)
             .expect("group proxies should exist")
@@ -10167,7 +10444,11 @@ providerA:
         let refs = v
             .get("proxy-groups")
             .and_then(Value::as_sequence)
-            .and_then(|groups| groups.first())
+            .and_then(|groups| {
+                groups
+                    .iter()
+                    .find(|group| group.get("name").and_then(Value::as_str) == Some("demo"))
+            })
             .and_then(|group| group.get("proxies"))
             .and_then(Value::as_sequence)
             .expect("group proxies should exist")

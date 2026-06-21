@@ -5871,7 +5871,7 @@ rules: []
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
-            "proxy-groups[0].proxies",
+            ".proxies[0]: MissingGroup",
         ),
         (
             json!({
@@ -5885,7 +5885,7 @@ rules: []
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
-            "proxy-groups[0].use",
+            ".use[0]: providerA",
         ),
         (
             json!({
@@ -5901,7 +5901,7 @@ rules: []
 "#,
               "extra_proxy_providers_yaml": "",
             }),
-            "proxy-groups[0].dialer-proxy",
+            ".dialer-proxy: MissingDialer",
         ),
         (
             json!({
@@ -5912,7 +5912,7 @@ rules:
               "extra_proxies_yaml": "",
               "extra_proxy_providers_yaml": "",
             }),
-            "rules[0]",
+            "rules[0]: MissingTarget",
         ),
     ];
 

@@ -50,6 +50,29 @@ The generated system aggregate groups must obey these contracts:
 - `💎 节点选择` must be `type: fallback`.
 - `💎 节点选择` must contain exactly `["🚀 节点选择", "🤯 All"]` in that order.
 
+## System Proxy Group Sequence
+
+The generated system-managed `proxy-groups` block must be deterministic after final normalization.
+
+Required constraints:
+
+- The system-owned sequence must be ordered as:
+  `🔒 高质量`
+  `-> 💎 高质量`
+  `-> all visible region groups in canonical region order`
+  `-> all hidden fallback region groups in canonical region order`
+  `-> all hidden probe region groups in canonical region order`
+  `-> all landing groups \`🛬 {base}\` in deterministic base order`
+  `-> 🔒 落地`
+  `-> 🤯 All`
+  `-> 🚀 节点选择`
+  `-> 💎 节点选择`
+  `-> hidden per-base relay groups \`🛣️ {relay-base}\` at the tail`
+- The canonical region order is exactly:
+  `Japan`, `HongKong`, `Taiwan`, `Korea`, `Singapore`, `US`, `Other`.
+- User-defined groups must remain outside that system-owned sequence.
+- Hidden relay groups must not be interleaved into the high-quality / region / landing / node-selector sequence.
+
 ## User Mixin Normalization
 
 System normalization must preserve user intent while mapping legacy region references onto the current visible contract.
