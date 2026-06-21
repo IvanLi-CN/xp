@@ -21,6 +21,7 @@ import {
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
+import { fetchAdminNodeTcpConnections } from "../api/adminTcpConnections";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -57,6 +58,7 @@ vi.mock("../api/adminNodes");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/adminNodeHistory");
 vi.mock("../api/adminIpUsage");
+vi.mock("../api/adminTcpConnections");
 
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();
@@ -81,6 +83,7 @@ function renderPage() {
 
 function setupMocks(args?: {
 	nodeIpUsage?: Awaited<ReturnType<typeof fetchAdminNodeIpUsage>>;
+	nodeTcpConnections?: Awaited<ReturnType<typeof fetchAdminNodeTcpConnections>>;
 	refreshEgressProbe?: {
 		public_ipv4: string | null;
 		public_ipv6: string | null;
@@ -263,6 +266,61 @@ function setupMocks(args?: {
 				],
 			},
 	);
+	vi.mocked(fetchAdminNodeTcpConnections).mockImplementation(
+		async (_token, _nodeId, window) =>
+			args?.nodeTcpConnections ?? {
+				node,
+				window,
+				window_start:
+					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
+				window_end: "2026-03-08T00:59:00Z",
+				warnings: [],
+				endpoints: [
+					{
+						endpoint_id: "ep-vless",
+						endpoint_tag: "tokyo-vless",
+						port: 443,
+					},
+					{
+						endpoint_id: "ep-ss",
+						endpoint_tag: "tokyo-ss",
+						port: 8388,
+					},
+				],
+				per_endpoint_series: [
+					{
+						endpoint_id: "ep-vless",
+						endpoint_tag: "tokyo-vless",
+						port: 443,
+						series: [
+							{
+								minute: "2026-03-08T00:58:00Z",
+								count: window === "24h" ? 2 : 6,
+							},
+							{
+								minute: "2026-03-08T00:59:00Z",
+								count: window === "24h" ? 3 : 8,
+							},
+						],
+					},
+					{
+						endpoint_id: "ep-ss",
+						endpoint_tag: "tokyo-ss",
+						port: 8388,
+						series: [
+							{
+								minute: "2026-03-08T00:58:00Z",
+								count: window === "24h" ? 1 : 4,
+							},
+							{
+								minute: "2026-03-08T00:59:00Z",
+								count: window === "24h" ? 2 : 5,
+							},
+						],
+					},
+				],
+			},
+	);
 }
 
 describe("<NodeDetailsPage />", () => {
@@ -308,6 +366,60 @@ describe("<NodeDetailsPage />", () => {
 				expect.any(AbortSignal),
 			);
 		});
+	});
+
+	it("loads TCP connections on demand and switches windows", async () => {
+		setupMocks();
+		renderPage();
+
+		await waitFor(() => {
+			expect(fetchAdminNode).toHaveBeenCalled();
+		});
+		expect(fetchAdminNodeTcpConnections).not.toHaveBeenCalled();
+
+		fireEvent.click(await screenByRole("tab", "TCP connections"));
+		await waitFor(() => {
+			expect(fetchAdminNodeTcpConnections).toHaveBeenCalledWith(
+				"admintoken",
+				"node-tokyo",
+				"24h",
+				expect.any(AbortSignal),
+			);
+		});
+
+		expect(await screenByText("TCP connection count")).toBeTruthy();
+		expect(await screenByText("tokyo-vless :443")).toBeTruthy();
+		expect(await screenByText("tokyo-ss :8388")).toBeTruthy();
+
+		fireEvent.click(await screenByRole("button", "7d"));
+		await waitFor(() => {
+			expect(fetchAdminNodeTcpConnections).toHaveBeenLastCalledWith(
+				"admintoken",
+				"node-tokyo",
+				"7d",
+				expect.any(AbortSignal),
+			);
+		});
+	});
+
+	it("uses a section select on mobile and keeps tabs for larger screens", async () => {
+		setupMocks();
+		renderPage();
+
+		const sectionSelect = await screenByRole(
+			"combobox",
+			"Node details section",
+		);
+		expect(sectionSelect).toBeTruthy();
+		expect(sectionSelect.parentElement?.className).toContain("pb-3");
+
+		const tablist = await screenByRole("tablist", "Node details sections");
+		expect(tablist.className).toContain("flex-wrap");
+		expect(tablist.className).toContain("w-full");
+
+		const tcpTab = await screenByRole("tab", "TCP connections");
+		expect(tcpTab.className).toContain("basis-[calc(50%-0.125rem)]");
+		expect(tcpTab.className).toContain("min-h-11");
 	});
 
 	it("allows saving unlimited quota reset after entering an invalid monthly day", async () => {

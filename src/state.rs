@@ -17,6 +17,10 @@ use crate::{
     inbound_ip_usage::{
         GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
     },
+    tcp_connection_usage::{
+        PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
+        TcpConnectionUsageWarning,
+    },
     protocol::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
@@ -3163,6 +3167,8 @@ pub struct JsonSnapshotStore {
     usage: PersistedUsage,
     inbound_ip_usage_path: PathBuf,
     inbound_ip_usage: PersistedInboundIpUsage,
+    tcp_connection_usage_path: PathBuf,
+    tcp_connection_usage: PersistedTcpConnectionUsage,
 }
 
 impl JsonSnapshotStore {
@@ -3172,6 +3178,7 @@ impl JsonSnapshotStore {
         let state_path = init.data_dir.join("state.json");
         let usage_path = init.data_dir.join("usage.json");
         let inbound_ip_usage_path = init.data_dir.join("inbound_ip_usage.json");
+        let tcp_connection_usage_path = init.data_dir.join("tcp_connection_usage.json");
         let (mut state, grant_id_to_membership_key, is_new_state, mut migrated) =
             if state_path.exists() {
                 let bytes = fs::read(&state_path)?;
@@ -3358,6 +3365,21 @@ impl JsonSnapshotStore {
             .iter()
             .map(|m| membership_key(&m.user_id, &m.endpoint_id))
             .collect::<BTreeSet<_>>();
+        let allowed_tcp_endpoints = state
+            .endpoints
+            .values()
+            .map(|endpoint| {
+                (
+                    endpoint.endpoint_id.clone(),
+                    TcpConnectionEndpointView {
+                        node_id: endpoint.node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                        endpoint_tag: endpoint.tag.clone(),
+                        port: endpoint.port,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
 
         let mut usage_migrated = false;
         let mut usage = if usage_path.exists() {
@@ -3436,6 +3458,17 @@ impl JsonSnapshotStore {
             inbound_ip_usage_migrated = true;
         }
 
+        let mut tcp_connection_usage_migrated = false;
+        let mut tcp_connection_usage = if tcp_connection_usage_path.exists() {
+            let bytes = fs::read(&tcp_connection_usage_path)?;
+            serde_json::from_slice::<PersistedTcpConnectionUsage>(&bytes)?
+        } else {
+            PersistedTcpConnectionUsage::default()
+        };
+        if tcp_connection_usage.normalize(&allowed_tcp_endpoints) {
+            tcp_connection_usage_migrated = true;
+        }
+
         let store = Self {
             state_path,
             state,
@@ -3443,6 +3476,8 @@ impl JsonSnapshotStore {
             usage,
             inbound_ip_usage_path,
             inbound_ip_usage,
+            tcp_connection_usage_path,
+            tcp_connection_usage,
         };
 
         if is_new_state || migrated {
@@ -3453,6 +3488,9 @@ impl JsonSnapshotStore {
         }
         if inbound_ip_usage_migrated {
             store.save_inbound_ip_usage()?;
+        }
+        if tcp_connection_usage_migrated {
+            store.save_tcp_connection_usage()?;
         }
 
         Ok(store)
@@ -3497,9 +3535,19 @@ impl JsonSnapshotStore {
         &self.inbound_ip_usage
     }
 
+    pub fn tcp_connection_usage(&self) -> &PersistedTcpConnectionUsage {
+        &self.tcp_connection_usage
+    }
+
     pub fn save_inbound_ip_usage(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.inbound_ip_usage)?;
         write_atomic(&self.inbound_ip_usage_path, &bytes)?;
+        Ok(())
+    }
+
+    pub fn save_tcp_connection_usage(&self) -> Result<(), StoreError> {
+        let bytes = serde_json::to_vec_pretty(&self.tcp_connection_usage)?;
+        write_atomic(&self.tcp_connection_usage_path, &bytes)?;
         Ok(())
     }
 
@@ -3525,6 +3573,12 @@ impl JsonSnapshotStore {
 
     pub fn latest_inbound_ip_usage_minute(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.inbound_ip_usage.latest_minute_dt()
+    }
+
+    pub fn latest_tcp_connection_usage_minute(
+        &self,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.tcp_connection_usage.latest_minute_dt()
     }
 
     pub fn clear_membership_inbound_ip_usage(
@@ -3576,6 +3630,65 @@ impl JsonSnapshotStore {
             .collect::<BTreeSet<_>>();
         if self.inbound_ip_usage.normalize(&allowed_membership_keys) {
             self.save_inbound_ip_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn clear_endpoint_tcp_connection_usage(
+        &mut self,
+        endpoint_id: &str,
+    ) -> Result<(), StoreError> {
+        if self.tcp_connection_usage.clear_endpoint(endpoint_id) {
+            self.save_tcp_connection_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn clear_node_tcp_connection_usage(&mut self, node_id: &str) -> Result<(), StoreError> {
+        if self.tcp_connection_usage.clear_node(node_id) {
+            self.save_tcp_connection_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn record_tcp_connection_usage_samples(
+        &mut self,
+        minute: chrono::DateTime<chrono::Utc>,
+        linux_only: bool,
+        warning: Option<TcpConnectionUsageWarning>,
+        samples: &[TcpConnectionMinuteSample],
+    ) -> Result<(), StoreError> {
+        let changed = self.tcp_connection_usage.record_minute_samples(
+            minute,
+            linux_only,
+            warning,
+            samples,
+        );
+        if changed {
+            self.save_tcp_connection_usage()?;
+        }
+        Ok(())
+    }
+
+    pub fn prune_tcp_connection_usage_endpoints(&mut self) -> Result<(), StoreError> {
+        let allowed_endpoints = self
+            .state
+            .endpoints
+            .values()
+            .map(|endpoint| {
+                (
+                    endpoint.endpoint_id.clone(),
+                    TcpConnectionEndpointView {
+                        node_id: endpoint.node_id.clone(),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                        endpoint_tag: endpoint.tag.clone(),
+                        port: endpoint.port,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        if self.tcp_connection_usage.normalize(&allowed_endpoints) {
+            self.save_tcp_connection_usage()?;
         }
         Ok(())
     }

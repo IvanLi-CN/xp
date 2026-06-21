@@ -555,6 +555,44 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 }
                             }
 
+                            match &cmd {
+                                DesiredStateCommand::DeleteEndpoint { endpoint_id } => {
+                                    store
+                                        .clear_endpoint_tcp_connection_usage(endpoint_id)
+                                        .map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                }
+                                DesiredStateCommand::DeleteNode { node_id, .. } => {
+                                    store
+                                        .clear_node_tcp_connection_usage(node_id)
+                                        .map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                }
+                                DesiredStateCommand::UpsertEndpoint { .. }
+                                | DesiredStateCommand::UpsertNode { .. } => {
+                                    store
+                                        .prune_tcp_connection_usage_endpoints()
+                                        .map_err(|e| {
+                                            io_err(
+                                                ErrorSubject::StateMachine,
+                                                ErrorVerb::Write,
+                                                std::io::Error::other(e.to_string()),
+                                            )
+                                        })?;
+                                }
+                                _ => {}
+                            }
+
                             ClientResponse::Ok {
                                 result: apply_result,
                             }

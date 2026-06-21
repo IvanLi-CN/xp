@@ -7120,6 +7120,231 @@ async fn ip_usage_rejects_invalid_window_values() {
 }
 
 #[tokio::test]
+async fn node_tcp_connections_returns_per_endpoint_series() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (node_id, minute0, minute1, endpoint_one_id, endpoint_two_id, endpoint_one_tag) = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let endpoint_one = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let endpoint_two = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8389,
+                json!({}),
+            )
+            .unwrap();
+        let minute0 = crate::tcp_connection_usage::floor_minute(chrono::Utc::now())
+            - chrono::Duration::minutes(1);
+        let minute1 = minute0 + chrono::Duration::minutes(1);
+        store
+            .record_tcp_connection_usage_samples(
+                minute0,
+                true,
+                None,
+                &[
+                    crate::tcp_connection_usage::TcpConnectionMinuteSample {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_one.endpoint_id.clone(),
+                        endpoint_tag: endpoint_one.tag.clone(),
+                        port: endpoint_one.port,
+                        count: 2,
+                    },
+                    crate::tcp_connection_usage::TcpConnectionMinuteSample {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_two.endpoint_id.clone(),
+                        endpoint_tag: endpoint_two.tag.clone(),
+                        port: endpoint_two.port,
+                        count: 1,
+                    },
+                ],
+            )
+            .unwrap();
+        store
+            .record_tcp_connection_usage_samples(
+                minute1,
+                true,
+                None,
+                &[
+                    crate::tcp_connection_usage::TcpConnectionMinuteSample {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_one.endpoint_id.clone(),
+                        endpoint_tag: endpoint_one.tag.clone(),
+                        port: endpoint_one.port,
+                        count: 4,
+                    },
+                    crate::tcp_connection_usage::TcpConnectionMinuteSample {
+                        node_id: node_id.clone(),
+                        endpoint_id: endpoint_two.endpoint_id.clone(),
+                        endpoint_tag: endpoint_two.tag.clone(),
+                        port: endpoint_two.port,
+                        count: 3,
+                    },
+                ],
+            )
+            .unwrap();
+
+        (
+            node_id,
+            crate::tcp_connection_usage::floor_minute(minute0)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            crate::tcp_connection_usage::floor_minute(minute1)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            endpoint_one.endpoint_id,
+            endpoint_two.endpoint_id,
+            endpoint_one.tag,
+        )
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/tcp-connections?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+
+    assert_eq!(json["node"]["node_id"], node_id);
+    assert_eq!(json["window"], "24h");
+    assert_eq!(json["window_end"], minute1);
+    assert_eq!(warning_codes(&json["warnings"]), Vec::<String>::new());
+    assert_eq!(json["endpoints"].as_array().unwrap().len(), 2);
+
+    let endpoint_ids = json["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["endpoint_id"].as_str())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert!(endpoint_ids.contains(&endpoint_one_id));
+    assert!(endpoint_ids.contains(&endpoint_two_id));
+
+    let endpoint_one_series = json["per_endpoint_series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["endpoint_id"] == endpoint_one_id)
+        .expect("endpoint one series");
+    assert_eq!(endpoint_one_series["endpoint_tag"], endpoint_one_tag);
+    assert_eq!(
+        series_count_at(&endpoint_one_series["series"], &minute0),
+        2
+    );
+    assert_eq!(
+        series_count_at(&endpoint_one_series["series"], &minute1),
+        4
+    );
+}
+
+#[tokio::test]
+async fn node_tcp_connections_returns_unsupported_warning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node_id = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let endpoint = store
+            .create_endpoint(
+                node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        store
+            .record_tcp_connection_usage_samples(
+                crate::tcp_connection_usage::floor_minute(chrono::Utc::now()),
+                false,
+                Some(crate::tcp_connection_usage::TcpConnectionUsageWarning {
+                    code: "socket_read_failed".to_string(),
+                    message: "failed to read /proc/net/tcp".to_string(),
+                }),
+                &[crate::tcp_connection_usage::TcpConnectionMinuteSample {
+                    node_id: node_id.clone(),
+                    endpoint_id: endpoint.endpoint_id,
+                    endpoint_tag: endpoint.tag,
+                    port: endpoint.port,
+                    count: 0,
+                }],
+            )
+            .unwrap();
+        node_id
+    };
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/tcp-connections?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(
+        warning_codes(&json["warnings"]),
+        vec![
+            "socket_read_failed".to_string(),
+            "unsupported_platform".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn tcp_connections_reject_invalid_window_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let node_id = {
+        let store = store.lock().await;
+        store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node")
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{node_id}/tcp-connections?window=nope"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
 async fn admin_delete_user_removes_usage_entry() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

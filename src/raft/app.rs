@@ -565,6 +565,24 @@ impl RaftFacade for LocalRaft {
                         .map_err(anyhow::Error::new)?;
                 }
             }
+            match &cmd {
+                DesiredStateCommand::DeleteEndpoint { endpoint_id } => {
+                    store
+                        .clear_endpoint_tcp_connection_usage(endpoint_id)
+                        .map_err(anyhow::Error::new)?;
+                }
+                DesiredStateCommand::DeleteNode { node_id, .. } => {
+                    store
+                        .clear_node_tcp_connection_usage(node_id)
+                        .map_err(anyhow::Error::new)?;
+                }
+                DesiredStateCommand::UpsertEndpoint { .. } | DesiredStateCommand::UpsertNode { .. } => {
+                    store
+                        .prune_tcp_connection_usage_endpoints()
+                        .map_err(anyhow::Error::new)?;
+                }
+                _ => {}
+            }
             Ok(ClientResponse::Ok { result: out })
         })
     }

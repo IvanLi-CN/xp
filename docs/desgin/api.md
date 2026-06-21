@@ -884,3 +884,71 @@ SSE 事件类型：
 
 - `GET /api/admin/_internal/nodes/ip-usage/local?window=24h|7d`
 - `GET /api/admin/_internal/users/{user_id}/ip-usage/local?window=24h|7d`
+
+## 7. Node TCP connection usage（分钟级 TCP 连接数）
+
+### 7.1 节点视角：查询节点 TCP 连接数详情（管理员）
+
+`GET /api/admin/nodes/{node_id}/tcp-connections?window=24h|7d`
+
+返回：
+
+```json
+{
+  "node": {
+    "node_id": "01J...",
+    "node_name": "node-1",
+    "access_host": "example.com",
+    "api_base_url": "https://node-1.internal:8443"
+  },
+  "window": "24h",
+  "window_start": "2026-03-07T12:00:00Z",
+  "window_end": "2026-03-08T11:59:00Z",
+  "warnings": [],
+  "endpoints": [
+    {
+      "endpoint_id": "01JEP1...",
+      "endpoint_tag": "vless-edge-a",
+      "port": 443
+    },
+    {
+      "endpoint_id": "01JEP2...",
+      "endpoint_tag": "ss22-edge-b",
+      "port": 8443
+    }
+  ],
+  "per_endpoint_series": [
+    {
+      "endpoint_id": "01JEP1...",
+      "endpoint_tag": "vless-edge-a",
+      "port": 443,
+      "series": [
+        {
+          "minute": "2026-03-08T11:58:00Z",
+          "count": 2
+        },
+        {
+          "minute": "2026-03-08T11:59:00Z",
+          "count": 3
+        }
+      ]
+    }
+  ]
+}
+```
+
+说明：
+
+- `per_endpoint_series` 为每个 endpoint 的逐分钟 TCP 连接数，不做跨 endpoint 去重。
+- 前端默认全选全部 `endpoints`，并将已选 endpoints 的同一分钟 `count` 直接求和后画图。
+- 统计口径固定为节点本机 socket 视角，只统计业务 endpoint 监听端口上的 `ESTABLISHED` 入站 TCP 连接。
+- `warnings` 可能包含：
+  - `unsupported_platform`：当前节点不是 Linux，无法读取 `/proc/net/tcp*`。
+  - `socket_read_failed`：节点读取本机 socket 视图失败，历史可能不完整。
+- 该接口与 `IP usage` 完全独立，不依赖 Xray `statsUserOnline`。
+
+### 7.2 Internal local fan-out 接口
+
+仅供节点间 fan-out 聚合使用，要求 internal signature：
+
+- `GET /api/admin/_internal/nodes/tcp-connections/local?window=24h|7d`

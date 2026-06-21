@@ -31,6 +31,10 @@ import {
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
+import {
+	type AdminTcpConnectionUsageWindow,
+	fetchAdminNodeTcpConnections,
+} from "../api/adminTcpConnections";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
@@ -39,6 +43,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 import { alertClass } from "../components/ui-helpers";
@@ -175,7 +180,25 @@ type RuntimeActivityRow = {
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
 
-type NodeDetailsTab = "runtime" | "metadata" | "quota" | "ipUsage" | "danger";
+type NodeDetailsTab =
+	| "runtime"
+	| "metadata"
+	| "quota"
+	| "ipUsage"
+	| "tcpConnections"
+	| "danger";
+
+const NODE_DETAILS_TAB_OPTIONS: Array<{
+	value: NodeDetailsTab;
+	label: string;
+}> = [
+	{ value: "runtime", label: "Service runtime" },
+	{ value: "metadata", label: "Node metadata" },
+	{ value: "quota", label: "Quota reset" },
+	{ value: "ipUsage", label: "IP usage" },
+	{ value: "tcpConnections", label: "TCP connections" },
+	{ value: "danger", label: "Danger zone" },
+];
 
 function buildRuntimeActivityRows(
 	recentSlots: NodeRuntimeHistorySlot[],
@@ -480,12 +503,32 @@ export function NodeDetailsPage() {
 	const [runtimeSseError, setRuntimeSseError] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<NodeDetailsTab>("runtime");
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
+	const [tcpConnectionsWindow, setTcpConnectionsWindow] =
+		useState<AdminTcpConnectionUsageWindow>("24h");
 
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
 		enabled: adminToken.length > 0 && activeTab === "ipUsage",
 		queryFn: ({ signal }) =>
 			fetchAdminNodeIpUsage(adminToken, nodeId, ipUsageWindow, signal),
+		placeholderData: (previousData) =>
+			previousData?.node.node_id === nodeId ? previousData : undefined,
+	});
+	const tcpConnectionsQuery = useQuery({
+		queryKey: [
+			"adminNodeTcpConnections",
+			adminToken,
+			nodeId,
+			tcpConnectionsWindow,
+		],
+		enabled: adminToken.length > 0 && activeTab === "tcpConnections",
+		queryFn: ({ signal }) =>
+			fetchAdminNodeTcpConnections(
+				adminToken,
+				nodeId,
+				tcpConnectionsWindow,
+				signal,
+			),
 		placeholderData: (previousData) =>
 			previousData?.node.node_id === nodeId ? previousData : undefined,
 	});
@@ -497,6 +540,7 @@ export function NodeDetailsPage() {
 		setRuntimeSseConnected(false);
 		setActiveTab("runtime");
 		setIpUsageWindow("24h");
+		setTcpConnectionsWindow("24h");
 	}, [nodeId]);
 
 	const [saveError, setSaveError] = useState<string | null>(null);
@@ -807,224 +851,206 @@ export function NodeDetailsPage() {
 					value={activeTab}
 					onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
 				>
-					<div className="overflow-x-auto">
+					<div className="pb-3 sm:hidden">
+						<Select
+							value={activeTab}
+							onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
+						>
+							<SelectTrigger aria-label="Node details section">
+								<SelectValue placeholder="Select section" />
+							</SelectTrigger>
+							<SelectContent>
+								{NODE_DETAILS_TAB_OPTIONS.map((option) => (
+									<SelectItem key={option.value} value={option.value}>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="hidden sm:block">
 						<TabsList
-							className="h-auto min-w-max justify-start gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
+							className="h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/70 bg-card p-0.5 sm:p-1 shadow-sm"
 							aria-label="Node details sections"
 						>
-							<TabsTrigger
-								value="runtime"
-								className="whitespace-nowrap"
-								onClick={() => setActiveTab("runtime")}
-							>
-								Service runtime
-							</TabsTrigger>
-							<TabsTrigger
-								value="metadata"
-								className="whitespace-nowrap"
-								onClick={() => setActiveTab("metadata")}
-							>
-								Node metadata
-							</TabsTrigger>
-							<TabsTrigger
-								value="quota"
-								className="whitespace-nowrap"
-								onClick={() => setActiveTab("quota")}
-							>
-								Quota reset
-							</TabsTrigger>
-							<TabsTrigger
-								value="ipUsage"
-								className="whitespace-nowrap"
-								onClick={() => setActiveTab("ipUsage")}
-							>
-								IP usage
-							</TabsTrigger>
-							<TabsTrigger
-								value="danger"
-								className="whitespace-nowrap"
-								onClick={() => setActiveTab("danger")}
-							>
-								Danger zone
-							</TabsTrigger>
+							{NODE_DETAILS_TAB_OPTIONS.map((option) => (
+								<TabsTrigger
+									key={option.value}
+									value={option.value}
+									className="min-h-11 flex-1 basis-[calc(50%-0.125rem)] whitespace-nowrap px-2.5 sm:min-h-8 sm:flex-none sm:basis-auto sm:px-3"
+									onClick={() => setActiveTab(option.value)}
+								>
+									{option.label}
+								</TabsTrigger>
+							))}
 						</TabsList>
 					</div>
 
 					{activeTab === "runtime" ? (
-						<div className="xp-card">
-							<div className="xp-card-body space-y-4">
-								<div className="flex items-center justify-between gap-3">
-									<div>
-										<h2 className="xp-card-title">Service runtime</h2>
-										<p className="text-sm text-muted-foreground">
-											Live status of xp/xray/cloudflared/ddns with 7-day history
-											and key events.
-										</p>
-									</div>
-									<div className="flex items-center gap-2">
-										{runtime ? (
-											<Badge
-												variant={summaryBadgeVariant(runtime.summary.status)}
-											>
-												{runtime.summary.status}
-											</Badge>
-										) : null}
-										<Badge variant={runtimeSseConnected ? "success" : "ghost"}>
-											{runtimeSseConnected ? "live" : "polling"}
-										</Badge>
-									</div>
+						<section className="space-y-4">
+							<div className="flex items-center justify-between gap-3">
+								<div>
+									<h2 className="xp-card-title">Service runtime</h2>
+									<p className="text-sm text-muted-foreground">
+										Live status of xp/xray/cloudflared/ddns with 7-day history
+										and key events.
+									</p>
 								</div>
+								<div className="flex items-center gap-2">
+									{runtime ? (
+										<Badge
+											variant={summaryBadgeVariant(runtime.summary.status)}
+										>
+											{runtime.summary.status}
+										</Badge>
+									) : null}
+									<Badge variant={runtimeSseConnected ? "success" : "ghost"}>
+										{runtimeSseConnected ? "live" : "polling"}
+									</Badge>
+								</div>
+							</div>
 
-								{runtimeQuery.isLoading && !runtime ? (
-									<PageState
-										variant="loading"
-										title="Loading runtime"
-										description="Fetching service runtime details."
-									/>
-								) : null}
+							{runtimeQuery.isLoading && !runtime ? (
+								<PageState
+									variant="loading"
+									title="Loading runtime"
+									description="Fetching service runtime details."
+								/>
+							) : null}
 
-								{runtimeQuery.isError && !runtime && !history ? (
-									<PageState
-										variant="error"
-										title="Failed to load runtime"
-										description={formatErrorMessage(runtimeQuery.error)}
-										action={
-											<Button
-												variant="secondary"
-												loading={runtimeQuery.isFetching}
-												onClick={() => runtimeQuery.refetch()}
+							{runtimeQuery.isError && !runtime && !history ? (
+								<PageState
+									variant="error"
+									title="Failed to load runtime"
+									description={formatErrorMessage(runtimeQuery.error)}
+									action={
+										<Button
+											variant="secondary"
+											loading={runtimeQuery.isFetching}
+											onClick={() => runtimeQuery.refetch()}
+										>
+											Retry
+										</Button>
+									}
+								/>
+							) : null}
+
+							{runtimeQuery.isError && !runtime && history ? (
+								<NodeHistoryFallbackPanel
+									history={history}
+									loading={historyQuery.isFetching}
+									onRefresh={() => historyQuery.refetch()}
+								/>
+							) : null}
+
+							{runtime ? (
+								<>
+									{runtimeSseError ? (
+										<div className={alertClass("warning", "py-2")}>
+											<span>Realtime stream degraded: {runtimeSseError}</span>
+										</div>
+									) : null}
+
+									<div className="grid gap-3 lg:grid-cols-3">
+										{runtime.components.map((component) => (
+											<div
+												key={component.component}
+												className="space-y-2 rounded-2xl border border-border/70 bg-muted/35 p-3"
 											>
-												Retry
-											</Button>
-										}
-									/>
-								) : null}
-
-								{runtimeQuery.isError && !runtime && history ? (
-									<NodeHistoryFallbackPanel
-										history={history}
-										loading={historyQuery.isFetching}
-										onRefresh={() => historyQuery.refetch()}
-									/>
-								) : null}
-
-								{runtime ? (
-									<>
-										{runtimeSseError ? (
-											<div className={alertClass("warning", "py-2")}>
-												<span>Realtime stream degraded: {runtimeSseError}</span>
-											</div>
-										) : null}
-
-										<div className="grid gap-3 lg:grid-cols-3">
-											{runtime.components.map((component) => (
-												<div
-													key={component.component}
-													className="space-y-2 rounded-2xl border border-border/70 bg-muted/35 p-3"
-												>
-													<div className="flex items-center justify-between gap-2">
-														<p className="font-semibold">
-															{component.component}
-														</p>
-														<Badge
-															variant={componentBadgeVariant(component.status)}
-															size="sm"
-														>
-															{component.status}
-														</Badge>
-													</div>
-													<div className="space-y-1 font-mono text-xs opacity-80">
-														<p>last_ok: {formatTime(component.last_ok_at)}</p>
-														<p>
-															last_fail: {formatTime(component.last_fail_at)}
-														</p>
-														<p>
-															down_since: {formatTime(component.down_since)}
-														</p>
-														<p>fails: {component.consecutive_failures}</p>
-														<p>recoveries: {component.recoveries_observed}</p>
-														<p>
-															restart_attempts: {component.restart_attempts}
-														</p>
-														<p>
-															last_restart:{" "}
-															{formatTime(component.last_restart_at)}
-														</p>
-														{component.last_sync_at ? (
-															<p>
-																last_sync: {formatTime(component.last_sync_at)}
-															</p>
-														) : null}
-														{component.current_ipv4 ? (
-															<p>ipv4: {component.current_ipv4}</p>
-														) : null}
-														{component.current_ipv6 ? (
-															<p>ipv6: {component.current_ipv6}</p>
-														) : null}
-														{component.fast_mode_until ? (
-															<p>
-																fast_until:{" "}
-																{formatTime(component.fast_mode_until)}
-															</p>
-														) : null}
-														{component.last_error ? (
-															<p className="whitespace-pre-wrap break-words text-warning">
-																last_error: {component.last_error}
-															</p>
-														) : null}
-													</div>
+												<div className="flex items-center justify-between gap-2">
+													<p className="font-semibold">{component.component}</p>
+													<Badge
+														variant={componentBadgeVariant(component.status)}
+														size="sm"
+													>
+														{component.status}
+													</Badge>
 												</div>
-											))}
+												<div className="space-y-1 font-mono text-xs opacity-80">
+													<p>last_ok: {formatTime(component.last_ok_at)}</p>
+													<p>last_fail: {formatTime(component.last_fail_at)}</p>
+													<p>down_since: {formatTime(component.down_since)}</p>
+													<p>fails: {component.consecutive_failures}</p>
+													<p>recoveries: {component.recoveries_observed}</p>
+													<p>restart_attempts: {component.restart_attempts}</p>
+													<p>
+														last_restart:{" "}
+														{formatTime(component.last_restart_at)}
+													</p>
+													{component.last_sync_at ? (
+														<p>
+															last_sync: {formatTime(component.last_sync_at)}
+														</p>
+													) : null}
+													{component.current_ipv4 ? (
+														<p>ipv4: {component.current_ipv4}</p>
+													) : null}
+													{component.current_ipv6 ? (
+														<p>ipv6: {component.current_ipv6}</p>
+													) : null}
+													{component.fast_mode_until ? (
+														<p>
+															fast_until:{" "}
+															{formatTime(component.fast_mode_until)}
+														</p>
+													) : null}
+													{component.last_error ? (
+														<p className="whitespace-pre-wrap break-words text-warning">
+															last_error: {component.last_error}
+														</p>
+													) : null}
+												</div>
+											</div>
+										))}
+									</div>
+
+									<div>
+										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+											<p className="text-xs uppercase tracking-wide text-muted-foreground">
+												7-day activity (30-minute slots)
+											</p>
+											<div className="flex items-center gap-3 text-[11px] opacity-70">
+												<span className="inline-flex items-center gap-1">
+													<span className="size-2 rounded-[2px] bg-success" />
+													up
+												</span>
+												<span className="inline-flex items-center gap-1">
+													<span className="size-2 rounded-[2px] bg-warning" />
+													degraded
+												</span>
+												<span className="inline-flex items-center gap-1">
+													<span className="size-2 rounded-[2px] bg-destructive" />
+													down
+												</span>
+												<span className="inline-flex items-center gap-1">
+													<span className="size-2 rounded-[2px] bg-info" />
+													unknown
+												</span>
+											</div>
 										</div>
 
-										<div>
-											<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-												<p className="text-xs uppercase tracking-wide text-muted-foreground">
-													7-day activity (30-minute slots)
-												</p>
-												<div className="flex items-center gap-3 text-[11px] opacity-70">
-													<span className="inline-flex items-center gap-1">
-														<span className="size-2 rounded-[2px] bg-success" />
-														up
-													</span>
-													<span className="inline-flex items-center gap-1">
-														<span className="size-2 rounded-[2px] bg-warning" />
-														degraded
-													</span>
-													<span className="inline-flex items-center gap-1">
-														<span className="size-2 rounded-[2px] bg-destructive" />
-														down
-													</span>
-													<span className="inline-flex items-center gap-1">
-														<span className="size-2 rounded-[2px] bg-info" />
-														unknown
-													</span>
-												</div>
-											</div>
-
-											<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
-												<div className="overflow-x-auto">
-													<div className="min-w-[28rem]">
-														<div
-															className="mb-1 grid items-center gap-2 text-[10px] text-muted-foreground"
-															style={{
-																gridTemplateColumns: "4.5rem minmax(0,1fr)",
-															}}
-														>
-															<span />
-															<div className="flex items-center justify-between">
-																<span>00:00</span>
-																<span>06:00</span>
-																<span>12:00</span>
-																<span>18:00</span>
-																<span>24:00</span>
-															</div>
+										<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+											<div className="overflow-x-auto">
+												<div className="min-w-[28rem]">
+													<div
+														className="mb-1 grid items-center gap-2 text-[10px] text-muted-foreground"
+														style={{
+															gridTemplateColumns: "4.5rem minmax(0,1fr)",
+														}}
+													>
+														<span />
+														<div className="flex items-center justify-between">
+															<span>00:00</span>
+															<span>06:00</span>
+															<span>12:00</span>
+															<span>18:00</span>
+															<span>24:00</span>
 														</div>
+													</div>
 
-														<div className="space-y-1.5">
-															{buildRuntimeActivityRows(
-																runtime.recent_slots,
-															).map((row) => (
+													<div className="space-y-1.5">
+														{buildRuntimeActivityRows(runtime.recent_slots).map(
+															(row) => (
 																<div
 																	key={row.key}
 																	className="grid items-center gap-2"
@@ -1059,410 +1085,404 @@ export function NodeDetailsPage() {
 																		))}
 																	</div>
 																</div>
-															))}
-														</div>
+															),
+														)}
 													</div>
 												</div>
 											</div>
 										</div>
+									</div>
 
-										<div className="space-y-2">
-											<div className="flex items-center justify-between gap-2">
-												<p className="text-xs uppercase tracking-wide text-muted-foreground">
-													Key events
-												</p>
-												<Button
-													variant="secondary"
-													loading={runtimeQuery.isFetching}
-													onClick={() => runtimeQuery.refetch()}
-												>
-													Refresh runtime
-												</Button>
-											</div>
-											<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
-												<table className="xp-table xp-table-compact">
-													<thead>
-														<tr>
-															<th>Time</th>
-															<th>Component</th>
-															<th>Kind</th>
-															<th>Message</th>
-														</tr>
-													</thead>
-													<tbody>
-														{runtime.events.length === 0 ? (
-															<tr>
-																<td colSpan={4} className="opacity-60">
-																	No runtime events in window.
-																</td>
-															</tr>
-														) : (
-															runtime.events.map((event) => (
-																<tr key={event.event_id}>
-																	<td className="font-mono text-xs">
-																		{formatTime(event.occurred_at)}
-																	</td>
-																	<td className="font-mono text-xs">
-																		{event.component}
-																	</td>
-																	<td>
-																		<Badge
-																			variant={eventBadgeVariant(event.kind)}
-																			size="sm"
-																		>
-																			{event.kind}
-																		</Badge>
-																	</td>
-																	<td className="text-xs">{event.message}</td>
-																</tr>
-															))
-														)}
-													</tbody>
-												</table>
-											</div>
+									<div className="space-y-2">
+										<div className="flex items-center justify-between gap-2">
+											<p className="text-xs uppercase tracking-wide text-muted-foreground">
+												Key events
+											</p>
+											<Button
+												variant="secondary"
+												loading={runtimeQuery.isFetching}
+												onClick={() => runtimeQuery.refetch()}
+											>
+												Refresh runtime
+											</Button>
 										</div>
-									</>
-								) : null}
-							</div>
-						</div>
+										<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+											<table className="xp-table xp-table-compact">
+												<thead>
+													<tr>
+														<th>Time</th>
+														<th>Component</th>
+														<th>Kind</th>
+														<th>Message</th>
+													</tr>
+												</thead>
+												<tbody>
+													{runtime.events.length === 0 ? (
+														<tr>
+															<td colSpan={4} className="opacity-60">
+																No runtime events in window.
+															</td>
+														</tr>
+													) : (
+														runtime.events.map((event) => (
+															<tr key={event.event_id}>
+																<td className="font-mono text-xs">
+																	{formatTime(event.occurred_at)}
+																</td>
+																<td className="font-mono text-xs">
+																	{event.component}
+																</td>
+																<td>
+																	<Badge
+																		variant={eventBadgeVariant(event.kind)}
+																		size="sm"
+																	>
+																		{event.kind}
+																	</Badge>
+																</td>
+																<td className="text-xs">{event.message}</td>
+															</tr>
+														))
+													)}
+												</tbody>
+											</table>
+										</div>
+									</div>
+								</>
+							) : null}
+						</section>
 					) : null}
 
 					{activeTab === "metadata" ? (
-						<div className="xp-card">
-							<div className="xp-card-body space-y-3">
-								<div>
-									<h2 className="xp-card-title">Node metadata</h2>
-									<p className="text-sm text-muted-foreground">
-										Read-only. Managed via xp-ops config file.
-									</p>
+						<section className="space-y-3">
+							<div>
+								<h2 className="xp-card-title">Node metadata</h2>
+								<p className="text-sm text-muted-foreground">
+									Read-only. Managed via xp-ops config file.
+								</p>
+							</div>
+							<div className="rounded-2xl bg-muted/35 p-4 space-y-2">
+								<div className="text-xs uppercase tracking-wide text-muted-foreground">
+									Node ID
 								</div>
-								<div className="rounded-2xl bg-muted/35 p-4 space-y-2">
-									<div className="text-xs uppercase tracking-wide text-muted-foreground">
-										Node ID
-									</div>
-									<div className="font-mono text-sm break-all">{nodeId}</div>
-									<div className="grid gap-2 md:grid-cols-2 pt-3">
-										<div>
-											<div className="text-xs uppercase tracking-wide text-muted-foreground">
-												Node name
-											</div>
-											<div className="font-mono text-sm break-all">
-												{nodeQuery.data.node_name || "(empty)"}
-											</div>
+								<div className="font-mono text-sm break-all">{nodeId}</div>
+								<div className="grid gap-2 md:grid-cols-2 pt-3">
+									<div>
+										<div className="text-xs uppercase tracking-wide text-muted-foreground">
+											Node name
 										</div>
-										<div>
-											<div className="text-xs uppercase tracking-wide text-muted-foreground">
-												Access host
-											</div>
-											<div className="font-mono text-sm break-all">
-												{nodeQuery.data.access_host || "(empty)"}
-											</div>
-										</div>
-										<div className="md:col-span-2">
-											<div className="text-xs uppercase tracking-wide text-muted-foreground">
-												API base URL
-											</div>
-											<div className="font-mono text-sm break-all">
-												{nodeQuery.data.api_base_url || "(empty)"}
-											</div>
+										<div className="font-mono text-sm break-all">
+											{nodeQuery.data.node_name || "(empty)"}
 										</div>
 									</div>
-								</div>
-								<div className="rounded-2xl border border-border/70 bg-muted/35 p-4 space-y-4">
-									<div className="flex flex-wrap items-start justify-between gap-3">
-										<div>
-											<div className="text-xs uppercase tracking-wide text-muted-foreground">
-												Node egress probe
-											</div>
-											<p className="text-sm text-muted-foreground">
-												Subscription region is derived from the latest outbound
-												public IP probe.
-											</p>
+									<div>
+										<div className="text-xs uppercase tracking-wide text-muted-foreground">
+											Access host
 										</div>
-										<div className="flex items-center gap-2">
-											{egressProbe ? (
-												<>
-													<Badge variant="outline">
-														{formatSubscriptionRegion(
-															egressProbe.subscription_region,
-														)}
-													</Badge>
-													{egressProbe.stale ? (
-														<Badge variant="warning">stale</Badge>
-													) : (
-														<Badge variant="success">fresh</Badge>
-													)}
-												</>
-											) : (
-												<Badge variant="ghost">unknown</Badge>
-											)}
-											<Button
-												variant="secondary"
-												loading={isRefreshingEgressProbe}
-												onClick={() => void handleRefreshEgressProbe()}
-											>
-												Refresh probe
-											</Button>
+										<div className="font-mono text-sm break-all">
+											{nodeQuery.data.access_host || "(empty)"}
 										</div>
 									</div>
-
-									{egressProbe ? (
-										<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Selected public IP
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.selected_public_ip ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													IPv4
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.public_ipv4 ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													IPv6
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.public_ipv6 ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Country
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.country_code ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Region
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.geo_region ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													City
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.geo_city ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Operator
-												</div>
-												<div className="font-mono text-sm break-all">
-													{egressProbe.geo_operator ?? "-"}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Checked at
-												</div>
-												<div className="font-mono text-sm break-all">
-													{formatTime(egressProbe.checked_at)}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs uppercase tracking-wide text-muted-foreground">
-													Last success
-												</div>
-												<div className="font-mono text-sm break-all">
-													{formatTime(egressProbe.last_success_at)}
-												</div>
-											</div>
+									<div className="md:col-span-2">
+										<div className="text-xs uppercase tracking-wide text-muted-foreground">
+											API base URL
 										</div>
-									) : (
-										<div className={alertClass("warning", "py-2")}>
-											<span>
-												No egress probe result is stored yet. Trigger a refresh
-												to probe the node now.
-											</span>
+										<div className="font-mono text-sm break-all">
+											{nodeQuery.data.api_base_url || "(empty)"}
 										</div>
-									)}
-
-									{egressProbe?.error_summary ? (
-										<div className={alertClass("warning", "py-2")}>
-											<span className="break-words">
-												Last probe error: {egressProbe.error_summary}
-											</span>
-										</div>
-									) : null}
-								</div>
-								<div className="text-sm text-muted-foreground">
-									To change node meta, edit{" "}
-									<span className="font-mono">/etc/xp/xp.env</span> and run{" "}
-									<span className="font-mono">
-										sudo xp-ops xp sync-node-meta
-									</span>
-									.
+									</div>
 								</div>
 							</div>
-						</div>
+							<div className="rounded-2xl border border-border/70 bg-muted/35 p-4 space-y-4">
+								<div className="flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<div className="text-xs uppercase tracking-wide text-muted-foreground">
+											Node egress probe
+										</div>
+										<p className="text-sm text-muted-foreground">
+											Subscription region is derived from the latest outbound
+											public IP probe.
+										</p>
+									</div>
+									<div className="flex items-center gap-2">
+										{egressProbe ? (
+											<>
+												<Badge variant="outline">
+													{formatSubscriptionRegion(
+														egressProbe.subscription_region,
+													)}
+												</Badge>
+												{egressProbe.stale ? (
+													<Badge variant="warning">stale</Badge>
+												) : (
+													<Badge variant="success">fresh</Badge>
+												)}
+											</>
+										) : (
+											<Badge variant="ghost">unknown</Badge>
+										)}
+										<Button
+											variant="secondary"
+											loading={isRefreshingEgressProbe}
+											onClick={() => void handleRefreshEgressProbe()}
+										>
+											Refresh probe
+										</Button>
+									</div>
+								</div>
+
+								{egressProbe ? (
+									<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Selected public IP
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.selected_public_ip ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												IPv4
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.public_ipv4 ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												IPv6
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.public_ipv6 ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Country
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.country_code ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Region
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.geo_region ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												City
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.geo_city ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Operator
+											</div>
+											<div className="font-mono text-sm break-all">
+												{egressProbe.geo_operator ?? "-"}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Checked at
+											</div>
+											<div className="font-mono text-sm break-all">
+												{formatTime(egressProbe.checked_at)}
+											</div>
+										</div>
+										<div>
+											<div className="text-xs uppercase tracking-wide text-muted-foreground">
+												Last success
+											</div>
+											<div className="font-mono text-sm break-all">
+												{formatTime(egressProbe.last_success_at)}
+											</div>
+										</div>
+									</div>
+								) : (
+									<div className={alertClass("warning", "py-2")}>
+										<span>
+											No egress probe result is stored yet. Trigger a refresh to
+											probe the node now.
+										</span>
+									</div>
+								)}
+
+								{egressProbe?.error_summary ? (
+									<div className={alertClass("warning", "py-2")}>
+										<span className="break-words">
+											Last probe error: {egressProbe.error_summary}
+										</span>
+									</div>
+								) : null}
+							</div>
+							<div className="text-sm text-muted-foreground">
+								To change node meta, edit{" "}
+								<span className="font-mono">/etc/xp/xp.env</span> and run{" "}
+								<span className="font-mono">sudo xp-ops xp sync-node-meta</span>
+								.
+							</div>
+						</section>
 					) : null}
 
 					{activeTab === "quota" ? (
-						<div className="xp-card">
-							<div className="xp-card-body space-y-4">
-								<div>
-									<h2 className="xp-card-title">Quota reset</h2>
-									<p className="text-sm text-muted-foreground">
-										Runtime admin setting. Safe to edit via the admin API.
-									</p>
-								</div>
-								<div className="rounded-2xl bg-muted/35 p-4 space-y-1">
-									<div className="text-xs uppercase tracking-wide text-muted-foreground">
-										Quota budget
-									</div>
-									<div className="text-sm text-muted-foreground">
-										Total bytes per cycle for this node. Set to{" "}
-										<span className="font-mono">0</span> to disable shared quota
-										enforcement (unlimited).
-									</div>
-									<NodeQuotaEditor
-										value={nodeQuery.data.quota_limit_bytes}
-										disabled={isSaving}
-										onApply={async (nextBytes: number) => {
-											try {
-												await patchAdminNode(adminToken, nodeId, {
-													quota_limit_bytes: nextBytes,
-												});
-												pushToast({
-													variant: "success",
-													message: "Node quota budget updated.",
-												});
-												await nodeQuery.refetch();
-											} catch (error) {
-												const message = formatErrorMessage(error);
-												pushToast({
-													variant: "error",
-													message: `Failed to update node quota budget: ${message}`,
-												});
-												throw new Error(message);
-											}
-										}}
-									/>
-								</div>
-								<Form {...quotaForm}>
-									<form className="space-y-4" onSubmit={handleSaveQuotaReset}>
-										<div className="grid gap-4 md:grid-cols-3">
-											<FormField
-												control={quotaForm.control}
-												name="resetPolicy"
-												render={({ field }) => (
-													<FormItem>
-														<FormLabel>Policy</FormLabel>
-														<Select
-															value={field.value}
-															onValueChange={(value) => {
-																field.onChange(value);
-																if (value !== "monthly") {
-																	quotaForm.setValue("resetDay", 1, {
-																		shouldDirty: true,
-																		shouldValidate: false,
-																	});
-																	quotaForm.clearErrors("resetDay");
-																}
-															}}
-														>
-															<FormControl>
-																<SelectTrigger>
-																	<SelectValue />
-																</SelectTrigger>
-															</FormControl>
-															<SelectContent>
-																<SelectItem value="monthly">monthly</SelectItem>
-																<SelectItem value="unlimited">
-																	unlimited
-																</SelectItem>
-															</SelectContent>
-														</Select>
-														<FormMessage />
-													</FormItem>
-												)}
-											/>
-											<FormField
-												control={quotaForm.control}
-												name="resetDay"
-												render={({ field }) => (
-													<FormItem>
-														<FormLabel>Day of month</FormLabel>
-														<FormControl>
-															<Input
-																{...field}
-																type="number"
-																min={1}
-																max={31}
-																step={1}
-																disabled={quotaPolicy !== "monthly"}
-																onChange={(event) =>
-																	field.onChange(event.target.value)
-																}
-															/>
-														</FormControl>
-														<FormDescription>
-															Used when the policy is monthly.
-														</FormDescription>
-														<FormMessage />
-													</FormItem>
-												)}
-											/>
-											<FormField
-												control={quotaForm.control}
-												name="resetTzOffsetMinutes"
-												render={({ field }) => (
-													<FormItem>
-														<FormLabel>tz_offset_minutes</FormLabel>
-														<FormControl>
-															<Input
-																{...field}
-																type="text"
-																placeholder="(empty)"
-															/>
-														</FormControl>
-														<FormDescription>
-															Leave empty to follow node-local defaults.
-														</FormDescription>
-														<FormMessage />
-													</FormItem>
-												)}
-											/>
-										</div>
-
-										{saveError ? (
-											<p className="text-sm text-destructive">{saveError}</p>
-										) : null}
-
-										<div className="flex justify-end gap-2">
-											<Button
-												variant="secondary"
-												type="button"
-												loading={nodeQuery.isFetching}
-												onClick={() => nodeQuery.refetch()}
-											>
-												Refresh
-											</Button>
-											<Button
-												type="submit"
-												loading={isSaving}
-												disabled={!isDirty}
-											>
-												Save changes
-											</Button>
-										</div>
-									</form>
-								</Form>
+						<section className="space-y-4">
+							<div>
+								<h2 className="xp-card-title">Quota reset</h2>
+								<p className="text-sm text-muted-foreground">
+									Runtime admin setting. Safe to edit via the admin API.
+								</p>
 							</div>
-						</div>
+							<div className="rounded-2xl bg-muted/35 p-4 space-y-1">
+								<div className="text-xs uppercase tracking-wide text-muted-foreground">
+									Quota budget
+								</div>
+								<div className="text-sm text-muted-foreground">
+									Total bytes per cycle for this node. Set to{" "}
+									<span className="font-mono">0</span> to disable shared quota
+									enforcement (unlimited).
+								</div>
+								<NodeQuotaEditor
+									value={nodeQuery.data.quota_limit_bytes}
+									disabled={isSaving}
+									onApply={async (nextBytes: number) => {
+										try {
+											await patchAdminNode(adminToken, nodeId, {
+												quota_limit_bytes: nextBytes,
+											});
+											pushToast({
+												variant: "success",
+												message: "Node quota budget updated.",
+											});
+											await nodeQuery.refetch();
+										} catch (error) {
+											const message = formatErrorMessage(error);
+											pushToast({
+												variant: "error",
+												message: `Failed to update node quota budget: ${message}`,
+											});
+											throw new Error(message);
+										}
+									}}
+								/>
+							</div>
+							<Form {...quotaForm}>
+								<form className="space-y-4" onSubmit={handleSaveQuotaReset}>
+									<div className="grid gap-4 md:grid-cols-3">
+										<FormField
+											control={quotaForm.control}
+											name="resetPolicy"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Policy</FormLabel>
+													<Select
+														value={field.value}
+														onValueChange={(value) => {
+															field.onChange(value);
+															if (value !== "monthly") {
+																quotaForm.setValue("resetDay", 1, {
+																	shouldDirty: true,
+																	shouldValidate: false,
+																});
+																quotaForm.clearErrors("resetDay");
+															}
+														}}
+													>
+														<FormControl>
+															<SelectTrigger>
+																<SelectValue />
+															</SelectTrigger>
+														</FormControl>
+														<SelectContent>
+															<SelectItem value="monthly">monthly</SelectItem>
+															<SelectItem value="unlimited">
+																unlimited
+															</SelectItem>
+														</SelectContent>
+													</Select>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<FormField
+											control={quotaForm.control}
+											name="resetDay"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Day of month</FormLabel>
+													<FormControl>
+														<Input
+															{...field}
+															type="number"
+															min={1}
+															max={31}
+															step={1}
+															disabled={quotaPolicy !== "monthly"}
+															onChange={(event) =>
+																field.onChange(event.target.value)
+															}
+														/>
+													</FormControl>
+													<FormDescription>
+														Used when the policy is monthly.
+													</FormDescription>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<FormField
+											control={quotaForm.control}
+											name="resetTzOffsetMinutes"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>tz_offset_minutes</FormLabel>
+													<FormControl>
+														<Input
+															{...field}
+															type="text"
+															placeholder="(empty)"
+														/>
+													</FormControl>
+													<FormDescription>
+														Leave empty to follow node-local defaults.
+													</FormDescription>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+									</div>
+
+									{saveError ? (
+										<p className="text-sm text-destructive">{saveError}</p>
+									) : null}
+
+									<div className="flex justify-end gap-2">
+										<Button
+											variant="secondary"
+											type="button"
+											loading={nodeQuery.isFetching}
+											onClick={() => nodeQuery.refetch()}
+										>
+											Refresh
+										</Button>
+										<Button
+											type="submit"
+											loading={isSaving}
+											disabled={!isDirty}
+										>
+											Save changes
+										</Button>
+									</div>
+								</form>
+							</Form>
+						</section>
 					) : null}
 
 					{activeTab === "ipUsage" ? (
@@ -1507,27 +1527,63 @@ export function NodeDetailsPage() {
 						</div>
 					) : null}
 
-					{activeTab === "danger" ? (
-						<div className="xp-card border border-destructive/30">
-							<div className="xp-card-body space-y-4">
-								<h2 className="xp-card-title text-destructive">Danger zone</h2>
-								<p className="text-sm text-muted-foreground">
-									Deleting a node removes it from the cluster membership and
-									inventory. If the node still owns endpoints, the next step
-									shows exactly what will be deleted.
-								</p>
-								<div>
-									<Button
-										variant="danger"
-										onClick={() => void handleOpenDeleteDialog()}
-										loading={isPreparingDelete}
-										disabled={isDeleting}
-									>
-										Delete node
-									</Button>
-								</div>
-							</div>
+					{activeTab === "tcpConnections" ? (
+						<div className="space-y-4">
+							{tcpConnectionsQuery.isLoading && !tcpConnectionsQuery.data ? (
+								<PageState
+									variant="loading"
+									title="Loading TCP connection count"
+									description="Fetching the node's minute-level TCP connection history."
+								/>
+							) : null}
+
+							{tcpConnectionsQuery.isError && !tcpConnectionsQuery.data ? (
+								<PageState
+									variant="error"
+									title="Failed to load TCP connection count"
+									description={formatErrorMessage(tcpConnectionsQuery.error)}
+									action={
+										<Button
+											variant="secondary"
+											loading={tcpConnectionsQuery.isFetching}
+											onClick={() => tcpConnectionsQuery.refetch()}
+										>
+											Retry
+										</Button>
+									}
+								/>
+							) : null}
+
+							{tcpConnectionsQuery.data ? (
+								<TcpConnectionUsageView
+									window={tcpConnectionsWindow}
+									onWindowChange={setTcpConnectionsWindow}
+									report={tcpConnectionsQuery.data}
+									isFetching={tcpConnectionsQuery.isFetching}
+								/>
+							) : null}
 						</div>
+					) : null}
+
+					{activeTab === "danger" ? (
+						<section className="space-y-4 border-t border-destructive/30 pt-4">
+							<h2 className="xp-card-title text-destructive">Danger zone</h2>
+							<p className="text-sm text-muted-foreground">
+								Deleting a node removes it from the cluster membership and
+								inventory. If the node still owns endpoints, the next step shows
+								exactly what will be deleted.
+							</p>
+							<div>
+								<Button
+									variant="danger"
+									onClick={() => void handleOpenDeleteDialog()}
+									loading={isPreparingDelete}
+									disabled={isDeleting}
+								>
+									Delete node
+								</Button>
+							</div>
+						</section>
 					) : null}
 				</Tabs>
 
@@ -1627,7 +1683,7 @@ export function NodeDetailsPage() {
 	})();
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-4 sm:space-y-6">
 			<PageHeader
 				title="Node details"
 				description="Manage node metadata and routing configuration."
