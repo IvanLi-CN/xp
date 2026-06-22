@@ -128,6 +128,7 @@
   story_id_or_title: `Pages/NodeDetailsPage/TcpConnectionsTab`
   state: `live hover keeps series visible`
   evidence_note: 验证真实 hover 打开 tooltip 后，折线与面积层仍保持可见，不会在 hover 帧里被 SVG hover 状态冲成 `none`。
+  PR: include
   image:
   ![TCP connections hover keeps series visible](./assets/node-tcp-connections-hover-proof.png)
 
