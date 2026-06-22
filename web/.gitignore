@@ -3,5 +3,5 @@ dist
 .vite
 storybook-static
 playwright-report
+playwright-report-storybook
 test-results
-
