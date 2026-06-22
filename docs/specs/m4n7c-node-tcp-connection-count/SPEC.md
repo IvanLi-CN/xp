@@ -121,6 +121,20 @@
 - source_type: `storybook_canvas`
   target_program: `mock-only`
   capture_scope: `browser-viewport`
+  requested_viewport: `1600x1200`
+  viewport_strategy: `devtools-emulate`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Pages/NodeDetailsPage/TcpConnectionsTab`
+  state: `live hover keeps series visible`
+  evidence_note: 验证真实 hover 打开 tooltip 后，折线与面积层仍保持可见，不会在 hover 帧里被 SVG hover 状态冲成 `none`。
+  PR: include
+  image:
+  ![TCP connections hover keeps series visible](./assets/node-tcp-connections-hover-proof.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
   requested_viewport: `1600x1800`
   viewport_strategy: `devtools-emulate`
   sensitive_exclusion: `N/A`

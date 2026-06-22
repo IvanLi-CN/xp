@@ -616,6 +616,9 @@ export function TcpConnectionUsageView({
 					type: "line",
 					smooth: false,
 					showSymbol: false,
+					emphasis: {
+						disabled: true,
+					},
 					data: points,
 					lineStyle: {
 						width: 2,
