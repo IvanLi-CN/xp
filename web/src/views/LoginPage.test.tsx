@@ -45,10 +45,14 @@ describe("<LoginPage />", () => {
 		}
 		mocks.navigate.mockReset();
 		mocks.verifyAdminToken.mockReset();
-		window.history.pushState({}, "", "/login?login_token=test.jwt.token");
+		window.history.pushState(
+			{},
+			"",
+			"/login?login_token=test.jwt.token&redirect=/nodes%3Fview%3Dtable%23history",
+		);
 	});
 
-	it("consumes login_token from URL, verifies, stores, and removes it from the address bar", async () => {
+	it("consumes login_token from URL, verifies, stores, removes it from the address bar, and navigates back to redirect", async () => {
 		mocks.verifyAdminToken.mockResolvedValue(undefined);
 
 		render(
@@ -67,7 +71,30 @@ describe("<LoginPage />", () => {
 			);
 		});
 
-		expect(window.location.search).toBe("");
-		expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
+		expect(window.location.search).toBe(
+			"?redirect=%2Fnodes%3Fview%3Dtable%23history",
+		);
+		expect(mocks.navigate).toHaveBeenCalledWith({
+			href: "/nodes?view=table#history",
+		});
+	});
+
+	it("falls back to root for invalid redirect targets", async () => {
+		mocks.verifyAdminToken.mockResolvedValue(undefined);
+		window.history.pushState(
+			{},
+			"",
+			"/login?login_token=test.jwt.token&redirect=https%3A%2F%2Fevil.example.com",
+		);
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		await waitFor(() => {
+			expect(mocks.navigate).toHaveBeenCalledWith({ href: "/" });
+		});
 	});
 });

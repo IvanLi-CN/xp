@@ -1,8 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
-import { NodeInventoryList } from "./NodeInventoryList";
+import {
+	LIST_LAYOUT_BREAKPOINT_PX,
+	NodeInventoryList,
+} from "./NodeInventoryList";
 import { UiPrefsProvider } from "./UiPrefs";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
@@ -40,6 +43,14 @@ vi.mock("./Icon", () => ({
 		<span aria-hidden={ariaLabel ? undefined : "true"} aria-label={ariaLabel} />
 	),
 }));
+
+vi.mock("./auth", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./auth")>();
+	return {
+		...actual,
+		readAdminToken: () => "xp_admin_token",
+	};
+});
 
 const baseNodes: AdminNodeRuntimeListItem[] = [
 	{
@@ -95,7 +106,15 @@ const baseNodes: AdminNodeRuntimeListItem[] = [
 ];
 
 describe("<NodeInventoryList />", () => {
-	it("renders icon-only node links without button styles", async () => {
+	beforeEach(() => {
+		window.history.replaceState(
+			{},
+			"",
+			"/nodes?view=table&login_token=old-token#history",
+		);
+	});
+
+	it("renders a desktop table with details and cross-node actions", async () => {
 		render(
 			<UiPrefsProvider>
 				<NodeInventoryList
@@ -106,20 +125,25 @@ describe("<NodeInventoryList />", () => {
 			</UiPrefsProvider>,
 		);
 
-		const links = await screen.findAllByRole("link", {
-			name: /open node panel:/i,
-		});
-		const uniqueHrefs = new Set(
-			links.map((link) => link.getAttribute("href")).filter(Boolean),
-		);
-		expect(uniqueHrefs).toEqual(new Set(["/nodes/node-1", "/nodes/node-2"]));
-		expect(links.some((link) => !/\bbtn\b/.test(link.className))).toBe(true);
-
-		for (const nodeName of screen.getAllByText("tokyo-1")) {
-			expect(nodeName.closest("a")).toBeNull();
-		}
-		expect(screen.getAllByText("(unnamed)").length).toBeGreaterThan(0);
 		expect(screen.getByRole("table")).toBeInTheDocument();
+		expect(
+			screen.getByRole("columnheader", { name: "Actions" }),
+		).toBeInTheDocument();
+		const detailsLinks = await screen.findAllByRole("link", {
+			name: "Details",
+		});
+		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
+			"/nodes/node-1",
+			"/nodes/node-2",
+		]);
+		const openOnNodeLinks = screen.getAllByRole("link", {
+			name: "Open on node",
+		});
+		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
+			"https://node-1.example.com/nodes?view=table&login_token=xp_admin_token#history",
+			"https://node-2.example.com/nodes?view=table&login_token=xp_admin_token#history",
+		]);
+		expect(screen.getAllByText("(unnamed)").length).toBeGreaterThan(0);
 		expect(screen.getAllByText("API base URL").length).toBeGreaterThan(0);
 	});
 
@@ -192,6 +216,41 @@ describe("<NodeInventoryList />", () => {
 				configurable: true,
 				writable: true,
 				value: originalResizeObserver,
+			});
+		}
+	});
+
+	it("renders mobile cards below the table breakpoint with both actions", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			writable: true,
+			value: LIST_LAYOUT_BREAKPOINT_PX - 1,
+		});
+
+		try {
+			render(
+				<UiPrefsProvider>
+					<NodeInventoryList
+						items={baseNodes}
+						partial={false}
+						unreachableNodes={[]}
+					/>
+				</UiPrefsProvider>,
+			);
+
+			expect(screen.queryByRole("table")).toBeNull();
+			expect(
+				await screen.findAllByRole("link", { name: "Details" }),
+			).toHaveLength(2);
+			expect(
+				screen.getAllByRole("link", { name: "Open on node" }),
+			).toHaveLength(2);
+		} finally {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				writable: true,
+				value: originalInnerWidth,
 			});
 		}
 	});

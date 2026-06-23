@@ -23,6 +23,7 @@ import {
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
+import { sanitizeRedirectPath } from "../utils/navigation";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -56,6 +57,10 @@ export function LoginPage() {
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [serverError, setServerError] = useState<string | null>(null);
+	const redirectTarget = useMemo(() => {
+		const params = new URLSearchParams(window.location.search);
+		return sanitizeRedirectPath(params.get("redirect"));
+	}, []);
 	const form = useForm<LoginValues>({
 		resolver: zodResolver(loginSchema),
 		defaultValues: {
@@ -78,14 +83,14 @@ export function LoginPage() {
 				writeAdminToken(parsed.token);
 				setTokenLength(parsed.token.length);
 				form.reset({ token: parsed.token });
-				navigate({ to: "/" });
+				navigate({ href: redirectTarget });
 			} catch (err) {
 				setServerError(formatError(err));
 			} finally {
 				setIsVerifying(false);
 			}
 		},
-		[form, navigate],
+		[form, navigate, redirectTarget],
 	);
 
 	useEffect(() => {

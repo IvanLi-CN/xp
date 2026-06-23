@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import { expect, fn, within } from "@storybook/test";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
-import { NodeInventoryList } from "./NodeInventoryList";
+import {
+	LIST_LAYOUT_BREAKPOINT_PX,
+	NodeInventoryList,
+} from "./NodeInventoryList";
 
 function buildRecentSlots(
 	startIso: string,
@@ -135,12 +138,40 @@ export const PartialResult: Story = {
 	},
 };
 
+export const DesktopTable: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("columnheader", { name: "Actions" }),
+		).toBeInTheDocument();
+		await expect(canvas.getAllByRole("link", { name: "Details" })).toHaveLength(
+			2,
+		);
+		await expect(
+			canvas.getAllByRole("link", { name: "Open on node" }),
+		).toHaveLength(2);
+	},
+};
+
 export const MobileCards: Story = {
 	decorators: [
 		(Story) => (
-			<div className="w-[390px]">
+			<div
+				className="max-w-full"
+				style={{ width: `${LIST_LAYOUT_BREAKPOINT_PX - 1}px` }}
+			>
 				<Story />
 			</div>
 		),
 	],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.queryByRole("table")).toBeNull();
+		await expect(canvas.getAllByRole("link", { name: "Details" })).toHaveLength(
+			2,
+		);
+		await expect(
+			canvas.getAllByRole("link", { name: "Open on node" }),
+		).toHaveLength(2);
+	},
 };
