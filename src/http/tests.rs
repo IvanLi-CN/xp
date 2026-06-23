@@ -3169,6 +3169,115 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
 }
 
 #[tokio::test]
+async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "reality": {
+                "dest": "edge.example.com:443",
+                "server_names": ["edge.example.com"],
+                "fingerprint": "firefox"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("system-managed")
+    );
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "canary_upstream": {
+                "url": " http://127.0.0.1:8080 ",
+                "mode": "h2c"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(
+        updated["meta"]["canary_upstream"]["url"],
+        "http://127.0.0.1:8080"
+    );
+    assert_eq!(updated["meta"]["canary_upstream"]["mode"], "h2c");
+    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(updated["meta"]["reality"]["server_names"][0], "node.example.com");
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({ "canary_upstream": null }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["meta"].get("canary_upstream"), None);
+}
+
+#[tokio::test]
 async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

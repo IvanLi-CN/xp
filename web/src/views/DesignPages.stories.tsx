@@ -91,12 +91,17 @@ const DESIGN_ENDPOINTS: Array<
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		meta: {
-			public_domain: "tokyo.example.com",
 			reality: {
-				dest: "www.example.com:443",
-				server_names: ["example.com", "www.example.com"],
+				dest: "127.0.0.1:39043",
+				server_names: ["tokyo.example.com"],
+				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
+			canary_upstream: {
+				url: "http://127.0.0.1:8080",
+				mode: "auto",
+			},
+			managed_default: true,
 		},
 		short_ids: ["2a3b4c", "5d6e7f"],
 		active_short_id: "2a3b4c",

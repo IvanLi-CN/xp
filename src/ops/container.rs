@@ -293,7 +293,7 @@ impl ContainerSpec {
         let api_base_url = resolve_api_base_url(env_map, cloudflare.as_ref())?;
         let access_host = resolve_access_host(env_map, &api_base_url, cloudflare.as_ref())?;
         let ddns = build_ddns_spec(paths, env_map, &access_host, cloudflare.as_ref()).await?;
-        let default_endpoints = ManagedDefaultEndpointsSpec::from_env_map(env_map)?;
+        let default_endpoints = ManagedDefaultEndpointsSpec::from_env_map(env_map, &access_host)?;
         let runtime_env = build_runtime_env(env_map, ddns.as_ref());
         let vless_canary_token = load_vless_canary_runtime_token(
             paths,
@@ -438,9 +438,12 @@ async fn build_ddns_spec(
 }
 
 impl ManagedDefaultEndpointsSpec {
-    fn from_env_map(env_map: &BTreeMap<String, String>) -> Result<Self, ExitError> {
+    fn from_env_map(
+        env_map: &BTreeMap<String, String>,
+        access_host: &str,
+    ) -> Result<Self, ExitError> {
         Ok(Self {
-            vless: parse_default_vless_endpoint_spec(env_map)?,
+            vless: parse_default_vless_endpoint_spec(env_map, access_host)?,
             ss: parse_default_ss_endpoint_spec(env_map)?,
         })
     }
@@ -448,6 +451,7 @@ impl ManagedDefaultEndpointsSpec {
 
 fn parse_default_vless_endpoint_spec(
     env_map: &BTreeMap<String, String>,
+    access_host: &str,
 ) -> Result<Option<DefaultVlessEndpointSpec>, ExitError> {
     let port = optional_port_env(env_map, "XP_DEFAULT_VLESS_PORT")?;
     let server_names_raw = optional_env(env_map, "XP_DEFAULT_VLESS_SERVER_NAMES");
@@ -460,6 +464,7 @@ fn parse_default_vless_endpoint_spec(
 
     build_default_vless_endpoint_spec(
         port,
+        access_host,
         server_names_raw.as_deref(),
         fingerprint.as_deref(),
         vless_canary_bind,
@@ -1734,6 +1739,35 @@ mod tests {
         assert!(spec.bootstrap_admin_token_hash.is_some());
     }
 
+    #[tokio::test]
+    async fn managed_vless_uses_derived_access_host_when_access_host_env_is_absent() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let runtime_token =
+            paths.map_abs(Path::new(crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE));
+        fs::create_dir_all(runtime_token.parent().unwrap()).unwrap();
+        fs::write(&runtime_token, "runtime-token\n").unwrap();
+        let env = env_map(&[
+            ("XP_NODE_NAME", "node-1"),
+            ("XP_API_BASE_URL", "https://node-1.example.com"),
+            ("XP_ADMIN_TOKEN", "secret"),
+            ("XP_DEFAULT_VLESS_PORT", "53842"),
+        ]);
+        let spec = ContainerSpec::from_env_map(&paths, &env, None)
+            .await
+            .unwrap();
+
+        assert_eq!(spec.access_host, "node-1.example.com");
+        assert_eq!(
+            spec.default_endpoints
+                .vless
+                .as_ref()
+                .unwrap()
+                .server_names,
+            vec!["node-1.example.com"]
+        );
+    }
+
     #[test]
     fn cloudflare_api_base_url_defaults_to_hostname() {
         let cf = ContainerCloudflare {
@@ -1844,6 +1878,7 @@ mod tests {
     #[test]
     fn parses_default_endpoint_specs_from_env() {
         let env = env_map(&[
+            ("XP_ACCESS_HOST", "node-1-ep.example.com"),
             ("XP_DEFAULT_VLESS_PORT", "53842"),
             (
                 "XP_DEFAULT_VLESS_SERVER_NAMES",
@@ -1851,7 +1886,8 @@ mod tests {
             ),
             ("XP_DEFAULT_SS_PORT", "53843"),
         ]);
-        let spec = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap();
+        let spec =
+            ManagedDefaultEndpointsSpec::from_env_map(&env, "node-1-ep.example.com").unwrap();
         assert_eq!(spec.vless.as_ref().unwrap().port, 53842);
         assert_eq!(
             spec.vless.as_ref().unwrap().reality_dest,
@@ -1859,7 +1895,7 @@ mod tests {
         );
         assert_eq!(
             spec.vless.as_ref().unwrap().server_names,
-            vec!["public.sn.files.1drv.com", "public.bn.files.1drv.com"]
+            vec!["node-1-ep.example.com"]
         );
         assert_eq!(spec.vless.as_ref().unwrap().fingerprint, "chrome");
         assert_eq!(spec.ss.as_ref().unwrap().port, 53843);
@@ -1868,24 +1904,28 @@ mod tests {
     #[test]
     fn default_vless_canary_bind_must_be_socket_addr() {
         let env = env_map(&[
+            ("XP_ACCESS_HOST", "node-1-ep.example.com"),
             ("XP_DEFAULT_VLESS_PORT", "53842"),
             ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
             ("XP_VLESS_CANARY_BIND", "bad-bind"),
         ]);
 
-        let err = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap_err();
+        let err =
+            ManagedDefaultEndpointsSpec::from_env_map(&env, "node-1-ep.example.com").unwrap_err();
         assert!(err.message.contains("XP_VLESS_CANARY_BIND"));
     }
 
     #[test]
     fn default_vless_canary_bind_can_be_overridden() {
         let env = env_map(&[
+            ("XP_ACCESS_HOST", "node-1-ep.example.com"),
             ("XP_DEFAULT_VLESS_PORT", "53842"),
             ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
             ("XP_VLESS_CANARY_BIND", "127.0.0.1:49043"),
         ]);
 
-        let spec = ManagedDefaultEndpointsSpec::from_env_map(&env).unwrap();
+        let spec =
+            ManagedDefaultEndpointsSpec::from_env_map(&env, "node-1-ep.example.com").unwrap();
         assert_eq!(
             spec.vless.as_ref().unwrap().reality_dest,
             "127.0.0.1:49043"

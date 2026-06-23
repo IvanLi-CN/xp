@@ -75,6 +75,8 @@ const endpointSchema = z.object({
 	realityServerNamesSource: z.enum(["manual", "global"]),
 	realityServerNamesManual: z.array(z.string()),
 	realityFingerprint: z.string(),
+	canaryUpstreamUrl: z.string(),
+	canaryUpstreamMode: z.enum(["auto", "http1", "h2c"]),
 });
 
 type EndpointFormValues = z.infer<typeof endpointSchema>;
@@ -105,6 +107,8 @@ export function EndpointNewPage() {
 			realityServerNamesSource: "global",
 			realityServerNamesManual: [],
 			realityFingerprint: "chrome",
+			canaryUpstreamUrl: "",
+			canaryUpstreamMode: "auto",
 		},
 	});
 
@@ -168,6 +172,7 @@ export function EndpointNewPage() {
 				}
 
 				const primary = serverNames[0];
+				const upstreamUrl = values.canaryUpstreamUrl.trim();
 				return createAdminEndpoint(adminToken, {
 					kind: values.kind,
 					node_id: values.nodeId,
@@ -178,6 +183,9 @@ export function EndpointNewPage() {
 						server_names_source: values.realityServerNamesSource,
 						fingerprint: fingerprintValue,
 					},
+					canary_upstream: upstreamUrl
+						? { url: upstreamUrl, mode: values.canaryUpstreamMode }
+						: null,
 				});
 			}
 
@@ -198,10 +206,7 @@ export function EndpointNewPage() {
 			});
 		},
 		onError: (error) => {
-			pushToast({
-				variant: "error",
-				message: formatErrorMessage(error),
-			});
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
 
@@ -364,50 +369,36 @@ export function EndpointNewPage() {
 									)}
 								/>
 
-								{nodes.length <= 1 ? (
-									<div className="space-y-2">
-										<p className="text-sm font-medium">Node</p>
-										<div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
-											<span className="font-medium">
-												{nodes[0]?.node_name ?? "Node"}
-											</span>{" "}
-											<span className="font-mono text-xs text-muted-foreground">
-												({nodes[0]?.node_id ?? nodeId})
-											</span>
-										</div>
-									</div>
-								) : (
-									<FormField
-										control={form.control}
-										name="nodeId"
-										render={({ field }) => (
-											<FormItem>
-												<FormLabel>Node</FormLabel>
-												<Select
-													value={field.value}
-													onValueChange={field.onChange}
-												>
-													<FormControl>
-														<SelectTrigger>
-															<SelectValue placeholder="Choose a node" />
-														</SelectTrigger>
-													</FormControl>
-													<SelectContent>
-														{nodes.map((node) => (
-															<SelectItem
-																key={node.node_id}
-																value={node.node_id}
-															>
-																{node.node_name} ({node.node_id})
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-												<FormMessage />
-											</FormItem>
-										)}
-									/>
-								)}
+								<FormField
+									control={form.control}
+									name="nodeId"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>Node</FormLabel>
+											<Select
+												value={field.value}
+												onValueChange={field.onChange}
+											>
+												<FormControl>
+													<SelectTrigger>
+														<SelectValue placeholder="Choose a node" />
+													</SelectTrigger>
+												</FormControl>
+												<SelectContent>
+													{nodes.map((node) => (
+														<SelectItem key={node.node_id} value={node.node_id}>
+															{node.node_name} ({node.node_id})
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+											<FormDescription>
+												VLESS SNI is derived from this node's access host.
+											</FormDescription>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
 							</div>
 
 							<div className="space-y-4 border-t border-border/70 pt-6">
@@ -543,6 +534,57 @@ export function EndpointNewPage() {
 												</p>
 											</div>
 										)}
+
+										<div className="grid gap-4 md:grid-cols-[1fr_180px]">
+											<FormField
+												control={form.control}
+												name="canaryUpstreamUrl"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel className="font-mono">
+															canaryUpstreamUrl
+														</FormLabel>
+														<FormControl>
+															<Input
+																{...field}
+																type="url"
+																placeholder="http://127.0.0.1:8080"
+															/>
+														</FormControl>
+														<FormDescription>
+															Non-probe requests are proxied to this origin.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={form.control}
+												name="canaryUpstreamMode"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel className="font-mono">mode</FormLabel>
+														<Select
+															value={field.value}
+															onValueChange={field.onChange}
+														>
+															<FormControl>
+																<SelectTrigger>
+																	<SelectValue />
+																</SelectTrigger>
+															</FormControl>
+															<SelectContent>
+																<SelectItem value="auto">auto</SelectItem>
+																<SelectItem value="http1">http1</SelectItem>
+																<SelectItem value="h2c">h2c</SelectItem>
+															</SelectContent>
+														</Select>
+														<FormDescription>h2c is explicit.</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+										</div>
 
 										<details className="rounded-2xl border border-border/70 bg-muted/35 px-4 py-3">
 											<summary className="cursor-pointer text-sm font-medium">

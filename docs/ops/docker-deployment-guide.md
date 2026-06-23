@@ -199,7 +199,6 @@ https://<XP_CLOUDFLARE_HOSTNAME>
 当你设置这些变量时，容器会托管一个默认 VLESS endpoint：
 
 - `XP_DEFAULT_VLESS_PORT`
-- `XP_DEFAULT_VLESS_SERVER_NAMES`
 - `XP_DEFAULT_VLESS_FINGERPRINT`（可选，默认 `chrome`）
 - `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`（可选，但建议设置）
 
@@ -262,7 +261,6 @@ XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
 XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_VLESS_FINGERPRINT=chrome
 
 XP_DEFAULT_SS_PORT=53843
@@ -298,7 +296,6 @@ XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
 XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_VLESS_FINGERPRINT=chrome
 XP_DEFAULT_SS_PORT=53843
 
@@ -352,7 +349,6 @@ CLOUDFLARE_API_TOKEN=...
 ```env
 XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 
 XP_DEFAULT_SS_PORT=53843
 ```
@@ -384,7 +380,6 @@ XP_CLOUDFLARE_DDNS_ZONE_ID=...
 
 XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 XP_DEFAULT_VLESS_PORT=53842
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com
 XP_DEFAULT_SS_PORT=53843
 
 CLOUDFLARE_API_TOKEN=...
@@ -448,10 +443,12 @@ join 场景下，容器入口会自动完成：
 
 对于 xp 托管/default VLESS endpoint：
 
-- `XP_DEFAULT_VLESS_SERVER_NAMES` 只负责客户端 SNI 候选列表
+- `server_names` 固定为 `[XP_ACCESS_HOST]`，不包含端口
 - `reality.dest` 不再来自外部伪装站点，而是自动指向 `XP_VLESS_CANARY_BIND`
 - 普通 HTTPS client 访问 `https://<access_host[:vless_port]>/generate_204` 时，会经由 REALITY 未认证 fallback 命中 xp 进程内 loopback TLS canary
-- 手工创建的 VLESS endpoint 不会被自动改写它的 `reality.dest`
+- `XP_DEFAULT_VLESS_SERVER_NAMES` 仅作为旧配置兼容输入存在；存在时会校验，但不再决定托管 SNI
+- 每个 VLESS endpoint 可单独配置 `canary_upstream`；`GET/HEAD /generate_204` 永远由 xp 返回 `204`，其他请求按 HTTP `Host`/`:authority` 匹配 `XP_ACCESS_HOST[:endpoint_port]` 后转发到该 endpoint upstream
+- upstream 支持 HTTP、HTTPS ALPN、显式 h2c、SSE、大请求/响应流式转发和 WebSocket upgrade
 
 如果开启了 Tunnel，还应确认：
 

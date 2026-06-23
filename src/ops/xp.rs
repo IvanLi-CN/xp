@@ -299,6 +299,7 @@ pub async fn cmd_xp_sync_node_meta(
                         format!("invalid_input: XP_DEFAULT_VLESS_PORT must be a valid port: {err}"),
                     )
                 })?,
+            &access_host,
             parsed.default_vless_server_names.as_deref(),
             parsed.default_vless_fingerprint.as_deref(),
             vless_canary_bind,
@@ -462,6 +463,7 @@ pub(crate) async fn sync_node_meta_runtime(
         crate::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
             managed_default_spec,
             &node_endpoints,
+            access_host,
             vless_canary_bind,
             &managed_default_state,
         )

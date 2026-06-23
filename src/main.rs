@@ -317,6 +317,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::managed_default_endpoints::ManagedDefaultEndpointsSpec {
             vless: xp::managed_default_endpoints::build_default_vless_endpoint_spec(
                 config.default_vless_port,
+                &cluster.access_host,
                 config.default_vless_server_names.as_deref(),
                 config.default_vless_fingerprint.as_deref(),
                 config.vless_canary_bind,
@@ -340,6 +341,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
             &explicit_managed_default_spec,
             &endpoints,
+            &cluster.access_host,
             config.vless_canary_bind,
             &managed_default_state,
         )?;
@@ -347,7 +349,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         managed_default_intent.vless,
         xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
     ) {
-        let canary_result = xp::vless_https_canary::spawn(config_arc.clone()).await;
+        let canary_result = xp::vless_https_canary::spawn(
+            config_arc.clone(),
+            store.clone(),
+            cluster.node_id.clone(),
+        )
+        .await;
         if disable_managed_vless_reconcile_for_canary_result(
             matches!(
                 managed_default_intent.vless,

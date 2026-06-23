@@ -55,7 +55,9 @@ use crate::{
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
         RuntimeSummaryStatus,
     },
-    protocol::{RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta},
+    protocol::{
+        CanaryUpstreamConfig, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
+    },
     raft::{
         app::RaftFacade,
         types::{
@@ -721,6 +723,16 @@ where
     Ok(Some(value))
 }
 
+fn deserialize_optional_canary_upstream<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<CanaryUpstreamConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<CanaryUpstreamConfig>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CreateEndpointRequest {
@@ -728,6 +740,8 @@ enum CreateEndpointRequest {
         node_id: String,
         port: u16,
         reality: RealityConfig,
+        #[serde(default)]
+        canary_upstream: Option<CanaryUpstreamConfig>,
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
     Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
@@ -740,6 +754,8 @@ struct PatchEndpointRequest {
     port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_optional_reality")]
     reality: Option<Option<RealityConfig>>,
+    #[serde(default, deserialize_with = "deserialize_optional_canary_upstream")]
+    canary_upstream: Option<Option<CanaryUpstreamConfig>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3834,11 +3850,12 @@ async fn admin_create_endpoint(
             node_id,
             port,
             reality,
+            canary_upstream,
         } => (
             node_id,
             crate::domain::EndpointKind::VlessRealityVisionTcp,
             port,
-            json!({ "reality": reality }),
+            json!({ "reality": reality, "canary_upstream": canary_upstream }),
         ),
         CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm { node_id, port } => (
             node_id,
@@ -5193,6 +5210,11 @@ async fn admin_patch_endpoint(
                     .map_err(|e| ApiError::internal(e.to_string()))?;
 
             if let Some(reality) = req.reality {
+                if meta.managed_default {
+                    return Err(ApiError::invalid_request(
+                        "managed VLESS reality is system-managed",
+                    ));
+                }
                 let Some(reality) = reality else {
                     return Err(ApiError::invalid_request(
                         "reality cannot be null for vless endpoints",
@@ -5205,6 +5227,12 @@ async fn admin_patch_endpoint(
                     fingerprint: reality.fingerprint,
                 };
             }
+            if let Some(canary_upstream) = req.canary_upstream {
+                meta.canary_upstream = canary_upstream.map(|mut upstream| {
+                    upstream.url = upstream.url.trim().to_string();
+                    upstream
+                });
+            }
 
             endpoint.meta =
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
@@ -5213,6 +5241,11 @@ async fn admin_patch_endpoint(
             if req.reality.is_some() {
                 return Err(ApiError::invalid_request(
                     "ss2022 endpoints only support port updates",
+                ));
+            }
+            if req.canary_upstream.is_some() {
+                return Err(ApiError::invalid_request(
+                    "canary_upstream is only supported for vless endpoints",
                 ));
             }
         }
