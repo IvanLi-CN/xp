@@ -144,7 +144,10 @@ describe("<NodeInventoryList />", () => {
 			"https://node-2.example.com/nodes?view=table&login_token=xp_admin_token#history",
 		]);
 		expect(screen.getAllByText("(unnamed)").length).toBeGreaterThan(0);
-		expect(screen.getAllByText("API base URL").length).toBeGreaterThan(0);
+		expect(screen.queryByText("API base URL")).toBeNull();
+		expect(screen.queryByText("Access host")).toBeNull();
+		expect(screen.queryByText("Components")).toBeNull();
+		expect(screen.queryByText("7d (30m)")).toBeNull();
 	});
 
 	it("shows partial runtime warning", () => {

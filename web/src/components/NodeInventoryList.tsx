@@ -479,47 +479,27 @@ export function NodeInventoryList({
 										</div>
 									</td>
 									<td>
-										<div className="space-y-2">
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													API base URL
-												</p>
-												<p className="break-all font-mono whitespace-normal">
-													{node.api_base_url}
-												</p>
-											</div>
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													Access host
-												</p>
-												<p className="break-all font-mono whitespace-normal">
-													{node.access_host}
-												</p>
-											</div>
+										<div className="space-y-3">
+											<p className="break-all font-mono whitespace-normal">
+												{node.api_base_url}
+											</p>
+											<p className="break-all font-mono whitespace-normal text-muted-foreground">
+												{node.access_host}
+											</p>
 										</div>
 									</td>
 									<td>
-										<div className="space-y-2">
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													Components
-												</p>
-												<div className="max-w-full truncate whitespace-nowrap">
-													<ProblematicComponentsField
-														problematic={node.components.filter(
-															(component) =>
-																component.status === "down" ||
-																component.status === "unknown",
-														)}
-													/>
-												</div>
+										<div className="space-y-3">
+											<div className="max-w-full truncate whitespace-nowrap">
+												<ProblematicComponentsField
+													problematic={node.components.filter(
+														(component) =>
+															component.status === "down" ||
+															component.status === "unknown",
+													)}
+												/>
 											</div>
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													7d (30m)
-												</p>
-												{renderHistorySlots(node)}
-											</div>
+											{renderHistorySlots(node)}
 										</div>
 									</td>
 									<td className="align-top">
