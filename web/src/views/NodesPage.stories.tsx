@@ -50,13 +50,17 @@ export const Default: Story = {};
 export const WithJoinToken: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findAllByRole("link", { name: "Details" }),
+		).toHaveLength(2);
 		const openLinks = await canvas.findAllByRole("link", {
-			name: /open node panel:/i,
+			name: "Open on node",
 		});
 		await expect(openLinks).toHaveLength(2);
-		for (const link of openLinks) {
-			await expect(link.className.includes("btn")).toBe(false);
-		}
+		await expect(openLinks[0]).toHaveAttribute(
+			"href",
+			"https://node-a.example.invalid/iframe.html?id=pages-nodespage--with-join-token&viewMode=%7B%7BviewMode%7D%7D&login_token=storybook-admin-token",
+		);
 		await userEvent.click(
 			canvas.getByRole("button", { name: /create token/i }),
 		);

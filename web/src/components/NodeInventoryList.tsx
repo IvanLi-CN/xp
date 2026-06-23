@@ -5,13 +5,14 @@ import type {
 	AdminNodeRuntimeListItem,
 	NodeRuntimeComponent,
 } from "../api/adminNodeRuntime";
+import { buildNodePageHref } from "../utils/navigation";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { ResourceTable } from "./ResourceTable";
 import { alertClass, badgeClass } from "./ui-helpers";
 
 const BADGE_GAP_PX = 4;
-const LIST_LAYOUT_BREAKPOINT_PX = 960;
+export const LIST_LAYOUT_BREAKPOINT_PX = 768;
 
 type ProblematicComponent = Pick<NodeRuntimeComponent, "component" | "status">;
 
@@ -222,25 +223,65 @@ function ProblematicComponentsField({
 	);
 }
 
-function NodePanelLink({
+function NodeDetailsAction({
 	nodeId,
-	accessibleNodeLabel,
 }: {
 	nodeId: string;
-	accessibleNodeLabel: string;
 }) {
-	const openNodePanelLabel = `Open node panel: ${accessibleNodeLabel}`;
+	return (
+		<Button asChild variant="secondary" size="sm">
+			<Link to="/nodes/$nodeId" params={{ nodeId }}>
+				Details
+			</Link>
+		</Button>
+	);
+}
+
+function NodeOpenOnNodeAction({
+	apiBaseUrl,
+}: {
+	apiBaseUrl: string;
+}) {
+	const resolved = buildNodePageHref(apiBaseUrl);
+	const label = "Open on node";
+
+	if (resolved.disabled) {
+		return (
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled
+				title={resolved.reason}
+				aria-label={resolved.reason}
+				iconLeft={<Icon name="tabler:external-link" size={14} />}
+			>
+				{label}
+			</Button>
+		);
+	}
 
 	return (
-		<Link
-			to="/nodes/$nodeId"
-			params={{ nodeId }}
-			className="inline-flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-			title={openNodePanelLabel}
-			aria-label={openNodePanelLabel}
-		>
-			<Icon name="tabler:external-link" size={20} className="h-5 w-5" />
-		</Link>
+		<Button asChild variant="ghost" size="sm">
+			<a href={resolved.href} title="Open on node" aria-label="Open on node">
+				<Icon name="tabler:external-link" size={14} />
+				{label}
+			</a>
+		</Button>
+	);
+}
+
+function NodeRowActions({
+	nodeId,
+	apiBaseUrl,
+}: {
+	nodeId: string;
+	apiBaseUrl: string;
+}) {
+	return (
+		<div className="flex flex-wrap items-center justify-end gap-2">
+			<NodeDetailsAction nodeId={nodeId} />
+			<NodeOpenOnNodeAction apiBaseUrl={apiBaseUrl} />
+		</div>
 	);
 }
 
@@ -342,7 +383,6 @@ export function NodeInventoryList({
 						<div className="divide-y divide-border/60">
 							{sortedItems.map((node) => {
 								const nodeLabel = node.node_name || "(unnamed)";
-								const accessibleNodeLabel = node.node_name || node.node_id;
 								return (
 									<div key={node.node_id} className="space-y-3 px-4 py-3">
 										<div className="flex min-w-0 items-start justify-between gap-3">
@@ -357,9 +397,9 @@ export function NodeInventoryList({
 													{node.node_id}
 												</p>
 											</div>
-											<NodePanelLink
+											<NodeRowActions
 												nodeId={node.node_id}
-												accessibleNodeLabel={accessibleNodeLabel}
+												apiBaseUrl={node.api_base_url}
 											/>
 										</div>
 										<div className="space-y-1">
@@ -407,11 +447,16 @@ export function NodeInventoryList({
 							{ key: "node", label: "Node" },
 							{ key: "endpoint", label: "Endpoint" },
 							{ key: "runtime", label: "Runtime" },
+							{
+								key: "actions",
+								label: "Actions",
+								align: "right",
+								className: "w-[1%] whitespace-nowrap",
+							},
 						]}
 					>
 						{sortedItems.map((node) => {
 							const nodeLabel = node.node_name || "(unnamed)";
-							const accessibleNodeLabel = node.node_name || node.node_id;
 
 							return (
 								<tr key={node.node_id}>
@@ -424,10 +469,6 @@ export function NodeInventoryList({
 												>
 													{nodeLabel}
 												</span>
-												<NodePanelLink
-													nodeId={node.node_id}
-													accessibleNodeLabel={accessibleNodeLabel}
-												/>
 											</div>
 											<p
 												className="break-all font-mono text-xs text-muted-foreground"
@@ -438,48 +479,34 @@ export function NodeInventoryList({
 										</div>
 									</td>
 									<td>
-										<div className="space-y-2">
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													API base URL
-												</p>
-												<p className="break-all font-mono whitespace-normal">
-													{node.api_base_url}
-												</p>
-											</div>
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													Access host
-												</p>
-												<p className="break-all font-mono whitespace-normal">
-													{node.access_host}
-												</p>
-											</div>
+										<div className="space-y-3">
+											<p className="break-all font-mono whitespace-normal">
+												{node.api_base_url}
+											</p>
+											<p className="break-all font-mono whitespace-normal text-muted-foreground">
+												{node.access_host}
+											</p>
 										</div>
 									</td>
 									<td>
-										<div className="space-y-2">
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													Components
-												</p>
-												<div className="max-w-full truncate whitespace-nowrap">
-													<ProblematicComponentsField
-														problematic={node.components.filter(
-															(component) =>
-																component.status === "down" ||
-																component.status === "unknown",
-														)}
-													/>
-												</div>
+										<div className="space-y-3">
+											<div className="max-w-full truncate whitespace-nowrap">
+												<ProblematicComponentsField
+													problematic={node.components.filter(
+														(component) =>
+															component.status === "down" ||
+															component.status === "unknown",
+													)}
+												/>
 											</div>
-											<div className="space-y-1">
-												<p className="text-xs uppercase text-muted-foreground">
-													7d (30m)
-												</p>
-												{renderHistorySlots(node)}
-											</div>
+											{renderHistorySlots(node)}
 										</div>
+									</td>
+									<td className="align-top">
+										<NodeRowActions
+											nodeId={node.node_id}
+											apiBaseUrl={node.api_base_url}
+										/>
 									</td>
 								</tr>
 							);

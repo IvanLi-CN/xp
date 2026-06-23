@@ -154,7 +154,7 @@ describe("<NodesPage />", () => {
 		});
 	});
 
-	it("uses icon-only links to open node panel in node inventory rows", async () => {
+	it("renders dual node actions in the shared inventory list", async () => {
 		renderPage();
 
 		await waitFor(() => {
@@ -164,29 +164,19 @@ describe("<NodesPage />", () => {
 			);
 		});
 
-		const links = await screen.findAllByRole("link", {
-			name: /open node panel:/i,
+		const detailsLinks = await screen.findAllByRole("link", {
+			name: "Details",
 		});
-		const uniqueHrefs = new Set(
-			links.map((link) => link.getAttribute("href")).filter(Boolean),
-		);
-		expect(uniqueHrefs).toEqual(new Set(["/nodes/node-1", "/nodes/node-2"]));
-		const labels = new Set(
-			links.map((link) => link.getAttribute("aria-label")).filter(Boolean),
-		);
-		expect(labels).toEqual(
-			new Set(["Open node panel: tokyo-1", "Open node panel: node-2"]),
-		);
-		expect(links.every((link) => !/\bbtn\b/.test(link.className))).toBe(true);
-
-		for (const nodeName of screen.getAllByText("tokyo-1")) {
-			expect(nodeName.closest("a")).toBeNull();
-		}
-		for (const unnamed of screen.getAllByText("(unnamed)")) {
-			expect(unnamed.closest("a")).toBeNull();
-		}
-		for (const nodeId of screen.getAllByText("node-1")) {
-			expect(nodeId.closest("a")).toBeNull();
-		}
+		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
+			"/nodes/node-1",
+			"/nodes/node-2",
+		]);
+		const openOnNodeLinks = screen.getAllByRole("link", {
+			name: "Open on node",
+		});
+		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
+			"https://node-1.example.com/?login_token=admintoken",
+			"https://node-2.example.com/?login_token=admintoken",
+		]);
 	});
 });

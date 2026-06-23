@@ -147,7 +147,7 @@ describe("<HomePage />", () => {
 		vi.mocked(verifyAdminToken).mockResolvedValue(undefined);
 	});
 
-	it("adds icon-only links for opening node panels in dashboard nodes table", async () => {
+	it("reuses the shared inventory actions on the dashboard", async () => {
 		renderPage();
 
 		await waitFor(() => {
@@ -157,20 +157,15 @@ describe("<HomePage />", () => {
 			);
 		});
 
-		const links = await screen.findAllByRole("link", {
-			name: /open node panel:/i,
+		const detailsLinks = await screen.findAllByRole("link", {
+			name: "Details",
 		});
-		const uniqueHrefs = new Set(
-			links.map((link) => link.getAttribute("href")).filter(Boolean),
+		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
+			"/nodes/node-1",
+			"/nodes/node-2",
+		]);
+		expect(screen.getAllByRole("link", { name: "Open on node" })).toHaveLength(
+			2,
 		);
-		expect(uniqueHrefs).toEqual(new Set(["/nodes/node-1", "/nodes/node-2"]));
-		expect(links.every((link) => !/\bbtn\b/.test(link.className))).toBe(true);
-
-		for (const nodeName of screen.getAllByText("tokyo-1")) {
-			expect(nodeName.closest("a")).toBeNull();
-		}
-		for (const nodeIdCell of screen.getAllByText("node-1")) {
-			expect(nodeIdCell.closest("a")).toBeNull();
-		}
 	});
 });

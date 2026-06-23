@@ -12,6 +12,7 @@ import { AuthGate } from "./components/AuthGate";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
 import { hasDemoSession } from "./demo/session";
+import { resolveLoginRedirectFromHref } from "./utils/navigation";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
@@ -119,9 +120,19 @@ const loginRoute = createRoute({
 const appRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	id: "app",
-	beforeLoad: () => {
+	beforeLoad: ({ location }) => {
 		if (!hasAdminToken()) {
-			throw redirect({ to: "/login" });
+			const targetUrl = new URL(location.href, window.location.origin);
+			const loginSearch = new URLSearchParams(targetUrl.search);
+			const loginToken = loginSearch.get("login_token");
+			const redirectTarget = resolveLoginRedirectFromHref(location.href);
+			throw redirect({
+				to: "/login",
+				search: {
+					redirect: redirectTarget,
+					...(loginToken ? { login_token: loginToken } : {}),
+				},
+			});
 		}
 	},
 	component: AppShell,
