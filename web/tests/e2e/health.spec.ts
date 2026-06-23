@@ -7,7 +7,7 @@ test("redirects to login when missing token", async ({ page }) => {
 
 	await page.goto("/");
 
-	await expect(page).toHaveURL(/\/login$/);
+	await expect(page).toHaveURL(/\/login\?redirect=%2F$/);
 	await expect(
 		page.getByRole("heading", { name: "Admin login" }),
 	).toBeVisible();
