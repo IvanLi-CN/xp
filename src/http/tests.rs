@@ -3278,6 +3278,53 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
 }
 
 #[tokio::test]
+async fn create_vless_rejects_canary_upstream_for_unmanaged_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              },
+              "canary_upstream": {
+                "url": "http://127.0.0.1:8080",
+                "mode": "auto"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("managed VLESS")
+    );
+}
+
+#[tokio::test]
 async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

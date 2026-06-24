@@ -3883,12 +3883,19 @@ async fn admin_create_endpoint(
             port,
             reality,
             canary_upstream,
-        } => (
-            node_id,
-            crate::domain::EndpointKind::VlessRealityVisionTcp,
-            port,
-            json!({ "reality": reality, "canary_upstream": canary_upstream }),
-        ),
+        } => {
+            if canary_upstream.is_some() {
+                return Err(ApiError::invalid_request(
+                    "canary_upstream is only editable on managed VLESS endpoints",
+                ));
+            }
+            (
+                node_id,
+                crate::domain::EndpointKind::VlessRealityVisionTcp,
+                port,
+                json!({ "reality": reality }),
+            )
+        }
         CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm { node_id, port } => (
             node_id,
             crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
