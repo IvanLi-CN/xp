@@ -267,14 +267,16 @@ export function EndpointDetailsPage() {
 					}
 				}
 
-				const nextUrl = upstreamUrl.trim();
-				const upstreamChanged =
-					nextUrl !== metaSnapshot.canaryUpstreamUrl ||
-					upstreamMode !== metaSnapshot.canaryUpstreamMode;
-				if (upstreamChanged) {
-					payload.canary_upstream = nextUrl
-						? { url: nextUrl, mode: upstreamMode }
-						: null;
+				if (metaSnapshot.managedDefault) {
+					const nextUrl = upstreamUrl.trim();
+					const upstreamChanged =
+						nextUrl !== metaSnapshot.canaryUpstreamUrl ||
+						upstreamMode !== metaSnapshot.canaryUpstreamMode;
+					if (upstreamChanged) {
+						payload.canary_upstream = nextUrl
+							? { url: nextUrl, mode: upstreamMode }
+							: null;
+					}
 				}
 			}
 
@@ -722,7 +724,7 @@ export function EndpointDetailsPage() {
 									</>
 								) : null}
 
-								{vlessMeta ? (
+								{vlessMeta?.managedDefault ? (
 									<div className="grid gap-4 md:grid-cols-[1fr_180px]">
 										<div className="xp-field-stack">
 											<span className="text-sm font-medium font-mono">

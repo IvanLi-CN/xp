@@ -11,6 +11,7 @@ import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 import {
@@ -36,8 +37,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { validateRealityServerName } from "../utils/realityServerName";
 
 const kindOptions = [
+	{
+		value: "vless_reality_vision_tcp" as const,
+		label: "VLESS Reality Vision TCP",
+	},
 	{
 		value: "ss2022_2022_blake3_aes_128_gcm" as const,
 		label: "SS2022 BLAKE3 AES-128-GCM",
@@ -54,9 +60,12 @@ function formatErrorMessage(error: unknown): string {
 }
 
 const endpointSchema = z.object({
-	kind: z.literal("ss2022_2022_blake3_aes_128_gcm"),
+	kind: z.enum(["vless_reality_vision_tcp", "ss2022_2022_blake3_aes_128_gcm"]),
 	nodeId: z.string().min(1, "Node is required."),
 	port: z.coerce.number().int().positive("Please enter a valid port."),
+	realityDest: z.string(),
+	realityServerNames: z.array(z.string()),
+	realityFingerprint: z.string(),
 });
 
 type EndpointFormValues = z.infer<typeof endpointSchema>;
@@ -75,12 +84,16 @@ export function EndpointNewPage() {
 	const form = useForm<EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
 		defaultValues: {
-			kind: "ss2022_2022_blake3_aes_128_gcm",
+			kind: "vless_reality_vision_tcp",
 			nodeId: "",
 			port: 443,
+			realityDest: "",
+			realityServerNames: [],
+			realityFingerprint: "chrome",
 		},
 	});
 
+	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
 
 	useEffect(() => {
@@ -95,6 +108,35 @@ export function EndpointNewPage() {
 		mutationFn: async (values: EndpointFormValues) => {
 			if (adminToken.length === 0) {
 				throw new Error("Missing admin token.");
+			}
+
+			if (values.kind === "vless_reality_vision_tcp") {
+				const dest = values.realityDest.trim();
+				if (dest.length === 0) {
+					throw new Error("dest is required.");
+				}
+				const serverNames = values.realityServerNames
+					.map((serverName) => serverName.trim().replace(/\.$/, ""))
+					.filter((serverName) => serverName.length > 0);
+				if (serverNames.length === 0) {
+					throw new Error("serverName is required.");
+				}
+				for (const name of serverNames) {
+					const err = validateRealityServerName(name);
+					if (err) throw new Error(err);
+				}
+
+				return createAdminEndpoint(adminToken, {
+					kind: values.kind,
+					node_id: values.nodeId,
+					port: values.port,
+					reality: {
+						dest,
+						server_names: serverNames,
+						server_names_source: "manual",
+						fingerprint: values.realityFingerprint.trim() || "chrome",
+					},
+				});
 			}
 
 			return createAdminEndpoint(adminToken, {
@@ -308,7 +350,11 @@ export function EndpointNewPage() {
 							</div>
 
 							<div className="space-y-4 border-t border-border/70 pt-6">
-								<h2 className="text-lg font-semibold">SS2022 settings</h2>
+								<h2 className="text-lg font-semibold">
+									{kind === "vless_reality_vision_tcp"
+										? "VLESS settings"
+										: "SS2022 settings"}
+								</h2>
 
 								<FormField
 									control={form.control}
@@ -333,6 +379,81 @@ export function EndpointNewPage() {
 										</FormItem>
 									)}
 								/>
+
+								{kind === "vless_reality_vision_tcp" ? (
+									<>
+										<FormField
+											control={form.control}
+											name="realityDest"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel className="font-mono">dest</FormLabel>
+													<FormControl>
+														<Input
+															{...field}
+															type="text"
+															placeholder="oneclient.sfx.ms:443"
+														/>
+													</FormControl>
+													<FormDescription>
+														REALITY destination origin for this manual endpoint.
+													</FormDescription>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<FormField
+											control={form.control}
+											name="realityServerNames"
+											render={({ field }) => (
+												<FormItem>
+													<FormControl>
+														<TagInput
+															label="serverNames"
+															value={field.value ?? []}
+															onChange={field.onChange}
+															placeholder="download.example.com"
+															disabled={createMutation.isPending}
+															validateTag={validateRealityServerName}
+															helperText="Camouflage domains (TLS SNI). Manual endpoint destination is edited separately."
+														/>
+													</FormControl>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<details className="rounded-2xl border border-border/70 bg-muted/35 px-4 py-3">
+											<summary className="cursor-pointer text-sm font-medium">
+												Advanced (optional)
+											</summary>
+											<div className="mt-4">
+												<FormField
+													control={form.control}
+													name="realityFingerprint"
+													render={({ field }) => (
+														<FormItem>
+															<FormLabel className="font-mono">
+																fingerprint
+															</FormLabel>
+															<FormControl>
+																<Input
+																	{...field}
+																	type="text"
+																	placeholder="chrome"
+																/>
+															</FormControl>
+															<FormDescription>
+																Defaults to{" "}
+																<span className="font-mono">chrome</span>.
+															</FormDescription>
+															<FormMessage />
+														</FormItem>
+													)}
+												/>
+											</div>
+										</details>
+									</>
+								) : null}
 							</div>
 
 							{form.formState.errors.root?.message ? (
