@@ -1121,6 +1121,32 @@ async fn internal_client_write_requires_admin_auth() {
 }
 
 #[tokio::test]
+async fn internal_endpoint_canary_probe_requires_internal_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/_internal/endpoint-canary-probe")
+                .header(header::AUTHORIZATION, format!("Bearer {}", TEST_ADMIN_TOKEN))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "endpoint_id": "ep1",
+                        "url": "http://127.0.0.1:1/generate_204",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn patch_node_rejects_node_meta_but_allows_quota_reset() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

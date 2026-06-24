@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
@@ -37,6 +38,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import { validateRealityServerName } from "../utils/realityServerName";
 
 const kindOptions = [
@@ -63,6 +65,7 @@ const endpointSchema = z.object({
 	kind: z.enum(["vless_reality_vision_tcp", "ss2022_2022_blake3_aes_128_gcm"]),
 	nodeId: z.string().min(1, "Node is required."),
 	port: z.coerce.number().int().positive("Please enter a valid port."),
+	realityServerNamesSource: z.enum(["manual", "global"]),
 	realityDest: z.string(),
 	realityServerNames: z.array(z.string()),
 	realityFingerprint: z.string(),
@@ -80,6 +83,11 @@ export function EndpointNewPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
+	const realityDomainsQuery = useQuery({
+		queryKey: ["adminRealityDomains", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
+	});
 
 	const form = useForm<EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
@@ -87,6 +95,7 @@ export function EndpointNewPage() {
 			kind: "vless_reality_vision_tcp",
 			nodeId: "",
 			port: 443,
+			realityServerNamesSource: "manual",
 			realityDest: "",
 			realityServerNames: [],
 			realityFingerprint: "chrome",
@@ -95,6 +104,11 @@ export function EndpointNewPage() {
 
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
+	const realityServerNamesSource = form.watch("realityServerNamesSource");
+	const derivedGlobalServerNames = deriveGlobalRealityServerNames(
+		realityDomainsQuery.data?.items ?? [],
+		nodeId,
+	);
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -111,19 +125,33 @@ export function EndpointNewPage() {
 			}
 
 			if (values.kind === "vless_reality_vision_tcp") {
-				const dest = values.realityDest.trim();
-				if (dest.length === 0) {
-					throw new Error("dest is required.");
-				}
-				const serverNames = values.realityServerNames
-					.map((serverName) => serverName.trim().replace(/\.$/, ""))
-					.filter((serverName) => serverName.length > 0);
-				if (serverNames.length === 0) {
-					throw new Error("serverName is required.");
-				}
-				for (const name of serverNames) {
-					const err = validateRealityServerName(name);
-					if (err) throw new Error(err);
+				const serverNamesSource = values.realityServerNamesSource;
+				const serverNames =
+					serverNamesSource === "global"
+						? derivedGlobalServerNames
+						: values.realityServerNames
+								.map((serverName) => serverName.trim().replace(/\.$/, ""))
+								.filter((serverName) => serverName.length > 0);
+				const dest =
+					serverNamesSource === "global" && serverNames.length > 0
+						? `${serverNames[0]}:443`
+						: values.realityDest.trim();
+
+				if (serverNamesSource === "manual") {
+					if (dest.length === 0) {
+						throw new Error("dest is required.");
+					}
+					if (serverNames.length === 0) {
+						throw new Error("serverName is required.");
+					}
+					for (const name of serverNames) {
+						const err = validateRealityServerName(name);
+						if (err) throw new Error(err);
+					}
+				} else if (serverNames.length === 0) {
+					throw new Error(
+						"No enabled reality domains for this node. Add some in Settings > Reality domains.",
+					);
 				}
 
 				return createAdminEndpoint(adminToken, {
@@ -133,7 +161,7 @@ export function EndpointNewPage() {
 					reality: {
 						dest,
 						server_names: serverNames,
-						server_names_source: "manual",
+						server_names_source: serverNamesSource,
 						fingerprint: values.realityFingerprint.trim() || "chrome",
 					},
 				});
@@ -384,44 +412,122 @@ export function EndpointNewPage() {
 									<>
 										<FormField
 											control={form.control}
-											name="realityDest"
+											name="realityServerNamesSource"
 											render={({ field }) => (
 												<FormItem>
-													<FormLabel className="font-mono">dest</FormLabel>
-													<FormControl>
-														<Input
-															{...field}
-															type="text"
-															placeholder="oneclient.sfx.ms:443"
-														/>
-													</FormControl>
+													<FormLabel className="font-mono">
+														serverNamesSource
+													</FormLabel>
+													<Select
+														value={field.value}
+														onValueChange={field.onChange}
+														disabled={createMutation.isPending}
+													>
+														<FormControl>
+															<SelectTrigger aria-label="serverNamesSource">
+																<SelectValue />
+															</SelectTrigger>
+														</FormControl>
+														<SelectContent>
+															<SelectItem value="global">global</SelectItem>
+															<SelectItem value="manual">manual</SelectItem>
+														</SelectContent>
+													</Select>
 													<FormDescription>
-														REALITY destination origin for this manual endpoint.
+														global derives serverNames from{" "}
+														<Link className="xp-link" to="/reality-domains">
+															Settings &gt; Reality domains
+														</Link>
+														. manual stores the list on this endpoint.
 													</FormDescription>
 													<FormMessage />
 												</FormItem>
 											)}
 										/>
-										<FormField
-											control={form.control}
-											name="realityServerNames"
-											render={({ field }) => (
-												<FormItem>
-													<FormControl>
-														<TagInput
-															label="serverNames"
-															value={field.value ?? []}
-															onChange={field.onChange}
-															placeholder="download.example.com"
-															disabled={createMutation.isPending}
-															validateTag={validateRealityServerName}
-															helperText="Camouflage domains (TLS SNI). Manual endpoint destination is edited separately."
-														/>
-													</FormControl>
-													<FormMessage />
-												</FormItem>
-											)}
-										/>
+										{realityServerNamesSource === "global" ? (
+											<div className="xp-field-stack">
+												<span className="text-sm font-medium font-mono">
+													derived serverNames
+												</span>
+												<div className="rounded-2xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
+													{realityDomainsQuery.isLoading ? (
+														<span className="opacity-70">
+															Loading reality domains...
+														</span>
+													) : realityDomainsQuery.isError ? (
+														<span className="text-destructive">
+															Failed to load reality domains.
+														</span>
+													) : derivedGlobalServerNames.length === 0 ? (
+														<span className="text-warning">
+															No enabled domains for this node.
+														</span>
+													) : (
+														<div className="flex flex-wrap gap-2">
+															{derivedGlobalServerNames.map((name, idx) => (
+																<span
+																	key={`${idx}:${name}`}
+																	className={`badge ${idx === 0 ? "badge-primary" : "badge-ghost"} font-mono gap-2`}
+																>
+																	<span>{name}</span>
+																	{idx === 0 ? (
+																		<span className="opacity-80">primary</span>
+																	) : null}
+																</span>
+															))}
+														</div>
+													)}
+												</div>
+												<p className="text-xs opacity-70">
+													Derived from the ordered registry; the first enabled
+													domain becomes the derived destination.
+												</p>
+											</div>
+										) : (
+											<>
+												<FormField
+													control={form.control}
+													name="realityDest"
+													render={({ field }) => (
+														<FormItem>
+															<FormLabel className="font-mono">dest</FormLabel>
+															<FormControl>
+																<Input
+																	{...field}
+																	type="text"
+																	placeholder="oneclient.sfx.ms:443"
+																/>
+															</FormControl>
+															<FormDescription>
+																REALITY destination origin for this manual
+																endpoint.
+															</FormDescription>
+															<FormMessage />
+														</FormItem>
+													)}
+												/>
+												<FormField
+													control={form.control}
+													name="realityServerNames"
+													render={({ field }) => (
+														<FormItem>
+															<FormControl>
+																<TagInput
+																	label="serverNames"
+																	value={field.value ?? []}
+																	onChange={field.onChange}
+																	placeholder="download.example.com"
+																	disabled={createMutation.isPending}
+																	validateTag={validateRealityServerName}
+																	helperText="Camouflage domains (TLS SNI). Manual endpoint destination is edited separately."
+																/>
+															</FormControl>
+															<FormMessage />
+														</FormItem>
+													)}
+												/>
+											</>
+										)}
 										<details className="rounded-2xl border border-border/70 bg-muted/35 px-4 py-3">
 											<summary className="cursor-pointer text-sm font-medium">
 												Advanced (optional)

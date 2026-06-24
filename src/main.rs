@@ -47,18 +47,26 @@ fn should_reconcile_managed_defaults_at_startup(
 async fn reconcile_managed_defaults_with_startup_retries(
     data_dir: PathBuf,
     node_id: String,
-    startup_endpoints: Vec<xp::domain::Endpoint>,
+    store: Arc<Mutex<xp::state::JsonSnapshotStore>>,
     intent: xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
     raft_facade: Arc<dyn xp::raft::app::RaftFacade>,
 ) {
     const ATTEMPTS: usize = 8;
 
     for attempt in 1..=ATTEMPTS {
+        let endpoints = {
+            let store = store.lock().await;
+            store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == node_id)
+                .collect::<Vec<_>>()
+        };
         let mut writer = |cmd| async { raft_facade.client_write(cmd).await.map(|_| ()) };
         match xp::managed_default_endpoints::reconcile_managed_default_endpoints(
             &data_dir,
             &node_id,
-            &startup_endpoints,
+            &endpoints,
             &intent,
             &mut writer,
             "xp startup",
@@ -448,10 +456,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    let pending_managed_default_reconcile = should_reconcile_managed_defaults_at_startup(
-        &managed_default_intent,
-    )
-    .then_some((endpoints, managed_default_intent));
+    let pending_managed_default_reconcile =
+        should_reconcile_managed_defaults_at_startup(&managed_default_intent)
+            .then_some(managed_default_intent);
     let startup_raft_facade = raft_facade.clone();
     let startup_node_id = cluster.node_id.clone();
     let (geo_db_update, _geo_db_update_task) =
@@ -514,17 +521,16 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         "starting xp"
     );
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
-    if let Some((startup_endpoints, startup_managed_default_intent)) =
-        pending_managed_default_reconcile
-    {
+    if let Some(startup_managed_default_intent) = pending_managed_default_reconcile {
         let data_dir = config.data_dir.clone();
         let raft_facade = startup_raft_facade;
+        let store = store.clone();
         let node_id = startup_node_id;
         tokio::spawn(async move {
             reconcile_managed_defaults_with_startup_retries(
                 data_dir,
                 node_id,
-                startup_endpoints,
+                store,
                 startup_managed_default_intent,
                 raft_facade,
             )

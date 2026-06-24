@@ -5549,8 +5549,12 @@ fn build_endpoint_canary_probe_client() -> Result<reqwest::Client, ApiError> {
 
 async fn admin_internal_endpoint_canary_probe(
 	Extension(state): Extension<AppState>,
+	internal: Option<Extension<InternalSignatureAuth>>,
 	ApiJson(req): ApiJson<AdminInternalEndpointCanaryProbeRequest>,
 ) -> Result<Json<AdminEndpointCanaryProbeNode>, ApiError> {
+	if internal.is_none() {
+		return Err(ApiError::unauthorized("internal auth required"));
+	}
 	if req.endpoint_id.trim().is_empty() {
 		return Err(ApiError::invalid_request("endpoint_id is required"));
 	}
