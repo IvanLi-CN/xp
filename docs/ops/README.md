@@ -84,7 +84,12 @@ If you want Mihomo relay `url-test` to probe the actual managed VLESS ingress in
 Contract:
 
 - `xp` terminates TLS for `GET/HEAD /generate_204` on the loopback canary and returns `204`.
-- xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, so ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary response through the VLESS ingress itself.
+- xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, and set `server_names` to `[XP_ACCESS_HOST]` without a port. `XP_DEFAULT_VLESS_SERVER_NAMES` is deprecated compatibility input; when present it is validated, but it does not choose managed VLESS SNI.
+- The canary routes non-probe HTTPS traffic by HTTP authority, not by TLS SNI. `Host` / HTTP/2 `:authority` is normalized to `XP_ACCESS_HOST[:endpoint_port]`; `:443` may be omitted. Exactly one managed VLESS endpoint on the node must match that authority.
+- Each VLESS endpoint may store its own `canary_upstream` origin URL. When it is unset, non-probe requests return a diagnostic error. When set, xp forwards method, path, query, non-hop-by-hop headers, status, response headers, and streaming bodies to that endpoint upstream. The outbound `Host` is normalized to the `canary_upstream` origin so localhost and name-based upstream services work predictably. Upstream mode is `auto`, `http1`, or explicit `h2c`; `auto` supports HTTP/1.1 and HTTPS ALPN HTTP/2.
+- The reverse proxy is TLS-terminating HTTP reverse proxy behavior, not TCP passthrough and not a forward proxy. It supports streaming request/response bodies, SSE, large uploads/downloads, and WebSocket upgrade over an HTTP/1.1 upstream connection; explicit `h2c` is for non-upgrade HTTP traffic, and `CONNECT` is not part of the v1 contract.
+- Ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary `204` through the VLESS ingress itself and never touch upstream.
+- The endpoint detail page exposes a managed VLESS **Canary /generate_204** test for that ordinary HTTPS path. It fans out to every xp node, reports per-node status/latency/error, and is an immediate diagnostic for public ingress, TLS, REALITY fallback, and xp canary behavior; it is separate from the hourly cluster-wide proxy path probe and is not stored in endpoint probe history.
 - Host-managed and container-managed nodes use the same managed-default endpoint contract. On host-managed nodes, `xp` startup and `xp-ops xp sync-node-meta` both reconcile the local default endpoint set; on container-managed nodes, `xp-ops container run` does the same after the local control plane is ready.
 - Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade when that endpoint still predates the `managed_default` metadata flag; the runtime only rewrites that ingress to the loopback canary semantics after the canary itself is ready, and if canary preparation fails the old ingress stays untouched while `vless_https_canary_status.last_error` explains the blocker.
 - This does not move the admin UI / cluster API onto the VLESS port.
@@ -93,7 +98,7 @@ Contract:
 
 Host-managed upgrade note:
 
-- If `/etc/xp/xp.env` already declares `XP_DEFAULT_VLESS_*`, startup uses those values as the source of truth.
+- If `/etc/xp/xp.env` already declares `XP_DEFAULT_VLESS_PORT`, startup uses that port as the source of truth. `XP_DEFAULT_VLESS_SERVER_NAMES` is ignored for SNI selection after validation.
 - If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint whose metadata still predates the `managed_default` flag, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary only after the canary is healthy; when canary preparation is blocked, startup/sync leave the existing endpoint untouched and surface the error via `vless_https_canary_status`.
 - If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
 

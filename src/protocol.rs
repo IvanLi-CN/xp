@@ -21,6 +21,22 @@ pub struct RealityConfig {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum CanaryUpstreamMode {
+    #[default]
+    Auto,
+    Http1,
+    H2c,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanaryUpstreamConfig {
+    pub url: String,
+    #[serde(default)]
+    pub mode: CanaryUpstreamMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum RealityServerNamesSource {
     #[default]
     Manual,
@@ -39,6 +55,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub reality_keys: RealityKeys,
     pub short_ids: Vec<String>,
     pub active_short_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canary_upstream: Option<CanaryUpstreamConfig>,
     #[serde(default)]
     pub managed_default: bool,
 }
@@ -158,6 +176,34 @@ pub fn validate_reality_dest(dest: &str) -> Result<(), &'static str> {
         .map_err(|_| "dest port must be 1..65535")?;
     if port == 0 {
         return Err("dest port must be 1..65535");
+    }
+    Ok(())
+}
+
+pub fn validate_canary_upstream(config: &CanaryUpstreamConfig) -> Result<(), &'static str> {
+    let trimmed = config.url.trim();
+    if trimmed.is_empty() {
+        return Err("canary_upstream.url is required");
+    }
+    if trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err("canary_upstream.url must not contain spaces");
+    }
+    let url = reqwest::Url::parse(trimmed).map_err(|_| "canary_upstream.url must be a URL")?;
+    match url.scheme() {
+        "http" | "https" => {}
+        _ => return Err("canary_upstream.url must use http or https"),
+    }
+    if url.host_str().is_none() {
+        return Err("canary_upstream.url must include host");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("canary_upstream.url must not include credentials");
+    }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err("canary_upstream.url must be an origin without path, query, or fragment");
+    }
+    if matches!(config.mode, CanaryUpstreamMode::H2c) && url.scheme() != "http" {
+        return Err("canary_upstream.mode h2c requires http URL");
     }
     Ok(())
 }
@@ -367,6 +413,30 @@ mod tests {
         assert!(validate_reality_dest("[2001:db8::1]").is_err());
         assert!(validate_reality_dest("oneclient.sfx.ms:0").is_err());
         assert!(validate_reality_dest("[2001:db8::1]:0").is_err());
+    }
+
+    #[test]
+    fn canary_upstream_accepts_origin_urls_only() {
+        let valid = CanaryUpstreamConfig {
+            url: "https://backend.example.com:8443".to_string(),
+            mode: CanaryUpstreamMode::Auto,
+        };
+        assert!(validate_canary_upstream(&valid).is_ok());
+
+        for url in [
+            "https://backend.example.com/app",
+            "https://backend.example.com?fixed=1",
+            "https://backend.example.com/#fragment",
+        ] {
+            let config = CanaryUpstreamConfig {
+                url: url.to_string(),
+                mode: CanaryUpstreamMode::Auto,
+            };
+            assert_eq!(
+                validate_canary_upstream(&config),
+                Err("canary_upstream.url must be an origin without path, query, or fragment")
+            );
+        }
     }
 
     #[test]

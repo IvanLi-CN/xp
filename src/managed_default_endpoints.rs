@@ -128,6 +128,7 @@ enum ManagedDefaultEndpointKind {
 
 pub fn build_default_vless_endpoint_spec(
     port: Option<u16>,
+    access_host: &str,
     server_names_raw: Option<&str>,
     fingerprint: Option<&str>,
     vless_canary_bind: SocketAddr,
@@ -142,10 +143,16 @@ pub fn build_default_vless_endpoint_spec(
     };
     validate_port(port).map_err(|err| anyhow!("{err}"))?;
 
-    let Some(server_names_raw) = server_names_raw else {
-        bail!("XP_DEFAULT_VLESS_SERVER_NAMES is required when managing the default VLESS endpoint");
-    };
-    let server_names = parse_default_vless_server_names(server_names_raw)?;
+    let access_host = access_host.trim().trim_end_matches('.');
+    if access_host.is_empty() {
+        bail!("node access_host is required when managing the default VLESS endpoint");
+    }
+    validate_reality_server_name(access_host).map_err(|reason| {
+        anyhow!("node access_host is invalid for managed default VLESS SNI {access_host}: {reason}")
+    })?;
+    if let Some(server_names_raw) = server_names_raw {
+        let _ = parse_default_vless_server_names(server_names_raw)?;
+    }
     let fingerprint = fingerprint
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -155,7 +162,7 @@ pub fn build_default_vless_endpoint_spec(
     Ok(Some(DefaultVlessEndpointSpec {
         port,
         reality_dest: vless_canary_bind.to_string(),
-        server_names,
+        server_names: vec![access_host.to_string()],
         server_names_source: RealityServerNamesSource::Manual,
         fingerprint,
     }))
@@ -170,6 +177,7 @@ pub fn build_default_ss_endpoint_spec(port: Option<u16>) -> anyhow::Result<Optio
 }
 
 pub fn load_explicit_managed_default_endpoints_from_env(
+    access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<ManagedDefaultEndpointsSpec> {
     let default_vless_port = optional_u16_env("XP_DEFAULT_VLESS_PORT")?;
@@ -180,6 +188,7 @@ pub fn load_explicit_managed_default_endpoints_from_env(
     Ok(ManagedDefaultEndpointsSpec {
         vless: build_default_vless_endpoint_spec(
             default_vless_port,
+            access_host,
             default_vless_server_names.as_deref(),
             default_vless_fingerprint.as_deref(),
             vless_canary_bind,
@@ -202,8 +211,7 @@ pub async fn reconcile_host_managed_default_endpoints<W, Fut>(
     data_dir: &Path,
     node_id: &str,
     node_endpoints: &[Endpoint],
-    explicit: &ManagedDefaultEndpointsSpec,
-    vless_canary_bind: SocketAddr,
+    options: HostManagedDefaultEndpointsOptions<'_>,
     write_command: &mut W,
     log_label: &str,
 ) -> anyhow::Result<()>
@@ -213,9 +221,10 @@ where
 {
     let state = load_managed_default_endpoints_state(data_dir)?;
     let resolved = resolve_host_managed_default_endpoints_intent(
-        explicit,
+        options.explicit,
         node_endpoints,
-        vless_canary_bind,
+        options.access_host,
+        options.vless_canary_bind,
         &state,
     )?;
     if matches!(resolved.vless, ManagedDefaultEndpointIntent::Skip)
@@ -232,6 +241,13 @@ where
         log_label,
     )
     .await
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HostManagedDefaultEndpointsOptions<'a> {
+    pub explicit: &'a ManagedDefaultEndpointsSpec,
+    pub access_host: &'a str,
+    pub vless_canary_bind: SocketAddr,
 }
 
 pub async fn reconcile_managed_default_endpoints<W, Fut>(
@@ -430,6 +446,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             },
             short_ids: vec![short_id.clone()],
             active_short_id: short_id,
+            canary_upstream: None,
             managed_default: true,
         };
         Ok(Endpoint {
@@ -533,12 +550,14 @@ fn parse_default_vless_server_names(raw: &str) -> anyhow::Result<Vec<String>> {
 pub fn resolve_host_managed_default_endpoints_spec(
     explicit: &ManagedDefaultEndpointsSpec,
     node_endpoints: &[Endpoint],
+    access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<ManagedDefaultEndpointsSpec> {
     Ok(
         resolve_host_managed_default_endpoints_intent(
             explicit,
             node_endpoints,
+            access_host,
             vless_canary_bind,
             &ManagedDefaultEndpointsState::default(),
         )?
@@ -549,11 +568,18 @@ pub fn resolve_host_managed_default_endpoints_spec(
 pub fn resolve_host_managed_default_endpoints_intent(
     explicit: &ManagedDefaultEndpointsSpec,
     node_endpoints: &[Endpoint],
+    access_host: &str,
     vless_canary_bind: SocketAddr,
     state: &ManagedDefaultEndpointsState,
 ) -> anyhow::Result<ManagedDefaultEndpointsIntent> {
     Ok(ManagedDefaultEndpointsIntent {
-        vless: resolve_host_managed_vless_intent(explicit, node_endpoints, vless_canary_bind, state)?,
+        vless: resolve_host_managed_vless_intent(
+            explicit,
+            node_endpoints,
+            access_host,
+            vless_canary_bind,
+            state,
+        )?,
         ss: resolve_host_managed_ss_intent(explicit, node_endpoints, state)?,
     })
 }
@@ -576,6 +602,7 @@ impl ManagedDefaultEndpointsIntent {
 fn resolve_host_managed_vless_intent(
     explicit: &ManagedDefaultEndpointsSpec,
     node_endpoints: &[Endpoint],
+    access_host: &str,
     vless_canary_bind: SocketAddr,
     state: &ManagedDefaultEndpointsState,
 ) -> anyhow::Result<ManagedDefaultEndpointIntent<DefaultVlessEndpointSpec>> {
@@ -586,7 +613,7 @@ fn resolve_host_managed_vless_intent(
         });
     }
 
-    match derive_host_managed_vless_spec(node_endpoints, vless_canary_bind)? {
+    match derive_host_managed_vless_spec(node_endpoints, access_host, vless_canary_bind)? {
         Some(spec) => {
             let source = match state.vless_effective_source() {
                 Some(ManagedDefaultEndpointSource::Explicit) => {
@@ -644,6 +671,7 @@ fn resolve_host_managed_ss_intent(
 
 fn derive_host_managed_vless_spec(
     node_endpoints: &[Endpoint],
+    access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let mut marked = Vec::new();
@@ -662,13 +690,23 @@ fn derive_host_managed_vless_spec(
     }
 
     match marked.as_slice() {
-        [endpoint] => return Ok(Some(default_vless_spec_from_endpoint(endpoint, vless_canary_bind)?)),
+        [endpoint] => {
+            return Ok(Some(default_vless_spec_from_endpoint(
+                endpoint,
+                access_host,
+                vless_canary_bind,
+            )?));
+        }
         [] => {}
         _ => bail!("multiple managed-default VLESS endpoints are marked on this node"),
     }
 
     match legacy.as_slice() {
-        [endpoint] => Ok(Some(default_vless_spec_from_endpoint(endpoint, vless_canary_bind)?)),
+        [endpoint] => Ok(Some(default_vless_spec_from_endpoint(
+            endpoint,
+            access_host,
+            vless_canary_bind,
+        )?)),
         [] => Ok(None),
         _ => Ok(None),
     }
@@ -707,6 +745,7 @@ fn derive_host_managed_ss_spec(
 
 fn default_vless_spec_from_endpoint(
     endpoint: &Endpoint,
+    access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<DefaultVlessEndpointSpec> {
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -716,8 +755,8 @@ fn default_vless_spec_from_endpoint(
     Ok(DefaultVlessEndpointSpec {
         port: endpoint.port,
         reality_dest: vless_canary_bind.to_string(),
-        server_names: meta.reality.server_names,
-        server_names_source: meta.reality.server_names_source,
+        server_names: vec![access_host.trim().trim_end_matches('.').to_string()],
+        server_names_source: RealityServerNamesSource::Manual,
         fingerprint: meta.reality.fingerprint,
     })
 }
@@ -943,6 +982,7 @@ mod tests {
     fn build_default_vless_endpoint_spec_rejects_zero_port() {
         let err = build_default_vless_endpoint_spec(
             Some(0),
+            "node.example.com",
             Some("public.sn.files.1drv.com"),
             None,
             "127.0.0.1:39043".parse().unwrap(),
@@ -984,8 +1024,11 @@ mod tests {
                 tempdir.path(),
                 "n1",
                 &[endpoint],
-                &spec,
-                bind,
+                HostManagedDefaultEndpointsOptions {
+                    explicit: &spec,
+                    access_host: "node.example.com",
+                    vless_canary_bind: bind,
+                },
                 &mut writer,
                 "test",
             )
@@ -1014,6 +1057,7 @@ mod tests {
             resolve_host_managed_default_endpoints_spec(
                 &ManagedDefaultEndpointsSpec::default(),
                 &[endpoint],
+                "node.example.com",
                 "127.0.0.1:39043".parse().unwrap(),
             )
             .unwrap();
@@ -1021,7 +1065,7 @@ mod tests {
         let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
         assert_eq!(vless.port, 53844);
         assert_eq!(vless.reality_dest, "127.0.0.1:39043");
-        assert_eq!(vless.server_names, vec!["example.com"]);
+        assert_eq!(vless.server_names, vec!["node.example.com"]);
         assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
         assert!(spec.ss.is_none());
     }
@@ -1033,6 +1077,7 @@ mod tests {
             resolve_host_managed_default_endpoints_spec(
                 &ManagedDefaultEndpointsSpec::default(),
                 &[endpoint],
+                "node.example.com",
                 "127.0.0.1:39043".parse().unwrap(),
             )
             .unwrap();
@@ -1050,6 +1095,7 @@ mod tests {
         let spec = resolve_host_managed_default_endpoints_spec(
             &ManagedDefaultEndpointsSpec::default(),
             &endpoints,
+            "node.example.com",
             "127.0.0.1:39043".parse().unwrap(),
         )
         .unwrap();
@@ -1071,6 +1117,7 @@ mod tests {
         let intent = resolve_host_managed_default_endpoints_intent(
             &ManagedDefaultEndpointsSpec::default(),
             &[endpoint],
+            "node.example.com",
             "127.0.0.1:39043".parse().unwrap(),
             &state,
         )
@@ -1088,14 +1135,15 @@ mod tests {
         endpoint.meta["reality"]["server_names_source"] =
             serde_json::Value::String("global".to_string());
         let spec = resolve_host_managed_default_endpoints_spec(
-            &ManagedDefaultEndpointsSpec::default(),
-            &[endpoint],
-            "127.0.0.1:39043".parse().unwrap(),
+                &ManagedDefaultEndpointsSpec::default(),
+                &[endpoint],
+                "node.example.com",
+                "127.0.0.1:39043".parse().unwrap(),
         )
         .unwrap();
 
         let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
-        assert_eq!(vless.server_names_source, RealityServerNamesSource::Global);
+        assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
         assert_eq!(vless.reality_dest, "127.0.0.1:39043");
     }
 
@@ -1112,6 +1160,7 @@ mod tests {
         let intent = resolve_host_managed_default_endpoints_intent(
             &ManagedDefaultEndpointsSpec::default(),
             &[endpoint],
+            "node.example.com",
             "127.0.0.1:39043".parse().unwrap(),
             &state,
         )

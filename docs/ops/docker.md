@@ -46,8 +46,8 @@ xp-ops container run
 | `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`           | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
 | `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                     | DNS-01 authoritative visibility wait budget; defaults to `180` seconds                                                                  |
 | `XP_MESH_PROXY_URL`                            | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config           |
-| `XP_DEFAULT_VLESS_PORT`                        | optional                     | Enables managed default VLESS endpoint when paired with the required VLESS envs                                                         |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`                | with `XP_DEFAULT_VLESS_PORT` | Comma-separated client SNI hostnames used by the managed VLESS endpoint                                                                 |
+| `XP_DEFAULT_VLESS_PORT`                        | optional                     | Enables the managed default VLESS endpoint; managed SNI is derived from `XP_ACCESS_HOST`                                                |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated compatibility input; values are validated when present but no longer choose managed VLESS SNI                                |
 | `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
 | `XP_DEFAULT_SS_PORT`                           | optional                     | Enables managed default SS2022 endpoint                                                                                                 |
 | `CLOUDFLARE_API_TOKEN`                         | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                          |
@@ -92,10 +92,10 @@ The container entrypoint treats the mounted data volume as the source of truth f
 
 The managed default endpoint contract is:
 
-- VLESS: set `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_VLESS_SERVER_NAMES`
+- VLESS: set `XP_DEFAULT_VLESS_PORT`; managed SNI is derived from `XP_ACCESS_HOST`
 - SS2022: set `XP_DEFAULT_SS_PORT`
 
-For managed VLESS REALITY endpoints, `XP_DEFAULT_VLESS_SERVER_NAMES` is the client SNI candidate list, while `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. This changes xp-managed/default VLESS camouflage semantics from “external disguise site” to “local HTTPS canary behind fallback”. Manual VLESS endpoints are not rewritten.
+For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each VLESS endpoint may carry its own `canary_upstream`; `GET/HEAD /generate_204` is always answered by xp, and other requests route by `Host`/`:authority` to the endpoint upstream.
 
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 
@@ -120,7 +120,6 @@ export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
 export XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 export XP_DEFAULT_VLESS_PORT=53842
-export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
 
@@ -160,7 +159,6 @@ export XP_CLOUDFLARE_DDNS_ENABLED=true
 export XP_CLOUDFLARE_DDNS_ZONE_ID=...
 export XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com
 export XP_DEFAULT_VLESS_PORT=53842
-export XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'
 export XP_DEFAULT_SS_PORT=53843
 export CLOUDFLARE_API_TOKEN=...
 

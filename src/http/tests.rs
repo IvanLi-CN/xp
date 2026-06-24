@@ -30,7 +30,7 @@ use crate::{
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
-    protocol::{Ss2022EndpointMeta, ss2022_password},
+    protocol::{RealityConfig, RealityKeys, Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, ss2022_password},
     raft::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
@@ -1115,6 +1115,32 @@ async fn internal_client_write_requires_admin_auth() {
 
     let res = app
         .oneshot(req("POST", "/api/admin/_internal/raft/client-write"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn internal_endpoint_canary_probe_requires_internal_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/_internal/endpoint-canary-probe")
+                .header(header::AUTHORIZATION, format!("Bearer {}", TEST_ADMIN_TOKEN))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "endpoint_id": "ep1",
+                        "url": "http://127.0.0.1:1/generate_204",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
@@ -3169,6 +3195,295 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
 }
 
 #[tokio::test]
+async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "node.example.com").await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "reality": {
+                "dest": "edge.example.com:443",
+                "server_names": ["edge.example.com"],
+                "fingerprint": "firefox"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("system-managed")
+    );
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "canary_upstream": {
+                "url": " http://127.0.0.1:8080 ",
+                "mode": "h2c"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(
+        updated["meta"]["canary_upstream"]["url"],
+        "http://127.0.0.1:8080"
+    );
+    assert_eq!(updated["meta"]["canary_upstream"]["mode"], "h2c");
+    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(updated["meta"]["reality"]["server_names"][0], "node.example.com");
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({ "canary_upstream": null }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["meta"].get("canary_upstream"), None);
+}
+
+#[tokio::test]
+async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "node.example.com").await;
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    for url in [
+        "http://127.0.0.1:8080/app",
+        "http://127.0.0.1:8080?fixed=1",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PATCH",
+                &format!("/api/admin/endpoints/{endpoint_id}"),
+                json!({
+                  "canary_upstream": {
+                    "url": url,
+                    "mode": "auto"
+                  }
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn create_vless_rejects_canary_upstream_for_unmanaged_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              },
+              "canary_upstream": {
+                "url": "http://127.0.0.1:8080",
+                "mode": "auto"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("managed VLESS")
+    );
+}
+
+#[tokio::test]
+async fn patch_unmanaged_vless_rejects_canary_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "example.com:443",
+                "server_names": ["example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap();
+    assert_eq!(created["meta"]["managed_default"], false);
+
+    let res = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "canary_upstream": {
+                "url": "http://127.0.0.1:8080",
+                "mode": "auto"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(res).await;
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("managed VLESS")
+    );
+}
+
+#[tokio::test]
 async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -3313,6 +3628,93 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
     assert_eq!(updated["node_id"], dst_node_id);
     assert_eq!(updated["port"], 443);
     assert_eq!(updated["meta"], meta);
+}
+
+#[tokio::test]
+async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let dst_node_id = new_ulid_string();
+    {
+        let mut store = store.lock().await;
+        store.state_mut().nodes.insert(
+            dst_node_id.clone(),
+            Node {
+                node_id: dst_node_id.clone(),
+                node_name: "node-2".to_string(),
+                access_host: "node-2.example.com".to_string(),
+                api_base_url: "https://node-2.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": src_node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node-1.example.com"],
+                "fingerprint": "firefox"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "node_id": dst_node_id.clone()
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["node_id"], dst_node_id);
+    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(
+        updated["meta"]["reality"]["server_names"],
+        json!(["node-2.example.com"])
+    );
+    assert_eq!(updated["meta"]["reality"]["server_names_source"], "manual");
+    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
 }
 
 #[tokio::test]
@@ -8308,6 +8710,216 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
     assert_eq!(slot["participating_nodes"], 2);
     assert_eq!(slot["sample_count"], 1);
     assert_eq!(slot["status"], "missing");
+}
+
+fn test_vless_meta(managed_default: bool) -> Value {
+    serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
+        reality: RealityConfig {
+            dest: "127.0.0.1:39043".to_string(),
+            server_names: vec!["example.test".to_string()],
+            server_names_source: Default::default(),
+            fingerprint: "chrome".to_string(),
+        },
+        reality_keys: RealityKeys {
+            private_key: "private".to_string(),
+            public_key: "public".to_string(),
+        },
+        short_ids: vec!["0123456789abcdef".to_string()],
+        active_short_id: "0123456789abcdef".to_string(),
+        canary_upstream: None,
+        managed_default,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn endpoint_canary_probe_url_omits_default_port() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "Example.TEST.".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: test_vless_meta(true),
+    };
+    assert_eq!(
+        super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
+        "https://Example.TEST/generate_204"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_canary_probe_url_includes_non_default_port() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "example.test".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 8443,
+        meta: test_vless_meta(true),
+    };
+    assert_eq!(
+        super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
+        "https://example.test:8443/generate_204"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_canary_probe_url_rejects_loopback_access_host() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "127.0.0.1".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: test_vless_meta(true),
+    };
+
+	let err = super::endpoint_canary_probe_url(&node, &endpoint).unwrap_err();
+	assert_eq!(err.status, StatusCode::BAD_REQUEST);
+	assert!(err.message.contains("loopback access_host"));
+}
+
+#[tokio::test]
+async fn run_endpoint_canary_probe_url_reports_204_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/generate_204"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let out = super::run_endpoint_canary_probe_url(
+        &client,
+        "n1",
+        format!("{}/generate_204", server.uri()),
+    )
+    .await;
+    assert_eq!(out.node_id, "n1");
+    assert!(out.ok);
+    assert_eq!(out.status, Some(204));
+    assert_eq!(out.error, None);
+}
+
+#[tokio::test]
+async fn run_endpoint_canary_probe_url_reports_non_204_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/generate_204"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let out = super::run_endpoint_canary_probe_url(
+        &client,
+        "n1",
+        format!("{}/generate_204", server.uri()),
+    )
+    .await;
+    assert_eq!(out.node_id, "n1");
+    assert!(!out.ok);
+    assert_eq!(out.status, Some(200));
+    assert_eq!(out.error.as_deref(), Some("expected 204, got 200"));
+}
+
+#[tokio::test]
+async fn admin_canary_probe_rejects_non_vless_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        store
+            .create_endpoint(
+                local_node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+            .endpoint_id
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/canary-probe"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn admin_canary_probe_rejects_manual_vless_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        store
+            .create_endpoint(
+                local_node_id,
+                EndpointKind::VlessRealityVisionTcp,
+                443,
+                test_vless_meta(false),
+            )
+            .unwrap()
+            .endpoint_id
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/canary-probe"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("managed VLESS")
+    );
 }
 
 #[tokio::test]

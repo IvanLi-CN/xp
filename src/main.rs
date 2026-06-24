@@ -2,6 +2,7 @@
 compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
 
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -41,6 +42,65 @@ fn should_reconcile_managed_defaults_at_startup(
         intent.ss,
         xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
     )
+}
+
+async fn reconcile_managed_defaults_with_startup_retries(
+    data_dir: PathBuf,
+    node_id: String,
+    store: Arc<Mutex<xp::state::JsonSnapshotStore>>,
+    intent: xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
+    raft_facade: Arc<dyn xp::raft::app::RaftFacade>,
+) {
+    const ATTEMPTS: usize = 8;
+
+    for attempt in 1..=ATTEMPTS {
+        let endpoints = {
+            let store = store.lock().await;
+            store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == node_id)
+                .collect::<Vec<_>>()
+        };
+        let mut writer = |cmd| async { raft_facade.client_write(cmd).await.map(|_| ()) };
+        match xp::managed_default_endpoints::reconcile_managed_default_endpoints(
+            &data_dir,
+            &node_id,
+            &endpoints,
+            &intent,
+            &mut writer,
+            "xp startup",
+        )
+        .await
+        {
+            Ok(()) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        attempt,
+                        "managed default endpoint reconcile succeeded after startup retry"
+                    );
+                }
+                return;
+            }
+            Err(err) if attempt < ATTEMPTS => {
+                tracing::warn!(
+                    attempt,
+                    max_attempts = ATTEMPTS,
+                    error = %err,
+                    "managed default endpoint reconcile failed after startup; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
+            }
+            Err(err) => {
+                tracing::error!(
+                    attempt,
+                    max_attempts = ATTEMPTS,
+                    error = %err,
+                    "managed default endpoint reconcile failed after startup retries"
+                );
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -317,6 +377,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::managed_default_endpoints::ManagedDefaultEndpointsSpec {
             vless: xp::managed_default_endpoints::build_default_vless_endpoint_spec(
                 config.default_vless_port,
+                &config.access_host,
                 config.default_vless_server_names.as_deref(),
                 config.default_vless_fingerprint.as_deref(),
                 config.vless_canary_bind,
@@ -340,6 +401,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
             &explicit_managed_default_spec,
             &endpoints,
+            &config.access_host,
             config.vless_canary_bind,
             &managed_default_state,
         )?;
@@ -347,7 +409,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         managed_default_intent.vless,
         xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
     ) {
-        let canary_result = xp::vless_https_canary::spawn(config_arc.clone()).await;
+        let canary_result = xp::vless_https_canary::spawn(
+            config_arc.clone(),
+            store.clone(),
+            cluster.node_id.clone(),
+        )
+        .await;
         if disable_managed_vless_reconcile_for_canary_result(
             matches!(
                 managed_default_intent.vless,
@@ -389,10 +456,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
-    let pending_managed_default_reconcile = should_reconcile_managed_defaults_at_startup(
-        &managed_default_intent,
-    )
-    .then_some((endpoints, managed_default_intent));
+    let pending_managed_default_reconcile =
+        should_reconcile_managed_defaults_at_startup(&managed_default_intent)
+            .then_some(managed_default_intent);
     let startup_raft_facade = raft_facade.clone();
     let startup_node_id = cluster.node_id.clone();
     let (geo_db_update, _geo_db_update_task) =
@@ -455,34 +521,20 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         "starting xp"
     );
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
-    if let Some((startup_endpoints, startup_managed_default_intent)) =
-        pending_managed_default_reconcile
-    {
+    if let Some(startup_managed_default_intent) = pending_managed_default_reconcile {
         let data_dir = config.data_dir.clone();
         let raft_facade = startup_raft_facade;
+        let store = store.clone();
         let node_id = startup_node_id;
         tokio::spawn(async move {
-            let mut writer = |cmd| async {
-                raft_facade
-                    .client_write(cmd)
-                    .await
-                    .map(|_| ())
-            };
-            if let Err(err) = xp::managed_default_endpoints::reconcile_managed_default_endpoints(
-                &data_dir,
-                &node_id,
-                &startup_endpoints,
-                &startup_managed_default_intent,
-                &mut writer,
-                "xp startup",
+            reconcile_managed_defaults_with_startup_retries(
+                data_dir,
+                node_id,
+                store,
+                startup_managed_default_intent,
+                raft_facade,
             )
-            .await
-            {
-                tracing::error!(
-                    error = %err,
-                    "managed default endpoint reconcile failed after startup"
-                );
-            }
+            .await;
         });
     }
     axum::serve(listener, app)

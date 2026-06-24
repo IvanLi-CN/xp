@@ -634,12 +634,6 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
     {
         errors.push("vless canary acme contact email must look like an email".to_string());
     }
-    if args.default_vless_port.is_some() && args.default_vless_server_names.is_none() {
-        errors.push(
-            "default vless requires --default-vless-server-names when --default-vless-port is set"
-                .to_string(),
-        );
-    }
     if args.default_vless_port.is_none()
         && (args.default_vless_server_names.is_some() || args.default_vless_fingerprint.is_some())
     {
@@ -2719,7 +2713,7 @@ XP_DEFAULT_SS_PORT=53843\n"
     }
 
     #[tokio::test]
-    async fn build_plan_requires_default_vless_server_names_when_port_is_set() {
+    async fn build_plan_allows_default_vless_port_without_server_names() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         let xp_bin = tmp.path().join("xp");
@@ -2762,10 +2756,11 @@ XP_DEFAULT_SS_PORT=53843\n"
 
         let plan = build_plan(&paths, &args).await.unwrap();
         assert!(
-            plan.errors
+            !plan
+                .errors
                 .iter()
                 .any(|e| e.contains("--default-vless-server-names")),
-            "expected actionable default vless validation error, got: {:?}",
+            "default vless server names should be optional for managed SNI, got: {:?}",
             plan.errors
         );
     }

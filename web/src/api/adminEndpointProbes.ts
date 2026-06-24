@@ -25,6 +25,29 @@ export type AdminEndpointProbeRunResponse = z.infer<
 	typeof AdminEndpointProbeRunResponseSchema
 >;
 
+export const AdminEndpointCanaryProbeNodeSchema = z.object({
+	node_id: z.string(),
+	ok: z.boolean(),
+	status: z.number().int().nonnegative().optional().nullable(),
+	latency_ms: z.number().int().nonnegative(),
+	error: z.string().optional().nullable(),
+	checked_at: z.string(),
+});
+
+export type AdminEndpointCanaryProbeNode = z.infer<
+	typeof AdminEndpointCanaryProbeNodeSchema
+>;
+
+export const AdminEndpointCanaryProbeResponseSchema = z.object({
+	endpoint_id: z.string(),
+	url: z.string(),
+	nodes: z.array(AdminEndpointCanaryProbeNodeSchema),
+});
+
+export type AdminEndpointCanaryProbeResponse = z.infer<
+	typeof AdminEndpointCanaryProbeResponseSchema
+>;
+
 export const AdminEndpointProbeHistoryNodeSchema = z.object({
 	node_id: z.string(),
 	ok: z.boolean(),
@@ -86,6 +109,29 @@ export async function runAdminEndpointProbeRun(
 
 	const json: unknown = await res.json();
 	return AdminEndpointProbeRunResponseSchema.parse(json);
+}
+
+export async function runAdminEndpointCanaryProbe(
+	adminToken: string,
+	endpointId: string,
+	signal?: AbortSignal,
+): Promise<AdminEndpointCanaryProbeResponse> {
+	const res = await fetch(
+		`/api/admin/endpoints/${encodeURIComponent(endpointId)}/canary-probe`,
+		{
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return AdminEndpointCanaryProbeResponseSchema.parse(json);
 }
 
 export async function fetchAdminEndpointProbeHistory(

@@ -48,6 +48,16 @@ export const RealityConfigSchema = z.object({
 
 export type RealityConfig = z.infer<typeof RealityConfigSchema>;
 
+export const CanaryUpstreamModeSchema = z.enum(["auto", "http1", "h2c"]);
+export type CanaryUpstreamMode = z.infer<typeof CanaryUpstreamModeSchema>;
+
+export const CanaryUpstreamConfigSchema = z.object({
+	url: z.string(),
+	mode: CanaryUpstreamModeSchema.default("auto"),
+});
+
+export type CanaryUpstreamConfig = z.infer<typeof CanaryUpstreamConfigSchema>;
+
 export const AdminEndpointSchema = z.object({
 	endpoint_id: z.string(),
 	node_id: z.string(),
@@ -84,6 +94,7 @@ export type AdminEndpointCreateRequest =
 			node_id: string;
 			port: number;
 			reality: RealityConfig;
+			canary_upstream?: CanaryUpstreamConfig | null;
 	  }
 	| {
 			kind: "ss2022_2022_blake3_aes_128_gcm";
@@ -94,6 +105,7 @@ export type AdminEndpointCreateRequest =
 export type AdminEndpointPatchRequest = {
 	port?: number;
 	reality?: RealityConfig;
+	canary_upstream?: CanaryUpstreamConfig | null;
 };
 
 export async function fetchAdminEndpoints(

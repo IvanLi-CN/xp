@@ -1,8 +1,9 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    convert::Infallible,
-    future::Future,
-    sync::Arc,
+	collections::{BTreeMap, BTreeSet, VecDeque},
+	convert::Infallible,
+	future::Future,
+	sync::Arc,
+	time::Instant as StdInstant,
 };
 
 use axum::{
@@ -55,7 +56,9 @@ use crate::{
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
         RuntimeSummaryStatus,
     },
-    protocol::{RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta},
+    protocol::{
+        CanaryUpstreamConfig, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
+    },
     raft::{
         app::RaftFacade,
         types::{
@@ -253,9 +256,32 @@ struct AdminEndpointProbeSummary {
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointWithProbe {
-    #[serde(flatten)]
-    endpoint: Endpoint,
-    probe: AdminEndpointProbeSummary,
+	#[serde(flatten)]
+	endpoint: Endpoint,
+	probe: AdminEndpointProbeSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminEndpointCanaryProbeNode {
+	node_id: String,
+	ok: bool,
+	status: Option<u16>,
+	latency_ms: u32,
+	error: Option<String>,
+	checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointCanaryProbeResponse {
+	endpoint_id: String,
+	url: String,
+	nodes: Vec<AdminEndpointCanaryProbeNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointCanaryProbeRequest {
+	endpoint_id: String,
+	url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -721,6 +747,16 @@ where
     Ok(Some(value))
 }
 
+fn deserialize_optional_canary_upstream<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<CanaryUpstreamConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<CanaryUpstreamConfig>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CreateEndpointRequest {
@@ -728,6 +764,8 @@ enum CreateEndpointRequest {
         node_id: String,
         port: u16,
         reality: RealityConfig,
+        #[serde(default)]
+        canary_upstream: Option<CanaryUpstreamConfig>,
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
     Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
@@ -740,6 +778,8 @@ struct PatchEndpointRequest {
     port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_optional_reality")]
     reality: Option<Option<RealityConfig>>,
+    #[serde(default, deserialize_with = "deserialize_optional_canary_upstream")]
+    canary_upstream: Option<Option<CanaryUpstreamConfig>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -875,10 +915,14 @@ pub fn build_router(
                 .delete(admin_delete_endpoint)
                 .patch(admin_patch_endpoint),
         )
-        .route(
-            "/endpoints/:endpoint_id/rotate-shortid",
-            post(admin_rotate_short_id),
-        )
+		.route(
+			"/endpoints/:endpoint_id/rotate-shortid",
+			post(admin_rotate_short_id),
+		)
+		.route(
+			"/endpoints/:endpoint_id/canary-probe",
+			post(admin_probe_endpoint_canary),
+		)
         .route(
             "/reality-domains",
             get(admin_list_reality_domains).post(admin_create_reality_domain),
@@ -977,6 +1021,10 @@ pub fn build_router(
             "/_internal/endpoint-probe/runs/:run_id/events",
             get(admin_internal_endpoint_probe_run_events),
         )
+		.route(
+			"/_internal/endpoint-canary-probe",
+			post(admin_internal_endpoint_canary_probe),
+		)
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
@@ -3834,12 +3882,20 @@ async fn admin_create_endpoint(
             node_id,
             port,
             reality,
-        } => (
-            node_id,
-            crate::domain::EndpointKind::VlessRealityVisionTcp,
-            port,
-            json!({ "reality": reality }),
-        ),
+            canary_upstream,
+        } => {
+            if canary_upstream.is_some() {
+                return Err(ApiError::invalid_request(
+                    "canary_upstream is only editable on managed VLESS endpoints",
+                ));
+            }
+            (
+                node_id,
+                crate::domain::EndpointKind::VlessRealityVisionTcp,
+                port,
+                json!({ "reality": reality }),
+            )
+        }
         CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm { node_id, port } => (
             node_id,
             crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
@@ -5193,6 +5249,11 @@ async fn admin_patch_endpoint(
                     .map_err(|e| ApiError::internal(e.to_string()))?;
 
             if let Some(reality) = req.reality {
+                if meta.managed_default {
+                    return Err(ApiError::invalid_request(
+                        "managed VLESS reality is system-managed",
+                    ));
+                }
                 let Some(reality) = reality else {
                     return Err(ApiError::invalid_request(
                         "reality cannot be null for vless endpoints",
@@ -5205,6 +5266,25 @@ async fn admin_patch_endpoint(
                     fingerprint: reality.fingerprint,
                 };
             }
+            if let Some(canary_upstream) = req.canary_upstream {
+                if !meta.managed_default {
+                    return Err(ApiError::invalid_request(
+                        "canary_upstream is only editable on managed VLESS endpoints",
+                    ));
+                }
+                meta.canary_upstream = canary_upstream.map(|mut upstream| {
+                    upstream.url = upstream.url.trim().to_string();
+                    upstream
+                });
+            }
+            if meta.managed_default {
+                let desired_node = nodes
+                    .iter()
+                    .find(|node| node.node_id == endpoint.node_id)
+                    .ok_or_else(|| ApiError::invalid_request("node not found"))?;
+                meta.reality =
+                    managed_vless_reality_for_node(&state, desired_node, &meta.reality.fingerprint)?;
+            }
 
             endpoint.meta =
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
@@ -5213,6 +5293,11 @@ async fn admin_patch_endpoint(
             if req.reality.is_some() {
                 return Err(ApiError::invalid_request(
                     "ss2022 endpoints only support port updates",
+                ));
+            }
+            if req.canary_upstream.is_some() {
+                return Err(ApiError::invalid_request(
+                    "canary_upstream is only supported for vless endpoints",
                 ));
             }
         }
@@ -5227,6 +5312,26 @@ async fn admin_patch_endpoint(
     .await?;
     state.reconcile.request_full();
     Ok(Json(endpoint))
+}
+
+fn managed_vless_reality_for_node(
+    state: &AppState,
+    node: &Node,
+    fingerprint: &str,
+) -> Result<crate::protocol::RealityConfig, ApiError> {
+    let access_host = node.access_host.trim().trim_end_matches('.');
+    crate::protocol::validate_reality_server_name(access_host).map_err(|reason| {
+        ApiError::invalid_request(format!(
+            "node access_host is invalid for managed VLESS SNI: node_id={} reason={reason}",
+            node.node_id
+        ))
+    })?;
+    Ok(crate::protocol::RealityConfig {
+        dest: state.config.vless_canary_bind.to_string(),
+        server_names: vec![access_host.to_string()],
+        server_names_source: RealityServerNamesSource::Manual,
+        fingerprint: fingerprint.to_string(),
+    })
 }
 
 async fn admin_delete_endpoint(
@@ -5350,8 +5455,8 @@ struct RotateShortIdResponse {
 }
 
 async fn admin_rotate_short_id(
-    Extension(state): Extension<AppState>,
-    Path(endpoint_id): Path<String>,
+	Extension(state): Extension<AppState>,
+	Path(endpoint_id): Path<String>,
 ) -> Result<Json<RotateShortIdResponse>, ApiError> {
     let (cmd, out) = {
         let store = state.store.lock().await;
@@ -5375,16 +5480,272 @@ async fn admin_rotate_short_id(
     let _ = raft_write(&state, cmd).await?;
     state.reconcile.request_rebuild_inbound(endpoint_id.clone());
 
-    Ok(Json(RotateShortIdResponse {
-        endpoint_id,
-        active_short_id: out.active_short_id,
-        short_ids: out.short_ids,
-    }))
+	Ok(Json(RotateShortIdResponse {
+		endpoint_id,
+		active_short_id: out.active_short_id,
+		short_ids: out.short_ids,
+	}))
+}
+
+fn endpoint_canary_probe_url(node: &Node, endpoint: &Endpoint) -> Result<String, ApiError> {
+	let host = node.access_host.trim().trim_end_matches('.');
+	if host.is_empty() {
+		return Err(ApiError::invalid_request(format!(
+			"node access_host is empty: node_id={}",
+			node.node_id
+		)));
+	}
+	if crate::endpoint_probe::is_loopback_host(host) {
+		return Err(ApiError::invalid_request(format!(
+			"loopback access_host is not allowed for managed VLESS canary probe: node_id={}",
+			node.node_id
+		)));
+	}
+	let authority = if endpoint.port == 443 {
+		host.to_string()
+	} else {
+		format!("{host}:{}", endpoint.port)
+	};
+	Ok(format!("https://{authority}/generate_204"))
+}
+
+async fn run_endpoint_canary_probe_url(
+	client: &reqwest::Client,
+	node_id: &str,
+	url: String,
+) -> AdminEndpointCanaryProbeNode {
+	let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+	let started = StdInstant::now();
+	let request = client.get(&url).header(header::ACCEPT, "*/*");
+	let result = tokio::time::timeout(Duration::from_secs(5), request.send()).await;
+	let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+
+	match result {
+		Ok(Ok(response)) => {
+			let status = response.status();
+			let ok = status == StatusCode::NO_CONTENT;
+			AdminEndpointCanaryProbeNode {
+				node_id: node_id.to_string(),
+				ok,
+				status: Some(status.as_u16()),
+				latency_ms,
+				error: if ok {
+					None
+				} else {
+					Some(format!("expected 204, got {}", status.as_u16()))
+				},
+				checked_at,
+			}
+		}
+		Ok(Err(err)) => AdminEndpointCanaryProbeNode {
+			node_id: node_id.to_string(),
+			ok: false,
+			status: err.status().map(|status| status.as_u16()),
+			latency_ms,
+			error: Some(err.to_string()),
+			checked_at,
+		},
+		Err(_) => AdminEndpointCanaryProbeNode {
+			node_id: node_id.to_string(),
+			ok: false,
+			status: None,
+			latency_ms,
+			error: Some("timeout".to_string()),
+			checked_at,
+		},
+	}
+}
+
+fn endpoint_canary_probe_error_node(
+	node_id: String,
+	status: Option<u16>,
+	latency_ms: u32,
+	error: impl Into<String>,
+) -> AdminEndpointCanaryProbeNode {
+	AdminEndpointCanaryProbeNode {
+		node_id,
+		ok: false,
+		status,
+		latency_ms,
+		error: Some(error.into()),
+		checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+	}
+}
+
+fn build_endpoint_canary_probe_client() -> Result<reqwest::Client, ApiError> {
+	reqwest::Client::builder()
+		.redirect(reqwest::redirect::Policy::none())
+		.connect_timeout(Duration::from_secs(3))
+		.user_agent(format!("xp/{} canary-probe", crate::version::VERSION))
+		.build()
+		.map_err(|e| ApiError::internal(format!("build canary probe client: {e}")))
+}
+
+async fn admin_internal_endpoint_canary_probe(
+	Extension(state): Extension<AppState>,
+	internal: Option<Extension<InternalSignatureAuth>>,
+	ApiJson(req): ApiJson<AdminInternalEndpointCanaryProbeRequest>,
+) -> Result<Json<AdminEndpointCanaryProbeNode>, ApiError> {
+	if internal.is_none() {
+		return Err(ApiError::unauthorized("internal auth required"));
+	}
+	if req.endpoint_id.trim().is_empty() {
+		return Err(ApiError::invalid_request("endpoint_id is required"));
+	}
+	if req.url.trim().is_empty() {
+		return Err(ApiError::invalid_request("url is required"));
+	}
+	let client = build_endpoint_canary_probe_client()?;
+	Ok(Json(
+		run_endpoint_canary_probe_url(&client, &state.cluster.node_id, req.url).await,
+	))
+}
+
+async fn admin_probe_endpoint_canary(
+	Extension(state): Extension<AppState>,
+	Path(endpoint_id): Path<String>,
+) -> Result<Json<AdminEndpointCanaryProbeResponse>, ApiError> {
+	let (endpoint, node, nodes, meta) = {
+		let store = state.store.lock().await;
+		let endpoint = store
+			.get_endpoint(&endpoint_id)
+			.ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+		if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+			return Err(ApiError::invalid_request(
+				"canary probe is only supported for vless_reality_vision_tcp endpoints",
+			));
+		}
+		let meta: VlessRealityVisionTcpEndpointMeta =
+			serde_json::from_value(endpoint.meta.clone())
+				.map_err(|e| ApiError::internal(e.to_string()))?;
+		if !meta.managed_default {
+			return Err(ApiError::invalid_request(
+				"canary probe is only supported for managed VLESS endpoints",
+			));
+		}
+		let node = store
+			.get_node(&endpoint.node_id)
+			.ok_or_else(|| ApiError::not_found(format!("node not found: {}", endpoint.node_id)))?;
+		let nodes = store.list_nodes();
+		(endpoint, node, nodes, meta)
+	};
+	let _ = meta;
+	let url = endpoint_canary_probe_url(&node, &endpoint)?;
+
+	let local_node_id = state.cluster.node_id.clone();
+	let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+		return Err(ApiError::internal("cluster ca key is not available"));
+	};
+	let cluster_client = build_cluster_http_client(&state)?;
+	let uri: axum::http::Uri = "/_internal/endpoint-canary-probe"
+		.parse()
+		.expect("valid uri");
+	let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
+		.map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+	let mut tasks = Vec::new();
+	for node in nodes {
+		let node_id = node.node_id.clone();
+		let req_body = AdminInternalEndpointCanaryProbeRequest {
+			endpoint_id: endpoint.endpoint_id.clone(),
+			url: url.clone(),
+		};
+
+		if node_id == local_node_id {
+			tasks.push(tokio::spawn(async move {
+				match build_endpoint_canary_probe_client() {
+					Ok(client) => {
+						run_endpoint_canary_probe_url(&client, &node_id, req_body.url).await
+					}
+					Err(err) => endpoint_canary_probe_error_node(
+						node_id,
+						None,
+						0,
+						format!("build local client: {err:?}"),
+					),
+				}
+			}));
+			continue;
+		}
+
+		let client = cluster_client.clone();
+		let sig = sig.clone();
+		let url_path = format!(
+			"{}/api/admin/_internal/endpoint-canary-probe",
+			node.api_base_url.trim_end_matches('/')
+		);
+
+		tasks.push(tokio::spawn(async move {
+			let started = StdInstant::now();
+			let request = client.send_with_fallback(Duration::from_secs(8), |client| {
+				client
+					.post(url_path.clone())
+					.header(
+						header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+						sig.clone(),
+					)
+					.json(&req_body)
+			});
+			let resp = tokio::time::timeout(Duration::from_secs(8), request).await;
+			let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+			let resp = match resp {
+				Ok(Ok(resp)) => resp,
+				Ok(Err(err)) => {
+					return endpoint_canary_probe_error_node(
+						node_id,
+						None,
+						latency_ms,
+						err.to_string(),
+					);
+				}
+				Err(_) => {
+					return endpoint_canary_probe_error_node(
+						node_id, None, latency_ms, "timeout",
+					);
+				}
+			};
+
+			let status = resp.status();
+			if !status.is_success() {
+				let body = resp.text().await.unwrap_or_default();
+				let error = if body.trim().is_empty() {
+					format!("dispatch http {}", status.as_u16())
+				} else {
+					format!("dispatch http {}: {body}", status.as_u16())
+				};
+				return endpoint_canary_probe_error_node(
+					node_id,
+					Some(status.as_u16()),
+					latency_ms,
+					error,
+				);
+			}
+
+			match resp.json::<AdminEndpointCanaryProbeNode>().await {
+				Ok(out) => out,
+				Err(err) => {
+					endpoint_canary_probe_error_node(node_id, None, latency_ms, err.to_string())
+				}
+			}
+		}));
+	}
+
+	let mut nodes = Vec::new();
+	for item in join_all(tasks).await.into_iter().flatten() {
+		nodes.push(item);
+	}
+	nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+
+	Ok(Json(AdminEndpointCanaryProbeResponse {
+		endpoint_id: endpoint.endpoint_id,
+		url,
+		nodes,
+	}))
 }
 
 async fn admin_create_user(
-    Extension(state): Extension<AppState>,
-    ApiJson(req): ApiJson<CreateUserRequest>,
+	Extension(state): Extension<AppState>,
+	ApiJson(req): ApiJson<CreateUserRequest>,
 ) -> Result<Json<User>, ApiError> {
     let user = {
         let store = state.store.lock().await;

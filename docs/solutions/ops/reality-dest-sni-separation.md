@@ -1,10 +1,11 @@
-# VLESS REALITY destination and SNI are separate operator choices
+# VLESS REALITY destination and SNI are separate on manual endpoints
 
 ## Symptoms
 
 - A REALITY endpoint is reachable when Xray dials one camouflage destination, but clients must use a different SNI hostname from the same provider.
 - Updating `server_names` through the admin API unexpectedly changes `reality.dest` to the first SNI hostname.
 - The endpoint remains unavailable after changing the SNI list because the destination origin was changed at the same time.
+- A managed-default VLESS endpoint exposes custom SNI/dest controls even though xp later rewrites them to the canary contract.
 
 ## Root cause
 
@@ -18,9 +19,12 @@ Preserve explicit `reality.dest` for manual VLESS REALITY endpoints. In manual m
 
 Keep the derived behavior for global domain mode. When `server_names_source=global`, XP still derives both the SNI list and `dest=<first global server name>:443` from the global REALITY domain registry.
 
+For managed-default VLESS endpoints, do not expose SNI/dest as operator choices. The managed contract fixes `reality.dest` to `XP_VLESS_CANARY_BIND` and fixes `server_names` to `[node.access_host]` without a port. Non-probe HTTPS canary traffic is handled by endpoint-level `canary_upstream`, routed by HTTP `Host` / `:authority`.
+
 ## Verification
 
 - Add state-machine coverage proving manual endpoints keep their explicit `dest` when `server_names` changes.
 - Keep state-machine coverage proving global endpoints still derive `dest` from the first global hostname.
-- Cover container-managed defaults proving `reality.dest` is derived from `XP_VLESS_CANARY_BIND` while `XP_DEFAULT_VLESS_SERVER_NAMES` only controls client SNI candidates.
+- Cover managed defaults proving `reality.dest` is derived from `XP_VLESS_CANARY_BIND` while SNI is derived from node `access_host`.
+- Cover canary routing proving `Host` / `:authority` maps to a unique endpoint authority and distinguishes missing upstream from missing endpoint.
 - Before changing production, test the exact destination/SNI pair from an external node; do not infer that a successful SNI also works as the destination origin.

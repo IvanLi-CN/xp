@@ -25,8 +25,8 @@ use crate::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
-        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_reality_dest,
-        validate_reality_server_name,
+        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_canary_upstream,
+        validate_reality_dest, validate_reality_server_name,
     },
 };
 
@@ -2532,6 +2532,14 @@ impl DesiredStateCommand {
                             }
                         })?;
                     }
+                    if let Some(upstream) = meta.canary_upstream.as_ref() {
+                        validate_canary_upstream(upstream).map_err(|reason| {
+                            DomainError::InvalidRealityServerName {
+                                server_name: upstream.url.clone(),
+                                reason: reason.to_string(),
+                            }
+                        })?;
+                    }
                     endpoint.meta = serde_json::to_value(meta)?;
                 }
 
@@ -4300,6 +4308,8 @@ impl JsonSnapshotStore {
 #[derive(Debug, Deserialize)]
 struct VlessRealityEndpointMetaInput {
     reality: crate::protocol::RealityConfig,
+    #[serde(default)]
+    canary_upstream: Option<crate::protocol::CanaryUpstreamConfig>,
 }
 
 fn build_endpoint_meta(
@@ -4322,6 +4332,7 @@ fn build_endpoint_meta(
                 },
                 short_ids: vec![short_id.clone()],
                 active_short_id: short_id,
+                canary_upstream: input.canary_upstream,
                 managed_default: false,
             };
 
@@ -4458,6 +4469,7 @@ mod tests {
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 
@@ -5325,6 +5337,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 
@@ -5369,6 +5382,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 
@@ -5406,6 +5420,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 
@@ -5464,6 +5479,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 
@@ -5526,6 +5542,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+            canary_upstream: None,
             managed_default: true,
         };
 
@@ -5578,6 +5595,7 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
+        canary_upstream: None,
         managed_default: false,
         };
 

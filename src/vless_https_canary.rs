@@ -8,8 +8,21 @@ use std::{
 };
 
 use anyhow::Context;
-use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{
+    Router,
+    body::Body,
+    extract::State,
+    http::{
+        HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri,
+        header::{CONNECTION, HOST, UPGRADE},
+    },
+    response::IntoResponse,
+    routing::get,
+};
 use chrono::{DateTime, NaiveDateTime, Utc};
+use futures_util::TryStreamExt;
+use hyper::upgrade;
+use hyper_util::rt::TokioIo;
 use lers::{
     Account, Certificate, Directory, Error as LersError, LETS_ENCRYPT_PRODUCTION_URL,
     solver::Solver,
@@ -24,12 +37,20 @@ use trust_dns_resolver::{
     config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
 };
 
-use crate::{config::Config, ops::cloudflare};
+use crate::{
+    config::Config,
+    domain::{Endpoint, EndpointKind},
+    managed_default_endpoints::managed_default_vless_endpoint,
+    ops::cloudflare,
+    protocol::{CanaryUpstreamConfig, CanaryUpstreamMode},
+    state::JsonSnapshotStore,
+};
 
 pub const GENERATE_204_PATH: &str = "/generate_204";
 const READY_ATTEMPTS: usize = 60;
 const READY_DELAY: Duration = Duration::from_secs(1);
 const DNS_PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AuthoritativeNameserver {
@@ -41,6 +62,67 @@ struct PreparedCanaryRuntime {
     paths: VlessHttpsCanaryPaths,
     rustls: axum_server::tls_rustls::RustlsConfig,
     listener: std::net::TcpListener,
+}
+
+#[derive(Clone)]
+struct CanaryProxyState {
+    store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
+    node_id: String,
+    clients: Arc<CanaryProxyClients>,
+}
+
+struct CanaryProxyClients {
+    auto: reqwest::Client,
+    http1: reqwest::Client,
+    h2c: reqwest::Client,
+}
+
+impl CanaryProxyClients {
+    fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            auto: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(PROXY_CONNECT_TIMEOUT)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .build()
+                .context("build canary auto upstream client")?,
+            http1: reqwest::Client::builder()
+                .http1_only()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(PROXY_CONNECT_TIMEOUT)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .build()
+                .context("build canary http1 upstream client")?,
+            h2c: reqwest::Client::builder()
+                .http2_prior_knowledge()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(PROXY_CONNECT_TIMEOUT)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .build()
+                .context("build canary h2c upstream client")?,
+        })
+    }
+
+    fn for_mode(&self, mode: CanaryUpstreamMode) -> &reqwest::Client {
+        match mode {
+            CanaryUpstreamMode::Auto => &self.auto,
+            CanaryUpstreamMode::Http1 => &self.http1,
+            CanaryUpstreamMode::H2c => &self.h2c,
+        }
+    }
+
+    fn for_websocket_mode(&self, mode: CanaryUpstreamMode) -> Option<&reqwest::Client> {
+        match mode {
+            CanaryUpstreamMode::Auto | CanaryUpstreamMode::Http1 => Some(&self.http1),
+            CanaryUpstreamMode::H2c => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RoutedUpstream {
+    endpoint_id: String,
+    upstream: CanaryUpstreamConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -373,7 +455,11 @@ impl Solver for RepoCloudflareDns01Solver {
     }
 }
 
-pub async fn spawn(config: Arc<Config>) -> anyhow::Result<Option<std::thread::JoinHandle<()>>> {
+pub async fn spawn(
+    config: Arc<Config>,
+    store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
+    node_id: String,
+) -> anyhow::Result<Option<std::thread::JoinHandle<()>>> {
     let prepared = match prepare_runtime(config.as_ref()).await {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -392,13 +478,20 @@ pub async fn spawn(config: Arc<Config>) -> anyhow::Result<Option<std::thread::Jo
 
     let bind = prepared.listener.local_addr().unwrap_or(config.vless_canary_bind);
     let config_for_thread = config.clone();
+    let proxy_state = CanaryProxyState {
+        store,
+        node_id,
+        clients: Arc::new(CanaryProxyClients::new()?),
+    };
     let handle = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("build vless https canary runtime");
         runtime.block_on(async move {
-            if let Err(err) = run_supervisor(config_for_thread.clone(), prepared).await {
+            if let Err(err) =
+                run_supervisor(config_for_thread.clone(), prepared, proxy_state).await
+            {
                 let mut status = base_status(&config_for_thread);
                 status.last_error = Some(err.to_string());
                 let _ = persist_status(&config_for_thread.data_dir, &status);
@@ -484,6 +577,7 @@ pub async fn wait_until_ready(
 async fn run_supervisor(
     config: Arc<Config>,
     prepared: PreparedCanaryRuntime,
+    proxy_state: CanaryProxyState,
 ) -> anyhow::Result<()> {
     let PreparedCanaryRuntime {
         paths,
@@ -491,7 +585,10 @@ async fn run_supervisor(
         listener,
     } = prepared;
 
-    let app = Router::new().route(GENERATE_204_PATH, get(generate_204).head(generate_204));
+    let app = Router::new()
+        .route(GENERATE_204_PATH, get(generate_204).head(generate_204))
+        .fallback(canary_proxy)
+        .with_state(proxy_state);
     let bind = config.vless_canary_bind;
     let rustls_reload = rustls.clone();
     let data_dir = config.data_dir.clone();
@@ -549,6 +646,347 @@ fn base_status(config: &Config) -> VlessHttpsCanaryStatus {
 
 async fn generate_204() -> impl IntoResponse {
     StatusCode::NO_CONTENT
+}
+
+async fn canary_proxy(
+    State(state): State<CanaryProxyState>,
+    mut req: Request<Body>,
+) -> impl IntoResponse {
+    match proxy_request(&state, &mut req).await {
+        Ok(resp) => resp,
+        Err(resp) => resp,
+    }
+}
+
+async fn proxy_request(
+    state: &CanaryProxyState,
+    req: &mut Request<Body>,
+) -> Result<Response<Body>, Response<Body>> {
+    let routed = route_upstream(state, req.headers(), req.uri()).await?;
+    let upstream_url = build_upstream_url(&routed.upstream.url, req.uri()).map_err(error_response)?;
+    if is_upgrade_request(req.headers()) {
+        let Some(client) = state.clients.for_websocket_mode(routed.upstream.mode) else {
+            return Err(text_response(
+                StatusCode::NOT_IMPLEMENTED,
+                "websocket proxying requires an HTTP/1.1 upstream mode; h2c does not support HTTP/1.1 upgrade",
+            ));
+        };
+        return proxy_websocket(client, req, routed, upstream_url).await;
+    }
+    proxy_http(state, req, routed, upstream_url).await
+}
+
+async fn route_upstream(
+    state: &CanaryProxyState,
+    headers: &HeaderMap,
+    uri: &Uri,
+) -> Result<RoutedUpstream, Response<Body>> {
+    let authority = request_authority(headers, uri).ok_or_else(|| {
+        text_response(
+            StatusCode::MISDIRECTED_REQUEST,
+            "missing Host or :authority for canary routing",
+        )
+    })?;
+    let (host, port) = normalize_authority(&authority).map_err(|err| {
+        text_response(
+            StatusCode::MISDIRECTED_REQUEST,
+            format!("invalid authority for canary routing: {err}"),
+        )
+    })?;
+
+    let matches = {
+        let store = state.store.lock().await;
+        let Some(node) = store.get_node(&state.node_id) else {
+            return Err(text_response(
+                StatusCode::NOT_FOUND,
+                format!("local node not found: {}", state.node_id),
+            ));
+        };
+        if node.access_host.trim().trim_end_matches('.').to_ascii_lowercase() != host {
+            Vec::new()
+        } else {
+            store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == state.node_id)
+                .filter_map(|endpoint| matching_managed_vless_endpoint(endpoint, port))
+                .collect::<Vec<_>>()
+        }
+    };
+
+    match matches.as_slice() {
+        [] => Err(text_response(
+            StatusCode::NOT_FOUND,
+            format!("no managed VLESS endpoint matched authority {authority}"),
+        )),
+        [routed] if routed.upstream.url.trim().is_empty() => Err(text_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "managed VLESS endpoint {} has no canary upstream configured",
+                routed.endpoint_id
+            ),
+        )),
+        [routed] => Ok(routed.clone()),
+        _ => Err(text_response(
+            StatusCode::CONFLICT,
+            format!("multiple managed VLESS endpoints matched authority {authority}"),
+        )),
+    }
+}
+
+fn matching_managed_vless_endpoint(endpoint: Endpoint, port: u16) -> Option<RoutedUpstream> {
+    if endpoint.kind != EndpointKind::VlessRealityVisionTcp || endpoint.port != port {
+        return None;
+    }
+    let meta = managed_default_vless_endpoint(&endpoint)?;
+    let upstream = meta.canary_upstream.unwrap_or(CanaryUpstreamConfig {
+        url: String::new(),
+        mode: CanaryUpstreamMode::Auto,
+    });
+    Some(RoutedUpstream {
+        endpoint_id: endpoint.endpoint_id,
+        upstream,
+    })
+}
+
+async fn proxy_http(
+    state: &CanaryProxyState,
+    req: &mut Request<Body>,
+    routed: RoutedUpstream,
+    upstream_url: reqwest::Url,
+) -> Result<Response<Body>, Response<Body>> {
+    let method = req.method().clone();
+    let headers = req.headers().clone();
+    let body = std::mem::replace(req.body_mut(), Body::empty());
+    let response = send_upstream_request(
+        state.clients.for_mode(routed.upstream.mode),
+        method,
+        upstream_url,
+        &headers,
+        body,
+        false,
+    )
+    .await
+    .map_err(|err| upstream_error_response(&routed.endpoint_id, err))?;
+    Ok(upstream_response_to_axum(response))
+}
+
+async fn proxy_websocket(
+    client: &reqwest::Client,
+    req: &mut Request<Body>,
+    routed: RoutedUpstream,
+    upstream_url: reqwest::Url,
+) -> Result<Response<Body>, Response<Body>> {
+    let client_upgrade = upgrade::on(&mut *req);
+    let method = req.method().clone();
+    let headers = req.headers().clone();
+    let body = std::mem::replace(req.body_mut(), Body::empty());
+    let response = send_upstream_request(
+        client,
+        method,
+        upstream_url,
+        &headers,
+        body,
+        true,
+    )
+    .await
+    .map_err(|err| upstream_error_response(&routed.endpoint_id, err))?;
+
+    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+        return Ok(upstream_response_to_axum(response));
+    }
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let upstream_upgrade = response.upgrade();
+    tokio::spawn(async move {
+        let (downstream, upstream) = tokio::join!(client_upgrade, upstream_upgrade);
+        match (downstream, upstream) {
+            (Ok(downstream), Ok(mut upstream)) => {
+                let mut downstream = TokioIo::new(downstream);
+                let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+            }
+            (Err(err), _) => {
+                tracing::debug!(error = %err, "canary downstream websocket upgrade failed");
+            }
+            (_, Err(err)) => {
+                tracing::debug!(error = %err, "canary upstream websocket upgrade failed");
+            }
+        }
+    });
+
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers.iter() {
+        if response_header_allowed(name.as_str(), true) {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+        .body(Body::empty())
+        .map_err(|err| error_response(anyhow::anyhow!(err)))
+}
+
+async fn send_upstream_request(
+    client: &reqwest::Client,
+    method: Method,
+    url: reqwest::Url,
+    headers: &HeaderMap,
+    body: Body,
+    upgrade: bool,
+) -> reqwest::Result<reqwest::Response> {
+    let mut request = client.request(method, url);
+    for (name, value) in headers.iter() {
+        if request_header_allowed(name.as_str(), upgrade) {
+            request = request.header(name, value);
+        }
+    }
+    request
+        .body(reqwest::Body::wrap_stream(
+            body.into_data_stream()
+                .map_err(io::Error::other),
+        ))
+        .send()
+        .await
+}
+
+fn upstream_response_to_axum(response: reqwest::Response) -> Response<Body> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let stream = response
+        .bytes_stream()
+        .map_err(io::Error::other);
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers.iter() {
+        if response_header_allowed(name.as_str(), false) {
+            builder = builder.header(name, value);
+        }
+    }
+    builder.body(Body::from_stream(stream)).unwrap_or_else(|err| {
+        text_response(
+            StatusCode::BAD_GATEWAY,
+            format!("failed to build upstream response: {err}"),
+        )
+    })
+}
+
+fn request_authority(headers: &HeaderMap, uri: &Uri) -> Option<String> {
+    uri.authority()
+        .map(|authority| authority.as_str().to_string())
+        .or_else(|| {
+            headers
+                .get(HOST)
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string)
+        })
+}
+
+fn normalize_authority(authority: &str) -> anyhow::Result<(String, u16)> {
+    let authority = authority.trim();
+    if authority.is_empty() {
+        anyhow::bail!("authority is empty");
+    }
+    let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
+        let Some((host, rest)) = bracketed.split_once(']') else {
+            anyhow::bail!("invalid IPv6 authority");
+        };
+        let port = rest
+            .strip_prefix(':')
+            .map(str::parse::<u16>)
+            .transpose()?
+            .unwrap_or(443);
+        (host, port)
+    } else if let Some((host, port)) = authority.rsplit_once(':') {
+        if host.contains(':') {
+            (authority, 443)
+        } else {
+            (host, port.parse::<u16>()?)
+        }
+    } else {
+        (authority, 443)
+    };
+    Ok((host.trim_end_matches('.').to_ascii_lowercase(), port))
+}
+
+fn build_upstream_url(base: &str, incoming: &Uri) -> anyhow::Result<reqwest::Url> {
+    let mut url = reqwest::Url::parse(base.trim()).context("parse endpoint canary upstream URL")?;
+    let path_and_query = incoming
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    let (path, query) = path_and_query
+        .split_once('?')
+        .map(|(path, query)| (path, Some(query)))
+        .unwrap_or((path_and_query, None));
+    url.set_path(path);
+    url.set_query(query);
+    Ok(url)
+}
+
+fn is_upgrade_request(headers: &HeaderMap) -> bool {
+    let has_upgrade = headers
+        .get(UPGRADE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+    let connection_upgrade = headers
+        .get(CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+        });
+    has_upgrade && connection_upgrade
+}
+
+fn request_header_allowed(name: &str, upgrade: bool) -> bool {
+    let name = name.to_ascii_lowercase();
+    if upgrade && matches!(name.as_str(), "connection" | "upgrade") {
+        return true;
+    }
+    !matches!(
+        name.as_str(),
+        "host"
+            | "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
+}
+
+fn response_header_allowed(name: &str, upgrade: bool) -> bool {
+    let name = name.to_ascii_lowercase();
+    if upgrade && matches!(name.as_str(), "connection" | "upgrade") {
+        return true;
+    }
+    !matches!(
+        name.as_str(),
+        "connection" | "keep-alive" | "proxy-authenticate" | "proxy-authorization" | "te"
+            | "trailer" | "transfer-encoding" | "upgrade"
+    )
+}
+
+fn upstream_error_response(endpoint_id: &str, err: reqwest::Error) -> Response<Body> {
+    text_response(
+        StatusCode::BAD_GATEWAY,
+        format!("canary upstream request failed for endpoint {endpoint_id}: {err}"),
+    )
+}
+
+fn error_response(err: anyhow::Error) -> Response<Body> {
+    text_response(StatusCode::BAD_GATEWAY, err.to_string())
+}
+
+fn text_response(status: StatusCode, text: impl Into<String>) -> Response<Body> {
+    let body = text.into();
+    Response::builder()
+        .status(status)
+        .header("content-type", HeaderValue::from_static("text/plain; charset=utf-8"))
+        .body(Body::from(body))
+        .expect("build text response")
 }
 
 async fn ensure_certificate(
@@ -988,6 +1426,237 @@ mod tests {
                 "com".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn normalize_authority_defaults_tls_port_and_lowercases_host() {
+        assert_eq!(
+            normalize_authority("Tokyo.EXAMPLE.com").unwrap(),
+            ("tokyo.example.com".to_string(), 443)
+        );
+        assert_eq!(
+            normalize_authority("Tokyo.EXAMPLE.com:53844").unwrap(),
+            ("tokyo.example.com".to_string(), 53844)
+        );
+    }
+
+    #[test]
+    fn build_upstream_url_uses_incoming_path_and_query() {
+        let incoming: Uri = "/api/items?cursor=abc&limit=20".parse().unwrap();
+        let url = build_upstream_url("http://127.0.0.1:8080", &incoming).unwrap();
+        assert_eq!(url.as_str(), "http://127.0.0.1:8080/api/items?cursor=abc&limit=20");
+    }
+
+    #[test]
+    fn response_header_filter_preserves_websocket_handshake_headers_only_for_upgrade() {
+        assert!(!response_header_allowed("connection", false));
+        assert!(!response_header_allowed("upgrade", false));
+        assert!(response_header_allowed("connection", true));
+        assert!(response_header_allowed("upgrade", true));
+    }
+
+    #[test]
+    fn websocket_proxy_rejects_h2c_upstreams() {
+        let clients = CanaryProxyClients::new().unwrap();
+        let auto_client = clients.for_websocket_mode(CanaryUpstreamMode::Auto);
+        let http1_client = clients.for_websocket_mode(CanaryUpstreamMode::Http1);
+        let h2c_client = clients.for_websocket_mode(CanaryUpstreamMode::H2c);
+
+        assert!(auto_client.is_some());
+        assert!(http1_client.is_some());
+        assert!(h2c_client.is_none());
+    }
+
+    #[test]
+    fn websocket_proxy_forces_auto_mode_to_http1_client() {
+        let clients = CanaryProxyClients::new().unwrap();
+        let auto_client = clients.for_websocket_mode(CanaryUpstreamMode::Auto).unwrap();
+        let http1_client = clients.for_mode(CanaryUpstreamMode::Http1);
+
+        assert!(std::ptr::eq(auto_client, http1_client));
+    }
+
+    #[tokio::test]
+    async fn canary_proxy_client_does_not_follow_redirects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buffer = [0_u8; 1024];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/private\r\nContent-Length: 0\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let clients = CanaryProxyClients::new().unwrap();
+        let url = reqwest::Url::parse(&format!("http://{addr}/redirect")).unwrap();
+        let response = send_upstream_request(
+            clients.for_mode(CanaryUpstreamMode::Auto),
+            Method::GET,
+            url,
+            &HeaderMap::new(),
+            Body::empty(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "http://127.0.0.1:9/private"
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canary_proxy_client_uses_upstream_origin_host_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buffer = [0_u8; 2048];
+            let n = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..n]);
+            assert!(request.contains(&format!("\r\nhost: {addr}\r\n")));
+            assert!(!request.contains("\r\nhost: public.example.com\r\n"));
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("public.example.com"));
+        let clients = CanaryProxyClients::new().unwrap();
+        let url = reqwest::Url::parse(&format!("http://{addr}/")).unwrap();
+        let response = send_upstream_request(
+            clients.for_mode(CanaryUpstreamMode::Auto),
+            Method::GET,
+            url,
+            &headers,
+            Body::empty(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canary_proxy_client_allows_slow_streaming_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buffer = [0_u8; 1024];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 16\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream.write_all(b"data: 1\n\n").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(750)).await;
+            stream.write_all(b"data: 2\n\n").await.unwrap();
+        });
+
+        let clients = CanaryProxyClients::new().unwrap();
+        let url = reqwest::Url::parse(&format!("http://{addr}/events")).unwrap();
+        let response = send_upstream_request(
+            clients.for_mode(CanaryUpstreamMode::Auto),
+            Method::GET,
+            url,
+            &HeaderMap::new(),
+            Body::empty(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(body.contains("data: 1"));
+        assert!(body.contains("data: 2"));
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn managed_vless_matching_keeps_unconfigured_upstream_diagnostic() {
+        let endpoint = Endpoint {
+            endpoint_id: "ep1".to_string(),
+            node_id: "n1".to_string(),
+            tag: "vless-ep1".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 53844,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "127.0.0.1:39043",
+                    "server_names": ["node.example.com"],
+                    "server_names_source": "manual",
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["aaaaaaaaaaaaaaaa"],
+                "active_short_id": "aaaaaaaaaaaaaaaa",
+                "managed_default": true
+            }),
+        };
+
+        let routed = matching_managed_vless_endpoint(endpoint, 53844).unwrap();
+        assert_eq!(routed.endpoint_id, "ep1");
+        assert!(routed.upstream.url.is_empty());
+        assert_eq!(routed.upstream.mode, CanaryUpstreamMode::Auto);
+    }
+
+    #[test]
+    fn managed_vless_matching_requires_managed_default_flag_and_port() {
+        let mut endpoint = Endpoint {
+            endpoint_id: "ep1".to_string(),
+            node_id: "n1".to_string(),
+            tag: "vless-ep1".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 53844,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "127.0.0.1:39043",
+                    "server_names": ["node.example.com"],
+                    "server_names_source": "manual",
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["aaaaaaaaaaaaaaaa"],
+                "active_short_id": "aaaaaaaaaaaaaaaa",
+                "canary_upstream": {
+                    "url": "http://127.0.0.1:8080",
+                    "mode": "h2c"
+                },
+                "managed_default": false
+            }),
+        };
+
+        assert!(matching_managed_vless_endpoint(endpoint.clone(), 53844).is_none());
+        endpoint.meta["managed_default"] = serde_json::Value::Bool(true);
+        assert!(matching_managed_vless_endpoint(endpoint.clone(), 443).is_none());
+        let routed = matching_managed_vless_endpoint(endpoint, 53844).unwrap();
+        assert_eq!(routed.upstream.url, "http://127.0.0.1:8080");
+        assert_eq!(routed.upstream.mode, CanaryUpstreamMode::H2c);
     }
 
     #[cfg(unix)]
