@@ -2,6 +2,7 @@
 compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
 
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -41,6 +42,57 @@ fn should_reconcile_managed_defaults_at_startup(
         intent.ss,
         xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip
     )
+}
+
+async fn reconcile_managed_defaults_with_startup_retries(
+    data_dir: PathBuf,
+    node_id: String,
+    startup_endpoints: Vec<xp::domain::Endpoint>,
+    intent: xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
+    raft_facade: Arc<dyn xp::raft::app::RaftFacade>,
+) {
+    const ATTEMPTS: usize = 8;
+
+    for attempt in 1..=ATTEMPTS {
+        let mut writer = |cmd| async { raft_facade.client_write(cmd).await.map(|_| ()) };
+        match xp::managed_default_endpoints::reconcile_managed_default_endpoints(
+            &data_dir,
+            &node_id,
+            &startup_endpoints,
+            &intent,
+            &mut writer,
+            "xp startup",
+        )
+        .await
+        {
+            Ok(()) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        attempt,
+                        "managed default endpoint reconcile succeeded after startup retry"
+                    );
+                }
+                return;
+            }
+            Err(err) if attempt < ATTEMPTS => {
+                tracing::warn!(
+                    attempt,
+                    max_attempts = ATTEMPTS,
+                    error = %err,
+                    "managed default endpoint reconcile failed after startup; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
+            }
+            Err(err) => {
+                tracing::error!(
+                    attempt,
+                    max_attempts = ATTEMPTS,
+                    error = %err,
+                    "managed default endpoint reconcile failed after startup retries"
+                );
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -469,27 +521,14 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         let raft_facade = startup_raft_facade;
         let node_id = startup_node_id;
         tokio::spawn(async move {
-            let mut writer = |cmd| async {
-                raft_facade
-                    .client_write(cmd)
-                    .await
-                    .map(|_| ())
-            };
-            if let Err(err) = xp::managed_default_endpoints::reconcile_managed_default_endpoints(
-                &data_dir,
-                &node_id,
-                &startup_endpoints,
-                &startup_managed_default_intent,
-                &mut writer,
-                "xp startup",
+            reconcile_managed_defaults_with_startup_retries(
+                data_dir,
+                node_id,
+                startup_endpoints,
+                startup_managed_default_intent,
+                raft_facade,
             )
-            .await
-            {
-                tracing::error!(
-                    error = %err,
-                    "managed default endpoint reconcile failed after startup"
-                );
-            }
+            .await;
         });
     }
     axum::serve(listener, app)
