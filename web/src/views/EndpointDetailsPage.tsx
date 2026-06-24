@@ -152,8 +152,10 @@ export function EndpointDetailsPage() {
 	const [realityFingerprint, setRealityFingerprint] = useState("");
 	const [upstreamUrl, setUpstreamUrl] = useState("");
 	const [upstreamMode, setUpstreamMode] = useState<CanaryUpstreamMode>("auto");
-	const [canaryProbeResult, setCanaryProbeResult] =
-		useState<AdminEndpointCanaryProbeResponse | null>(null);
+	const [canaryProbeResult, setCanaryProbeResult] = useState<{
+		endpointId: string;
+		result: AdminEndpointCanaryProbeResponse;
+	} | null>(null);
 	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -345,7 +347,7 @@ export function EndpointDetailsPage() {
 	const canaryProbeMutation = useMutation({
 		mutationFn: () => runAdminEndpointCanaryProbe(adminToken, endpointId),
 		onSuccess: (data) => {
-			setCanaryProbeResult(data);
+			setCanaryProbeResult({ endpointId, result: data });
 			const okCount = data.nodes.filter((node) => node.ok).length;
 			const totalCount = data.nodes.length;
 			const allOk = totalCount > 0 && okCount === totalCount;
@@ -425,6 +427,10 @@ export function EndpointDetailsPage() {
 	const effectiveGlobalServerNames = derivedGlobalServerNames.length
 		? derivedGlobalServerNames
 		: (vlessMeta?.realityServerNames ?? []);
+	const currentCanaryProbeResult =
+		canaryProbeResult?.endpointId === endpointId
+			? canaryProbeResult.result
+			: null;
 
 	return (
 		<div className="space-y-6">
@@ -822,17 +828,19 @@ export function EndpointDetailsPage() {
 												canary without touching upstream.
 											</p>
 										</div>
-										{canaryProbeResult ? (
+										{currentCanaryProbeResult ? (
 											<div className="space-y-3 text-xs">
 												<p className="break-all font-mono">
-													{canaryProbeResult.url}
+													{currentCanaryProbeResult.url}
 												</p>
 												<div className="flex flex-wrap items-center gap-2">
 													{(() => {
-														const okCount = canaryProbeResult.nodes.filter(
-															(node) => node.ok,
-														).length;
-														const totalCount = canaryProbeResult.nodes.length;
+														const okCount =
+															currentCanaryProbeResult.nodes.filter(
+																(node) => node.ok,
+															).length;
+														const totalCount =
+															currentCanaryProbeResult.nodes.length;
 														return (
 															<Badge
 																variant={
@@ -847,7 +855,7 @@ export function EndpointDetailsPage() {
 													})()}
 												</div>
 												<div className="space-y-2">
-													{canaryProbeResult.nodes.map((node) => (
+													{currentCanaryProbeResult.nodes.map((node) => (
 														<div
 															key={node.node_id}
 															className="flex flex-col gap-1 rounded-lg border border-border/70 bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
@@ -880,7 +888,7 @@ export function EndpointDetailsPage() {
 														</div>
 													))}
 												</div>
-												{canaryProbeResult.nodes.length === 0 ? (
+												{currentCanaryProbeResult.nodes.length === 0 ? (
 													<Badge variant="destructive">no nodes returned</Badge>
 												) : null}
 											</div>

@@ -658,6 +658,12 @@ async fn proxy_request(
     let routed = route_upstream(state, req.headers(), req.uri()).await?;
     let upstream_url = build_upstream_url(&routed.upstream.url, req.uri()).map_err(error_response)?;
     if is_upgrade_request(req.headers()) {
+        if !websocket_upstream_supported(routed.upstream.mode) {
+            return Err(text_response(
+                StatusCode::NOT_IMPLEMENTED,
+                "websocket proxying requires an HTTP/1.1 upstream mode; h2c does not support HTTP/1.1 upgrade",
+            ));
+        }
         return proxy_websocket(state, req, routed, upstream_url).await;
     }
     proxy_http(state, req, routed, upstream_url).await
@@ -923,6 +929,10 @@ fn is_upgrade_request(headers: &HeaderMap) -> bool {
                 .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
         });
     has_upgrade && connection_upgrade
+}
+
+fn websocket_upstream_supported(mode: CanaryUpstreamMode) -> bool {
+    !matches!(mode, CanaryUpstreamMode::H2c)
 }
 
 fn request_header_allowed(name: &str, upgrade: bool) -> bool {
@@ -1442,6 +1452,13 @@ mod tests {
         assert!(!response_header_allowed("upgrade", false));
         assert!(response_header_allowed("connection", true));
         assert!(response_header_allowed("upgrade", true));
+    }
+
+    #[test]
+    fn websocket_proxy_rejects_h2c_upstreams() {
+        assert!(websocket_upstream_supported(CanaryUpstreamMode::Auto));
+        assert!(websocket_upstream_supported(CanaryUpstreamMode::Http1));
+        assert!(!websocket_upstream_supported(CanaryUpstreamMode::H2c));
     }
 
     #[tokio::test]
