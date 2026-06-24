@@ -344,11 +344,15 @@ export function EndpointDetailsPage() {
 		mutationFn: () => runAdminEndpointCanaryProbe(adminToken, endpointId),
 		onSuccess: (data) => {
 			setCanaryProbeResult(data);
+			const okCount = data.nodes.filter((node) => node.ok).length;
+			const totalCount = data.nodes.length;
+			const allOk = totalCount > 0 && okCount === totalCount;
+			const firstError = data.nodes.find((node) => !node.ok)?.error;
 			pushToast({
-				variant: data.ok ? "success" : "error",
-				message: data.ok
-					? `Canary probe returned 204 in ${data.latency_ms} ms.`
-					: `Canary probe failed: ${data.error ?? "unexpected response"}`,
+				variant: allOk ? "success" : "error",
+				message: allOk
+					? `Canary probe returned 204 from ${okCount}/${totalCount} nodes.`
+					: `Canary probe passed ${okCount}/${totalCount} nodes: ${firstError ?? "unexpected response"}`,
 			});
 		},
 		onError: (error) => {
@@ -817,31 +821,65 @@ export function EndpointDetailsPage() {
 											</p>
 										</div>
 										{canaryProbeResult ? (
-											<div className="space-y-1 text-xs">
+											<div className="space-y-3 text-xs">
 												<p className="break-all font-mono">
 													{canaryProbeResult.url}
 												</p>
 												<div className="flex flex-wrap items-center gap-2">
-													<Badge
-														variant={
-															canaryProbeResult.ok ? "default" : "destructive"
-														}
-													>
-														{canaryProbeResult.ok ? "204 OK" : "failed"}
-													</Badge>
-													<span className="text-muted-foreground">
-														{canaryProbeResult.latency_ms} ms
-													</span>
-													{canaryProbeResult.status ? (
-														<span className="font-mono text-muted-foreground">
-															status={canaryProbeResult.status}
-														</span>
-													) : null}
+													{(() => {
+														const okCount = canaryProbeResult.nodes.filter(
+															(node) => node.ok,
+														).length;
+														const totalCount = canaryProbeResult.nodes.length;
+														return (
+															<Badge
+																variant={
+																	totalCount > 0 && okCount === totalCount
+																		? "default"
+																		: "destructive"
+																}
+															>
+																{okCount} / {totalCount} nodes OK
+															</Badge>
+														);
+													})()}
 												</div>
-												{canaryProbeResult.error ? (
-													<p className="text-destructive">
-														{canaryProbeResult.error}
-													</p>
+												<div className="space-y-2">
+													{canaryProbeResult.nodes.map((node) => (
+														<div
+															key={node.node_id}
+															className="flex flex-col gap-1 rounded-lg border border-border/70 bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+														>
+															<div className="flex min-w-0 flex-wrap items-center gap-2">
+																<span className="font-mono text-muted-foreground">
+																	{node.node_id}
+																</span>
+																<Badge
+																	variant={node.ok ? "default" : "destructive"}
+																>
+																	{node.ok ? "204 OK" : "failed"}
+																</Badge>
+																{node.status ? (
+																	<span className="font-mono text-muted-foreground">
+																		status={node.status}
+																	</span>
+																) : null}
+															</div>
+															<div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+																<span className="text-muted-foreground">
+																	{node.latency_ms} ms
+																</span>
+																{node.error ? (
+																	<span className="break-all text-destructive">
+																		{node.error}
+																	</span>
+																) : null}
+															</div>
+														</div>
+													))}
+												</div>
+												{canaryProbeResult.nodes.length === 0 ? (
+													<Badge variant="destructive">no nodes returned</Badge>
 												) : null}
 											</div>
 										) : null}

@@ -1822,11 +1822,14 @@ async function handleRequest(
 		return jsonResponse({
 			endpoint_id: endpoint.endpoint_id,
 			url: `https://${authority}/generate_204`,
-			ok: true,
-			status: 204,
-			latency_ms: 27,
-			error: null,
-			checked_at: new Date().toISOString(),
+			nodes: state.nodes.map((item, index) => ({
+				node_id: item.node_id,
+				ok: true,
+				status: 204,
+				latency_ms: 27 + index * 8,
+				error: null,
+				checked_at: new Date().toISOString(),
+			})),
 		});
 	}
 

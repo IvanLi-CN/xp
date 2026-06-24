@@ -261,15 +261,27 @@ struct AdminEndpointWithProbe {
 	probe: AdminEndpointProbeSummary,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AdminEndpointCanaryProbeResponse {
-	endpoint_id: String,
-	url: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminEndpointCanaryProbeNode {
+	node_id: String,
 	ok: bool,
 	status: Option<u16>,
 	latency_ms: u32,
 	error: Option<String>,
 	checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEndpointCanaryProbeResponse {
+	endpoint_id: String,
+	url: String,
+	nodes: Vec<AdminEndpointCanaryProbeNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminInternalEndpointCanaryProbeRequest {
+	endpoint_id: String,
+	url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1009,6 +1021,10 @@ pub fn build_router(
             "/_internal/endpoint-probe/runs/:run_id/events",
             get(admin_internal_endpoint_probe_run_events),
         )
+		.route(
+			"/_internal/endpoint-canary-probe",
+			post(admin_internal_endpoint_canary_probe),
+		)
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
@@ -5449,9 +5465,9 @@ fn endpoint_canary_probe_url(node: &Node, endpoint: &Endpoint) -> Result<String,
 
 async fn run_endpoint_canary_probe_url(
 	client: &reqwest::Client,
-	endpoint_id: &str,
+	node_id: &str,
 	url: String,
-) -> AdminEndpointCanaryProbeResponse {
+) -> AdminEndpointCanaryProbeNode {
 	let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 	let started = StdInstant::now();
 	let request = client.get(&url).header(header::ACCEPT, "*/*");
@@ -5462,9 +5478,8 @@ async fn run_endpoint_canary_probe_url(
 		Ok(Ok(response)) => {
 			let status = response.status();
 			let ok = status == StatusCode::NO_CONTENT;
-			AdminEndpointCanaryProbeResponse {
-				endpoint_id: endpoint_id.to_string(),
-				url,
+			AdminEndpointCanaryProbeNode {
+				node_id: node_id.to_string(),
 				ok,
 				status: Some(status.as_u16()),
 				latency_ms,
@@ -5476,18 +5491,16 @@ async fn run_endpoint_canary_probe_url(
 				checked_at,
 			}
 		}
-		Ok(Err(err)) => AdminEndpointCanaryProbeResponse {
-			endpoint_id: endpoint_id.to_string(),
-			url,
+		Ok(Err(err)) => AdminEndpointCanaryProbeNode {
+			node_id: node_id.to_string(),
 			ok: false,
 			status: err.status().map(|status| status.as_u16()),
 			latency_ms,
 			error: Some(err.to_string()),
 			checked_at,
 		},
-		Err(_) => AdminEndpointCanaryProbeResponse {
-			endpoint_id: endpoint_id.to_string(),
-			url,
+		Err(_) => AdminEndpointCanaryProbeNode {
+			node_id: node_id.to_string(),
 			ok: false,
 			status: None,
 			latency_ms,
@@ -5497,11 +5510,52 @@ async fn run_endpoint_canary_probe_url(
 	}
 }
 
+fn endpoint_canary_probe_error_node(
+	node_id: String,
+	status: Option<u16>,
+	latency_ms: u32,
+	error: impl Into<String>,
+) -> AdminEndpointCanaryProbeNode {
+	AdminEndpointCanaryProbeNode {
+		node_id,
+		ok: false,
+		status,
+		latency_ms,
+		error: Some(error.into()),
+		checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+	}
+}
+
+fn build_endpoint_canary_probe_client() -> Result<reqwest::Client, ApiError> {
+	reqwest::Client::builder()
+		.redirect(reqwest::redirect::Policy::none())
+		.connect_timeout(Duration::from_secs(3))
+		.user_agent(format!("xp/{} canary-probe", crate::version::VERSION))
+		.build()
+		.map_err(|e| ApiError::internal(format!("build canary probe client: {e}")))
+}
+
+async fn admin_internal_endpoint_canary_probe(
+	Extension(state): Extension<AppState>,
+	ApiJson(req): ApiJson<AdminInternalEndpointCanaryProbeRequest>,
+) -> Result<Json<AdminEndpointCanaryProbeNode>, ApiError> {
+	if req.endpoint_id.trim().is_empty() {
+		return Err(ApiError::invalid_request("endpoint_id is required"));
+	}
+	if req.url.trim().is_empty() {
+		return Err(ApiError::invalid_request("url is required"));
+	}
+	let client = build_endpoint_canary_probe_client()?;
+	Ok(Json(
+		run_endpoint_canary_probe_url(&client, &state.cluster.node_id, req.url).await,
+	))
+}
+
 async fn admin_probe_endpoint_canary(
 	Extension(state): Extension<AppState>,
 	Path(endpoint_id): Path<String>,
 ) -> Result<Json<AdminEndpointCanaryProbeResponse>, ApiError> {
-	let (endpoint, node, meta) = {
+	let (endpoint, node, nodes, meta) = {
 		let store = state.store.lock().await;
 		let endpoint = store
 			.get_endpoint(&endpoint_id)
@@ -5522,20 +5576,121 @@ async fn admin_probe_endpoint_canary(
 		let node = store
 			.get_node(&endpoint.node_id)
 			.ok_or_else(|| ApiError::not_found(format!("node not found: {}", endpoint.node_id)))?;
-		(endpoint, node, meta)
+		let nodes = store.list_nodes();
+		(endpoint, node, nodes, meta)
 	};
 	let _ = meta;
 	let url = endpoint_canary_probe_url(&node, &endpoint)?;
-	let client = reqwest::Client::builder()
-		.redirect(reqwest::redirect::Policy::none())
-		.connect_timeout(Duration::from_secs(3))
-		.user_agent(format!("xp/{} canary-probe", crate::version::VERSION))
-		.build()
-		.map_err(|e| ApiError::internal(format!("build canary probe client: {e}")))?;
 
-	Ok(Json(
-		run_endpoint_canary_probe_url(&client, &endpoint.endpoint_id, url).await,
-	))
+	let local_node_id = state.cluster.node_id.clone();
+	let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+		return Err(ApiError::internal("cluster ca key is not available"));
+	};
+	let cluster_client = build_cluster_http_client(&state)?;
+	let uri: axum::http::Uri = "/_internal/endpoint-canary-probe"
+		.parse()
+		.expect("valid uri");
+	let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
+		.map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+
+	let mut tasks = Vec::new();
+	for node in nodes {
+		let node_id = node.node_id.clone();
+		let req_body = AdminInternalEndpointCanaryProbeRequest {
+			endpoint_id: endpoint.endpoint_id.clone(),
+			url: url.clone(),
+		};
+
+		if node_id == local_node_id {
+			tasks.push(tokio::spawn(async move {
+				match build_endpoint_canary_probe_client() {
+					Ok(client) => {
+						run_endpoint_canary_probe_url(&client, &node_id, req_body.url).await
+					}
+					Err(err) => endpoint_canary_probe_error_node(
+						node_id,
+						None,
+						0,
+						format!("build local client: {err:?}"),
+					),
+				}
+			}));
+			continue;
+		}
+
+		let client = cluster_client.clone();
+		let sig = sig.clone();
+		let url_path = format!(
+			"{}/api/admin/_internal/endpoint-canary-probe",
+			node.api_base_url.trim_end_matches('/')
+		);
+
+		tasks.push(tokio::spawn(async move {
+			let started = StdInstant::now();
+			let request = client.send_with_fallback(Duration::from_secs(8), |client| {
+				client
+					.post(url_path.clone())
+					.header(
+						header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+						sig.clone(),
+					)
+					.json(&req_body)
+			});
+			let resp = tokio::time::timeout(Duration::from_secs(8), request).await;
+			let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+			let resp = match resp {
+				Ok(Ok(resp)) => resp,
+				Ok(Err(err)) => {
+					return endpoint_canary_probe_error_node(
+						node_id,
+						None,
+						latency_ms,
+						err.to_string(),
+					);
+				}
+				Err(_) => {
+					return endpoint_canary_probe_error_node(
+						node_id, None, latency_ms, "timeout",
+					);
+				}
+			};
+
+			let status = resp.status();
+			if !status.is_success() {
+				let body = resp.text().await.unwrap_or_default();
+				let error = if body.trim().is_empty() {
+					format!("dispatch http {}", status.as_u16())
+				} else {
+					format!("dispatch http {}: {body}", status.as_u16())
+				};
+				return endpoint_canary_probe_error_node(
+					node_id,
+					Some(status.as_u16()),
+					latency_ms,
+					error,
+				);
+			}
+
+			match resp.json::<AdminEndpointCanaryProbeNode>().await {
+				Ok(out) => out,
+				Err(err) => {
+					endpoint_canary_probe_error_node(node_id, None, latency_ms, err.to_string())
+				}
+			}
+		}));
+	}
+
+	let mut nodes = Vec::new();
+	for item in join_all(tasks).await.into_iter().flatten() {
+		nodes.push(item);
+	}
+	nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+
+	Ok(Json(AdminEndpointCanaryProbeResponse {
+		endpoint_id: endpoint.endpoint_id,
+		url,
+		nodes,
+	}))
 }
 
 async fn admin_create_user(

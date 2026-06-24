@@ -8502,10 +8502,11 @@ async fn run_endpoint_canary_probe_url_reports_204_success() {
         .unwrap();
     let out = super::run_endpoint_canary_probe_url(
         &client,
-        "ep1",
+        "n1",
         format!("{}/generate_204", server.uri()),
     )
     .await;
+    assert_eq!(out.node_id, "n1");
     assert!(out.ok);
     assert_eq!(out.status, Some(204));
     assert_eq!(out.error, None);
@@ -8526,10 +8527,11 @@ async fn run_endpoint_canary_probe_url_reports_non_204_failure() {
         .unwrap();
     let out = super::run_endpoint_canary_probe_url(
         &client,
-        "ep1",
+        "n1",
         format!("{}/generate_204", server.uri()),
     )
     .await;
+    assert_eq!(out.node_id, "n1");
     assert!(!out.ok);
     assert_eq!(out.status, Some(200));
     assert_eq!(out.error.as_deref(), Some("expected 204, got 200"));

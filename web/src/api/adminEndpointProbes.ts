@@ -25,14 +25,23 @@ export type AdminEndpointProbeRunResponse = z.infer<
 	typeof AdminEndpointProbeRunResponseSchema
 >;
 
-export const AdminEndpointCanaryProbeResponseSchema = z.object({
-	endpoint_id: z.string(),
-	url: z.string(),
+export const AdminEndpointCanaryProbeNodeSchema = z.object({
+	node_id: z.string(),
 	ok: z.boolean(),
 	status: z.number().int().nonnegative().optional().nullable(),
 	latency_ms: z.number().int().nonnegative(),
 	error: z.string().optional().nullable(),
 	checked_at: z.string(),
+});
+
+export type AdminEndpointCanaryProbeNode = z.infer<
+	typeof AdminEndpointCanaryProbeNodeSchema
+>;
+
+export const AdminEndpointCanaryProbeResponseSchema = z.object({
+	endpoint_id: z.string(),
+	url: z.string(),
+	nodes: z.array(AdminEndpointCanaryProbeNodeSchema),
 });
 
 export type AdminEndpointCanaryProbeResponse = z.infer<
