@@ -447,8 +447,8 @@ join 场景下，容器入口会自动完成：
 - `reality.dest` 不再来自外部伪装站点，而是自动指向 `XP_VLESS_CANARY_BIND`
 - 普通 HTTPS client 访问 `https://<access_host[:vless_port]>/generate_204` 时，会经由 REALITY 未认证 fallback 命中 xp 进程内 loopback TLS canary
 - `XP_DEFAULT_VLESS_SERVER_NAMES` 仅作为旧配置兼容输入存在；存在时会校验，但不再决定托管 SNI
-- 每个 VLESS endpoint 可单独配置 `canary_upstream`；`GET/HEAD /generate_204` 永远由 xp 返回 `204`，其他请求按 HTTP `Host`/`:authority` 匹配 `XP_ACCESS_HOST[:endpoint_port]` 后转发到该 endpoint upstream
-- upstream 支持 HTTP、HTTPS ALPN、显式 h2c、SSE、大请求/响应流式转发和 WebSocket upgrade
+- 每个 VLESS endpoint 可单独配置 origin-only `canary_upstream`；`GET/HEAD /generate_204` 永远由 xp 返回 `204`，其他请求按 HTTP `Host`/`:authority` 匹配 `XP_ACCESS_HOST[:endpoint_port]` 后转发到该 endpoint upstream
+- upstream 支持 HTTP、HTTPS ALPN、显式 h2c、SSE、大请求/响应流式转发；WebSocket upgrade 使用 HTTP/1.1 upstream 连接，显式 h2c 仅用于非 upgrade HTTP 流量
 
 如果开启了 Tunnel，还应确认：
 

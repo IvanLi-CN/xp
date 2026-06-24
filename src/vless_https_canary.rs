@@ -110,6 +110,13 @@ impl CanaryProxyClients {
             CanaryUpstreamMode::H2c => &self.h2c,
         }
     }
+
+    fn for_websocket_mode(&self, mode: CanaryUpstreamMode) -> Option<&reqwest::Client> {
+        match mode {
+            CanaryUpstreamMode::Auto | CanaryUpstreamMode::Http1 => Some(&self.http1),
+            CanaryUpstreamMode::H2c => None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -658,13 +665,13 @@ async fn proxy_request(
     let routed = route_upstream(state, req.headers(), req.uri()).await?;
     let upstream_url = build_upstream_url(&routed.upstream.url, req.uri()).map_err(error_response)?;
     if is_upgrade_request(req.headers()) {
-        if !websocket_upstream_supported(routed.upstream.mode) {
+        let Some(client) = state.clients.for_websocket_mode(routed.upstream.mode) else {
             return Err(text_response(
                 StatusCode::NOT_IMPLEMENTED,
                 "websocket proxying requires an HTTP/1.1 upstream mode; h2c does not support HTTP/1.1 upgrade",
             ));
-        }
-        return proxy_websocket(state, req, routed, upstream_url).await;
+        };
+        return proxy_websocket(client, req, routed, upstream_url).await;
     }
     proxy_http(state, req, routed, upstream_url).await
 }
@@ -765,7 +772,7 @@ async fn proxy_http(
 }
 
 async fn proxy_websocket(
-    state: &CanaryProxyState,
+    client: &reqwest::Client,
     req: &mut Request<Body>,
     routed: RoutedUpstream,
     upstream_url: reqwest::Url,
@@ -775,7 +782,7 @@ async fn proxy_websocket(
     let headers = req.headers().clone();
     let body = std::mem::replace(req.body_mut(), Body::empty());
     let response = send_upstream_request(
-        state.clients.for_mode(routed.upstream.mode),
+        client,
         method,
         upstream_url,
         &headers,
@@ -929,10 +936,6 @@ fn is_upgrade_request(headers: &HeaderMap) -> bool {
                 .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
         });
     has_upgrade && connection_upgrade
-}
-
-fn websocket_upstream_supported(mode: CanaryUpstreamMode) -> bool {
-    !matches!(mode, CanaryUpstreamMode::H2c)
 }
 
 fn request_header_allowed(name: &str, upgrade: bool) -> bool {
@@ -1440,9 +1443,9 @@ mod tests {
     }
 
     #[test]
-    fn build_upstream_url_preserves_incoming_path_and_query() {
+    fn build_upstream_url_uses_incoming_path_and_query() {
         let incoming: Uri = "/api/items?cursor=abc&limit=20".parse().unwrap();
-        let url = build_upstream_url("http://127.0.0.1:8080/base", &incoming).unwrap();
+        let url = build_upstream_url("http://127.0.0.1:8080", &incoming).unwrap();
         assert_eq!(url.as_str(), "http://127.0.0.1:8080/api/items?cursor=abc&limit=20");
     }
 
@@ -1456,9 +1459,23 @@ mod tests {
 
     #[test]
     fn websocket_proxy_rejects_h2c_upstreams() {
-        assert!(websocket_upstream_supported(CanaryUpstreamMode::Auto));
-        assert!(websocket_upstream_supported(CanaryUpstreamMode::Http1));
-        assert!(!websocket_upstream_supported(CanaryUpstreamMode::H2c));
+        let clients = CanaryProxyClients::new().unwrap();
+        let auto_client = clients.for_websocket_mode(CanaryUpstreamMode::Auto);
+        let http1_client = clients.for_websocket_mode(CanaryUpstreamMode::Http1);
+        let h2c_client = clients.for_websocket_mode(CanaryUpstreamMode::H2c);
+
+        assert!(auto_client.is_some());
+        assert!(http1_client.is_some());
+        assert!(h2c_client.is_none());
+    }
+
+    #[test]
+    fn websocket_proxy_forces_auto_mode_to_http1_client() {
+        let clients = CanaryProxyClients::new().unwrap();
+        let auto_client = clients.for_websocket_mode(CanaryUpstreamMode::Auto).unwrap();
+        let http1_client = clients.for_mode(CanaryUpstreamMode::Http1);
+
+        assert!(std::ptr::eq(auto_client, http1_client));
     }
 
     #[tokio::test]

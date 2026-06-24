@@ -164,7 +164,7 @@
 - Given 托管 VLESS endpoint 被创建或 reconcile，When 检查 Xray inbound Reality 配置，Then `dest` 必须等于 `XP_VLESS_CANARY_BIND`，`server_names` 必须等于 `[node.access_host]`，且 SNI 不包含端口。
 - Given Admin UI/API 修改托管 VLESS endpoint，When payload 包含 `reality.dest`、`server_names` 或 `server_names_source`，Then 系统必须拒绝或忽略该修改，不能让隐藏 UI 字段绕过托管协议事实。
 - Given 非 `/generate_204` 请求进入 canary，When `Host` / HTTP/2 `:authority` 归一化为 `access_host[:endpoint_port]`，Then 必须匹配同 node 上唯一托管 VLESS endpoint；0 个匹配返回可诊断未匹配错误，多个匹配返回冲突错误，匹配但未设置 `canary_upstream` 返回未配置 upstream 错误。
-- Given endpoint 设置了 `canary_upstream`，When canary 代理非探测请求，Then 请求 method/path/query/header/body 与响应 status/header/body 应尽量透明流式转发；HTTP/1.1、HTTPS ALPN HTTP/2、显式 h2c、SSE、大上传/下载和 WebSocket upgrade 属于支持范围，`CONNECT` 不属于 v1 反代能力。
+- Given endpoint 设置了 origin-only `canary_upstream`，When canary 代理非探测请求，Then 请求 method/path/query/header/body 与响应 status/header/body 应尽量透明流式转发；HTTP/1.1、HTTPS ALPN HTTP/2、显式 h2c、SSE、大上传/下载属于支持范围，WebSocket upgrade 使用 HTTP/1.1 upstream 连接，显式 h2c 仅用于非 upgrade HTTP 流量，`CONNECT` 不属于 v1 反代能力。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
 - Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 per-base relay 组 `🛣️ {relay-base}`。

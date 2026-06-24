@@ -199,6 +199,9 @@ pub fn validate_canary_upstream(config: &CanaryUpstreamConfig) -> Result<(), &'s
     if !url.username().is_empty() || url.password().is_some() {
         return Err("canary_upstream.url must not include credentials");
     }
+    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err("canary_upstream.url must be an origin without path, query, or fragment");
+    }
     if matches!(config.mode, CanaryUpstreamMode::H2c) && url.scheme() != "http" {
         return Err("canary_upstream.mode h2c requires http URL");
     }
@@ -410,6 +413,30 @@ mod tests {
         assert!(validate_reality_dest("[2001:db8::1]").is_err());
         assert!(validate_reality_dest("oneclient.sfx.ms:0").is_err());
         assert!(validate_reality_dest("[2001:db8::1]:0").is_err());
+    }
+
+    #[test]
+    fn canary_upstream_accepts_origin_urls_only() {
+        let valid = CanaryUpstreamConfig {
+            url: "https://backend.example.com:8443".to_string(),
+            mode: CanaryUpstreamMode::Auto,
+        };
+        assert!(validate_canary_upstream(&valid).is_ok());
+
+        for url in [
+            "https://backend.example.com/app",
+            "https://backend.example.com?fixed=1",
+            "https://backend.example.com/#fragment",
+        ] {
+            let config = CanaryUpstreamConfig {
+                url: url.to_string(),
+                mode: CanaryUpstreamMode::Auto,
+            };
+            assert_eq!(
+                validate_canary_upstream(&config),
+                Err("canary_upstream.url must be an origin without path, query, or fragment")
+            );
+        }
     }
 
     #[test]

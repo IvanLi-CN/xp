@@ -774,7 +774,8 @@ export function EndpointDetailsPage() {
 												</SelectContent>
 											</Select>
 											<p className="text-xs opacity-70">
-												auto uses HTTP/1.1 or HTTPS ALPN; h2c is explicit.
+												Use an origin URL only. WebSocket uses HTTP/1.1
+												upstream; h2c is for non-upgrade HTTP.
 											</p>
 										</div>
 									</div>

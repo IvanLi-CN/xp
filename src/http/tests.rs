@@ -3304,6 +3304,75 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
 }
 
 #[tokio::test]
+async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let node_id = nodes["items"][0]["node_id"].as_str().unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node.example.com"],
+                "fingerprint": "chrome"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    for url in [
+        "http://127.0.0.1:8080/app",
+        "http://127.0.0.1:8080?fixed=1",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(req_authed_json(
+                "PATCH",
+                &format!("/api/admin/endpoints/{endpoint_id}"),
+                json!({
+                  "canary_upstream": {
+                    "url": url,
+                    "mode": "auto"
+                  }
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
 async fn create_vless_rejects_canary_upstream_for_unmanaged_endpoint() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
