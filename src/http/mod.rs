@@ -5267,6 +5267,11 @@ async fn admin_patch_endpoint(
                 };
             }
             if let Some(canary_upstream) = req.canary_upstream {
+                if !meta.managed_default {
+                    return Err(ApiError::invalid_request(
+                        "canary_upstream is only editable on managed VLESS endpoints",
+                    ));
+                }
                 meta.canary_upstream = canary_upstream.map(|mut upstream| {
                     upstream.url = upstream.url.trim().to_string();
                     upstream
