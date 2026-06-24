@@ -5467,6 +5467,12 @@ fn endpoint_canary_probe_url(node: &Node, endpoint: &Endpoint) -> Result<String,
 			node.node_id
 		)));
 	}
+	if crate::endpoint_probe::is_loopback_host(host) {
+		return Err(ApiError::invalid_request(format!(
+			"loopback access_host is not allowed for managed VLESS canary probe: node_id={}",
+			node.node_id
+		)));
+	}
 	let authority = if endpoint.port == 443 {
 		host.to_string()
 	} else {

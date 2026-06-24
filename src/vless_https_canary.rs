@@ -930,10 +930,12 @@ fn request_header_allowed(name: &str, upgrade: bool) -> bool {
     if upgrade && matches!(name.as_str(), "connection" | "upgrade") {
         return true;
     }
+    if name == "host" {
+        return true;
+    }
     !matches!(
         name.as_str(),
         "connection"
-            | "host"
             | "keep-alive"
             | "proxy-authenticate"
             | "proxy-authorization"
@@ -1477,6 +1479,42 @@ mod tests {
             response.headers().get("location").unwrap(),
             "http://127.0.0.1:9/private"
         );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canary_proxy_client_preserves_original_host_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buffer = [0_u8; 2048];
+            let n = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..n]);
+            assert!(request.contains("\r\nhost: app.example.com\r\n"));
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("app.example.com"));
+        let clients = CanaryProxyClients::new().unwrap();
+        let url = reqwest::Url::parse(&format!("http://{addr}/")).unwrap();
+        let response = send_upstream_request(
+            clients.for_mode(CanaryUpstreamMode::Auto),
+            Method::GET,
+            url,
+            &headers,
+            Body::empty(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
         server.await.unwrap();
     }
 

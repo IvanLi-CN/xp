@@ -8623,6 +8623,30 @@ async fn endpoint_canary_probe_url_includes_non_default_port() {
 }
 
 #[tokio::test]
+async fn endpoint_canary_probe_url_rejects_loopback_access_host() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "127.0.0.1".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: test_vless_meta(true),
+    };
+
+	let err = super::endpoint_canary_probe_url(&node, &endpoint).unwrap_err();
+	assert_eq!(err.status, StatusCode::BAD_REQUEST);
+	assert!(err.message.contains("loopback access_host"));
+}
+
+#[tokio::test]
 async fn run_endpoint_canary_probe_url_reports_204_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
