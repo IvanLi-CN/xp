@@ -3198,6 +3198,7 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
 async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "node.example.com").await;
 
     let res = app
         .clone()
@@ -3307,6 +3308,7 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
 async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "node.example.com").await;
 
     let res = app
         .clone()
@@ -3626,6 +3628,93 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
     assert_eq!(updated["node_id"], dst_node_id);
     assert_eq!(updated["port"], 443);
     assert_eq!(updated["meta"], meta);
+}
+
+#[tokio::test]
+async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let res = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let nodes = body_json(res).await;
+    let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
+
+    let dst_node_id = new_ulid_string();
+    {
+        let mut store = store.lock().await;
+        store.state_mut().nodes.insert(
+            dst_node_id.clone(),
+            Node {
+                node_id: dst_node_id.clone(),
+                node_name: "node-2".to_string(),
+                access_host: "node-2.example.com".to_string(),
+                api_base_url: "https://node-2.example.com".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        store.save().unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+              "node_id": src_node_id,
+              "kind": "vless_reality_vision_tcp",
+              "port": 443,
+              "reality": {
+                "dest": "127.0.0.1:39043",
+                "server_names": ["node-1.example.com"],
+                "fingerprint": "firefox"
+              }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let endpoint_id = created["endpoint_id"].as_str().unwrap().to_string();
+
+    {
+        let mut store = store.lock().await;
+        let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
+        let mut meta = endpoint.meta.clone();
+        meta["managed_default"] = Value::Bool(true);
+        endpoint.meta = meta;
+        DesiredStateCommand::UpsertEndpoint { endpoint }
+            .apply(store.state_mut())
+            .unwrap();
+    }
+
+    let res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &format!("/api/admin/endpoints/{endpoint_id}"),
+            json!({
+              "node_id": dst_node_id.clone()
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated = body_json(res).await;
+    assert_eq!(updated["node_id"], dst_node_id);
+    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(
+        updated["meta"]["reality"]["server_names"],
+        json!(["node-2.example.com"])
+    );
+    assert_eq!(updated["meta"]["reality"]["server_names_source"], "manual");
+    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
 }
 
 #[tokio::test]

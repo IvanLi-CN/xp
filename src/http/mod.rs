@@ -5277,6 +5277,14 @@ async fn admin_patch_endpoint(
                     upstream
                 });
             }
+            if meta.managed_default {
+                let desired_node = nodes
+                    .iter()
+                    .find(|node| node.node_id == endpoint.node_id)
+                    .ok_or_else(|| ApiError::invalid_request("node not found"))?;
+                meta.reality =
+                    managed_vless_reality_for_node(&state, desired_node, &meta.reality.fingerprint)?;
+            }
 
             endpoint.meta =
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
@@ -5304,6 +5312,26 @@ async fn admin_patch_endpoint(
     .await?;
     state.reconcile.request_full();
     Ok(Json(endpoint))
+}
+
+fn managed_vless_reality_for_node(
+    state: &AppState,
+    node: &Node,
+    fingerprint: &str,
+) -> Result<crate::protocol::RealityConfig, ApiError> {
+    let access_host = node.access_host.trim().trim_end_matches('.');
+    crate::protocol::validate_reality_server_name(access_host).map_err(|reason| {
+        ApiError::invalid_request(format!(
+            "node access_host is invalid for managed VLESS SNI: node_id={} reason={reason}",
+            node.node_id
+        ))
+    })?;
+    Ok(crate::protocol::RealityConfig {
+        dest: state.config.vless_canary_bind.to_string(),
+        server_names: vec![access_host.to_string()],
+        server_names_source: RealityServerNamesSource::Manual,
+        fingerprint: fingerprint.to_string(),
+    })
 }
 
 async fn admin_delete_endpoint(
