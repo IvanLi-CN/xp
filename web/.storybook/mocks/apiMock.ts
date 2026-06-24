@@ -1794,6 +1794,42 @@ async function handleRequest(
 		});
 	}
 
+	const endpointCanaryProbeMatch = path.match(
+		/^\/api\/admin\/endpoints\/([^/]+)\/canary-probe$/,
+	);
+	if (endpointCanaryProbeMatch && method === "POST") {
+		const endpointId = decodeURIComponent(endpointCanaryProbeMatch[1]);
+		const endpoint = state.endpoints.find(
+			(item) => item.endpoint_id === endpointId,
+		);
+		if (!endpoint) {
+			return errorResponse(404, "not_found", "endpoint not found");
+		}
+		if (
+			endpoint.kind !== "vless_reality_vision_tcp" ||
+			(endpoint.meta as Record<string, unknown>).managed_default !== true
+		) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"canary probe is only supported for managed VLESS endpoints",
+			);
+		}
+		const node = state.nodes.find((item) => item.node_id === endpoint.node_id);
+		const host = node?.access_host ?? "example.test";
+		const authority =
+			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
+		return jsonResponse({
+			endpoint_id: endpoint.endpoint_id,
+			url: `https://${authority}/generate_204`,
+			ok: true,
+			status: 204,
+			latency_ms: 27,
+			error: null,
+			checked_at: new Date().toISOString(),
+		});
+	}
+
 	const endpointMatch = path.match(/^\/api\/admin\/endpoints\/([^/]+)$/);
 	if (endpointMatch) {
 		const endpointId = decodeURIComponent(endpointMatch[1]);

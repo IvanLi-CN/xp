@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
+import {
+	type AdminEndpointCanaryProbeResponse,
+	runAdminEndpointCanaryProbe,
+	runAdminEndpointProbeRun,
+} from "../api/adminEndpointProbes";
 import {
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
@@ -148,6 +152,8 @@ export function EndpointDetailsPage() {
 	const [realityFingerprint, setRealityFingerprint] = useState("");
 	const [upstreamUrl, setUpstreamUrl] = useState("");
 	const [upstreamMode, setUpstreamMode] = useState<CanaryUpstreamMode>("auto");
+	const [canaryProbeResult, setCanaryProbeResult] =
+		useState<AdminEndpointCanaryProbeResponse | null>(null);
 	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -327,6 +333,22 @@ export function EndpointDetailsPage() {
 			navigate({
 				to: "/endpoints/probe/runs/$runId",
 				params: { runId: data.run_id },
+			});
+		},
+		onError: (error) => {
+			pushToast({ variant: "error", message: formatErrorMessage(error) });
+		},
+	});
+
+	const canaryProbeMutation = useMutation({
+		mutationFn: () => runAdminEndpointCanaryProbe(adminToken, endpointId),
+		onSuccess: (data) => {
+			setCanaryProbeResult(data);
+			pushToast({
+				variant: data.ok ? "success" : "error",
+				message: data.ok
+					? `Canary probe returned 204 in ${data.latency_ms} ms.`
+					: `Canary probe failed: ${data.error ?? "unexpected response"}`,
 			});
 		},
 		onError: (error) => {
@@ -760,18 +782,80 @@ export function EndpointDetailsPage() {
 			<div className="xp-card">
 				<div className="xp-card-body space-y-4">
 					<h2 className="xp-card-title">Probe</h2>
-					<p className="text-sm text-muted-foreground">
-						Run a cluster-wide probe for all endpoints. Results are stored
-						hourly and shown in the endpoint list.
-					</p>
-					<div className="xp-card-actions justify-end">
-						<Button
-							variant="secondary"
-							loading={probeRunMutation.isPending}
-							onClick={() => probeRunMutation.mutate()}
-						>
-							Test now
-						</Button>
+					<div className="grid gap-4">
+						<div className="rounded-xl border border-border/70 bg-muted/25 px-4 py-4">
+							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+								<div className="space-y-1">
+									<h3 className="text-sm font-semibold">Proxy path</h3>
+									<p className="text-sm text-muted-foreground">
+										Run a cluster-wide probe for all endpoints. Results are
+										stored hourly and shown in the endpoint list.
+									</p>
+								</div>
+								<Button
+									variant="secondary"
+									loading={probeRunMutation.isPending}
+									onClick={() => probeRunMutation.mutate()}
+								>
+									Test now
+								</Button>
+							</div>
+						</div>
+
+						{vlessMeta?.managedDefault ? (
+							<div className="rounded-xl border border-border/70 bg-muted/25 px-4 py-4">
+								<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+									<div className="space-y-2">
+										<div className="space-y-1">
+											<h3 className="text-sm font-semibold">
+												Canary /generate_204
+											</h3>
+											<p className="text-sm text-muted-foreground">
+												Test ordinary HTTPS access to the managed VLESS
+												fallback. This checks DNS, public ingress, TLS, and xp
+												canary without touching upstream.
+											</p>
+										</div>
+										{canaryProbeResult ? (
+											<div className="space-y-1 text-xs">
+												<p className="break-all font-mono">
+													{canaryProbeResult.url}
+												</p>
+												<div className="flex flex-wrap items-center gap-2">
+													<Badge
+														variant={
+															canaryProbeResult.ok ? "default" : "destructive"
+														}
+													>
+														{canaryProbeResult.ok ? "204 OK" : "failed"}
+													</Badge>
+													<span className="text-muted-foreground">
+														{canaryProbeResult.latency_ms} ms
+													</span>
+													{canaryProbeResult.status ? (
+														<span className="font-mono text-muted-foreground">
+															status={canaryProbeResult.status}
+														</span>
+													) : null}
+												</div>
+												{canaryProbeResult.error ? (
+													<p className="text-destructive">
+														{canaryProbeResult.error}
+													</p>
+												) : null}
+											</div>
+										) : null}
+									</div>
+									<Button
+										variant="secondary"
+										loading={canaryProbeMutation.isPending}
+										onClick={() => canaryProbeMutation.mutate()}
+									>
+										Test canary
+									</Button>
+								</div>
+							</div>
+						) : null}
 					</div>
 				</div>
 			</div>

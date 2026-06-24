@@ -25,6 +25,26 @@ Optional target:
 
 The endpoint latency shown in UI is derived from the **first required target** (stable and comparable).
 
+## Managed VLESS canary probe
+
+Managed VLESS endpoints also expose an immediate **Canary /generate_204** probe in the endpoint detail
+page. This probe is deliberately separate from the cluster-wide proxy path probe above.
+
+It sends an ordinary HTTPS request to:
+
+- `https://<access_host[:vless_port]>/generate_204`
+
+Expected result:
+
+- HTTP `204`
+
+This checks the public ingress path, TLS certificate, REALITY fallback destination, and xp canary
+handler. It does **not** build an Xray client config, does **not** test proxy egress, and does
+**not** touch the endpoint `canary_upstream`.
+
+The result is an immediate diagnostic only. It is not stored in the hourly endpoint probe history and
+does not affect the endpoint list health score.
+
 ## Non-negotiable semantics (do NOT "fix" by cheating)
 
 The probe is meant to test the _real_ ingress path. In particular:

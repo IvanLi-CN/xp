@@ -30,7 +30,7 @@ use crate::{
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
-    protocol::{Ss2022EndpointMeta, ss2022_password},
+    protocol::{RealityConfig, RealityKeys, Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, ss2022_password},
     raft::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
@@ -8417,6 +8417,190 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
     assert_eq!(slot["participating_nodes"], 2);
     assert_eq!(slot["sample_count"], 1);
     assert_eq!(slot["status"], "missing");
+}
+
+fn test_vless_meta(managed_default: bool) -> Value {
+    serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
+        reality: RealityConfig {
+            dest: "127.0.0.1:39043".to_string(),
+            server_names: vec!["example.test".to_string()],
+            server_names_source: Default::default(),
+            fingerprint: "chrome".to_string(),
+        },
+        reality_keys: RealityKeys {
+            private_key: "private".to_string(),
+            public_key: "public".to_string(),
+        },
+        short_ids: vec!["0123456789abcdef".to_string()],
+        active_short_id: "0123456789abcdef".to_string(),
+        canary_upstream: None,
+        managed_default,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn endpoint_canary_probe_url_omits_default_port() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "Example.TEST.".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: test_vless_meta(true),
+    };
+    assert_eq!(
+        super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
+        "https://Example.TEST/generate_204"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_canary_probe_url_includes_non_default_port() {
+    let node = Node {
+        node_id: "n1".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "example.test".to_string(),
+        api_base_url: "https://node.example.test".to_string(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+    let endpoint = crate::domain::Endpoint {
+        endpoint_id: "ep1".to_string(),
+        node_id: "n1".to_string(),
+        tag: "vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 8443,
+        meta: test_vless_meta(true),
+    };
+    assert_eq!(
+        super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
+        "https://example.test:8443/generate_204"
+    );
+}
+
+#[tokio::test]
+async fn run_endpoint_canary_probe_url_reports_204_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/generate_204"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let out = super::run_endpoint_canary_probe_url(
+        &client,
+        "ep1",
+        format!("{}/generate_204", server.uri()),
+    )
+    .await;
+    assert!(out.ok);
+    assert_eq!(out.status, Some(204));
+    assert_eq!(out.error, None);
+}
+
+#[tokio::test]
+async fn run_endpoint_canary_probe_url_reports_non_204_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/generate_204"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let out = super::run_endpoint_canary_probe_url(
+        &client,
+        "ep1",
+        format!("{}/generate_204", server.uri()),
+    )
+    .await;
+    assert!(!out.ok);
+    assert_eq!(out.status, Some(200));
+    assert_eq!(out.error.as_deref(), Some("expected 204, got 200"));
+}
+
+#[tokio::test]
+async fn admin_canary_probe_rejects_non_vless_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        store
+            .create_endpoint(
+                local_node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap()
+            .endpoint_id
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/canary-probe"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn admin_canary_probe_rejects_manual_vless_endpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let endpoint_id = {
+        let mut store = store.lock().await;
+        let local_node_id = store.list_nodes()[0].node_id.clone();
+        store
+            .create_endpoint(
+                local_node_id,
+                EndpointKind::VlessRealityVisionTcp,
+                443,
+                test_vless_meta(false),
+            )
+            .unwrap()
+            .endpoint_id
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "POST",
+            &format!("/api/admin/endpoints/{endpoint_id}/canary-probe"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("managed VLESS")
+    );
 }
 
 #[tokio::test]
