@@ -1234,8 +1234,7 @@ fn ensure_fqdn(name: &str) -> String {
 async fn authoritative_nameservers_for_fqdn(
     fqdn: &str,
 ) -> anyhow::Result<Vec<AuthoritativeNameserver>> {
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default())
-        .context("build public recursive resolver for canary NS discovery")?;
+    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default());
     for candidate in zone_name_candidates(fqdn) {
         if candidate.split('.').count() < 2 {
             continue;
@@ -1307,8 +1306,7 @@ async fn authoritative_txt_contains(
         vec![],
         NameServerConfigGroup::from_ips_clear(&[*nameserver], 53, true),
     );
-    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default())
-        .context("build authoritative TXT resolver")?;
+    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
     let lookup = match resolver.txt_lookup(fqdn).await {
         Ok(lookup) => lookup,
         Err(_) => return Ok(false),

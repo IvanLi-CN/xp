@@ -72,6 +72,7 @@ const endpointSchema = z.object({
 });
 
 type EndpointFormValues = z.infer<typeof endpointSchema>;
+type EndpointFormInput = z.input<typeof endpointSchema>;
 
 export function EndpointNewPage() {
 	const navigate = useNavigate();
@@ -89,7 +90,7 @@ export function EndpointNewPage() {
 		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
 	});
 
-	const form = useForm<EndpointFormValues>({
+	const form = useForm<EndpointFormInput, unknown, EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
 		defaultValues: {
 			kind: "vless_reality_vision_tcp",
@@ -392,9 +393,17 @@ export function EndpointNewPage() {
 											<FormLabel className="font-mono">port</FormLabel>
 											<FormControl>
 												<Input
-													{...field}
 													type="number"
 													min={1}
+													name={field.name}
+													ref={field.ref}
+													onBlur={field.onBlur}
+													value={
+														typeof field.value === "number" ||
+														typeof field.value === "string"
+															? field.value
+															: ""
+													}
 													onChange={(event) =>
 														field.onChange(event.target.value)
 													}

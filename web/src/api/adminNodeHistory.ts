@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-	NodeRuntimeEventSchema,
 	RuntimeComponentSchema,
 	RuntimeStatusSchema,
 } from "./adminNodeRuntime";
@@ -26,15 +25,20 @@ export const NodeHistoryDailyComponentStatusSchema = z.object({
 	components: z.array(NodeHistoryComponentDayStatusSchema),
 });
 
-export const NodeHistoryComponentStatusEventSchema =
-	NodeRuntimeEventSchema.pick({
-		event_id: true,
-		occurred_at: true,
-		component: true,
-		message: true,
-		from_status: true,
-		to_status: true,
-	});
+export const NodeHistoryComponentStatusEventSchema = z.object({
+	event_id: z.string(),
+	occurred_at: z.string(),
+	component: RuntimeComponentSchema,
+	message: z.string(),
+	from_status: z
+		.enum(["disabled", "up", "degraded", "down", "unknown"])
+		.nullable()
+		.optional(),
+	to_status: z
+		.enum(["disabled", "up", "degraded", "down", "unknown"])
+		.nullable()
+		.optional(),
+});
 
 export const NodeHistorySnapshotSchema = z.object({
 	node_id: z.string(),

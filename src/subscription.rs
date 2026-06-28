@@ -3425,7 +3425,7 @@ fn build_landing_group_reference_rename_map(
 
     if base_rename_map.is_empty() {
         let mut rename_map = std::collections::BTreeMap::<String, String>::new();
-        for (old_name, new_name) in old_refs.into_iter().zip(generated_names.into_iter()) {
+        for (old_name, new_name) in old_refs.into_iter().zip(generated_names) {
             if old_name != new_name {
                 rename_map.insert(old_name, new_name);
             }

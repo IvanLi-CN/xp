@@ -67,7 +67,7 @@ export const AdminEndpointSchema = z.object({
 	tag: z.string(),
 	kind: AdminEndpointKindSchema,
 	port: z.number().int().nonnegative(),
-	meta: z.record(z.unknown()),
+	meta: z.record(z.string(), z.unknown()),
 	probe: AdminEndpointProbeSummarySchema.optional(),
 });
 

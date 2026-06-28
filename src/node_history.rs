@@ -341,7 +341,7 @@ fn record_daily_components(
             observed_at: now_str.clone(),
         })
         .collect::<Vec<_>>();
-    components.sort_by(|a, b| a.component.cmp(&b.component));
+    components.sort_by_key(|a| a.component);
     record.daily_component_status.insert(
         date.clone(),
         NodeHistoryDailyComponentStatus { date, components },

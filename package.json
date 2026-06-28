@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "devDependencies": {
-    "@commitlint/cli": "^20.1.0",
-    "@commitlint/config-conventional": "^20.0.0",
-    "commitlint-plugin-function-rules": "^4.1.0",
-    "dprint": "^0.47.5"
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
+    "commitlint-plugin-function-rules": "^5.0.1",
+    "dprint": "^0.55.1"
   },
   "scripts": {
     "check:style-budget": "python3 scripts/check-style-budget.py"

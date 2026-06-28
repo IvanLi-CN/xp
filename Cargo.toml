@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
-axum = { version = "0.7", features = ["json", "macros"] }
+axum = { version = "0.8.9", features = ["json", "macros"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 argon2 = "0.5"
 async-trait = "0.1"
@@ -21,10 +21,10 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 libc = "0.2"
 rustls = "0.23.35"
 openraft = { version = "0.9.21", features = ["serde", "storage-v2"] }
-prost = "0.14"
+prost = "0.14.4"
 rand = "0.8"
 regex = "1.11"
-ratatui = "0.30.0"
+ratatui = "0.30.2"
 rcgen = { version = "0.14", features = ["x509-parser"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream", "socks", "http2"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -34,7 +34,7 @@ sha2 = "0.10"
 futures-util = "0.3"
 flate2 = "1.1"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
-trust-dns-resolver = "0.22.0"
+trust-dns-resolver = "0.23.2"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tonic = { version = "0.14", features = ["transport"] }
 tonic-prost = "0.14"
@@ -43,7 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1.2.1"
 nanoid = "0.4"
-maxminddb = "0.27.3"
+maxminddb = "0.28.1"
 lers = { version = "0.4.0", default-features = false, features = ["dns-01", "dns-01-cloudflare"] }
 openssl = { version = "0.10", features = ["vendored"] }
 uuid = { version = "1", features = ["v4"] }
@@ -52,8 +52,8 @@ zip = "7.1.0"
 
 [build-dependencies]
 protoc-bin-vendored = "3.2.0"
-tonic-build = "0.14"
-tonic-prost-build = "0.14"
+tonic-build = "0.14.2"
+tonic-prost-build = "0.14.2"
 
 [dev-dependencies]
 assert_cmd = "2.1.2"

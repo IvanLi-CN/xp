@@ -204,7 +204,6 @@ impl IntoResponse for ApiError {
 
 pub struct ApiJson<T>(pub T);
 
-#[axum::async_trait]
 impl<S, T> FromRequest<S> for ApiJson<T>
 where
     axum::Json<T>: FromRequest<S>,
@@ -901,27 +900,27 @@ pub fn build_router(
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/nodes", get(admin_list_nodes))
         .route(
-            "/nodes/:node_id/delete-preview",
+            "/nodes/{node_id}/delete-preview",
             get(admin_get_node_delete_preview),
         )
         .route(
-            "/nodes/:node_id/egress-probe/refresh",
+            "/nodes/{node_id}/egress-probe/refresh",
             post(admin_refresh_node_egress_probe),
         )
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
-        .route("/nodes/:node_id/runtime", get(admin_get_node_runtime))
-        .route("/nodes/:node_id/history", get(admin_get_node_history))
-        .route("/nodes/:node_id/ip-usage", get(admin_get_node_ip_usage))
+        .route("/nodes/{node_id}/runtime", get(admin_get_node_runtime))
+        .route("/nodes/{node_id}/history", get(admin_get_node_history))
+        .route("/nodes/{node_id}/ip-usage", get(admin_get_node_ip_usage))
         .route(
-            "/nodes/:node_id/tcp-connections",
+            "/nodes/{node_id}/tcp-connections",
             get(admin_get_node_tcp_connections),
         )
         .route(
-            "/nodes/:node_id/runtime/events",
+            "/nodes/{node_id}/runtime/events",
             get(admin_stream_node_runtime_events),
         )
         .route(
-            "/nodes/:node_id",
+            "/nodes/{node_id}",
             get(admin_get_node)
                 .patch(admin_patch_node)
                 .delete(admin_delete_node),
@@ -931,17 +930,17 @@ pub fn build_router(
             post(admin_create_endpoint).get(admin_list_endpoints),
         )
         .route(
-            "/endpoints/:endpoint_id",
+            "/endpoints/{endpoint_id}",
             get(admin_get_endpoint)
                 .delete(admin_delete_endpoint)
                 .patch(admin_patch_endpoint),
         )
         .route(
-            "/endpoints/:endpoint_id/rotate-shortid",
+            "/endpoints/{endpoint_id}/rotate-shortid",
             post(admin_rotate_short_id),
         )
         .route(
-            "/endpoints/:endpoint_id/canary-probe",
+            "/endpoints/{endpoint_id}/canary-probe",
             post(admin_probe_endpoint_canary),
         )
         .route(
@@ -953,20 +952,20 @@ pub fn build_router(
             post(admin_reorder_reality_domains),
         )
         .route(
-            "/reality-domains/:domain_id",
+            "/reality-domains/{domain_id}",
             patch(admin_patch_reality_domain).delete(admin_delete_reality_domain),
         )
         .route("/endpoints/probe/run", post(admin_run_endpoint_probe_run))
         .route(
-            "/endpoints/probe/runs/:run_id",
+            "/endpoints/probe/runs/{run_id}",
             get(admin_get_endpoint_probe_run_status),
         )
         .route(
-            "/endpoints/probe/runs/:run_id/events",
+            "/endpoints/probe/runs/{run_id}/events",
             get(admin_stream_endpoint_probe_run_events),
         )
         .route(
-            "/endpoints/:endpoint_id/probe-history",
+            "/endpoints/{endpoint_id}/probe-history",
             get(admin_get_endpoint_probe_history),
         )
         .route("/users", post(admin_create_user).get(admin_list_users))
@@ -975,7 +974,7 @@ pub fn build_router(
             get(admin_list_user_quota_summaries),
         )
         .route(
-            "/quota-policy/nodes/:node_id/weight-rows",
+            "/quota-policy/nodes/{node_id}/weight-rows",
             get(admin_list_quota_policy_node_weight_rows),
         )
         .route(
@@ -983,51 +982,51 @@ pub fn build_router(
             get(admin_list_quota_policy_global_weight_rows),
         )
         .route(
-            "/quota-policy/global-weight-rows/:user_id",
+            "/quota-policy/global-weight-rows/{user_id}",
             put(admin_put_quota_policy_global_weight_row),
         )
         .route(
-            "/quota-policy/nodes/:node_id/policy",
+            "/quota-policy/nodes/{node_id}/policy",
             get(admin_get_quota_policy_node_policy).put(admin_put_quota_policy_node_policy),
         )
         .route(
-            "/users/:user_id",
+            "/users/{user_id}",
             get(admin_get_user)
                 .delete(admin_delete_user)
                 .patch(admin_patch_user),
         )
-        .route("/users/:user_id/reset-token", post(admin_reset_user_token))
+        .route("/users/{user_id}/reset-token", post(admin_reset_user_token))
         .route(
-            "/users/:user_id/node-quotas/status",
+            "/users/{user_id}/node-quotas/status",
             get(admin_get_user_node_quota_status),
         )
-        .route("/users/:user_id/ip-usage", get(admin_get_user_ip_usage))
+        .route("/users/{user_id}/ip-usage", get(admin_get_user_ip_usage))
         .route(
-            "/users/:user_id/node-quotas",
+            "/users/{user_id}/node-quotas",
             get(admin_list_user_node_quotas),
         )
         .route(
-            "/users/:user_id/node-quotas/:node_id",
+            "/users/{user_id}/node-quotas/{node_id}",
             put(admin_put_user_node_quota),
         )
         .route(
-            "/users/:user_id/node-weights",
+            "/users/{user_id}/node-weights",
             get(admin_list_user_node_weights),
         )
         .route(
-            "/users/:user_id/node-weights/:node_id",
+            "/users/{user_id}/node-weights/{node_id}",
             put(admin_put_user_node_weight),
         )
         .route(
-            "/users/:user_id/access",
+            "/users/{user_id}/access",
             get(admin_get_user_access).put(admin_put_user_access),
         )
         .route(
-            "/users/:user_id/subscription-mihomo-profile",
+            "/users/{user_id}/subscription-mihomo-profile",
             get(admin_get_user_mihomo_profile).put(admin_put_user_mihomo_profile),
         )
         .route(
-            "/users/:user_id/reset-credentials",
+            "/users/{user_id}/reset-credentials",
             post(admin_reset_user_credentials),
         )
         .route(
@@ -1035,11 +1034,11 @@ pub fn build_router(
             post(admin_internal_endpoint_probe_run),
         )
         .route(
-            "/_internal/endpoint-probe/runs/:run_id",
+            "/_internal/endpoint-probe/runs/{run_id}",
             get(admin_internal_endpoint_probe_run_status),
         )
         .route(
-            "/_internal/endpoint-probe/runs/:run_id/events",
+            "/_internal/endpoint-probe/runs/{run_id}/events",
             get(admin_internal_endpoint_probe_run_events),
         )
         .route(
@@ -1075,7 +1074,7 @@ pub fn build_router(
             get(admin_internal_get_local_node_history),
         )
         .route(
-            "/_internal/users/:user_id/ip-usage/local",
+            "/_internal/users/{user_id}/ip-usage/local",
             get(admin_internal_get_local_user_ip_usage),
         )
         .route("/alerts", get(admin_get_alerts))
@@ -1087,20 +1086,20 @@ pub fn build_router(
         .route("/version/check", get(api_version_check))
         .route("/cluster/join", post(cluster_join))
         .route(
-            "/sub/:subscription_token/mihomo/provider",
+            "/sub/{subscription_token}/mihomo/provider",
             get(get_subscription_mihomo_provider),
         )
         .route(
-            "/sub/:subscription_token/mihomo/provider/system",
+            "/sub/{subscription_token}/mihomo/provider/system",
             get(get_subscription_mihomo_provider_system),
         )
-        .route("/sub/:subscription_token", get(get_subscription))
+        .route("/sub/{subscription_token}", get(get_subscription))
         .nest("/admin", admin)
         .fallback(fallback_not_found);
 
     let mut app = Router::new()
         .nest("/api", api)
-        .route("/assets/*path", get(embedded_asset))
+        .route("/assets/{*path}", get(embedded_asset))
         .fallback(embedded_spa_fallback);
 
     if let Some(raft) = raft_rpc {
@@ -1954,11 +1953,10 @@ async fn promote_joined_learner_to_voter(
                 Some(None) => {
                     // Learner is not reachable yet. Keep waiting.
                 }
-                Some(Some(log_id)) => {
-                    if log_id.index >= required_log_index {
-                        break;
-                    }
+                Some(Some(log_id)) if log_id.index >= required_log_index => {
+                    break;
                 }
+                Some(Some(_)) => {}
             }
         }
 

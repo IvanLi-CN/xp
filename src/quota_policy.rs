@@ -57,8 +57,7 @@ pub fn allocate_total_by_weight<I: Clone>(total: u64, items: &[(I, u16)]) -> Vec
             .filter_map(|(idx, w)| (*w > 0).then_some(idx))
             .collect();
         let n = eligible.len() as u64;
-        if n > 0 {
-            let per = rem / n;
+        if let Some(per) = rem.checked_div(n) {
             let extra = rem % n;
             if per > 0 {
                 for idx in eligible.iter() {
