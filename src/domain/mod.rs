@@ -36,6 +36,10 @@ pub enum DomainError {
         server_name: String,
         reason: String,
     },
+    InvalidAcceptedAuthority {
+        authority: String,
+        reason: String,
+    },
     VlessRealityServerNamesEmpty {
         endpoint_id: String,
     },
@@ -68,6 +72,7 @@ impl DomainError {
             Self::NodeInUse { .. } | Self::NodeEndpointSetChanged { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
+            | Self::InvalidAcceptedAuthority { .. }
             | Self::VlessRealityServerNamesEmpty { .. }
             | Self::RealityDomainsReorderInvalid { .. }
             | Self::RealityDomainsWouldBreakEndpoint { .. } => "invalid_request",
@@ -107,6 +112,9 @@ impl std::fmt::Display for DomainError {
                 reason,
             } => {
                 write!(f, "invalid reality server_name: {server_name} ({reason})")
+            }
+            Self::InvalidAcceptedAuthority { authority, reason } => {
+                write!(f, "invalid accepted authority: {authority} ({reason})")
             }
             Self::VlessRealityServerNamesEmpty { endpoint_id } => write!(
                 f,

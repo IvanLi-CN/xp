@@ -42,7 +42,9 @@ use crate::{
     domain::{Endpoint, EndpointKind},
     managed_default_endpoints::managed_default_vless_endpoint,
     ops::cloudflare,
-    protocol::{CanaryUpstreamConfig, CanaryUpstreamMode},
+    protocol::{
+        CanaryUpstreamConfig, CanaryUpstreamMode, normalize_accepted_authority,
+    },
     state::JsonSnapshotStore,
 };
 
@@ -123,6 +125,12 @@ impl CanaryProxyClients {
 struct RoutedUpstream {
     endpoint_id: String,
     upstream: CanaryUpstreamConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NormalizedAuthority {
+    host: String,
+    port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -666,10 +674,12 @@ async fn proxy_request(
     let upstream_url = build_upstream_url(&routed.upstream.url, req.uri()).map_err(error_response)?;
     if is_upgrade_request(req.headers()) {
         let Some(client) = state.clients.for_websocket_mode(routed.upstream.mode) else {
-            return Err(text_response(
-                StatusCode::NOT_IMPLEMENTED,
-                "websocket proxying requires an HTTP/1.1 upstream mode; h2c does not support HTTP/1.1 upgrade",
-            ));
+            tracing::warn!(
+                endpoint_id = %routed.endpoint_id,
+                mode = ?routed.upstream.mode,
+                "websocket request hit non-upgrade-compatible canary upstream mode"
+            );
+            return Err(bad_gateway_response());
         };
         return proxy_websocket(client, req, routed, upstream_url).await;
     }
@@ -681,64 +691,63 @@ async fn route_upstream(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<RoutedUpstream, Response<Body>> {
-    let authority = request_authority(headers, uri).ok_or_else(|| {
-        text_response(
-            StatusCode::MISDIRECTED_REQUEST,
-            "missing Host or :authority for canary routing",
-        )
-    })?;
-    let (host, port) = normalize_authority(&authority).map_err(|err| {
-        text_response(
-            StatusCode::MISDIRECTED_REQUEST,
-            format!("invalid authority for canary routing: {err}"),
-        )
-    })?;
+    let Some(authority_raw) = request_authority(headers, uri) else {
+        return Err(not_found_response());
+    };
+    let authority = match normalize_authority(&authority_raw) {
+        Ok(authority) => authority,
+        Err(err) => {
+            tracing::debug!(error = %err, authority = %authority_raw, "canary request authority was invalid");
+            return Err(not_found_response());
+        }
+    };
 
     let matches = {
         let store = state.store.lock().await;
         let Some(node) = store.get_node(&state.node_id) else {
-            return Err(text_response(
-                StatusCode::NOT_FOUND,
-                format!("local node not found: {}", state.node_id),
-            ));
+            tracing::warn!(node_id = %state.node_id, "local node missing while routing canary request");
+            return Err(not_found_response());
         };
-        if node.access_host.trim().trim_end_matches('.').to_ascii_lowercase() != host {
-            Vec::new()
-        } else {
-            store
-                .list_endpoints()
-                .into_iter()
-                .filter(|endpoint| endpoint.node_id == state.node_id)
-                .filter_map(|endpoint| matching_managed_vless_endpoint(endpoint, port))
-                .collect::<Vec<_>>()
-        }
+        store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == state.node_id)
+            .filter_map(|endpoint| {
+                matching_managed_vless_endpoint(endpoint, &node.access_host, &authority)
+            })
+            .collect::<Vec<_>>()
     };
 
     match matches.as_slice() {
-        [] => Err(text_response(
-            StatusCode::NOT_FOUND,
-            format!("no managed VLESS endpoint matched authority {authority}"),
-        )),
-        [routed] if routed.upstream.url.trim().is_empty() => Err(text_response(
-            StatusCode::NOT_FOUND,
-            format!(
-                "managed VLESS endpoint {} has no canary upstream configured",
-                routed.endpoint_id
-            ),
-        )),
+        [] => Err(not_found_response()),
+        [routed] if routed.upstream.url.trim().is_empty() => Err(not_found_response()),
         [routed] => Ok(routed.clone()),
-        _ => Err(text_response(
-            StatusCode::CONFLICT,
-            format!("multiple managed VLESS endpoints matched authority {authority}"),
-        )),
+        _ => {
+            tracing::warn!(authority = %authority_raw, "multiple managed endpoint routes matched one canary authority");
+            Err(not_found_response())
+        }
     }
 }
 
-fn matching_managed_vless_endpoint(endpoint: Endpoint, port: u16) -> Option<RoutedUpstream> {
-    if endpoint.kind != EndpointKind::VlessRealityVisionTcp || endpoint.port != port {
+fn matching_managed_vless_endpoint(
+    endpoint: Endpoint,
+    access_host: &str,
+    requested_authority: &NormalizedAuthority,
+) -> Option<RoutedUpstream> {
+    if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
         return None;
     }
     let meta = managed_default_vless_endpoint(&endpoint)?;
+    let canonical_authority = canonical_authority(access_host, endpoint.port)?;
+    let accepted = meta
+        .accepted_authorities
+        .iter()
+        .filter_map(|authority| normalize_accepted_authority(authority).ok())
+        .filter_map(|authority| normalize_authority(&authority).ok())
+        .collect::<Vec<_>>();
+    if requested_authority != &canonical_authority && !accepted.iter().any(|item| item == requested_authority) {
+        return None;
+    }
     let upstream = meta.canary_upstream.unwrap_or(CanaryUpstreamConfig {
         url: String::new(),
         mode: CanaryUpstreamMode::Auto,
@@ -862,10 +871,8 @@ fn upstream_response_to_axum(response: reqwest::Response) -> Response<Body> {
         }
     }
     builder.body(Body::from_stream(stream)).unwrap_or_else(|err| {
-        text_response(
-            StatusCode::BAD_GATEWAY,
-            format!("failed to build upstream response: {err}"),
-        )
+        tracing::warn!(error = %err, "failed to build proxied canary response body");
+        bad_gateway_response()
     })
 }
 
@@ -880,7 +887,7 @@ fn request_authority(headers: &HeaderMap, uri: &Uri) -> Option<String> {
         })
 }
 
-fn normalize_authority(authority: &str) -> anyhow::Result<(String, u16)> {
+fn normalize_authority(authority: &str) -> anyhow::Result<NormalizedAuthority> {
     let authority = authority.trim();
     if authority.is_empty() {
         anyhow::bail!("authority is empty");
@@ -904,7 +911,21 @@ fn normalize_authority(authority: &str) -> anyhow::Result<(String, u16)> {
     } else {
         (authority, 443)
     };
-    Ok((host.trim_end_matches('.').to_ascii_lowercase(), port))
+    Ok(NormalizedAuthority {
+        host: host.trim_end_matches('.').to_ascii_lowercase(),
+        port,
+    })
+}
+
+fn canonical_authority(access_host: &str, port: u16) -> Option<NormalizedAuthority> {
+    let host = access_host.trim().trim_end_matches('.');
+    if host.is_empty() {
+        return None;
+    }
+    Some(NormalizedAuthority {
+        host: host.to_ascii_lowercase(),
+        port,
+    })
 }
 
 fn build_upstream_url(base: &str, incoming: &Uri) -> anyhow::Result<reqwest::Url> {
@@ -970,14 +991,13 @@ fn response_header_allowed(name: &str, upgrade: bool) -> bool {
 }
 
 fn upstream_error_response(endpoint_id: &str, err: reqwest::Error) -> Response<Body> {
-    text_response(
-        StatusCode::BAD_GATEWAY,
-        format!("canary upstream request failed for endpoint {endpoint_id}: {err}"),
-    )
+    tracing::warn!(endpoint_id = %endpoint_id, error = %err, "canary upstream request failed");
+    bad_gateway_response()
 }
 
 fn error_response(err: anyhow::Error) -> Response<Body> {
-    text_response(StatusCode::BAD_GATEWAY, err.to_string())
+    tracing::warn!(error = %err, "canary proxy failed before upstream response");
+    bad_gateway_response()
 }
 
 fn text_response(status: StatusCode, text: impl Into<String>) -> Response<Body> {
@@ -987,6 +1007,14 @@ fn text_response(status: StatusCode, text: impl Into<String>) -> Response<Body> 
         .header("content-type", HeaderValue::from_static("text/plain; charset=utf-8"))
         .body(Body::from(body))
         .expect("build text response")
+}
+
+fn not_found_response() -> Response<Body> {
+    text_response(StatusCode::NOT_FOUND, "404 Not Found")
+}
+
+fn bad_gateway_response() -> Response<Body> {
+    text_response(StatusCode::BAD_GATEWAY, "Bad Gateway")
 }
 
 async fn ensure_certificate(
@@ -1285,6 +1313,7 @@ mod tests {
     use crate::cluster_identity::generate_cluster_ca;
     use crate::config::{Config, DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE, XrayRestartMode};
     use axum::routing::get;
+    use http_body_util::BodyExt;
     use rcgen::{
         CertificateParams, DistinguishedName, DnType, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256,
     };
@@ -1432,11 +1461,17 @@ mod tests {
     fn normalize_authority_defaults_tls_port_and_lowercases_host() {
         assert_eq!(
             normalize_authority("Tokyo.EXAMPLE.com").unwrap(),
-            ("tokyo.example.com".to_string(), 443)
+            NormalizedAuthority {
+                host: "tokyo.example.com".to_string(),
+                port: 443,
+            }
         );
         assert_eq!(
             normalize_authority("Tokyo.EXAMPLE.com:53844").unwrap(),
-            ("tokyo.example.com".to_string(), 53844)
+            NormalizedAuthority {
+                host: "tokyo.example.com".to_string(),
+                port: 53844,
+            }
         );
     }
 
@@ -1616,7 +1651,15 @@ mod tests {
             }),
         };
 
-        let routed = matching_managed_vless_endpoint(endpoint, 53844).unwrap();
+        let routed = matching_managed_vless_endpoint(
+            endpoint,
+            "node.example.com",
+            &NormalizedAuthority {
+                host: "node.example.com".to_string(),
+                port: 53844,
+            },
+        )
+        .unwrap();
         assert_eq!(routed.endpoint_id, "ep1");
         assert!(routed.upstream.url.is_empty());
         assert_eq!(routed.upstream.mode, CanaryUpstreamMode::Auto);
@@ -1643,6 +1686,7 @@ mod tests {
                 },
                 "short_ids": ["aaaaaaaaaaaaaaaa"],
                 "active_short_id": "aaaaaaaaaaaaaaaa",
+                "accepted_authorities": ["edge.example.com:53844"],
                 "canary_upstream": {
                     "url": "http://127.0.0.1:8080",
                     "mode": "h2c"
@@ -1651,12 +1695,114 @@ mod tests {
             }),
         };
 
-        assert!(matching_managed_vless_endpoint(endpoint.clone(), 53844).is_none());
+        let requested = NormalizedAuthority {
+            host: "edge.example.com".to_string(),
+            port: 53844,
+        };
+        assert!(
+            matching_managed_vless_endpoint(endpoint.clone(), "node.example.com", &requested)
+                .is_none()
+        );
         endpoint.meta["managed_default"] = serde_json::Value::Bool(true);
-        assert!(matching_managed_vless_endpoint(endpoint.clone(), 443).is_none());
-        let routed = matching_managed_vless_endpoint(endpoint, 53844).unwrap();
+        assert!(
+            matching_managed_vless_endpoint(
+                endpoint.clone(),
+                "node.example.com",
+                &NormalizedAuthority {
+                    host: "node.example.com".to_string(),
+                    port: 443,
+                },
+            )
+            .is_none()
+        );
+        let routed =
+            matching_managed_vless_endpoint(endpoint, "node.example.com", &requested).unwrap();
         assert_eq!(routed.upstream.url, "http://127.0.0.1:8080");
         assert_eq!(routed.upstream.mode, CanaryUpstreamMode::H2c);
+    }
+
+    #[test]
+    fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
+        let endpoint = Endpoint {
+            endpoint_id: "ep1".to_string(),
+            node_id: "n1".to_string(),
+            tag: "vless-ep1".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 53844,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "127.0.0.1:39043",
+                    "server_names": ["node.example.com"],
+                    "server_names_source": "manual",
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["aaaaaaaaaaaaaaaa"],
+                "active_short_id": "aaaaaaaaaaaaaaaa",
+                "accepted_authorities": ["edge.example.com:53844"],
+                "managed_default": true
+            }),
+        };
+
+        assert!(
+            matching_managed_vless_endpoint(
+                endpoint,
+                "node.example.com",
+                &NormalizedAuthority {
+                    host: "other.example.com".to_string(),
+                    port: 53844,
+                },
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn managed_vless_matching_accepts_canonical_authority() {
+        let endpoint = Endpoint {
+            endpoint_id: "ep1".to_string(),
+            node_id: "n1".to_string(),
+            tag: "vless-ep1".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "127.0.0.1:39043",
+                    "server_names": ["node.example.com"],
+                    "server_names_source": "manual",
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["aaaaaaaaaaaaaaaa"],
+                "active_short_id": "aaaaaaaaaaaaaaaa",
+                "managed_default": true
+            }),
+        };
+
+        let routed = matching_managed_vless_endpoint(
+            endpoint,
+            "Node.Example.com.",
+            &NormalizedAuthority {
+                host: "node.example.com".to_string(),
+                port: 443,
+            },
+        )
+        .unwrap();
+        assert_eq!(routed.endpoint_id, "ep1");
+    }
+
+    #[tokio::test]
+    async fn not_found_response_is_plain_text_404() {
+        let response = not_found_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.as_ref(), b"404 Not Found");
     }
 
     #[cfg(unix)]

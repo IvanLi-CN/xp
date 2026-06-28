@@ -28,6 +28,20 @@ function Harness() {
 	);
 }
 
+function AliasHarness() {
+	const [tags, setTags] = useState<string[]>([]);
+	return (
+		<TagInput
+			label="accepted host:port"
+			value={tags}
+			onChange={setTags}
+			validateTag={(value) => (!value.includes(":") ? "port required" : null)}
+			placeholder="edge.example.com:53844"
+			allowPrimary={false}
+		/>
+	);
+}
+
 describe("<TagInput />", () => {
 	afterEach(() => cleanup());
 
@@ -115,5 +129,20 @@ describe("<TagInput />", () => {
 
 		expect(screen.getByText("a.example.com")).toBeInTheDocument();
 		expect(screen.getByText("b.example.com")).toBeInTheDocument();
+	});
+
+	it("can disable primary controls for unordered authority sets", () => {
+		render(<AliasHarness />);
+
+		const input = screen.getByPlaceholderText("edge.example.com:53844");
+		fireEvent.change(input, {
+			target: { value: "edge.example.com:53844, tavily-tw.ivanli.cc:53844" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+		expect(screen.getByText("edge.example.com:53844")).toBeInTheDocument();
+		expect(screen.getByText("tavily-tw.ivanli.cc:53844")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Primary")).toBeNull();
+		expect(screen.queryByTitle("Make primary")).toBeNull();
 	});
 });

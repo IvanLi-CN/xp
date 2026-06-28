@@ -163,7 +163,7 @@
 - Given 托管 VLESS endpoint 已启用，When 请求 `https://<access_host[:port]>/generate_204`，Then 现有 VLESS/REALITY 接入点会把未认证 HTTPS 流量转到 xp 进程内 loopback TLS canary 并返回 `204`，且不新增公网 probe listener。
 - Given 托管 VLESS endpoint 被创建或 reconcile，When 检查 Xray inbound Reality 配置，Then `dest` 必须等于 `XP_VLESS_CANARY_BIND`，`server_names` 必须等于 `[node.access_host]`，且 SNI 不包含端口。
 - Given Admin UI/API 修改托管 VLESS endpoint，When payload 包含 `reality.dest`、`server_names` 或 `server_names_source`，Then 系统必须拒绝或忽略该修改，不能让隐藏 UI 字段绕过托管协议事实。
-- Given 非 `/generate_204` 请求进入 canary，When `Host` / HTTP/2 `:authority` 归一化为 `access_host[:endpoint_port]`，Then 必须匹配同 node 上唯一托管 VLESS endpoint；0 个匹配返回可诊断未匹配错误，多个匹配返回冲突错误，匹配但未设置 `canary_upstream` 返回未配置 upstream 错误。
+- Given 非 `/generate_204` 请求进入 canary，When `Host` / HTTP/2 `:authority` 归一化为 canonical `access_host[:endpoint_port]` 或 endpoint 配置的 `accepted_authorities` 别名之一，Then 必须匹配同 node 上唯一托管 VLESS endpoint；0 个匹配、多个匹配或匹配但未设置 `canary_upstream` 时，对外统一返回普通纯文本 `404 Not Found`，内部诊断通过日志与 Admin 面可见。
 - Given endpoint 设置了 origin-only `canary_upstream`，When canary 代理非探测请求，Then 请求 method/path/query/body、非 hop-by-hop header、响应 status/header/body 应尽量透明流式转发；发往 upstream 的 `Host` 按 `canary_upstream` origin 归一化；HTTP/1.1、HTTPS ALPN HTTP/2、显式 h2c、SSE、大上传/下载属于支持范围，WebSocket upgrade 使用 HTTP/1.1 upstream 连接，显式 h2c 仅用于非 upgrade HTTP 流量，`CONNECT` 不属于 v1 反代能力。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
@@ -213,6 +213,12 @@
   - state: `Pages/ServiceConfigPage/ProviderOnly`
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/EndpointDetailsPage/ManagedDefaultAliases`
+  - submission_gate: `approved`
+  - evidence_note: 托管 VLESS endpoint 详情页展示 `accepted_authorities` 别名集合，并明确说明它只影响普通 HTTPS Host 匹配，不影响 REALITY `server_names` 或 canonical `/generate_204`。
+    PR: include
+    ![Endpoint details accepted host aliases](./assets/endpoint-details-accepted-authorities.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
   - result: provider-hosted `*-ss-chain` can reference a main-config `dialer-proxy`; missing main-config dialer fails immediately, proving provider payload chains depend on main-config relay groups.
@@ -252,3 +258,4 @@
 - 2026-06-15: 明确补充高质量入口兜底合同；`💎 高质量` 之上必须存在稳定的全局兜底聚合入口，不能因 mixin 缺失或系统组收敛而消失。
 - 2026-06-16: relay 外层健康检查切到托管 VLESS 端口自身的 HTTPS canary（`https://<access_host[:port]>/generate_204`），并冻结地区组合同为：`🌟 {Region}` 是 hidden source group，`🔒 {Region}` 是 owner-facing 可见入口，`🤯 {Region}` 是 hidden `url-test` 包装组。
 - 2026-06-23: 托管 VLESS 的 SNI/dest 收敛为固定协议事实：`server_names=[node.access_host]`、`dest=XP_VLESS_CANARY_BIND`；canary 增加 endpoint-level `canary_upstream` 透明 TLS 终止反代，并通过 HTTP authority 匹配 endpoint。
+- 2026-06-28: 托管 VLESS canary 增加 endpoint-level `accepted_authorities` 无序 `host:port` 别名集合；公共未命中和未配置 upstream 的表面统一收敛为普通纯文本 `404 Not Found`，不暴露内部协议和匹配细节。

@@ -57,6 +57,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub active_short_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canary_upstream: Option<CanaryUpstreamConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accepted_authorities: Vec<String>,
     #[serde(default)]
     pub managed_default: bool,
 }
@@ -148,6 +150,49 @@ pub fn validate_reality_server_name(host: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn validate_accepted_authority_host(host: &str) -> Result<(), &'static str> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("accepted_authority host is required");
+    }
+    if trimmed.len() > 253 {
+        return Err("accepted_authority host is too long (max 253)");
+    }
+    if trimmed.starts_with('.') || trimmed.ends_with('.') {
+        return Err("accepted_authority host must not start or end with a dot (.)");
+    }
+    if trimmed.contains("..") {
+        return Err("accepted_authority host must not contain consecutive dots (..)");
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return Err("accepted_authority host must be a valid hostname");
+    }
+
+    for label in trimmed.split('.') {
+        if label.is_empty() {
+            return Err("accepted_authority host contains an empty label");
+        }
+        if label.len() > 63 {
+            return Err("accepted_authority host label is too long (max 63)");
+        }
+        let bytes = label.as_bytes();
+        if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
+            return Err("accepted_authority host labels must not start/end with '-'");
+        }
+        if !label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("accepted_authority host labels must be alnum or '-'");
+        }
+    }
+
+    Ok(())
+}
+
 pub fn validate_reality_dest(dest: &str) -> Result<(), &'static str> {
     let trimmed = dest.trim();
     if trimmed.is_empty() {
@@ -206,6 +251,85 @@ pub fn validate_canary_upstream(config: &CanaryUpstreamConfig) -> Result<(), &'s
         return Err("canary_upstream.mode h2c requires http URL");
     }
     Ok(())
+}
+
+pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static str> {
+    let trimmed = authority.trim();
+    if trimmed.is_empty() {
+        return Err("accepted_authority is required");
+    }
+    if trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err("accepted_authority must not contain spaces");
+    }
+    if trimmed.contains("://") {
+        return Err("accepted_authority must not include scheme (://)");
+    }
+    if trimmed.contains('/') {
+        return Err("accepted_authority must not include path (/)");
+    }
+    if trimmed.contains('?') {
+        return Err("accepted_authority must not include query (?)");
+    }
+    if trimmed.contains('#') {
+        return Err("accepted_authority must not include fragment (#)");
+    }
+
+    let (host, port) = if let Some(bracketed) = trimmed.strip_prefix('[') {
+        let Some((host, rest)) = bracketed.split_once(']') else {
+            return Err("accepted_authority IPv6 host must use [addr]:port");
+        };
+        let Some(port) = rest.strip_prefix(':') else {
+            return Err("accepted_authority must include port (:)");
+        };
+        (host, port)
+    } else {
+        let Some((host, port)) = trimmed.rsplit_once(':') else {
+            return Err("accepted_authority must include port (:)");
+        };
+        if host.contains(':') {
+            return Err("accepted_authority IPv6 host must use [addr]:port");
+        }
+        (host, port)
+    };
+
+    let parsed_port = port
+        .parse::<u16>()
+        .map_err(|_| "accepted_authority port must be 1..65535")?;
+    if parsed_port == 0 {
+        return Err("accepted_authority port must be 1..65535");
+    }
+
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        return Ok(format!("[{}]:{parsed_port}", host.to_ascii_lowercase()));
+    }
+    let normalized_host = host.strip_suffix('.').unwrap_or(host);
+    if normalized_host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Ok(format!("{normalized_host}:{parsed_port}"));
+    }
+    if normalized_host
+        .split('.')
+        .all(|label| !label.is_empty() && label.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err("accepted_authority must use a valid IPv4, hostname, or [ipv6]");
+    }
+
+    validate_accepted_authority_host(normalized_host)?;
+    Ok(format!("{}:{parsed_port}", normalized_host.to_ascii_lowercase()))
+}
+
+pub fn normalize_accepted_authorities(
+    authorities: &[String],
+) -> Result<Vec<String>, (&str, String)> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for authority in authorities {
+        let normalized = normalize_accepted_authority(authority)
+            .map_err(|reason| (reason, authority.clone()))?;
+        if seen.insert(normalized.clone()) {
+            out.push(normalized);
+        }
+    }
+    Ok(out)
 }
 
 pub fn validate_short_id(short_id: &str) -> Result<(), &'static str> {
@@ -435,6 +559,47 @@ mod tests {
             assert_eq!(
                 validate_canary_upstream(&config),
                 Err("canary_upstream.url must be an origin without path, query, or fragment")
+            );
+        }
+    }
+
+    #[test]
+    fn accepted_authorities_normalize_case_ipv6_and_deduplicate() {
+        let normalized = normalize_accepted_authorities(&[
+            " Edge.Example.com.:443 ".to_string(),
+            "edge.example.com:443".to_string(),
+            "LOCALHOST:443".to_string(),
+            "[2001:DB8::1]:8443".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            normalized,
+            vec![
+                "edge.example.com:443".to_string(),
+                "localhost:443".to_string(),
+                "[2001:db8::1]:8443".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn accepted_authorities_reject_invalid_shapes() {
+        for raw in [
+            "",
+            "edge.example.com",
+            "https://edge.example.com:443",
+            "edge.example.com/path:443",
+            "edge.example.com:0",
+            "edge.example.com..:443",
+            "999.999.999.999:443",
+            "2001:db8::1:443",
+            "[2001:db8::1]",
+            "bad host:443",
+        ] {
+            assert!(
+                normalize_accepted_authority(raw).is_err(),
+                "expected {raw:?} to be rejected"
             );
         }
     }

@@ -16,6 +16,7 @@ type TagInputProps = {
 	disabled?: boolean;
 	inputClass?: string;
 	validateTag?: (value: string) => string | null;
+	allowPrimary?: boolean;
 };
 
 function defaultValidateTag(value: string): string | null {
@@ -54,6 +55,7 @@ export function TagInput({
 	disabled = false,
 	inputClass = "xp-input",
 	validateTag = defaultValidateTag,
+	allowPrimary = true,
 }: TagInputProps) {
 	const inputId = useId();
 	const helperTextId = useId();
@@ -70,7 +72,7 @@ export function TagInput({
 			),
 		[value],
 	);
-	const primary = tags[0] ?? "";
+	const primary = allowPrimary ? (tags[0] ?? "") : "";
 
 	function setTags(next: string[]): void {
 		onChange(dedupePreserveOrder(next.map(normalizeToken).filter(Boolean)));
@@ -103,6 +105,7 @@ export function TagInput({
 	}
 
 	function makePrimaryAt(index: number): void {
+		if (!allowPrimary) return;
 		if (index <= 0 || index >= tags.length) return;
 		const chosen = tags[index];
 		const next = [chosen, ...tags.slice(0, index), ...tags.slice(index + 1)];
@@ -151,13 +154,17 @@ export function TagInput({
 						<div key={tag} className="xp-chip-group">
 							<span
 								className={badgeClass(
-									idx === 0 ? "primary" : "ghost",
+									allowPrimary && idx === 0 ? "primary" : "ghost",
 									"default",
 									"gap-2 font-mono xp-chip-action",
 								)}
-								title={idx === 0 ? "Primary (used for dest / probe)" : tag}
+								title={
+									allowPrimary && idx === 0
+										? "Primary (used for dest / probe)"
+										: tag
+								}
 							>
-								{idx === 0 ? (
+								{allowPrimary && idx === 0 ? (
 									<Icon
 										name="tabler:star-filled"
 										size={14}
@@ -167,7 +174,7 @@ export function TagInput({
 								<span>{tag}</span>
 							</span>
 
-							{idx !== 0 ? (
+							{allowPrimary && idx !== 0 ? (
 								<Button
 									type="button"
 									variant="ghost"
