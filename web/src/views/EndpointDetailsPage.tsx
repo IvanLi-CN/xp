@@ -483,7 +483,7 @@ export function EndpointDetailsPage() {
 				description={`Endpoint ${endpoint.endpoint_id}`}
 				actions={
 					<div className="flex gap-2">
-						<Button asChild variant="ghost" size="sm">
+						<Button asChild variant="ghost">
 							<Link to="/endpoints">Back</Link>
 						</Button>
 						<Button

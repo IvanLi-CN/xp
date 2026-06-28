@@ -74,9 +74,19 @@ type Story = StoryObj<typeof meta>;
 export const ManagedDefaultAliases: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const backAction = await canvas.findByRole("link", { name: "Back" });
+		const refreshAction = await canvas.findByRole("button", {
+			name: "Refresh",
+		});
 		await expect(
 			await canvas.findByRole("heading", { name: "Endpoint details" }),
 		).toBeInTheDocument();
+		await expect(
+			Math.abs(
+				backAction.getBoundingClientRect().height -
+					refreshAction.getBoundingClientRect().height,
+			),
+		).toBeLessThanOrEqual(1);
 		await expect(
 			await canvas.findByText("acceptedAuthorities"),
 		).toBeInTheDocument();

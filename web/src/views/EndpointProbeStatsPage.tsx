@@ -173,7 +173,7 @@ export function EndpointProbeStatsPage() {
 				actions={
 					<div className="flex gap-2">
 						<Link
-							className={buttonVariants({ variant: "ghost", size: "sm" })}
+							className={buttonVariants({ variant: "ghost" })}
 							to="/endpoints"
 						>
 							Back
