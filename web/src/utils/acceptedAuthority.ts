@@ -2,6 +2,15 @@ function normalizeAuthorityHost(value: string): string {
 	return value.trim().replace(/\.$/, "").toLowerCase();
 }
 
+function isValidIpv6Literal(host: string): boolean {
+	try {
+		void new URL(`http://[${host}]/`);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export function normalizeAcceptedAuthority(value: string): string {
 	const trimmed = value.trim();
 	if (!trimmed) return "";
@@ -46,7 +55,7 @@ export function validateAcceptedAuthority(value: string): string | null {
 			return "accepted host:port must include port (:).";
 		}
 		port = rest.slice(1);
-		if (!host.includes(":")) return "Bracketed host must be IPv6.";
+		if (!isValidIpv6Literal(host)) return "Bracketed host must be IPv6.";
 	} else {
 		const splitIndex = trimmed.lastIndexOf(":");
 		if (splitIndex <= 0) return "accepted host:port must include port (:).";

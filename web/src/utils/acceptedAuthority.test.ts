@@ -28,5 +28,6 @@ describe("acceptedAuthority utils", () => {
 			validateAcceptedAuthority("https://edge.example.com:443"),
 		).not.toBeNull();
 		expect(validateAcceptedAuthority("2001:db8::1:8443")).not.toBeNull();
+		expect(validateAcceptedAuthority("[foo:bar]:443")).not.toBeNull();
 	});
 });
