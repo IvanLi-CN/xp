@@ -3359,8 +3359,8 @@ async fn patch_managed_vless_updates_accepted_authorities() {
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
               "accepted_authorities": [
-                "EDGE.EXAMPLE.COM:443",
-                "[2001:db8::1]:53844",
+                "EDGE.EXAMPLE.COM.",
+                "[2001:db8::1]",
                 "edge.example.com:443"
               ]
             }),
@@ -3371,7 +3371,7 @@ async fn patch_managed_vless_updates_accepted_authorities() {
     let updated = body_json(res).await;
     assert_eq!(
         updated["meta"]["accepted_authorities"],
-        json!(["edge.example.com:443", "[2001:db8::1]:53844"])
+        json!(["edge.example.com:443", "[2001:db8::1]:443"])
     );
 
     let res = app
@@ -3443,7 +3443,8 @@ async fn patch_managed_vless_rejects_invalid_accepted_authorities() {
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
               "accepted_authorities": [
-                "https://edge.example.com:443"
+                "https://edge.example.com:443",
+                "localhost:"
               ]
             }),
         ))

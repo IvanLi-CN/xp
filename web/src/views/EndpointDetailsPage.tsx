@@ -854,7 +854,7 @@ export function EndpointDetailsPage() {
 											</div>
 										</div>
 										<TagInput
-											label="accepted host:port"
+											label="accepted host[:port]"
 											value={acceptedAuthorities}
 											onChange={(next) =>
 												setAcceptedAuthorities(
@@ -865,12 +865,12 @@ export function EndpointDetailsPage() {
 													),
 												)
 											}
-											placeholder="edge.example.com:53844"
+											placeholder="edge.example.com"
 											disabled={patchMutation.isPending}
 											inputClass={inputClass}
 											validateTag={validateAcceptedAuthority}
 											allowPrimary={false}
-											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. This does not change REALITY serverNames or the canonical /generate_204 URL."
+											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL."
 										/>
 									</div>
 								) : null}

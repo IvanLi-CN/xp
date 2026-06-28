@@ -19,7 +19,7 @@ Preserve explicit `reality.dest` for manual VLESS REALITY endpoints. In manual m
 
 Keep the derived behavior for global domain mode. When `server_names_source=global`, XP still derives both the SNI list and `dest=<first global server name>:443` from the global REALITY domain registry.
 
-For managed-default VLESS endpoints, do not expose SNI/dest as operator choices. The managed contract fixes `reality.dest` to `XP_VLESS_CANARY_BIND` and fixes `server_names` to `[node.access_host]` without a port. Non-probe HTTPS canary traffic is handled by endpoint-level `canary_upstream`, routed by HTTP `Host` / `:authority`. The canonical authority remains `node.access_host[:endpoint_port]`, while `accepted_authorities` provides an unordered extra `host:port` alias set for ordinary HTTPS camouflage only.
+For managed-default VLESS endpoints, do not expose SNI/dest as operator choices. The managed contract fixes `reality.dest` to `XP_VLESS_CANARY_BIND` and fixes `server_names` to `[node.access_host]` without a port. Non-probe HTTPS canary traffic is handled by endpoint-level `canary_upstream`, routed by HTTP `Host` / `:authority`. The canonical authority remains `node.access_host[:endpoint_port]`, while `accepted_authorities` provides an unordered extra `host[:port]` alias set for ordinary HTTPS camouflage only; omitted port means HTTPS default `443`.
 
 ## Verification
 

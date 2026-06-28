@@ -214,9 +214,9 @@
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
-  - state: `Pages/EndpointDetailsPage/ManagedDefaultAliases`
+  - state: `Pages/EndpointDetailsPage/ManagedDefaultAliasDefaultsTo443`
   - submission_gate: `approved`
-  - evidence_note: 托管 VLESS endpoint 详情页展示 `accepted_authorities` 别名集合，并明确说明它只影响普通 HTTPS Host 匹配，不影响 REALITY `server_names` 或 canonical `/generate_204`。
+  - evidence_note: 托管 VLESS endpoint 详情页展示 `accepted_authorities` 别名集合，并明确说明它只影响普通 HTTPS Host 匹配；录入格式为 `host[:port]`，省略端口时按 HTTPS 默认 `443` 解释，不影响 REALITY `server_names` 或 canonical `/generate_204`。
     PR: include
     ![Endpoint details accepted host aliases](./assets/endpoint-details-accepted-authorities.png)
 - Real Mihomo validation
@@ -258,4 +258,4 @@
 - 2026-06-15: 明确补充高质量入口兜底合同；`💎 高质量` 之上必须存在稳定的全局兜底聚合入口，不能因 mixin 缺失或系统组收敛而消失。
 - 2026-06-16: relay 外层健康检查切到托管 VLESS 端口自身的 HTTPS canary（`https://<access_host[:port]>/generate_204`），并冻结地区组合同为：`🌟 {Region}` 是 hidden source group，`🔒 {Region}` 是 owner-facing 可见入口，`🤯 {Region}` 是 hidden `url-test` 包装组。
 - 2026-06-23: 托管 VLESS 的 SNI/dest 收敛为固定协议事实：`server_names=[node.access_host]`、`dest=XP_VLESS_CANARY_BIND`；canary 增加 endpoint-level `canary_upstream` 透明 TLS 终止反代，并通过 HTTP authority 匹配 endpoint。
-- 2026-06-28: 托管 VLESS canary 增加 endpoint-level `accepted_authorities` 无序 `host:port` 别名集合；公共未命中和未配置 upstream 的表面统一收敛为普通纯文本 `404 Not Found`，不暴露内部协议和匹配细节。
+- 2026-06-28: 托管 VLESS canary 增加 endpoint-level `accepted_authorities` 无序 `host[:port]` 别名集合；省略端口时按 HTTPS 默认 `443` 解释。公共未命中和未配置 upstream 的表面统一收敛为普通纯文本 `404 Not Found`，不暴露内部协议和匹配细节。

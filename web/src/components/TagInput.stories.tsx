@@ -73,11 +73,11 @@ export const Prefilled: Story = {
 
 export const AuthorityAliases: Story = {
 	args: {
-		label: "accepted host:port",
-		placeholder: "edge.example.com:53844",
+		label: "accepted host[:port]",
+		placeholder: "edge.example.com",
 		helperText:
-			"Accept additional ordinary HTTPS Host headers for camouflage routing. Order does not matter.",
-		initialValue: ["edge.example.com:53844", "tavily-tw.ivanli.cc:53844"],
+			"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. Order does not matter.",
+		initialValue: ["edge.example.com", "tavily-tw.ivanli.cc:8443"],
 		allowPrimary: false,
 	},
 };
