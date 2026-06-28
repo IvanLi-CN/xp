@@ -1722,6 +1722,48 @@ mod tests {
     }
 
     #[test]
+    fn managed_vless_matching_accepts_alias_without_explicit_port_as_https_443() {
+        let endpoint = Endpoint {
+            endpoint_id: "ep1".to_string(),
+            node_id: "n1".to_string(),
+            tag: "vless-ep1".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "127.0.0.1:39043",
+                    "server_names": ["node.example.com"],
+                    "server_names_source": "manual",
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["aaaaaaaaaaaaaaaa"],
+                "active_short_id": "aaaaaaaaaaaaaaaa",
+                "accepted_authorities": ["Edge.Example.com."],
+                "canary_upstream": {
+                    "url": "http://127.0.0.1:8080",
+                    "mode": "auto"
+                },
+                "managed_default": true
+            }),
+        };
+
+        let routed = matching_managed_vless_endpoint(
+            endpoint,
+            "node.example.com",
+            &NormalizedAuthority {
+                host: "edge.example.com".to_string(),
+                port: 443,
+            },
+        )
+        .unwrap();
+        assert_eq!(routed.endpoint_id, "ep1");
+    }
+
+    #[test]
     fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
         let endpoint = Endpoint {
             endpoint_id: "ep1".to_string(),

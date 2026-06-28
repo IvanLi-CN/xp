@@ -20,11 +20,12 @@ export function normalizeAcceptedAuthority(value: string): string {
 		if (end === -1) return trimmed;
 		const host = normalizeAuthorityHost(trimmed.slice(1, end));
 		const rest = trimmed.slice(end + 1);
-		return `[${host}]${rest}`;
+		return `[${host}]${rest || ":443"}`;
 	}
 
 	const splitIndex = trimmed.lastIndexOf(":");
-	if (splitIndex <= 0) return trimmed;
+	if (trimmed.startsWith(":")) return trimmed;
+	if (splitIndex <= 0) return `${normalizeAuthorityHost(trimmed)}:443`;
 	const host = trimmed.slice(0, splitIndex);
 	const port = trimmed.slice(splitIndex + 1);
 	if (host.includes(":")) return trimmed;
@@ -33,80 +34,90 @@ export function normalizeAcceptedAuthority(value: string): string {
 
 export function validateAcceptedAuthority(value: string): string | null {
 	const trimmed = value.trim();
-	if (!trimmed) return "accepted host:port is required.";
-	if (/\s/.test(trimmed)) return "accepted host:port must not contain spaces.";
+	if (!trimmed) return "accepted host[:port] is required.";
+	if (/\s/.test(trimmed))
+		return "accepted host[:port] must not contain spaces.";
 	if (trimmed.includes("://"))
-		return "accepted host:port must not include scheme (://).";
+		return "accepted host[:port] must not include scheme (://).";
 	if (trimmed.includes("/"))
-		return "accepted host:port must not include path (/).";
+		return "accepted host[:port] must not include path (/).";
 	if (trimmed.includes("?"))
-		return "accepted host:port must not include query (?).";
+		return "accepted host[:port] must not include query (?).";
 	if (trimmed.includes("#"))
-		return "accepted host:port must not include fragment (#).";
+		return "accepted host[:port] must not include fragment (#).";
 
 	let host = "";
-	let port = "";
+	let port = "443";
 	if (trimmed.startsWith("[")) {
 		const end = trimmed.indexOf("]");
-		if (end === -1) return "IPv6 host must use [addr]:port.";
+		if (end === -1) return "IPv6 host must use [addr] or [addr]:port.";
 		host = trimmed.slice(1, end);
 		const rest = trimmed.slice(end + 1);
-		if (!rest.startsWith(":")) {
-			return "accepted host:port must include port (:).";
+		if (rest.length > 0) {
+			if (!rest.startsWith(":")) {
+				return "IPv6 host must use [addr] or [addr]:port.";
+			}
+			port = rest.slice(1);
 		}
-		port = rest.slice(1);
 		if (!isValidIpv6Literal(host)) return "Bracketed host must be IPv6.";
 	} else {
 		const splitIndex = trimmed.lastIndexOf(":");
-		if (splitIndex <= 0) return "accepted host:port must include port (:).";
-		host = trimmed.slice(0, splitIndex);
-		port = trimmed.slice(splitIndex + 1);
-		if (host.includes(":")) return "IPv6 host must use [addr]:port.";
+		if (trimmed.startsWith(":")) {
+			return "accepted host[:port] must use a valid IPv4, hostname, or bracketed IPv6.";
+		}
+		if (splitIndex <= 0) {
+			host = trimmed;
+		} else {
+			host = trimmed.slice(0, splitIndex);
+			port = trimmed.slice(splitIndex + 1);
+			if (host.includes(":"))
+				return "IPv6 host must use [addr] or [addr]:port.";
+		}
 	}
 
-	if (!port) return "accepted host:port must include port (:).";
-	if (!/^\d+$/.test(port)) return "accepted host:port port must be 1..65535.";
+	if (!port) return "accepted host[:port] port must be 1..65535.";
+	if (!/^\d+$/.test(port)) return "accepted host[:port] port must be 1..65535.";
 	const parsedPort = Number.parseInt(port, 10);
 	if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-		return "accepted host:port port must be 1..65535.";
+		return "accepted host[:port] port must be 1..65535.";
 	}
 
 	if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
 		const octets = host.split(".").map((part) => Number.parseInt(part, 10));
 		if (octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-			return "accepted host:port must use a valid IPv4, hostname, or bracketed IPv6.";
+			return "accepted host[:port] must use a valid IPv4, hostname, or bracketed IPv6.";
 		}
 		return null;
 	}
 
 	if (host.includes(":")) {
 		if (!/^[0-9a-fA-F:]+$/.test(host)) {
-			return "accepted host:port must use a valid IPv4, hostname, or bracketed IPv6.";
+			return "accepted host[:port] must use a valid IPv4, hostname, or bracketed IPv6.";
 		}
 		return null;
 	}
 
 	const normalizedHost = normalizeAuthorityHost(host);
 	if (normalizedHost.length > 253) {
-		return "accepted host:port hostname is too long.";
+		return "accepted host[:port] hostname is too long.";
 	}
 	if (normalizedHost.startsWith(".") || normalizedHost.endsWith(".")) {
-		return "accepted host:port hostname must not start or end with a dot.";
+		return "accepted host[:port] hostname must not start or end with a dot.";
 	}
 	if (normalizedHost.includes("..")) {
-		return "accepted host:port hostname must not contain consecutive dots.";
+		return "accepted host[:port] hostname must not contain consecutive dots.";
 	}
 	if (!/^[0-9A-Za-z.-]+$/.test(normalizedHost)) {
-		return "accepted host:port must use a valid IPv4, hostname, or bracketed IPv6.";
+		return "accepted host[:port] must use a valid IPv4, hostname, or bracketed IPv6.";
 	}
 	const labels = normalizedHost.split(".");
 	for (const label of labels) {
-		if (!label) return "accepted host:port hostname contains an empty label.";
+		if (!label) return "accepted host[:port] hostname contains an empty label.";
 		if (label.length > 63) {
-			return "accepted host:port hostname label is too long.";
+			return "accepted host[:port] hostname label is too long.";
 		}
 		if (!/^[0-9A-Za-z](?:[0-9A-Za-z-]*[0-9A-Za-z])?$/.test(label)) {
-			return "accepted host:port hostname labels must start/end with letter or digit.";
+			return "accepted host[:port] hostname labels must start/end with letter or digit.";
 		}
 	}
 

@@ -274,33 +274,51 @@ pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static 
         return Err("accepted_authority must not include fragment (#)");
     }
 
-    let (host, port) = if let Some(bracketed) = trimmed.strip_prefix('[') {
+    let (host, parsed_port, bracketed_host) = if let Some(bracketed) = trimmed.strip_prefix('[') {
         let Some((host, rest)) = bracketed.split_once(']') else {
-            return Err("accepted_authority IPv6 host must use [addr]:port");
+            return Err("accepted_authority IPv6 host must use [addr] or [addr]:port");
         };
-        let Some(port) = rest.strip_prefix(':') else {
-            return Err("accepted_authority must include port (:)");
-        };
-        (host, port)
+        if rest.is_empty() {
+            (host, 443, true)
+        } else {
+            let Some(port) = rest.strip_prefix(':') else {
+                return Err("accepted_authority IPv6 host must use [addr] or [addr]:port");
+            };
+            let parsed_port = port
+                .parse::<u16>()
+                .map_err(|_| "accepted_authority port must be 1..65535")?;
+            if parsed_port == 0 {
+                return Err("accepted_authority port must be 1..65535");
+            }
+            (host, parsed_port, true)
+        }
     } else {
         let Some((host, port)) = trimmed.rsplit_once(':') else {
-            return Err("accepted_authority must include port (:)");
+            if trimmed.contains(':') {
+                return Err("accepted_authority IPv6 host must use [addr] or [addr]:port");
+            }
+            return normalize_accepted_authority(&format!("{trimmed}:443"));
         };
         if host.contains(':') {
-            return Err("accepted_authority IPv6 host must use [addr]:port");
+            return Err("accepted_authority IPv6 host must use [addr] or [addr]:port");
         }
-        (host, port)
+        let parsed_port = port
+            .parse::<u16>()
+            .map_err(|_| "accepted_authority port must be 1..65535")?;
+        if parsed_port == 0 {
+            return Err("accepted_authority port must be 1..65535");
+        }
+        (host, parsed_port, false)
     };
 
-    let parsed_port = port
-        .parse::<u16>()
-        .map_err(|_| "accepted_authority port must be 1..65535")?;
-    if parsed_port == 0 {
-        return Err("accepted_authority port must be 1..65535");
-    }
-
     if host.parse::<std::net::Ipv6Addr>().is_ok() {
-        return Ok(format!("[{}]:{parsed_port}", host.to_ascii_lowercase()));
+        return Ok(format!(
+            "[{}]:{parsed_port}",
+            host.to_ascii_lowercase()
+        ));
+    }
+    if bracketed_host {
+        return Err("accepted_authority bracketed host must be IPv6");
     }
     let normalized_host = host.strip_suffix('.').unwrap_or(host);
     if normalized_host.parse::<std::net::Ipv4Addr>().is_ok() {
@@ -314,7 +332,10 @@ pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static 
     }
 
     validate_accepted_authority_host(normalized_host)?;
-    Ok(format!("{}:{parsed_port}", normalized_host.to_ascii_lowercase()))
+    Ok(format!(
+        "{}:{parsed_port}",
+        normalized_host.to_ascii_lowercase()
+    ))
 }
 
 pub fn normalize_accepted_authorities(
@@ -566,10 +587,11 @@ mod tests {
     #[test]
     fn accepted_authorities_normalize_case_ipv6_and_deduplicate() {
         let normalized = normalize_accepted_authorities(&[
-            " Edge.Example.com.:443 ".to_string(),
+            " Edge.Example.com. ".to_string(),
             "edge.example.com:443".to_string(),
-            "LOCALHOST:443".to_string(),
-            "[2001:DB8::1]:8443".to_string(),
+            "LOCALHOST".to_string(),
+            "[2001:DB8::1]".to_string(),
+            "[2001:db8::1]:443".to_string(),
         ])
         .unwrap();
 
@@ -578,8 +600,20 @@ mod tests {
             vec![
                 "edge.example.com:443".to_string(),
                 "localhost:443".to_string(),
-                "[2001:db8::1]:8443".to_string(),
+                "[2001:db8::1]:443".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn accepted_authorities_default_missing_port_to_443() {
+        assert_eq!(
+            normalize_accepted_authority("edge.example.com").unwrap(),
+            "edge.example.com:443"
+        );
+        assert_eq!(
+            normalize_accepted_authority("[2001:DB8::1]").unwrap(),
+            "[2001:db8::1]:443"
         );
     }
 
@@ -587,14 +621,15 @@ mod tests {
     fn accepted_authorities_reject_invalid_shapes() {
         for raw in [
             "",
-            "edge.example.com",
             "https://edge.example.com:443",
             "edge.example.com/path:443",
+            "localhost:",
+            "[edge.example.com]",
             "edge.example.com:0",
             "edge.example.com..:443",
             "999.999.999.999:443",
             "2001:db8::1:443",
-            "[2001:db8::1]",
+            "[2001:db8::1]bad",
             "bad host:443",
         ] {
             assert!(

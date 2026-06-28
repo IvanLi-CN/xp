@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, within } from "@storybook/test";
+import { expect, userEvent, within } from "@storybook/test";
 
 const NODE_ID = "node-1";
 const ENDPOINT_ID = "endpoint-managed-vless";
@@ -98,8 +98,22 @@ export const ManagedDefaultAliases: Story = {
 		).toHaveLength(2);
 		await expect(
 			await canvas.findByText(
-				"Accept additional ordinary HTTPS Host headers for camouflage routing. This does not change REALITY serverNames or the canonical /generate_204 URL.",
+				"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL.",
 			),
+		).toBeInTheDocument();
+	},
+};
+
+export const ManagedDefaultAliasDefaultsTo443: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("heading", { name: "Endpoint details" }),
+		).toBeInTheDocument();
+		const input = await canvas.findByLabelText("accepted host[:port]");
+		await userEvent.type(input, "edge.example.com{enter}");
+		await expect(
+			await canvas.findByText("edge.example.com:443"),
 		).toBeInTheDocument();
 	},
 };
