@@ -1,9 +1,9 @@
+use crate::managed_default_endpoints::{
+    ManagedDefaultEndpointsSpec, build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
+};
 use crate::ops::cli::{
     ExitError, XpBootstrapArgs, XpInstallArgs, XpRecoverSingleNodeArgs, XpRestartArgs,
     XpSyncNodeMetaArgs,
-};
-use crate::managed_default_endpoints::{
-    ManagedDefaultEndpointsSpec, build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
@@ -315,8 +315,8 @@ pub async fn cmd_xp_sync_node_meta(
                     ExitError::new(
                         2,
                         format!("invalid_input: XP_DEFAULT_SS_PORT must be a valid port: {err}"),
-                )
-            })?,
+                    )
+                })?,
         )
         .map_err(|err| ExitError::new(2, format!("invalid_input: {err}")))?,
     };

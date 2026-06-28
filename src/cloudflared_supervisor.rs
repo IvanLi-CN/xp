@@ -379,8 +379,9 @@ pub fn spawn_cloudflared_supervisor_with_options_and_probe_and_restarter(
                 snap.last_restart_at = Some(attempt_at);
                 snap.restart_backoff_secs = next_delay.as_secs();
                 snap.restart_backoff_attempts = restart_backoff_attempts;
-                snap.next_restart_at =
-                    chrono::Duration::from_std(next_delay).map(|delay| Utc::now() + delay).ok();
+                snap.next_restart_at = chrono::Duration::from_std(next_delay)
+                    .map(|delay| Utc::now() + delay)
+                    .ok();
                 match result {
                     Ok(()) => {
                         info!(
@@ -502,9 +503,9 @@ async fn restart_openrc(service: &str, timeout: Duration) -> Result<(), RestartE
         .await;
     }
     result.map_err(|details| RestartError::Command {
-            program: "doas/sudo",
-            details,
-        })
+        program: "doas/sudo",
+        details,
+    })
 }
 
 async fn run_command_with_timeout(

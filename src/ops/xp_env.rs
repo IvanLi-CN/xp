@@ -17,8 +17,7 @@ const LEGACY_RELAY_PROBE_ENV_VARS: &[&str] = &[
     "XP_RELAY_PROBE_CLOUDFLARE_ZONE_ID",
 ];
 
-pub const LEGACY_RELAY_PROBE_REMOVED_MESSAGE: &str =
-    "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly";
+pub const LEGACY_RELAY_PROBE_REMOVED_MESSAGE: &str = "invalid_input: XP_RELAY_PROBE_* has been removed; migrate to XP_VLESS_CANARY_* and probe the managed VLESS port directly";
 
 #[derive(Default, Debug, Clone)]
 pub struct XpEnvFlags {
@@ -299,8 +298,10 @@ pub fn parse_xp_env(raw: Option<String>) -> ParsedXpEnv {
             flags.has_default_vless_port = true;
             if line.len() > "XP_DEFAULT_VLESS_PORT=".len() {
                 default_vless_port = Some(
-                    shell_unquote_wrapping_quotes(line.trim_start_matches("XP_DEFAULT_VLESS_PORT="))
-                        .to_string(),
+                    shell_unquote_wrapping_quotes(
+                        line.trim_start_matches("XP_DEFAULT_VLESS_PORT="),
+                    )
+                    .to_string(),
                 );
             }
             continue;
@@ -588,51 +589,59 @@ pub fn write_xp_env(
         )
     })?;
     lines.push(format!("XP_VLESS_CANARY_BIND={vless_canary_bind}"));
-    let vless_canary_acme_directory_url =
-        shell_quote_single(values.vless_canary_acme_directory_url).map_err(|e| {
-            ExitError::new(
-                2,
-                format!(
-                    "invalid_input: XP_VLESS_CANARY_ACME_DIRECTORY_URL cannot be written safely: {e}"
-                ),
-            )
-        })?;
+    let vless_canary_acme_directory_url = shell_quote_single(
+        values.vless_canary_acme_directory_url,
+    )
+    .map_err(|e| {
+        ExitError::new(
+            2,
+            format!(
+                "invalid_input: XP_VLESS_CANARY_ACME_DIRECTORY_URL cannot be written safely: {e}"
+            ),
+        )
+    })?;
     lines.push(format!(
         "XP_VLESS_CANARY_ACME_DIRECTORY_URL={vless_canary_acme_directory_url}"
     ));
-    let vless_canary_acme_contact_email =
-        shell_quote_single(values.vless_canary_acme_contact_email).map_err(|e| {
-            ExitError::new(
-                2,
-                format!(
-                    "invalid_input: XP_VLESS_CANARY_ACME_CONTACT_EMAIL cannot be written safely: {e}"
-                ),
-            )
-        })?;
+    let vless_canary_acme_contact_email = shell_quote_single(
+        values.vless_canary_acme_contact_email,
+    )
+    .map_err(|e| {
+        ExitError::new(
+            2,
+            format!(
+                "invalid_input: XP_VLESS_CANARY_ACME_CONTACT_EMAIL cannot be written safely: {e}"
+            ),
+        )
+    })?;
     lines.push(format!(
         "XP_VLESS_CANARY_ACME_CONTACT_EMAIL={vless_canary_acme_contact_email}"
     ));
-    let vless_canary_cloudflare_token_file =
-        shell_quote_single(values.vless_canary_cloudflare_token_file).map_err(|e| {
-            ExitError::new(
-                2,
-                format!(
-                    "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE cannot be written safely: {e}"
-                ),
-            )
-        })?;
+    let vless_canary_cloudflare_token_file = shell_quote_single(
+        values.vless_canary_cloudflare_token_file,
+    )
+    .map_err(|e| {
+        ExitError::new(
+            2,
+            format!(
+                "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE cannot be written safely: {e}"
+            ),
+        )
+    })?;
     lines.push(format!(
         "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE={vless_canary_cloudflare_token_file}"
     ));
-    let vless_canary_cloudflare_zone_id =
-        shell_quote_single(values.vless_canary_cloudflare_zone_id).map_err(|e| {
-            ExitError::new(
-                2,
-                format!(
-                    "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID cannot be written safely: {e}"
-                ),
-            )
-        })?;
+    let vless_canary_cloudflare_zone_id = shell_quote_single(
+        values.vless_canary_cloudflare_zone_id,
+    )
+    .map_err(|e| {
+        ExitError::new(
+            2,
+            format!(
+                "invalid_input: XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID cannot be written safely: {e}"
+            ),
+        )
+    })?;
     lines.push(format!(
         "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID={vless_canary_cloudflare_zone_id}"
     ));

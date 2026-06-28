@@ -155,7 +155,12 @@ fn classify_probe_error(
     err: reqwest::Error,
     family: PublicIpAddressFamily,
 ) -> PublicIpProbeOutcome {
-    classify_probe_failure(err.is_timeout(), err.to_string(), probe_error_texts(&err), family)
+    classify_probe_failure(
+        err.is_timeout(),
+        err.to_string(),
+        probe_error_texts(&err),
+        family,
+    )
 }
 
 fn classify_probe_failure(

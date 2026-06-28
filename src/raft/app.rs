@@ -576,7 +576,8 @@ impl RaftFacade for LocalRaft {
                         .clear_node_tcp_connection_usage(node_id)
                         .map_err(anyhow::Error::new)?;
                 }
-                DesiredStateCommand::UpsertEndpoint { .. } | DesiredStateCommand::UpsertNode { .. } => {
+                DesiredStateCommand::UpsertEndpoint { .. }
+                | DesiredStateCommand::UpsertNode { .. } => {
                     store
                         .prune_tcp_connection_usage_endpoints()
                         .map_err(anyhow::Error::new)?;

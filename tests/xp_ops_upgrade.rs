@@ -150,7 +150,10 @@ mod linux {
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
-        seed_xray_config(tmp.path(), "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n");
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
 
         let dest = tmp.path().join("xp-ops-copy");
         copy_current_xp_ops(&dest);
@@ -200,7 +203,9 @@ mod linux {
             .success()
             .stderr(predicates::str::contains("resolved release"))
             .stderr(predicates::str::contains("would download"))
-            .stderr(predicates::str::contains("would rewrite static xray config"))
+            .stderr(predicates::str::contains(
+                "would rewrite static xray config",
+            ))
             .stderr(predicates::str::contains("would restart service: xray"));
     }
 
@@ -794,7 +799,9 @@ mod linux {
         cmd.assert()
             .failure()
             .code(7)
-            .stderr(predicates::str::contains("service_error: xray restart failed; rolled back xp"));
+            .stderr(predicates::str::contains(
+                "service_error: xray restart failed; rolled back xp",
+            ));
 
         assert!(!tmp.path().join("etc/xray/config.json").exists());
         assert_eq!(fs::read(&xp_path).unwrap(), b"xp-old-binary");

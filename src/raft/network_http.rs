@@ -21,9 +21,7 @@ pub struct HttpNetworkFactory {
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
-        let client = raft_http_client_builder()
-            .build()
-            .expect("reqwest client");
+        let client = raft_http_client_builder().build().expect("reqwest client");
         let state = MeshProxyStateHandle::disabled();
         Self {
             client: MeshAwareHttpClient::new(client, None, state),
@@ -88,7 +86,11 @@ impl HttpNetworkFactory {
                 Some(proxy_url),
             )
             .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-            Some(relay_builder.build().context("build relay reqwest client")?)
+            Some(
+                relay_builder
+                    .build()
+                    .context("build relay reqwest client")?,
+            )
         } else {
             None
         };
@@ -250,8 +252,7 @@ mod tests {
         let cert = crate::cluster_identity::sign_node_csr(cluster_id, &ca.key_pem, &csr.csr_pem)
             .expect("sign node csr");
 
-        let _factory =
-            HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem, None)
-                .expect("mtls");
+        let _factory = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem, None)
+            .expect("mtls");
     }
 }

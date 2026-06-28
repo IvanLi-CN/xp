@@ -1,0 +1,1103 @@
+{
+  ".github/workflows/ci.yml": {
+    "long_line_count": 5,
+    "max_line_length": 130
+  },
+  ".github/workflows/label-gate.yml": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  ".github/workflows/notify-release-failure.yml": {
+    "long_line_count": 7,
+    "max_line_length": 141
+  },
+  ".github/workflows/release.yml": {
+    "long_line_count": 6,
+    "max_line_length": 124
+  },
+  "AGENTS.md": {
+    "long_line_count": 9,
+    "max_line_length": 244
+  },
+  "Cargo.toml": {
+    "long_line_count": 2,
+    "max_line_length": 132
+  },
+  "DESIGN.md": {
+    "long_line_count": 20,
+    "max_line_length": 177
+  },
+  "PRODUCT.md": {
+    "long_line_count": 6,
+    "max_line_length": 164
+  },
+  "README.md": {
+    "long_line_count": 32,
+    "max_line_length": 287
+  },
+  "build.rs": {
+    "long_line_count": 2,
+    "max_line_length": 125
+  },
+  "commitlint.config.cjs": {
+    "long_line_count": 1,
+    "max_line_length": 101
+  },
+  "docs/desgin/api.md": {
+    "long_line_count": 5,
+    "max_line_length": 164
+  },
+  "docs/desgin/cluster.md": {
+    "long_line_count": 2,
+    "max_line_length": 221
+  },
+  "docs/desgin/quality.md": {
+    "long_line_count": 2,
+    "max_line_length": 151
+  },
+  "docs/desgin/requirements.md": {
+    "long_line_count": 2,
+    "max_line_length": 183
+  },
+  "docs/desgin/subscription.md": {
+    "long_line_count": 24,
+    "max_line_length": 292
+  },
+  "docs/desgin/workflows.md": {
+    "long_line_count": 1,
+    "max_line_length": 112
+  },
+  "docs/desgin/xray.md": {
+    "long_line_count": 3,
+    "max_line_length": 263
+  },
+  "docs/ops/README.md": {
+    "long_line_count": 115,
+    "max_line_length": 748
+  },
+  "docs/ops/cloudflare-tunnel.md": {
+    "long_line_count": 19,
+    "max_line_length": 358
+  },
+  "docs/ops/docker-deployment-guide.md": {
+    "long_line_count": 16,
+    "max_line_length": 406
+  },
+  "docs/ops/docker.md": {
+    "long_line_count": 44,
+    "max_line_length": 687
+  },
+  "docs/ops/endpoint-probe.md": {
+    "long_line_count": 11,
+    "max_line_length": 124
+  },
+  "docs/plan/0001:mvp-outline/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  "docs/plan/0002:m1-management-foundation/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 123
+  },
+  "docs/plan/0003:m2-xray-controller-reconcile/PLAN.md": {
+    "long_line_count": 4,
+    "max_line_length": 146
+  },
+  "docs/plan/0004:m3-subscription-output/PLAN.md": {
+    "long_line_count": 5,
+    "max_line_length": 144
+  },
+  "docs/plan/0005:m4-quota-system/PLAN.md": {
+    "long_line_count": 6,
+    "max_line_length": 123
+  },
+  "docs/plan/0006:m5-raft-cluster/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 145
+  },
+  "docs/plan/0007:m5-quota-raft-consistency/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 127
+  },
+  "docs/plan/0008:m6-web-panel/PLAN.md": {
+    "long_line_count": 7,
+    "max_line_length": 129
+  },
+  "docs/plan/0009:m7-quality-gates-delivery/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 131
+  },
+  "docs/plan/0010:admin-ui-geek-redesign/PLAN.md": {
+    "long_line_count": 24,
+    "max_line_length": 193
+  },
+  "docs/plan/0010:admin-ui-geek-redesign/contracts/ui-components.md": {
+    "long_line_count": 1,
+    "max_line_length": 107
+  },
+  "docs/plan/0011:storybook-no-auto-open/PLAN.md": {
+    "long_line_count": 7,
+    "max_line_length": 258
+  },
+  "docs/plan/0012:grant-access-matrix/PLAN.md": {
+    "long_line_count": 12,
+    "max_line_length": 222
+  },
+  "docs/plan/0012:grant-access-matrix/contracts/http-apis.md": {
+    "long_line_count": 5,
+    "max_line_length": 244
+  },
+  "docs/plan/0013:cloudflare-tunnel-remote-access/PLAN.md": {
+    "long_line_count": 22,
+    "max_line_length": 207
+  },
+  "docs/plan/0013:cloudflare-tunnel-remote-access/contracts/cli.md": {
+    "long_line_count": 17,
+    "max_line_length": 190
+  },
+  "docs/plan/0013:cloudflare-tunnel-remote-access/contracts/config.md": {
+    "long_line_count": 3,
+    "max_line_length": 179
+  },
+  "docs/plan/0013:cloudflare-tunnel-remote-access/contracts/file-formats.md": {
+    "long_line_count": 2,
+    "max_line_length": 148
+  },
+  "docs/plan/0014:grant-node-quota-editor/PLAN.md": {
+    "long_line_count": 7,
+    "max_line_length": 187
+  },
+  "docs/plan/0014:grant-node-quota-editor/contracts/http-apis.md": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  "docs/plan/0015:service-config-readonly-page/PLAN.md": {
+    "long_line_count": 10,
+    "max_line_length": 167
+  },
+  "docs/plan/0015:service-config-readonly-page/assets/service-config-page.html": {
+    "long_line_count": 6,
+    "max_line_length": 130
+  },
+  "docs/plan/0015:service-config-readonly-page/contracts/http-apis.md": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "docs/plan/0016:grant-new-access-selection/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 121
+  },
+  "docs/plan/0017:grant-grouping-and-cycle-ownership/PLAN.md": {
+    "long_line_count": 15,
+    "max_line_length": 406
+  },
+  "docs/plan/0017:grant-grouping-and-cycle-ownership/contracts/file-formats.md": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  "docs/plan/0017:grant-grouping-and-cycle-ownership/contracts/http-apis.md": {
+    "long_line_count": 2,
+    "max_line_length": 105
+  },
+  "docs/plan/0018:xp-ops-upgrade-and-release-automation/PLAN.md": {
+    "long_line_count": 13,
+    "max_line_length": 192
+  },
+  "docs/plan/0018:xp-ops-upgrade-and-release-automation/contracts/cli.md": {
+    "long_line_count": 1,
+    "max_line_length": 103
+  },
+  "docs/plan/0019:subscription-preview-formatting/PLAN.md": {
+    "long_line_count": 13,
+    "max_line_length": 151
+  },
+  "docs/plan/0020:xp-ops-tui-config-autosave/PLAN.md": {
+    "long_line_count": 8,
+    "max_line_length": 245
+  },
+  "docs/plan/0021:xray-supervision-auto-restart/PLAN.md": {
+    "long_line_count": 7,
+    "max_line_length": 198
+  },
+  "docs/plan/0021:xray-supervision-auto-restart/contracts/cli.md": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "docs/plan/0022:xp-ops-deploy-cloudflare-token/PLAN.md": {
+    "long_line_count": 12,
+    "max_line_length": 262
+  },
+  "docs/plan/0023:xray-restart-via-init-system/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 115
+  },
+  "docs/plan/0024:service-log-rotation/PLAN.md": {
+    "long_line_count": 10,
+    "max_line_length": 194
+  },
+  "docs/plan/0024:service-log-rotation/contracts/cli.md": {
+    "long_line_count": 3,
+    "max_line_length": 114
+  },
+  "docs/plan/0025:xp-cli-one-time-login-link/PLAN.md": {
+    "long_line_count": 7,
+    "max_line_length": 228
+  },
+  "docs/plan/38wmj:cluster-node-onboarding/PLAN.md": {
+    "long_line_count": 11,
+    "max_line_length": 211
+  },
+  "docs/plan/38wmj:cluster-node-onboarding/contracts/cli.md": {
+    "long_line_count": 2,
+    "max_line_length": 178
+  },
+  "docs/plan/38wmj:cluster-node-onboarding/contracts/file-formats.md": {
+    "long_line_count": 6,
+    "max_line_length": 167
+  },
+  "docs/plan/38wmj:cluster-node-onboarding/contracts/http-apis.md": {
+    "long_line_count": 9,
+    "max_line_length": 191
+  },
+  "docs/plan/README.md": {
+    "long_line_count": 52,
+    "max_line_length": 176
+  },
+  "docs/plan/ap63t:xp-ops-upgrade-unified/PLAN.md": {
+    "long_line_count": 3,
+    "max_line_length": 166
+  },
+  "docs/plan/ap63t:xp-ops-upgrade-unified/contracts/cli.md": {
+    "long_line_count": 1,
+    "max_line_length": 115
+  },
+  "docs/plan/bz652:user-details-user-node-quotas/PLAN.md": {
+    "long_line_count": 9,
+    "max_line_length": 226
+  },
+  "docs/plan/bz652:user-details-user-node-quotas/contracts/http-apis.md": {
+    "long_line_count": 1,
+    "max_line_length": 166
+  },
+  "docs/plan/bz652:user-details-user-node-quotas/contracts/ui.md": {
+    "long_line_count": 1,
+    "max_line_length": 118
+  },
+  "docs/plan/c2v6d:raft-single-node-recovery/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 129
+  },
+  "docs/plan/e8c4j:reality-multi-server-names/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  "docs/plan/eu2rn:prerelease-e2e-verification/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 128
+  },
+  "docs/plan/gcbwg:reality-global-domain-registry/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 101
+  },
+  "docs/plan/hmtuc:node-meta-config-source-of-truth/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 112
+  },
+  "docs/plan/hshdf:prerelease-release-channel/PLAN.md": {
+    "long_line_count": 6,
+    "max_line_length": 188
+  },
+  "docs/plan/jwzaq:release-workflow-yaml-fix/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 102
+  },
+  "docs/plan/k9n2r:xp-ops-admin-token-ops/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 128
+  },
+  "docs/plan/m6mer:subscription-name-uniqueness/PLAN.md": {
+    "long_line_count": 2,
+    "max_line_length": 105
+  },
+  "docs/plan/n5mtq:ui-version-check/PLAN.md": {
+    "long_line_count": 15,
+    "max_line_length": 204
+  },
+  "docs/plan/n5mtq:ui-version-check/contracts/http-apis.md": {
+    "long_line_count": 2,
+    "max_line_length": 124
+  },
+  "docs/plan/n93kd:endpoint-probe/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 127
+  },
+  "docs/plan/qxxja:endpoint-probe-run-sse/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 101
+  },
+  "docs/plan/xkzjb:endpoint-node-reassign/PLAN.md": {
+    "long_line_count": 3,
+    "max_line_length": 142
+  },
+  "docs/plan/z27vg:pr-intent-label-release/PLAN.md": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "docs/solutions/ci/docker-build-push-post-build-hang.md": {
+    "long_line_count": 7,
+    "max_line_length": 338
+  },
+  "docs/solutions/ci/musl-release-openssl-vendoring.md": {
+    "long_line_count": 7,
+    "max_line_length": 278
+  },
+  "docs/solutions/ci/real-xray-e2e-runner-guardrails.md": {
+    "long_line_count": 17,
+    "max_line_length": 225
+  },
+  "docs/solutions/ci/release-backfill-version-resolution.md": {
+    "long_line_count": 13,
+    "max_line_length": 367
+  },
+  "docs/solutions/ops/reality-dest-sni-separation.md": {
+    "long_line_count": 14,
+    "max_line_length": 555
+  },
+  "docs/specs/3e4q4-mihomo-provider-dual-track/SPEC.md": {
+    "long_line_count": 62,
+    "max_line_length": 512
+  },
+  "docs/specs/3e4q4-mihomo-provider-dual-track/contracts/final-mihomo-config.md": {
+    "long_line_count": 9,
+    "max_line_length": 162
+  },
+  "docs/specs/3e4q4-mihomo-provider-dual-track/contracts/http-apis.md": {
+    "long_line_count": 15,
+    "max_line_length": 364
+  },
+  "docs/specs/3hpk4-admin-delete-node/HISTORY.md": {
+    "long_line_count": 3,
+    "max_line_length": 136
+  },
+  "docs/specs/3hpk4-admin-delete-node/IMPLEMENTATION.md": {
+    "long_line_count": 3,
+    "max_line_length": 226
+  },
+  "docs/specs/3hpk4-admin-delete-node/SPEC.md": {
+    "long_line_count": 5,
+    "max_line_length": 139
+  },
+  "docs/specs/5yd72-ci-workflow-yaml-parse-fix/SPEC.md": {
+    "long_line_count": 1,
+    "max_line_length": 103
+  },
+  "docs/specs/6e7e4-node-user-inbound-ip-usage/SPEC.md": {
+    "long_line_count": 23,
+    "max_line_length": 181
+  },
+  "docs/specs/6e7e4-node-user-inbound-ip-usage/contracts/cli.md": {
+    "long_line_count": 1,
+    "max_line_length": 183
+  },
+  "docs/specs/6e7e4-node-user-inbound-ip-usage/contracts/http-apis.md": {
+    "long_line_count": 1,
+    "max_line_length": 102
+  },
+  "docs/specs/9vmap-node-service-observability/SPEC.md": {
+    "long_line_count": 15,
+    "max_line_length": 189
+  },
+  "docs/specs/README.md": {
+    "long_line_count": 33,
+    "max_line_length": 474
+  },
+  "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
+    "long_line_count": 34,
+    "max_line_length": 162
+  },
+  "docs/specs/d4kex-shadcn-ui-full-migration/SPEC.md": {
+    "long_line_count": 19,
+    "max_line_length": 238
+  },
+  "docs/specs/e5sqd-web-tools-mihomo-redact/SPEC.md": {
+    "long_line_count": 7,
+    "max_line_length": 184
+  },
+  "docs/specs/e5sqd-web-tools-mihomo-redact/contracts/http-apis.md": {
+    "long_line_count": 4,
+    "max_line_length": 225
+  },
+  "docs/specs/gj4xg-dashboard-nodes-shared-list/SPEC.md": {
+    "long_line_count": 5,
+    "max_line_length": 197
+  },
+  "docs/specs/jtnnd-node-runtime-fanout-timeout-tolerance/SPEC.md": {
+    "long_line_count": 2,
+    "max_line_length": 117
+  },
+  "docs/specs/k7m2n-node-history-fallback/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 213
+  },
+  "docs/specs/k7m2n-node-history-fallback/IMPLEMENTATION.md": {
+    "long_line_count": 4,
+    "max_line_length": 144
+  },
+  "docs/specs/k7m2n-node-history-fallback/SPEC.md": {
+    "long_line_count": 6,
+    "max_line_length": 167
+  },
+  "docs/specs/m4n7c-node-tcp-connection-count/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 273
+  },
+  "docs/specs/m4n7c-node-tcp-connection-count/IMPLEMENTATION.md": {
+    "long_line_count": 12,
+    "max_line_length": 213
+  },
+  "docs/specs/m4n7c-node-tcp-connection-count/SPEC.md": {
+    "long_line_count": 3,
+    "max_line_length": 145
+  },
+  "docs/specs/much7-endpoint-probe-online-participants/SPEC.md": {
+    "long_line_count": 8,
+    "max_line_length": 154
+  },
+  "docs/specs/nbs5f-xray-control-plane-relay/HISTORY.md": {
+    "long_line_count": 2,
+    "max_line_length": 109
+  },
+  "docs/specs/nbs5f-xray-control-plane-relay/IMPLEMENTATION.md": {
+    "long_line_count": 4,
+    "max_line_length": 197
+  },
+  "docs/specs/nbs5f-xray-control-plane-relay/SPEC.md": {
+    "long_line_count": 1,
+    "max_line_length": 102
+  },
+  "docs/specs/nujzm-access-model-hardcut-v9/SPEC.md": {
+    "long_line_count": 1,
+    "max_line_length": 158
+  },
+  "docs/specs/puf2g-node-panel-link-entry/SPEC.md": {
+    "long_line_count": 2,
+    "max_line_length": 115
+  },
+  "docs/specs/q4n8p-node-list-cross-origin-actions/IMPLEMENTATION.md": {
+    "long_line_count": 3,
+    "max_line_length": 160
+  },
+  "docs/specs/q4n8p-node-list-cross-origin-actions/SPEC.md": {
+    "long_line_count": 5,
+    "max_line_length": 164
+  },
+  "docs/specs/r7m2q-openrc-low-memory-runtime-recovery/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 231
+  },
+  "docs/specs/r7m2q-openrc-low-memory-runtime-recovery/IMPLEMENTATION.md": {
+    "long_line_count": 7,
+    "max_line_length": 340
+  },
+  "docs/specs/r7m2q-openrc-low-memory-runtime-recovery/SPEC.md": {
+    "long_line_count": 10,
+    "max_line_length": 269
+  },
+  "docs/specs/rbt5e-mihomo-subscription-template/SPEC.md": {
+    "long_line_count": 31,
+    "max_line_length": 355
+  },
+  "docs/specs/rbt5e-mihomo-subscription-template/assets/owner-mixin-normalized.yaml": {
+    "long_line_count": 23,
+    "max_line_length": 122
+  },
+  "docs/specs/rbt5e-mihomo-subscription-template/contracts/http-apis.md": {
+    "long_line_count": 2,
+    "max_line_length": 310
+  },
+  "docs/specs/s2w9k-quota-policy-node-ratio-editor/SPEC.md": {
+    "long_line_count": 13,
+    "max_line_length": 147
+  },
+  "docs/specs/t8m4q-xray-stale-tcp-reclaim/HISTORY.md": {
+    "long_line_count": 5,
+    "max_line_length": 127
+  },
+  "docs/specs/t8m4q-xray-stale-tcp-reclaim/IMPLEMENTATION.md": {
+    "long_line_count": 10,
+    "max_line_length": 237
+  },
+  "docs/specs/t8m4q-xray-stale-tcp-reclaim/SPEC.md": {
+    "long_line_count": 7,
+    "max_line_length": 188
+  },
+  "docs/specs/tc2kp-country-is-ip-geo/SPEC.md": {
+    "long_line_count": 3,
+    "max_line_length": 128
+  },
+  "docs/specs/wvrmn-remove-grants-hard-cut/SPEC.md": {
+    "long_line_count": 18,
+    "max_line_length": 231
+  },
+  "docs/specs/yzqn6-remove-grant-groups-hard-cut/SPEC.md": {
+    "long_line_count": 4,
+    "max_line_length": 185
+  },
+  "scripts/dev/seed-m6-demo-data.js": {
+    "long_line_count": 2,
+    "max_line_length": 127
+  },
+  "scripts/dev/subscription-3node-compose/README.md": {
+    "long_line_count": 6,
+    "max_line_length": 133
+  },
+  "scripts/dev/subscription-3node-compose/docker-compose.yml": {
+    "long_line_count": 3,
+    "max_line_length": 120
+  },
+  "src/ddns.rs": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "src/domain/mod.rs": {
+    "long_line_count": 1,
+    "max_line_length": 106
+  },
+  "src/endpoint_probe.rs": {
+    "long_line_count": 1,
+    "max_line_length": 103,
+    "source_lines": 1244
+  },
+  "src/http/mod.rs": {
+    "long_line_count": 4,
+    "max_line_length": 128,
+    "source_lines": 7732
+  },
+  "src/http/tests.rs": {
+    "long_line_count": 2,
+    "max_line_length": 126,
+    "source_lines": 9546
+  },
+  "src/inbound_ip_usage.rs": {
+    "long_line_count": 1,
+    "max_line_length": 125
+  },
+  "src/ip_geo_db.rs": {
+    "long_line_count": 2,
+    "max_line_length": 102
+  },
+  "src/main.rs": {
+    "long_line_count": 2,
+    "max_line_length": 105
+  },
+  "src/managed_default_endpoints.rs": {
+    "long_line_count": 1,
+    "max_line_length": 193
+  },
+  "src/mihomo_redact.rs": {
+    "source_lines": 1331
+  },
+  "src/mihomo_redact/tests.rs": {
+    "long_line_count": 5,
+    "max_line_length": 207
+  },
+  "src/node_egress_probe.rs": {
+    "long_line_count": 4,
+    "max_line_length": 114
+  },
+  "src/openrc_process.rs": {
+    "long_line_count": 1,
+    "max_line_length": 101
+  },
+  "src/ops/admin_token.rs": {
+    "long_line_count": 4,
+    "max_line_length": 120
+  },
+  "src/ops/admin_token_tests.rs": {
+    "long_line_count": 1,
+    "max_line_length": 125
+  },
+  "src/ops/cloudflare.rs": {
+    "long_line_count": 2,
+    "max_line_length": 431,
+    "source_lines": 1087
+  },
+  "src/ops/container.rs": {
+    "long_line_count": 10,
+    "max_line_length": 155,
+    "source_lines": 1683
+  },
+  "src/ops/container/tests.rs": {
+    "long_line_count": 1,
+    "max_line_length": 141
+  },
+  "src/ops/deploy.rs": {
+    "long_line_count": 21,
+    "max_line_length": 187,
+    "source_lines": 2308
+  },
+  "src/ops/deploy/tests.rs": {
+    "long_line_count": 4,
+    "max_line_length": 141
+  },
+  "src/ops/init.rs": {
+    "long_line_count": 2,
+    "max_line_length": 363
+  },
+  "src/ops/install.rs": {
+    "long_line_count": 1,
+    "max_line_length": 139
+  },
+  "src/ops/tui.rs": {
+    "long_line_count": 2,
+    "max_line_length": 175,
+    "source_lines": 1016
+  },
+  "src/ops/upgrade.rs": {
+    "long_line_count": 3,
+    "max_line_length": 108,
+    "source_lines": 1015
+  },
+  "src/ops/xp.rs": {
+    "long_line_count": 7,
+    "max_line_length": 115,
+    "source_lines": 1205
+  },
+  "src/ops/xp_env.rs": {
+    "long_line_count": 1,
+    "max_line_length": 176
+  },
+  "src/protocol.rs": {
+    "long_line_count": 1,
+    "max_line_length": 103
+  },
+  "src/public_ip_probe.rs": {
+    "long_line_count": 1,
+    "max_line_length": 112
+  },
+  "src/quota.rs": {
+    "long_line_count": 6,
+    "max_line_length": 187,
+    "source_lines": 1113
+  },
+  "src/quota/tests.rs": {
+    "long_line_count": 6,
+    "max_line_length": 117,
+    "source_lines": 3902
+  },
+  "src/raft/README.md": {
+    "long_line_count": 5,
+    "max_line_length": 263
+  },
+  "src/raft/storage/file.rs": {
+    "long_line_count": 2,
+    "max_line_length": 201
+  },
+  "src/raft/storage/snapshot.rs": {
+    "long_line_count": 1,
+    "max_line_length": 103
+  },
+  "src/raft/storage/state_machine.rs": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "src/reconcile.rs": {
+    "long_line_count": 5,
+    "max_line_length": 125,
+    "source_lines": 1087
+  },
+  "src/reconcile/tests.rs": {
+    "long_line_count": 8,
+    "max_line_length": 218
+  },
+  "src/state.rs": {
+    "long_line_count": 2,
+    "max_line_length": 129,
+    "source_lines": 4405
+  },
+  "src/state/tests.rs": {
+    "source_lines": 2296
+  },
+  "src/subscription.rs": {
+    "long_line_count": 5,
+    "max_line_length": 133,
+    "source_lines": 5138
+  },
+  "src/subscription/tests.rs": {
+    "long_line_count": 45,
+    "max_line_length": 150,
+    "source_lines": 5350
+  },
+  "src/vless_https_canary.rs": {
+    "long_line_count": 5,
+    "max_line_length": 120,
+    "source_lines": 1327
+  },
+  "src/vless_https_canary/tests.rs": {
+    "long_line_count": 2,
+    "max_line_length": 111
+  },
+  "src/xray/builder.rs": {
+    "long_line_count": 5,
+    "max_line_length": 114
+  },
+  "src/xray_supervisor.rs": {
+    "long_line_count": 2,
+    "max_line_length": 109
+  },
+  "tests/forwarding_raft_facade_forwarding.rs": {
+    "long_line_count": 1,
+    "max_line_length": 114
+  },
+  "tests/shared_quota_xray_e2e.rs": {
+    "source_lines": 1008
+  },
+  "tests/xp_ops_smoke.rs": {
+    "long_line_count": 5,
+    "max_line_length": 128
+  },
+  "tests/xp_ops_upgrade.rs": {
+    "long_line_count": 14,
+    "max_line_length": 491
+  },
+  "web/.storybook/mocks/apiMock.ts": {
+    "long_line_count": 6,
+    "max_line_length": 198,
+    "source_lines": 2224
+  },
+  "web/package.json": {
+    "long_line_count": 1,
+    "max_line_length": 142
+  },
+  "web/src/components/AccessMatrix.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 126
+  },
+  "web/src/components/AppShell.tsx": {
+    "long_line_count": 5,
+    "max_line_length": 215
+  },
+  "web/src/components/AuthGate.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 200
+  },
+  "web/src/components/Button.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 238
+  },
+  "web/src/components/ConfirmDialog.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 221
+  },
+  "web/src/components/DataTable.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 202
+  },
+  "web/src/components/EditorShortcutHint.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 161
+  },
+  "web/src/components/EditorShortcutHint.tsx": {
+    "long_line_count": 4,
+    "max_line_length": 190
+  },
+  "web/src/components/EndpointProbeBar.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 282
+  },
+  "web/src/components/EndpointsTable.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 151
+  },
+  "web/src/components/IpUsageView.tsx": {
+    "long_line_count": 8,
+    "max_line_length": 156,
+    "source_lines": 1907
+  },
+  "web/src/components/MihomoSplitEditor.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 430
+  },
+  "web/src/components/NodeQuotaEditor.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 277
+  },
+  "web/src/components/NodeQuotaEditor.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 168
+  },
+  "web/src/components/PageHeader.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 173
+  },
+  "web/src/components/SubscriptionFormatSegmentedControl.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 153
+  },
+  "web/src/components/SubscriptionPreviewDialog.tsx": {
+    "long_line_count": 11,
+    "max_line_length": 368
+  },
+  "web/src/components/TagInput.stories.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 134
+  },
+  "web/src/components/TagInput.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 148
+  },
+  "web/src/components/TcpConnectionUsageView.tsx": {
+    "long_line_count": 11,
+    "max_line_length": 148
+  },
+  "web/src/components/Toast.stories.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 199
+  },
+  "web/src/components/UiPrefs.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 256
+  },
+  "web/src/components/VersionBadges.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 179
+  },
+  "web/src/components/YamlCodeEditor.stories.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 242
+  },
+  "web/src/components/ui/alert-dialog.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 182
+  },
+  "web/src/components/ui/alert-dialog.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 178
+  },
+  "web/src/components/ui/badge.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 178
+  },
+  "web/src/components/ui/badge.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 123
+  },
+  "web/src/components/ui/button.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 178
+  },
+  "web/src/components/ui/button.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 230
+  },
+  "web/src/components/ui/card.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 184
+  },
+  "web/src/components/ui/checkbox.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 186
+  },
+  "web/src/components/ui/checkbox.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 693
+  },
+  "web/src/components/ui/command.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 184
+  },
+  "web/src/components/ui/command.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 477
+  },
+  "web/src/components/ui/dialog.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 183
+  },
+  "web/src/components/ui/dialog.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 206
+  },
+  "web/src/components/ui/dropdown-menu.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 171
+  },
+  "web/src/components/ui/dropdown-menu.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 235
+  },
+  "web/src/components/ui/form.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 201
+  },
+  "web/src/components/ui/input.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 203
+  },
+  "web/src/components/ui/input.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 369
+  },
+  "web/src/components/ui/label.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 168
+  },
+  "web/src/components/ui/popover.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 170
+  },
+  "web/src/components/ui/popover.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 110
+  },
+  "web/src/components/ui/scroll-area.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 185
+  },
+  "web/src/components/ui/select.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 180
+  },
+  "web/src/components/ui/select.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 288
+  },
+  "web/src/components/ui/separator.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 157
+  },
+  "web/src/components/ui/sheet.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 174
+  },
+  "web/src/components/ui/sheet.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 153
+  },
+  "web/src/components/ui/table.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 170
+  },
+  "web/src/components/ui/tabs.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 187
+  },
+  "web/src/components/ui/tabs.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 338
+  },
+  "web/src/components/ui/textarea.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 205
+  },
+  "web/src/components/ui/textarea.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 288
+  },
+  "web/src/demo/DemoEndpointsPage.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 109
+  },
+  "web/src/demo/DemoLayout.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 276
+  },
+  "web/src/demo/DemoLoginPage.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 129
+  },
+  "web/src/demo/DemoSettingsPages.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 169
+  },
+  "web/src/demo/DemoUsersPage.tsx": {
+    "long_line_count": 5,
+    "max_line_length": 138,
+    "source_lines": 1261
+  },
+  "web/src/demo/mockApi.ts": {
+    "long_line_count": 2,
+    "max_line_length": 151
+  },
+  "web/src/styles.css": {
+    "long_line_count": 5,
+    "max_line_length": 270
+  },
+  "web/src/views/EndpointDetailsPage.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 189
+  },
+  "web/src/views/EndpointDetailsPage.tsx": {
+    "long_line_count": 4,
+    "max_line_length": 206,
+    "source_lines": 1069
+  },
+  "web/src/views/EndpointNewPage.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 109
+  },
+  "web/src/views/EndpointProbeRunPage.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 122
+  },
+  "web/src/views/EndpointProbeStatsPage.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 164
+  },
+  "web/src/views/LoginPage.test.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 133
+  },
+  "web/src/views/LoginPage.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 118
+  },
+  "web/src/views/NodeDetailsPage.tsx": {
+    "long_line_count": 4,
+    "max_line_length": 134,
+    "source_lines": 1699
+  },
+  "web/src/views/NodesPage.stories.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 148
+  },
+  "web/src/views/NodesPage.tsx": {
+    "long_line_count": 7,
+    "max_line_length": 198
+  },
+  "web/src/views/QuotaPolicyPage.tsx": {
+    "long_line_count": 9,
+    "max_line_length": 181,
+    "source_lines": 2568
+  },
+  "web/src/views/RealityDomainsPage.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 139
+  },
+  "web/src/views/ToolsPage.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 119
+  },
+  "web/src/views/UserDetailsPage.stories.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 136
+  },
+  "web/src/views/UserDetailsPage.test.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 122,
+    "source_lines": 1081
+  },
+  "web/src/views/UserDetailsPage.tsx": {
+    "long_line_count": 11,
+    "max_line_length": 151,
+    "source_lines": 1519
+  },
+  "web/src/views/UserNewPage.tsx": {
+    "long_line_count": 1,
+    "max_line_length": 118
+  },
+  "web/src/views/UsersPage.tsx": {
+    "long_line_count": 4,
+    "max_line_length": 131
+  }
+}

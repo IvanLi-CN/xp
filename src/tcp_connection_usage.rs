@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    fs,
-    io,
+    fs, io,
     net::IpAddr,
     path::Path,
 };
@@ -362,7 +361,9 @@ pub fn build_window_view(
     window: TcpConnectionUsageWindow,
     endpoints: &[TcpConnectionEndpointView],
 ) -> TcpConnectionUsageWindowView {
-    let latest = usage.latest_minute_dt().unwrap_or_else(|| floor_minute(now));
+    let latest = usage
+        .latest_minute_dt()
+        .unwrap_or_else(|| floor_minute(now));
     let window_minutes = window.minutes();
     let window_start_dt = latest - Duration::minutes((window_minutes - 1) as i64);
 
@@ -483,18 +484,10 @@ fn collect_established_inbound_connections_from_path(
             continue;
         }
         let (local_ip, local_port) = parse_proc_addr_port(local).map_err(|err| {
-            TcpConnectionUsageError::Parse(format!(
-                "{}:{} {err}",
-                path.display(),
-                line_index + 1
-            ))
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
         let (_remote_ip, remote_port) = parse_proc_addr_port(remote).map_err(|err| {
-            TcpConnectionUsageError::Parse(format!(
-                "{}:{} {err}",
-                path.display(),
-                line_index + 1
-            ))
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
         if remote_port == 0 {
             continue;
@@ -557,8 +550,8 @@ fn parse_proc_addr_port(value: &str) -> Result<(IpAddr, u16), String> {
 }
 
 fn parse_ipv4_hex(value: &str) -> Result<IpAddr, String> {
-    let raw = u32::from_str_radix(value, 16)
-        .map_err(|err| format!("invalid ipv4 hex {value}: {err}"))?;
+    let raw =
+        u32::from_str_radix(value, 16).map_err(|err| format!("invalid ipv4 hex {value}: {err}"))?;
     let bytes = raw.to_le_bytes();
     Ok(IpAddr::from(bytes))
 }
@@ -625,16 +618,25 @@ mod tests {
             &usage,
             minute,
             TcpConnectionUsageWindow::Hours24,
-            &[endpoint_view("ep-a", "edge-a", 443), endpoint_view("ep-b", "edge-b", 8443)],
+            &[
+                endpoint_view("ep-a", "edge-a", 443),
+                endpoint_view("ep-b", "edge-b", 8443),
+            ],
         );
         assert_eq!(report.endpoints.len(), 2);
         assert_eq!(report.per_endpoint_series.len(), 2);
         assert_eq!(
-            report.per_endpoint_series[0].series.last().map(|point| point.count),
+            report.per_endpoint_series[0]
+                .series
+                .last()
+                .map(|point| point.count),
             Some(3)
         );
         assert_eq!(
-            report.per_endpoint_series[1].series.last().map(|point| point.count),
+            report.per_endpoint_series[1]
+                .series
+                .last()
+                .map(|point| point.count),
             Some(1)
         );
     }
@@ -731,8 +733,7 @@ mod tests {
         assert_eq!(ip4, IpAddr::from([127, 0, 0, 1]));
         assert_eq!(port4, 22);
 
-        let (ip6, port6) =
-            parse_proc_addr_port("00000000000000000000000000000000:01BB").unwrap();
+        let (ip6, port6) = parse_proc_addr_port("00000000000000000000000000000000:01BB").unwrap();
         assert!(matches!(ip6, IpAddr::V6(v6) if v6.is_unspecified()));
         assert_eq!(port6, 443);
     }

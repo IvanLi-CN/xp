@@ -64,11 +64,9 @@ pub fn detect_distro(paths: &Paths) -> Result<Distro, String> {
     match id.as_deref() {
         Some("arch") => Ok(Distro::Arch),
         Some("debian") | Some("ubuntu") => Ok(Distro::Debian),
-        Some("rhel")
-        | Some("centos")
-        | Some("rocky")
-        | Some("almalinux")
-        | Some("ol") => Ok(Distro::Rhel),
+        Some("rhel") | Some("centos") | Some("rocky") | Some("almalinux") | Some("ol") => {
+            Ok(Distro::Rhel)
+        }
         Some("alpine") => Ok(Distro::Alpine),
         Some(other) => Err(format!("unsupported distro: ID={other}")),
         None => Err("unsupported distro: missing ID in /etc/os-release".to_string()),

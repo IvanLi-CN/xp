@@ -26,6 +26,9 @@ jobs:
       - name: rustfmt
         run: cargo fmt --check
 
+      - name: style budget
+        run: python3 scripts/check-style-budget.py
+
       - name: setup bun
         uses: oven-sh/setup-bun@v2
         with:

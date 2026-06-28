@@ -158,7 +158,8 @@ impl MeshAwareHttpClient {
         F: Fn(&reqwest::Client) -> reqwest::RequestBuilder,
     {
         if let Some(relay) = &self.relay {
-            let relay_budget = std::cmp::min(budget / 2, Duration::from_secs(1)).max(Duration::from_millis(1));
+            let relay_budget =
+                std::cmp::min(budget / 2, Duration::from_secs(1)).max(Duration::from_millis(1));
             match tokio::time::timeout(relay_budget, build_request(relay).send()).await {
                 Ok(Ok(response)) => {
                     self.state.mark_ready().await;

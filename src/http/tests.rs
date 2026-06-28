@@ -30,7 +30,10 @@ use crate::{
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
-    protocol::{RealityConfig, RealityKeys, Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta, ss2022_password},
+    protocol::{
+        RealityConfig, RealityKeys, Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta,
+        ss2022_password,
+    },
     raft::{
         app::LocalRaft,
         types::{NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
@@ -130,12 +133,15 @@ fn test_config(data_dir: PathBuf) -> Config {
         node_name: "node-1".to_string(),
         access_host: "".to_string(),
         api_base_url: "https://127.0.0.1:62416".to_string(),
-        vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], crate::config::DEFAULT_VLESS_CANARY_BIND_PORT)),
-        vless_canary_acme_directory_url:
-            "https://acme-v02.api.letsencrypt.org/directory".to_string(),
+        vless_canary_bind: SocketAddr::from((
+            [127, 0, 0, 1],
+            crate::config::DEFAULT_VLESS_CANARY_BIND_PORT,
+        )),
+        vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory"
+            .to_string(),
         vless_canary_acme_contact_email: String::new(),
-        vless_canary_cloudflare_token_file:
-            crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
+        vless_canary_cloudflare_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
+            .to_string(),
         vless_canary_cloudflare_zone_id: String::new(),
         vless_canary_dns_propagation_timeout_secs: 180,
         default_vless_port: None,
@@ -1130,7 +1136,10 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
             Request::builder()
                 .method("POST")
                 .uri("/api/admin/_internal/endpoint-canary-probe")
-                .header(header::AUTHORIZATION, format!("Bearer {}", TEST_ADMIN_TOKEN))
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", TEST_ADMIN_TOKEN),
+                )
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     json!({
@@ -1338,7 +1347,10 @@ async fn get_node_delete_preview_lists_referenced_endpoints() {
     let json = body_json(res).await;
     assert_eq!(json["node_id"], json!(node.node_id));
     assert_eq!(json["endpoints"].as_array().unwrap().len(), 1);
-    assert_eq!(json["endpoints"][0]["endpoint_id"], json!(endpoint.endpoint_id));
+    assert_eq!(
+        json["endpoints"][0]["endpoint_id"],
+        json!(endpoint.endpoint_id)
+    );
     assert_eq!(json["endpoints"][0]["tag"], json!(endpoint.tag));
     assert_eq!(
         json["endpoints"][0]["kind"],
@@ -1392,11 +1404,13 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
-    assert!(json["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|item| item["node_id"] != json!(node.node_id)));
+    assert!(
+        json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["node_id"] != json!(node.node_id))
+    );
 
     let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
     let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
@@ -1493,7 +1507,11 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
         "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=stale-preview",
         node.node_id
     );
-    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "conflict");
@@ -1525,13 +1543,20 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_removed_preview_end
         "/api/admin/nodes/{}?delete_endpoints=true&expected_endpoint_ids=already-removed",
         node.node_id
     );
-    let res = app.clone().oneshot(req_authed("DELETE", &uri)).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(req_authed("DELETE", &uri))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
     let json = body_json(res).await;
     assert_eq!(json["error"]["code"], "conflict");
 
     let res = app
-        .oneshot(req_authed("GET", &format!("/api/admin/nodes/{}", node.node_id)))
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/nodes/{}", node.node_id),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -2863,7 +2888,11 @@ async fn health_includes_vless_https_canary_view() {
     let tmp = TempDir::new().unwrap();
     let app = app(&tmp);
 
-    let res = app.clone().oneshot(req("GET", "/api/health")).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(req("GET", "/api/health"))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     let canary = body
@@ -3289,7 +3318,10 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
     );
     assert_eq!(updated["meta"]["canary_upstream"]["mode"], "h2c");
     assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
-    assert_eq!(updated["meta"]["reality"]["server_names"][0], "node.example.com");
+    assert_eq!(
+        updated["meta"]["reality"]["server_names"][0],
+        "node.example.com"
+    );
 
     let res = app
         .oneshot(req_authed_json(
@@ -3509,10 +3541,7 @@ async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
             .unwrap();
     }
 
-    for url in [
-        "http://127.0.0.1:8080/app",
-        "http://127.0.0.1:8080?fixed=1",
-    ] {
+    for url in ["http://127.0.0.1:8080/app", "http://127.0.0.1:8080?fixed=1"] {
         let res = app
             .clone()
             .oneshot(req_authed_json(
@@ -4431,7 +4460,10 @@ async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
                 .await
                 .unwrap();
             assert_eq!(res.status(), StatusCode::OK);
-            body_json(res).await["user_id"].as_str().unwrap().to_string()
+            body_json(res).await["user_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
         }
     };
     let vless_user_id = create_user("vless-user").await;
@@ -5415,11 +5447,9 @@ async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
         config.api_base_url.clone(),
     )
     .unwrap();
-    let store = JsonSnapshotStore::load_or_init(test_store_init(
-        &config,
-        Some(cluster.node_id.clone()),
-    ))
-    .unwrap();
+    let store =
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .unwrap();
     let store = Arc::new(Mutex::new(store));
 
     let leader_app = build_app_with_cluster_store_and_raft(
@@ -5723,7 +5753,10 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
     let provider_system_res = app
         .oneshot(req(
             "GET",
-            &format!("/api/sub/{}/mihomo/provider/system", fixtures.subscription_token),
+            &format!(
+                "/api/sub/{}/mihomo/provider/system",
+                fixtures.subscription_token
+            ),
         ))
         .await
         .unwrap();
@@ -5941,9 +5974,7 @@ rules: []
     );
     assert_eq!(
         relay_group.get("filter").and_then(YamlValue::as_str),
-        Some(
-            "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)"
-        )
+        Some("(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)")
     );
     let relay_use = relay_group
         .get("use")
@@ -6045,12 +6076,20 @@ rules: []
         .collect::<Vec<_>>();
     assert_eq!(
         japan_use,
-        vec![crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
+        vec![
+            crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME,
+            "providerA"
+        ]
     );
     let japan_alias_proxies = japan_alias
         .get("proxies")
         .and_then(YamlValue::as_sequence)
-        .map(|values| values.iter().filter_map(YamlValue::as_str).collect::<Vec<_>>());
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(YamlValue::as_str)
+                .collect::<Vec<_>>()
+        });
     assert_eq!(japan_alias_proxies, None);
 
     let landing_pool = groups
@@ -6153,7 +6192,9 @@ rules: []
         .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
     assert!(
-        provider_system_proxy_names.iter().any(|name| name.ends_with("-ss")),
+        provider_system_proxy_names
+            .iter()
+            .any(|name| name.ends_with("-ss")),
         "system payload should still include direct system proxies"
     );
 }
@@ -6269,7 +6310,9 @@ rules: []
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let profile = body_json(res).await;
-    assert_eq!(profile["mixin_yaml"], r#"port: 0
+    assert_eq!(
+        profile["mixin_yaml"],
+        r#"port: 0
 proxies:
   - name: "custom-direct"
     type: ss
@@ -6289,7 +6332,8 @@ proxy-groups:
     use: ["providerA"]
     proxies: ["DIRECT"]
 rules: []
-"#);
+"#
+    );
     assert_eq!(profile["extra_proxies_yaml"], "");
     assert_eq!(profile["extra_proxy_providers_yaml"], "");
 
@@ -6309,9 +6353,7 @@ rules: []
         })
         .expect("custom-direct should render from stored mixin");
     assert_eq!(
-        custom_direct
-            .get("server")
-            .and_then(YamlValue::as_str),
+        custom_direct.get("server").and_then(YamlValue::as_str),
         Some("custom.example.com")
     );
     let provider_a = yaml
@@ -7959,14 +8001,8 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
         .find(|item| item["endpoint_id"] == endpoint_one_id)
         .expect("endpoint one series");
     assert_eq!(endpoint_one_series["endpoint_tag"], endpoint_one_tag);
-    assert_eq!(
-        series_count_at(&endpoint_one_series["series"], &minute0),
-        2
-    );
-    assert_eq!(
-        series_count_at(&endpoint_one_series["series"], &minute1),
-        4
-    );
+    assert_eq!(series_count_at(&endpoint_one_series["series"], &minute0), 2);
+    assert_eq!(series_count_at(&endpoint_one_series["series"], &minute1), 4);
 }
 
 #[tokio::test]
@@ -9112,9 +9148,9 @@ async fn endpoint_canary_probe_url_rejects_loopback_access_host() {
         meta: test_vless_meta(true),
     };
 
-	let err = super::endpoint_canary_probe_url(&node, &endpoint).unwrap_err();
-	assert_eq!(err.status, StatusCode::BAD_REQUEST);
-	assert!(err.message.contains("loopback access_host"));
+    let err = super::endpoint_canary_probe_url(&node, &endpoint).unwrap_err();
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("loopback access_host"));
 }
 
 #[tokio::test]

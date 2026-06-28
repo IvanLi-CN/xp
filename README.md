@@ -204,6 +204,7 @@ Backend:
 cargo test
 cargo fmt
 cargo clippy -- -D warnings
+bun run check:style-budget
 ```
 
 Frontend:

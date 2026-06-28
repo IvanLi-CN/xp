@@ -173,7 +173,8 @@ impl NodeHistoryHandle {
     }
 
     fn new(persistence_path: PathBuf) -> Self {
-        let cache = load_history_cache(&persistence_path).unwrap_or_else(PersistedNodeHistoryCache::empty);
+        let cache =
+            load_history_cache(&persistence_path).unwrap_or_else(PersistedNodeHistoryCache::empty);
         Self {
             inner: Arc::new(RwLock::new(cache)),
             persistence_path: Arc::new(persistence_path),
@@ -183,7 +184,10 @@ impl NodeHistoryHandle {
 
     pub async fn snapshot(&self, node_id: &str) -> Option<NodeHistorySnapshot> {
         let state = self.inner.read().await;
-        state.nodes.get(node_id).map(PersistedNodeHistoryRecord::snapshot)
+        state
+            .nodes
+            .get(node_id)
+            .map(PersistedNodeHistoryRecord::snapshot)
     }
 
     pub async fn record_local_sample(
@@ -286,15 +290,16 @@ fn record_daily_traffic(
 ) {
     let now_str = rfc3339(now);
     let date = date_key(now);
-    let entry = record
-        .daily_traffic
-        .entry(date.clone())
-        .or_insert_with(|| NodeHistoryDailyTraffic {
-            date,
-            uplink_bytes: 0,
-            downlink_bytes: 0,
-            updated_at: now_str.clone(),
-        });
+    let entry =
+        record
+            .daily_traffic
+            .entry(date.clone())
+            .or_insert_with(|| NodeHistoryDailyTraffic {
+                date,
+                uplink_bytes: 0,
+                downlink_bytes: 0,
+                updated_at: now_str.clone(),
+            });
 
     for totals in totals {
         if let Some(previous) = record.traffic_baselines.get(&totals.membership_key)
@@ -435,9 +440,7 @@ async fn collect_local_traffic_totals(
             .node_user_endpoint_memberships
             .iter()
             .filter(|membership| membership.node_id == local_node_id)
-            .map(|membership| {
-                membership_xray_email(&membership.user_id, &membership.endpoint_id)
-            })
+            .map(|membership| membership_xray_email(&membership.user_id, &membership.endpoint_id))
             .collect::<Vec<_>>()
     };
     if memberships.is_empty() {

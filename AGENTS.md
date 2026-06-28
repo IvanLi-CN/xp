@@ -27,6 +27,7 @@
 
 - Install repo tooling (commitlint + dprint): `bun install`
 - Install Git hooks (required): `lefthook install`
+- Style budget: `bun run check:style-budget`
 - Run backend locally: `cargo run` (default bind `127.0.0.1:62416`)
 - Sanitize Mihomo subscriptions/configs before sharing: `xp-ops mihomo redact [SOURCE]` (`SOURCE` supports URL, file path, `-` for stdin, or omit for stdin)
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
@@ -41,6 +42,7 @@
 - Rust: format with rustfmt (`cargo fmt`); keep Clippy clean (warnings are errors).
 - TypeScript/React: Biome handles formatting + linting (`web/` scripts `format` / `lint`).
 - Markdown: formatted via `bunx --no-install dprint fmt` (see `dprint.json`).
+- Line and source-file budgets are enforced by `scripts/check-style-budget.py`.
 - Naming: Rust modules/functions `snake_case`, types `CamelCase`; React components `PascalCase`.
 
 ## Testing Guidelines
