@@ -122,6 +122,7 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     baseline = load_baseline(root)
+    unseen_baseline_paths = set(baseline)
     failures: list[str] = []
 
     for path in iter_files(root):
@@ -135,6 +136,7 @@ def main() -> int:
         metrics = file_metrics(rel, lines)
         rel_key = rel.as_posix()
         budget = baseline.get(rel_key, {})
+        unseen_baseline_paths.discard(rel_key)
 
         if is_size_checked(rel):
             source_limit = int(budget.get("source_lines", MAX_SOURCE_LINES))
@@ -159,6 +161,14 @@ def main() -> int:
                 f"{rel}: max line has {metrics['max_line_length']} characters, "
                 f"limit is {allowed_max_line}"
             )
+        if budget:
+            has_long_lines = metrics["long_line_count"] > 0
+            has_large_source = is_size_checked(rel) and metrics["source_lines"] > MAX_SOURCE_LINES
+            if not has_long_lines and not has_large_source:
+                failures.append(f"{rel}: baseline entry is obsolete; remove it")
+
+    for rel_key in sorted(unseen_baseline_paths):
+        failures.append(f"{rel_key}: baseline entry is stale; file is missing or not checked")
 
     if failures:
         print("style budget check failed:")
