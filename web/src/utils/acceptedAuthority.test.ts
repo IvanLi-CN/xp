@@ -17,6 +17,7 @@ describe("acceptedAuthority utils", () => {
 
 	it("accepts valid hostname, IPv4, and bracketed IPv6 authorities", () => {
 		expect(validateAcceptedAuthority("edge.example.com:443")).toBeNull();
+		expect(validateAcceptedAuthority("localhost:443")).toBeNull();
 		expect(validateAcceptedAuthority("203.0.113.10:8443")).toBeNull();
 		expect(validateAcceptedAuthority("[2001:db8::1]:8443")).toBeNull();
 	});

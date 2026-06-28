@@ -91,11 +91,6 @@ export function validateAcceptedAuthority(value: string): string | null {
 		return "accepted host:port must use a valid IPv4, hostname, or bracketed IPv6.";
 	}
 	const labels = normalizedHost.split(".");
-	if (labels.length < 2) {
-		return "accepted host:port hostname must contain at least one dot.";
-	}
-	const tld = labels[labels.length - 1] ?? "";
-	if (tld.length < 2) return "accepted host:port hostname TLD is too short.";
 	for (const label of labels) {
 		if (!label) return "accepted host:port hostname contains an empty label.";
 		if (label.length > 63) {

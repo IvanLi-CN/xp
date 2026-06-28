@@ -150,6 +150,49 @@ pub fn validate_reality_server_name(host: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn validate_accepted_authority_host(host: &str) -> Result<(), &'static str> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("accepted_authority host is required");
+    }
+    if trimmed.len() > 253 {
+        return Err("accepted_authority host is too long (max 253)");
+    }
+    if trimmed.starts_with('.') || trimmed.ends_with('.') {
+        return Err("accepted_authority host must not start or end with a dot (.)");
+    }
+    if trimmed.contains("..") {
+        return Err("accepted_authority host must not contain consecutive dots (..)");
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return Err("accepted_authority host must be a valid hostname");
+    }
+
+    for label in trimmed.split('.') {
+        if label.is_empty() {
+            return Err("accepted_authority host contains an empty label");
+        }
+        if label.len() > 63 {
+            return Err("accepted_authority host label is too long (max 63)");
+        }
+        let bytes = label.as_bytes();
+        if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
+            return Err("accepted_authority host labels must not start/end with '-'");
+        }
+        if !label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("accepted_authority host labels must be alnum or '-'");
+        }
+    }
+
+    Ok(())
+}
+
 pub fn validate_reality_dest(dest: &str) -> Result<(), &'static str> {
     let trimmed = dest.trim();
     if trimmed.is_empty() {
@@ -270,7 +313,7 @@ pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static 
         return Err("accepted_authority must use a valid IPv4, hostname, or [ipv6]");
     }
 
-    validate_reality_server_name(normalized_host)?;
+    validate_accepted_authority_host(normalized_host)?;
     Ok(format!("{}:{parsed_port}", normalized_host.to_ascii_lowercase()))
 }
 
@@ -525,6 +568,7 @@ mod tests {
         let normalized = normalize_accepted_authorities(&[
             " Edge.Example.com.:443 ".to_string(),
             "edge.example.com:443".to_string(),
+            "LOCALHOST:443".to_string(),
             "[2001:DB8::1]:8443".to_string(),
         ])
         .unwrap();
@@ -533,6 +577,7 @@ mod tests {
             normalized,
             vec![
                 "edge.example.com:443".to_string(),
+                "localhost:443".to_string(),
                 "[2001:db8::1]:8443".to_string(),
             ]
         );
