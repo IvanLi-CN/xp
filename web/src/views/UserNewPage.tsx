@@ -43,12 +43,10 @@ const createUserSchema = z
 		displayName: z.string().trim().min(1, "Display name is required."),
 		resetPolicy: z.enum(["monthly", "unlimited"]),
 		resetDay: z.coerce
-			.number({
-				invalid_type_error: "Reset day must be an integer between 1 and 31.",
-			})
+			.number()
 			.int("Reset day must be an integer between 1 and 31."),
 		resetTzOffsetMinutes: z.coerce
-			.number({ invalid_type_error: "tz_offset_minutes must be a number." })
+			.number()
 			.int("tz_offset_minutes must be an integer."),
 	})
 	.superRefine((values, ctx) => {
@@ -64,14 +62,15 @@ const createUserSchema = z
 		}
 	});
 
-type CreateUserValues = z.infer<typeof createUserSchema>;
+type CreateUserFormInput = z.input<typeof createUserSchema>;
+type CreateUserValues = z.output<typeof createUserSchema>;
 
 export function UserNewPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
 	const [serverError, setServerError] = useState<string | null>(null);
-	const form = useForm<CreateUserValues>({
+	const form = useForm<CreateUserFormInput, unknown, CreateUserValues>({
 		resolver: zodResolver(createUserSchema),
 		defaultValues: {
 			displayName: "",
@@ -196,11 +195,19 @@ export function UserNewPage() {
 											<FormLabel>Reset day of month</FormLabel>
 											<FormControl>
 												<Input
-													{...field}
 													type="number"
 													min={1}
 													max={31}
 													disabled={resetPolicy !== "monthly"}
+													name={field.name}
+													ref={field.ref}
+													onBlur={field.onBlur}
+													value={
+														typeof field.value === "number" ||
+														typeof field.value === "string"
+															? field.value
+															: ""
+													}
 													onChange={(event) =>
 														field.onChange(event.target.value)
 													}
@@ -219,8 +226,16 @@ export function UserNewPage() {
 											<FormLabel>User tz_offset_minutes</FormLabel>
 											<FormControl>
 												<Input
-													{...field}
 													type="number"
+													name={field.name}
+													ref={field.ref}
+													onBlur={field.onBlur}
+													value={
+														typeof field.value === "number" ||
+														typeof field.value === "string"
+															? field.value
+															: ""
+													}
 													onChange={(event) =>
 														field.onChange(event.target.value)
 													}

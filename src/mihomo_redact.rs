@@ -538,12 +538,11 @@ fn split_code_and_comment(line: &str) -> (&str, &str) {
                     closed_flow_now = seq_depth == 0;
                 }
             }
-            b'}' => {
-                if map_depth > 0 {
-                    map_depth -= 1;
-                    closed_flow_now = map_depth == 0;
-                }
+            b'}' if map_depth > 0 => {
+                map_depth -= 1;
+                closed_flow_now = map_depth == 0;
             }
+            b'}' => {}
             _ => {}
         }
         prev_closed_flow = closed_flow_now;

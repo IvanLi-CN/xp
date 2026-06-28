@@ -75,7 +75,6 @@ function formatErrorMessage(error: unknown): string {
 	}
 	return String(error);
 }
-
 function summaryBadgeVariant(
 	status: string,
 ): "success" | "warning" | "destructive" | "ghost" {
@@ -90,7 +89,6 @@ function summaryBadgeVariant(
 			return "ghost";
 	}
 }
-
 function componentBadgeVariant(
 	status: string,
 ): "success" | "warning" | "destructive" | "ghost" | "outline" {
@@ -107,7 +105,6 @@ function componentBadgeVariant(
 			return "outline";
 	}
 }
-
 function eventBadgeVariant(
 	kind: NodeRuntimeEvent["kind"],
 ): "warning" | "info" | "success" | "destructive" | "ghost" {
@@ -147,9 +144,7 @@ const quotaResetSchema = z
 	.object({
 		resetPolicy: z.enum(["monthly", "unlimited"]),
 		resetDay: z.coerce
-			.number({
-				invalid_type_error: "Reset day must be an integer between 1 and 31.",
-			})
+			.number()
 			.int("Reset day must be an integer between 1 and 31."),
 		resetTzOffsetMinutes: z
 			.string()
@@ -172,6 +167,7 @@ const quotaResetSchema = z
 	});
 
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
+type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
 
 type RuntimeActivityRow = {
 	key: string;
@@ -290,7 +286,6 @@ function NodeHistoryFallbackPanel({
 }) {
 	const traffic = latestItems(history.daily_traffic, 90);
 	const componentDays = latestItems(history.daily_component_status, 90);
-
 	return (
 		<div className="space-y-4">
 			<div className={alertClass("warning", "py-2")}>
@@ -304,7 +299,6 @@ function NodeHistoryFallbackPanel({
 					<span>Last sync error: {history.last_sync_error}</span>
 				</div>
 			) : null}
-
 			<div className="grid gap-3 lg:grid-cols-2">
 				<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
 					<div className="mb-2 flex items-center justify-between gap-2">
@@ -478,7 +472,6 @@ export function NodeDetailsPage() {
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
-
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
 		enabled: adminToken.length > 0,
@@ -505,7 +498,6 @@ export function NodeDetailsPage() {
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [tcpConnectionsWindow, setTcpConnectionsWindow] =
 		useState<AdminTcpConnectionUsageWindow>("24h");
-
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
 		enabled: adminToken.length > 0 && activeTab === "ipUsage",
@@ -552,15 +544,16 @@ export function NodeDetailsPage() {
 	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
 		AdminNodeDeletePreviewEndpoint[]
 	>([]);
-
-	const quotaForm = useForm<QuotaResetFormValues>({
-		resolver: zodResolver(quotaResetSchema),
-		defaultValues: {
-			resetPolicy: "monthly",
-			resetDay: 1,
-			resetTzOffsetMinutes: "",
+	const quotaForm = useForm<QuotaResetFormInput, unknown, QuotaResetFormValues>(
+		{
+			resolver: zodResolver(quotaResetSchema),
+			defaultValues: {
+				resetPolicy: "monthly",
+				resetDay: 1,
+				resetTzOffsetMinutes: "",
+			},
 		},
-	});
+	);
 
 	const resetQuotaForm = quotaForm.reset;
 
@@ -665,7 +658,7 @@ export function NodeDetailsPage() {
 		return quotaValues.resetPolicy === "monthly"
 			? {
 					policy: "monthly",
-					day_of_month: quotaValues.resetDay,
+					day_of_month: Number(quotaValues.resetDay),
 					...(tz === undefined ? {} : { tz_offset_minutes: tz }),
 				}
 			: {
@@ -706,7 +699,6 @@ export function NodeDetailsPage() {
 			pushToast({ variant: "info", message: "No changes to save." });
 			return;
 		}
-
 		setIsSaving(true);
 		setSaveError(null);
 
@@ -1419,12 +1411,20 @@ export function NodeDetailsPage() {
 													<FormLabel>Day of month</FormLabel>
 													<FormControl>
 														<Input
-															{...field}
 															type="number"
 															min={1}
 															max={31}
 															step={1}
 															disabled={quotaPolicy !== "monthly"}
+															name={field.name}
+															ref={field.ref}
+															onBlur={field.onBlur}
+															value={
+																typeof field.value === "number" ||
+																typeof field.value === "string"
+																	? field.value
+																	: ""
+															}
 															onChange={(event) =>
 																field.onChange(event.target.value)
 															}

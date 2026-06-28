@@ -505,11 +505,10 @@ impl App {
                     self.backspace();
                 }
             }
-            KeyCode::Char(c) => {
-                if self.is_editable_field() {
-                    self.push_char(c);
-                }
+            KeyCode::Char(c) if self.is_editable_field() => {
+                self.push_char(c);
             }
+            KeyCode::Char(_) => {}
             _ => {}
         }
         self.list_state.select(Some(self.focus));
