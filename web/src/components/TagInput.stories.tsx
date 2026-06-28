@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 
+import { validateAcceptedAuthority } from "../utils/acceptedAuthority";
 import { validateRealityServerName } from "../utils/realityServerName";
 import { TagInput } from "./TagInput";
 
@@ -10,6 +11,7 @@ type TagInputDemoProps = {
 	helperText?: string;
 	disabled?: boolean;
 	initialValue: string[];
+	allowPrimary?: boolean;
 };
 
 function TagInputDemo({
@@ -18,6 +20,7 @@ function TagInputDemo({
 	helperText,
 	disabled = false,
 	initialValue,
+	allowPrimary = true,
 }: TagInputDemoProps) {
 	const [tags, setTags] = useState<string[]>(initialValue);
 
@@ -30,7 +33,10 @@ function TagInputDemo({
 				placeholder={placeholder}
 				helperText={helperText}
 				disabled={disabled}
-				validateTag={validateRealityServerName}
+				validateTag={
+					allowPrimary ? validateRealityServerName : validateAcceptedAuthority
+				}
+				allowPrimary={allowPrimary}
 			/>
 		</div>
 	);
@@ -62,5 +68,16 @@ export const Empty: Story = {
 export const Prefilled: Story = {
 	args: {
 		initialValue: ["download.example.com", "public.sn.files.1drv.com"],
+	},
+};
+
+export const AuthorityAliases: Story = {
+	args: {
+		label: "accepted host:port",
+		placeholder: "edge.example.com:53844",
+		helperText:
+			"Accept additional ordinary HTTPS Host headers for camouflage routing. Order does not matter.",
+		initialValue: ["edge.example.com:53844", "tavily-tw.ivanli.cc:53844"],
+		allowPrimary: false,
 	},
 };

@@ -58,6 +58,7 @@ use crate::{
     },
     protocol::{
         CanaryUpstreamConfig, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
+        normalize_accepted_authorities,
     },
     raft::{
         app::RaftFacade,
@@ -757,6 +758,16 @@ where
     Ok(Some(value))
 }
 
+fn deserialize_optional_string_array<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Vec<String>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Vec<String>>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CreateEndpointRequest {
@@ -766,9 +777,18 @@ enum CreateEndpointRequest {
         reality: RealityConfig,
         #[serde(default)]
         canary_upstream: Option<CanaryUpstreamConfig>,
+        #[serde(default)]
+        accepted_authorities: Option<Vec<String>>,
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
-    Ss2022_2022Blake3Aes128Gcm { node_id: String, port: u16 },
+    Ss2022_2022Blake3Aes128Gcm {
+        node_id: String,
+        port: u16,
+        #[serde(default)]
+        canary_upstream: Option<CanaryUpstreamConfig>,
+        #[serde(default)]
+        accepted_authorities: Option<Vec<String>>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -780,6 +800,8 @@ struct PatchEndpointRequest {
     reality: Option<Option<RealityConfig>>,
     #[serde(default, deserialize_with = "deserialize_optional_canary_upstream")]
     canary_upstream: Option<Option<CanaryUpstreamConfig>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_array")]
+    accepted_authorities: Option<Option<Vec<String>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3883,10 +3905,16 @@ async fn admin_create_endpoint(
             port,
             reality,
             canary_upstream,
+            accepted_authorities,
         } => {
             if canary_upstream.is_some() {
                 return Err(ApiError::invalid_request(
                     "canary_upstream is only editable on managed VLESS endpoints",
+                ));
+            }
+            if accepted_authorities.is_some() {
+                return Err(ApiError::invalid_request(
+                    "accepted_authorities is only editable on managed VLESS endpoints",
                 ));
             }
             (
@@ -3896,12 +3924,29 @@ async fn admin_create_endpoint(
                 json!({ "reality": reality }),
             )
         }
-        CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm { node_id, port } => (
+        CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm {
             node_id,
-            crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port,
-            json!({}),
-        ),
+            canary_upstream,
+            accepted_authorities,
+        } => {
+            if canary_upstream.is_some() {
+                return Err(ApiError::invalid_request(
+                    "canary_upstream is only supported for vless endpoints",
+                ));
+            }
+            if accepted_authorities.is_some() {
+                return Err(ApiError::invalid_request(
+                    "accepted_authorities is only supported for managed vless endpoints",
+                ));
+            }
+            (
+                node_id,
+                crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                port,
+                json!({}),
+            )
+        }
     };
 
     let endpoint = {
@@ -5277,6 +5322,21 @@ async fn admin_patch_endpoint(
                     upstream
                 });
             }
+            if let Some(accepted_authorities) = req.accepted_authorities {
+                if !meta.managed_default {
+                    return Err(ApiError::invalid_request(
+                        "accepted_authorities is only editable on managed VLESS endpoints",
+                    ));
+                }
+                meta.accepted_authorities = normalize_accepted_authorities(
+                    accepted_authorities.as_deref().unwrap_or(&[]),
+                )
+                .map_err(|(reason, authority)| {
+                    ApiError::invalid_request(format!(
+                        "invalid accepted_authority: {authority} ({reason})"
+                    ))
+                })?;
+            }
             if meta.managed_default {
                 let desired_node = nodes
                     .iter()
@@ -5298,6 +5358,11 @@ async fn admin_patch_endpoint(
             if req.canary_upstream.is_some() {
                 return Err(ApiError::invalid_request(
                     "canary_upstream is only supported for vless endpoints",
+                ));
+            }
+            if req.accepted_authorities.is_some() {
+                return Err(ApiError::invalid_request(
+                    "accepted_authorities is only supported for managed vless endpoints",
                 ));
             }
         }

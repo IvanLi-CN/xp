@@ -447,6 +447,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             short_ids: vec![short_id.clone()],
             active_short_id: short_id,
             canary_upstream: None,
+            accepted_authorities: Vec::new(),
             managed_default: true,
         };
         Ok(Endpoint {

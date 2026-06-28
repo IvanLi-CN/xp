@@ -13,6 +13,7 @@ import {
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
@@ -37,6 +38,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import {
+	normalizeAcceptedAuthority,
+	validateAcceptedAuthority,
+} from "../utils/acceptedAuthority";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
@@ -53,6 +58,7 @@ type VlessMetaSnapshot = {
 	managedDefault: boolean;
 	canaryUpstreamUrl: string;
 	canaryUpstreamMode: CanaryUpstreamMode;
+	acceptedAuthorities: string[];
 };
 
 function formatErrorMessage(error: unknown): string {
@@ -104,11 +110,12 @@ function parseVlessMeta(meta: Record<string, unknown>): VlessMetaSnapshot {
 		managedDefault: meta.managed_default === true,
 		canaryUpstreamUrl: asString(upstream?.url) ?? "",
 		canaryUpstreamMode: asCanaryUpstreamMode(upstream?.mode) ?? "auto",
+		acceptedAuthorities: asStringArray(meta.accepted_authorities) ?? [],
 	};
 }
 
-function routeAuthority(serverNames: string[], port: number): string {
-	const host = serverNames[0] ?? "-";
+function routeAuthority(hostname: string | undefined, port: number): string {
+	const host = hostname?.trim().replace(/\.$/, "") || "-";
 	if (host === "-") return host;
 	return port === 443 ? host : `${host}:${port}`;
 }
@@ -116,6 +123,17 @@ function routeAuthority(serverNames: string[], port: number): string {
 function arraysEqual(left: string[], right: string[]): boolean {
 	if (left.length !== right.length) return false;
 	return left.every((value, index) => value === right[index]);
+}
+
+function authoritySetsEqual(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) return false;
+	const leftSorted = [...left].sort();
+	const rightSorted = [...right].sort();
+	return leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
+function dedupeAuthorities(values: string[]): string[] {
+	return [...new Set(values)];
 }
 
 export function EndpointDetailsPage() {
@@ -140,6 +158,11 @@ export function EndpointDetailsPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
 	});
+	const nodesQuery = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
 
 	const [port, setPort] = useState("");
 	const [realityServerNamesSource, setRealityServerNamesSource] = useState<
@@ -152,6 +175,7 @@ export function EndpointDetailsPage() {
 	const [realityFingerprint, setRealityFingerprint] = useState("");
 	const [upstreamUrl, setUpstreamUrl] = useState("");
 	const [upstreamMode, setUpstreamMode] = useState<CanaryUpstreamMode>("auto");
+	const [acceptedAuthorities, setAcceptedAuthorities] = useState<string[]>([]);
 	const [canaryProbeResult, setCanaryProbeResult] = useState<{
 		endpointId: string;
 		result: AdminEndpointCanaryProbeResponse;
@@ -171,6 +195,7 @@ export function EndpointDetailsPage() {
 			setRealityFingerprint(metaSnapshot.realityFingerprint);
 			setUpstreamUrl(metaSnapshot.canaryUpstreamUrl);
 			setUpstreamMode(metaSnapshot.canaryUpstreamMode);
+			setAcceptedAuthorities(metaSnapshot.acceptedAuthorities);
 		} else {
 			setRealityServerNamesSource("manual");
 			setRealityDest("");
@@ -178,6 +203,7 @@ export function EndpointDetailsPage() {
 			setRealityFingerprint("");
 			setUpstreamUrl("");
 			setUpstreamMode("auto");
+			setAcceptedAuthorities([]);
 		}
 	}, [endpointQuery.data]);
 
@@ -207,6 +233,7 @@ export function EndpointDetailsPage() {
 					fingerprint: string;
 				};
 				canary_upstream?: { url: string; mode: CanaryUpstreamMode } | null;
+				accepted_authorities?: string[] | null;
 			} = { port: portNumber };
 
 			if (endpoint.kind === "vless_reality_vision_tcp") {
@@ -271,13 +298,27 @@ export function EndpointDetailsPage() {
 
 				if (metaSnapshot.managedDefault) {
 					const nextUrl = upstreamUrl.trim();
+					const nextAcceptedAuthorities = acceptedAuthorities
+						.map(normalizeAcceptedAuthority)
+						.filter((authority) => authority.length > 0);
+					for (const authority of nextAcceptedAuthorities) {
+						const err = validateAcceptedAuthority(authority);
+						if (err) throw new Error(err);
+					}
 					const upstreamChanged =
 						nextUrl !== metaSnapshot.canaryUpstreamUrl ||
 						upstreamMode !== metaSnapshot.canaryUpstreamMode;
+					const authoritiesChanged = !authoritySetsEqual(
+						nextAcceptedAuthorities,
+						metaSnapshot.acceptedAuthorities,
+					);
 					if (upstreamChanged) {
 						payload.canary_upstream = nextUrl
 							? { url: nextUrl, mode: upstreamMode }
 							: null;
+					}
+					if (authoritiesChanged) {
+						payload.accepted_authorities = nextAcceptedAuthorities;
 					}
 				}
 			}
@@ -427,6 +468,9 @@ export function EndpointDetailsPage() {
 	const effectiveGlobalServerNames = derivedGlobalServerNames.length
 		? derivedGlobalServerNames
 		: (vlessMeta?.realityServerNames ?? []);
+	const endpointNode = nodesQuery.data?.items.find(
+		(node) => node.node_id === endpoint.node_id,
+	);
 	const currentCanaryProbeResult =
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
@@ -497,7 +541,9 @@ export function EndpointDetailsPage() {
 									<span className="font-mono">routeAuthority</span>:{" "}
 									<span className="font-mono">
 										{routeAuthority(
-											vlessMeta.realityServerNames,
+											vlessMeta.managedDefault
+												? endpointNode?.access_host
+												: vlessMeta.realityServerNames[0],
 											endpoint.port,
 										)}
 									</span>
@@ -514,6 +560,31 @@ export function EndpointDetailsPage() {
 										{String(vlessMeta.managedDefault)}
 									</span>
 								</p>
+								{vlessMeta.managedDefault ? (
+									<div className="space-y-1 pt-1">
+										<p>
+											<span className="font-mono">acceptedAuthorities</span>:{" "}
+											<span className="font-mono">
+												{vlessMeta.acceptedAuthorities.length}
+											</span>
+										</p>
+										<div className="flex flex-wrap gap-2">
+											{vlessMeta.acceptedAuthorities.length > 0 ? (
+												vlessMeta.acceptedAuthorities.map((authority) => (
+													<Badge
+														key={authority}
+														variant="ghost"
+														className="font-mono"
+													>
+														{authority}
+													</Badge>
+												))
+											) : (
+												<span className="font-mono">-</span>
+											)}
+										</div>
+									</div>
+								) : null}
 								<div className="flex flex-wrap gap-2 pt-1">
 									{vlessMeta.realityServerNames.length > 0 ? (
 										vlessMeta.realityServerNames.map((name, idx) => (
@@ -731,53 +802,76 @@ export function EndpointDetailsPage() {
 								) : null}
 
 								{vlessMeta?.managedDefault ? (
-									<div className="grid gap-4 md:grid-cols-[1fr_180px]">
-										<div className="xp-field-stack">
-											<span className="text-sm font-medium font-mono">
-												canaryUpstreamUrl
-											</span>
-											<Input
-												aria-label="canary upstream url"
-												type="url"
-												className={inputClass}
-												value={upstreamUrl}
-												placeholder="http://127.0.0.1:8080"
-												disabled={patchMutation.isPending}
-												onChange={(event) => setUpstreamUrl(event.target.value)}
-											/>
-											<p className="text-xs opacity-70">
-												Requests other than GET/HEAD /generate_204 are proxied
-												to this origin.
-											</p>
-										</div>
-										<div className="xp-field-stack">
-											<span className="text-sm font-medium font-mono">
-												mode
-											</span>
-											<Select
-												value={upstreamMode}
-												onValueChange={(value) =>
-													setUpstreamMode(value as CanaryUpstreamMode)
-												}
-												disabled={patchMutation.isPending}
-											>
-												<SelectTrigger
-													className={selectClass}
-													aria-label="canary upstream mode"
+									<div className="space-y-4">
+										<div className="grid gap-4 md:grid-cols-[1fr_180px]">
+											<div className="xp-field-stack">
+												<span className="text-sm font-medium font-mono">
+													canaryUpstreamUrl
+												</span>
+												<Input
+													aria-label="canary upstream url"
+													type="url"
+													className={inputClass}
+													value={upstreamUrl}
+													placeholder="http://127.0.0.1:8080"
+													disabled={patchMutation.isPending}
+													onChange={(event) =>
+														setUpstreamUrl(event.target.value)
+													}
+												/>
+												<p className="text-xs opacity-70">
+													Requests other than GET/HEAD /generate_204 are proxied
+													to this origin.
+												</p>
+											</div>
+											<div className="xp-field-stack">
+												<span className="text-sm font-medium font-mono">
+													mode
+												</span>
+												<Select
+													value={upstreamMode}
+													onValueChange={(value) =>
+														setUpstreamMode(value as CanaryUpstreamMode)
+													}
+													disabled={patchMutation.isPending}
 												>
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="auto">auto</SelectItem>
-													<SelectItem value="http1">http1</SelectItem>
-													<SelectItem value="h2c">h2c</SelectItem>
-												</SelectContent>
-											</Select>
-											<p className="text-xs opacity-70">
-												Use an origin URL only. WebSocket uses HTTP/1.1
-												upstream; h2c is for non-upgrade HTTP.
-											</p>
+													<SelectTrigger
+														className={selectClass}
+														aria-label="canary upstream mode"
+													>
+														<SelectValue />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="auto">auto</SelectItem>
+														<SelectItem value="http1">http1</SelectItem>
+														<SelectItem value="h2c">h2c</SelectItem>
+													</SelectContent>
+												</Select>
+												<p className="text-xs opacity-70">
+													Use an origin URL only. WebSocket uses HTTP/1.1
+													upstream; h2c is for non-upgrade HTTP.
+												</p>
+											</div>
 										</div>
+										<TagInput
+											label="accepted host:port"
+											value={acceptedAuthorities}
+											onChange={(next) =>
+												setAcceptedAuthorities(
+													dedupeAuthorities(
+														next
+															.map(normalizeAcceptedAuthority)
+															.filter((authority) => authority.length > 0),
+													),
+												)
+											}
+											placeholder="edge.example.com:53844"
+											disabled={patchMutation.isPending}
+											inputClass={inputClass}
+											validateTag={validateAcceptedAuthority}
+											allowPrimary={false}
+											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. This does not change REALITY serverNames or the canonical /generate_204 URL."
+										/>
 									</div>
 								) : null}
 							</div>

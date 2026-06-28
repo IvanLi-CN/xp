@@ -101,6 +101,7 @@ const DESIGN_ENDPOINTS: Array<
 				url: "http://127.0.0.1:8080",
 				mode: "auto",
 			},
+			accepted_authorities: ["edge.example.com:443", "tavily-tw.ivanli.cc:443"],
 			managed_default: true,
 		},
 		short_ids: ["2a3b4c", "5d6e7f"],

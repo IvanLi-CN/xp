@@ -95,7 +95,7 @@ The managed default endpoint contract is:
 - VLESS: set `XP_DEFAULT_VLESS_PORT`; managed SNI is derived from `XP_ACCESS_HOST`
 - SS2022: set `XP_DEFAULT_SS_PORT`
 
-For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each VLESS endpoint may carry its own `canary_upstream`; `GET/HEAD /generate_204` is always answered by xp, and other requests route by `Host`/`:authority` to the endpoint upstream.
+For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each managed VLESS endpoint may carry its own `canary_upstream` plus an `accepted_authorities` alias set; `GET/HEAD /generate_204` is always answered by xp, and other requests route by canonical `Host`/`:authority` or one of the accepted aliases to the endpoint upstream. Public misses are exposed as plain text `404 Not Found`.
 
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 

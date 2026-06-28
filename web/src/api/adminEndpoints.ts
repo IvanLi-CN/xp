@@ -58,6 +58,9 @@ export const CanaryUpstreamConfigSchema = z.object({
 
 export type CanaryUpstreamConfig = z.infer<typeof CanaryUpstreamConfigSchema>;
 
+export const AcceptedAuthoritiesSchema = z.array(z.string());
+export type AcceptedAuthorities = z.infer<typeof AcceptedAuthoritiesSchema>;
+
 export const AdminEndpointSchema = z.object({
 	endpoint_id: z.string(),
 	node_id: z.string(),
@@ -106,6 +109,7 @@ export type AdminEndpointPatchRequest = {
 	port?: number;
 	reality?: RealityConfig;
 	canary_upstream?: CanaryUpstreamConfig | null;
+	accepted_authorities?: string[] | null;
 };
 
 export async function fetchAdminEndpoints(

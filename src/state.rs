@@ -25,8 +25,8 @@ use crate::{
         RealityKeys, RealityServerNamesSource, RotateShortIdResult,
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
         VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
-        generate_ss2022_psk_b64, rotate_short_ids_in_place, validate_canary_upstream,
-        validate_reality_dest, validate_reality_server_name,
+        generate_ss2022_psk_b64, normalize_accepted_authorities, rotate_short_ids_in_place,
+        validate_canary_upstream, validate_reality_dest, validate_reality_server_name,
     },
 };
 
@@ -2540,6 +2540,21 @@ impl DesiredStateCommand {
                             }
                         })?;
                     }
+                    meta.accepted_authorities = normalize_accepted_authorities(
+                        &meta.accepted_authorities,
+                    )
+                    .map_err(|(reason, authority)| DomainError::InvalidAcceptedAuthority {
+                        authority,
+                        reason: reason.to_string(),
+                    })?;
+                    if !meta.managed_default && !meta.accepted_authorities.is_empty() {
+                        return Err(DomainError::InvalidAcceptedAuthority {
+                            authority: meta.accepted_authorities[0].clone(),
+                            reason: "accepted_authorities is only supported for managed VLESS endpoints"
+                                .to_string(),
+                        }
+                        .into());
+                    }
                     endpoint.meta = serde_json::to_value(meta)?;
                 }
 
@@ -4310,6 +4325,8 @@ struct VlessRealityEndpointMetaInput {
     reality: crate::protocol::RealityConfig,
     #[serde(default)]
     canary_upstream: Option<crate::protocol::CanaryUpstreamConfig>,
+    #[serde(default)]
+    accepted_authorities: Vec<String>,
 }
 
 fn build_endpoint_meta(
@@ -4333,6 +4350,7 @@ fn build_endpoint_meta(
                 short_ids: vec![short_id.clone()],
                 active_short_id: short_id,
                 canary_upstream: input.canary_upstream,
+                accepted_authorities: input.accepted_authorities,
                 managed_default: false,
             };
 
@@ -4469,8 +4487,9 @@ mod tests {
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         Endpoint {
@@ -5337,8 +5356,9 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5382,8 +5402,9 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5420,8 +5441,9 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5479,8 +5501,9 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         let endpoint = Endpoint {
@@ -5543,6 +5566,7 @@ rules: []
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
             canary_upstream: None,
+            accepted_authorities: Vec::new(),
             managed_default: true,
         };
 
@@ -5595,8 +5619,9 @@ rules: []
             },
             short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
             active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        managed_default: false,
+            canary_upstream: None,
+            accepted_authorities: Vec::new(),
+            managed_default: false,
         };
 
         store.state_mut().endpoints.insert(
