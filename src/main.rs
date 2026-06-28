@@ -444,7 +444,10 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             Ok(None) | Err(_) => None,
         }
     } else {
-        xp::vless_https_canary::persist_disabled_status(&config.data_dir, config.vless_canary_bind)?;
+        xp::vless_https_canary::persist_disabled_status(
+            &config.data_dir,
+            config.vless_canary_bind,
+        )?;
         None
     };
 
@@ -664,7 +667,8 @@ mod tests {
 
         let err = result.expect_err("legacy relay-probe env must be rejected");
         assert!(
-            err.to_string().contains("XP_RELAY_PROBE_* has been removed"),
+            err.to_string()
+                .contains("XP_RELAY_PROBE_* has been removed"),
             "unexpected error: {err}"
         );
     }
@@ -706,8 +710,7 @@ mod tests {
                     port: 53844,
                     reality_dest: "127.0.0.1:39043".to_string(),
                     server_names: vec!["example.com".to_string()],
-                    server_names_source:
-                        xp::protocol::RealityServerNamesSource::Manual,
+                    server_names_source: xp::protocol::RealityServerNamesSource::Manual,
                     fingerprint: "chrome".to_string(),
                 },
                 source: xp::managed_default_endpoints::ManagedDefaultEndpointSource::Explicit,

@@ -486,7 +486,10 @@ async fn upgrade_xp(
         let rollback_ok = fs::rename(backup, &dest).is_ok();
         if rollback_ok {
             let _ = restart_xp_service(paths);
-            return Err(ExitError::new(7, "service_error: restart failed; rolled back"));
+            return Err(ExitError::new(
+                7,
+                "service_error: restart failed; rolled back",
+            ));
         }
         return Err(ExitError::new(8, "rollback_failed"));
     }
@@ -616,9 +619,8 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
     let Some(tag) = std::env::var(UPGRADE_RESUME_TAG).ok() else {
         return Ok(None);
     };
-    let repo = std::env::var(UPGRADE_RESUME_REPO).map_err(|_| {
-        ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_REPO")
-    })?;
+    let repo = std::env::var(UPGRADE_RESUME_REPO)
+        .map_err(|_| ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_REPO"))?;
     if let Some(repo_override) = repo_override
         && repo_override != repo
     {
@@ -627,9 +629,8 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
             "invalid_args: --repo conflicts with resumed upgrade context",
         ));
     }
-    let api_base = std::env::var(UPGRADE_RESUME_API_BASE).map_err(|_| {
-        ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_API_BASE")
-    })?;
+    let api_base = std::env::var(UPGRADE_RESUME_API_BASE)
+        .map_err(|_| ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_API_BASE"))?;
     let Some((owner, name)) = parse_owner_repo(&repo) else {
         return Err(ExitError::new(
             3,
@@ -639,9 +640,13 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
     let xp_ops_dest = PathBuf::from(std::env::var(UPGRADE_RESUME_XP_OPS_DEST).map_err(|_| {
         ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_DEST")
     })?);
-    let xp_ops_backup = PathBuf::from(std::env::var(UPGRADE_RESUME_XP_OPS_BACKUP).map_err(
-        |_| ExitError::new(3, "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP"),
-    )?);
+    let xp_ops_backup =
+        PathBuf::from(std::env::var(UPGRADE_RESUME_XP_OPS_BACKUP).map_err(|_| {
+            ExitError::new(
+                3,
+                "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP",
+            )
+        })?);
     Ok(Some(ResumeContext {
         release: LockedRelease {
             owner,
@@ -786,9 +791,9 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
             .map_err(|e| ExitError::new(7, format!("service_error: backup xray config: {e}")))?;
     }
 
-    if let Err(err) = write_static_xray_config(paths).and_then(|_| {
-        preserve_control_plane_listeners(paths, existing_config.as_deref())
-    }) {
+    if let Err(err) = write_static_xray_config(paths)
+        .and_then(|_| preserve_control_plane_listeners(paths, existing_config.as_deref()))
+    {
         if had_old {
             let _ = fs::copy(&backup, &config_path);
             let _ = fs::remove_file(&backup);
@@ -860,10 +865,16 @@ fn preserve_control_plane_listeners(
 }
 
 fn apply_api_inbound_addr(config: &mut serde_json::Value, addr: SocketAddr) -> bool {
-    let Some(inbounds) = config.get_mut("inbounds").and_then(serde_json::Value::as_array_mut) else {
+    let Some(inbounds) = config
+        .get_mut("inbounds")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
         return false;
     };
-    let Some(api) = inbounds.iter_mut().find(|inbound| inbound_tag(inbound) == Some("api")) else {
+    let Some(api) = inbounds
+        .iter_mut()
+        .find(|inbound| inbound_tag(inbound) == Some("api"))
+    else {
         return false;
     };
     let host = serde_json::Value::String(addr.ip().to_string());
@@ -883,7 +894,11 @@ fn replace_inbound_by_tag(
     let Some(existing_inbound) = existing
         .get("inbounds")
         .and_then(serde_json::Value::as_array)
-        .and_then(|inbounds| inbounds.iter().find(|inbound| inbound_tag(inbound) == Some(tag)))
+        .and_then(|inbounds| {
+            inbounds
+                .iter()
+                .find(|inbound| inbound_tag(inbound) == Some(tag))
+        })
         .cloned()
     else {
         return false;
@@ -895,8 +910,9 @@ fn replace_inbound_by_tag(
     else {
         return false;
     };
-    let Some(current_inbound) =
-        inbounds.iter_mut().find(|inbound| inbound_tag(inbound) == Some(tag))
+    let Some(current_inbound) = inbounds
+        .iter_mut()
+        .find(|inbound| inbound_tag(inbound) == Some(tag))
     else {
         return false;
     };
@@ -989,9 +1005,8 @@ fn read_xp_env_value(paths: &Paths, key: &str) -> Option<String> {
 }
 
 fn unquote_env_value(value: &str) -> String {
-    let quoted =
-        (value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\''));
+    let quoted = (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''));
     if quoted && value.len() >= 2 {
         value[1..value.len() - 1].to_string()
     } else {

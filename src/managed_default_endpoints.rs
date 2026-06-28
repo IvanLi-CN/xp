@@ -135,9 +135,7 @@ pub fn build_default_vless_endpoint_spec(
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let Some(port) = port else {
         if server_names_raw.is_some() || fingerprint.is_some() {
-            bail!(
-                "XP_DEFAULT_VLESS_PORT is required when managing the default VLESS endpoint"
-            );
+            bail!("XP_DEFAULT_VLESS_PORT is required when managing the default VLESS endpoint");
         }
         return Ok(None);
     };
@@ -168,7 +166,9 @@ pub fn build_default_vless_endpoint_spec(
     }))
 }
 
-pub fn build_default_ss_endpoint_spec(port: Option<u16>) -> anyhow::Result<Option<DefaultSsEndpointSpec>> {
+pub fn build_default_ss_endpoint_spec(
+    port: Option<u16>,
+) -> anyhow::Result<Option<DefaultSsEndpointSpec>> {
     let Some(port) = port else {
         return Ok(None);
     };
@@ -203,7 +203,8 @@ pub fn managed_default_vless_endpoint(
     if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
         return None;
     }
-    let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta.clone()).ok()?;
+    let meta: VlessRealityVisionTcpEndpointMeta =
+        serde_json::from_value(endpoint.meta.clone()).ok()?;
     meta.managed_default.then_some(meta)
 }
 
@@ -357,7 +358,10 @@ where
             }
             Ok((None, None))
         }
-        ManagedDefaultEndpointIntent::Manage { spec: desired, source } => {
+        ManagedDefaultEndpointIntent::Manage {
+            spec: desired,
+            source,
+        } => {
             if let Some(endpoint) = managed_current {
                 let next = desired.reconcile_existing(endpoint)?;
                 if &next != endpoint {
@@ -515,12 +519,13 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
 
     fn reconcile_existing(&self, endpoint: &Endpoint) -> anyhow::Result<Endpoint> {
         if endpoint.kind != EndpointKind::Ss2022_2022Blake3Aes128Gcm {
-            bail!("endpoint {} is not an SS2022 endpoint", endpoint.endpoint_id);
+            bail!(
+                "endpoint {} is not an SS2022 endpoint",
+                endpoint.endpoint_id
+            );
         }
-        let mut meta: Ss2022EndpointMeta =
-            serde_json::from_value(endpoint.meta.clone()).with_context(|| {
-                format!("parse SS2022 endpoint {} metadata", endpoint.endpoint_id)
-            })?;
+        let mut meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())
+            .with_context(|| format!("parse SS2022 endpoint {} metadata", endpoint.endpoint_id))?;
         meta.managed_default = true;
 
         let mut next = endpoint.clone();
@@ -536,7 +541,11 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
 
 fn parse_default_vless_server_names(raw: &str) -> anyhow::Result<Vec<String>> {
     let mut out = Vec::new();
-    for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         validate_reality_server_name(item).map_err(|reason| {
             anyhow!("XP_DEFAULT_VLESS_SERVER_NAMES contains invalid server name {item}: {reason}")
         })?;
@@ -554,16 +563,14 @@ pub fn resolve_host_managed_default_endpoints_spec(
     access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<ManagedDefaultEndpointsSpec> {
-    Ok(
-        resolve_host_managed_default_endpoints_intent(
-            explicit,
-            node_endpoints,
-            access_host,
-            vless_canary_bind,
-            &ManagedDefaultEndpointsState::default(),
-        )?
-        .into_spec(),
-    )
+    Ok(resolve_host_managed_default_endpoints_intent(
+        explicit,
+        node_endpoints,
+        access_host,
+        vless_canary_bind,
+        &ManagedDefaultEndpointsState::default(),
+    )?
+    .into_spec())
 }
 
 pub fn resolve_host_managed_default_endpoints_intent(
@@ -749,10 +756,8 @@ fn default_vless_spec_from_endpoint(
     access_host: &str,
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<DefaultVlessEndpointSpec> {
-    let meta: VlessRealityVisionTcpEndpointMeta =
-        serde_json::from_value(endpoint.meta.clone()).with_context(|| {
-            format!("parse VLESS endpoint {} metadata", endpoint.endpoint_id)
-        })?;
+    let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta.clone())
+        .with_context(|| format!("parse VLESS endpoint {} metadata", endpoint.endpoint_id))?;
     Ok(DefaultVlessEndpointSpec {
         port: endpoint.port,
         reality_dest: vless_canary_bind.to_string(),
@@ -763,9 +768,8 @@ fn default_vless_spec_from_endpoint(
 }
 
 fn default_ss_spec_from_endpoint(endpoint: &Endpoint) -> anyhow::Result<DefaultSsEndpointSpec> {
-    let _: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone()).with_context(|| {
-        format!("parse SS2022 endpoint {} metadata", endpoint.endpoint_id)
-    })?;
+    let _: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())
+        .with_context(|| format!("parse SS2022 endpoint {} metadata", endpoint.endpoint_id))?;
     Ok(DefaultSsEndpointSpec {
         port: endpoint.port,
     })
@@ -774,9 +778,7 @@ fn default_ss_spec_from_endpoint(endpoint: &Endpoint) -> anyhow::Result<DefaultS
 fn endpoint_matches_kind(endpoint: &Endpoint, kind: ManagedDefaultEndpointKind) -> bool {
     match kind {
         ManagedDefaultEndpointKind::Vless => endpoint.kind == EndpointKind::VlessRealityVisionTcp,
-        ManagedDefaultEndpointKind::Ss => {
-            endpoint.kind == EndpointKind::Ss2022_2022Blake3Aes128Gcm
-        }
+        ManagedDefaultEndpointKind::Ss => endpoint.kind == EndpointKind::Ss2022_2022Blake3Aes128Gcm,
     }
 }
 
@@ -890,7 +892,8 @@ fn persist_managed_default_endpoints_state(
         fs::create_dir_all(parent)
             .with_context(|| format!("create managed default endpoint dir {}", parent.display()))?;
     }
-    let raw = serde_json::to_string_pretty(state).context("serialize managed default endpoint state")?;
+    let raw =
+        serde_json::to_string_pretty(state).context("serialize managed default endpoint state")?;
     fs::write(&path, raw + "\n")
         .with_context(|| format!("write managed default endpoint state {}", path.display()))?;
     remove_if_exists(&legacy_path)?;
@@ -926,309 +929,4 @@ fn optional_u16_env(key: &str) -> anyhow::Result<Option<u16>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn endpoint_vless(
-        endpoint_id: &str,
-        port: u16,
-        server_names: &[&str],
-        managed_default: Option<bool>,
-    ) -> Endpoint {
-        let mut meta = serde_json::json!({
-            "reality": {
-                "dest": "example.com:443",
-                "server_names": server_names,
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["0123456789abcdef"],
-            "active_short_id": "0123456789abcdef"
-        });
-        if let Some(value) = managed_default {
-            meta["managed_default"] = serde_json::Value::Bool(value);
-        }
-        Endpoint {
-            endpoint_id: endpoint_id.to_string(),
-            node_id: "n1".to_string(),
-            tag: format!("vless-vision-{endpoint_id}"),
-            kind: EndpointKind::VlessRealityVisionTcp,
-            port,
-            meta,
-        }
-    }
-
-    fn endpoint_ss(endpoint_id: &str, port: u16, managed_default: Option<bool>) -> Endpoint {
-        let mut meta = serde_json::json!({
-            "method": SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-            "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
-        });
-        if let Some(value) = managed_default {
-            meta["managed_default"] = serde_json::Value::Bool(value);
-        }
-        Endpoint {
-            endpoint_id: endpoint_id.to_string(),
-            node_id: "n1".to_string(),
-            tag: format!("ss2022-{endpoint_id}"),
-            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-            port,
-            meta,
-        }
-    }
-
-    #[test]
-    fn build_default_vless_endpoint_spec_rejects_zero_port() {
-        let err = build_default_vless_endpoint_spec(
-            Some(0),
-            "node.example.com",
-            Some("public.sn.files.1drv.com"),
-            None,
-            "127.0.0.1:39043".parse().unwrap(),
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("invalid port: 0"));
-    }
-
-    #[test]
-    fn build_default_ss_endpoint_spec_rejects_zero_port() {
-        let err = build_default_ss_endpoint_spec(Some(0)).unwrap_err();
-        assert!(err.to_string().contains("invalid port: 0"));
-    }
-
-    #[tokio::test]
-    async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
-        let mut writes = Vec::<DesiredStateCommand>::new();
-        let spec = ManagedDefaultEndpointsSpec {
-            vless: Some(DefaultVlessEndpointSpec {
-                port: 53844,
-                reality_dest: "127.0.0.1:39043".to_string(),
-                server_names: vec!["example.com".to_string()],
-                server_names_source: RealityServerNamesSource::Manual,
-                fingerprint: "chrome".to_string(),
-            }),
-            ss: None,
-        };
-        let bind = "127.0.0.1:39043".parse().unwrap();
-
-        {
-            let mut writer = |cmd| {
-                writes.push(cmd);
-                std::future::ready(Ok(()))
-            };
-            reconcile_host_managed_default_endpoints(
-                tempdir.path(),
-                "n1",
-                &[endpoint],
-                HostManagedDefaultEndpointsOptions {
-                    explicit: &spec,
-                    access_host: "node.example.com",
-                    vless_canary_bind: bind,
-                },
-                &mut writer,
-                "test",
-            )
-            .await
-            .unwrap();
-        }
-
-        assert_eq!(writes.len(), 1);
-        match &writes[0] {
-            DesiredStateCommand::UpsertEndpoint { endpoint } => {
-                let meta: VlessRealityVisionTcpEndpointMeta =
-                    serde_json::from_value(endpoint.meta.clone()).unwrap();
-                assert!(meta.managed_default);
-                assert_eq!(meta.reality.dest, "127.0.0.1:39043");
-                assert_eq!(meta.reality.server_names, vec!["example.com"]);
-                assert_eq!(endpoint.port, 53844);
-            }
-            other => panic!("unexpected command: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn host_managed_legacy_vless_is_auto_adopted_without_explicit_config() {
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
-        let spec =
-            resolve_host_managed_default_endpoints_spec(
-                &ManagedDefaultEndpointsSpec::default(),
-                &[endpoint],
-                "node.example.com",
-                "127.0.0.1:39043".parse().unwrap(),
-            )
-            .unwrap();
-
-        let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
-        assert_eq!(vless.port, 53844);
-        assert_eq!(vless.reality_dest, "127.0.0.1:39043");
-        assert_eq!(vless.server_names, vec!["node.example.com"]);
-        assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
-        assert!(spec.ss.is_none());
-    }
-
-    #[test]
-    fn host_managed_vless_with_false_flag_is_not_auto_adopted() {
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(false));
-        let spec =
-            resolve_host_managed_default_endpoints_spec(
-                &ManagedDefaultEndpointsSpec::default(),
-                &[endpoint],
-                "node.example.com",
-                "127.0.0.1:39043".parse().unwrap(),
-            )
-            .unwrap();
-
-        assert!(spec.vless.is_none());
-        assert!(spec.ss.is_none());
-    }
-
-    #[test]
-    fn host_managed_multiple_legacy_vless_are_not_auto_adopted() {
-        let endpoints = vec![
-            endpoint_vless("e1", 53844, &["example.com"], None),
-            endpoint_vless("e2", 53845, &["example.org"], None),
-        ];
-        let spec = resolve_host_managed_default_endpoints_spec(
-            &ManagedDefaultEndpointsSpec::default(),
-            &endpoints,
-            "node.example.com",
-            "127.0.0.1:39043".parse().unwrap(),
-        )
-        .unwrap();
-
-        assert!(spec.vless.is_none());
-        assert!(spec.ss.is_none());
-    }
-
-    #[test]
-    fn host_managed_explicitly_cleared_vless_is_not_rederived_from_marked_endpoint() {
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
-        let state = ManagedDefaultEndpointsState {
-            schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
-            vless_endpoint_id: Some("e1".to_string()),
-            vless_source: Some(ManagedDefaultEndpointSource::Explicit),
-            ss_endpoint_id: None,
-            ss_source: None,
-        };
-        let intent = resolve_host_managed_default_endpoints_intent(
-            &ManagedDefaultEndpointsSpec::default(),
-            &[endpoint],
-            "node.example.com",
-            "127.0.0.1:39043".parse().unwrap(),
-            &state,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            intent.vless,
-            ManagedDefaultEndpointIntent::Remove
-        ));
-    }
-
-    #[test]
-    fn host_managed_auto_adopted_vless_preserves_global_server_name_mode() {
-        let mut endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
-        endpoint.meta["reality"]["server_names_source"] =
-            serde_json::Value::String("global".to_string());
-        let spec = resolve_host_managed_default_endpoints_spec(
-                &ManagedDefaultEndpointsSpec::default(),
-                &[endpoint],
-                "node.example.com",
-                "127.0.0.1:39043".parse().unwrap(),
-        )
-        .unwrap();
-
-        let vless = spec.vless.expect("legacy VLESS endpoint should be auto-adopted");
-        assert_eq!(vless.server_names_source, RealityServerNamesSource::Manual);
-        assert_eq!(vless.reality_dest, "127.0.0.1:39043");
-    }
-
-    #[test]
-    fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config() {
-        let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
-        let state = ManagedDefaultEndpointsState {
-            schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
-            vless_endpoint_id: Some("e1".to_string()),
-            vless_source: Some(ManagedDefaultEndpointSource::AutoAdopted),
-            ss_endpoint_id: None,
-            ss_source: None,
-        };
-        let intent = resolve_host_managed_default_endpoints_intent(
-            &ManagedDefaultEndpointsSpec::default(),
-            &[endpoint],
-            "node.example.com",
-            "127.0.0.1:39043".parse().unwrap(),
-            &state,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            intent.vless,
-            ManagedDefaultEndpointIntent::Manage {
-                source: ManagedDefaultEndpointSource::AutoAdopted,
-                ..
-            }
-        ));
-    }
-
-    #[tokio::test]
-    async fn persists_adopted_endpoint_ids_before_later_kind_fails() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let endpoints = vec![
-            endpoint_vless("e1", 53844, &["example.com"], None),
-            endpoint_ss("s1", 443, None),
-            endpoint_ss("s2", 8443, None),
-        ];
-        let spec = ManagedDefaultEndpointsSpec {
-            vless: Some(DefaultVlessEndpointSpec {
-                port: 53844,
-                reality_dest: "127.0.0.1:39043".to_string(),
-                server_names: vec!["example.com".to_string()],
-                server_names_source: RealityServerNamesSource::Manual,
-                fingerprint: "chrome".to_string(),
-            }),
-            ss: Some(DefaultSsEndpointSpec { port: 9443 }),
-        };
-        let mut writes = Vec::<DesiredStateCommand>::new();
-
-        let err = {
-            let mut writer = |cmd| {
-                writes.push(cmd);
-                std::future::ready(Ok(()))
-            };
-            let intent = ManagedDefaultEndpointsIntent {
-                vless: ManagedDefaultEndpointIntent::Manage {
-                    spec: spec.vless.clone().unwrap(),
-                    source: ManagedDefaultEndpointSource::AutoAdopted,
-                },
-                ss: ManagedDefaultEndpointIntent::Manage {
-                    spec: spec.ss.clone().unwrap(),
-                    source: ManagedDefaultEndpointSource::Explicit,
-                },
-            };
-            reconcile_managed_default_endpoints(
-                tempdir.path(),
-                "n1",
-                &endpoints,
-                &intent,
-                &mut writer,
-                "test",
-            )
-            .await
-            .expect_err("ss ambiguity should still fail after vless adoption")
-        };
-
-        assert!(err
-            .to_string()
-            .contains("multiple ss2022_2022_blake3_aes_128_gcm endpoints already exist"));
-        assert_eq!(writes.len(), 1);
-        let state = load_managed_default_endpoints_state(tempdir.path()).unwrap();
-        assert_eq!(state.vless_endpoint_id.as_deref(), Some("e1"));
-        assert_eq!(state.ss_endpoint_id, None);
-    }
-}
+mod tests;

@@ -1,5 +1,5 @@
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
     format-web:
       glob: "web/**/*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
@@ -12,6 +12,8 @@ pre-commit:
       files: git diff --cached --name-only --diff-filter=ACMR -- '*.md'
       run: bunx --no-install dprint fmt {files}
       stage_fixed: true
+    style-budget:
+      run: bun run check:style-budget
     fmt-rust:
       glob: "**/*.{rs}"
       run: cargo fmt

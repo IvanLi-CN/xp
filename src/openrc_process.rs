@@ -131,10 +131,7 @@ fn parse_ps_output(output: &str) -> Vec<OpenrcProcess> {
             if command.is_empty() {
                 return None;
             }
-            Some(OpenrcProcess {
-                pid,
-                command,
-            })
+            Some(OpenrcProcess { pid, command })
         })
         .collect()
 }
@@ -259,8 +256,12 @@ async fn terminate_supervisor_process(
 ) -> Result<(), String> {
     let pid = pid.to_string();
     let direct_args = ["-TERM", pid.as_str()];
-    match run_command_with_timeout(&["/bin/kill", "/usr/bin/kill", "kill"], &direct_args, timeout)
-        .await
+    match run_command_with_timeout(
+        &["/bin/kill", "/usr/bin/kill", "kill"],
+        &direct_args,
+        timeout,
+    )
+    .await
     {
         Ok(()) => Ok(()),
         Err(err) => {

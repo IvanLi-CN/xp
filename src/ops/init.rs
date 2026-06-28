@@ -367,7 +367,10 @@ fn write_openrc_supervisor_kill_helper(paths: &Paths, mode: Mode) -> Result<(), 
     let dir = paths.usr_local_libexec_dir();
     let helper = paths.usr_local_libexec_xp_openrc_kill_supervisor();
     if mode == Mode::DryRun {
-        eprintln!("would write OpenRC supervisor kill helper: {}", helper.display());
+        eprintln!(
+            "would write OpenRC supervisor kill helper: {}",
+            helper.display()
+        );
         return Ok(());
     }
 

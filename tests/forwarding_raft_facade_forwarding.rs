@@ -313,12 +313,15 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         node_name: cluster.node_name.clone(),
         access_host: cluster.access_host.clone(),
         api_base_url: admin_base_url.clone(),
-        vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], xp::config::DEFAULT_VLESS_CANARY_BIND_PORT)),
-        vless_canary_acme_directory_url:
-            "https://acme-v02.api.letsencrypt.org/directory".to_string(),
+        vless_canary_bind: SocketAddr::from((
+            [127, 0, 0, 1],
+            xp::config::DEFAULT_VLESS_CANARY_BIND_PORT,
+        )),
+        vless_canary_acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory"
+            .to_string(),
         vless_canary_acme_contact_email: String::new(),
-        vless_canary_cloudflare_token_file:
-            xp::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
+        vless_canary_cloudflare_token_file: xp::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE
+            .to_string(),
         vless_canary_cloudflare_zone_id: String::new(),
         vless_canary_dns_propagation_timeout_secs: 180,
         default_vless_port: None,

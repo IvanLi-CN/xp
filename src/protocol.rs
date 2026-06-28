@@ -214,7 +214,9 @@ pub fn validate_reality_dest(dest: &str) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    let (host, port) = trimmed.rsplit_once(':').ok_or("dest must include port (:)")?;
+    let (host, port) = trimmed
+        .rsplit_once(':')
+        .ok_or("dest must include port (:)")?;
     validate_reality_server_name(host)?;
     let port = port
         .parse::<u16>()
@@ -312,10 +314,7 @@ pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static 
     };
 
     if host.parse::<std::net::Ipv6Addr>().is_ok() {
-        return Ok(format!(
-            "[{}]:{parsed_port}",
-            host.to_ascii_lowercase()
-        ));
+        return Ok(format!("[{}]:{parsed_port}", host.to_ascii_lowercase()));
     }
     if bracketed_host {
         return Err("accepted_authority bracketed host must be IPv6");

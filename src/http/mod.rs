@@ -1,9 +1,9 @@
 use std::{
-	collections::{BTreeMap, BTreeSet, VecDeque},
-	convert::Infallible,
-	future::Future,
-	sync::Arc,
-	time::Instant as StdInstant,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    convert::Infallible,
+    future::Future,
+    sync::Arc,
+    time::Instant as StdInstant,
 };
 
 use axum::{
@@ -29,11 +29,11 @@ use tokio::{
 
 use crate::{
     admin_token::{AdminTokenHash, verify_admin_token},
+    cloudflared_supervisor::CloudflaredHealthHandle,
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
-    cloudflared_supervisor::CloudflaredHealthHandle,
-    control_plane_mesh::{MeshAwareHttpClient, MeshProxyStateHandle},
     config::Config,
+    control_plane_mesh::{MeshAwareHttpClient, MeshProxyStateHandle},
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
         Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
@@ -75,9 +75,8 @@ use crate::{
     subscription,
     tcp_connection_usage::{
         TcpConnectionEndpointView, TcpConnectionUsageEndpointOption,
-        TcpConnectionUsageEndpointSeries, TcpConnectionUsageWarning,
-        TcpConnectionUsageWindow, TcpConnectionUsageWindowView,
-        build_window_view as build_tcp_connection_window_view,
+        TcpConnectionUsageEndpointSeries, TcpConnectionUsageWarning, TcpConnectionUsageWindow,
+        TcpConnectionUsageWindowView, build_window_view as build_tcp_connection_window_view,
     },
     xray_supervisor::XrayHealthHandle,
 };
@@ -257,32 +256,32 @@ struct AdminEndpointProbeSummary {
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointWithProbe {
-	#[serde(flatten)]
-	endpoint: Endpoint,
-	probe: AdminEndpointProbeSummary,
+    #[serde(flatten)]
+    endpoint: Endpoint,
+    probe: AdminEndpointProbeSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminEndpointCanaryProbeNode {
-	node_id: String,
-	ok: bool,
-	status: Option<u16>,
-	latency_ms: u32,
-	error: Option<String>,
-	checked_at: String,
+    node_id: String,
+    ok: bool,
+    status: Option<u16>,
+    latency_ms: u32,
+    error: Option<String>,
+    checked_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointCanaryProbeResponse {
-	endpoint_id: String,
-	url: String,
-	nodes: Vec<AdminEndpointCanaryProbeNode>,
+    endpoint_id: String,
+    url: String,
+    nodes: Vec<AdminEndpointCanaryProbeNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminInternalEndpointCanaryProbeRequest {
-	endpoint_id: String,
-	url: String,
+    endpoint_id: String,
+    url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -937,14 +936,14 @@ pub fn build_router(
                 .delete(admin_delete_endpoint)
                 .patch(admin_patch_endpoint),
         )
-		.route(
-			"/endpoints/:endpoint_id/rotate-shortid",
-			post(admin_rotate_short_id),
-		)
-		.route(
-			"/endpoints/:endpoint_id/canary-probe",
-			post(admin_probe_endpoint_canary),
-		)
+        .route(
+            "/endpoints/:endpoint_id/rotate-shortid",
+            post(admin_rotate_short_id),
+        )
+        .route(
+            "/endpoints/:endpoint_id/canary-probe",
+            post(admin_probe_endpoint_canary),
+        )
         .route(
             "/reality-domains",
             get(admin_list_reality_domains).post(admin_create_reality_domain),
@@ -1043,10 +1042,10 @@ pub fn build_router(
             "/_internal/endpoint-probe/runs/:run_id/events",
             get(admin_internal_endpoint_probe_run_events),
         )
-		.route(
-			"/_internal/endpoint-canary-probe",
-			post(admin_internal_endpoint_canary_probe),
-		)
+        .route(
+            "/_internal/endpoint-canary-probe",
+            post(admin_internal_endpoint_canary_probe),
+        )
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
@@ -2431,8 +2430,7 @@ fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError
 fn parse_tcp_connection_usage_window(
     query: &TcpConnectionUsageQuery,
 ) -> Result<TcpConnectionUsageWindow, ApiError> {
-    TcpConnectionUsageWindow::parse(query.window.as_deref())
-        .map_err(ApiError::invalid_request)
+    TcpConnectionUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
 }
 
 fn build_ip_usage_membership_views(
@@ -2534,12 +2532,7 @@ fn build_local_node_tcp_connections_report(
     window: TcpConnectionUsageWindow,
 ) -> TcpConnectionUsageWindowView {
     let endpoints = build_tcp_connection_endpoint_views(store, node_id);
-    build_tcp_connection_window_view(
-        store.tcp_connection_usage(),
-        Utc::now(),
-        window,
-        &endpoints,
-    )
+    build_tcp_connection_window_view(store.tcp_connection_usage(), Utc::now(), window, &endpoints)
 }
 
 fn node_tcp_connections_response_from_report(
@@ -3019,12 +3012,10 @@ async fn admin_get_user_ip_usage(
             window.as_str()
         );
         let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
@@ -3150,12 +3141,10 @@ async fn forward_remote_node_runtime_events(
 ) {
     let response = match client
         .send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         })
         .await
     {
@@ -3715,8 +3704,10 @@ async fn admin_delete_node(
             .map(|endpoint| endpoint.endpoint_id)
             .collect::<Vec<_>>();
         let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
-        let expected_endpoint_ids_set =
-            expected_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let expected_endpoint_ids_set = expected_endpoint_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if query.delete_endpoints {
             if actual_endpoint_ids != expected_endpoint_ids_set {
                 return Err(ApiError::conflict(
@@ -3838,10 +3829,7 @@ async fn build_admin_service_config_response(
         access_host: state.config.access_host.clone(),
         api_base_url: state.config.api_base_url.clone(),
         vless_https_canary_bind: state.config.vless_canary_bind.to_string(),
-        vless_https_canary_acme_directory_url: state
-            .config
-            .vless_canary_acme_directory_url
-            .clone(),
+        vless_https_canary_acme_directory_url: state.config.vless_canary_acme_directory_url.clone(),
         vless_https_canary_status,
         mesh_proxy_url: state.config.mesh_proxy_url.clone(),
         mesh_proxy_status: mesh_proxy.status.as_str().to_string(),
@@ -4380,10 +4368,14 @@ fn build_cluster_http_client(state: &AppState) -> Result<MeshAwareHttpClient, Ap
     let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
         .map_err(|e| ApiError::internal(e.to_string()))?;
     let direct = reqwest::Client::builder()
-        .add_root_certificate(reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
-            .map_err(|e| ApiError::internal(e.to_string()))?)
-        .identity(reqwest::Identity::from_pem(identity_pem.as_bytes())
-            .map_err(|e| ApiError::internal(e.to_string()))?)
+        .add_root_certificate(
+            reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
+                .map_err(|e| ApiError::internal(e.to_string()))?,
+        )
+        .identity(
+            reqwest::Identity::from_pem(identity_pem.as_bytes())
+                .map_err(|e| ApiError::internal(e.to_string()))?,
+        )
         .build()
         .map_err(|e| ApiError::internal(format!("build cluster reqwest client: {e}")))?;
 
@@ -4724,12 +4716,10 @@ async fn admin_get_endpoint_probe_run_status(
 
         tasks.push(tokio::spawn(async move {
             let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-                client
-                    .get(url.clone())
-                    .header(
-                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                        sig.clone(),
-                    )
+                client.get(url.clone()).header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    sig.clone(),
+                )
             });
 
             let resp = tokio::time::timeout(Duration::from_secs(3), request).await;
@@ -4962,12 +4952,10 @@ async fn forward_remote_endpoint_probe_run_events(
 ) {
     let resp = match client
         .send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         })
         .await
     {
@@ -5328,22 +5316,24 @@ async fn admin_patch_endpoint(
                         "accepted_authorities is only editable on managed VLESS endpoints",
                     ));
                 }
-                meta.accepted_authorities = normalize_accepted_authorities(
-                    accepted_authorities.as_deref().unwrap_or(&[]),
-                )
-                .map_err(|(reason, authority)| {
-                    ApiError::invalid_request(format!(
-                        "invalid accepted_authority: {authority} ({reason})"
-                    ))
-                })?;
+                meta.accepted_authorities =
+                    normalize_accepted_authorities(accepted_authorities.as_deref().unwrap_or(&[]))
+                        .map_err(|(reason, authority)| {
+                            ApiError::invalid_request(format!(
+                                "invalid accepted_authority: {authority} ({reason})"
+                            ))
+                        })?;
             }
             if meta.managed_default {
                 let desired_node = nodes
                     .iter()
                     .find(|node| node.node_id == endpoint.node_id)
                     .ok_or_else(|| ApiError::invalid_request("node not found"))?;
-                meta.reality =
-                    managed_vless_reality_for_node(&state, desired_node, &meta.reality.fingerprint)?;
+                meta.reality = managed_vless_reality_for_node(
+                    &state,
+                    desired_node,
+                    &meta.reality.fingerprint,
+                )?;
             }
 
             endpoint.meta =
@@ -5520,8 +5510,8 @@ struct RotateShortIdResponse {
 }
 
 async fn admin_rotate_short_id(
-	Extension(state): Extension<AppState>,
-	Path(endpoint_id): Path<String>,
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
 ) -> Result<Json<RotateShortIdResponse>, ApiError> {
     let (cmd, out) = {
         let store = state.store.lock().await;
@@ -5545,272 +5535,269 @@ async fn admin_rotate_short_id(
     let _ = raft_write(&state, cmd).await?;
     state.reconcile.request_rebuild_inbound(endpoint_id.clone());
 
-	Ok(Json(RotateShortIdResponse {
-		endpoint_id,
-		active_short_id: out.active_short_id,
-		short_ids: out.short_ids,
-	}))
+    Ok(Json(RotateShortIdResponse {
+        endpoint_id,
+        active_short_id: out.active_short_id,
+        short_ids: out.short_ids,
+    }))
 }
 
 fn endpoint_canary_probe_url(node: &Node, endpoint: &Endpoint) -> Result<String, ApiError> {
-	let host = node.access_host.trim().trim_end_matches('.');
-	if host.is_empty() {
-		return Err(ApiError::invalid_request(format!(
-			"node access_host is empty: node_id={}",
-			node.node_id
-		)));
-	}
-	if crate::endpoint_probe::is_loopback_host(host) {
-		return Err(ApiError::invalid_request(format!(
-			"loopback access_host is not allowed for managed VLESS canary probe: node_id={}",
-			node.node_id
-		)));
-	}
-	let authority = if endpoint.port == 443 {
-		host.to_string()
-	} else {
-		format!("{host}:{}", endpoint.port)
-	};
-	Ok(format!("https://{authority}/generate_204"))
+    let host = node.access_host.trim().trim_end_matches('.');
+    if host.is_empty() {
+        return Err(ApiError::invalid_request(format!(
+            "node access_host is empty: node_id={}",
+            node.node_id
+        )));
+    }
+    if crate::endpoint_probe::is_loopback_host(host) {
+        return Err(ApiError::invalid_request(format!(
+            "loopback access_host is not allowed for managed VLESS canary probe: node_id={}",
+            node.node_id
+        )));
+    }
+    let authority = if endpoint.port == 443 {
+        host.to_string()
+    } else {
+        format!("{host}:{}", endpoint.port)
+    };
+    Ok(format!("https://{authority}/generate_204"))
 }
 
 async fn run_endpoint_canary_probe_url(
-	client: &reqwest::Client,
-	node_id: &str,
-	url: String,
+    client: &reqwest::Client,
+    node_id: &str,
+    url: String,
 ) -> AdminEndpointCanaryProbeNode {
-	let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-	let started = StdInstant::now();
-	let request = client.get(&url).header(header::ACCEPT, "*/*");
-	let result = tokio::time::timeout(Duration::from_secs(5), request.send()).await;
-	let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+    let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let started = StdInstant::now();
+    let request = client.get(&url).header(header::ACCEPT, "*/*");
+    let result = tokio::time::timeout(Duration::from_secs(5), request.send()).await;
+    let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
 
-	match result {
-		Ok(Ok(response)) => {
-			let status = response.status();
-			let ok = status == StatusCode::NO_CONTENT;
-			AdminEndpointCanaryProbeNode {
-				node_id: node_id.to_string(),
-				ok,
-				status: Some(status.as_u16()),
-				latency_ms,
-				error: if ok {
-					None
-				} else {
-					Some(format!("expected 204, got {}", status.as_u16()))
-				},
-				checked_at,
-			}
-		}
-		Ok(Err(err)) => AdminEndpointCanaryProbeNode {
-			node_id: node_id.to_string(),
-			ok: false,
-			status: err.status().map(|status| status.as_u16()),
-			latency_ms,
-			error: Some(err.to_string()),
-			checked_at,
-		},
-		Err(_) => AdminEndpointCanaryProbeNode {
-			node_id: node_id.to_string(),
-			ok: false,
-			status: None,
-			latency_ms,
-			error: Some("timeout".to_string()),
-			checked_at,
-		},
-	}
+    match result {
+        Ok(Ok(response)) => {
+            let status = response.status();
+            let ok = status == StatusCode::NO_CONTENT;
+            AdminEndpointCanaryProbeNode {
+                node_id: node_id.to_string(),
+                ok,
+                status: Some(status.as_u16()),
+                latency_ms,
+                error: if ok {
+                    None
+                } else {
+                    Some(format!("expected 204, got {}", status.as_u16()))
+                },
+                checked_at,
+            }
+        }
+        Ok(Err(err)) => AdminEndpointCanaryProbeNode {
+            node_id: node_id.to_string(),
+            ok: false,
+            status: err.status().map(|status| status.as_u16()),
+            latency_ms,
+            error: Some(err.to_string()),
+            checked_at,
+        },
+        Err(_) => AdminEndpointCanaryProbeNode {
+            node_id: node_id.to_string(),
+            ok: false,
+            status: None,
+            latency_ms,
+            error: Some("timeout".to_string()),
+            checked_at,
+        },
+    }
 }
 
 fn endpoint_canary_probe_error_node(
-	node_id: String,
-	status: Option<u16>,
-	latency_ms: u32,
-	error: impl Into<String>,
+    node_id: String,
+    status: Option<u16>,
+    latency_ms: u32,
+    error: impl Into<String>,
 ) -> AdminEndpointCanaryProbeNode {
-	AdminEndpointCanaryProbeNode {
-		node_id,
-		ok: false,
-		status,
-		latency_ms,
-		error: Some(error.into()),
-		checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-	}
+    AdminEndpointCanaryProbeNode {
+        node_id,
+        ok: false,
+        status,
+        latency_ms,
+        error: Some(error.into()),
+        checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    }
 }
 
 fn build_endpoint_canary_probe_client() -> Result<reqwest::Client, ApiError> {
-	reqwest::Client::builder()
-		.redirect(reqwest::redirect::Policy::none())
-		.connect_timeout(Duration::from_secs(3))
-		.user_agent(format!("xp/{} canary-probe", crate::version::VERSION))
-		.build()
-		.map_err(|e| ApiError::internal(format!("build canary probe client: {e}")))
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(3))
+        .user_agent(format!("xp/{} canary-probe", crate::version::VERSION))
+        .build()
+        .map_err(|e| ApiError::internal(format!("build canary probe client: {e}")))
 }
 
 async fn admin_internal_endpoint_canary_probe(
-	Extension(state): Extension<AppState>,
-	internal: Option<Extension<InternalSignatureAuth>>,
-	ApiJson(req): ApiJson<AdminInternalEndpointCanaryProbeRequest>,
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(req): ApiJson<AdminInternalEndpointCanaryProbeRequest>,
 ) -> Result<Json<AdminEndpointCanaryProbeNode>, ApiError> {
-	if internal.is_none() {
-		return Err(ApiError::unauthorized("internal auth required"));
-	}
-	if req.endpoint_id.trim().is_empty() {
-		return Err(ApiError::invalid_request("endpoint_id is required"));
-	}
-	if req.url.trim().is_empty() {
-		return Err(ApiError::invalid_request("url is required"));
-	}
-	let client = build_endpoint_canary_probe_client()?;
-	Ok(Json(
-		run_endpoint_canary_probe_url(&client, &state.cluster.node_id, req.url).await,
-	))
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    if req.endpoint_id.trim().is_empty() {
+        return Err(ApiError::invalid_request("endpoint_id is required"));
+    }
+    if req.url.trim().is_empty() {
+        return Err(ApiError::invalid_request("url is required"));
+    }
+    let client = build_endpoint_canary_probe_client()?;
+    Ok(Json(
+        run_endpoint_canary_probe_url(&client, &state.cluster.node_id, req.url).await,
+    ))
 }
 
 async fn admin_probe_endpoint_canary(
-	Extension(state): Extension<AppState>,
-	Path(endpoint_id): Path<String>,
+    Extension(state): Extension<AppState>,
+    Path(endpoint_id): Path<String>,
 ) -> Result<Json<AdminEndpointCanaryProbeResponse>, ApiError> {
-	let (endpoint, node, nodes, meta) = {
-		let store = state.store.lock().await;
-		let endpoint = store
-			.get_endpoint(&endpoint_id)
-			.ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
-		if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
-			return Err(ApiError::invalid_request(
-				"canary probe is only supported for vless_reality_vision_tcp endpoints",
-			));
-		}
-		let meta: VlessRealityVisionTcpEndpointMeta =
-			serde_json::from_value(endpoint.meta.clone())
-				.map_err(|e| ApiError::internal(e.to_string()))?;
-		if !meta.managed_default {
-			return Err(ApiError::invalid_request(
-				"canary probe is only supported for managed VLESS endpoints",
-			));
-		}
-		let node = store
-			.get_node(&endpoint.node_id)
-			.ok_or_else(|| ApiError::not_found(format!("node not found: {}", endpoint.node_id)))?;
-		let nodes = store.list_nodes();
-		(endpoint, node, nodes, meta)
-	};
-	let _ = meta;
-	let url = endpoint_canary_probe_url(&node, &endpoint)?;
+    let (endpoint, node, nodes, meta) = {
+        let store = state.store.lock().await;
+        let endpoint = store
+            .get_endpoint(&endpoint_id)
+            .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
+        if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+            return Err(ApiError::invalid_request(
+                "canary probe is only supported for vless_reality_vision_tcp endpoints",
+            ));
+        }
+        let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta.clone())
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        if !meta.managed_default {
+            return Err(ApiError::invalid_request(
+                "canary probe is only supported for managed VLESS endpoints",
+            ));
+        }
+        let node = store
+            .get_node(&endpoint.node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {}", endpoint.node_id)))?;
+        let nodes = store.list_nodes();
+        (endpoint, node, nodes, meta)
+    };
+    let _ = meta;
+    let url = endpoint_canary_probe_url(&node, &endpoint)?;
 
-	let local_node_id = state.cluster.node_id.clone();
-	let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
-		return Err(ApiError::internal("cluster ca key is not available"));
-	};
-	let cluster_client = build_cluster_http_client(&state)?;
-	let uri: axum::http::Uri = "/_internal/endpoint-canary-probe"
-		.parse()
-		.expect("valid uri");
-	let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
-		.map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
+    let local_node_id = state.cluster.node_id.clone();
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
+        return Err(ApiError::internal("cluster ca key is not available"));
+    };
+    let cluster_client = build_cluster_http_client(&state)?;
+    let uri: axum::http::Uri = "/_internal/endpoint-canary-probe"
+        .parse()
+        .expect("valid uri");
+    let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
+        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
 
-	let mut tasks = Vec::new();
-	for node in nodes {
-		let node_id = node.node_id.clone();
-		let req_body = AdminInternalEndpointCanaryProbeRequest {
-			endpoint_id: endpoint.endpoint_id.clone(),
-			url: url.clone(),
-		};
+    let mut tasks = Vec::new();
+    for node in nodes {
+        let node_id = node.node_id.clone();
+        let req_body = AdminInternalEndpointCanaryProbeRequest {
+            endpoint_id: endpoint.endpoint_id.clone(),
+            url: url.clone(),
+        };
 
-		if node_id == local_node_id {
-			tasks.push(tokio::spawn(async move {
-				match build_endpoint_canary_probe_client() {
-					Ok(client) => {
-						run_endpoint_canary_probe_url(&client, &node_id, req_body.url).await
-					}
-					Err(err) => endpoint_canary_probe_error_node(
-						node_id,
-						None,
-						0,
-						format!("build local client: {err:?}"),
-					),
-				}
-			}));
-			continue;
-		}
+        if node_id == local_node_id {
+            tasks.push(tokio::spawn(async move {
+                match build_endpoint_canary_probe_client() {
+                    Ok(client) => {
+                        run_endpoint_canary_probe_url(&client, &node_id, req_body.url).await
+                    }
+                    Err(err) => endpoint_canary_probe_error_node(
+                        node_id,
+                        None,
+                        0,
+                        format!("build local client: {err:?}"),
+                    ),
+                }
+            }));
+            continue;
+        }
 
-		let client = cluster_client.clone();
-		let sig = sig.clone();
-		let url_path = format!(
-			"{}/api/admin/_internal/endpoint-canary-probe",
-			node.api_base_url.trim_end_matches('/')
-		);
+        let client = cluster_client.clone();
+        let sig = sig.clone();
+        let url_path = format!(
+            "{}/api/admin/_internal/endpoint-canary-probe",
+            node.api_base_url.trim_end_matches('/')
+        );
 
-		tasks.push(tokio::spawn(async move {
-			let started = StdInstant::now();
-			let request = client.send_with_fallback(Duration::from_secs(8), |client| {
-				client
-					.post(url_path.clone())
-					.header(
-						header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-						sig.clone(),
-					)
-					.json(&req_body)
-			});
-			let resp = tokio::time::timeout(Duration::from_secs(8), request).await;
-			let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
-			let resp = match resp {
-				Ok(Ok(resp)) => resp,
-				Ok(Err(err)) => {
-					return endpoint_canary_probe_error_node(
-						node_id,
-						None,
-						latency_ms,
-						err.to_string(),
-					);
-				}
-				Err(_) => {
-					return endpoint_canary_probe_error_node(
-						node_id, None, latency_ms, "timeout",
-					);
-				}
-			};
+        tasks.push(tokio::spawn(async move {
+            let started = StdInstant::now();
+            let request = client.send_with_fallback(Duration::from_secs(8), |client| {
+                client
+                    .post(url_path.clone())
+                    .header(
+                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                        sig.clone(),
+                    )
+                    .json(&req_body)
+            });
+            let resp = tokio::time::timeout(Duration::from_secs(8), request).await;
+            let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+            let resp = match resp {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    return endpoint_canary_probe_error_node(
+                        node_id,
+                        None,
+                        latency_ms,
+                        err.to_string(),
+                    );
+                }
+                Err(_) => {
+                    return endpoint_canary_probe_error_node(node_id, None, latency_ms, "timeout");
+                }
+            };
 
-			let status = resp.status();
-			if !status.is_success() {
-				let body = resp.text().await.unwrap_or_default();
-				let error = if body.trim().is_empty() {
-					format!("dispatch http {}", status.as_u16())
-				} else {
-					format!("dispatch http {}: {body}", status.as_u16())
-				};
-				return endpoint_canary_probe_error_node(
-					node_id,
-					Some(status.as_u16()),
-					latency_ms,
-					error,
-				);
-			}
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                let error = if body.trim().is_empty() {
+                    format!("dispatch http {}", status.as_u16())
+                } else {
+                    format!("dispatch http {}: {body}", status.as_u16())
+                };
+                return endpoint_canary_probe_error_node(
+                    node_id,
+                    Some(status.as_u16()),
+                    latency_ms,
+                    error,
+                );
+            }
 
-			match resp.json::<AdminEndpointCanaryProbeNode>().await {
-				Ok(out) => out,
-				Err(err) => {
-					endpoint_canary_probe_error_node(node_id, None, latency_ms, err.to_string())
-				}
-			}
-		}));
-	}
+            match resp.json::<AdminEndpointCanaryProbeNode>().await {
+                Ok(out) => out,
+                Err(err) => {
+                    endpoint_canary_probe_error_node(node_id, None, latency_ms, err.to_string())
+                }
+            }
+        }));
+    }
 
-	let mut nodes = Vec::new();
-	for item in join_all(tasks).await.into_iter().flatten() {
-		nodes.push(item);
-	}
-	nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    let mut nodes = Vec::new();
+    for item in join_all(tasks).await.into_iter().flatten() {
+        nodes.push(item);
+    }
+    nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
 
-	Ok(Json(AdminEndpointCanaryProbeResponse {
-		endpoint_id: endpoint.endpoint_id,
-		url,
-		nodes,
-	}))
+    Ok(Json(AdminEndpointCanaryProbeResponse {
+        endpoint_id: endpoint.endpoint_id,
+        url,
+        nodes,
+    }))
 }
 
 async fn admin_create_user(
-	Extension(state): Extension<AppState>,
-	ApiJson(req): ApiJson<CreateUserRequest>,
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<CreateUserRequest>,
 ) -> Result<Json<User>, ApiError> {
     let user = {
         let store = state.store.lock().await;
@@ -6592,12 +6579,10 @@ async fn admin_list_user_quota_summaries(
         }
         let url = format!("{base}/api/admin/users/quota-summaries?scope=local");
         let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
@@ -6860,12 +6845,10 @@ async fn admin_get_user_node_quota_status(
         }
         let url = format!("{base}/api/admin/users/{user_id}/node-quotas/status?scope=local");
         let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
@@ -7051,9 +7034,7 @@ async fn admin_get_user_mihomo_profile(
     if store.get_user(&user_id).is_none() {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
-    let profile = store
-        .get_user_mihomo_profile(&user_id)
-        .unwrap_or_default();
+    let profile = store.get_user_mihomo_profile(&user_id).unwrap_or_default();
     Ok(Json(profile.into()))
 }
 
@@ -7090,7 +7071,9 @@ async fn validate_user_mihomo_profile_final_render(
         let user = store
             .get_user(user_id)
             .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
-        let memberships = store.list_user_access(&user.user_id).map_err(ApiError::from)?;
+        let memberships = store
+            .list_user_access(&user.user_id)
+            .map_err(ApiError::from)?;
         let endpoints = store.list_endpoints();
         let nodes = store.list_nodes();
         let node_egress_probes = store.list_node_egress_probes();
@@ -7303,12 +7286,10 @@ async fn admin_get_alerts(
         }
         let url = format!("{base}/api/admin/alerts?scope=local");
         let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .get(url.clone())
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
+            client.get(url.clone()).header(
+                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                sig.clone(),
+            )
         });
         let response = tokio::time::timeout(Duration::from_secs(3), request).await;
         let response = match response {
@@ -7518,9 +7499,9 @@ fn map_subscription_render_error(err: subscription::SubscriptionError) -> ApiErr
         | other @ subscription::SubscriptionError::MihomoReservedProxyNameConflict { .. }
         | other @ subscription::SubscriptionError::MihomoExtraProxyConflict { .. }
         | other @ subscription::SubscriptionError::MihomoExtraProxyProviderConflict { .. }
-        | other @ subscription::SubscriptionError::MihomoInvalidFinalConfigReference {
-            ..
-        } => ApiError::invalid_request(other.to_string()),
+        | other @ subscription::SubscriptionError::MihomoInvalidFinalConfigReference { .. } => {
+            ApiError::invalid_request(other.to_string())
+        }
         other => ApiError::internal(format!("failed to build subscription: {other}")),
     }
 }

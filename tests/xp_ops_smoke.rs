@@ -253,12 +253,16 @@ fn deploy_dry_run_prints_managed_default_fields() {
 
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("vless_canary_acme_contact_email: ops@example.com"))
+        .stderr(predicate::str::contains(
+            "vless_canary_acme_contact_email: ops@example.com",
+        ))
         .stderr(predicate::str::contains("default_vless_port: 53842"))
         .stderr(predicate::str::contains(
             "default_vless_server_names: public.sn.files.1drv.com,public.bn.files.1drv.com",
         ))
-        .stderr(predicate::str::contains("default_vless_fingerprint: chrome"))
+        .stderr(predicate::str::contains(
+            "default_vless_fingerprint: chrome",
+        ))
         .stderr(predicate::str::contains("default_ss_port: 53843"))
         .stderr(predicate::str::contains("deploy plan:"));
 }
