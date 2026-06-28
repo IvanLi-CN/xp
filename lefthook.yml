@@ -12,8 +12,6 @@ pre-commit:
       files: git diff --cached --name-only --diff-filter=ACMR -- '*.md'
       run: bunx --no-install dprint fmt {files}
       stage_fixed: true
-    style-budget:
-      run: bun run check:style-budget
     fmt-rust:
       glob: "**/*.{rs}"
       run: cargo fmt
@@ -21,6 +19,8 @@ pre-commit:
     clippy-rust:
       glob: "**/*.{rs}"
       run: cargo clippy -- -D warnings
+    style-budget:
+      run: bun run check:style-budget
 
 commit-msg:
   commands:
