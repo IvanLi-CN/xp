@@ -215,7 +215,9 @@
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAliases`
+  - submission_gate: `approved`
   - evidence_note: 托管 VLESS endpoint 详情页展示 `accepted_authorities` 别名集合，并明确说明它只影响普通 HTTPS Host 匹配，不影响 REALITY `server_names` 或 canonical `/generate_204`。
+    PR: include
     ![Endpoint details accepted host aliases](./assets/endpoint-details-accepted-authorities.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
