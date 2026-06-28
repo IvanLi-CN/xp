@@ -81,11 +81,11 @@ export const ManagedDefaultAliases: Story = {
 			await canvas.findByText("acceptedAuthorities"),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText("hinet-ep.707979.xyz:53844"),
-		).toBeInTheDocument();
+			await canvas.findAllByText("hinet-ep.707979.xyz:53844"),
+		).toHaveLength(2);
 		await expect(
-			await canvas.findByText("edge.example.com:53844"),
-		).toBeInTheDocument();
+			await canvas.findAllByText("edge.example.com:53844"),
+		).toHaveLength(2);
 		await expect(
 			await canvas.findByText(
 				"Accept additional ordinary HTTPS Host headers for camouflage routing. This does not change REALITY serverNames or the canonical /generate_204 URL.",

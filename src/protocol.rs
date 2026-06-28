@@ -259,9 +259,15 @@ pub fn normalize_accepted_authority(authority: &str) -> Result<String, &'static 
     if host.parse::<std::net::Ipv6Addr>().is_ok() {
         return Ok(format!("[{}]:{parsed_port}", host.to_ascii_lowercase()));
     }
-    let normalized_host = host.trim_end_matches('.');
+    let normalized_host = host.strip_suffix('.').unwrap_or(host);
     if normalized_host.parse::<std::net::Ipv4Addr>().is_ok() {
         return Ok(format!("{normalized_host}:{parsed_port}"));
+    }
+    if normalized_host
+        .split('.')
+        .all(|label| !label.is_empty() && label.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err("accepted_authority must use a valid IPv4, hostname, or [ipv6]");
     }
 
     validate_reality_server_name(normalized_host)?;
@@ -517,7 +523,7 @@ mod tests {
     #[test]
     fn accepted_authorities_normalize_case_ipv6_and_deduplicate() {
         let normalized = normalize_accepted_authorities(&[
-            " Edge.Example.com:443 ".to_string(),
+            " Edge.Example.com.:443 ".to_string(),
             "edge.example.com:443".to_string(),
             "[2001:DB8::1]:8443".to_string(),
         ])
@@ -540,6 +546,8 @@ mod tests {
             "https://edge.example.com:443",
             "edge.example.com/path:443",
             "edge.example.com:0",
+            "edge.example.com..:443",
+            "999.999.999.999:443",
             "2001:db8::1:443",
             "[2001:db8::1]",
             "bad host:443",
