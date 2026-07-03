@@ -164,20 +164,9 @@ export const AutocompleteInput = React.forwardRef<
 												key={suggestion.value}
 												value={suggestion.value}
 												onSelect={() => selectSuggestion(suggestion.value)}
-												className="items-start"
 											>
-												<span className="flex min-w-0 flex-col gap-0.5">
-													<span className="truncate font-mono text-sm">
-														{suggestion.value}
-													</span>
-													<span className="truncate text-xs text-muted-foreground">
-														{suggestion.label}
-													</span>
-													{suggestion.description ? (
-														<span className="truncate text-xs text-muted-foreground">
-															{suggestion.description}
-														</span>
-													) : null}
+												<span className="min-w-0 truncate font-mono text-sm">
+													{suggestion.value}
 												</span>
 											</CommandItem>
 										))}

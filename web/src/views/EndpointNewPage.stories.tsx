@@ -48,6 +48,12 @@ export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 		await expect(
 			await within(document.body).findByText("hinet-api.example.com:62416"),
 		).toBeVisible();
+		await expect(
+			within(document.body).queryByText("hinet API address"),
+		).toBeNull();
+		await expect(
+			within(document.body).queryByText("Use this node's xp API origin."),
+		).toBeNull();
 		await userEvent.click(
 			await within(document.body).findByText("hinet-api.example.com:62416"),
 		);

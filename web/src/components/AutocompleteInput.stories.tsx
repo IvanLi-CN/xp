@@ -41,8 +41,7 @@ const meta = {
 		suggestions: [
 			{
 				value: "hinet-api.example.com:62416",
-				label: "hinet API address",
-				description: "Use this node's xp API origin.",
+				label: "hinet-api.example.com:62416",
 			},
 		],
 	},

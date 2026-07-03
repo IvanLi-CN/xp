@@ -122,8 +122,7 @@ export function EndpointNewPage() {
 		? [
 				{
 					value: selectedNodeApiDest,
-					label: `${selectedNode?.node_name ?? "Selected node"} API address`,
-					description: "Use this node's xp API origin.",
+					label: selectedNodeApiDest,
 				},
 			]
 		: [];
