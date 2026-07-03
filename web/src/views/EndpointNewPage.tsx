@@ -38,6 +38,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { realityDestFromApiBaseUrl } from "../utils/realityDestSuggestions";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import { validateRealityServerName } from "../utils/realityServerName";
 
@@ -110,6 +111,12 @@ export function EndpointNewPage() {
 		realityDomainsQuery.data?.items ?? [],
 		nodeId,
 	);
+	const selectedNode = nodesQuery.data?.items.find(
+		(node) => node.node_id === nodeId,
+	);
+	const selectedNodeApiDest = selectedNode
+		? realityDestFromApiBaseUrl(selectedNode.api_base_url)
+		: null;
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -505,8 +512,21 @@ export function EndpointNewPage() {
 																	{...field}
 																	type="text"
 																	placeholder="oneclient.sfx.ms:443"
+																	list={
+																		selectedNodeApiDest
+																			? "reality-dest-suggestions"
+																			: undefined
+																	}
 																/>
 															</FormControl>
+															{selectedNodeApiDest ? (
+																<datalist id="reality-dest-suggestions">
+																	<option
+																		value={selectedNodeApiDest}
+																		label={`${selectedNode?.node_name ?? "Selected node"} API address`}
+																	/>
+																</datalist>
+															) : null}
 															<FormDescription>
 																REALITY destination origin for this manual
 																endpoint.
