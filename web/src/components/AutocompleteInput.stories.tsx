@@ -56,9 +56,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Open suggestions" }),
-		);
+		await userEvent.click(await canvas.findByLabelText("dest"));
 		await userEvent.click(
 			await within(document.body).findByText("hinet-api.example.com:62416"),
 		);

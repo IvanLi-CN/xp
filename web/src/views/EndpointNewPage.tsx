@@ -523,7 +523,7 @@ export function EndpointNewPage() {
 																	type="text"
 																	placeholder="oneclient.sfx.ms:443"
 																	suggestions={realityDestSuggestions}
-																	suggestionLabel="Open dest suggestions"
+																	suggestionLabel="Show API address suggestions"
 																	onSuggestionSelect={field.onChange}
 																/>
 															</FormControl>

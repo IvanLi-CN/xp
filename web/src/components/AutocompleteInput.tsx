@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import {
 	Popover,
+	PopoverAnchor,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
@@ -45,6 +46,9 @@ export const AutocompleteInput = React.forwardRef<
 		{
 			className,
 			disabled,
+			onChange,
+			onClick,
+			onFocus,
 			onKeyDown,
 			onSuggestionSelect,
 			placeholder,
@@ -56,6 +60,9 @@ export const AutocompleteInput = React.forwardRef<
 		ref,
 	) => {
 		const [open, setOpen] = React.useState(false);
+		const openTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+			null,
+		);
 		const typedValue = typeof value === "string" ? value : "";
 		const query = normalize(typedValue);
 		const visibleSuggestions = suggestions.filter((suggestion) => {
@@ -66,6 +73,28 @@ export const AutocompleteInput = React.forwardRef<
 			return haystack.includes(query);
 		});
 		const hasSuggestions = suggestions.length > 0;
+		const shouldPromptForEmptyValue = (nextValue: string) =>
+			hasSuggestions && normalize(nextValue).length === 0;
+
+		React.useEffect(() => {
+			return () => {
+				if (openTimerRef.current) clearTimeout(openTimerRef.current);
+			};
+		}, []);
+
+		const openSuggestionsAfterCurrentInteraction = () => {
+			if (openTimerRef.current) clearTimeout(openTimerRef.current);
+			openTimerRef.current = setTimeout(() => {
+				setOpen(true);
+				openTimerRef.current = null;
+			}, 0);
+		};
+
+		const promptForEmptyValue = (nextValue: string) => {
+			if (shouldPromptForEmptyValue(nextValue)) {
+				openSuggestionsAfterCurrentInteraction();
+			}
+		};
 
 		const selectSuggestion = (selectedValue: string) => {
 			onSuggestionSelect?.(selectedValue);
@@ -74,37 +103,51 @@ export const AutocompleteInput = React.forwardRef<
 
 		return (
 			<Popover open={open} onOpenChange={setOpen}>
-				<div className="relative">
-					<Input
-						ref={ref}
-						value={value}
-						disabled={disabled}
-						placeholder={placeholder}
-						className={cn(hasSuggestions && "pr-12", className)}
-						onKeyDown={(event) => {
-							if (event.key === "ArrowDown" && hasSuggestions) {
-								event.preventDefault();
-								setOpen(true);
-							}
-							onKeyDown?.(event);
-						}}
-						{...props}
-					/>
-					{hasSuggestions ? (
-						<PopoverTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								disabled={disabled}
-								aria-label={suggestionLabel}
-								className={triggerButtonClass}
-							>
-								<Icon name="tabler:chevron-down" size={16} ariaLabel="" />
-							</Button>
-						</PopoverTrigger>
-					) : null}
-				</div>
+				<PopoverAnchor asChild>
+					<div className="relative">
+						<Input
+							ref={ref}
+							value={value}
+							disabled={disabled}
+							placeholder={placeholder}
+							className={cn(hasSuggestions && "pr-12", className)}
+							onChange={(event) => {
+								promptForEmptyValue(event.currentTarget.value);
+								onChange?.(event);
+							}}
+							onClick={(event) => {
+								promptForEmptyValue(typedValue);
+								onClick?.(event);
+							}}
+							onFocus={(event) => {
+								promptForEmptyValue(typedValue);
+								onFocus?.(event);
+							}}
+							onKeyDown={(event) => {
+								if (event.key === "ArrowDown" && hasSuggestions) {
+									event.preventDefault();
+									setOpen(true);
+								}
+								onKeyDown?.(event);
+							}}
+							{...props}
+						/>
+						{hasSuggestions ? (
+							<PopoverTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									disabled={disabled}
+									aria-label={suggestionLabel}
+									className={triggerButtonClass}
+								>
+									<Icon name="tabler:chevron-down" size={16} ariaLabel="" />
+								</Button>
+							</PopoverTrigger>
+						) : null}
+					</div>
+				</PopoverAnchor>
 				{hasSuggestions ? (
 					<PopoverContent
 						align="end"

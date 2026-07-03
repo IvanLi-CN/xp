@@ -37,14 +37,17 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const ManualDestApiAddressSuggestion: Story = {
+export const ManualDestApiAddressSuggestion: Story = {};
+
+export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const destInput = await canvas.findByLabelText("dest");
 		await expect(destInput).not.toHaveAttribute("list");
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Open dest suggestions" }),
-		);
+		await userEvent.click(destInput);
+		await expect(
+			await within(document.body).findByText("hinet-api.example.com:62416"),
+		).toBeVisible();
 		await userEvent.click(
 			await within(document.body).findByText("hinet-api.example.com:62416"),
 		);
