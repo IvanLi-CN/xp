@@ -37,6 +37,19 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const expectSuggestionPanelToMatchInput = (input: HTMLElement) => {
+	const panel = document.querySelector(
+		'[data-testid="autocomplete-suggestions"]',
+	);
+	if (!(panel instanceof HTMLElement)) {
+		throw new Error("Autocomplete suggestions panel was not rendered.");
+	}
+	const inputRect = input.getBoundingClientRect();
+	const panelRect = panel.getBoundingClientRect();
+	expect(Math.abs(panelRect.left - inputRect.left)).toBeLessThanOrEqual(2);
+	expect(Math.abs(panelRect.width - inputRect.width)).toBeLessThanOrEqual(2);
+};
+
 export const ManualDestApiAddressSuggestion: Story = {};
 
 export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
@@ -48,6 +61,7 @@ export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 		await expect(
 			await within(document.body).findByText("hinet-api.example.com:62416"),
 		).toBeVisible();
+		expectSuggestionPanelToMatchInput(destInput);
 		await expect(
 			within(document.body).queryByText("hinet API address"),
 		).toBeNull();

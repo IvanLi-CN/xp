@@ -150,8 +150,9 @@ export const AutocompleteInput = React.forwardRef<
 				</PopoverAnchor>
 				{hasSuggestions ? (
 					<PopoverContent
-						align="end"
-						className="w-80 max-w-[calc(100vw-2rem)] p-0 sm:w-[28rem]"
+						align="start"
+						data-testid="autocomplete-suggestions"
+						className="w-[var(--radix-popper-anchor-width)] max-w-[calc(100vw-2rem)] p-0"
 					>
 						<Command shouldFilter={false}>
 							<CommandList>
