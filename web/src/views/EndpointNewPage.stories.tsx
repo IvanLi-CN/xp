@@ -41,12 +41,13 @@ export const ManualDestApiAddressSuggestion: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const destInput = await canvas.findByLabelText("dest");
-		await expect(destInput).toHaveAttribute("list", "reality-dest-suggestions");
-		const suggestion = canvasElement.querySelector(
-			'datalist#reality-dest-suggestions option[value="hinet-api.example.com:62416"]',
+		await expect(destInput).not.toHaveAttribute("list");
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Open dest suggestions" }),
 		);
-		await expect(suggestion).not.toBeNull();
-		await userEvent.type(destInput, "hinet-api.example.com:62416");
+		await userEvent.click(
+			await within(document.body).findByText("hinet-api.example.com:62416"),
+		);
 		await expect(destInput).toHaveValue("hinet-api.example.com:62416");
 	},
 };

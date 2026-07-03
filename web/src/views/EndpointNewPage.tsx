@@ -9,6 +9,7 @@ import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -117,6 +118,15 @@ export function EndpointNewPage() {
 	const selectedNodeApiDest = selectedNode
 		? realityDestFromApiBaseUrl(selectedNode.api_base_url)
 		: null;
+	const realityDestSuggestions = selectedNodeApiDest
+		? [
+				{
+					value: selectedNodeApiDest,
+					label: `${selectedNode?.node_name ?? "Selected node"} API address`,
+					description: "Use this node's xp API origin.",
+				},
+			]
+		: [];
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -508,25 +518,15 @@ export function EndpointNewPage() {
 														<FormItem>
 															<FormLabel className="font-mono">dest</FormLabel>
 															<FormControl>
-																<Input
+																<AutocompleteInput
 																	{...field}
 																	type="text"
 																	placeholder="oneclient.sfx.ms:443"
-																	list={
-																		selectedNodeApiDest
-																			? "reality-dest-suggestions"
-																			: undefined
-																	}
+																	suggestions={realityDestSuggestions}
+																	suggestionLabel="Open dest suggestions"
+																	onSuggestionSelect={field.onChange}
 																/>
 															</FormControl>
-															{selectedNodeApiDest ? (
-																<datalist id="reality-dest-suggestions">
-																	<option
-																		value={selectedNodeApiDest}
-																		label={`${selectedNode?.node_name ?? "Selected node"} API address`}
-																	/>
-																</datalist>
-															) : null}
 															<FormDescription>
 																REALITY destination origin for this manual
 																endpoint.

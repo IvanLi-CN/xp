@@ -65,6 +65,9 @@
 
 - 核心可复用组件（例如 `Icon`、`PageHeader`、`DataTable`、`AppShell`）必须有渲染与交互单测（Vitest + Testing Library）。
 - E2E（Playwright）至少覆盖 1 条关键路径，并包含主题切换与刷新持久化验证（`xp_ui_theme` / `data-theme`）。
+- 产品界面除非万不得已，不直接使用浏览器原生控件外观或原生弹出层承载可见交互。
+- `input` 等基础语义元素可以作为本地组件内部基底；autocomplete、select、date/color picker、组合输入等可见控件必须优先使用项目 UI 组件。
+- 可见控件由主题 token 控制图标、弹层、hover、focus、disabled 与错误状态；任何例外都必须写明原因、主题适配和可访问性边界。
 
 ## 3. Storybook（必须，且每个组件都要 stories）
 
