@@ -50,6 +50,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
         Command::Init(args) => preflight_init(paths, args),
         Command::Container(ContainerCommand::Run(_args)) => Ok(()),
         Command::Upgrade(args) => preflight_upgrade(paths, args),
+        Command::UpgradeRunner(_args) => Ok(()),
 
         Command::Xp(XpCommand::Install(args)) => preflight_xp_install(paths, args),
         Command::Xp(XpCommand::Bootstrap(args)) => {

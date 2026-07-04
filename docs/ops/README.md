@@ -484,8 +484,36 @@ Useful flags:
 UI notes:
 
 - The Web UI header shows the current `xp` version (clickable) and can check whether a newer stable GitHub Release exists.
-- The UI does not perform upgrades; upgrades are still expected to be done via `xp-ops upgrade`.
+- On host-managed systemd/OpenRC nodes, the Web UI can start a local in-place upgrade for the
+  current node after admin confirmation. The actual upgrade is still performed by `xp-ops upgrade`
+  through a restricted one-shot root runner.
+- Docker / Compose nodes do not support in-container Web automatic upgrade. Upgrade them from the
+  host by changing the image tag or digest and restarting the container.
 - If you override the upgrade source repo via `XP_OPS_GITHUB_REPO`, the version check uses the same repo.
+
+Web-triggered local upgrade contract:
+
+- `xp` exposes admin-only `GET /api/admin/upgrade/status` and `POST /api/admin/upgrade/start`.
+- The start request must include the confirmed release tag, for example `v0.3.0`; `latest` is
+  intentionally not accepted by the Web start API.
+- `xp` writes the restricted request to `${XP_DATA_DIR}/upgrade/request.json` and records durable
+  status at `${XP_DATA_DIR}/upgrade/status.json`.
+- Only one active job is allowed. A second start request while a job is `running` or `restarting`
+  returns `409 upgrade_already_running`.
+- The Web UI polls status while the job is running. If `xp` restarts during the upgrade, the status
+  file is used to recover the last known result.
+
+Host-managed root delegation:
+
+- systemd nodes use `xp-upgrade.service` as a root one-shot service. `xp-ops init` writes a narrow
+  polkit rule that only lets the `xp` user start that unit.
+- OpenRC nodes use `xp-upgrade` as a root one-shot service. `xp-ops init` appends a narrow doas rule
+  that only allows `rc-service xp-upgrade start`.
+- Reference samples live at:
+  - `docs/ops/systemd/xp-upgrade.service`
+  - `docs/ops/systemd/xp-upgrade.polkit.rules`
+  - `docs/ops/openrc/xp-upgrade`
+  - `docs/ops/openrc/doas-xp-upgrade.conf`
 
 Rollback notes:
 
@@ -500,11 +528,15 @@ Use the path that matches the node shape instead of mixing procedures:
 
 - Host-managed systemd/OpenRC nodes:
   - Upgrade binaries with `xp-ops upgrade` when the distro family is officially supported by `xp-ops`.
+  - Alternatively, after `xp-ops init` has installed the one-shot runner and narrow privilege rule,
+    start the same current-node upgrade from the Web UI.
   - Arch/Debian/Ubuntu/RHEL-family nodes are covered by the supported automation path.
   - If a host-managed node falls outside those distro families, upgrade the `xp` and `xp-ops` binaries manually, then restart `xp` and verify the post-upgrade checks below.
 - Docker / Compose nodes:
   - Update the image tag or digest, then restart the container.
   - Let `xp-ops container run` perform runtime reconcile on startup.
+  - The Web UI reports this shape as unsupported for automatic upgrade and does not replace binaries
+    inside the container.
 
 Post-upgrade validation for nodes expected to expose a managed-default VLESS ingress:
 

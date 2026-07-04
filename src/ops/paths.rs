@@ -59,6 +59,10 @@ impl Paths {
         self.etc_polkit_rules_dir().join("90-xp-xray-restart.rules")
     }
 
+    pub fn etc_polkit_xp_upgrade_rule(&self) -> PathBuf {
+        self.etc_polkit_rules_dir().join("91-xp-upgrade.rules")
+    }
+
     pub fn etc_doas_conf(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/doas.conf"))
     }

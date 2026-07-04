@@ -188,6 +188,20 @@ The persisted Tunnel state prevents duplicate Tunnel / DNS creation on restart a
 - `/etc/cloudflared`
 - `/etc/xp-ops/cloudflare_tunnel`
 
+## Upgrade behavior
+
+Docker / Compose nodes are upgraded from the host by changing `XP_IMAGE` to the desired tag or
+digest and restarting the container:
+
+```bash
+export XP_IMAGE=ghcr.io/ivanli-cn/xp:vX.Y.Z
+docker compose -f deploy/docker/compose.bootstrap.yml up -d
+```
+
+The Web UI does not replace binaries inside the container. If an update is available, the Web
+upgrade popover reports this deployment shape as unsupported for automatic upgrade and points
+operators back to the host-side image / Compose flow.
+
 ## Image publishing
 
 Stable releases publish:
