@@ -425,7 +425,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
 }
 
 pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result<(), ExitError> {
-    let request = crate::upgrade_job::read_request(&args.data_dir)?;
+    let request = crate::upgrade_job::read_runner_request(&args.data_dir)?;
     let starting = crate::upgrade_job::status_for_runner_start(&request);
     crate::upgrade_job::write_status(&args.data_dir, &starting)
         .map_err(|e| ExitError::new(7, format!("service_error: write upgrade status: {e}")))?;
@@ -433,7 +433,7 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     let release_args = UpgradeReleaseArgs {
         version: request.target_tag.clone(),
         prerelease: false,
-        repo: request.repo.clone(),
+        repo: None,
     };
     let upgrade_args = UpgradeArgs {
         release: release_args,

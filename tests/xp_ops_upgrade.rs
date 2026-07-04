@@ -484,13 +484,12 @@ mod linux {
             request_dir.join("request.json"),
             serde_json::json!({
                 "target_tag": "v0.1.999",
-                "repo": "o/r",
+                "repo": "attacker/repo",
                 "requested_at": "2026-07-04T00:00:00Z"
             })
             .to_string(),
         )
         .unwrap();
-
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
@@ -516,6 +515,7 @@ mod linux {
 
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        cmd.env("XP_OPS_GITHUB_REPO", "o/r");
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
@@ -541,7 +541,7 @@ mod linux {
         let status: serde_json::Value = serde_json::from_str(&status_raw).unwrap();
         assert_eq!(status["state"], "succeeded");
         assert_eq!(status["target_tag"], "v0.1.999");
-        assert_eq!(status["repo"], "o/r");
+        assert_eq!(status["repo"], serde_json::Value::Null);
         assert_eq!(status["exit_code"], 0);
         assert_eq!(status["message"], "upgrade completed");
     }

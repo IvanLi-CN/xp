@@ -158,6 +158,12 @@ pub fn read_request(data_dir: &Path) -> Result<UpgradeRequest, ExitError> {
         .map_err(|e| ExitError::new(3, format!("invalid_args: parse upgrade request: {e}")))
 }
 
+pub fn read_runner_request(data_dir: &Path) -> Result<UpgradeRequest, ExitError> {
+    let mut request = read_request(data_dir)?;
+    request.repo = None;
+    Ok(request)
+}
+
 fn write_request(data_dir: &Path, request: &UpgradeRequest) -> io::Result<()> {
     let dir = upgrade_dir(data_dir);
     fs::create_dir_all(&dir)?;
