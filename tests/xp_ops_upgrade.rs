@@ -442,6 +442,111 @@ mod linux {
     }
 
     #[tokio::test]
+    async fn upgrade_runner_executes_request_and_writes_success_status() {
+        let server = MockServer::start().await;
+
+        let new_xp = b"xp-new-binary-from-web-runner";
+        let xp_asset = xp_asset_name();
+        let xp_ops_asset = xp_ops_asset_name();
+
+        let new_xp_ops = current_xp_ops_bytes();
+        let xp_checksum = sha256_hex(new_xp);
+        let xp_ops_checksum = sha256_hex(&new_xp_ops);
+
+        mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{xp_ops_asset}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops.clone()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/download/checksums.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "{xp_checksum}  {xp_asset}\n{xp_ops_checksum}  {xp_ops_asset}\n"
+            )))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let data_dir = tmp.path().join("data");
+        let request_dir = data_dir.join("upgrade");
+        fs::create_dir_all(&request_dir).unwrap();
+        fs::write(
+            request_dir.join("request.json"),
+            serde_json::json!({
+                "target_tag": "v0.1.999",
+                "repo": "o/r",
+                "requested_at": "2026-07-04T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let marker = tmp.path().join("marker.txt");
+        let bin_dir = tmp.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        write_executable(
+            &bin_dir.join("systemctl"),
+            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
+        );
+        write_executable(
+            &bin_dir.join("rc-service"),
+            "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
+        );
+
+        let xp_path = tmp.path().join("usr/local/bin/xp");
+        fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
+        fs::write(&xp_path, b"xp-old-binary").unwrap();
+        seed_xray_config(
+            tmp.path(),
+            "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+        );
+
+        let dest = tmp.path().join("xp-ops-copy");
+        copy_current_xp_ops(&dest);
+
+        let mut cmd = assert_cmd::Command::new(&dest);
+        cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_MARKER", &marker);
+        cmd.env("PATH", prepend_path(&bin_dir));
+        let data_dir_arg = data_dir.to_string_lossy().to_string();
+        cmd.args([
+            "--root",
+            &root,
+            "_upgrade-runner",
+            "--data-dir",
+            &data_dir_arg,
+        ]);
+
+        cmd.assert().success();
+
+        let new_xp_bytes = fs::read(&xp_path).unwrap();
+        assert_eq!(new_xp_bytes, new_xp);
+
+        let marker_raw = fs::read_to_string(&marker).unwrap();
+        assert!(marker_raw.contains("systemctl restart xp.service"));
+        assert!(marker_raw.contains("systemctl restart xray.service"));
+
+        let status_raw = fs::read_to_string(data_dir.join("upgrade/status.json")).unwrap();
+        let status: serde_json::Value = serde_json::from_str(&status_raw).unwrap();
+        assert_eq!(status["state"], "succeeded");
+        assert_eq!(status["target_tag"], "v0.1.999");
+        assert_eq!(status["repo"], "o/r");
+        assert_eq!(status["exit_code"], 0);
+        assert_eq!(status["message"], "upgrade completed");
+    }
+
+    #[tokio::test]
     async fn upgrade_rolls_back_when_xp_restart_fails() {
         let server = MockServer::start().await;
 

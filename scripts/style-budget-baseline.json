@@ -758,7 +758,8 @@
 	},
 	"tests/xp_ops_upgrade.rs": {
 		"long_line_count": 14,
-		"max_line_length": 491
+		"max_line_length": 491,
+		"source_lines": 1062
 	},
 	"web/.storybook/mocks/apiMock.ts": {
 		"long_line_count": 6,

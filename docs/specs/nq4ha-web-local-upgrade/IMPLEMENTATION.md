@@ -18,6 +18,8 @@
 - Rust:
   - upgrade status roundtrip、missing status idle、invalid target reject。
   - admin status auth gate、durable status recovery、active job 409。
+  - `_upgrade-runner` 从 `upgrade/request.json` 读取 target，执行 mocked release upgrade，
+    并把 `succeeded` durable status 写回 `upgrade/status.json`。
   - systemd unit/polkit 与 OpenRC doas policy 的窄触发测试。
 - Web:
   - admin upgrade API schema parse。
@@ -32,6 +34,7 @@
 - `cd web && bun run lint`
 - `cd web && bun run typecheck`
 - `cd web && bun run test`
+- `scripts/testbox/run-web-local-upgrade-e2e.sh`
 
 ## 操作边界
 

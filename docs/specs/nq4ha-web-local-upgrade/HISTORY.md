@@ -5,3 +5,5 @@
   unsupported，并继续走宿主侧 image/Compose 升级。
 - 2026-07-04: 落地受限 request/status 文件、admin upgrade API、`xp-ops _upgrade-runner`、
   systemd/OpenRC one-shot root 委托与 `VersionIndicator` popover。
+- 2026-07-04: 补充共享测试机高成本回归脚本，覆盖 Web request/status 到
+  `_upgrade-runner` 再到 `xp-ops upgrade` 的桥接路径。
