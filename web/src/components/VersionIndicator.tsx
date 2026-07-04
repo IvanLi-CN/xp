@@ -23,7 +23,7 @@ type VersionIndicatorProps = {
 	upgradeStarting?: boolean;
 	onRetryVersionCheck?: () => void;
 	onRefreshUpgradeStatus?: () => void;
-	onStartUpgrade?: (targetTag: string, repo: string) => void;
+	onStartUpgrade?: (targetTag: string) => void;
 };
 
 export function VersionIndicator({
@@ -232,7 +232,7 @@ export function VersionIndicator({
 				onConfirm={() => {
 					if (!upgradeTarget) return;
 					setConfirmOpen(false);
-					onStartUpgrade?.(upgradeTarget, repo);
+					onStartUpgrade?.(upgradeTarget);
 				}}
 			/>
 		</>

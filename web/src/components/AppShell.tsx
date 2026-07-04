@@ -135,10 +135,9 @@ export function AppShell({
 	});
 
 	const adminUpgradeStart = useMutation({
-		mutationFn: (payload: { targetTag: string; repo: string }) =>
+		mutationFn: (payload: { targetTag: string }) =>
 			startAdminUpgrade(adminToken, {
 				target_tag: payload.targetTag,
-				repo: payload.repo,
 			}),
 		onSuccess: (data) => {
 			queryClient.setQueryData(["adminUpgradeStatus", adminToken], data);
@@ -327,8 +326,8 @@ export function AppShell({
 				onRefreshUpgradeStatus={() => {
 					void adminUpgradeStatus.refetch();
 				}}
-				onStartUpgrade={(targetTag, repo) => {
-					adminUpgradeStart.mutate({ targetTag, repo });
+				onStartUpgrade={(targetTag) => {
+					adminUpgradeStart.mutate({ targetTag });
 				}}
 			/>
 		);

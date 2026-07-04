@@ -88,10 +88,12 @@
 
 ```json
 {
-  "target_tag": "v0.3.0",
-  "repo": "IvanLi-CN/xp"
+  "target_tag": "v0.3.0"
 }
 ```
+
+The upgrade source repo is server-controlled from `XP_OPS_GITHUB_REPO`; the start API must not trust
+or persist a browser-supplied repo override.
 
 ### Durable files
 

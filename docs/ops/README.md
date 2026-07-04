@@ -490,6 +490,8 @@ UI notes:
 - Docker / Compose nodes do not support in-container Web automatic upgrade. Upgrade them from the
   host by changing the image tag or digest and restarting the container.
 - If you override the upgrade source repo via `XP_OPS_GITHUB_REPO`, the version check uses the same repo.
+  The Web start API also uses this server-side repo setting and ignores browser-supplied repo
+  overrides.
 
 Web-triggered local upgrade contract:
 

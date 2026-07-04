@@ -702,7 +702,6 @@ struct AdminUpgradeStatusResponse {
 #[serde(deny_unknown_fields)]
 struct AdminUpgradeStartRequest {
     target_tag: String,
-    repo: Option<String>,
 }
 
 impl From<crate::state::UserMihomoProfile> for AdminUserMihomoProfileResponse {
@@ -3920,10 +3919,11 @@ async fn admin_start_upgrade(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<AdminUpgradeStartRequest>,
 ) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
+    let repo = state.ops_github_repo.trim().trim_matches('/');
     let status = start_upgrade(
         &state.config.data_dir,
         req.target_tag.trim(),
-        req.repo.filter(|repo| !repo.trim().is_empty()),
+        (!repo.is_empty()).then(|| repo.to_string()),
     )
     .map_err(|err| match err {
         UpgradeStartError::Active => ApiError::new(

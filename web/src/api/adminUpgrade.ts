@@ -61,7 +61,7 @@ export async function fetchAdminUpgradeStatus(
 
 export async function startAdminUpgrade(
 	adminToken: string,
-	payload: { target_tag: string; repo?: string | null },
+	payload: { target_tag: string },
 	signal?: AbortSignal,
 ): Promise<AdminUpgradeStatusResponse> {
 	const res = await fetch("/api/admin/upgrade/start", {
