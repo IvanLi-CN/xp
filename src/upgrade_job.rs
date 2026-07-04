@@ -12,6 +12,7 @@ const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
+const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -195,7 +196,7 @@ pub fn support_status() -> UpgradeSupport {
         };
     }
 
-    if command_exists("doas") && command_exists("rc-service") {
+    if command_exists("doas") && command_exists(OPENRC_RC_SERVICE) {
         return UpgradeSupport {
             supported: true,
             reason: None,
@@ -365,11 +366,13 @@ fn trigger_upgrade_service(trigger: Option<&str>) -> Result<(), String> {
             "--no-block",
             SYSTEMD_UPGRADE_UNIT,
         ])),
-        Some("openrc") => {
-            run_status(Command::new("doas").args(["rc-service", OPENRC_UPGRADE_SERVICE, "start"]))
-        }
+        Some("openrc") => run_status(Command::new("doas").args(openrc_trigger_args())),
         _ => Err("upgrade trigger is not supported".to_string()),
     }
+}
+
+fn openrc_trigger_args() -> [&'static str; 3] {
+    [OPENRC_RC_SERVICE, OPENRC_UPGRADE_SERVICE, "start"]
 }
 
 fn run_status(cmd: &mut Command) -> Result<(), String> {
@@ -454,5 +457,13 @@ mod tests {
         let _lock = StartLock::acquire(tmp.path()).unwrap();
         let err = start_upgrade(tmp.path(), "v0.2.0", None).unwrap_err();
         assert!(matches!(err, UpgradeStartError::Active));
+    }
+
+    #[test]
+    fn openrc_trigger_matches_installed_doas_policy() {
+        assert_eq!(
+            openrc_trigger_args(),
+            ["/sbin/rc-service", "xp-upgrade", "start"]
+        );
     }
 }
