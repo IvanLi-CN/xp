@@ -7,3 +7,5 @@
   systemd/OpenRC one-shot root 委托与 `VersionIndicator` popover。
 - 2026-07-04: 补充共享测试机高成本回归脚本，覆盖 Web request/status 到
   `_upgrade-runner` 再到 `xp-ops upgrade` 的桥接路径。
+- 2026-07-04: 补充 live shared-testbox 回归脚本，启动真实旧版 `xp`，通过 Web admin API
+  触发升级，验证新版重启、失败自动回滚与关键迁移 smoke。

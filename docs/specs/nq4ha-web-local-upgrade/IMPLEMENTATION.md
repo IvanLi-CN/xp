@@ -21,6 +21,16 @@
   - `_upgrade-runner` 从 `upgrade/request.json` 读取 target，执行 mocked release upgrade，
     并把 `succeeded` durable status 写回 `upgrade/status.json`。
   - systemd unit/polkit 与 OpenRC doas policy 的窄触发测试。
+- Shared testbox live E2E:
+  - `scripts/testbox/run-web-local-upgrade-live-e2e.sh` 在隔离共享测试机容器中启动真实
+    `xp` 服务，通过 `POST /api/admin/upgrade/start` 触发升级，并用 fake systemd boundary
+    只允许 `xp-upgrade.service` 与固定 restart 调用。
+  - success case 从 `XP_BUILD_VERSION=0.2.0` 升级到 `0.2.1`，验证
+    `/api/cluster/info` 返回新版本，并确认升级前创建的用户仍可读取。
+  - rollback case 故意让 `xp.service` restart 失败，验证 durable status 进入
+    `failed`、旧版本 `xp` 继续提供服务、升级失败二进制被保留为 `xp.failed.*`。
+  - migration smoke 覆盖 legacy state JSON、state/usage version skew recovery 与 legacy grants
+    snapshot install migration。
 - Web:
   - admin upgrade API schema parse。
   - `Components/VersionIndicator` Storybook 覆盖 idle/checking/update/unsupported/running/failed/
@@ -35,6 +45,7 @@
 - `cd web && bun run typecheck`
 - `cd web && bun run test`
 - `scripts/testbox/run-web-local-upgrade-e2e.sh`
+- `scripts/testbox/run-web-local-upgrade-live-e2e.sh`
 
 ## 操作边界
 

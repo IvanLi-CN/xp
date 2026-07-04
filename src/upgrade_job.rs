@@ -138,6 +138,14 @@ fn write_request(data_dir: &Path, request: &UpgradeRequest) -> io::Result<()> {
 }
 
 pub fn support_status() -> UpgradeSupport {
+    if let Some(trigger) = test_forced_host_trigger() {
+        return UpgradeSupport {
+            supported: true,
+            reason: None,
+            trigger: Some(trigger),
+        };
+    }
+
     if is_container_runtime() {
         return UpgradeSupport {
             supported: false,
@@ -168,6 +176,20 @@ pub fn support_status() -> UpgradeSupport {
         supported: false,
         reason: Some("missing supported upgrade trigger: systemctl or doas+rc-service".to_string()),
         trigger: None,
+    }
+}
+
+fn test_forced_host_trigger() -> Option<&'static str> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    match std::env::var("XP_UPGRADE_TEST_FORCE_HOST_TRIGGER")
+        .ok()?
+        .as_str()
+    {
+        "systemd" => Some("systemd"),
+        "openrc" => Some("openrc"),
+        _ => None,
     }
 }
 
