@@ -1,4 +1,4 @@
-use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs};
+use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
 use crate::ops::init::write_static_xray_config;
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
@@ -422,6 +422,34 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             Err(err)
         }
     }
+}
+
+pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result<(), ExitError> {
+    let request = crate::upgrade_job::prepare_runner_request(&args.data_dir, DEFAULT_GITHUB_REPO)?;
+    let starting = crate::upgrade_job::status_for_runner_start(&request);
+    crate::upgrade_job::write_status(&args.data_dir, &starting)
+        .map_err(|e| ExitError::new(7, format!("service_error: write upgrade status: {e}")))?;
+
+    let release_args = UpgradeReleaseArgs {
+        version: request.target_tag.clone(),
+        prerelease: false,
+        repo: request.repo.clone(),
+    };
+    let upgrade_args = UpgradeArgs {
+        release: release_args,
+        dry_run: false,
+    };
+
+    let result = cmd_upgrade(paths, upgrade_args).await;
+    let final_status =
+        crate::upgrade_job::status_for_runner_finish(&request, result.as_ref().map(|_| ()));
+    if let Err(err) = crate::upgrade_job::write_status(&args.data_dir, &final_status) {
+        return Err(ExitError::new(
+            7,
+            format!("service_error: write upgrade status: {err}"),
+        ));
+    }
+    result
 }
 
 async fn upgrade_xp(

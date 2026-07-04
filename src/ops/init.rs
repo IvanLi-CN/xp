@@ -34,6 +34,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
         InitSystem::Systemd => {
             write_systemd_units(&paths, &args, mode)?;
             write_systemd_xray_restart_policy(&paths, mode)?;
+            write_systemd_upgrade_policy(&paths, mode)?;
             if args.enable_services {
                 enable_systemd_services(&paths, mode)?;
             }
@@ -42,6 +43,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
             write_openrc_scripts(&paths, &args, mode)?;
             write_openrc_supervisor_kill_helper(&paths, mode)?;
             write_openrc_xray_restart_policy(&paths, mode)?;
+            write_openrc_upgrade_policy(&paths, mode)?;
             if args.enable_services {
                 enable_openrc_services(mode)?;
             }
@@ -189,13 +191,17 @@ fn write_systemd_units(paths: &Paths, args: &InitArgs, mode: Mode) -> Result<(),
 
     let xp_unit = systemd_xp_unit(args);
     let xray_unit = systemd_xray_unit(args);
+    let upgrade_unit = systemd_xp_upgrade_unit(args);
 
     let xp_path = dir.join("xp.service");
     let xray_path = dir.join("xray.service");
+    let upgrade_path = dir.join("xp-upgrade.service");
 
     write_string_if_changed(&xp_path, &xp_unit)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xray_path, &xray_unit)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&upgrade_path, &upgrade_unit)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     Ok(())
@@ -222,6 +228,24 @@ RestartSec=2s\n\
 [Install]\n\
 WantedBy=multi-user.target\n",
         args.xp_work_dir.display(),
+        args.xp_data_dir.display()
+    )
+}
+
+fn systemd_xp_upgrade_unit(args: &InitArgs) -> String {
+    format!(
+        "[Unit]\n\
+Description=xp web-triggered upgrade runner\n\
+Wants=network-online.target\n\
+After=network-online.target\n\
+\n\
+[Service]\n\
+Type=oneshot\n\
+Environment=XP_DATA_DIR={}\n\
+EnvironmentFile=-/etc/xp/xp.env\n\
+ExecStart=/bin/sh -c '\
+exec /usr/local/bin/xp-ops _upgrade-runner \
+--data-dir \"${{XP_DATA_DIR:-/var/lib/xp/data}}\"'\n",
         args.xp_data_dir.display()
     )
 }
@@ -305,6 +329,36 @@ polkit.addRule(function(action, subject) {
     Ok(())
 }
 
+fn write_systemd_upgrade_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let p = paths.etc_polkit_xp_upgrade_rule();
+    if mode == Mode::DryRun {
+        eprintln!("would write: {}", p.display());
+        return Ok(());
+    }
+
+    let template = r#"// Managed by xp-ops (xp init)
+polkit.addRule(function(action, subject) {
+  if (action.id != "org.freedesktop.systemd1.manage-units") {
+    return null;
+  }
+  if (!subject || subject.user != "xp") {
+    return null;
+  }
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (unit == "xp-upgrade.service" && verb == "start") {
+    return polkit.Result.YES;
+  }
+  return null;
+});
+"#;
+
+    write_string_if_changed(&p, template)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&p, 0o644).ok();
+    Ok(())
+}
+
 fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
     let p = paths.etc_doas_conf();
     if mode == Mode::DryRun {
@@ -356,6 +410,35 @@ fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), Exi
         out.push_str(&rule);
         out.push('\n');
     }
+
+    write_string_if_changed(&p, &out)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&p, 0o600).ok();
+    Ok(())
+}
+
+fn write_openrc_upgrade_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let p = paths.etc_doas_conf();
+    if mode == Mode::DryRun {
+        eprintln!("would ensure: {}", p.display());
+        return Ok(());
+    }
+
+    let existing = fs::read_to_string(&p).unwrap_or_default();
+    let marker = "# Managed by xp-ops: allow xp to start the upgrade runner";
+    let rule = "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start";
+    if existing.contains(rule) {
+        return Ok(());
+    }
+
+    let mut out = existing;
+    if !out.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(marker);
+    out.push('\n');
+    out.push_str(rule);
+    out.push('\n');
 
     write_string_if_changed(&p, &out)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
@@ -448,26 +531,81 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
 
     let xp_script = openrc_xp_script();
     let xray_script = openrc_xray_script();
+    let upgrade_script = openrc_xp_upgrade_script();
 
     let xp_path = initd.join("xp");
     let xray_path = initd.join("xray");
+    let upgrade_path = initd.join("xp-upgrade");
 
     write_string_if_changed(&xp_path, &xp_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xray_path, &xray_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&upgrade_path, &upgrade_script)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&xp_path, 0o755).ok();
     chmod(&xray_path, 0o755).ok();
+    chmod(&upgrade_path, 0o755).ok();
 
     Ok(())
 }
 
 fn openrc_xp_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xp\"\ndescription=\"xp (Xray cluster manager)\"\n\ncommand=\"/bin/sh\"\ncommand_args=\"-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'\"\ncommand_user=\"xp:xp\"\ncommand_background=\"yes\"\npidfile=\"/run/xp.pid\"\n\ndepend() {\n  need net\n}\n".to_string()
+    r#"#!/sbin/openrc-run
+
+name="xp"
+description="xp (Xray cluster manager)"
+
+command="/bin/sh"
+command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'"
+command_user="xp:xp"
+command_background="yes"
+pidfile="/run/xp.pid"
+
+depend() {
+  need net
+}
+"#
+    .to_string()
 }
 
 fn openrc_xray_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"xray\"\ndescription=\"xray (local proxy runtime)\"\n\ncommand=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\ncommand_user=\"xray:xray\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
+    r#"#!/sbin/openrc-run
+
+name="xray"
+description="xray (local proxy runtime)"
+
+command="/usr/local/bin/xray"
+command_args="run -c /etc/xray/config.json"
+command_user="xray:xray"
+
+# Ensure automatic recovery on crashes without busy-looping.
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+
+depend() {
+  need net
+}
+"#
+    .to_string()
+}
+
+fn openrc_xp_upgrade_script() -> String {
+    r#"#!/sbin/openrc-run
+
+name="xp-upgrade"
+description="xp web-triggered upgrade runner"
+
+command="/bin/sh"
+command_args='-c '"'"'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp-ops _upgrade-runner --data-dir "${XP_DATA_DIR:-/var/lib/xp/data}"'"'"''
+command_user="root:root"
+
+depend() {
+  need net
+}
+"#
+    .to_string()
 }
 
 fn openrc_supervisor_kill_helper_script() -> String {
@@ -644,11 +782,37 @@ mod tests {
     }
 
     #[test]
+    fn systemd_upgrade_unit_and_policy_are_narrow() {
+        let args = InitArgs {
+            xp_work_dir: Path::new("/var/lib/xp").to_path_buf(),
+            xp_data_dir: Path::new("/var/lib/xp/data").to_path_buf(),
+            xray_work_dir: Path::new("/var/lib/xray").to_path_buf(),
+            init_system: InitSystemArg::Systemd,
+            enable_services: false,
+            dry_run: false,
+        };
+        let unit = systemd_xp_upgrade_unit(&args);
+        assert!(unit.contains("Type=oneshot"));
+        assert!(unit.contains("/usr/local/bin/xp-ops _upgrade-runner"));
+        assert!(unit.contains(r#""${XP_DATA_DIR:-/var/lib/xp/data}""#));
+        assert!(!unit.contains("User=xp"));
+
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        write_systemd_upgrade_policy(&paths, Mode::Real).unwrap();
+        let content = fs::read_to_string(paths.etc_polkit_xp_upgrade_rule()).unwrap();
+        assert!(content.contains("xp-upgrade.service"));
+        assert!(content.contains("verb == \"start\""));
+        assert!(!content.contains("restart"));
+    }
+
+    #[test]
     fn openrc_restart_policy_includes_configured_service() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         fs::create_dir_all(paths.etc_xp_dir()).unwrap();
         fs::write(paths.etc_xp_env(), "XP_XRAY_OPENRC_SERVICE=my-xray\n").unwrap();
+        fs::create_dir_all(paths.etc_doas_conf().parent().unwrap()).unwrap();
         fs::write(paths.etc_doas_conf(), "permit nopass root\n").unwrap();
 
         write_openrc_xray_restart_policy(&paths, Mode::Real).unwrap();
@@ -668,6 +832,29 @@ mod tests {
         );
         assert!(!doas.contains("permit nopass xp as root cmd /bin/kill"));
         assert!(!doas.contains("permit nopass xp as root cmd /usr/bin/kill"));
+    }
+
+    #[test]
+    fn openrc_upgrade_policy_only_allows_runner_start() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_doas_conf().parent().unwrap()).unwrap();
+        fs::write(paths.etc_doas_conf(), "permit nopass root\n").unwrap();
+
+        write_openrc_upgrade_policy(&paths, Mode::Real).unwrap();
+
+        let doas = fs::read_to_string(paths.etc_doas_conf()).unwrap();
+        assert!(doas.contains("permit nopass root"));
+        assert!(
+            doas.contains("permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start")
+        );
+        assert!(!doas.contains("xp-upgrade restart"));
+
+        let script = openrc_xp_upgrade_script();
+        assert!(script.contains("xp-ops _upgrade-runner"));
+        assert!(script.contains(r#""${XP_DATA_DIR:-/var/lib/xp/data}""#));
+        assert!(!script.contains("command_background="));
+        assert!(!script.contains("pidfile="));
     }
 
     #[test]

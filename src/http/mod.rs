@@ -78,6 +78,10 @@ use crate::{
         TcpConnectionUsageEndpointSeries, TcpConnectionUsageWarning, TcpConnectionUsageWindow,
         TcpConnectionUsageWindowView, build_window_view as build_tcp_connection_window_view,
     },
+    upgrade_job::{
+        UpgradeJobStatus, UpgradeStartError, UpgradeSupport, read_status, start_upgrade,
+        support_status,
+    },
     xray_supervisor::XrayHealthHandle,
 };
 
@@ -688,6 +692,18 @@ struct AdminMihomoRedactResponse {
     redacted_text: String,
 }
 
+#[derive(Debug, Serialize)]
+struct AdminUpgradeStatusResponse {
+    support: UpgradeSupport,
+    status: UpgradeJobStatus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdminUpgradeStartRequest {
+    target_tag: String,
+}
+
 impl From<crate::state::UserMihomoProfile> for AdminUserMihomoProfileResponse {
     fn from(profile: crate::state::UserMihomoProfile) -> Self {
         Self {
@@ -898,6 +914,8 @@ pub fn build_router(
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
+        .route("/upgrade/status", get(admin_get_upgrade_status))
+        .route("/upgrade/start", post(admin_start_upgrade))
         .route("/nodes", get(admin_list_nodes))
         .route(
             "/nodes/{node_id}/delete-preview",
@@ -3879,6 +3897,62 @@ async fn admin_redact_mihomo_source(
         .map_err(map_mihomo_redact_error)?;
 
     Ok(Json(AdminMihomoRedactResponse { redacted_text }))
+}
+
+async fn admin_get_upgrade_status(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
+    let status = read_status(&state.config.data_dir).map_err(|e| {
+        ApiError::new(
+            "upgrade_status_unavailable",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("read upgrade status: {e}"),
+        )
+    })?;
+    Ok(Json(AdminUpgradeStatusResponse {
+        support: support_status(),
+        status,
+    }))
+}
+
+async fn admin_start_upgrade(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<AdminUpgradeStartRequest>,
+) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
+    let repo = state.ops_github_repo.trim().trim_matches('/');
+    let status = start_upgrade(
+        &state.config.data_dir,
+        req.target_tag.trim(),
+        (!repo.is_empty()).then(|| repo.to_string()),
+    )
+    .map_err(|err| match err {
+        UpgradeStartError::Active => ApiError::new(
+            "upgrade_already_running",
+            StatusCode::CONFLICT,
+            "an upgrade job is already running",
+        ),
+        UpgradeStartError::Unsupported(message) => ApiError::new(
+            "upgrade_unsupported",
+            StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        ),
+        UpgradeStartError::InvalidTarget(message) => {
+            ApiError::new("invalid_upgrade_target", StatusCode::BAD_REQUEST, message)
+        }
+        UpgradeStartError::Io(err) => ApiError::new(
+            "upgrade_status_unavailable",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write upgrade status: {err}"),
+        ),
+        UpgradeStartError::TriggerFailed(message) => {
+            ApiError::new("upgrade_trigger_failed", StatusCode::BAD_GATEWAY, message)
+        }
+    })?;
+
+    Ok(Json(AdminUpgradeStatusResponse {
+        support: support_status(),
+        status,
+    }))
 }
 
 async fn admin_create_endpoint(

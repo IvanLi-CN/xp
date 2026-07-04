@@ -2,5 +2,15 @@
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
 	"files": { "ignoreUnknown": true },
 	"formatter": { "enabled": true },
-	"linter": { "enabled": true, "rules": { "recommended": true } }
+	"linter": { "enabled": true, "rules": { "recommended": true } },
+	"overrides": [
+		{
+			"include": [".storybook/docs-theme.css"],
+			"css": {
+				"linter": {
+					"enabled": false
+				}
+			}
+		}
+	]
 }

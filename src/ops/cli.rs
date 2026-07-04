@@ -39,6 +39,9 @@ pub enum Command {
 
     Upgrade(UpgradeArgs),
 
+    #[command(name = "_upgrade-runner", hide = true)]
+    UpgradeRunner(UpgradeRunnerArgs),
+
     #[command(subcommand)]
     Xp(XpCommand),
 
@@ -198,6 +201,17 @@ pub struct UpgradeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct UpgradeRunnerArgs {
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "XP_DATA_DIR",
+        default_value = "/var/lib/xp/data"
+    )]
+    pub data_dir: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -540,6 +554,7 @@ pub async fn run() -> i32 {
             ContainerCommand::Run(args) => container::cmd_container_run(paths, args).await,
         },
         Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
+        Some(Command::UpgradeRunner(args)) => upgrade::cmd_upgrade_runner(paths, args).await,
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,

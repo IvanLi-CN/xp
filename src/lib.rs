@@ -31,6 +31,7 @@ pub mod reconcile;
 pub mod state;
 pub mod subscription;
 pub mod tcp_connection_usage;
+pub mod upgrade_job;
 pub mod version;
 pub mod vless_https_canary;
 pub mod xray;

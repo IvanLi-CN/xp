@@ -1,0 +1,15 @@
+// Managed by xp-ops (xp init)
+polkit.addRule(function(action, subject) {
+  if (action.id != "org.freedesktop.systemd1.manage-units") {
+    return null;
+  }
+  if (!subject || subject.user != "xp") {
+    return null;
+  }
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (unit == "xp-upgrade.service" && verb == "start") {
+    return polkit.Result.YES;
+  }
+  return null;
+});

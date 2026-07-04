@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
@@ -36,6 +36,10 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { fetchAdminAlerts } from "../api/adminAlerts";
+import {
+	fetchAdminUpgradeStatus,
+	startAdminUpgrade,
+} from "../api/adminUpgrade";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
@@ -43,7 +47,7 @@ import { fetchVersionCheck } from "../api/versionCheck";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { useUiPrefs } from "./UiPrefs";
-import { VersionBadges } from "./VersionBadges";
+import { VersionIndicator } from "./VersionIndicator";
 import { clearAdminToken, readAdminToken } from "./auth";
 import { inputClass } from "./ui-helpers";
 import {
@@ -74,6 +78,15 @@ function safeHostFromUrl(value: string): string | null {
 	}
 }
 
+function formatApiError(err: unknown): string {
+	if (isBackendApiError(err)) {
+		return err.code
+			? `${err.status} ${err.code}: ${err.message}`
+			: `${err.status}: ${err.message}`;
+	}
+	return err instanceof Error ? err.message : "request failed";
+}
+
 export function AppShell({
 	brand,
 	navItems,
@@ -82,6 +95,7 @@ export function AppShell({
 	children,
 }: AppShellProps) {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -108,6 +122,28 @@ export function AppShell({
 		queryKey: ["adminAlerts", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
+	});
+
+	const adminUpgradeStatus = useQuery({
+		queryKey: ["adminUpgradeStatus", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminUpgradeStatus(adminToken, signal),
+		refetchInterval: (query) => {
+			const state = query.state.data?.status.state;
+			return state === "running" || state === "restarting" ? 2500 : false;
+		},
+	});
+
+	const adminUpgradeStart = useMutation({
+		mutationFn: (payload: { targetTag: string }) =>
+			startAdminUpgrade(adminToken, {
+				target_tag: payload.targetTag,
+			}),
+		onSuccess: (data) => {
+			queryClient.setQueryData(["adminUpgradeStatus", adminToken], data);
+			void clusterInfo.refetch();
+			void runVersionCheck({ force: true });
+		},
 	});
 
 	useEffect(() => {
@@ -265,21 +301,43 @@ export function AppShell({
 
 	const statusMenuBadges = headerStatus ?? statusBadges;
 
-	const versionBadges = useMemo(() => {
+	const versionIndicator = useMemo(() => {
 		const xpVersion =
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
 				? clusterInfo.data.xp_version
 				: null;
+		const upgradeError =
+			adminUpgradeStart.isError && adminUpgradeStart.error
+				? formatApiError(adminUpgradeStart.error)
+				: adminUpgradeStatus.isError && adminUpgradeStatus.error
+					? formatApiError(adminUpgradeStatus.error)
+					: null;
 		return (
-			<VersionBadges
+			<VersionIndicator
 				xpVersion={xpVersion}
 				versionCheck={versionCheck}
-				onRetry={() => {
+				upgradeStatus={adminUpgradeStatus.data ?? null}
+				upgradeStatusError={upgradeError}
+				upgradeStatusLoading={adminUpgradeStatus.isFetching}
+				upgradeStarting={adminUpgradeStart.isPending}
+				onRetryVersionCheck={() => {
 					void runVersionCheck({ force: true });
+				}}
+				onRefreshUpgradeStatus={() => {
+					void adminUpgradeStatus.refetch();
+				}}
+				onStartUpgrade={(targetTag) => {
+					adminUpgradeStart.mutate({ targetTag });
 				}}
 			/>
 		);
-	}, [clusterInfo.data, clusterInfo.isSuccess, runVersionCheck, versionCheck]);
+	}, [
+		adminUpgradeStart,
+		adminUpgradeStatus,
+		clusterInfo,
+		runVersionCheck,
+		versionCheck,
+	]);
 
 	const navContent = (
 		<nav aria-label="Primary navigation" className="xp-panel p-4">
@@ -372,7 +430,9 @@ export function AppShell({
 							</div>
 
 							<div className="flex items-center justify-end gap-2">
-								<div className="flex items-center gap-2">{versionBadges}</div>
+								<div className="flex items-center gap-2">
+									{versionIndicator}
+								</div>
 
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>

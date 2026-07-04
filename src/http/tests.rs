@@ -2902,6 +2902,76 @@ async fn health_includes_vless_https_canary_view() {
 }
 
 #[tokio::test]
+async fn admin_upgrade_status_requires_auth() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req("GET", "/api/admin/upgrade/status"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn admin_upgrade_status_recovers_persisted_job() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+    let status = crate::upgrade_job::UpgradeJobStatus {
+        state: crate::upgrade_job::UpgradeJobState::Succeeded,
+        target_tag: Some("v0.2.0".to_string()),
+        repo: Some("IvanLi-CN/xp".to_string()),
+        started_at: Some("2026-07-04T00:00:00Z".to_string()),
+        finished_at: Some("2026-07-04T00:01:00Z".to_string()),
+        exit_code: Some(0),
+        message: Some("upgrade completed".to_string()),
+        updated_at: "2026-07-04T00:01:00Z".to_string(),
+    };
+    crate::upgrade_job::write_status(tmp.path(), &status).unwrap();
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/upgrade/status"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["status"]["state"], "succeeded");
+    assert_eq!(body["status"]["target_tag"], "v0.2.0");
+}
+
+#[tokio::test]
+async fn admin_upgrade_start_rejects_active_job() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+    let status = crate::upgrade_job::UpgradeJobStatus {
+        state: crate::upgrade_job::UpgradeJobState::Running,
+        target_tag: Some("v0.2.0".to_string()),
+        repo: Some("IvanLi-CN/xp".to_string()),
+        started_at: Some("2026-07-04T00:00:00Z".to_string()),
+        finished_at: None,
+        exit_code: None,
+        message: Some("running".to_string()),
+        updated_at: "2026-07-04T00:00:00Z".to_string(),
+    };
+    crate::upgrade_job::write_status(tmp.path(), &status).unwrap();
+
+    let res = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/upgrade/start",
+            json!({ "target_tag": "v0.3.0" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "upgrade_already_running");
+}
+
+#[tokio::test]
 async fn admin_mihomo_redact_requires_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
