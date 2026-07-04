@@ -152,6 +152,7 @@ Status states:
 ## Visual Evidence
 
 - Storybook `Components/VersionIndicator/UpdateAvailable`
+  - PR: include
   - ![Version indicator update available](./assets/version-indicator-update-available.png)
 
 ## 文档更新（Docs to Update）
