@@ -60,6 +60,8 @@ export const AutocompleteInput = React.forwardRef<
 		ref,
 	) => {
 		const [open, setOpen] = React.useState(false);
+		const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(0);
+		const listboxId = React.useId();
 		const openTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
 			null,
 		);
@@ -75,6 +77,11 @@ export const AutocompleteInput = React.forwardRef<
 		const hasSuggestions = suggestions.length > 0;
 		const shouldPromptForEmptyValue = (nextValue: string) =>
 			hasSuggestions && normalize(nextValue).length === 0;
+		const safeActiveSuggestionIndex = Math.min(
+			activeSuggestionIndex,
+			Math.max(visibleSuggestions.length - 1, 0),
+		);
+		const activeSuggestion = visibleSuggestions[safeActiveSuggestionIndex];
 
 		React.useEffect(() => {
 			return () => {
@@ -86,6 +93,7 @@ export const AutocompleteInput = React.forwardRef<
 			if (openTimerRef.current) clearTimeout(openTimerRef.current);
 			openTimerRef.current = setTimeout(() => {
 				setOpen(true);
+				setActiveSuggestionIndex(0);
 				openTimerRef.current = null;
 			}, 0);
 		};
@@ -112,6 +120,7 @@ export const AutocompleteInput = React.forwardRef<
 							placeholder={placeholder}
 							className={cn(hasSuggestions && "pr-12", className)}
 							onChange={(event) => {
+								setActiveSuggestionIndex(0);
 								promptForEmptyValue(event.currentTarget.value);
 								onChange?.(event);
 							}}
@@ -127,9 +136,42 @@ export const AutocompleteInput = React.forwardRef<
 								if (event.key === "ArrowDown" && hasSuggestions) {
 									event.preventDefault();
 									setOpen(true);
+									if (visibleSuggestions.length > 0) {
+										setActiveSuggestionIndex((currentIndex) =>
+											open
+												? Math.min(
+														currentIndex + 1,
+														visibleSuggestions.length - 1,
+													)
+												: 0,
+										);
+									}
+								} else if (
+									event.key === "ArrowUp" &&
+									open &&
+									visibleSuggestions.length > 0
+								) {
+									event.preventDefault();
+									setActiveSuggestionIndex((currentIndex) =>
+										Math.max(currentIndex - 1, 0),
+									);
+								} else if (event.key === "Enter" && open && activeSuggestion) {
+									event.preventDefault();
+									selectSuggestion(activeSuggestion.value);
+								} else if (event.key === "Escape" && open) {
+									event.preventDefault();
+									setOpen(false);
 								}
 								onKeyDown?.(event);
 							}}
+							aria-autocomplete={hasSuggestions ? "list" : undefined}
+							aria-controls={open ? listboxId : undefined}
+							aria-expanded={hasSuggestions ? open : undefined}
+							aria-activedescendant={
+								open && activeSuggestion
+									? `${listboxId}-option-${safeActiveSuggestionIndex}`
+									: undefined
+							}
 							{...props}
 						/>
 						{hasSuggestions ? (
@@ -153,18 +195,22 @@ export const AutocompleteInput = React.forwardRef<
 						align="start"
 						data-testid="autocomplete-suggestions"
 						className="w-[var(--radix-popper-anchor-width)] max-w-[calc(100vw-2rem)] p-0"
+						onOpenAutoFocus={(event) => event.preventDefault()}
 					>
 						<Command shouldFilter={false}>
-							<CommandList>
+							<CommandList id={listboxId}>
 								{visibleSuggestions.length === 0 ? (
 									<CommandEmpty>No suggestions.</CommandEmpty>
 								) : (
 									<CommandGroup>
-										{visibleSuggestions.map((suggestion) => (
+										{visibleSuggestions.map((suggestion, index) => (
 											<CommandItem
+												id={`${listboxId}-option-${index}`}
 												key={suggestion.value}
 												value={suggestion.value}
+												data-active={index === safeActiveSuggestionIndex}
 												onSelect={() => selectSuggestion(suggestion.value)}
+												className="data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
 											>
 												<span className="min-w-0 truncate font-mono text-sm">
 													{suggestion.value}

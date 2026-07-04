@@ -65,6 +65,16 @@ export const Default: Story = {
 	},
 };
 
+export const KeyboardSelection: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const input = await canvas.findByLabelText("dest");
+		await userEvent.click(input);
+		await userEvent.keyboard("{ArrowDown}{Enter}");
+		await expect(input).toHaveValue("hinet-api.example.com:62416");
+	},
+};
+
 export const NoSuggestions: Story = {
 	args: {
 		suggestions: [],
