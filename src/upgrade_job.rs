@@ -158,10 +158,41 @@ pub fn read_request(data_dir: &Path) -> Result<UpgradeRequest, ExitError> {
         .map_err(|e| ExitError::new(3, format!("invalid_args: parse upgrade request: {e}")))
 }
 
-pub fn read_runner_request(data_dir: &Path) -> Result<UpgradeRequest, ExitError> {
+pub fn root_controlled_runner_repo(
+    request_repo: Option<&str>,
+    default_repo: &str,
+) -> Result<Option<String>, ExitError> {
+    let runner_repo = std::env::var("XP_OPS_GITHUB_REPO")
+        .ok()
+        .map(|v| v.trim().trim_matches('/').to_string())
+        .filter(|v| !v.is_empty());
+    if request_repo != runner_repo.as_deref()
+        && !(request_repo == Some(default_repo) && runner_repo.is_none())
+    {
+        return Err(ExitError::new(
+            3,
+            "invalid_args: upgrade repo must match root runner XP_OPS_GITHUB_REPO",
+        ));
+    }
+    Ok(runner_repo)
+}
+
+pub fn prepare_runner_request(
+    data_dir: &Path,
+    default_repo: &str,
+) -> Result<UpgradeRequest, ExitError> {
     let mut request = read_request(data_dir)?;
-    request.repo = None;
-    Ok(request)
+    match root_controlled_runner_repo(request.repo.as_deref(), default_repo) {
+        Ok(repo) => {
+            request.repo = repo;
+            Ok(request)
+        }
+        Err(err) => {
+            let failed = status_for_runner_finish(&request, Err(&err));
+            let _ = write_status(data_dir, &failed);
+            Err(err)
+        }
+    }
 }
 
 fn write_request(data_dir: &Path, request: &UpgradeRequest) -> io::Result<()> {
