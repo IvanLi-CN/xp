@@ -9,6 +9,7 @@ import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -38,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { realityDestFromApiBaseUrl } from "../utils/realityDestSuggestions";
 import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import { validateRealityServerName } from "../utils/realityServerName";
 
@@ -110,6 +112,20 @@ export function EndpointNewPage() {
 		realityDomainsQuery.data?.items ?? [],
 		nodeId,
 	);
+	const selectedNode = nodesQuery.data?.items.find(
+		(node) => node.node_id === nodeId,
+	);
+	const selectedNodeApiDest = selectedNode
+		? realityDestFromApiBaseUrl(selectedNode.api_base_url)
+		: null;
+	const realityDestSuggestions = selectedNodeApiDest
+		? [
+				{
+					value: selectedNodeApiDest,
+					label: selectedNodeApiDest,
+				},
+			]
+		: [];
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -501,10 +517,13 @@ export function EndpointNewPage() {
 														<FormItem>
 															<FormLabel className="font-mono">dest</FormLabel>
 															<FormControl>
-																<Input
+																<AutocompleteInput
 																	{...field}
 																	type="text"
 																	placeholder="oneclient.sfx.ms:443"
+																	suggestions={realityDestSuggestions}
+																	suggestionLabel="Show API address suggestions"
+																	onSuggestionSelect={field.onChange}
 																/>
 															</FormControl>
 															<FormDescription>
