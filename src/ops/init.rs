@@ -599,8 +599,6 @@ description="xp web-triggered upgrade runner"
 command="/bin/sh"
 command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp-ops _upgrade-runner --data-dir ${XP_DATA_DIR:-/var/lib/xp/data}'"
 command_user="root:root"
-command_background="yes"
-pidfile="/run/xp-upgrade.pid"
 
 depend() {
   need net
@@ -852,8 +850,8 @@ mod tests {
 
         let script = openrc_xp_upgrade_script();
         assert!(script.contains("xp-ops _upgrade-runner"));
-        assert!(script.contains("command_background=\"yes\""));
-        assert!(script.contains("pidfile=\"/run/xp-upgrade.pid\""));
+        assert!(!script.contains("command_background="));
+        assert!(!script.contains("pidfile="));
     }
 
     #[test]

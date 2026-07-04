@@ -1,11 +1,13 @@
 use crate::ops::cli::ExitError;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const UPGRADE_DIR: &str = "upgrade";
+const LOCK_FILE: &str = "start.lock";
 const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
@@ -79,6 +81,35 @@ pub fn status_path(data_dir: &Path) -> PathBuf {
 
 pub fn upgrade_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(UPGRADE_DIR)
+}
+
+fn lock_path(data_dir: &Path) -> PathBuf {
+    upgrade_dir(data_dir).join(LOCK_FILE)
+}
+
+struct StartLock {
+    path: PathBuf,
+}
+
+impl StartLock {
+    fn acquire(data_dir: &Path) -> Result<Self, UpgradeStartError> {
+        let dir = upgrade_dir(data_dir);
+        fs::create_dir_all(&dir)?;
+        let path = lock_path(data_dir);
+        match File::options().write(true).create_new(true).open(&path) {
+            Ok(_) => Ok(Self { path }),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                Err(UpgradeStartError::Active)
+            }
+            Err(err) => Err(UpgradeStartError::Io(err)),
+        }
+    }
+}
+
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 pub fn now_rfc3339() -> String {
@@ -199,6 +230,7 @@ pub fn start_upgrade(
     repo: Option<String>,
 ) -> Result<UpgradeJobStatus, UpgradeStartError> {
     validate_target_tag(target_tag)?;
+    let _lock = StartLock::acquire(data_dir)?;
 
     let current = read_status(data_dir)?;
     if current.state.is_active() {
@@ -414,5 +446,13 @@ mod tests {
     fn invalid_target_is_rejected() {
         let err = validate_target_tag("latest").unwrap_err();
         assert!(matches!(err, UpgradeStartError::InvalidTarget(_)));
+    }
+
+    #[test]
+    fn start_lock_rejects_concurrent_claim() {
+        let tmp = tempdir().unwrap();
+        let _lock = StartLock::acquire(tmp.path()).unwrap();
+        let err = start_upgrade(tmp.path(), "v0.2.0", None).unwrap_err();
+        assert!(matches!(err, UpgradeStartError::Active));
     }
 }
