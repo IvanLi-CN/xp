@@ -11,8 +11,14 @@ const LOCK_FILE: &str = "start.lock";
 const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
+const SYSTEMD_UPGRADE_UNIT_PATH: &str = "/etc/systemd/system/xp-upgrade.service";
+const SYSTEMD_UPGRADE_POLKIT_PATH: &str = "/etc/polkit-1/rules.d/91-xp-upgrade.rules";
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
+const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
+const OPENRC_DOAS_CONF_PATH: &str = "/etc/doas.conf";
+const OPENRC_UPGRADE_DOAS_RULE: &str =
+    "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -233,6 +239,10 @@ fn write_request(data_dir: &Path, request: &UpgradeRequest) -> io::Result<()> {
 }
 
 pub fn support_status() -> UpgradeSupport {
+    support_status_for_root(Path::new("/"))
+}
+
+fn support_status_for_root(root: &Path) -> UpgradeSupport {
     if let Some(trigger) = test_forced_host_trigger() {
         return UpgradeSupport {
             supported: true,
@@ -251,7 +261,7 @@ pub fn support_status() -> UpgradeSupport {
         };
     }
 
-    if command_exists("systemctl") {
+    if command_exists("systemctl") && systemd_upgrade_delegate_installed(root) {
         return UpgradeSupport {
             supported: true,
             reason: None,
@@ -259,7 +269,10 @@ pub fn support_status() -> UpgradeSupport {
         };
     }
 
-    if command_exists("doas") && command_exists(OPENRC_RC_SERVICE) {
+    if command_exists("doas")
+        && command_exists(OPENRC_RC_SERVICE)
+        && openrc_upgrade_delegate_installed(root)
+    {
         return UpgradeSupport {
             supported: true,
             reason: None,
@@ -269,9 +282,33 @@ pub fn support_status() -> UpgradeSupport {
 
     UpgradeSupport {
         supported: false,
-        reason: Some("missing supported upgrade trigger: systemctl or doas+rc-service".to_string()),
+        reason: Some(
+            "missing installed upgrade delegate; rerun xp-ops init on this host".to_string(),
+        ),
         trigger: None,
     }
+}
+
+fn systemd_upgrade_delegate_installed(root: &Path) -> bool {
+    root_abs(root, SYSTEMD_UPGRADE_UNIT_PATH).exists()
+        && root_abs(root, SYSTEMD_UPGRADE_POLKIT_PATH).exists()
+}
+
+fn openrc_upgrade_delegate_installed(root: &Path) -> bool {
+    if !root_abs(root, OPENRC_UPGRADE_SCRIPT_PATH).exists() {
+        return false;
+    }
+    fs::read_to_string(root_abs(root, OPENRC_DOAS_CONF_PATH))
+        .ok()
+        .is_some_and(|content| content.contains(OPENRC_UPGRADE_DOAS_RULE))
+}
+
+fn root_abs(root: &Path, absolute_path: &str) -> PathBuf {
+    let path = Path::new(absolute_path);
+    if root == Path::new("/") {
+        return path.to_path_buf();
+    }
+    root.join(path.strip_prefix("/").unwrap_or(path))
 }
 
 fn test_forced_host_trigger() -> Option<&'static str> {
@@ -512,6 +549,29 @@ mod tests {
     fn invalid_target_is_rejected() {
         let err = validate_target_tag("latest").unwrap_err();
         assert!(matches!(err, UpgradeStartError::InvalidTarget(_)));
+    }
+
+    #[test]
+    fn delegate_asset_detection_requires_installed_runner_files() {
+        let tmp = tempdir().unwrap();
+        assert!(!systemd_upgrade_delegate_installed(tmp.path()));
+        assert!(!openrc_upgrade_delegate_installed(tmp.path()));
+
+        let systemd_unit = root_abs(tmp.path(), SYSTEMD_UPGRADE_UNIT_PATH);
+        let systemd_polkit = root_abs(tmp.path(), SYSTEMD_UPGRADE_POLKIT_PATH);
+        fs::create_dir_all(systemd_unit.parent().unwrap()).unwrap();
+        fs::create_dir_all(systemd_polkit.parent().unwrap()).unwrap();
+        fs::write(systemd_unit, "unit").unwrap();
+        fs::write(systemd_polkit, "polkit").unwrap();
+        assert!(systemd_upgrade_delegate_installed(tmp.path()));
+
+        let openrc_script = root_abs(tmp.path(), OPENRC_UPGRADE_SCRIPT_PATH);
+        let doas_conf = root_abs(tmp.path(), OPENRC_DOAS_CONF_PATH);
+        fs::create_dir_all(openrc_script.parent().unwrap()).unwrap();
+        fs::create_dir_all(doas_conf.parent().unwrap()).unwrap();
+        fs::write(openrc_script, "script").unwrap();
+        fs::write(doas_conf, OPENRC_UPGRADE_DOAS_RULE).unwrap();
+        assert!(openrc_upgrade_delegate_installed(tmp.path()));
     }
 
     #[test]
