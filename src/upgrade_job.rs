@@ -182,7 +182,7 @@ pub fn prepare_runner_request(
     default_repo: &str,
 ) -> Result<UpgradeRequest, ExitError> {
     let mut request = read_request(data_dir)?;
-    match root_controlled_runner_repo(request.repo.as_deref(), default_repo) {
+    match validate_runner_request(&request, default_repo) {
         Ok(repo) => {
             request.repo = repo;
             Ok(request)
@@ -193,6 +193,32 @@ pub fn prepare_runner_request(
             Err(err)
         }
     }
+}
+
+fn validate_runner_request(
+    request: &UpgradeRequest,
+    default_repo: &str,
+) -> Result<Option<String>, ExitError> {
+    validate_target_tag_for_runner(&request.target_tag)?;
+    root_controlled_runner_repo(request.repo.as_deref(), default_repo)
+}
+
+fn validate_target_tag_for_runner(target_tag: &str) -> Result<(), ExitError> {
+    validate_target_tag(target_tag).map_err(|err| match err {
+        UpgradeStartError::InvalidTarget(message) => {
+            ExitError::new(3, format!("invalid_args: {message}"))
+        }
+        UpgradeStartError::Active => ExitError::new(3, "invalid_args: active upgrade job"),
+        UpgradeStartError::Unsupported(message) => {
+            ExitError::new(3, format!("invalid_args: {message}"))
+        }
+        UpgradeStartError::Io(err) => {
+            ExitError::new(7, format!("service_error: validate upgrade target: {err}"))
+        }
+        UpgradeStartError::TriggerFailed(message) => {
+            ExitError::new(7, format!("service_error: {message}"))
+        }
+    })
 }
 
 fn write_request(data_dir: &Path, request: &UpgradeRequest) -> io::Result<()> {
@@ -486,6 +512,29 @@ mod tests {
     fn invalid_target_is_rejected() {
         let err = validate_target_tag("latest").unwrap_err();
         assert!(matches!(err, UpgradeStartError::InvalidTarget(_)));
+    }
+
+    #[test]
+    fn runner_rejects_tampered_target_tag_and_records_failure() {
+        let tmp = tempdir().unwrap();
+        let request = UpgradeRequest {
+            target_tag: "latest".to_string(),
+            repo: Some("IvanLi-CN/xp".to_string()),
+            requested_at: "2026-07-04T00:00:00Z".to_string(),
+        };
+
+        write_request(tmp.path(), &request).unwrap();
+        let err = prepare_runner_request(tmp.path(), "IvanLi-CN/xp").unwrap_err();
+        assert_eq!(err.code, 3);
+        assert!(
+            err.message
+                .contains("target_tag must be a v-prefixed release tag")
+        );
+
+        let status = read_status(tmp.path()).unwrap();
+        assert_eq!(status.state, UpgradeJobState::Failed);
+        assert_eq!(status.target_tag.as_deref(), Some("latest"));
+        assert_eq!(status.exit_code, Some(3));
     }
 
     #[test]
