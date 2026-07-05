@@ -8,13 +8,20 @@
   `xp-ops upgrade` 流程，并把 running/succeeded/failed 状态写回
   `${XP_DATA_DIR}/upgrade/status.json`。
 - `xp-ops init` 为 host-managed systemd/OpenRC 写入一次性 root 委托入口：
-  - systemd: `xp-upgrade.service` + 窄 polkit rule。
+  - systemd: `xp-upgrade.service` + root-owned 固定 helper + 窄 sudoers drop-in；窄 polkit
+    rule 作为新系统兼容补充。
   - OpenRC: `xp-upgrade` one-shot script + 窄 doas rule。
 - Web 顶栏改为单个 `VersionIndicator`，通过 Radix Popover 展示版本检查与升级状态；确认后
   调用 start API，并在 running/restarting 期间轮询 status。
-- systemd 支持检测要求 `xp-upgrade.service` 存在，并验证窄 polkit 授权；当 unprivileged
-  `xp` 用户不能遍历 `/etc/polkit-1/rules.d` 时，通过 `pkcheck` 验证当前进程确实可 start
-  固定 unit，避免 CentOS/RHEL 系统上 private polkit 目录导致误报，也避免只装 unit 的半安装被误判为 ready。
+- systemd 支持检测要求 `xp-upgrade.service` 存在，并验证以下任一窄授权：
+  - `sudo -n /usr/local/libexec/xp-upgrade-trigger --check` 可成功执行，且
+    `sudo -n -l /usr/local/libexec/xp-upgrade-trigger` 确认 no-arg start grant 存在。
+  - 窄 polkit rule 可读并限定 `xp-upgrade.service` + `start`。
+  - 当前进程通过 `pkcheck` 被授权 start 固定 unit。
+- systemd 触发优先执行 `sudo -n /usr/local/libexec/xp-upgrade-trigger`。只有 helper 授权不可用时，
+  才回退到 `systemctl start --no-block xp-upgrade.service` 的 polkit 路径。CentOS 7-class
+  polkit 不可靠提供 `unit` / `verb` action detail，因此不能把 polkit 作为唯一 systemd
+  Web upgrade 委托。
 - Web unsupported 状态禁用升级确认入口，按钮文案为 `Unavailable`；版本展示统一按 release tag
   规范化为 `vX.Y.Z`，popover 使用延迟 pointer leave close，降低 polling 状态刷新造成的闪烁。
 
@@ -25,8 +32,10 @@
   - admin status auth gate、durable status recovery、active job 409。
   - `_upgrade-runner` 从 `upgrade/request.json` 读取 target，执行 mocked release upgrade，
     并把 `succeeded` durable status 写回 `upgrade/status.json`。
-  - systemd unit/polkit 与 OpenRC doas policy 的窄触发测试。
-  - systemd delegate 检测拒绝只安装 unit 的半安装状态；polkit rules 不可读时通过有效授权探测恢复支持判定。
+  - systemd unit/helper/sudoers/polkit 与 OpenRC doas policy 的窄触发测试。
+  - systemd delegate 检测拒绝只安装 unit 的半安装状态；拒绝只允许 helper `--check`
+    的不完整 sudoers，真实 root 探测同时验证 `--check` 与 no-arg start grant，并允许通过
+    有效 helper 授权或 polkit 授权恢复支持判定。
 - Shared testbox live E2E:
   - `scripts/testbox/run-web-local-upgrade-live-e2e.sh` 在隔离共享测试机容器中启动真实
     `xp` 服务，通过 `POST /api/admin/upgrade/start` 触发升级，并用 fake systemd boundary

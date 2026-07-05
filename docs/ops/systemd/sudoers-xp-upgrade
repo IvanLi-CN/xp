@@ -1,0 +1,3 @@
+# Managed by xp-ops: allow xp to start the fixed systemd upgrade runner
+xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger ""
+xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger --check

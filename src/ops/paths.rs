@@ -67,6 +67,14 @@ impl Paths {
         self.map_abs(Path::new("/etc/doas.conf"))
     }
 
+    pub fn etc_sudoers_d_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/sudoers.d"))
+    }
+
+    pub fn etc_sudoers_xp_upgrade(&self) -> PathBuf {
+        self.etc_sudoers_d_dir().join("91-xp-upgrade")
+    }
+
     pub fn etc_xp_ops_cloudflare_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xp-ops/cloudflare_tunnel"))
     }
@@ -114,5 +122,9 @@ impl Paths {
     pub fn usr_local_libexec_xp_openrc_kill_supervisor(&self) -> PathBuf {
         self.usr_local_libexec_dir()
             .join("xp-openrc-kill-supervisor")
+    }
+
+    pub fn usr_local_libexec_xp_upgrade_trigger(&self) -> PathBuf {
+        self.usr_local_libexec_dir().join("xp-upgrade-trigger")
     }
 }

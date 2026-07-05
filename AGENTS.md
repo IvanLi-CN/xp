@@ -19,9 +19,12 @@
 - Single-image Docker / Compose nodes driven by `xp-ops container run`.
 - Host-managed upgrades must not be treated as a compatibility afterthought for container-only features. If a managed-default VLESS / Mihomo relay / canary behavior is shipped, the expected host-managed upgrade path must be explicit and tested.
 - Web-triggered automatic upgrade is supported only for host-managed `systemd` / `OpenRC` nodes via
-  the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`; Docker /
-  Compose nodes must keep using host-side image / Compose replacement and must be documented as
-  Web-upgrade unsupported.
+  the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
+  nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow
+  `/etc/sudoers.d/91-xp-upgrade` policy; the polkit rule is only a compatibility supplement because
+  CentOS 7-class polkit does not reliably expose `unit` / `verb` details. Docker / Compose nodes
+  must keep using host-side image / Compose replacement and must be documented as Web-upgrade
+  unsupported.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.

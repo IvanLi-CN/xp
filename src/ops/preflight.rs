@@ -248,6 +248,9 @@ fn preflight_init(paths: &Paths, args: &InitArgs) -> Result<(), ExitError> {
             Target::dir_if_exists(paths.openrc_confd_dir(), "openrc conf.d dir"),
             Target::dir_if_exists(paths.etc_polkit_rules_dir(), "polkit rules dir"),
             Target::file_if_exists(paths.etc_doas_conf(), "doas config"),
+            Target::dir_if_exists(paths.etc_sudoers_d_dir(), "sudoers.d dir"),
+            Target::file_if_exists(paths.etc_sudoers_xp_upgrade(), "xp upgrade sudoers"),
+            Target::dir_if_exists(paths.usr_local_libexec_dir(), "libexec dir"),
         ],
     )
 }
@@ -288,6 +291,9 @@ fn preflight_deploy(paths: &Paths, args: &DeployArgs) -> Result<(), ExitError> {
         Target::dir_if_exists(paths.openrc_confd_dir(), "openrc conf.d dir"),
         Target::dir_if_exists(paths.etc_polkit_rules_dir(), "polkit rules dir"),
         Target::file_if_exists(paths.etc_doas_conf(), "doas config"),
+        Target::dir_if_exists(paths.etc_sudoers_d_dir(), "sudoers.d dir"),
+        Target::file_if_exists(paths.etc_sudoers_xp_upgrade(), "xp upgrade sudoers"),
+        Target::dir_if_exists(paths.usr_local_libexec_dir(), "libexec dir"),
     ];
 
     if cloudflare_enabled {

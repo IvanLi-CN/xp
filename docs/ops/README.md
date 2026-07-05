@@ -507,12 +507,19 @@ Web-triggered local upgrade contract:
 
 Host-managed root delegation:
 
-- systemd nodes use `xp-upgrade.service` as a root one-shot service. `xp-ops init` writes a narrow
-  polkit rule that only lets the `xp` user start that unit.
+- systemd nodes use `xp-upgrade.service` as a root one-shot service. `xp-ops init` writes a
+  root-owned fixed helper at `/usr/local/libexec/xp-upgrade-trigger` plus
+  `/etc/sudoers.d/91-xp-upgrade`, allowing the `xp` user to run only that helper and its no-op
+  `--check` probe. The helper starts only `xp-upgrade.service`.
+- `xp-ops init` also writes a narrow systemd polkit rule for hosts whose polkit exposes `unit` and
+  `verb` action details. CentOS 7-class polkit does not expose those details reliably, so Web
+  upgrade support must not depend on the polkit rule alone.
 - OpenRC nodes use `xp-upgrade` as a root one-shot service. `xp-ops init` appends a narrow doas rule
   that only allows `rc-service xp-upgrade start`.
 - Reference samples live at:
   - `docs/ops/systemd/xp-upgrade.service`
+  - `docs/ops/systemd/xp-upgrade-trigger`
+  - `docs/ops/systemd/sudoers-xp-upgrade`
   - `docs/ops/systemd/xp-upgrade.polkit.rules`
   - `docs/ops/openrc/xp-upgrade`
   - `docs/ops/openrc/doas-xp-upgrade.conf`

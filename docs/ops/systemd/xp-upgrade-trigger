@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  "") ;;
+  --check) exit 0 ;;
+  *) echo "usage: xp-upgrade-trigger [--check]" >&2; exit 64 ;;
+esac
+for SYSTEMCTL in /bin/systemctl /usr/bin/systemctl; do
+  if [ -x "$SYSTEMCTL" ]; then
+    exec "$SYSTEMCTL" start --no-block xp-upgrade.service
+  fi
+done
+echo "systemctl not found" >&2
+exit 69
