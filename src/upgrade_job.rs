@@ -299,18 +299,23 @@ fn support_status_for_root(root: &Path) -> UpgradeSupport {
 }
 
 fn systemd_upgrade_delegate_installed(root: &Path) -> bool {
+    systemd_upgrade_delegate_installed_with_polkit_file(root, root != Path::new("/"))
+}
+
+fn systemd_upgrade_delegate_installed_with_polkit_file(
+    root: &Path,
+    allow_static_polkit_file: bool,
+) -> bool {
     if !root_abs(root, SYSTEMD_UPGRADE_UNIT_PATH).exists() {
         return false;
     }
 
-    if root != Path::new("/") {
+    if allow_static_polkit_file {
         return systemd_upgrade_sudo_delegate_installed(root)
             || systemd_upgrade_polkit_rule_readable(root);
     }
 
-    systemd_upgrade_sudo_delegate_installed(root)
-        || systemd_upgrade_polkit_rule_readable(root)
-        || systemd_upgrade_polkit_allows_current_process()
+    systemd_upgrade_sudo_delegate_installed(root) || systemd_upgrade_polkit_allows_current_process()
 }
 
 fn systemd_upgrade_sudo_delegate_installed(root: &Path) -> bool {
@@ -719,6 +724,10 @@ mod tests {
         )
         .unwrap();
         assert!(systemd_upgrade_delegate_installed(tmp.path()));
+        assert!(!systemd_upgrade_delegate_installed_with_polkit_file(
+            tmp.path(),
+            false
+        ));
 
         let openrc_script = root_abs(tmp.path(), OPENRC_UPGRADE_SCRIPT_PATH);
         let doas_conf = root_abs(tmp.path(), OPENRC_DOAS_CONF_PATH);

@@ -43,6 +43,8 @@ only supported trigger path.
 - Unit tests must reject sudoers content that only permits the helper `--check` command.
 - Real-root support detection must verify both the helper `--check` probe and the no-argument start
   grant before reporting systemd Web upgrade support.
+- Real-root support detection must not treat a readable legacy polkit rule file as sufficient. It
+  may accept polkit only after an actual authorization probe succeeds.
 - The helper must not use `command -v systemctl` or otherwise allow the unprivileged caller's `PATH`
   to influence root command selection.
 - Trigger tests must assert that systemd Web upgrade invokes the fixed helper through `sudo -n`, or
