@@ -35,6 +35,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
             write_systemd_units(&paths, &args, mode)?;
             write_systemd_xray_restart_policy(&paths, mode)?;
             write_systemd_upgrade_policy(&paths, mode)?;
+            write_systemd_upgrade_trigger_delegate(&paths, mode)?;
             if args.enable_services {
                 enable_systemd_services(&paths, mode)?;
             }
@@ -357,6 +358,53 @@ polkit.addRule(function(action, subject) {
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&p, 0o644).ok();
     Ok(())
+}
+
+fn write_systemd_upgrade_trigger_delegate(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let helper_dir = paths.usr_local_libexec_dir();
+    let helper = paths.usr_local_libexec_xp_upgrade_trigger();
+    let sudoers_dir = paths.etc_sudoers_d_dir();
+    let sudoers = paths.etc_sudoers_xp_upgrade();
+    if mode == Mode::DryRun {
+        eprintln!(
+            "would write systemd upgrade trigger helper: {}",
+            helper.display()
+        );
+        eprintln!("would write: {}", sudoers.display());
+        return Ok(());
+    }
+
+    ensure_dir(&helper_dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    ensure_dir(&sudoers_dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+
+    write_string_if_changed(&helper, &systemd_upgrade_trigger_helper_script())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&helper, 0o755).ok();
+
+    write_string_if_changed(&sudoers, &systemd_upgrade_sudoers_policy())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    chmod(&sudoers, 0o440).ok();
+    Ok(())
+}
+
+fn systemd_upgrade_trigger_helper_script() -> String {
+    "#!/bin/sh\n\
+set -eu\n\
+case \"${1:-}\" in\n\
+  \"\") ;;\n\
+  --check) exit 0 ;;\n\
+  *) echo \"usage: xp-upgrade-trigger [--check]\" >&2; exit 64 ;;\n\
+esac\n\
+SYSTEMCTL=\"$(command -v systemctl)\"\n\
+exec \"$SYSTEMCTL\" start --no-block xp-upgrade.service\n"
+        .to_string()
+}
+
+fn systemd_upgrade_sudoers_policy() -> String {
+    "# Managed by xp-ops: allow xp to start the fixed systemd upgrade runner\n\
+xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger \"\"\n\
+xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger --check\n"
+        .to_string()
 }
 
 fn write_openrc_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
@@ -800,10 +848,29 @@ mod tests {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         write_systemd_upgrade_policy(&paths, Mode::Real).unwrap();
+        write_systemd_upgrade_trigger_delegate(&paths, Mode::Real).unwrap();
+
         let content = fs::read_to_string(paths.etc_polkit_xp_upgrade_rule()).unwrap();
         assert!(content.contains("xp-upgrade.service"));
         assert!(content.contains("verb == \"start\""));
         assert!(!content.contains("restart"));
+
+        let helper = fs::read_to_string(paths.usr_local_libexec_xp_upgrade_trigger()).unwrap();
+        assert!(helper.contains("xp-upgrade.service"));
+        assert!(helper.contains("--check) exit 0"));
+        assert!(helper.contains("exit 64"));
+        assert!(!helper.contains("$@"));
+
+        let sudoers = fs::read_to_string(paths.etc_sudoers_xp_upgrade()).unwrap();
+        assert!(
+            sudoers.contains("xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger \"\"")
+        );
+        assert!(
+            sudoers
+                .contains("xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger --check")
+        );
+        assert!(!sudoers.contains("systemctl"));
+        assert!(!sudoers.contains("restart"));
     }
 
     #[test]

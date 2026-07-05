@@ -14,3 +14,7 @@
   `missing installed upgrade delegate`，也避免只装 unit 的半安装被误判为 ready。
 - 2026-07-05: `VersionIndicator` unsupported 状态改为不可触发升级的 `Unavailable` 操作，
   current/latest 版本展示统一为 `vX.Y.Z` release tag 风格，并延迟 hover close 以降低状态刷新造成的闪烁。
+- 2026-07-05: hinet-lam Web upgrade start 暴露 CentOS 7 polkit 0.112 不提供
+  `org.freedesktop.systemd1.manage-units` 的 `unit` / `verb` detail；原窄 polkit rule 永远不匹配，
+  `xp` 用户触发 `systemctl start xp-upgrade.service` 会要求交互认证。systemd 委托改为优先
+  root-owned 固定 helper + 窄 sudoers，polkit 只保留为兼容补充。

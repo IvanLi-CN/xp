@@ -113,7 +113,9 @@ Status states:
 
 ### Root delegation
 
-- systemd: `xp-upgrade.service` 是 root one-shot service，`xp` 用户只能通过窄 polkit rule start 该 unit。
+- systemd: `xp-upgrade.service` 是 root one-shot service，`xp` 用户默认通过
+  `/usr/local/libexec/xp-upgrade-trigger` 固定 helper 与窄 sudoers drop-in 触发该 unit；
+  polkit rule 仅作为支持 `unit` / `verb` action detail 的系统上的兼容补充。
 - OpenRC: `xp-upgrade` 是 root one-shot service，`xp` 用户只能通过窄 doas rule 执行
   `rc-service xp-upgrade start`。
 
@@ -131,6 +133,9 @@ Status states:
 - Given systemd/OpenRC 委托入口，
   When 审计脚本/unit/doas/polkit，
   Then 只能触发固定 `xp-ops _upgrade-runner`，不能执行任意命令。
+- Given CentOS 7-class systemd/polkit，
+  When `unit` / `verb` action detail 不可用于 polkit rule，
+  Then systemd Web upgrade 仍可通过固定 helper + sudoers 触发 `xp-upgrade.service`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -165,6 +170,8 @@ Status states:
 - `docs/specs/README.md`
 - `docs/ops/README.md`
 - `docs/ops/systemd/xp-upgrade.service`
+- `docs/ops/systemd/xp-upgrade-trigger`
+- `docs/ops/systemd/sudoers-xp-upgrade`
 - `docs/ops/systemd/xp-upgrade.polkit.rules`
 - `docs/ops/openrc/xp-upgrade`
 - `docs/ops/openrc/doas-xp-upgrade.conf`
@@ -191,6 +198,8 @@ Status states:
 - 2026-07-05: 修复 systemd polkit private directory 对 delegate 检测的误判，同时拒绝只装 unit
   的半安装状态；unsupported 状态下 Web 升级按钮变为不可用展示，版本号统一显示 release tag
   风格，并稳定 popover hover 关闭行为。
+- 2026-07-05: systemd Web upgrade 改为优先使用 root-owned 固定 helper 与窄 sudoers 委托，
+  避免 CentOS 7-class polkit 缺失 `unit` / `verb` action detail 时无法触发 `xp-upgrade.service`。
 
 ## 参考（References）
 

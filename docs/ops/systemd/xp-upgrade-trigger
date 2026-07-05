@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  "") ;;
+  --check) exit 0 ;;
+  *) echo "usage: xp-upgrade-trigger [--check]" >&2; exit 64 ;;
+esac
+SYSTEMCTL="$(command -v systemctl)"
+exec "$SYSTEMCTL" start --no-block xp-upgrade.service

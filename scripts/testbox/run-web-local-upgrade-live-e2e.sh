@@ -4,7 +4,7 @@ set -euo pipefail
 # High-cost live Web local upgrade regression suite on the shared testbox.
 #
 # The test starts a real xp server, triggers POST /api/admin/upgrade/start,
-# lets a fake systemd boundary run xp-ops _upgrade-runner, and verifies:
+# lets a fake sudo/systemd boundary run xp-ops _upgrade-runner, and verifies:
 # - success path restarts xp with the new binary/version
 # - failure path rolls xp back and keeps the old service available
 # - state written before upgrade remains readable after restart
@@ -237,14 +237,14 @@ dump_case_debug() {
 write_release_fixture() {
   local dir="$1"
   local port="$2"
-  mkdir -p "$dir/repos/o/r/releases/tags" "$dir/download"
+  mkdir -p "$dir/repos/IvanLi-CN/xp/releases/tags" "$dir/download"
   ln -f "$XP_ARTIFACTS/new/xp" "$dir/download/xp-linux-x86_64"
   ln -f "$XP_ARTIFACTS/new/xp-ops" "$dir/download/xp-ops-linux-x86_64"
   (
     cd "$dir/download"
     sha256sum xp-linux-x86_64 xp-ops-linux-x86_64 > checksums.txt
   )
-  cat > "$dir/repos/o/r/releases/tags/v$XP_NEW_VERSION" <<JSON
+  cat > "$dir/repos/IvanLi-CN/xp/releases/tags/v$XP_NEW_VERSION" <<JSON
 {
   "tag_name": "v$XP_NEW_VERSION",
   "prerelease": false,
@@ -309,6 +309,7 @@ if [ "$#" -eq 2 ] && [ "$1" = "restart" ] && [ "$2" = "xp.service" ]; then
   fi
   env PATH="$FAKE_BIN:$PATH" \
     XP_UPGRADE_TEST_FORCE_HOST_TRIGGER=systemd \
+    XP_UPGRADE_TEST_SYSTEMD_TRIGGER_PATH="$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" \
     XP_DATA_DIR="$XP_DATA_DIR" \
     XP_BIND="$XP_BIND" \
     XP_API_BASE_URL="$XP_API_BASE_URL" \
@@ -326,9 +327,43 @@ SH
   chmod +x "$bin_dir/systemctl"
 }
 
+make_sudo() {
+  local bin_dir="$1"
+  cat > "$bin_dir/sudo" <<'"'"'SH'"'"'
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "sudo $*" >> "$LIVE_LOG"
+
+if [ "$#" -ge 1 ] && [ "$1" = "-n" ]; then
+  shift
+fi
+
+exec "$@"
+SH
+  chmod +x "$bin_dir/sudo"
+}
+
+install_systemd_upgrade_helper() {
+  mkdir -p "$TEST_ROOT/usr/local/libexec"
+  cat > "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" <<'"'"'SH'"'"'
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  "") ;;
+  --check) exit 0 ;;
+  *) echo "usage: xp-upgrade-trigger [--check]" >&2; exit 64 ;;
+esac
+SYSTEMCTL="$(command -v systemctl)"
+exec "$SYSTEMCTL" start --no-block xp-upgrade.service
+SH
+  chmod +x "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger"
+}
+
 start_xp() {
   env PATH="$FAKE_BIN:$PATH" \
     XP_UPGRADE_TEST_FORCE_HOST_TRIGGER=systemd \
+    XP_UPGRADE_TEST_SYSTEMD_TRIGGER_PATH="$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" \
     XP_DATA_DIR="$XP_DATA_DIR" \
     XP_BIND="$XP_BIND" \
     XP_API_BASE_URL="$XP_API_BASE_URL" \
@@ -383,6 +418,8 @@ prepare_case() {
   export XP_PID_FILE RUNNER_PID_FILE XP_BIND XP_API_BASE_URL XP_ACCESS_HOST
   export ASSET_API_BASE XP_BIN XP_OPS_BIN ADMIN_TOKEN XP_ADMIN_TOKEN_HASH
   make_systemctl "$FAKE_BIN"
+  make_sudo "$FAKE_BIN"
+  install_systemd_upgrade_helper
 }
 
 run_success_case() {
@@ -402,16 +439,25 @@ run_success_case() {
   wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION"
 
   local user_id
-  user_id="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  user_id="$(curl -sS --fail-with-body -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"display_name\":\"upgrade sentinel\"}" \
     "$XP_API_BASE_URL/api/admin/users" \
-    | python3 -c '"'"'import json,sys; print(json.load(sys.stdin)["user_id"])'"'"')"
+    | python3 -c '"'"'import json,sys; print(json.load(sys.stdin)["user_id"])'"'"')" || {
+    dump_case_debug success-create-user
+    return 1
+  }
 
-  curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  local start_body="$case_dir/start-upgrade.body"
+  curl -sS --fail-with-body -o "$start_body" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"target_tag\":\"v$XP_NEW_VERSION\",\"repo\":\"o/r\"}" \
-    "$XP_API_BASE_URL/api/admin/upgrade/start" >/dev/null
+    -d "{\"target_tag\":\"v$XP_NEW_VERSION\"}" \
+    "$XP_API_BASE_URL/api/admin/upgrade/start" || {
+    cat "$start_body" >&2 || true
+    dump_case_debug success-start-upgrade
+    return 1
+  }
 
   wait_upgrade_state "$XP_API_BASE_URL" "$ADMIN_TOKEN" "succeeded" || {
     dump_case_debug success
@@ -425,8 +471,10 @@ import json
 import sys
 assert json.load(sys.stdin)["display_name"] == "upgrade sentinel"
 '"'"'
-  grep -q "systemctl start --no-block xp-upgrade.service" "$LIVE_LOG"
-  grep -q "systemctl restart xp.service" "$LIVE_LOG"
+  grep -Fxq "sudo -n $TEST_ROOT/usr/local/libexec/xp-upgrade-trigger --check" "$LIVE_LOG"
+  grep -Fxq "sudo -n $TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" "$LIVE_LOG"
+  grep -Fxq "systemctl start --no-block xp-upgrade.service" "$LIVE_LOG"
+  grep -Fxq "systemctl restart xp.service" "$LIVE_LOG"
   stop_xp
   kill "$asset_pid" >/dev/null 2>&1 || true
   rm -rf "$case_dir"
@@ -449,10 +497,16 @@ run_rollback_case() {
   wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION"
   touch "$RESTART_FAIL_FILE"
 
-  curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  local start_body="$case_dir/start-upgrade.body"
+  curl -sS --fail-with-body -o "$start_body" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"target_tag\":\"v$XP_NEW_VERSION\",\"repo\":\"o/r\"}" \
-    "$XP_API_BASE_URL/api/admin/upgrade/start" >/dev/null
+    -d "{\"target_tag\":\"v$XP_NEW_VERSION\"}" \
+    "$XP_API_BASE_URL/api/admin/upgrade/start" || {
+    cat "$start_body" >&2 || true
+    dump_case_debug rollback-start-upgrade
+    return 1
+  }
 
   wait_upgrade_state "$XP_API_BASE_URL" "$ADMIN_TOKEN" "failed" || {
     dump_case_debug rollback

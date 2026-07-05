@@ -4,7 +4,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const UPGRADE_DIR: &str = "upgrade";
 const LOCK_FILE: &str = "start.lock";
@@ -12,10 +12,16 @@ const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
 const SYSTEMD_UPGRADE_UNIT_PATH: &str = "/etc/systemd/system/xp-upgrade.service";
+const SYSTEMD_UPGRADE_TRIGGER_PATH: &str = "/usr/local/libexec/xp-upgrade-trigger";
+const SYSTEMD_SUDOERS_PATH: &str = "/etc/sudoers.d/91-xp-upgrade";
 const SYSTEMD_POLKIT_RULE_PATH: &str = "/etc/polkit-1/rules.d/91-xp-upgrade.rules";
 const SYSTEMD_POLKIT_ACTION: &str = "org.freedesktop.systemd1.manage-units";
 const SYSTEMD_UPGRADE_POLKIT_UNIT_RULE: &str = r#"unit == "xp-upgrade.service""#;
 const SYSTEMD_UPGRADE_POLKIT_VERB_RULE: &str = r#"verb == "start""#;
+const SYSTEMD_UPGRADE_SUDOERS_START_RULE: &str =
+    "xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger \"\"";
+const SYSTEMD_UPGRADE_SUDOERS_CHECK_RULE: &str =
+    "xp ALL=(root) NOPASSWD: /usr/local/libexec/xp-upgrade-trigger --check";
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
@@ -298,10 +304,58 @@ fn systemd_upgrade_delegate_installed(root: &Path) -> bool {
     }
 
     if root != Path::new("/") {
-        return systemd_upgrade_polkit_rule_readable(root);
+        return systemd_upgrade_sudo_delegate_installed(root)
+            || systemd_upgrade_polkit_rule_readable(root);
     }
 
-    systemd_upgrade_polkit_rule_readable(root) || systemd_upgrade_polkit_allows_current_process()
+    systemd_upgrade_sudo_delegate_installed(root)
+        || systemd_upgrade_polkit_rule_readable(root)
+        || systemd_upgrade_polkit_allows_current_process()
+}
+
+fn systemd_upgrade_sudo_delegate_installed(root: &Path) -> bool {
+    if !root_abs(root, SYSTEMD_UPGRADE_TRIGGER_PATH).exists() {
+        return false;
+    }
+
+    if root != Path::new("/") {
+        return fs::read_to_string(root_abs(root, SYSTEMD_SUDOERS_PATH))
+            .ok()
+            .is_some_and(|content| {
+                content_has_line(&content, SYSTEMD_UPGRADE_SUDOERS_START_RULE)
+                    && content_has_line(&content, SYSTEMD_UPGRADE_SUDOERS_CHECK_RULE)
+            });
+    }
+
+    systemd_upgrade_sudo_helper_allows_current_process()
+}
+
+fn content_has_line(content: &str, needle: &str) -> bool {
+    content.lines().any(|line| line.trim() == needle)
+}
+
+fn systemd_upgrade_sudo_helper_allows_current_process() -> bool {
+    let trigger_path = systemd_upgrade_trigger_path();
+    if !command_exists("sudo") || !Path::new(&trigger_path).exists() {
+        return false;
+    }
+    Command::new("sudo")
+        .args(["-n", &trigger_path, "--check"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn systemd_upgrade_trigger_path() -> String {
+    if cfg!(debug_assertions) {
+        std::env::var("XP_UPGRADE_TEST_SYSTEMD_TRIGGER_PATH")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| SYSTEMD_UPGRADE_TRIGGER_PATH.to_string())
+    } else {
+        SYSTEMD_UPGRADE_TRIGGER_PATH.to_string()
+    }
 }
 
 fn systemd_upgrade_polkit_rule_readable(root: &Path) -> bool {
@@ -500,14 +554,26 @@ fn validate_target_tag(target_tag: &str) -> Result<(), UpgradeStartError> {
 
 fn trigger_upgrade_service(trigger: Option<&str>) -> Result<(), String> {
     match trigger {
-        Some("systemd") => run_status(Command::new("systemctl").args([
-            "start",
-            "--no-block",
-            SYSTEMD_UPGRADE_UNIT,
-        ])),
+        Some("systemd") => trigger_systemd_upgrade_service(),
         Some("openrc") => run_status(Command::new("doas").args(openrc_trigger_args())),
         _ => Err("upgrade trigger is not supported".to_string()),
     }
+}
+
+fn trigger_systemd_upgrade_service() -> Result<(), String> {
+    if systemd_upgrade_sudo_helper_allows_current_process() {
+        return run_status(Command::new("sudo").args(systemd_sudo_trigger_args()));
+    }
+
+    run_status(Command::new("systemctl").args(systemd_systemctl_trigger_args()))
+}
+
+fn systemd_sudo_trigger_args() -> [String; 2] {
+    ["-n".to_string(), systemd_upgrade_trigger_path()]
+}
+
+fn systemd_systemctl_trigger_args() -> [&'static str; 3] {
+    ["start", "--no-block", SYSTEMD_UPGRADE_UNIT]
 }
 
 fn openrc_trigger_args() -> [&'static str; 3] {
@@ -601,6 +667,29 @@ mod tests {
         fs::write(systemd_unit, "unit").unwrap();
         assert!(!systemd_upgrade_delegate_installed(tmp.path()));
 
+        let systemd_helper = root_abs(tmp.path(), SYSTEMD_UPGRADE_TRIGGER_PATH);
+        let systemd_sudoers = root_abs(tmp.path(), SYSTEMD_SUDOERS_PATH);
+        fs::create_dir_all(systemd_helper.parent().unwrap()).unwrap();
+        fs::create_dir_all(systemd_sudoers.parent().unwrap()).unwrap();
+        fs::write(systemd_helper, "helper").unwrap();
+        fs::write(&systemd_sudoers, SYSTEMD_UPGRADE_SUDOERS_CHECK_RULE).unwrap();
+        assert!(!systemd_upgrade_delegate_installed(tmp.path()));
+        fs::write(&systemd_sudoers, SYSTEMD_UPGRADE_SUDOERS_START_RULE).unwrap();
+        assert!(!systemd_upgrade_delegate_installed(tmp.path()));
+        fs::write(
+            &systemd_sudoers,
+            format!(
+                "{SYSTEMD_UPGRADE_SUDOERS_START_RULE}\n\
+                 {SYSTEMD_UPGRADE_SUDOERS_CHECK_RULE}\n"
+            ),
+        )
+        .unwrap();
+        assert!(systemd_upgrade_delegate_installed(tmp.path()));
+
+        let tmp = tempdir().unwrap();
+        let systemd_unit = root_abs(tmp.path(), SYSTEMD_UPGRADE_UNIT_PATH);
+        fs::create_dir_all(systemd_unit.parent().unwrap()).unwrap();
+        fs::write(systemd_unit, "unit").unwrap();
         let systemd_polkit = root_abs(tmp.path(), SYSTEMD_POLKIT_RULE_PATH);
         fs::create_dir_all(systemd_polkit.parent().unwrap()).unwrap();
         fs::write(
@@ -659,6 +748,21 @@ mod tests {
         assert_eq!(
             openrc_trigger_args(),
             ["/sbin/rc-service", "xp-upgrade", "start"]
+        );
+    }
+
+    #[test]
+    fn systemd_trigger_uses_fixed_sudo_helper_or_fixed_unit() {
+        assert_eq!(
+            systemd_sudo_trigger_args(),
+            [
+                "-n".to_string(),
+                "/usr/local/libexec/xp-upgrade-trigger".to_string()
+            ]
+        );
+        assert_eq!(
+            systemd_systemctl_trigger_args(),
+            ["start", "--no-block", "xp-upgrade.service"]
         );
     }
 }
