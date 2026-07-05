@@ -9,3 +9,8 @@
   `_upgrade-runner` 再到 `xp-ops upgrade` 的桥接路径。
 - 2026-07-04: 补充 live shared-testbox 回归脚本，启动真实旧版 `xp`，通过 Web admin API
   触发升级，验证新版重启、失败自动回滚与关键迁移 smoke。
+- 2026-07-05: hinet-lam 验证暴露 CentOS 7 `polkit` rules 目录默认不可由 `xp` 用户遍历；
+  systemd delegate 支持检测收敛为 unit 存在加 polkit 授权验证，避免把有效委托误报为
+  `missing installed upgrade delegate`，也避免只装 unit 的半安装被误判为 ready。
+- 2026-07-05: `VersionIndicator` unsupported 状态改为不可触发升级的 `Unavailable` 操作，
+  current/latest 版本展示统一为 `vX.Y.Z` release tag 风格，并延迟 hover close 以降低状态刷新造成的闪烁。

@@ -12,7 +12,10 @@ const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
 const SYSTEMD_UPGRADE_UNIT_PATH: &str = "/etc/systemd/system/xp-upgrade.service";
-const SYSTEMD_UPGRADE_POLKIT_PATH: &str = "/etc/polkit-1/rules.d/91-xp-upgrade.rules";
+const SYSTEMD_POLKIT_RULE_PATH: &str = "/etc/polkit-1/rules.d/91-xp-upgrade.rules";
+const SYSTEMD_POLKIT_ACTION: &str = "org.freedesktop.systemd1.manage-units";
+const SYSTEMD_UPGRADE_POLKIT_UNIT_RULE: &str = r#"unit == "xp-upgrade.service""#;
+const SYSTEMD_UPGRADE_POLKIT_VERB_RULE: &str = r#"verb == "start""#;
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
@@ -290,8 +293,44 @@ fn support_status_for_root(root: &Path) -> UpgradeSupport {
 }
 
 fn systemd_upgrade_delegate_installed(root: &Path) -> bool {
-    root_abs(root, SYSTEMD_UPGRADE_UNIT_PATH).exists()
-        && root_abs(root, SYSTEMD_UPGRADE_POLKIT_PATH).exists()
+    if !root_abs(root, SYSTEMD_UPGRADE_UNIT_PATH).exists() {
+        return false;
+    }
+
+    if root != Path::new("/") {
+        return systemd_upgrade_polkit_rule_readable(root);
+    }
+
+    systemd_upgrade_polkit_rule_readable(root) || systemd_upgrade_polkit_allows_current_process()
+}
+
+fn systemd_upgrade_polkit_rule_readable(root: &Path) -> bool {
+    fs::read_to_string(root_abs(root, SYSTEMD_POLKIT_RULE_PATH))
+        .ok()
+        .is_some_and(|content| {
+            content.contains(SYSTEMD_POLKIT_ACTION)
+                && content.contains(SYSTEMD_UPGRADE_POLKIT_UNIT_RULE)
+                && content.contains(SYSTEMD_UPGRADE_POLKIT_VERB_RULE)
+        })
+}
+
+fn systemd_upgrade_polkit_allows_current_process() -> bool {
+    let pid = std::process::id().to_string();
+    Command::new("pkcheck")
+        .args([
+            "--action-id",
+            SYSTEMD_POLKIT_ACTION,
+            "--process",
+            &pid,
+            "--detail",
+            "unit",
+            SYSTEMD_UPGRADE_UNIT,
+            "--detail",
+            "verb",
+            "start",
+        ])
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn openrc_upgrade_delegate_installed(root: &Path) -> bool {
@@ -558,11 +597,21 @@ mod tests {
         assert!(!openrc_upgrade_delegate_installed(tmp.path()));
 
         let systemd_unit = root_abs(tmp.path(), SYSTEMD_UPGRADE_UNIT_PATH);
-        let systemd_polkit = root_abs(tmp.path(), SYSTEMD_UPGRADE_POLKIT_PATH);
         fs::create_dir_all(systemd_unit.parent().unwrap()).unwrap();
-        fs::create_dir_all(systemd_polkit.parent().unwrap()).unwrap();
         fs::write(systemd_unit, "unit").unwrap();
-        fs::write(systemd_polkit, "polkit").unwrap();
+        assert!(!systemd_upgrade_delegate_installed(tmp.path()));
+
+        let systemd_polkit = root_abs(tmp.path(), SYSTEMD_POLKIT_RULE_PATH);
+        fs::create_dir_all(systemd_polkit.parent().unwrap()).unwrap();
+        fs::write(
+            systemd_polkit,
+            format!(
+                "{SYSTEMD_POLKIT_ACTION}\n\
+                 {SYSTEMD_UPGRADE_POLKIT_UNIT_RULE}\n\
+                 {SYSTEMD_UPGRADE_POLKIT_VERB_RULE}\n"
+            ),
+        )
+        .unwrap();
         assert!(systemd_upgrade_delegate_installed(tmp.path()));
 
         let openrc_script = root_abs(tmp.path(), OPENRC_UPGRADE_SCRIPT_PATH);

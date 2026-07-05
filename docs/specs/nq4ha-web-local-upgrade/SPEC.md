@@ -156,6 +156,9 @@ Status states:
 - Storybook `Components/VersionIndicator/UpdateAvailable`
   - PR: include
   - ![Version indicator update available](./assets/version-indicator-update-available.png)
+- Storybook `Components/VersionIndicator/UpdateAvailableUnsupported`
+  - PR: include
+  - ![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
 
 ## 文档更新（Docs to Update）
 
@@ -185,6 +188,9 @@ Status states:
 ## 变更记录（Change log）
 
 - 2026-07-04: 创建并完成 Web 当前节点原地升级入口规格；实现委托 runner、admin API、顶栏 popover 与文档同步。
+- 2026-07-05: 修复 systemd polkit private directory 对 delegate 检测的误判，同时拒绝只装 unit
+  的半安装状态；unsupported 状态下 Web 升级按钮变为不可用展示，版本号统一显示 release tag
+  风格，并稳定 popover hover 关闭行为。
 
 ## 参考（References）
 

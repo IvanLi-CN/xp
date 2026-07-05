@@ -125,13 +125,14 @@ export const UpdateAvailableUnsupported: Story = {
 					support: {
 						supported: false,
 						reason:
-							"Web automatic upgrade is not supported inside the single-image container runtime.",
+							"missing installed upgrade delegate; rerun xp-ops init on this host",
 						trigger: null,
 					},
 					status: {
 						...baseUpgradeStatus.status,
 						state: "unsupported",
-						message: "Use host-side image or Compose upgrade.",
+						message:
+							"missing installed upgrade delegate; rerun xp-ops init on this host",
 					},
 				}}
 				onRetryVersionCheck={() => {}}
