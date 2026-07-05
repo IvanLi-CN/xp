@@ -872,13 +872,13 @@ fn default_seed_reality_domains() -> Vec<RealityDomain> {
     // Deterministic IDs: avoid cluster divergence when seeding during migrations.
     vec![
         RealityDomain {
-            domain_id: "seed_public_sn_files_1drv_com".to_string(),
-            server_name: "public.sn.files.1drv.com".to_string(),
+            domain_id: "seed_cdn_a_example_test".to_string(),
+            server_name: "cdn-a.example.test".to_string(),
             disabled_node_ids: BTreeSet::new(),
         },
         RealityDomain {
-            domain_id: "seed_public_bn_files_1drv_com".to_string(),
-            server_name: "public.bn.files.1drv.com".to_string(),
+            domain_id: "seed_cdn_b_example_test".to_string(),
+            server_name: "cdn-b.example.test".to_string(),
             disabled_node_ids: BTreeSet::new(),
         },
         RealityDomain {

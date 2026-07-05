@@ -124,7 +124,7 @@ function setupMocks(args?: {
 			country_code: "TW",
 			geo_region: "Taiwan",
 			geo_city: "Taipei",
-			geo_operator: "HiNet",
+			geo_operator: "ExampleNet",
 			subscription_region: "taiwan" as const,
 			checked_at: "2026-03-08T00:59:00Z",
 			last_success_at: "2026-03-08T00:59:00Z",
@@ -470,7 +470,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(screen.getAllByText("203.0.113.8").length).toBeGreaterThan(0);
 		});
-		expect(await screenByText("HiNet")).toBeTruthy();
+		expect(await screenByText("ExampleNet")).toBeTruthy();
 		await waitFor(() => {
 			expect(screen.getAllByText("Taiwan").length).toBeGreaterThan(0);
 		});

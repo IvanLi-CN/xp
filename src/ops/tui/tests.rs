@@ -79,9 +79,7 @@ fn save_tui_config_omits_legacy_save_token_field() {
         api_base_url: None,
         vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
         default_vless_port: Some(443),
-        default_vless_server_names: Some(
-            "public.sn.files.1drv.com,public.bn.files.1drv.com".to_string(),
-        ),
+        default_vless_server_names: Some("cdn-a.example.test,cdn-b.example.test".to_string()),
         default_vless_fingerprint: Some("chrome".to_string()),
         default_ss_port: Some(53843),
         xray_version: "latest".to_string(),
@@ -123,9 +121,7 @@ fn save_tui_config_persists_managed_default_fields() {
         api_base_url: None,
         vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
         default_vless_port: Some(443),
-        default_vless_server_names: Some(
-            "public.sn.files.1drv.com,public.bn.files.1drv.com".to_string(),
-        ),
+        default_vless_server_names: Some("cdn-a.example.test,cdn-b.example.test".to_string()),
         default_vless_fingerprint: Some("chrome".to_string()),
         default_ss_port: Some(53843),
         xray_version: "latest".to_string(),

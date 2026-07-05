@@ -45,11 +45,6 @@ const navGroups = [
 		items: [
 			{ label: "Quota policy", to: "/demo/quota-policy", icon: "tabler:gauge" },
 			{
-				label: "Reality domains",
-				to: "/demo/reality-domains",
-				icon: "tabler:world",
-			},
-			{
 				label: "Service config",
 				to: "/demo/service-config",
 				icon: "tabler:settings",

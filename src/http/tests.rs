@@ -694,7 +694,7 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
         NodeSubscriptionRegion::HongKong => {
             ("HK", "Hong Kong", "Hong Kong", "Example HK", "203.0.113.20")
         }
-        NodeSubscriptionRegion::Taiwan => ("TW", "Taiwan", "Taipei", "HiNet", "203.0.113.30"),
+        NodeSubscriptionRegion::Taiwan => ("TW", "Taiwan", "Taipei", "ExampleNet", "203.0.113.30"),
         NodeSubscriptionRegion::Korea => ("KR", "Seoul", "Seoul", "Example KR", "203.0.113.40"),
         NodeSubscriptionRegion::Singapore => {
             ("SG", "Singapore", "Singapore", "Example SG", "203.0.113.50")
@@ -1223,7 +1223,7 @@ async fn admin_get_node_includes_egress_probe_summary_when_present() {
     assert_eq!(json["egress_probe"]["country_code"], "TW");
     assert_eq!(json["egress_probe"]["selected_public_ip"], "203.0.113.30");
     assert_eq!(json["egress_probe"]["geo_city"], "Taipei");
-    assert_eq!(json["egress_probe"]["geo_operator"], "HiNet");
+    assert_eq!(json["egress_probe"]["geo_operator"], "ExampleNet");
     assert_eq!(json["egress_probe"]["stale"], false);
 }
 
@@ -5765,9 +5765,9 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
 
     let extra_node = Node {
         node_id: new_ulid_string(),
-        node_name: "hinetlh".to_string(),
-        access_host: "hinetlh-ep.example.com".to_string(),
-        api_base_url: "https://hinetlh.example.com".to_string(),
+        node_name: "nodebeta".to_string(),
+        access_host: "nodebeta-ep.example.com".to_string(),
+        api_base_url: "https://nodebeta.example.com".to_string(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -5840,7 +5840,7 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
         .iter()
         .filter_map(|proxy| proxy.get("name").and_then(YamlValue::as_str))
         .collect::<Vec<_>>();
-    assert!(proxy_names.contains(&"hinetlh-ss"));
+    assert!(proxy_names.contains(&"nodebeta-ss"));
 }
 
 #[tokio::test]
@@ -9455,8 +9455,8 @@ async fn reality_domains_list_returns_seeded_items() {
         .iter()
         .filter_map(|v| v.get("server_name").and_then(|s| s.as_str()))
         .collect();
-    assert!(server_names.contains(&"public.sn.files.1drv.com"));
-    assert!(server_names.contains(&"public.bn.files.1drv.com"));
+    assert!(server_names.contains(&"cdn-a.example.test"));
+    assert!(server_names.contains(&"cdn-b.example.test"));
 }
 
 #[tokio::test]

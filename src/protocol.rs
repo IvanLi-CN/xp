@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn reality_dest_accepts_host_and_ip_socket_addresses() {
-        assert!(validate_reality_dest("oneclient.sfx.ms:443").is_ok());
+        assert!(validate_reality_dest("origin.example.test:443").is_ok());
         assert!(validate_reality_dest("203.0.113.10:443").is_ok());
         assert!(validate_reality_dest("[2001:db8::1]:443").is_ok());
         assert!(validate_reality_dest("tcp://203.0.113.10:443").is_ok());
@@ -552,10 +552,10 @@ mod tests {
 
     #[test]
     fn reality_dest_rejects_missing_or_invalid_port() {
-        assert!(validate_reality_dest("oneclient.sfx.ms").is_err());
+        assert!(validate_reality_dest("origin.example.test").is_err());
         assert!(validate_reality_dest("203.0.113.10").is_err());
         assert!(validate_reality_dest("[2001:db8::1]").is_err());
-        assert!(validate_reality_dest("oneclient.sfx.ms:0").is_err());
+        assert!(validate_reality_dest("origin.example.test:0").is_err());
         assert!(validate_reality_dest("[2001:db8::1]:0").is_err());
     }
 

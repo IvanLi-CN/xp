@@ -67,7 +67,7 @@ export const Empty: Story = {
 
 export const Prefilled: Story = {
 	args: {
-		initialValue: ["download.example.com", "public.sn.files.1drv.com"],
+		initialValue: ["download.example.com", "cdn-a.example.test"],
 	},
 };
 
@@ -77,7 +77,7 @@ export const AuthorityAliases: Story = {
 		placeholder: "edge.example.com",
 		helperText:
 			"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. Order does not matter.",
-		initialValue: ["edge.example.com", "tavily-tw.ivanli.cc:8443"],
+		initialValue: ["edge.example.com", "edge.example.test:8443"],
 		allowPrimary: false,
 	},
 };

@@ -133,13 +133,6 @@ export const MainFlow: Story = {
 		).toBeInTheDocument();
 
 		await userEvent.click(
-			await canvas.findByRole("link", { name: "Reality domains" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Reality domains" }),
-		).toBeInTheDocument();
-
-		await userEvent.click(
 			await canvas.findByRole("link", { name: "Service config" }),
 		);
 		await expect(

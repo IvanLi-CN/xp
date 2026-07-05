@@ -275,7 +275,7 @@ export function DemoEndpointFormPage() {
 		"vless_reality_vision_tcp",
 	);
 	const [port, setPort] = useState("9443");
-	const [serverNames, setServerNames] = useState("public.sn.files.1drv.com");
+	const [serverNames, setServerNames] = useState("cdn-a.example.test");
 	const [submitted, setSubmitted] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const canWrite = state.session?.role !== "viewer";
@@ -305,7 +305,7 @@ export function DemoEndpointFormPage() {
 	const dirty =
 		name !== "seoul-reality-443" ||
 		port !== "9443" ||
-		serverNames !== "public.sn.files.1drv.com" ||
+		serverNames !== "cdn-a.example.test" ||
 		kind !== "vless_reality_vision_tcp";
 
 	return (
@@ -432,7 +432,7 @@ export function DemoEndpointFormPage() {
 								id="demo-endpoint-server-names"
 								value={serverNames}
 								onChange={(event) => setServerNames(event.target.value)}
-								placeholder="public.sn.files.1drv.com, oneclient.sfx.ms"
+								placeholder="cdn-a.example.test, origin.example.test"
 								className="font-mono"
 							/>
 							<span className="text-xs text-muted-foreground">

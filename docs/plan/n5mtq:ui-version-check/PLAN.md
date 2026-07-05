@@ -12,7 +12,7 @@
 - UI 现状已依赖后端返回的 `xp_version`（`GET /api/cluster/info`），并且节点部署引导命令会用该版本拼接 GitHub Releases 下载链接（`web/src/views/NodesPage.tsx`）。但这些信息对“我现在跑的是什么版本”并不直观。
 - 过往项目经验（对齐口径）：
   - `pod-upgrade-trigger`：后端提供 `GET /api/version/check`，由后端访问 GitHub Releases `releases/latest` 并比较 semver；前端采用“页面聚焦触发 + 冷却时间（例如 1h）”的节流策略，顶栏展示当前版本与“新版本可用”入口。
-  - `tavily-hikari`：前端通过“后端版本变化”提示用户刷新页面（不依赖 GitHub），并允许本地 dismiss。
+  - `reference-service`：前端通过“后端版本变化”提示用户刷新页面（不依赖 GitHub），并允许本地 dismiss。
   - `dockrev`：涉及自我升级时用独立执行者（supervisor）与独立页面/接口，避免主服务重启窗口内失联。
 
 ## 目标 / 非目标
@@ -155,7 +155,7 @@
 
 - 后端对齐 `pod-upgrade-trigger`：提供 `GET /api/version/check`，内部复用“从 GitHub Releases 解析 tag + semver 比较 + 缓存”的实现风格（可参考 `xp-ops` 的 `src/ops/upgrade.rs` 但保持 API 形状与职责更贴近版本检查）。
 - 前端对齐 `pod-upgrade-trigger`：聚焦触发 + 冷却时间（localStorage）节流；在顶栏展示当前版本与“新版本可用 vX.Y.Z”入口，点击跳转到 release 页面。
-- 补充对齐 `tavily-hikari`（可选、默认不做）：若后续引入 SSE/事件，可用“后端版本变化提示刷新页面”的机制作为第二层体验优化（不依赖 GitHub）。
+- 补充对齐 `reference-service`（可选、默认不做）：若后续引入 SSE/事件，可用“后端版本变化提示刷新页面”的机制作为第二层体验优化（不依赖 GitHub）。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

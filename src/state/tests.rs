@@ -1038,8 +1038,8 @@ fn upsert_vless_endpoint_manual_accepts_tcp_prefixed_dest() {
     let endpoint_id = "endpoint_1".to_string();
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "tcp://oneclient.sfx.ms:443".to_string(),
-            server_names: vec!["public.sn.files.1drv.com".to_string()],
+            dest: "tcp://origin.example.test:443".to_string(),
+            server_names: vec!["cdn-a.example.test".to_string()],
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -1069,7 +1069,7 @@ fn upsert_vless_endpoint_manual_accepts_tcp_prefixed_dest() {
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
         serde_json::from_value(saved.meta.clone()).expect("vless meta");
-    assert_eq!(meta.reality.dest, "tcp://oneclient.sfx.ms:443");
+    assert_eq!(meta.reality.dest, "tcp://origin.example.test:443");
 }
 
 #[test]

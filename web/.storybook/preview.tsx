@@ -31,7 +31,6 @@ import { DemoNodeDetailsPage, DemoNodesPage } from "../src/demo/DemoNodesPage";
 import { DemoScenariosPage } from "../src/demo/DemoScenariosPage";
 import {
 	DemoQuotaPolicyPage,
-	DemoRealityDomainsPage,
 	DemoServiceConfigPage,
 	DemoToolsPage,
 } from "../src/demo/DemoSettingsPages";
@@ -50,7 +49,6 @@ import { LoginPage } from "../src/views/LoginPage";
 import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
 import { NodesPage } from "../src/views/NodesPage";
 import { QuotaPolicyPage } from "../src/views/QuotaPolicyPage";
-import { RealityDomainsPage } from "../src/views/RealityDomainsPage";
 import { ServiceConfigPage } from "../src/views/ServiceConfigPage";
 import { ToolsPage } from "../src/views/ToolsPage";
 import { UserDetailsPage } from "../src/views/UserDetailsPage";
@@ -257,12 +255,6 @@ const preview: Preview = {
 				component: ToolsPage,
 			});
 
-			const realityDomainsRoute = createRoute({
-				getParentRoute: () => appRoute,
-				path: "/reality-domains",
-				component: RealityDomainsPage,
-			});
-
 			const demoLoginRootRoute = createRoute({
 				getParentRoute: () => rootRoute,
 				path: "/demo/login",
@@ -359,12 +351,6 @@ const preview: Preview = {
 				component: DemoQuotaPolicyPage,
 			});
 
-			const demoRealityDomainsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/reality-domains",
-				component: DemoRealityDomainsPage,
-			});
-
 			const demoServiceConfigRoute = createRoute({
 				getParentRoute: () => demoAppRoute,
 				path: "/service-config",
@@ -390,7 +376,6 @@ const preview: Preview = {
 				quotaPolicyRoute,
 				serviceConfigRoute,
 				toolsRoute,
-				realityDomainsRoute,
 			]);
 
 			const demoLoginRouteTree = demoLoginRootRoute.addChildren([
@@ -411,7 +396,6 @@ const preview: Preview = {
 				demoUserDetailsRoute,
 				demoScenariosRoute,
 				demoQuotaPolicyRoute,
-				demoRealityDomainsRoute,
 				demoServiceConfigRoute,
 				demoToolsRoute,
 			]);

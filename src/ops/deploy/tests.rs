@@ -170,9 +170,7 @@ fn ensure_xp_env_admin_token_hash_writes_managed_default_endpoint_keys() {
     let managed_defaults = ManagedDefaultsWriteValues {
         vless_canary_acme_contact_email: Some(Cow::Borrowed("ops@example.com")),
         default_vless_port: Some(Cow::Borrowed("53842")),
-        default_vless_server_names: Some(Cow::Borrowed(
-            "public.sn.files.1drv.com,public.bn.files.1drv.com",
-        )),
+        default_vless_server_names: Some(Cow::Borrowed("cdn-a.example.test,cdn-b.example.test")),
         default_vless_fingerprint: Some(Cow::Borrowed("chrome")),
         default_ss_port: Some(Cow::Borrowed("53843")),
     };
@@ -193,9 +191,7 @@ fn ensure_xp_env_admin_token_hash_writes_managed_default_endpoint_keys() {
     let env = read_env(&paths);
     assert!(env.contains("XP_VLESS_CANARY_ACME_CONTACT_EMAIL='ops@example.com'"));
     assert!(env.contains("XP_DEFAULT_VLESS_PORT='53842'"));
-    assert!(env.contains(
-        "XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'"
-    ));
+    assert!(env.contains("XP_DEFAULT_VLESS_SERVER_NAMES='cdn-a.example.test,cdn-b.example.test'"));
     assert!(env.contains("XP_DEFAULT_VLESS_FINGERPRINT='chrome'"));
     assert!(env.contains("XP_DEFAULT_SS_PORT='53843'"));
 }
@@ -253,7 +249,7 @@ fn ensure_xp_env_admin_token_hash_preserves_existing_managed_default_endpoint_ke
         format!(
             "XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\n\
 XP_DEFAULT_VLESS_PORT=53842\n\
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com\n\
+XP_DEFAULT_VLESS_SERVER_NAMES=cdn-a.example.test,cdn-b.example.test\n\
 XP_DEFAULT_VLESS_FINGERPRINT=chrome\n\
 XP_DEFAULT_SS_PORT=53843\n",
         ),
@@ -275,9 +271,7 @@ XP_DEFAULT_SS_PORT=53843\n",
 
     let env = read_env(&paths);
     assert!(env.contains("XP_DEFAULT_VLESS_PORT='53842'"));
-    assert!(env.contains(
-        "XP_DEFAULT_VLESS_SERVER_NAMES='public.sn.files.1drv.com,public.bn.files.1drv.com'"
-    ));
+    assert!(env.contains("XP_DEFAULT_VLESS_SERVER_NAMES='cdn-a.example.test,cdn-b.example.test'"));
     assert!(env.contains("XP_DEFAULT_VLESS_FINGERPRINT='chrome'"));
     assert!(env.contains("XP_DEFAULT_SS_PORT='53843'"));
 }
@@ -287,7 +281,7 @@ fn resolve_managed_defaults_write_values_preserves_existing_endpoint_settings() 
     let parsed = crate::ops::xp_env::parse_xp_env(Some(
         "XP_VLESS_CANARY_ACME_CONTACT_EMAIL=ops@example.com\n\
 XP_DEFAULT_VLESS_PORT=53842\n\
-XP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com,public.bn.files.1drv.com\n\
+XP_DEFAULT_VLESS_SERVER_NAMES=cdn-a.example.test,cdn-b.example.test\n\
 XP_DEFAULT_VLESS_FINGERPRINT=chrome\n\
 XP_DEFAULT_SS_PORT=53843\n"
             .to_string(),
@@ -302,7 +296,7 @@ XP_DEFAULT_SS_PORT=53843\n"
     assert_eq!(resolved.default_vless_port.as_deref(), Some("53842"));
     assert_eq!(
         resolved.default_vless_server_names.as_deref(),
-        Some("public.sn.files.1drv.com,public.bn.files.1drv.com")
+        Some("cdn-a.example.test,cdn-b.example.test")
     );
     assert_eq!(
         resolved.default_vless_fingerprint.as_deref(),
@@ -490,7 +484,7 @@ async fn build_plan_rejects_zero_managed_default_ports() {
         ddns_zone_id: None,
         vless_canary_acme_contact_email: None,
         default_vless_port: Some(0),
-        default_vless_server_names: Some("public.sn.files.1drv.com".to_string()),
+        default_vless_server_names: Some("cdn-a.example.test".to_string()),
         default_vless_fingerprint: None,
         default_ss_port: Some(0),
         join_token: None,
@@ -537,7 +531,7 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
     fs::create_dir_all(paths.etc_xp_dir()).unwrap();
     fs::write(
             paths.etc_xp_env(),
-            "XP_DEFAULT_VLESS_PORT=0\nXP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com\nXP_DEFAULT_SS_PORT=0\n",
+            "XP_DEFAULT_VLESS_PORT=0\nXP_DEFAULT_VLESS_SERVER_NAMES=cdn-a.example.test\nXP_DEFAULT_SS_PORT=0\n",
         )
         .unwrap();
 
@@ -606,7 +600,7 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
     fs::create_dir_all(paths.etc_xp_dir()).unwrap();
     fs::write(
         paths.etc_xp_env(),
-        "XP_DEFAULT_VLESS_PORT=53842\nXP_DEFAULT_VLESS_SERVER_NAMES=public.sn.files.1drv.com\n",
+        "XP_DEFAULT_VLESS_PORT=53842\nXP_DEFAULT_VLESS_SERVER_NAMES=cdn-a.example.test\n",
     )
     .unwrap();
 

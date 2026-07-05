@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
 	type AdminEndpointCanaryProbeResponse,
@@ -14,7 +14,6 @@ import {
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
-import { fetchAdminRealityDomains } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -42,9 +41,9 @@ import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
 } from "../utils/acceptedAuthority";
-import { deriveGlobalRealityServerNames } from "../utils/realityDomains";
 import {
 	normalizeRealityServerName,
+	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "../utils/realityServerName";
 
@@ -153,11 +152,6 @@ export function EndpointDetailsPage() {
 		queryFn: ({ signal }) => fetchAdminEndpoint(adminToken, endpointId, signal),
 	});
 
-	const realityDomainsQuery = useQuery({
-		queryKey: ["adminRealityDomains", adminToken],
-		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
-	});
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
@@ -165,9 +159,6 @@ export function EndpointDetailsPage() {
 	});
 
 	const [port, setPort] = useState("");
-	const [realityServerNamesSource, setRealityServerNamesSource] = useState<
-		"manual" | "global"
-	>("manual");
 	const [realityDest, setRealityDest] = useState("");
 	const [realityServerNamesManual, setRealityServerNamesManual] = useState<
 		string[]
@@ -189,7 +180,6 @@ export function EndpointDetailsPage() {
 		setPort(String(endpoint.port));
 		if (endpoint.kind === "vless_reality_vision_tcp") {
 			const metaSnapshot = parseVlessMeta(endpoint.meta);
-			setRealityServerNamesSource(metaSnapshot.realityServerNamesSource);
 			setRealityDest(metaSnapshot.realityDest);
 			setRealityServerNamesManual(metaSnapshot.realityServerNames);
 			setRealityFingerprint(metaSnapshot.realityFingerprint);
@@ -197,7 +187,6 @@ export function EndpointDetailsPage() {
 			setUpstreamMode(metaSnapshot.canaryUpstreamMode);
 			setAcceptedAuthorities(metaSnapshot.acceptedAuthorities);
 		} else {
-			setRealityServerNamesSource("manual");
 			setRealityDest("");
 			setRealityServerNamesManual([]);
 			setRealityFingerprint("");
@@ -206,14 +195,6 @@ export function EndpointDetailsPage() {
 			setAcceptedAuthorities([]);
 		}
 	}, [endpointQuery.data]);
-
-	const derivedGlobalServerNames = useMemo(() => {
-		const endpoint = endpointQuery.data;
-		if (!endpoint) return [];
-		if (endpoint.kind !== "vless_reality_vision_tcp") return [];
-		const domains = realityDomainsQuery.data?.items ?? [];
-		return deriveGlobalRealityServerNames(domains, endpoint.node_id);
-	}, [endpointQuery.data, realityDomainsQuery.data]);
 
 	const patchMutation = useMutation({
 		mutationFn: async () => {
@@ -240,57 +221,35 @@ export function EndpointDetailsPage() {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				if (!metaSnapshot.managedDefault) {
 					const fingerprintValue = realityFingerprint.trim() || "chrome";
-					const serverNamesSource = realityServerNamesSource;
 					const destInput = realityDest.trim();
 
-					const manualServerNames = realityServerNamesManual
+					const serverNames = realityServerNamesManual
 						.map(normalizeRealityServerName)
 						.filter((s) => s.length > 0);
 
-					const serverNames =
-						serverNamesSource === "global"
-							? derivedGlobalServerNames.length > 0
-								? derivedGlobalServerNames
-								: metaSnapshot.realityServerNames
-							: manualServerNames;
-
-					const destValue =
-						serverNamesSource === "global" && serverNames.length > 0
-							? `${serverNames[0]}:443`
-							: destInput;
+					const destValue = destInput;
 
 					const realityChanged =
-						serverNamesSource !== metaSnapshot.realityServerNamesSource ||
+						metaSnapshot.realityServerNamesSource !== "manual" ||
 						destValue !== metaSnapshot.realityDest ||
 						fingerprintValue !== metaSnapshot.realityFingerprint ||
-						(serverNamesSource === "manual" &&
-							!arraysEqual(serverNames, metaSnapshot.realityServerNames));
+						!arraysEqual(serverNames, metaSnapshot.realityServerNames);
 
 					if (realityChanged) {
-						if (serverNamesSource === "manual") {
-							if (destValue.length === 0) {
-								throw new Error("dest is required.");
-							}
-							if (serverNames.length === 0) {
-								throw new Error("serverName is required.");
-							}
-							for (const name of serverNames) {
-								const err = validateRealityServerName(name);
-								if (err) throw new Error(err);
-							}
-						} else if (
-							!realityDomainsQuery.isLoading &&
-							!realityDomainsQuery.isError &&
-							derivedGlobalServerNames.length === 0
-						) {
-							throw new Error(
-								"No enabled reality domains for this node. Add some in Settings > Reality domains.",
-							);
+						if (destValue.length === 0) {
+							throw new Error("dest is required.");
+						}
+						if (serverNames.length === 0) {
+							throw new Error("serverName is required.");
+						}
+						for (const name of serverNames) {
+							const err = validateRealityServerName(name);
+							if (err) throw new Error(err);
 						}
 						payload.reality = {
 							dest: destValue,
 							server_names: serverNames,
-							server_names_source: serverNamesSource,
+							server_names_source: "manual",
 							fingerprint: fingerprintValue,
 						};
 					}
@@ -465,12 +424,14 @@ export function EndpointDetailsPage() {
 		endpoint.kind === "vless_reality_vision_tcp"
 			? parseVlessMeta(endpoint.meta)
 			: null;
-	const effectiveGlobalServerNames = derivedGlobalServerNames.length
-		? derivedGlobalServerNames
-		: (vlessMeta?.realityServerNames ?? []);
 	const endpointNode = nodesQuery.data?.items.find(
 		(node) => node.node_id === endpoint.node_id,
 	);
+	const realityServerNameSuggestion =
+		realityServerNameSuggestionFromDest(realityDest);
+	const realityServerNameSuggestions = realityServerNameSuggestion
+		? [realityServerNameSuggestion]
+		: [];
 	const currentCanaryProbeResult =
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
@@ -653,124 +614,36 @@ export function EndpointDetailsPage() {
 										<div className="xp-field-stack">
 											<div className="flex items-center justify-between gap-2">
 												<span className="text-sm font-medium font-mono">
-													serverNamesSource
+													dest
 												</span>
 											</div>
-											<Select
-												value={realityServerNamesSource}
-												onValueChange={(value) =>
-													setRealityServerNamesSource(
-														value as "manual" | "global",
-													)
-												}
+											<Input
+												aria-label="dest"
+												type="text"
+												className={inputClass}
+												value={realityDest}
+												placeholder="origin.example.test:443"
 												disabled={patchMutation.isPending}
-											>
-												<SelectTrigger
-													className={selectClass}
-													aria-label="serverNamesSource"
-												>
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="global">global</SelectItem>
-													<SelectItem value="manual">manual</SelectItem>
-												</SelectContent>
-											</Select>
+												onChange={(event) => setRealityDest(event.target.value)}
+											/>
 											<p className="text-xs opacity-70">
-												<span className="font-mono">global</span> derives
-												serverNames from{" "}
-												<Link className="xp-link" to="/reality-domains">
-													Settings &gt; Reality domains
-												</Link>
-												. <span className="font-mono">manual</span> stores the
-												list on this endpoint.
+												REALITY destination origin. Destination is stored
+												separately from the SNI list.
 											</p>
 										</div>
 
-										{realityServerNamesSource === "manual" ? (
-											<>
-												<div className="xp-field-stack">
-													<div className="flex items-center justify-between gap-2">
-														<span className="text-sm font-medium font-mono">
-															dest
-														</span>
-													</div>
-													<Input
-														aria-label="dest"
-														type="text"
-														className={inputClass}
-														value={realityDest}
-														placeholder="oneclient.sfx.ms:443"
-														disabled={patchMutation.isPending}
-														onChange={(event) =>
-															setRealityDest(event.target.value)
-														}
-													/>
-													<p className="text-xs opacity-70">
-														REALITY destination origin. Manual mode stores this
-														separately from the SNI list.
-													</p>
-												</div>
-												<TagInput
-													label="serverNames"
-													value={realityServerNamesManual}
-													onChange={setRealityServerNamesManual}
-													placeholder="download.example.com"
-													disabled={patchMutation.isPending}
-													inputClass={inputClass}
-													validateTag={validateRealityServerName}
-													helperText="Camouflage domains (TLS SNI). Subscriptions may randomly output one of these names; destination is edited separately."
-												/>
-											</>
-										) : (
-											<div className="xp-field-stack">
-												<div className="flex items-center justify-between gap-2">
-													<span className="text-sm font-medium font-mono">
-														derived serverNames
-													</span>
-												</div>
-												<div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-3 text-sm">
-													{realityDomainsQuery.isLoading ? (
-														<span className="opacity-70">
-															Loading reality domains...
-														</span>
-													) : realityDomainsQuery.isError ? (
-														<span className="text-destructive">
-															Failed to load reality domains.
-														</span>
-													) : effectiveGlobalServerNames.length === 0 ? (
-														<span className="text-warning">
-															No enabled domains for this node.
-														</span>
-													) : (
-														<div className="flex flex-wrap gap-2">
-															{effectiveGlobalServerNames.map((name, idx) => (
-																<Badge
-																	key={`${idx}:${name}`}
-																	variant={idx === 0 ? "default" : "ghost"}
-																	className="gap-2 font-mono"
-																	title={
-																		idx === 0
-																			? "Primary (used for derived dest / probe)"
-																			: name
-																	}
-																>
-																	<span>{name}</span>
-																	{idx === 0 ? (
-																		<span className="opacity-80">primary</span>
-																	) : null}
-																</Badge>
-															))}
-														</div>
-													)}
-												</div>
-												<p className="text-xs opacity-70">
-													Derived from the ordered registry; the first enabled
-													domain becomes the derived destination and primary
-													probe target.
-												</p>
-											</div>
-										)}
+										<TagInput
+											label="serverNames"
+											value={realityServerNamesManual}
+											onChange={setRealityServerNamesManual}
+											placeholder="download.example.com"
+											disabled={patchMutation.isPending}
+											inputClass={inputClass}
+											validateTag={validateRealityServerName}
+											suggestions={realityServerNameSuggestions}
+											suggestionLabel="Show destination suggestion"
+											helperText="Camouflage domains (TLS SNI). Use the destination suggestion only when it should also be a serverName."
+										/>
 										<details className="rounded-xl border border-border/70 bg-muted/35">
 											<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
 												Advanced (optional)

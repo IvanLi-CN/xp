@@ -33,11 +33,6 @@ export function AppLayout({ children }: AppLayoutProps) {
 							icon: "tabler:gauge",
 						},
 						{
-							label: "Reality domains",
-							to: "/reality-domains",
-							icon: "tabler:world",
-						},
-						{
 							label: "Service config",
 							to: "/service-config",
 							icon: "tabler:settings",
