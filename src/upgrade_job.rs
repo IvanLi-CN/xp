@@ -339,8 +339,13 @@ fn systemd_upgrade_sudo_helper_allows_current_process() -> bool {
     if !command_exists("sudo") || !Path::new(&trigger_path).exists() {
         return false;
     }
+    sudo_status(systemd_sudo_check_args(&trigger_path))
+        && sudo_status(systemd_sudo_list_start_args(&trigger_path))
+}
+
+fn sudo_status(args: Vec<String>) -> bool {
     Command::new("sudo")
-        .args(["-n", &trigger_path, "--check"])
+        .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -572,6 +577,18 @@ fn systemd_sudo_trigger_args() -> [String; 2] {
     ["-n".to_string(), systemd_upgrade_trigger_path()]
 }
 
+fn systemd_sudo_check_args(trigger_path: &str) -> Vec<String> {
+    vec![
+        "-n".to_string(),
+        trigger_path.to_string(),
+        "--check".to_string(),
+    ]
+}
+
+fn systemd_sudo_list_start_args(trigger_path: &str) -> Vec<String> {
+    vec!["-n".to_string(), "-l".to_string(), trigger_path.to_string()]
+}
+
 fn systemd_systemctl_trigger_args() -> [&'static str; 3] {
     ["start", "--no-block", SYSTEMD_UPGRADE_UNIT]
 }
@@ -753,6 +770,23 @@ mod tests {
 
     #[test]
     fn systemd_trigger_uses_fixed_sudo_helper_or_fixed_unit() {
+        let helper = "/usr/local/libexec/xp-upgrade-trigger";
+        assert_eq!(
+            systemd_sudo_check_args(helper),
+            [
+                "-n".to_string(),
+                "/usr/local/libexec/xp-upgrade-trigger".to_string(),
+                "--check".to_string()
+            ]
+        );
+        assert_eq!(
+            systemd_sudo_list_start_args(helper),
+            [
+                "-n".to_string(),
+                "-l".to_string(),
+                "/usr/local/libexec/xp-upgrade-trigger".to_string()
+            ]
+        );
         assert_eq!(
             systemd_sudo_trigger_args(),
             [

@@ -30,14 +30,17 @@ exactly:
 - `/usr/local/libexec/xp-upgrade-trigger ""`
 - `/usr/local/libexec/xp-upgrade-trigger --check`
 
-The application detects systemd support by verifying the one-shot unit and a working no-op sudo
-helper check. The older polkit path remains a compatibility fallback, but it is not the only
-supported trigger path.
+The application detects systemd support by verifying the one-shot unit, a working no-op sudo helper
+check, and a non-side-effect `sudo -n -l /usr/local/libexec/xp-upgrade-trigger` check for the
+no-argument start grant. The older polkit path remains a compatibility fallback, but it is not the
+only supported trigger path.
 
 ## Verification
 
 - Unit tests must reject a systemd deployment that only has `xp-upgrade.service`.
 - Unit tests must reject sudoers content that only permits the helper `--check` command.
+- Real-root support detection must verify both the helper `--check` probe and the no-argument start
+  grant before reporting systemd Web upgrade support.
 - Trigger tests must assert that systemd Web upgrade invokes the fixed helper through `sudo -n`, or
   the fixed unit through `systemctl start --no-block xp-upgrade.service` for the polkit fallback.
 - On CentOS 7-class hosts, rerun `xp-ops init --init-system systemd`, then verify

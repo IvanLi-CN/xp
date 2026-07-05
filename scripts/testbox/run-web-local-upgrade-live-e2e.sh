@@ -339,6 +339,14 @@ if [ "$#" -ge 1 ] && [ "$1" = "-n" ]; then
   shift
 fi
 
+if [ "$#" -ge 1 ] && [ "$1" = "-l" ]; then
+  shift
+  if [ "$#" -eq 1 ] && [ "$1" = "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" ]; then
+    exit 0
+  fi
+  exit 1
+fi
+
 exec "$@"
 SH
   chmod +x "$bin_dir/sudo"
@@ -472,6 +480,7 @@ import sys
 assert json.load(sys.stdin)["display_name"] == "upgrade sentinel"
 '"'"'
   grep -Fxq "sudo -n $TEST_ROOT/usr/local/libexec/xp-upgrade-trigger --check" "$LIVE_LOG"
+  grep -Fxq "sudo -n -l $TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" "$LIVE_LOG"
   grep -Fxq "sudo -n $TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" "$LIVE_LOG"
   grep -Fxq "systemctl start --no-block xp-upgrade.service" "$LIVE_LOG"
   grep -Fxq "systemctl restart xp.service" "$LIVE_LOG"

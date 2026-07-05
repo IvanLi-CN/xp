@@ -14,7 +14,8 @@
 - Web 顶栏改为单个 `VersionIndicator`，通过 Radix Popover 展示版本检查与升级状态；确认后
   调用 start API，并在 running/restarting 期间轮询 status。
 - systemd 支持检测要求 `xp-upgrade.service` 存在，并验证以下任一窄授权：
-  - `sudo -n /usr/local/libexec/xp-upgrade-trigger --check` 可成功执行。
+  - `sudo -n /usr/local/libexec/xp-upgrade-trigger --check` 可成功执行，且
+    `sudo -n -l /usr/local/libexec/xp-upgrade-trigger` 确认 no-arg start grant 存在。
   - 窄 polkit rule 可读并限定 `xp-upgrade.service` + `start`。
   - 当前进程通过 `pkcheck` 被授权 start 固定 unit。
 - systemd 触发优先执行 `sudo -n /usr/local/libexec/xp-upgrade-trigger`。只有 helper 授权不可用时，
@@ -33,7 +34,8 @@
     并把 `succeeded` durable status 写回 `upgrade/status.json`。
   - systemd unit/helper/sudoers/polkit 与 OpenRC doas policy 的窄触发测试。
   - systemd delegate 检测拒绝只安装 unit 的半安装状态；拒绝只允许 helper `--check`
-    的不完整 sudoers，并允许通过有效 helper 授权或 polkit 授权恢复支持判定。
+    的不完整 sudoers，真实 root 探测同时验证 `--check` 与 no-arg start grant，并允许通过
+    有效 helper 授权或 polkit 授权恢复支持判定。
 - Shared testbox live E2E:
   - `scripts/testbox/run-web-local-upgrade-live-e2e.sh` 在隔离共享测试机容器中启动真实
     `xp` 服务，通过 `POST /api/admin/upgrade/start` 触发升级，并用 fake systemd boundary
