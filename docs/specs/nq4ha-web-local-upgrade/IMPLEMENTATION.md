@@ -12,6 +12,10 @@
   - OpenRC: `xp-upgrade` one-shot script + 窄 doas rule。
 - Web 顶栏改为单个 `VersionIndicator`，通过 Radix Popover 展示版本检查与升级状态；确认后
   调用 start API，并在 running/restarting 期间轮询 status。
+- systemd 支持检测以 `xp-upgrade.service` 为委托安装信号；不要求 unprivileged `xp` 用户能读取
+  `/etc/polkit-1/rules.d`，避免 CentOS/RHEL 系统上 private polkit 目录导致误报。
+- Web unsupported 状态禁用升级确认入口，按钮文案为 `Unavailable`；版本展示统一按 release tag
+  规范化为 `vX.Y.Z`，popover 使用延迟 pointer leave close，降低 polling 状态刷新造成的闪烁。
 
 ## 测试覆盖
 
@@ -21,6 +25,7 @@
   - `_upgrade-runner` 从 `upgrade/request.json` 读取 target，执行 mocked release upgrade，
     并把 `succeeded` durable status 写回 `upgrade/status.json`。
   - systemd unit/polkit 与 OpenRC doas policy 的窄触发测试。
+  - systemd delegate 检测不依赖 polkit rules 文件对 `xp` 用户可读。
 - Shared testbox live E2E:
   - `scripts/testbox/run-web-local-upgrade-live-e2e.sh` 在隔离共享测试机容器中启动真实
     `xp` 服务，通过 `POST /api/admin/upgrade/start` 触发升级，并用 fake systemd boundary
