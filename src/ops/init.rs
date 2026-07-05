@@ -379,11 +379,17 @@ fn write_systemd_upgrade_trigger_delegate(paths: &Paths, mode: Mode) -> Result<(
 
     write_string_if_changed(&helper, &systemd_upgrade_trigger_helper_script())
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    chmod(&helper, 0o755).ok();
+    if !is_test_root(paths.root()) {
+        chown_root_root(&helper)?;
+    }
+    chmod(&helper, 0o755).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     write_string_if_changed(&sudoers, &systemd_upgrade_sudoers_policy())
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    chmod(&sudoers, 0o440).ok();
+    if !is_test_root(paths.root()) {
+        chown_root_root(&sudoers)?;
+    }
+    chmod(&sudoers, 0o440).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     Ok(())
 }
 
@@ -760,6 +766,11 @@ fn run_or_fail(program: &str, args: &[&str]) -> Result<(), ExitError> {
         ));
     }
     Ok(())
+}
+
+fn chown_root_root(path: &Path) -> Result<(), ExitError> {
+    let path = path.to_string_lossy().to_string();
+    run_or_fail("chown", &["root:root", path.as_str()])
 }
 
 fn run_or_fail_owned(program: &str, args: &[String]) -> Result<(), ExitError> {
