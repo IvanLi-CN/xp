@@ -12,7 +12,6 @@ const REQUEST_FILE: &str = "request.json";
 const STATUS_FILE: &str = "status.json";
 const SYSTEMD_UPGRADE_UNIT: &str = "xp-upgrade.service";
 const SYSTEMD_UPGRADE_UNIT_PATH: &str = "/etc/systemd/system/xp-upgrade.service";
-const SYSTEMD_UPGRADE_POLKIT_PATH: &str = "/etc/polkit-1/rules.d/91-xp-upgrade.rules";
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
@@ -291,7 +290,6 @@ fn support_status_for_root(root: &Path) -> UpgradeSupport {
 
 fn systemd_upgrade_delegate_installed(root: &Path) -> bool {
     root_abs(root, SYSTEMD_UPGRADE_UNIT_PATH).exists()
-        && root_abs(root, SYSTEMD_UPGRADE_POLKIT_PATH).exists()
 }
 
 fn openrc_upgrade_delegate_installed(root: &Path) -> bool {
@@ -558,11 +556,8 @@ mod tests {
         assert!(!openrc_upgrade_delegate_installed(tmp.path()));
 
         let systemd_unit = root_abs(tmp.path(), SYSTEMD_UPGRADE_UNIT_PATH);
-        let systemd_polkit = root_abs(tmp.path(), SYSTEMD_UPGRADE_POLKIT_PATH);
         fs::create_dir_all(systemd_unit.parent().unwrap()).unwrap();
-        fs::create_dir_all(systemd_polkit.parent().unwrap()).unwrap();
         fs::write(systemd_unit, "unit").unwrap();
-        fs::write(systemd_polkit, "polkit").unwrap();
         assert!(systemd_upgrade_delegate_installed(tmp.path()));
 
         let openrc_script = root_abs(tmp.path(), OPENRC_UPGRADE_SCRIPT_PATH);

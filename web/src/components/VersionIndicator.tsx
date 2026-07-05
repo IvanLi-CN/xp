@@ -10,6 +10,7 @@ import {
 	type VersionCheckUiState,
 	XP_GITHUB_REPO,
 	githubReleaseTagUrl,
+	toSemverishReleaseTag,
 	xpVersionLinkHref,
 } from "./versionCheckUi";
 
@@ -41,8 +42,10 @@ export function VersionIndicator({
 	const [open, setOpen] = useState(defaultOpen);
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const closeTimerRef = useRef<number | null>(null);
+	const hoveringRef = useRef(false);
 	const repo = versionRepo(versionCheck);
 	const currentHref = xpVersionLinkHref(xpVersion, repo);
+	const currentDisplay = displayReleaseVersion(xpVersion);
 	const latestTag =
 		versionCheck.kind === "update_available" ||
 		versionCheck.kind === "up_to_date"
@@ -54,11 +57,18 @@ export function VersionIndicator({
 	const job = upgradeStatus?.status ?? null;
 	const support = upgradeStatus?.support ?? null;
 	const jobActive = job?.state === "running" || job?.state === "restarting";
+	const upgradeUnavailableReason =
+		support && !support.supported
+			? (support.reason ?? "Web automatic upgrade is not supported here.")
+			: null;
 	const canUpgrade =
 		Boolean(upgradeTarget) &&
 		Boolean(support?.supported) &&
 		!jobActive &&
 		!upgradeStarting;
+	const upgradeButtonLabel = upgradeUnavailableReason
+		? "Unavailable"
+		: "Upgrade";
 	const icon = indicatorIcon(versionCheck, job?.state);
 	const tone = versionCheck.kind === "update_available" ? "warning" : "ghost";
 
@@ -75,20 +85,29 @@ export function VersionIndicator({
 
 	function scheduleClose() {
 		clearCloseTimer();
-		closeTimerRef.current = window.setTimeout(() => setOpen(false), 160);
+		closeTimerRef.current = window.setTimeout(() => {
+			if (!hoveringRef.current) setOpen(false);
+		}, 260);
+	}
+
+	function handlePointerEnter() {
+		hoveringRef.current = true;
+		clearCloseTimer();
+		setOpen(true);
+	}
+
+	function handlePointerLeave() {
+		hoveringRef.current = false;
+		scheduleClose();
 	}
 
 	return (
 		<>
 			<Popover open={open} onOpenChange={setOpen}>
 				<div
-					onMouseEnter={() => {
-						clearCloseTimer();
-						setOpen(true);
-					}}
-					onMouseLeave={scheduleClose}
+					onPointerEnter={handlePointerEnter}
+					onPointerLeave={handlePointerLeave}
 					onFocus={() => setOpen(true)}
-					onBlur={scheduleClose}
 				>
 					<PopoverTrigger asChild>
 						<button
@@ -112,8 +131,8 @@ export function VersionIndicator({
 					<PopoverContent
 						align="end"
 						className="w-80 p-3"
-						onMouseEnter={clearCloseTimer}
-						onMouseLeave={scheduleClose}
+						onPointerEnter={handlePointerEnter}
+						onPointerLeave={handlePointerLeave}
 					>
 						<div className="space-y-3">
 							<div className="flex items-start justify-between gap-3">
@@ -140,7 +159,7 @@ export function VersionIndicator({
 									rel="noreferrer"
 									className="truncate font-mono text-foreground underline-offset-4 hover:underline"
 								>
-									{xpVersion ?? "unknown"}
+									{currentDisplay}
 								</a>
 								<span className="text-muted-foreground">Latest</span>
 								<span className="min-w-0 font-mono text-foreground">
@@ -184,16 +203,12 @@ export function VersionIndicator({
 										variant="ghost"
 										size="sm"
 										onClick={onRefreshUpgradeStatus}
-										disabled={upgradeStatusLoading}
+										aria-busy={upgradeStatusLoading}
 									>
 										<Icon
-											name={
-												upgradeStatusLoading
-													? "tabler:loader-2"
-													: "tabler:activity"
-											}
+											name="tabler:activity"
 											className={
-												upgradeStatusLoading ? "animate-spin" : undefined
+												upgradeStatusLoading ? "opacity-70" : undefined
 											}
 											ariaLabel="Refresh"
 										/>
@@ -202,11 +217,16 @@ export function VersionIndicator({
 									<Button
 										type="button"
 										size="sm"
+										variant={upgradeUnavailableReason ? "secondary" : "primary"}
 										disabled={!canUpgrade}
-										onClick={() => setConfirmOpen(true)}
+										title={upgradeUnavailableReason ?? undefined}
+										onClick={() => {
+											if (!canUpgrade) return;
+											setConfirmOpen(true);
+										}}
 									>
 										<Icon name="tabler:download" ariaLabel="Upgrade" />
-										Upgrade
+										{upgradeButtonLabel}
 									</Button>
 								</div>
 							</div>
@@ -237,6 +257,11 @@ export function VersionIndicator({
 			/>
 		</>
 	);
+}
+
+function displayReleaseVersion(version: string | null | undefined): string {
+	if (!version) return "unknown";
+	return toSemverishReleaseTag(version) ?? version;
 }
 
 function versionRepo(versionCheck: VersionCheckUiState): string {
