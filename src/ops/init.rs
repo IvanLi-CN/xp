@@ -395,8 +395,13 @@ case \"${1:-}\" in\n\
   --check) exit 0 ;;\n\
   *) echo \"usage: xp-upgrade-trigger [--check]\" >&2; exit 64 ;;\n\
 esac\n\
-SYSTEMCTL=\"$(command -v systemctl)\"\n\
-exec \"$SYSTEMCTL\" start --no-block xp-upgrade.service\n"
+for SYSTEMCTL in /bin/systemctl /usr/bin/systemctl; do\n\
+  if [ -x \"$SYSTEMCTL\" ]; then\n\
+    exec \"$SYSTEMCTL\" start --no-block xp-upgrade.service\n\
+  fi\n\
+done\n\
+echo \"systemctl not found\" >&2\n\
+exit 69\n"
         .to_string()
 }
 
@@ -858,7 +863,9 @@ mod tests {
         let helper = fs::read_to_string(paths.usr_local_libexec_xp_upgrade_trigger()).unwrap();
         assert!(helper.contains("xp-upgrade.service"));
         assert!(helper.contains("--check) exit 0"));
+        assert!(helper.contains("/bin/systemctl /usr/bin/systemctl"));
         assert!(helper.contains("exit 64"));
+        assert!(!helper.contains("command -v"));
         assert!(!helper.contains("$@"));
 
         let sudoers = fs::read_to_string(paths.etc_sudoers_xp_upgrade()).unwrap();

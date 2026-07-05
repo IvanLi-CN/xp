@@ -23,6 +23,8 @@ challenge.
 
 Install a root-owned fixed helper at `/usr/local/libexec/xp-upgrade-trigger`. It accepts either no
 argument, which starts only `xp-upgrade.service`, or `--check`, which exits without side effects.
+The helper must invoke a fixed root-controlled `systemctl` path such as `/bin/systemctl` or
+`/usr/bin/systemctl`; it must not resolve `systemctl` through the caller-controlled `PATH`.
 
 Install a narrow sudoers drop-in at `/etc/sudoers.d/91-xp-upgrade` allowing the `xp` user to run
 exactly:
@@ -41,6 +43,8 @@ only supported trigger path.
 - Unit tests must reject sudoers content that only permits the helper `--check` command.
 - Real-root support detection must verify both the helper `--check` probe and the no-argument start
   grant before reporting systemd Web upgrade support.
+- The helper must not use `command -v systemctl` or otherwise allow the unprivileged caller's `PATH`
+  to influence root command selection.
 - Trigger tests must assert that systemd Web upgrade invokes the fixed helper through `sudo -n`, or
   the fixed unit through `systemctl start --no-block xp-upgrade.service` for the polkit fallback.
 - On CentOS 7-class hosts, rerun `xp-ops init --init-system systemd`, then verify

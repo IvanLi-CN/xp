@@ -354,16 +354,15 @@ SH
 
 install_systemd_upgrade_helper() {
   mkdir -p "$TEST_ROOT/usr/local/libexec"
-  cat > "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" <<'"'"'SH'"'"'
+  cat > "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger" <<SH
 #!/bin/sh
 set -eu
-case "${1:-}" in
+case "\${1:-}" in
   "") ;;
   --check) exit 0 ;;
   *) echo "usage: xp-upgrade-trigger [--check]" >&2; exit 64 ;;
 esac
-SYSTEMCTL="$(command -v systemctl)"
-exec "$SYSTEMCTL" start --no-block xp-upgrade.service
+exec "$FAKE_BIN/systemctl" start --no-block xp-upgrade.service
 SH
   chmod +x "$TEST_ROOT/usr/local/libexec/xp-upgrade-trigger"
 }
