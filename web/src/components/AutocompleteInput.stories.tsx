@@ -20,7 +20,7 @@ function AutocompleteInputStory(args: AutocompleteStoryProps) {
 			<AutocompleteInput
 				{...args}
 				aria-label="dest"
-				placeholder={args.placeholder ?? "oneclient.sfx.ms:443"}
+				placeholder={args.placeholder ?? "origin.example.test:443"}
 				suggestionLabel={args.suggestionLabel ?? "Open suggestions"}
 				suggestions={args.suggestions ?? []}
 				value={value}
@@ -36,12 +36,12 @@ const meta = {
 	component: AutocompleteInput,
 	tags: ["autodocs"],
 	args: {
-		placeholder: "oneclient.sfx.ms:443",
+		placeholder: "origin.example.test:443",
 		suggestionLabel: "Open suggestions",
 		suggestions: [
 			{
-				value: "hinet-api.example.com:62416",
-				label: "hinet-api.example.com:62416",
+				value: "api-node.example.com:62416",
+				label: "api-node.example.com:62416",
 			},
 		],
 	},
@@ -57,10 +57,10 @@ export const Default: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByLabelText("dest"));
 		await userEvent.click(
-			await within(document.body).findByText("hinet-api.example.com:62416"),
+			await within(document.body).findByText("api-node.example.com:62416"),
 		);
 		await expect(await canvas.findByLabelText("dest")).toHaveValue(
-			"hinet-api.example.com:62416",
+			"api-node.example.com:62416",
 		);
 	},
 };
@@ -71,7 +71,7 @@ export const KeyboardSelection: Story = {
 		const input = await canvas.findByLabelText("dest");
 		await userEvent.click(input);
 		await userEvent.keyboard("{ArrowDown}{Enter}");
-		await expect(input).toHaveValue("hinet-api.example.com:62416");
+		await expect(input).toHaveValue("api-node.example.com:62416");
 	},
 };
 

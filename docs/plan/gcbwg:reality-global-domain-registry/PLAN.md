@@ -55,8 +55,8 @@
 ### SHOULD
 
 - 全局域名池升级后自动 seed 2-3 个 OneDrive 域名候选（确定性 domain_id，避免多节点迁移差异）：
-  - `public.sn.files.1drv.com`
-  - `public.bn.files.1drv.com`
+  - `cdn-a.example.test`
+  - `cdn-b.example.test`
   - `download.example.com`
 
 ## 验收标准（Acceptance Criteria）

@@ -10,7 +10,6 @@ function validateDomain(value: string): string | null {
 	if (/\s/.test(trimmed)) return "no spaces";
 	if (trimmed.includes("://")) return "no scheme";
 	if (trimmed.includes("/")) return "no path";
-	if (trimmed.includes(":")) return "no port";
 	if (trimmed.includes("*")) return "no wildcard";
 	return null;
 }
@@ -24,6 +23,7 @@ function Harness() {
 			onChange={setTags}
 			validateTag={validateDomain}
 			placeholder="download.example.com"
+			suggestions={["node.example.com:443"]}
 		/>
 	);
 }
@@ -98,6 +98,15 @@ describe("<TagInput />", () => {
 		expect(screen.getByRole("alert")).toBeInTheDocument();
 	});
 
+	it("adds a suggestion from the custom suggestions panel", async () => {
+		render(<Harness />);
+
+		fireEvent.focus(screen.getByPlaceholderText("download.example.com"));
+		fireEvent.click(await screen.findByText("node.example.com:443"));
+
+		expect(screen.getByText("node.example.com:443")).toBeInTheDocument();
+	});
+
 	it("keeps an error visible when some tokens are accepted and some are rejected", () => {
 		render(<Harness />);
 
@@ -136,12 +145,12 @@ describe("<TagInput />", () => {
 
 		const input = screen.getByPlaceholderText("edge.example.com");
 		fireEvent.change(input, {
-			target: { value: "edge.example.com, tavily-tw.ivanli.cc:8443" },
+			target: { value: "edge.example.com, edge.example.test:8443" },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
 		expect(screen.getByText("edge.example.com")).toBeInTheDocument();
-		expect(screen.getByText("tavily-tw.ivanli.cc:8443")).toBeInTheDocument();
+		expect(screen.getByText("edge.example.test:8443")).toBeInTheDocument();
 		expect(screen.queryByLabelText("Primary")).toBeNull();
 		expect(screen.queryByTitle("Make primary")).toBeNull();
 	});

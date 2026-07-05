@@ -25,7 +25,8 @@
 行为（normative）：
 
 - 串行化：同一时刻只允许 1 个 release 工作流运行（使用 `concurrency` 且 **不取消** in-progress，以保证每次合并都有 release）。
-- 计算 `XP_EFFECTIVE_VERSION`（建议用脚本固化，参考 `tavily-hikari` 的 `.github/scripts/compute-version.sh` 形态）：
+- 计算 `XP_EFFECTIVE_VERSION`（建议用脚本固化，参考
+  `reference-service` 的 `.github/scripts/compute-version.sh` 形态）：
   - 读取 `Cargo.toml` `package.version`（记为 `X.Y.Z`）
   - 执行 `git fetch --tags --force`（确保 tags 可用）
   - 从 `candidate=Z` 开始，循环检查 `vX.Y.<candidate>` 是否存在：

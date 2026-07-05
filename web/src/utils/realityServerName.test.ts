@@ -1,25 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { validateRealityServerName } from "./realityServerName";
+import {
+	realityServerNameSuggestionFromDest,
+	validateRealityServerName,
+} from "./realityServerName";
 
 describe("validateRealityServerName", () => {
 	it("accepts typical hostnames used as SNI", () => {
-		expect(validateRealityServerName("public.sn.files.1drv.com")).toBeNull();
+		expect(validateRealityServerName("cdn-a.example.test")).toBeNull();
 		expect(validateRealityServerName("download.example.com")).toBeNull();
-		expect(
-			validateRealityServerName("  public.sn.files.1drv.com  "),
-		).toBeNull();
+		expect(validateRealityServerName("download.example.com:443")).toBeNull();
+		expect(validateRealityServerName("  cdn-a.example.test  ")).toBeNull();
 	});
 
-	it("rejects common copy/paste mistakes (url/path/port)", () => {
+	it("rejects common copy/paste mistakes (url/path)", () => {
 		expect(
-			validateRealityServerName("https://public.sn.files.1drv.com"),
+			validateRealityServerName("https://cdn-a.example.test"),
 		).not.toBeNull();
+		expect(validateRealityServerName("cdn-a.example.test/path")).not.toBeNull();
+		expect(validateRealityServerName("cdn-a.example.test:0")).not.toBeNull();
 		expect(
-			validateRealityServerName("public.sn.files.1drv.com/path"),
-		).not.toBeNull();
-		expect(
-			validateRealityServerName("public.sn.files.1drv.com:443"),
+			validateRealityServerName("cdn-a.example.test:99999"),
 		).not.toBeNull();
 	});
 
@@ -33,5 +34,20 @@ describe("validateRealityServerName", () => {
 		expect(validateRealityServerName("ex_ample.com")).not.toBeNull();
 		expect(validateRealityServerName("-example.com")).not.toBeNull();
 		expect(validateRealityServerName("example-.com")).not.toBeNull();
+	});
+});
+
+describe("realityServerNameSuggestionFromDest", () => {
+	it("offers a valid destination authority as a serverName candidate", () => {
+		expect(
+			realityServerNameSuggestionFromDest(" origin.example.test:443 "),
+		).toBe("origin.example.test:443");
+	});
+
+	it("does not turn urls or invalid destinations into candidates", () => {
+		expect(
+			realityServerNameSuggestionFromDest("https://origin.example.test:443"),
+		).toBeNull();
+		expect(realityServerNameSuggestionFromDest("localhost:443")).toBeNull();
 	});
 });

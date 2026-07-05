@@ -1085,9 +1085,9 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Hinet",
-        "hinet-ep.example.com",
-        "https://hinet-xp.example.com",
+        "Node Beta",
+        "endpoint-node.example.com",
+        "https://xp-node.example.com",
     );
     let endpoints = vec![endpoint_vless(
         "e1",
@@ -1119,13 +1119,14 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ hinet-dash-ep-example-com")
+                group.get("name").and_then(Value::as_str)
+                    == Some("🛣️ endpoint-dash-node-example-com")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://hinet-ep.example.com:53844/generate_204")
+        Some("https://endpoint-node.example.com:53844/generate_204")
     );
 }
 
@@ -1134,9 +1135,9 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Hinet",
-        "hinet-ep.example.com",
-        "https://hinet-xp.example.com",
+        "Node Beta",
+        "endpoint-node.example.com",
+        "https://xp-node.example.com",
     );
     let endpoints = vec![
         endpoint_vless(
@@ -1171,13 +1172,14 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ hinet-dash-ep-example-com")
+                group.get("name").and_then(Value::as_str)
+                    == Some("🛣️ endpoint-dash-node-example-com")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://hinet-ep.example.com:53844/generate_204")
+        Some("https://endpoint-node.example.com:53844/generate_204")
     );
 }
 
@@ -1186,9 +1188,9 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Hinet",
-        "hinet-ep.example.com",
-        "https://hinet-xp.example.com",
+        "Node Beta",
+        "endpoint-node.example.com",
+        "https://xp-node.example.com",
     );
     let endpoints = vec![endpoint_vless(
         "e1",
@@ -1220,13 +1222,14 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ hinet-dash-ep-example-com")
+                group.get("name").and_then(Value::as_str)
+                    == Some("🛣️ endpoint-dash-node-example-com")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://hinet-xp.example.com/api/health")
+        Some("https://xp-node.example.com/api/health")
     );
 }
 

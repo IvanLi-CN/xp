@@ -11,7 +11,7 @@
 
 XP historically treated `server_names[0]` as the single primary hostname for both client SNI and Xray `dest`. That is only valid when the destination origin and the client-facing SNI are the same host.
 
-Some REALITY camouflage targets require a split configuration. For example, `oneclient.sfx.ms:443` can be the destination origin while `public.sn.files.1drv.com` and `public.bn.files.1drv.com` are better client SNI candidates.
+Some REALITY camouflage targets require a split configuration. For example, `origin.example.test:443` can be the destination origin while `cdn-a.example.test` and `cdn-b.example.test` are better client SNI candidates.
 
 ## Fix used here
 

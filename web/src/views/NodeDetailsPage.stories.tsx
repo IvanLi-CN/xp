@@ -24,7 +24,7 @@ const node: AdminNode = {
 		country_code: "TW",
 		geo_region: "Taiwan",
 		geo_city: "Taipei",
-		geo_operator: "HiNet",
+		geo_operator: "ExampleNet",
 		subscription_region: "taiwan",
 		checked_at: "2026-03-08T00:59:00Z",
 		last_success_at: "2026-03-08T00:59:00Z",
@@ -153,7 +153,7 @@ export const MetadataEgressProbe: Story = {
 			await canvas.findByText("Node egress probe"),
 		).toBeInTheDocument();
 		await expect(await canvas.findAllByText("203.0.113.8")).toHaveLength(2);
-		await expect(await canvas.findByText("HiNet")).toBeInTheDocument();
+		await expect(await canvas.findByText("ExampleNet")).toBeInTheDocument();
 	},
 };
 

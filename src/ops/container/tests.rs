@@ -188,7 +188,7 @@ fn parses_default_endpoint_specs_from_env() {
         ("XP_DEFAULT_VLESS_PORT", "53842"),
         (
             "XP_DEFAULT_VLESS_SERVER_NAMES",
-            "public.sn.files.1drv.com, public.bn.files.1drv.com",
+            "cdn-a.example.test, cdn-b.example.test",
         ),
         ("XP_DEFAULT_SS_PORT", "53843"),
     ]);
@@ -211,7 +211,7 @@ fn default_vless_canary_bind_must_be_socket_addr() {
     let env = env_map(&[
         ("XP_ACCESS_HOST", "node-1-ep.example.com"),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
         ("XP_VLESS_CANARY_BIND", "bad-bind"),
     ]);
 
@@ -224,7 +224,7 @@ fn default_vless_canary_bind_can_be_overridden() {
     let env = env_map(&[
         ("XP_ACCESS_HOST", "node-1-ep.example.com"),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
         ("XP_VLESS_CANARY_BIND", "127.0.0.1:49043"),
     ]);
 
@@ -248,7 +248,7 @@ async fn container_runtime_env_includes_vless_canary_settings() {
         ("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE", "/custom/token"),
         ("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID", "zone-123"),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
     ]);
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
@@ -301,7 +301,7 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
         ("XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE", "/custom/token"),
         ("XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID", "zone-123"),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
         ("XP_DEFAULT_VLESS_FINGERPRINT", "firefox"),
         ("XP_DEFAULT_SS_PORT", "53843"),
     ]);
@@ -343,7 +343,7 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
         runtime_env
             .get("XP_DEFAULT_VLESS_SERVER_NAMES")
             .map(String::as_str),
-        Some("public.sn.files.1drv.com")
+        Some("cdn-a.example.test")
     );
     assert_eq!(
         runtime_env
@@ -402,7 +402,7 @@ async fn container_spec_loads_canary_token_from_configured_runtime_path() {
         ("XP_ACCESS_HOST", "node-1.example.com"),
         ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
         (
             "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE",
             "/custom/canary-token",
@@ -429,7 +429,7 @@ async fn container_spec_loads_canary_token_from_default_runtime_path() {
         ("XP_ACCESS_HOST", "node-1.example.com"),
         ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
-        ("XP_DEFAULT_VLESS_SERVER_NAMES", "public.sn.files.1drv.com"),
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
     ]);
 
     let spec = ContainerSpec::from_env_map(&paths, &env, None)
@@ -447,8 +447,8 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
         port: 53842,
         reality_dest: crate::config::DEFAULT_VLESS_CANARY_BIND.to_string(),
         server_names: vec![
-            "public.sn.files.1drv.com".to_string(),
-            "public.bn.files.1drv.com".to_string(),
+            "cdn-a.example.test".to_string(),
+            "cdn-b.example.test".to_string(),
         ],
         server_names_source: crate::protocol::RealityServerNamesSource::Manual,
         fingerprint: "chrome".to_string(),
@@ -459,8 +459,8 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
         port: 60000,
         reality_dest: "127.0.0.1:49043".to_string(),
         server_names: vec![
-            "public.sn.files.1drv.com".to_string(),
-            "public.bn.files.1drv.com".to_string(),
+            "cdn-a.example.test".to_string(),
+            "cdn-b.example.test".to_string(),
         ],
         server_names_source: crate::protocol::RealityServerNamesSource::Manual,
         fingerprint: "firefox".to_string(),
@@ -474,7 +474,7 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
     assert_eq!(new_meta.reality.dest, "127.0.0.1:49043");
     assert_eq!(
         new_meta.reality.server_names,
-        vec!["public.sn.files.1drv.com", "public.bn.files.1drv.com"]
+        vec!["cdn-a.example.test", "cdn-b.example.test"]
     );
     assert_eq!(new_meta.reality.fingerprint, "firefox");
     assert_eq!(new_meta.reality_keys, old_meta.reality_keys);

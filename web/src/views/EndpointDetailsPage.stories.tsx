@@ -17,7 +17,7 @@ const meta = {
 					{
 						node_id: NODE_ID,
 						node_name: "tokyo-1",
-						access_host: "tavily-tw.ivanli.cc",
+						access_host: "edge.example.test",
 						api_base_url: "https://tokyo-1.example.com",
 						quota_limit_bytes: 0,
 						quota_reset: {
@@ -37,7 +37,7 @@ const meta = {
 						meta: {
 							reality: {
 								dest: "127.0.0.1:39043",
-								server_names: ["tavily-tw.ivanli.cc"],
+								server_names: ["edge.example.test"],
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -47,19 +47,12 @@ const meta = {
 								mode: "auto",
 							},
 							accepted_authorities: [
-								"hinet-ep.707979.xyz:53844",
+								"endpoint.example.test:53844",
 								"edge.example.com:53844",
 							],
 						},
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
-					},
-				],
-				realityDomains: [
-					{
-						domain_id: "seed-public-sn-files",
-						server_name: "public.sn.files.1drv.com",
-						disabled_node_ids: [],
 					},
 				],
 			},
@@ -91,7 +84,7 @@ export const ManagedDefaultAliases: Story = {
 			await canvas.findByText("acceptedAuthorities"),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findAllByText("hinet-ep.707979.xyz:53844"),
+			await canvas.findAllByText("endpoint.example.test:53844"),
 		).toHaveLength(2);
 		await expect(
 			await canvas.findAllByText("edge.example.com:53844"),

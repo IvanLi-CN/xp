@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from "@storybook/react";
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
-import type { AdminRealityDomain } from "../api/adminRealityDomains";
 import type { AdminUserAccessItem } from "../api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
@@ -101,7 +100,7 @@ const DESIGN_ENDPOINTS: Array<
 				url: "http://127.0.0.1:8080",
 				mode: "auto",
 			},
-			accepted_authorities: ["edge.example.com:443", "tavily-tw.ivanli.cc:443"],
+			accepted_authorities: ["edge.example.com:443", "edge.example.test:443"],
 			managed_default: true,
 		},
 		short_ids: ["2a3b4c", "5d6e7f"],
@@ -118,19 +117,6 @@ const DESIGN_ENDPOINTS: Array<
 		},
 		short_ids: ["aa11bb"],
 		active_short_id: "aa11bb",
-	},
-];
-
-const DESIGN_REALITY_DOMAINS: AdminRealityDomain[] = [
-	{
-		domain_id: "seed_public_sn_files_1drv_com",
-		server_name: "public.sn.files.1drv.com",
-		disabled_node_ids: [],
-	},
-	{
-		domain_id: "seed_public_bn_files_1drv_com",
-		server_name: "public.bn.files.1drv.com",
-		disabled_node_ids: ["n2"],
 	},
 ];
 
@@ -205,7 +191,6 @@ const DESIGN_MOCK_API = {
 		},
 		nodes: DESIGN_NODES,
 		endpoints: DESIGN_ENDPOINTS,
-		realityDomains: DESIGN_REALITY_DOMAINS,
 		users: DESIGN_USERS,
 		userAccessByUserId: DESIGN_USER_ACCESS,
 		nodeQuotas: DESIGN_NODE_QUOTAS,
@@ -282,7 +267,6 @@ export const EndpointNew: Story = pageStory({ path: "/endpoints/new" });
 export const EndpointDetails: Story = pageStory({
 	path: "/endpoints/ep_01HENDPTAAAAAA",
 });
-export const RealityDomains: Story = pageStory({ path: "/reality-domains" });
 export const Users: Story = pageStory({ path: "/users" });
 export const UserNew: Story = pageStory({ path: "/users/new" });
 export const UserDetails: Story = pageStory({ path: "/users/u_01HUSERAAAAAA" });

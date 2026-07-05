@@ -631,7 +631,7 @@ describe("storybook api mock", () => {
 							country_code: "TW",
 							geo_region: "Taiwan",
 							geo_city: "Taipei",
-							geo_operator: "HiNet",
+							geo_operator: "ExampleNet",
 							subscription_region: "taiwan",
 							checked_at: "2026-04-24T00:00:00Z",
 							last_success_at: "2026-04-24T00:00:00Z",

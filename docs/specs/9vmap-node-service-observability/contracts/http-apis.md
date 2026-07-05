@@ -19,7 +19,7 @@ Response:
         "country_code": "TW",
         "geo_region": "Taiwan",
         "geo_city": "Taipei",
-        "geo_operator": "HiNet",
+        "geo_operator": "ExampleNet",
         "subscription_region": "taiwan",
         "checked_at": "RFC3339",
         "last_success_at": "RFC3339|null",

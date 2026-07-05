@@ -118,7 +118,7 @@ sudo -E xp-ops deploy \
   --hostname admin-node-1.example.com \
   --ddns \
   --default-vless-port 443 \
-  --default-vless-server-names 'public.sn.files.1drv.com,public.bn.files.1drv.com' \
+  --default-vless-server-names 'cdn-a.example.test,cdn-b.example.test' \
   --default-vless-fingerprint chrome \
   --default-ss-port 53843 \
   --vless-canary-acme-contact-email ops@example.com \

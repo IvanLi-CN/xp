@@ -23,7 +23,6 @@ import { LoginPage } from "./views/LoginPage";
 import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
-import { RealityDomainsPage } from "./views/RealityDomainsPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
 import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
@@ -81,10 +80,6 @@ const DemoScenariosPage = lazyRouteComponent(
 const DemoQuotaPolicyPage = lazyRouteComponent(
 	() => import("./demo/DemoSettingsPages"),
 	"DemoQuotaPolicyPage",
-);
-const DemoRealityDomainsPage = lazyRouteComponent(
-	() => import("./demo/DemoSettingsPages"),
-	"DemoRealityDomainsPage",
 );
 const DemoServiceConfigPage = lazyRouteComponent(
 	() => import("./demo/DemoSettingsPages"),
@@ -221,12 +216,6 @@ const toolsRoute = createRoute({
 	component: ToolsPage,
 });
 
-const realityDomainsRoute = createRoute({
-	getParentRoute: () => appRoute,
-	path: "/reality-domains",
-	component: RealityDomainsPage,
-});
-
 const demoLoginRootRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/demo/login",
@@ -328,12 +317,6 @@ const demoQuotaPolicyRoute = createRoute({
 	component: DemoQuotaPolicyPage,
 });
 
-const demoRealityDomainsRoute = createRoute({
-	getParentRoute: () => demoAppRoute,
-	path: "/reality-domains",
-	component: DemoRealityDomainsPage,
-});
-
 const demoServiceConfigRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/service-config",
@@ -361,7 +344,6 @@ const appRouteTree = appRoute.addChildren([
 	quotaPolicyRoute,
 	serviceConfigRoute,
 	toolsRoute,
-	realityDomainsRoute,
 ]);
 
 const demoLoginRouteTree = demoLoginRootRoute.addChildren([demoLoginPageRoute]);
@@ -380,7 +362,6 @@ const demoAppRouteTree = demoAppRoute.addChildren([
 	demoUserDetailsRoute,
 	demoScenariosRoute,
 	demoQuotaPolicyRoute,
-	demoRealityDomainsRoute,
 	demoServiceConfigRoute,
 	demoToolsRoute,
 ]);

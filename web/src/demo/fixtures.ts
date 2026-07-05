@@ -95,7 +95,7 @@ const baseEndpoints: DemoEndpoint[] = [
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		status: "serving",
-		serverNames: ["public.sn.files.1drv.com", "oneclient.sfx.ms"],
+		serverNames: ["cdn-a.example.test", "origin.example.test"],
 		assignedUserIds: ["user-lin", "user-ops"],
 		probeLatencyMs: 31,
 		lastProbeAt: "2026-04-29T09:42:00Z",
@@ -121,7 +121,7 @@ const baseEndpoints: DemoEndpoint[] = [
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		status: "degraded",
-		serverNames: ["public.bn.files.1drv.com"],
+		serverNames: ["cdn-b.example.test"],
 		assignedUserIds: ["user-sato"],
 		probeLatencyMs: 118,
 		lastProbeAt: "2026-04-29T09:31:00Z",
@@ -207,7 +207,7 @@ const baseUsers: DemoUser[] = [
 const baseRealityDomains: DemoRealityDomain[] = [
 	{
 		id: "domain-onedrive",
-		hostname: "public.sn.files.1drv.com",
+		hostname: "cdn-a.example.test",
 		enabled: true,
 		nodeIds: ["node-tokyo-1", "node-osaka-1"],
 		priority: 1,
@@ -216,7 +216,7 @@ const baseRealityDomains: DemoRealityDomain[] = [
 	},
 	{
 		id: "domain-office",
-		hostname: "oneclient.sfx.ms",
+		hostname: "origin.example.test",
 		enabled: true,
 		nodeIds: ["node-tokyo-1"],
 		priority: 2,
@@ -225,7 +225,7 @@ const baseRealityDomains: DemoRealityDomain[] = [
 	},
 	{
 		id: "domain-archive",
-		hostname: "public.bn.files.1drv.com",
+		hostname: "cdn-b.example.test",
 		enabled: false,
 		nodeIds: ["node-sgp-1"],
 		priority: 3,

@@ -55,7 +55,7 @@ fn build_default_vless_endpoint_spec_rejects_zero_port() {
     let err = build_default_vless_endpoint_spec(
         Some(0),
         "node.example.com",
-        Some("public.sn.files.1drv.com"),
+        Some("cdn-a.example.test"),
         None,
         "127.0.0.1:39043".parse().unwrap(),
     )

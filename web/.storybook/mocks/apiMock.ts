@@ -659,17 +659,17 @@ function createDefaultSeed(): MockStateSeed {
 	const realityDomains: AdminRealityDomain[] = [
 		{
 			domain_id: "seed_public_sn_files_1drv_com",
-			server_name: "public.sn.files.1drv.com",
+			server_name: "cdn-a.example.test",
 			disabled_node_ids: [],
 		},
 		{
 			domain_id: "seed_public_bn_files_1drv_com",
-			server_name: "public.bn.files.1drv.com",
+			server_name: "cdn-b.example.test",
 			disabled_node_ids: [],
 		},
 		{
 			domain_id: "seed_oneclient_sfx_ms",
-			server_name: "oneclient.sfx.ms",
+			server_name: "origin.example.test",
 			disabled_node_ids: ["node-2"],
 		},
 	];
