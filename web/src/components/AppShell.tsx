@@ -171,7 +171,10 @@ export function AppShell({
 			dispatchVersionCheck({ type: "start" });
 
 			try {
-				const data = await fetchVersionCheck();
+				const data = await fetchVersionCheck({
+					refresh: force,
+					adminToken: force ? adminToken : undefined,
+				});
 				dispatchVersionCheck({ type: "success", data });
 			} catch (err) {
 				const message = isBackendApiError(err)
@@ -182,7 +185,7 @@ export function AppShell({
 				dispatchVersionCheck({ type: "fail", message });
 			}
 		},
-		[versionCheckLastAtMs],
+		[adminToken, versionCheckLastAtMs],
 	);
 
 	useEffect(() => {

@@ -31,6 +31,10 @@
   `restarting`，`xp` 会把 durable status 写回 `failed` 并返回该失败给 Web UI。
 - Web unsupported 状态禁用升级确认入口，按钮文案为 `Unavailable`；版本展示统一按 release tag
   规范化为 `vX.Y.Z`，popover 使用延迟 pointer leave close，降低 polling 状态刷新造成的闪烁。
+- `/api/version/check` 保留 1 小时 latest-release 缓存；admin-authorized
+  `/api/version/check?refresh=1` 和 `force=1` 不复用自动检查缓存，并在成功后更新缓存内容。
+  `VersionIndicator` 的手动 Check 走 refresh 模式并携带 admin bearer token，自动 focus
+  check 仍走公开的 1 小时缓存路径。
 
 ## 测试覆盖
 
@@ -56,6 +60,8 @@
   - migration smoke 覆盖 legacy state JSON、state/usage version skew recovery 与 legacy grants
     snapshot install migration。
 - Web:
+  - version check API schema/fetch tests cover cached default requests and user-forced refresh
+    requests.
   - admin upgrade API schema parse。
   - `Components/VersionIndicator` Storybook 覆盖 idle/checking/update/unsupported/running/failed/
     up-to-date/check-failed 状态。

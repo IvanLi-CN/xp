@@ -71,7 +71,7 @@
 
 ### SHOULD
 
-- Popover 内提供手动 Check 与 Status refresh。
+- Popover 内提供手动 Check 与 Status refresh；手动 Check 必须绕过后端 latest release 缓存，重新查询 stable GitHub Release。
 - 失败状态应显示简短安全摘要，避免泄露 token/secret。
 - host-managed systemd/OpenRC 样例应能直接解释 root 委托边界。
 
@@ -83,6 +83,10 @@
 | ------ | --------------------------- | ----- | --------------------------------------------- |
 | GET    | `/api/admin/upgrade/status` | admin | 返回支持状态与最近 job                        |
 | POST   | `/api/admin/upgrade/start`  | admin | 按 `target_tag` 启动当前节点升级；单 job 互斥 |
+
+`GET /api/version/check?refresh=1` keeps the existing version-check response shape but requires
+admin bearer auth and bypasses the in-process latest-release cache. UI-triggered manual Check must
+use this refresh mode; automatic focus-based checks may use the cached public path.
 
 `POST /api/admin/upgrade/start` 请求体：
 
@@ -144,6 +148,9 @@ Status states:
 - Given CentOS 7-class systemd/polkit，
   When `unit` / `verb` action detail 不可用于 polkit rule，
   Then systemd Web upgrade 仍可通过固定 helper + sudoers 触发 `xp-upgrade.service`。
+- Given 服务端版本检查缓存中仍保存旧 latest release，
+  When 用户在版本 popover 内点击手动 Check，
+  Then UI 必须请求 refresh 模式，后端必须绕过缓存重新查询 latest release。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -211,6 +218,8 @@ Status states:
 - 2026-07-06: systemd upgrade unit 改为直接执行 `_upgrade-runner`，避免 systemd 提前展开
   shell 风格 `XP_DATA_DIR` 表达式导致 runner 收到空 `--data-dir`；status API 增加 failed
   one-shot 自愈，防止 durable active status 残留为 running。
+- 2026-07-07: 手动 Check 改为调用 `/api/version/check?refresh=1`，绕过 1 小时后端缓存；
+  自动焦点检查继续允许使用缓存以避免频繁访问 GitHub。
 
 ## 参考（References）
 

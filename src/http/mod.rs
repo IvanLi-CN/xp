@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::{
     sync::{Mutex, mpsc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{
@@ -85,7 +85,10 @@ use crate::{
     xray_supervisor::XrayHealthHandle,
 };
 
+mod version_check;
 mod web_assets;
+
+use version_check::{VersionCheckCache, api_version_check};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -891,7 +894,7 @@ pub fn build_router(
         raft,
         raft_rpc: raft_rpc.clone(),
         geo_db_update,
-        version_check_cache: Arc::new(Mutex::new(VersionCheckCache { entry: None })),
+        version_check_cache: Arc::new(Mutex::new(VersionCheckCache::default())),
         ops_github_repo: Arc::new(ops_github_repo),
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
@@ -1348,263 +1351,11 @@ async fn cluster_info(
     }))
 }
 
-#[derive(Clone)]
-pub struct VersionCheckCache {
-    entry: Option<VersionCheckCacheEntry>,
-}
-
-#[derive(Clone)]
-struct VersionCheckCacheEntry {
-    fetched_at: Instant,
-    checked_at: String,
-    latest_release_tag: String,
-    latest_published_at: Option<String>,
-}
-
-const VERSION_CHECK_TTL: Duration = Duration::from_secs(60 * 60);
 const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);
 #[cfg(not(test))]
 const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_secs(20);
 #[cfg(test)]
 const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_millis(50);
-
-#[derive(Serialize)]
-struct VersionCheckResponse {
-    current: VersionCheckCurrent,
-    latest: VersionCheckLatest,
-    has_update: Option<bool>,
-    checked_at: String,
-    compare_reason: VersionCheckCompareReason,
-    source: VersionCheckSource,
-}
-
-#[derive(Serialize)]
-struct VersionCheckCurrent {
-    package: String,
-    release_tag: String,
-}
-
-#[derive(Serialize)]
-struct VersionCheckLatest {
-    release_tag: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    published_at: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum VersionCheckCompareReason {
-    Semver,
-    Uncomparable,
-}
-
-#[derive(Serialize)]
-struct VersionCheckSource {
-    kind: &'static str,
-    repo: String,
-    api_base: String,
-    channel: &'static str,
-}
-
-#[derive(Deserialize)]
-struct GithubLatestReleaseResponse {
-    tag_name: String,
-    published_at: Option<String>,
-}
-
-async fn api_version_check(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<VersionCheckResponse>, ApiError> {
-    let current_package = crate::version::VERSION.to_string();
-    let current_release_tag = format!("v{current_package}");
-
-    let cached = { state.version_check_cache.lock().await.entry.clone() };
-    let (latest_release_tag, latest_published_at, checked_at) = if let Some(entry) = cached
-        && entry.fetched_at.elapsed() < VERSION_CHECK_TTL
-    {
-        (
-            entry.latest_release_tag,
-            entry.latest_published_at,
-            entry.checked_at,
-        )
-    } else {
-        let (tag, published_at) = fetch_github_latest_release(&state).await?;
-        let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-        let mut cache = state.version_check_cache.lock().await;
-        cache.entry = Some(VersionCheckCacheEntry {
-            fetched_at: Instant::now(),
-            checked_at: checked_at.clone(),
-            latest_release_tag: tag.clone(),
-            latest_published_at: published_at.clone(),
-        });
-        (tag, published_at, checked_at)
-    };
-
-    let (has_update, compare_reason) =
-        compare_simple_semver(&current_release_tag, &latest_release_tag);
-
-    Ok(Json(VersionCheckResponse {
-        current: VersionCheckCurrent {
-            package: current_package,
-            release_tag: current_release_tag,
-        },
-        latest: VersionCheckLatest {
-            release_tag: latest_release_tag,
-            published_at: latest_published_at,
-        },
-        has_update,
-        checked_at,
-        compare_reason,
-        source: VersionCheckSource {
-            kind: "github-releases",
-            repo: state.ops_github_repo.as_str().to_string(),
-            api_base: state.ops_github_api_base_url.as_str().to_string(),
-            channel: "stable",
-        },
-    }))
-}
-
-async fn fetch_github_latest_release(
-    state: &AppState,
-) -> Result<(String, Option<String>), ApiError> {
-    let api_base = state.ops_github_api_base_url.trim_end_matches('/');
-    let repo = state.ops_github_repo.trim().trim_matches('/');
-    let url = format!("{api_base}/repos/{repo}/releases/latest");
-
-    let resp = state
-        .ops_github_client
-        .get(url)
-        .header(header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await;
-
-    match resp {
-        Ok(resp) if resp.status().is_success() => {
-            let body: GithubLatestReleaseResponse = resp.json().await.map_err(|e| {
-                ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
-            })?;
-
-            let published_at = match body.published_at {
-                Some(raw) => {
-                    let dt = chrono::DateTime::parse_from_rfc3339(&raw).map_err(|e| {
-                        ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string())
-                    })?;
-                    Some(
-                        dt.with_timezone(&Utc)
-                            .to_rfc3339_opts(SecondsFormat::Secs, true),
-                    )
-                }
-                None => None,
-            };
-
-            Ok((body.tag_name, published_at))
-        }
-        Ok(resp) => {
-            // Avoid surfacing flaky GitHub API failures (rate-limits, transient 5xx) as hard UI
-            // errors if we can derive the latest release tag from the HTML redirect endpoint.
-            if api_base == "https://api.github.com"
-                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
-            {
-                return Ok(out);
-            }
-
-            Err(ApiError::new(
-                "upstream_error",
-                StatusCode::BAD_GATEWAY,
-                format!("github returned status: {}", resp.status()),
-            ))
-        }
-        Err(err) => {
-            if api_base == "https://api.github.com"
-                && let Ok(out) = fetch_github_latest_release_via_redirect(state, repo).await
-            {
-                return Ok(out);
-            }
-
-            Err(ApiError::new(
-                "upstream_error",
-                StatusCode::BAD_GATEWAY,
-                err.to_string(),
-            ))
-        }
-    }
-}
-
-async fn fetch_github_latest_release_via_redirect(
-    state: &AppState,
-    repo: &str,
-) -> Result<(String, Option<String>), ApiError> {
-    let repo = repo.trim().trim_matches('/');
-    if repo.is_empty() {
-        return Err(ApiError::invalid_request("github repo is required"));
-    }
-
-    let url = format!("https://github.com/{repo}/releases/latest");
-    let resp = state
-        .ops_github_client
-        .get(url)
-        .header(header::ACCEPT, "text/html")
-        .send()
-        .await
-        .map_err(|e| ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, e.to_string()))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::new(
-            "upstream_error",
-            StatusCode::BAD_GATEWAY,
-            format!("github releases/latest returned status: {}", resp.status()),
-        ));
-    }
-
-    let Some(tag) = github_release_tag_from_url(resp.url()) else {
-        return Err(ApiError::new(
-            "upstream_error",
-            StatusCode::BAD_GATEWAY,
-            "github releases/latest returned unexpected url".to_string(),
-        ));
-    };
-
-    // Redirect-based lookup does not expose published_at without fetching the API JSON.
-    Ok((tag, None))
-}
-
-fn github_release_tag_from_url(url: &reqwest::Url) -> Option<String> {
-    let segments: Vec<_> = url.path_segments()?.collect();
-    let idx = segments.iter().position(|s| *s == "tag")?;
-    let tag = segments.get(idx + 1)?;
-    if tag.trim().is_empty() {
-        return None;
-    }
-    Some(tag.to_string())
-}
-
-fn compare_simple_semver(current: &str, latest: &str) -> (Option<bool>, VersionCheckCompareReason) {
-    let Some(current) = parse_simple_semver(current) else {
-        return (None, VersionCheckCompareReason::Uncomparable);
-    };
-    let Some(latest) = parse_simple_semver(latest) else {
-        return (None, VersionCheckCompareReason::Uncomparable);
-    };
-
-    (Some(latest > current), VersionCheckCompareReason::Semver)
-}
-
-fn parse_simple_semver(raw: &str) -> Option<(u64, u64, u64)> {
-    let raw = raw.trim();
-    let raw = raw
-        .strip_prefix('v')
-        .or_else(|| raw.strip_prefix('V'))
-        .unwrap_or(raw);
-    let core = raw.split(['-', '+']).next()?;
-    let mut parts = core.split('.');
-    let major: u64 = parts.next()?.parse().ok()?;
-    let minor: u64 = parts.next()?.parse().ok()?;
-    let patch: u64 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((major, minor, patch))
-}
 
 fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     let url = reqwest::Url::parse(origin)
