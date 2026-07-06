@@ -23,3 +23,5 @@
   收到空值并以 invalid argument 失败；同时 durable status 已写入 `running`，runner 失败前没有机会
   写回 terminal status。systemd unit 改为直接执行 `_upgrade-runner`，status API 增加 failed
   one-shot 自愈，避免 UI 永久显示 running。
+- 2026-07-07: hinet-lam 在 `v3.17.4` 发布后仍显示 latest `v3.17.3`，根因是
+  `/api/version/check` 在发布前缓存了旧 latest 一小时；手动 Check 改为 refresh 请求，保留自动检查缓存。

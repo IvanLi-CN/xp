@@ -24,13 +24,23 @@ export const VersionCheckResponseSchema = z.object({
 
 export type VersionCheckResponse = z.infer<typeof VersionCheckResponseSchema>;
 
-export async function fetchVersionCheck(
-	signal?: AbortSignal,
-): Promise<VersionCheckResponse> {
-	const res = await fetch("/api/version/check", {
+export async function fetchVersionCheck(options?: {
+	signal?: AbortSignal;
+	refresh?: boolean;
+	adminToken?: string;
+}): Promise<VersionCheckResponse> {
+	const url = options?.refresh
+		? "/api/version/check?refresh=1"
+		: "/api/version/check";
+	const res = await fetch(url, {
 		method: "GET",
-		headers: { Accept: "application/json" },
-		signal,
+		headers: {
+			Accept: "application/json",
+			...(options?.refresh && options.adminToken
+				? { Authorization: `Bearer ${options.adminToken}` }
+				: {}),
+		},
+		signal: options?.signal,
 	});
 
 	await throwIfNotOk(res);

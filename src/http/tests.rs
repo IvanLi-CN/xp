@@ -429,14 +429,9 @@ async fn version_check_uses_github_and_caches_and_compares() {
 
         let tmp = TempDir::new().unwrap();
         let app = app(&tmp);
+        let get = |uri| app.clone().oneshot(req("GET", uri));
 
-        let req = Request::builder()
-            .method("GET")
-            .uri("/api/version/check")
-            .header(header::ACCEPT, "application/json")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.clone().oneshot(req).await.unwrap();
+        let res = get("/api/version/check").await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
         let body = body_json(res).await;
@@ -462,18 +457,23 @@ async fn version_check_uses_github_and_caches_and_compares() {
             Some(github.uri().as_str())
         );
 
-        let req = Request::builder()
-            .method("GET")
-            .uri("/api/version/check")
-            .header(header::ACCEPT, "application/json")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.clone().oneshot(req).await.unwrap();
+        let res = get("/api/version/check").await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
         let requests = github.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].url.path(), "/repos/acme/xp/releases/latest");
+
+        let res = app
+            .clone()
+            .oneshot(req_authed("GET", "/api/version/check?refresh=1"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let requests = github.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].url.path(), "/repos/acme/xp/releases/latest");
     }
 
     // uncomparable compare semantics

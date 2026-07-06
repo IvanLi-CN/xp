@@ -483,7 +483,7 @@ Useful flags:
 
 UI notes:
 
-- The Web UI header shows the current `xp` version (clickable) and can check whether a newer stable GitHub Release exists.
+- The Web UI header shows the current `xp` version (clickable) and can check whether a newer stable GitHub Release exists. Automatic focus checks may use the node's short-lived latest-release cache; the popover's manual Check bypasses that cache.
 - On host-managed systemd/OpenRC nodes, the Web UI can start a local in-place upgrade for the
   current node after admin confirmation. The actual upgrade is still performed by `xp-ops upgrade`
   through a restricted one-shot root runner.
