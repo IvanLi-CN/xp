@@ -10,6 +10,19 @@ export function realityServerNameSuggestionFromDest(
 	return candidate;
 }
 
+export function realityServerNameSuggestionFromAccessHost(
+	accessHost: string,
+	port: number | string,
+): string | null {
+	const host = normalizeRealityServerName(accessHost).replace(/\.$/, "");
+	const portText = String(port).trim();
+	if (!host || !portText) return null;
+	if (host.includes("://") || host.includes("/")) return null;
+
+	const candidate = hasExplicitPort(host) ? host : `${host}:${portText}`;
+	return realityServerNameSuggestionFromDest(candidate);
+}
+
 export function validateRealityServerName(value: string): string | null {
 	const trimmed = normalizeRealityServerName(value);
 	if (!trimmed) return "serverName is required.";
@@ -61,6 +74,15 @@ export function validateRealityServerName(value: string): string | null {
 	}
 
 	return null;
+}
+
+function hasExplicitPort(value: string): boolean {
+	const splitIndex = value.lastIndexOf(":");
+	if (splitIndex <= 0 || splitIndex === value.length - 1) return false;
+	const host = value.slice(0, splitIndex);
+	const port = value.slice(splitIndex + 1);
+	if (host.includes(":")) return false;
+	return /^\d+$/.test(port);
 }
 
 function splitHostPort(value: string): { host: string; port: string | null } {
