@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 Environment=XP_DATA_DIR=/var/lib/xp/data
 EnvironmentFile=-/etc/xp/xp.env
-ExecStart=/bin/sh -c 'exec /usr/local/bin/xp-ops _upgrade-runner --data-dir "${XP_DATA_DIR:-/var/lib/xp/data}"'
+ExecStart=/usr/local/bin/xp-ops _upgrade-runner

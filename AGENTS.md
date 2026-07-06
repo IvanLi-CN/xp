@@ -24,7 +24,10 @@
   `/etc/sudoers.d/91-xp-upgrade` policy; the polkit rule is only a compatibility supplement because
   CentOS 7-class polkit does not reliably expose `unit` / `verb` details. Docker / Compose nodes
   must keep using host-side image / Compose replacement and must be documented as Web-upgrade
-  unsupported.
+  unsupported. The systemd `xp-upgrade.service` must invoke `xp-ops _upgrade-runner` directly and
+  pass `XP_DATA_DIR` through the unit environment, not through shell-expanded `--data-dir` command
+  text. If the one-shot runner fails before writing a terminal status, the admin upgrade status API
+  must reconcile the durable `running` / `restarting` status to `failed`.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.

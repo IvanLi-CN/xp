@@ -1,5 +1,6 @@
 use crate::ops::cli::ExitError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -153,6 +154,11 @@ pub fn read_status(data_dir: &Path) -> io::Result<UpgradeJobStatus> {
     }
     let raw = fs::read_to_string(path)?;
     serde_json::from_str(&raw).map_err(io::Error::other)
+}
+
+pub fn read_reconciled_status(data_dir: &Path) -> io::Result<UpgradeJobStatus> {
+    let status = read_status(data_dir)?;
+    reconcile_active_status(data_dir, status, detect_upgrade_delegate_failure)
 }
 
 pub fn write_status(data_dir: &Path, status: &UpgradeJobStatus) -> io::Result<()> {
@@ -436,7 +442,7 @@ pub fn start_upgrade(
     validate_target_tag(target_tag)?;
     let _lock = StartLock::acquire(data_dir)?;
 
-    let current = read_status(data_dir)?;
+    let current = read_reconciled_status(data_dir)?;
     if current.state.is_active() {
         return Err(UpgradeStartError::Active);
     }
@@ -570,6 +576,93 @@ fn trigger_upgrade_service(trigger: Option<&str>) -> Result<(), String> {
     }
 }
 
+fn reconcile_active_status<F>(
+    data_dir: &Path,
+    status: UpgradeJobStatus,
+    detect_failure: F,
+) -> io::Result<UpgradeJobStatus>
+where
+    F: FnOnce() -> Option<String>,
+{
+    if !status.state.is_active() {
+        return Ok(status);
+    }
+
+    let Some(message) = detect_failure() else {
+        return Ok(status);
+    };
+
+    let now = now_rfc3339();
+    let failed = UpgradeJobStatus {
+        state: UpgradeJobState::Failed,
+        target_tag: status.target_tag.clone(),
+        repo: status.repo.clone(),
+        started_at: status.started_at.clone(),
+        finished_at: Some(now.clone()),
+        exit_code: status.exit_code,
+        message: Some(message),
+        updated_at: now,
+    };
+    write_status(data_dir, &failed)?;
+    Ok(failed)
+}
+
+fn detect_upgrade_delegate_failure() -> Option<String> {
+    detect_systemd_upgrade_failure()
+}
+
+fn detect_systemd_upgrade_failure() -> Option<String> {
+    if !command_exists("systemctl") {
+        return None;
+    }
+
+    let output = Command::new("systemctl")
+        .args([
+            "show",
+            SYSTEMD_UPGRADE_UNIT,
+            "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus",
+            "--no-pager",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let fields = parse_systemctl_show(&text);
+    if fields.get("LoadState").map(String::as_str) != Some("loaded") {
+        return None;
+    }
+    if fields.get("ActiveState").map(String::as_str) != Some("failed") {
+        return None;
+    }
+
+    let result = fields
+        .get("Result")
+        .map(String::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let status = fields
+        .get("ExecMainStatus")
+        .map(String::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    Some(format!(
+        "upgrade runner failed: {SYSTEMD_UPGRADE_UNIT} is failed \
+         (result={result}, exit_status={status})"
+    ))
+}
+
+fn parse_systemctl_show(raw: &str) -> HashMap<String, String> {
+    raw.lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
 fn trigger_systemd_upgrade_service() -> Result<(), String> {
     if systemd_upgrade_sudo_helper_allows_current_process() {
         return run_status(Command::new("sudo").args(systemd_sudo_trigger_args()));
@@ -670,6 +763,90 @@ mod tests {
         let tmp = tempdir().unwrap();
         let loaded = read_status(tmp.path()).unwrap();
         assert_eq!(loaded.state, UpgradeJobState::Idle);
+    }
+
+    #[test]
+    fn active_status_reconciles_failed_systemd_delegate() {
+        let tmp = tempdir().unwrap();
+        let status = UpgradeJobStatus {
+            state: UpgradeJobState::Running,
+            target_tag: Some("v0.2.0".to_string()),
+            repo: Some("IvanLi-CN/xp".to_string()),
+            started_at: Some("2026-07-04T00:00:00Z".to_string()),
+            finished_at: None,
+            exit_code: None,
+            message: Some("upgrade trigger accepted".to_string()),
+            updated_at: "2026-07-04T00:00:00Z".to_string(),
+        };
+        write_status(tmp.path(), &status).unwrap();
+
+        let loaded = read_status(tmp.path()).unwrap();
+        let reconciled = reconcile_active_status(tmp.path(), loaded, || {
+            Some(
+                concat!(
+                    "upgrade runner failed: xp-upgrade.service is failed ",
+                    "(result=exit-code, exit_status=2)"
+                )
+                .to_string(),
+            )
+        })
+        .unwrap();
+
+        assert_eq!(reconciled.state, UpgradeJobState::Failed);
+        assert_eq!(reconciled.target_tag.as_deref(), Some("v0.2.0"));
+        assert!(reconciled.finished_at.is_some());
+        assert!(
+            reconciled
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("xp-upgrade.service is failed")
+        );
+        let persisted = read_status(tmp.path()).unwrap();
+        assert_eq!(persisted.state, UpgradeJobState::Failed);
+    }
+
+    #[test]
+    fn active_status_without_delegate_failure_stays_active() {
+        let tmp = tempdir().unwrap();
+        let status = UpgradeJobStatus {
+            state: UpgradeJobState::Running,
+            target_tag: Some("v0.2.0".to_string()),
+            repo: Some("IvanLi-CN/xp".to_string()),
+            started_at: Some("2026-07-04T00:00:00Z".to_string()),
+            finished_at: None,
+            exit_code: None,
+            message: Some("upgrade trigger accepted".to_string()),
+            updated_at: "2026-07-04T00:00:00Z".to_string(),
+        };
+        write_status(tmp.path(), &status).unwrap();
+
+        let loaded = read_status(tmp.path()).unwrap();
+        let reconciled = reconcile_active_status(tmp.path(), loaded, || None).unwrap();
+
+        assert_eq!(reconciled.state, UpgradeJobState::Running);
+        assert_eq!(reconciled.finished_at, None);
+        assert_eq!(
+            read_status(tmp.path()).unwrap().state,
+            UpgradeJobState::Running
+        );
+    }
+
+    #[test]
+    fn parses_failed_systemd_unit_show_output() {
+        let fields = parse_systemctl_show(concat!(
+            "LoadState=loaded\n",
+            "ActiveState=failed\n",
+            "SubState=failed\n",
+            "Result=exit-code\n",
+            "ExecMainStatus=2\n",
+        ));
+        assert_eq!(fields.get("LoadState").map(String::as_str), Some("loaded"));
+        assert_eq!(
+            fields.get("ActiveState").map(String::as_str),
+            Some("failed")
+        );
+        assert_eq!(fields.get("ExecMainStatus").map(String::as_str), Some("2"));
     }
 
     #[test]

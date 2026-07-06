@@ -22,6 +22,13 @@
   才回退到 `systemctl start --no-block xp-upgrade.service` 的 polkit 路径。CentOS 7-class
   polkit 不可靠提供 `unit` / `verb` action detail，因此不能把 polkit 作为唯一 systemd
   Web upgrade 委托。
+- systemd `xp-upgrade.service` 直接执行 `/usr/local/bin/xp-ops _upgrade-runner`，并通过 unit
+  environment / `/etc/xp/xp.env` 给 runner 提供 `XP_DATA_DIR`。runner CLI 自身读取该环境变量并
+  保留 `/var/lib/xp/data` 默认值，避免 systemd 在 `/bin/sh -c` 命令行中提前展开 shell 风格
+  `${XP_DATA_DIR:-...}`。
+- upgrade status 读取路径会对 active durable status 做本机自愈：当 systemd
+  `xp-upgrade.service` 已明确进入 `failed` 状态，而 `status.json` 仍停在 `running` /
+  `restarting`，`xp` 会把 durable status 写回 `failed` 并返回该失败给 Web UI。
 - Web unsupported 状态禁用升级确认入口，按钮文案为 `Unavailable`；版本展示统一按 release tag
   规范化为 `vX.Y.Z`，popover 使用延迟 pointer leave close，降低 polling 状态刷新造成的闪烁。
 
@@ -33,6 +40,8 @@
   - `_upgrade-runner` 从 `upgrade/request.json` 读取 target，执行 mocked release upgrade，
     并把 `succeeded` durable status 写回 `upgrade/status.json`。
   - systemd unit/helper/sudoers/polkit 与 OpenRC doas policy 的窄触发测试。
+  - systemd upgrade unit 不再经过 shell `--data-dir` 展开；active durable status 遇到已失败
+    one-shot 会收敛为 failed，无明确 delegate failure 时仍保持 active 并保留 409 并发保护。
   - systemd delegate 检测拒绝只安装 unit 的半安装状态；拒绝只允许 helper `--check`
     的不完整 sudoers，真实 root 探测同时验证 `--check` 与 no-arg start grant，并允许通过
     有效 helper 授权或 polkit 授权恢复支持判定。

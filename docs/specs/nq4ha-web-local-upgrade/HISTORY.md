@@ -18,3 +18,8 @@
   `org.freedesktop.systemd1.manage-units` 的 `unit` / `verb` detail；原窄 polkit rule 永远不匹配，
   `xp` 用户触发 `systemctl start xp-upgrade.service` 会要求交互认证。systemd 委托改为优先
   root-owned 固定 helper + 窄 sudoers，polkit 只保留为兼容补充。
+- 2026-07-06: hinet-lam 升级到 `v3.17.2` 时暴露 systemd unit 中的 shell 风格
+  `${XP_DATA_DIR:-...}` 会被 systemd 命令行展开提前处理，导致 `_upgrade-runner --data-dir`
+  收到空值并以 invalid argument 失败；同时 durable status 已写入 `running`，runner 失败前没有机会
+  写回 terminal status。systemd unit 改为直接执行 `_upgrade-runner`，status API 增加 failed
+  one-shot 自愈，避免 UI 永久显示 running。
