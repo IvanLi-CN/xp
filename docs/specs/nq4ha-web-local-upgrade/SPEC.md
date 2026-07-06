@@ -101,6 +101,8 @@ Under `${XP_DATA_DIR}`:
 
 - `upgrade/request.json`: Web start API 写入的受限请求。
 - `upgrade/status.json`: runner 与 `xp` 共同读写的最近状态。
+- 如果委托 one-shot 在 `_upgrade-runner` 写入 terminal result 前失败，status API 必须把
+  durable active status 收敛为 `failed`，不得让 UI 永久显示 `running`。
 
 Status states:
 
@@ -116,6 +118,9 @@ Status states:
 - systemd: `xp-upgrade.service` 是 root one-shot service，`xp` 用户默认通过
   `/usr/local/libexec/xp-upgrade-trigger` 固定 helper 与窄 sudoers drop-in 触发该 unit；
   polkit rule 仅作为支持 `unit` / `verb` action detail 的系统上的兼容补充。
+- systemd `xp-upgrade.service` 必须直接执行 `/usr/local/bin/xp-ops _upgrade-runner`，并通过
+  unit environment / `/etc/xp/xp.env` 传递 `XP_DATA_DIR`。不得用 `/bin/sh -c` 包裹
+  `--data-dir "${XP_DATA_DIR:-...}"` 这类命令行文本，因为 systemd 会先处理 `$` 展开。
 - OpenRC: `xp-upgrade` 是 root one-shot service，`xp` 用户只能通过窄 doas rule 执行
   `rc-service xp-upgrade start`。
 
@@ -130,6 +135,9 @@ Status states:
 - Given active job 已存在，When 再次 start，Then 返回 409。
 - Given Docker/Compose runtime，When start upgrade，Then 返回 unsupported，UI 显示不支持 Web 自动升级与宿主侧操作方向。
 - Given `xp` 重启后读取同一 `XP_DATA_DIR`，When 查询 status，Then 最近 succeeded/failed/running 状态仍可恢复。
+- Given systemd one-shot runner 在写入 terminal status 前失败，
+  When 查询 upgrade status，
+  Then durable active status 被收敛为 failed，UI 不继续显示 running。
 - Given systemd/OpenRC 委托入口，
   When 审计脚本/unit/doas/polkit，
   Then 只能触发固定 `xp-ops _upgrade-runner`，不能执行任意命令。
@@ -200,6 +208,9 @@ Status states:
   风格，并稳定 popover hover 关闭行为。
 - 2026-07-05: systemd Web upgrade 改为优先使用 root-owned 固定 helper 与窄 sudoers 委托，
   避免 CentOS 7-class polkit 缺失 `unit` / `verb` action detail 时无法触发 `xp-upgrade.service`。
+- 2026-07-06: systemd upgrade unit 改为直接执行 `_upgrade-runner`，避免 systemd 提前展开
+  shell 风格 `XP_DATA_DIR` 表达式导致 runner 收到空 `--data-dir`；status API 增加 failed
+  one-shot 自愈，防止 durable active status 残留为 running。
 
 ## 参考（References）
 

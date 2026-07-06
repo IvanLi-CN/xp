@@ -504,6 +504,9 @@ Web-triggered local upgrade contract:
   returns `409 upgrade_already_running`.
 - The Web UI polls status while the job is running. If `xp` restarts during the upgrade, the status
   file is used to recover the last known result.
+- If a host one-shot runner fails before it can write a terminal status, the status endpoint
+  reconciles the stale active status to `failed` instead of reporting `running` forever. On systemd
+  nodes this reconciliation uses `xp-upgrade.service` failure state as the durable local fact.
 
 Host-managed root delegation:
 
@@ -511,6 +514,10 @@ Host-managed root delegation:
   root-owned fixed helper at `/usr/local/libexec/xp-upgrade-trigger` plus
   `/etc/sudoers.d/91-xp-upgrade`, allowing the `xp` user to run only that helper and its no-op
   `--check` probe. The helper starts only `xp-upgrade.service`.
+- The systemd one-shot unit must call `/usr/local/bin/xp-ops _upgrade-runner` directly.
+  `XP_DATA_DIR` is supplied by `Environment=XP_DATA_DIR=...` plus `/etc/xp/xp.env`, so the unit must
+  not wrap the command in `/bin/sh -c` just to pass `--data-dir "${XP_DATA_DIR:-...}"`. systemd can
+  consume that shell expression before the runner sees it.
 - `xp-ops init` also writes a narrow systemd polkit rule for hosts whose polkit exposes `unit` and
   `verb` action details. CentOS 7-class polkit does not expose those details reliably, so Web
   upgrade support must not depend on the polkit rule alone.

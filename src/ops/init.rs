@@ -244,9 +244,7 @@ After=network-online.target\n\
 Type=oneshot\n\
 Environment=XP_DATA_DIR={}\n\
 EnvironmentFile=-/etc/xp/xp.env\n\
-ExecStart=/bin/sh -c '\
-exec /usr/local/bin/xp-ops _upgrade-runner \
---data-dir \"${{XP_DATA_DIR:-/var/lib/xp/data}}\"'\n",
+ExecStart=/usr/local/bin/xp-ops _upgrade-runner\n",
         args.xp_data_dir.display()
     )
 }
@@ -857,8 +855,11 @@ mod tests {
         };
         let unit = systemd_xp_upgrade_unit(&args);
         assert!(unit.contains("Type=oneshot"));
-        assert!(unit.contains("/usr/local/bin/xp-ops _upgrade-runner"));
-        assert!(unit.contains(r#""${XP_DATA_DIR:-/var/lib/xp/data}""#));
+        assert!(unit.contains("Environment=XP_DATA_DIR=/var/lib/xp/data"));
+        assert!(unit.contains("ExecStart=/usr/local/bin/xp-ops _upgrade-runner"));
+        assert!(!unit.contains("/bin/sh -c"));
+        assert!(!unit.contains("--data-dir"));
+        assert!(!unit.contains("${XP_DATA_DIR"));
         assert!(!unit.contains("User=xp"));
 
         let tmp = tempdir().unwrap();

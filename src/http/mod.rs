@@ -79,7 +79,7 @@ use crate::{
         TcpConnectionUsageWindowView, build_window_view as build_tcp_connection_window_view,
     },
     upgrade_job::{
-        UpgradeJobStatus, UpgradeStartError, UpgradeSupport, read_status, start_upgrade,
+        UpgradeJobStatus, UpgradeStartError, UpgradeSupport, read_reconciled_status, start_upgrade,
         support_status,
     },
     xray_supervisor::XrayHealthHandle,
@@ -3902,7 +3902,7 @@ async fn admin_redact_mihomo_source(
 async fn admin_get_upgrade_status(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
-    let status = read_status(&state.config.data_dir).map_err(|e| {
+    let status = read_reconciled_status(&state.config.data_dir).map_err(|e| {
         ApiError::new(
             "upgrade_status_unavailable",
             StatusCode::INTERNAL_SERVER_ERROR,
