@@ -40,6 +40,7 @@ import {
 } from "../components/ui/select";
 import { realityDestFromBindAddress } from "../utils/realityDestSuggestions";
 import {
+	realityServerNameSuggestionFromAccessHost,
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "../utils/realityServerName";
@@ -105,9 +106,24 @@ export function EndpointNewPage() {
 
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
+	const port = form.watch("port");
+	const endpointPort =
+		typeof port === "number" || typeof port === "string" ? port : "";
 	const realityDest = form.watch("realityDest");
-	const realityServerNameSuggestion =
+	const selectedNode = nodesQuery.data?.items.find(
+		(node) => node.node_id === nodeId,
+	);
+	const destinationServerNameSuggestion =
 		realityServerNameSuggestionFromDest(realityDest);
+	const accessHostServerNameSuggestion = selectedNode
+		? realityServerNameSuggestionFromAccessHost(
+				selectedNode.access_host,
+				endpointPort,
+			)
+		: null;
+	const realityServerNameSuggestion =
+		destinationServerNameSuggestion ??
+		(realityDest.trim().length === 0 ? accessHostServerNameSuggestion : null);
 	const realityServerNameSuggestions = realityServerNameSuggestion
 		? [realityServerNameSuggestion]
 		: [];
@@ -455,10 +471,10 @@ export function EndpointNewPage() {
 															disabled={createMutation.isPending}
 															validateTag={validateRealityServerName}
 															suggestions={realityServerNameSuggestions}
-															suggestionLabel="Show destination suggestion"
+															suggestionLabel="Show access address suggestion"
 															helperText={
-																"Choose the endpoint destination address when it " +
-																"should also be used as a REALITY serverName."
+																"Use the selected node access address, or the " +
+																"endpoint destination when it is filled."
 															}
 														/>
 													</FormControl>

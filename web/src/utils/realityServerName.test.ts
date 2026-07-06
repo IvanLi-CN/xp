@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	realityServerNameSuggestionFromAccessHost,
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "./realityServerName";
@@ -49,5 +50,31 @@ describe("realityServerNameSuggestionFromDest", () => {
 			realityServerNameSuggestionFromDest("https://origin.example.test:443"),
 		).toBeNull();
 		expect(realityServerNameSuggestionFromDest("localhost:443")).toBeNull();
+	});
+});
+
+describe("realityServerNameSuggestionFromAccessHost", () => {
+	it("offers the selected node access authority with the endpoint port", () => {
+		expect(
+			realityServerNameSuggestionFromAccessHost("node-xp.example.test", 443),
+		).toBe("node-xp.example.test:443");
+	});
+
+	it("keeps explicit ports and rejects invalid access hosts", () => {
+		expect(
+			realityServerNameSuggestionFromAccessHost(
+				"node-xp.example.test:8443",
+				443,
+			),
+		).toBe("node-xp.example.test:8443");
+		expect(
+			realityServerNameSuggestionFromAccessHost(
+				"https://node-xp.example.test",
+				443,
+			),
+		).toBeNull();
+		expect(
+			realityServerNameSuggestionFromAccessHost("localhost", 443),
+		).toBeNull();
 	});
 });

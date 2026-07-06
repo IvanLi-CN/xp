@@ -66,6 +66,19 @@ const expectTagSuggestionPanelToMatchControl = () => {
 
 export const ManualDestApiAddressSuggestion: Story = {};
 
+export const ServerNamesAccessAddressSuggestionShowsOnEmptyFocus: Story = {
+	tags: ["coverage-ui"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const serverNamesInput = await canvas.findByLabelText("serverNames");
+		await userEvent.click(serverNamesInput);
+		await expect(
+			await within(document.body).findByText("node-xp.example.test:443"),
+		).toBeVisible();
+		expectTagSuggestionPanelToMatchControl();
+	},
+};
+
 export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 	tags: ["coverage-ui"],
 	play: async ({ canvasElement }) => {
@@ -98,14 +111,17 @@ export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 		);
 		await expect(destInput).toHaveValue("127.0.0.1:62416");
 		await userEvent.clear(destInput);
+		await userEvent.click(await canvas.findByLabelText("serverNames"));
+		await expect(
+			await within(document.body).findByText("node-xp.example.test:443"),
+		).toBeVisible();
+		expectTagSuggestionPanelToMatchControl();
+		await userEvent.click(destInput);
 		await userEvent.type(destInput, "origin.example.test:443");
 		await userEvent.click(await canvas.findByLabelText("serverNames"));
 		await expect(
 			await within(document.body).findByText("origin.example.test:443"),
 		).toBeVisible();
 		expectTagSuggestionPanelToMatchControl();
-		await expect(
-			within(document.body).queryByText("node-xp.example.test:443"),
-		).toBeNull();
 	},
 };
