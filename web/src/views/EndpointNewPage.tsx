@@ -122,8 +122,7 @@ export function EndpointNewPage() {
 			)
 		: null;
 	const realityServerNameSuggestion =
-		destinationServerNameSuggestion ??
-		(realityDest.trim().length === 0 ? accessHostServerNameSuggestion : null);
+		destinationServerNameSuggestion ?? accessHostServerNameSuggestion;
 	const realityServerNameSuggestions = realityServerNameSuggestion
 		? [realityServerNameSuggestion]
 		: [];
