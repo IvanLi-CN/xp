@@ -110,6 +110,12 @@ export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
 			await within(document.body).findByText("127.0.0.1:62416"),
 		);
 		await expect(destInput).toHaveValue("127.0.0.1:62416");
+		await userEvent.click(await canvas.findByLabelText("serverNames"));
+		await expect(
+			await within(document.body).findByText("node-xp.example.test:443"),
+		).toBeVisible();
+		expectTagSuggestionPanelToMatchControl();
+		await userEvent.click(destInput);
 		await userEvent.clear(destInput);
 		await userEvent.click(await canvas.findByLabelText("serverNames"));
 		await expect(
