@@ -609,9 +609,15 @@ Ideal post-release path:
 
 ## Disaster recovery: quorum lost (single-node leader recovery)
 
-If a voter node is wiped and quorum is permanently lost (e.g. a 2-voter cluster loses 1 node),
-the remaining node cannot elect a leader by itself. In this case you can force a single-node Raft
-membership on the surviving node to restore write availability.
+Stable Raft membership treats every listed node as a voter. Long-lived learners, observer nodes,
+`can_vote` flags, or `voter=false` configuration are not supported. A 2-voter topology is not an
+acceptable production shape because losing either voter removes writable quorum; use at least 3
+stable voters for production clusters.
+
+If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
+case you can force a single-node Raft membership on the chosen surviving node to restore write
+availability. Failed or offline nodes are not kept as learners during this recovery; repair them
+separately and join them again after the recovered leader is writable.
 
 Warning:
 
@@ -621,8 +627,16 @@ Warning:
 
 Procedure (surviving node):
 
-1. Stop `xp` (systemd/OpenRC).
-2. Run the recovery command:
+1. Choose the surviving node with the most recent healthy data. Do not run recovery on multiple
+   nodes.
+2. Stop `xp` on the chosen node (systemd/OpenRC).
+3. Run a dry-run first:
+
+```
+sudo xp-ops xp recover-single-node --dry-run
+```
+
+4. Run the recovery command:
 
 ```
 sudo xp-ops xp recover-single-node -y
@@ -633,13 +647,22 @@ Notes:
 - By default, `xp-ops` creates a backup copy at `${XP_DATA_DIR}/raft.bak-<timestamp>`. You can skip
   it with `--no-backup` (not recommended).
 - After restart, leader election may take up to ~6-12 seconds (WAN-tuned defaults).
+- Do not manually edit Raft membership files and do not try to preserve offline nodes as learners.
 
 After recovery:
 
-- Re-join the wiped node using a join token issued by the recovered leader (`/api/admin/cluster/join-tokens`),
-  then run `xp join` on the wiped node and restart its service.
+- Start `xp` on the recovered node and wait until `/api/cluster/info` reports `"role": "leader"`.
+- Confirm an admin write works, for example by creating a temporary endpoint and then deleting it.
+- Re-join each repaired node using a join token issued by the recovered leader
+  (`/api/admin/cluster/join-tokens`), then run `xp join` on the repaired node and restart its
+  service.
+- Treat `xp join` success as voter success: a node that cannot be promoted to voter must not be
+  considered joined.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
   `NodeMeta` (leader discovery/forwarding) matches config.
+- After all intended nodes are rejoined, confirm `/api/cluster/info` has a leader and endpoint
+  creation succeeds through the admin UI/API. Any `membership.nodes - voter_ids` divergence is an
+  incident and must be repaired by the leader-side guard or by explicit disaster recovery.
 
 ### Backup before upgrade
 

@@ -45,7 +45,13 @@
 
 ### 3.3 成员数量与投票
 
-- 规模：1–20 节点（全部为 voter）
+- 规模：1–20 节点；稳定成员必须全部为 voter。
+- `learner` 只允许作为 join/delete 过程中的短暂内部状态，不能作为长期可见节点角色。
+- 不支持 `can_vote`、`voter=false`、观察者节点、只读节点或任何“是否能投票”的配置项。
+- Join 成功语义：
+  - `POST /api/cluster/join` 返回成功时，新节点必须已经进入 Raft voters。
+  - 如果 voter promotion 失败，join 必须失败并尽力回滚刚加入的 learner/state node。
+- 2-voter 拓扑不可接受：任一 voter 失联都会丢失可写 quorum。生产集群建议至少 3 个稳定 voter；单节点只适合 bootstrap、实验或显式灾难恢复后的临时状态。
 - 取舍：网络分区时少数派不可写（已确认可接受）
 
 ### 3.4 存储

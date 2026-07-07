@@ -2,7 +2,8 @@
 
 本目录用于管理工作项的**规格与追踪**：记录范围、验收标准、任务清单与状态，作为交付依据；实现与验证应以对应 `SPEC.md` 为准。
 
-> Legacy compatibility: historical repos may still contain `docs/plan/**/PLAN.md`. New entries must be created under `docs/specs/**/SPEC.md`.
+> Legacy compatibility: historical repos may still contain `docs/plan/**/PLAN.md`.
+> New entries must be created under `docs/specs/**/SPEC.md`.
 
 ## 快速新增一个规格
 
@@ -86,6 +87,7 @@
 | r7m2q | OpenRC 小内存运行时快速自愈                | 已完成 | `r7m2q-openrc-low-memory-runtime-recovery/SPEC.md`      | 2026-05-15 | 256MB no-swap host target；xray fast first restart + exponential backoff；cloudflared monitor-only default；health restart/backoff fields                                                                                                                                                                                                         |
 | nbs5f | Xray 控制面 Relay 组网                     | 已完成 | `nbs5f-xray-control-plane-relay/SPEC.md`                | 2026-05-23 | 控制面远程请求可选走本机 Xray relay；默认关闭；保留公网 api_base_url 作为 bootstrap/fallback；health/admin config 暴露 fallback 状态                                                                                                                                                                                                              |
 | nq4ha | Web 当前节点原地升级入口                   | 已完成 | `nq4ha-web-local-upgrade/SPEC.md`                       | 2026-07-06 | fast-track；systemd unit direct runner + stale active status failed reconciliation                                                                                                                                                                                                                                                                |
+| 7mvqp | Raft membership voter invariant            | 已完成 | `7mvqp-raft-membership-voter-invariant/SPEC.md`         | 2026-07-07 | fast-track；稳定 membership 节点全部为 voter；join 成功即 voter；leader-side guard 修复遗留 learner；无 quorum 仅显式灾难恢复                                                                                                                                                                                                                     |
 | m4n7c | 节点 TCP 连接数面板                        | 已完成 | `m4n7c-node-tcp-connection-count/SPEC.md`               | 2026-06-21 | fast-track；Linux-only，本机 socket 视角；Node details 独立 tab；本地 7d 分钟级历史 + endpoint 多选聚合                                                                                                                                                                                                                                           |
 | yzqn6 | Remove grant groups hard cut               | 已完成 | `yzqn6-remove-grant-groups-hard-cut/SPEC.md`            | 2026-02-27 | PR #84                                                                                                                                                                                                                                                                                                                                            |
 | wvrmn | Remove grants hard cut                     | 已完成 | `wvrmn-remove-grants-hard-cut/SPEC.md`                  | 2026-03-02 | PR #86 + PR #90 AccessMatrix post-fix（含树勾选状态/单端点元数据修正）                                                                                                                                                                                                                                                                            |

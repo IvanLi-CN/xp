@@ -1,4 +1,4 @@
-use std::{any::Any, collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+use std::{any::Any, collections::BTreeSet, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::http::{Method, Uri, header::HeaderName};
@@ -46,6 +46,56 @@ pub trait RaftFacade: Send + Sync + 'static {
 
     fn add_learner(&self, node_id: NodeId, node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>>;
 
+    fn wait_learner_caught_up(
+        &self,
+        node_id: NodeId,
+        required_log_index: u64,
+        timeout: Duration,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let mut metrics = self.metrics();
+        Box::pin(async move {
+            let expected_leader = {
+                let snapshot = metrics.borrow().clone();
+                if snapshot.state != openraft::ServerState::Leader {
+                    anyhow::bail!("not leader while waiting for learner catch-up");
+                }
+                snapshot.id
+            };
+            let deadline = tokio::time::Instant::now() + timeout;
+            loop {
+                {
+                    let snapshot = metrics.borrow();
+                    if snapshot.state != openraft::ServerState::Leader
+                        || snapshot.current_leader != Some(expected_leader)
+                    {
+                        anyhow::bail!("leadership changed while waiting for learner catch-up");
+                    }
+
+                    let membership = snapshot.membership_config.membership();
+                    if membership.voter_ids().any(|voter_id| voter_id == node_id) {
+                        return Ok(());
+                    }
+                    if membership.get_node(&node_id).is_some()
+                        && let Some(replication) = snapshot.replication.as_ref()
+                        && let Some(Some(log_id)) = replication.get(&node_id)
+                        && log_id.index >= required_log_index
+                    {
+                        return Ok(());
+                    }
+                }
+
+                let now = tokio::time::Instant::now();
+                if now >= deadline {
+                    anyhow::bail!("timeout after {}s", timeout.as_secs());
+                }
+                tokio::time::timeout(deadline - now, metrics.changed())
+                    .await
+                    .map_err(|_| anyhow::anyhow!("timeout after {}s", timeout.as_secs()))?
+                    .map_err(|e| anyhow::anyhow!("raft metrics channel closed: {e}"))?;
+            }
+        })
+    }
+
     fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>>;
 
     fn change_membership(
@@ -85,6 +135,23 @@ impl RaftFacade for PanicBoundaryRaft {
         let inner = self.inner.clone();
         Box::pin(async move {
             catch_raft_panic("raft add_learner", inner.add_learner(node_id, node)).await??;
+            Ok(())
+        })
+    }
+
+    fn wait_learner_caught_up(
+        &self,
+        node_id: NodeId,
+        required_log_index: u64,
+        timeout: Duration,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            catch_raft_panic(
+                "raft wait_learner_caught_up",
+                inner.wait_learner_caught_up(node_id, required_log_index, timeout),
+            )
+            .await??;
             Ok(())
         })
     }
@@ -589,6 +656,15 @@ impl RaftFacade for LocalRaft {
     }
 
     fn add_learner(&self, _node_id: NodeId, _node: NodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn wait_learner_caught_up(
+        &self,
+        _node_id: NodeId,
+        _required_log_index: u64,
+        _timeout: Duration,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 

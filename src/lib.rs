@@ -27,6 +27,7 @@ pub mod public_ip_probe;
 pub mod quota;
 pub mod quota_policy;
 pub mod raft;
+pub mod raft_membership_guard;
 pub mod reconcile;
 pub mod state;
 pub mod subscription;
