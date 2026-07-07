@@ -463,6 +463,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         should_reconcile_managed_defaults_at_startup(&managed_default_intent)
             .then_some(managed_default_intent);
     let startup_raft_facade = raft_facade.clone();
+    let membership_guard_raft_facade = raft_facade.clone();
     let startup_node_id = cluster.node_id.clone();
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
@@ -496,6 +497,10 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             raft_facade.clone(),
         )?;
     let _vless_https_canary_task = vless_https_canary_task;
+    let _raft_membership_guard_task = xp::raft_membership_guard::spawn_membership_voter_guard(
+        membership_guard_raft_facade,
+        Duration::from_secs(60),
+    );
 
     let app = xp::http::build_router(
         config.clone(),

@@ -38,8 +38,8 @@
     - 若该 node 仍存在 endpoints，则拒绝删除（409 conflict）。
     - 删除时清理 `user_node_quotas` 中对该 node 的配额配置（避免 quota worker 读取已删除 node）。
   - 若该 node 属于 Raft membership：
-    - 若是 voter：先 `RemoveVoters`（retain=true，使其退化为 learner）
-    - 再 `RemoveNodes`（把 learner 从 membership 移除）
+    - 若是 voter：先 `RemoveVoters`（retain=true，仅作为删除流程的短暂内部步骤）
+    - 再 `RemoveNodes`（把节点从 membership 移除，不能稳定保留为 learner）
   - 为 follower 场景提供 server-side forwarding（内部签名）以避免浏览器跨域/丢 Authorization。
 - Web：
   - Node details 页面新增 Danger zone：删除 node（ConfirmDialog 二次确认）。

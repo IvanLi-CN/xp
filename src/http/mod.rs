@@ -1628,6 +1628,10 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+
     state
         .raft
         .add_learner(
@@ -1641,35 +1645,32 @@ async fn cluster_join(
         .await
         .map_err(|e| ApiError::internal(format!("join add_learner failed: {e}")))?;
 
-    let _ = raft_write(
+    let upsert_result = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertNode { node },
+        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
     )
-    .await?;
+    .await;
+    if let Err(err) = upsert_result {
+        rollback_joined_learner(&state, raft_node_id, &node_id, false, false).await;
+        return Err(err);
+    }
 
-    let join_required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
-    let expected_leader = metrics.id;
-    let promotion_raft = state.raft.clone();
-    let promotion_metrics = state.raft.metrics();
-    tokio::spawn(async move {
-        if let Err(err) = promote_joined_learner_to_voter(
-            promotion_raft,
-            promotion_metrics,
-            expected_leader,
-            raft_node_id,
-            join_required_log_index,
-            Duration::from_secs(30),
-        )
+    let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
+    if let Err(err) = state
+        .raft
+        .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
         .await
-        {
-            tracing::warn!(
-                raft_node_id = raft_node_id,
-                expected_leader = expected_leader,
-                error = %err,
-                "join: voter promotion skipped"
-            );
-        }
-    });
+    {
+        rollback_joined_learner(&state, raft_node_id, &node_id, true, false).await;
+        return Err(ApiError::internal(format!(
+            "join learner catch-up failed: {err}"
+        )));
+    }
+
+    if let Err(err) = state.raft.add_voters(BTreeSet::from([raft_node_id])).await {
+        rollback_joined_learner(&state, raft_node_id, &node_id, true, true).await;
+        return Err(ApiError::internal(format!("join add_voters failed: {err}")));
+    }
 
     Ok(Json(ClusterJoinResponse {
         node_id,
@@ -1680,71 +1681,61 @@ async fn cluster_join(
     }))
 }
 
-async fn promote_joined_learner_to_voter(
-    raft: Arc<dyn RaftFacade>,
-    mut metrics: tokio::sync::watch::Receiver<openraft::RaftMetrics<RaftNodeId, RaftNodeMeta>>,
-    expected_leader: RaftNodeId,
+async fn rollback_joined_learner(
+    state: &AppState,
     raft_node_id: RaftNodeId,
-    required_log_index: u64,
-    timeout: Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        {
-            let m = metrics.borrow();
-
-            if m.state != openraft::ServerState::Leader || m.current_leader != Some(expected_leader)
-            {
-                return Err("leadership changed".to_string());
-            }
-
-            let membership = m.membership_config.membership();
-            if membership
-                .voter_ids()
-                .any(|voter_id| voter_id == raft_node_id)
-            {
-                return Ok(());
-            }
-
-            if membership.get_node(&raft_node_id).is_none() {
-                return Err("learner removed from membership".to_string());
-            }
-
-            let repl = match m.replication.as_ref() {
-                Some(x) => x,
-                None => return Err("no longer leader (no replication metrics)".to_string()),
-            };
-
-            match repl.get(&raft_node_id) {
-                None => {
-                    // Replication is not reported yet. Keep waiting.
-                }
-                Some(None) => {
-                    // Learner is not reachable yet. Keep waiting.
-                }
-                Some(Some(log_id)) if log_id.index >= required_log_index => {
-                    break;
-                }
-                Some(Some(_)) => {}
-            }
-        }
-
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return Err(format!("timeout after {}s", timeout.as_secs()));
-        }
-        let remaining = deadline - now;
-        tokio::time::timeout(remaining, metrics.changed())
+    node_id: &str,
+    remove_state_node: bool,
+    remove_possible_voter: bool,
+) {
+    if remove_possible_voter
+        && let Err(err) = state
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+                true,
+            )
             .await
-            .map_err(|_| format!("timeout after {}s", timeout.as_secs()))?
-            .map_err(|_| "metrics sender dropped".to_string())?;
+    {
+        tracing::warn!(
+            raft_node_id,
+            error = %err,
+            "join rollback failed to demote possibly promoted voter"
+        );
     }
 
-    raft.add_voters(BTreeSet::from([raft_node_id]))
+    if let Err(err) = state
+        .raft
+        .change_membership(
+            openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
+            true,
+        )
         .await
-        .map_err(|e| format!("change_membership add voter: {e}"))?;
+    {
+        tracing::warn!(
+            raft_node_id,
+            error = %err,
+            "join rollback failed to remove learner from raft membership"
+        );
+    }
 
-    Ok(())
+    if remove_state_node
+        && let Err(err) = raft_write(
+            state,
+            crate::state::DesiredStateCommand::DeleteNode {
+                node_id: node_id.to_string(),
+                delete_endpoints: false,
+                expected_endpoint_ids: Vec::new(),
+            },
+        )
+        .await
+    {
+        tracing::warn!(
+            node_id,
+            error = %err.message,
+            "join rollback failed to remove node from desired state"
+        );
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -3502,6 +3493,10 @@ async fn admin_delete_node(
     if metrics.current_leader == Some(raft_node_id) {
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
+
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
 
     let mut removed_membership = admin_delete_node_raft_op(
         "removing raft membership",
@@ -7551,5 +7546,7 @@ async fn get_subscription_mihomo_provider_system(
     )
 }
 
+#[cfg(test)]
+mod cluster_join_tests;
 #[cfg(test)]
 mod tests;
