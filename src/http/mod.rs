@@ -1628,6 +1628,10 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+
     state
         .raft
         .add_learner(
@@ -3472,6 +3476,10 @@ async fn admin_delete_node(
     if metrics.current_leader == Some(raft_node_id) {
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
+
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
 
     let mut removed_membership = admin_delete_node_raft_op(
         "removing raft membership",

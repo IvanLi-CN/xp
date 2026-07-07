@@ -1,11 +1,20 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, sync::OnceLock, time::Duration};
 
 use anyhow::Context;
+use tokio::sync::Mutex;
 
 use crate::raft::{
     app::RaftFacade,
     types::{NodeId, NodeMeta},
 };
+
+static MEMBERSHIP_OPERATION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
+
+pub fn membership_operation_gate() -> Arc<Mutex<()>> {
+    MEMBERSHIP_OPERATION_GATE
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 pub fn non_voter_membership_node_ids(
     metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
@@ -32,6 +41,20 @@ pub fn non_voter_membership_node_ids(
 pub async fn repair_membership_voters_once(
     raft: Arc<dyn RaftFacade>,
 ) -> anyhow::Result<BTreeSet<NodeId>> {
+    repair_membership_voters_once_with_gate(raft, membership_operation_gate()).await
+}
+
+async fn repair_membership_voters_once_with_gate(
+    raft: Arc<dyn RaftFacade>,
+    gate: Arc<Mutex<()>>,
+) -> anyhow::Result<BTreeSet<NodeId>> {
+    let Ok(_membership_operation_guard) = gate.try_lock_owned() else {
+        tracing::debug!(
+            "raft membership guard skipped because a membership operation is in progress"
+        );
+        return Ok(BTreeSet::new());
+    };
+
     let metrics = raft.metrics().borrow().clone();
     let non_voters = non_voter_membership_node_ids(&metrics);
     if non_voters.is_empty() {
@@ -195,7 +218,9 @@ mod tests {
             promoted: promoted.clone(),
         });
 
-        let repaired = repair_membership_voters_once(raft).await.unwrap();
+        let repaired = repair_membership_voters_once_with_gate(raft, Arc::new(Mutex::new(())))
+            .await
+            .unwrap();
 
         assert_eq!(repaired, BTreeSet::from([2]));
         assert_eq!(*promoted.lock().await, vec![BTreeSet::from([2])]);
@@ -217,9 +242,37 @@ mod tests {
             promoted: promoted.clone(),
         });
 
-        let err = repair_membership_voters_once(raft).await.unwrap_err();
+        let err = repair_membership_voters_once_with_gate(raft, Arc::new(Mutex::new(())))
+            .await
+            .unwrap_err();
 
         assert!(err.to_string().contains("requires leader/quorum"));
+        assert!(promoted.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn guard_skips_when_membership_operation_gate_is_busy() {
+        let nodes = BTreeMap::from([(1, meta("one")), (2, meta("two"))]);
+        let metrics = metrics_with_membership(
+            openraft::ServerState::Leader,
+            Some(1),
+            BTreeSet::from([1]),
+            nodes,
+        );
+        let (_tx, rx) = watch::channel(metrics);
+        let promoted = Arc::new(Mutex::new(Vec::new()));
+        let raft: Arc<dyn RaftFacade> = Arc::new(RecordingRaft {
+            metrics: rx,
+            promoted: promoted.clone(),
+        });
+        let gate = Arc::new(Mutex::new(()));
+        let _busy = gate.clone().lock_owned().await;
+
+        let repaired = repair_membership_voters_once_with_gate(raft, gate)
+            .await
+            .unwrap();
+
+        assert!(repaired.is_empty());
         assert!(promoted.lock().await.is_empty());
     }
 }

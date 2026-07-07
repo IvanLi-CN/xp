@@ -9,12 +9,15 @@
 - `raft_membership_guard` scans Raft metrics for `membership.nodes - voter_ids`.
 - The guard promotes non-voter membership nodes only while running on the leader; non-leader states
   log the divergence and leave disk state untouched.
+- Join/delete membership transitions and guard repair share a membership operation gate, so the
+  guard skips in-flight learners and removal transitions.
 - Server startup spawns the guard with a periodic interval.
 
 ## Coverage
 
 - HTTP join tests cover `add_voters` failure and state rollback.
-- Guard tests cover non-voter detection, leader repair, and follower/no-leader non-repair.
+- Guard tests cover non-voter detection, leader repair, in-flight operation skipping, and
+  follower/no-leader non-repair.
 
 ## Remaining Gaps
 
