@@ -34,6 +34,7 @@ const TEST_ADMIN_TOKEN: &str = "testtoken";
 #[derive(Clone)]
 struct FailingAddVotersRaft {
     inner: LocalRaft,
+    membership_changes: Arc<Mutex<Vec<&'static str>>>,
 }
 
 impl RaftFacade for FailingAddVotersRaft {
@@ -81,7 +82,17 @@ impl RaftFacade for FailingAddVotersRaft {
         changes: openraft::ChangeMembers<u64, RaftNodeMeta>,
         retain: bool,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        <LocalRaft as RaftFacade>::change_membership(&self.inner, changes, retain)
+        let inner = self.inner.clone();
+        let membership_changes = self.membership_changes.clone();
+        let change_kind = match &changes {
+            openraft::ChangeMembers::RemoveVoters(_) => "remove_voters",
+            openraft::ChangeMembers::RemoveNodes(_) => "remove_nodes",
+            _ => "other",
+        };
+        Box::pin(async move {
+            membership_changes.lock().await.push(change_kind);
+            <LocalRaft as RaftFacade>::change_membership(&inner, changes, retain).await
+        })
     }
 }
 
@@ -207,7 +218,12 @@ fn signed_join_token(cluster: &ClusterMetadata, ca_pem: &str, ca_key_pem: &str) 
 
 fn app_with_failing_add_voters(
     tmp: &TempDir,
-) -> (axum::Router, Arc<Mutex<JsonSnapshotStore>>, String) {
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    String,
+    Arc<Mutex<Vec<&'static str>>>,
+) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -251,8 +267,10 @@ fn app_with_failing_add_voters(
         ),
     ));
     let (_tx, rx) = watch::channel(metrics);
+    let membership_changes = Arc::new(Mutex::new(Vec::new()));
     let raft: Arc<dyn RaftFacade> = Arc::new(FailingAddVotersRaft {
         inner: LocalRaft::new(store.clone(), rx),
+        membership_changes: membership_changes.clone(),
     });
     let xray_health = XrayHealthHandle::new_unknown();
     let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
@@ -295,13 +313,13 @@ fn app_with_failing_add_voters(
         geo_db_update,
         crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
-    (router, store, join_token)
+    (router, store, join_token, membership_changes)
 }
 
 #[tokio::test]
 async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_node() {
     let tmp = TempDir::new().unwrap();
-    let (app, store, join_token) = app_with_failing_add_voters(&tmp);
+    let (app, store, join_token, membership_changes) = app_with_failing_add_voters(&tmp);
     let decoded =
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
@@ -332,4 +350,8 @@ async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_no
             .contains("join add_voters failed: simulated add_voters failure")
     );
     assert!(store.lock().await.get_node(&decoded.token_id).is_none());
+    assert_eq!(
+        *membership_changes.lock().await,
+        vec!["remove_voters", "remove_nodes"]
+    );
 }

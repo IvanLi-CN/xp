@@ -1651,7 +1651,7 @@ async fn cluster_join(
     )
     .await;
     if let Err(err) = upsert_result {
-        rollback_joined_learner(&state, raft_node_id, &node_id, false).await;
+        rollback_joined_learner(&state, raft_node_id, &node_id, false, false).await;
         return Err(err);
     }
 
@@ -1661,14 +1661,14 @@ async fn cluster_join(
         .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
         .await
     {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true).await;
+        rollback_joined_learner(&state, raft_node_id, &node_id, true, false).await;
         return Err(ApiError::internal(format!(
             "join learner catch-up failed: {err}"
         )));
     }
 
     if let Err(err) = state.raft.add_voters(BTreeSet::from([raft_node_id])).await {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true).await;
+        rollback_joined_learner(&state, raft_node_id, &node_id, true, true).await;
         return Err(ApiError::internal(format!("join add_voters failed: {err}")));
     }
 
@@ -1686,7 +1686,24 @@ async fn rollback_joined_learner(
     raft_node_id: RaftNodeId,
     node_id: &str,
     remove_state_node: bool,
+    remove_possible_voter: bool,
 ) {
+    if remove_possible_voter
+        && let Err(err) = state
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+                true,
+            )
+            .await
+    {
+        tracing::warn!(
+            raft_node_id,
+            error = %err,
+            "join rollback failed to demote possibly promoted voter"
+        );
+    }
+
     if let Err(err) = state
         .raft
         .change_membership(
