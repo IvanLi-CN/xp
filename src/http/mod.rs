@@ -595,6 +595,11 @@ struct AdminNodeDeletePreviewResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct InternalRestoreExistingNodeMembershipRequest {
+    node_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct DeleteNodeQuery {
     #[serde(default)]
     delete_endpoints: bool,
@@ -913,6 +918,10 @@ pub fn build_router(
         .route(
             "/_internal/raft/set-nodes",
             post(admin_internal_raft_set_nodes),
+        )
+        .route(
+            "/_internal/raft/restore-existing-node",
+            post(admin_internal_restore_existing_node_membership),
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
@@ -1407,8 +1416,49 @@ struct InternalChangeMembershipRequest {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum InternalChangeMembers {
+    AddVoters { nodes: Vec<InternalSetNode> },
+    AddNodes { nodes: Vec<InternalSetNode> },
     RemoveVoters { node_ids: Vec<RaftNodeId> },
     RemoveNodes { node_ids: Vec<RaftNodeId> },
+}
+
+fn internal_set_node_map(
+    nodes: Vec<InternalSetNode>,
+) -> Result<std::collections::BTreeMap<RaftNodeId, RaftNodeMeta>, ApiError> {
+    if nodes.is_empty() {
+        return Err(ApiError::invalid_request("nodes is empty"));
+    }
+
+    let mut map = std::collections::BTreeMap::new();
+    for n in nodes {
+        if n.node_id.trim().is_empty() {
+            return Err(ApiError::invalid_request("node_id is empty"));
+        }
+        if n.node_name.trim().is_empty() {
+            return Err(ApiError::invalid_request("node_name is empty"));
+        }
+        validate_https_origin(&n.api_base_url)?;
+
+        let raft_node_id = raft_node_id_from_ulid(&n.node_id)
+            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+        if map.contains_key(&raft_node_id) {
+            return Err(ApiError::invalid_request(format!(
+                "duplicate node_id: {}",
+                n.node_id
+            )));
+        }
+
+        map.insert(
+            raft_node_id,
+            RaftNodeMeta {
+                name: n.node_name,
+                api_base_url: n.api_base_url.clone(),
+                raft_endpoint: n.api_base_url,
+            },
+        );
+    }
+
+    Ok(map)
 }
 
 async fn admin_internal_raft_change_membership(
@@ -1421,6 +1471,19 @@ async fn admin_internal_raft_change_membership(
     }
 
     let node_ids: BTreeSet<RaftNodeId> = match &req.changes {
+        InternalChangeMembers::AddVoters { nodes } | InternalChangeMembers::AddNodes { nodes } => {
+            let node_ids = nodes
+                .iter()
+                .map(|node| {
+                    raft_node_id_from_ulid(&node.node_id)
+                        .map_err(|e| ApiError::invalid_request(e.to_string()))
+                })
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            if node_ids.len() != nodes.len() {
+                return Err(ApiError::invalid_request("duplicate node_id"));
+            }
+            node_ids
+        }
         InternalChangeMembers::RemoveVoters { node_ids } => node_ids.iter().cloned().collect(),
         InternalChangeMembers::RemoveNodes { node_ids } => node_ids.iter().cloned().collect(),
     };
@@ -1434,6 +1497,12 @@ async fn admin_internal_raft_change_membership(
     }
 
     let changes = match req.changes {
+        InternalChangeMembers::AddVoters { nodes } => {
+            openraft::ChangeMembers::AddVoters(internal_set_node_map(nodes)?)
+        }
+        InternalChangeMembers::AddNodes { nodes } => {
+            openraft::ChangeMembers::AddNodes(internal_set_node_map(nodes)?)
+        }
         InternalChangeMembers::RemoveVoters { .. } => {
             openraft::ChangeMembers::RemoveVoters(node_ids)
         }
@@ -1447,6 +1516,69 @@ async fn admin_internal_raft_change_membership(
         .map_err(|e| ApiError::internal(format!("change_membership: {e}")))?;
 
     Ok(Json(json!({ "ok": true })))
+}
+
+async fn admin_internal_restore_existing_node_membership(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(req): ApiJson<InternalRestoreExistingNodeMembershipRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&req.node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {}", req.node_id)))?
+    };
+    let raft_node_id = raft_node_id_from_ulid(&node.node_id)
+        .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+
+    let membership = metrics.membership_config.membership();
+    if membership
+        .voter_ids()
+        .any(|voter_id| voter_id == raft_node_id)
+    {
+        return Ok(Json(json!({ "ok": true, "already_voter": true })));
+    }
+
+    let meta = RaftNodeMeta {
+        name: node.node_name.clone(),
+        api_base_url: node.api_base_url.clone(),
+        raft_endpoint: node.api_base_url.clone(),
+    };
+
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+
+    state
+        .raft
+        .add_learner(raft_node_id, meta)
+        .await
+        .map_err(|e| ApiError::internal(format!("restore add_learner failed: {e}")))?;
+
+    let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
+    state
+        .raft
+        .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
+        .await
+        .map_err(|e| ApiError::internal(format!("restore learner catch-up failed: {e}")))?;
+
+    state
+        .raft
+        .add_voters(BTreeSet::from([raft_node_id]))
+        .await
+        .map_err(|e| ApiError::internal(format!("restore add_voters failed: {e}")))?;
+
+    Ok(Json(json!({ "ok": true, "already_voter": false })))
 }
 
 #[derive(Deserialize)]
@@ -7548,5 +7680,7 @@ async fn get_subscription_mihomo_provider_system(
 
 #[cfg(test)]
 mod cluster_join_tests;
+#[cfg(test)]
+mod restore_membership_tests;
 #[cfg(test)]
 mod tests;
