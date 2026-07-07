@@ -518,9 +518,7 @@ fn recover_single_node_membership(
         ));
     }
 
-    let mut nodes: BTreeMap<crate::raft::types::NodeId, crate::raft::types::NodeMeta> =
-        old.nodes().map(|(id, n)| (*id, n.clone())).collect();
-    nodes.insert(raft_node_id, desired_self_meta);
+    let nodes = BTreeMap::from([(raft_node_id, desired_self_meta)]);
 
     let mut voters = BTreeSet::new();
     voters.insert(raft_node_id);
@@ -915,6 +913,7 @@ mod recover_single_node_tests {
         assert_eq!(voter_ids, BTreeSet::from([2u64]));
         assert_eq!(out.log_id(), stored.log_id());
 
+        assert!(out.membership().get_node(&1u64).is_none());
         let meta = out
             .membership()
             .get_node(&2u64)
