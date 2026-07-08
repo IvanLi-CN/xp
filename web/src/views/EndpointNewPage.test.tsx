@@ -89,6 +89,20 @@ function setupEndpointMocks() {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
+				endpoint_id: "existing-managed-public-origin",
+				node_id: "node-alpha",
+				tag: "existing-managed-public-origin",
+				kind: "vless_reality_vision_tcp",
+				port: 443,
+				meta: {
+					managed_default: true,
+					canary_upstream: {
+						url: "https://node-xp.example.test",
+						mode: "auto",
+					},
+				},
+			},
+			{
 				endpoint_id: "existing-managed-upstream",
 				node_id: "node-alpha",
 				tag: "existing-managed-upstream",
@@ -190,6 +204,7 @@ describe("EndpointNewPage", () => {
 				name: "Show upstream origin suggestions",
 			}),
 		);
+		expect(screen.queryByText("https://node-xp.example.test")).toBeNull();
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),

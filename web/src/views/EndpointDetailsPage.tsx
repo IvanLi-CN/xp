@@ -397,7 +397,11 @@ export function EndpointDetailsPage() {
 	const managedCanaryUpstreamSuggestions =
 		canaryUpstreamSuggestionsFromManagedEndpoints(
 			endpointsQuery.data?.items ?? [],
-			endpoint.node_id,
+			{
+				nodeId: endpoint.node_id,
+				accessHost: endpointNode?.access_host,
+				apiBaseUrl: endpointNode?.api_base_url,
+			},
 		);
 	const managedAcceptedAuthoritySuggestions =
 		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host);

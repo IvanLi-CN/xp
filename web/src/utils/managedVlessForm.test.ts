@@ -87,7 +87,7 @@ describe("canaryUpstreamSuggestionsFromManagedEndpoints", () => {
 						},
 					},
 				],
-				"node-alpha",
+				{ nodeId: "node-alpha" },
 			),
 		).toEqual([
 			{
@@ -97,6 +97,47 @@ describe("canaryUpstreamSuggestionsFromManagedEndpoints", () => {
 			{
 				value: "https://origin.example.com",
 				label: "https://origin.example.com",
+			},
+		]);
+	});
+
+	it("filters node-owned public and control-plane origins from suggestions", () => {
+		expect(
+			canaryUpstreamSuggestionsFromManagedEndpoints(
+				[
+					{
+						endpoint_id: "managed-a",
+						node_id: "node-alpha",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "https://node-xp.example.test",
+							},
+						},
+					},
+					{
+						endpoint_id: "managed-b",
+						node_id: "node-alpha",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "http://127.0.0.1:8080",
+							},
+						},
+					},
+				],
+				{
+					nodeId: "node-alpha",
+					accessHost: "node-xp.example.test",
+					apiBaseUrl: "https://node-xp.example.test:443",
+				},
+			),
+		).toEqual([
+			{
+				value: "http://127.0.0.1:8080",
+				label: "http://127.0.0.1:8080",
 			},
 		]);
 	});

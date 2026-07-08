@@ -311,14 +311,14 @@ export function DemoEndpointFormPage() {
 					endpoint.managedDefault,
 			)
 			.map((endpoint) => endpoint.canaryUpstreamUrl),
+		{
+			accessHost: selectedNode?.accessHost,
+			apiBaseUrl: selectedNode?.apiBaseUrl,
+		},
 	);
-	const acceptedAuthoritySuggestions =
-		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.accessHost);
 	const duplicate = state.endpoints.some(
 		({ nodeId: id, port }) => id === nodeId && port === numericPort,
 	);
-	const normalizedAuthorities =
-		normalizeAcceptedAuthorities(acceptedAuthorities);
 	const acceptedAuthorityError =
 		kind === "vless_reality_vision_tcp"
 			? findAcceptedAuthorityError(acceptedAuthorities)
@@ -384,7 +384,7 @@ export function DemoEndpointFormPage() {
 									: undefined,
 							acceptedAuthorities:
 								kind === "vless_reality_vision_tcp"
-									? normalizedAuthorities
+									? normalizeAcceptedAuthorities(acceptedAuthorities)
 									: [],
 						});
 						setSaving(false);
@@ -512,7 +512,9 @@ export function DemoEndpointFormPage() {
 							placeholder="edge.example.com"
 							validateTag={validateAcceptedAuthority}
 							allowPrimary={false}
-							suggestions={acceptedAuthoritySuggestions}
+							suggestions={acceptedAuthoritySuggestionsFromAccessHost(
+								selectedNode?.accessHost,
+							)}
 							suggestionLabel="Show access host suggestions"
 							helperText={MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT}
 						/>

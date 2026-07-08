@@ -28,6 +28,20 @@ const meta = {
 				],
 				endpoints: [
 					{
+						endpoint_id: "existing-managed-public-origin",
+						node_id: NODE_ID,
+						tag: "existing-managed-public-origin",
+						kind: "vless_reality_vision_tcp",
+						port: 443,
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "https://node-xp.example.test",
+								mode: "auto",
+							},
+						},
+					},
+					{
 						endpoint_id: "existing-managed-upstream",
 						node_id: NODE_ID,
 						tag: "existing-managed-upstream",
@@ -91,6 +105,9 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				name: "Show upstream origin suggestions",
 			}),
 		);
+		await expect(
+			within(document.body).queryByText("https://node-xp.example.test"),
+		).toBeNull();
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),

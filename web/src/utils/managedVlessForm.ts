@@ -10,6 +10,12 @@ export type ManagedVlessAutocompleteSuggestion = {
 	description?: string;
 };
 
+export type ManagedVlessSuggestionScope = {
+	nodeId: string | null | undefined;
+	accessHost?: string | null | undefined;
+	apiBaseUrl?: string | null | undefined;
+};
+
 export const MANAGED_VLESS_MODE_HELPER_TEXT =
 	"Use an origin URL only. WebSocket uses HTTP/1.1 upstream; h2c is for " +
 	"non-upgrade HTTP.";
@@ -66,15 +72,68 @@ function normalizeCanaryUpstreamOrigin(
 	return url.origin;
 }
 
+function normalizeHostname(value: string): string {
+	return value
+		.trim()
+		.replace(/^\[(.+)\]$/, "$1")
+		.toLowerCase();
+}
+
+function hostnameFromOrigin(value: string | null | undefined): string | null {
+	const origin = normalizeCanaryUpstreamOrigin(value);
+	if (!origin) return null;
+
+	try {
+		return normalizeHostname(new URL(origin).hostname);
+	} catch {
+		return null;
+	}
+}
+
+function hostnameFromAcceptedAuthority(
+	value: string | null | undefined,
+): string | null {
+	const normalized = normalizeAcceptedAuthority(value ?? "");
+	if (!normalized || validateAcceptedAuthority(normalized)) return null;
+
+	if (normalized.startsWith("[")) {
+		const end = normalized.indexOf("]");
+		return end === -1 ? null : normalizeHostname(normalized.slice(1, end));
+	}
+
+	const splitIndex = normalized.lastIndexOf(":");
+	return normalizeHostname(
+		splitIndex === -1 ? normalized : normalized.slice(0, splitIndex),
+	);
+}
+
+function nodeOwnedCanaryUpstreamHosts(
+	scope:
+		| Pick<ManagedVlessSuggestionScope, "accessHost" | "apiBaseUrl">
+		| null
+		| undefined,
+): Set<string> {
+	const blockedHosts = new Set<string>();
+	const accessHost = hostnameFromAcceptedAuthority(scope?.accessHost);
+	if (accessHost) blockedHosts.add(accessHost);
+	const apiBaseUrlHost = hostnameFromOrigin(scope?.apiBaseUrl);
+	if (apiBaseUrlHost) blockedHosts.add(apiBaseUrlHost);
+	return blockedHosts;
+}
+
 export function canaryUpstreamSuggestionsFromUrls(
 	values: Iterable<string | null | undefined>,
+	scope?: Pick<ManagedVlessSuggestionScope, "accessHost" | "apiBaseUrl"> | null,
 ): ManagedVlessAutocompleteSuggestion[] {
 	const suggestions: ManagedVlessAutocompleteSuggestion[] = [];
 	const seen = new Set<string>();
+	const blockedHosts = nodeOwnedCanaryUpstreamHosts(scope);
 
 	for (const value of values) {
 		const normalized = normalizeCanaryUpstreamOrigin(value);
 		if (!normalized || seen.has(normalized)) continue;
+		const hostname = hostnameFromOrigin(normalized);
+		if (hostname && blockedHosts.has(hostname)) continue;
 		seen.add(normalized);
 		suggestions.push({ value: normalized, label: normalized });
 	}
@@ -87,9 +146,9 @@ export function canaryUpstreamSuggestionsFromManagedEndpoints(
 		AdminEndpoint,
 		"endpoint_id" | "node_id" | "kind" | "meta"
 	>[],
-	nodeId: string | null | undefined,
+	scope: ManagedVlessSuggestionScope,
 ): ManagedVlessAutocompleteSuggestion[] {
-	const trimmedNodeId = nodeId?.trim() ?? "";
+	const trimmedNodeId = scope.nodeId?.trim() ?? "";
 	if (!trimmedNodeId) return [];
 
 	return canaryUpstreamSuggestionsFromUrls(
@@ -109,6 +168,7 @@ export function canaryUpstreamSuggestionsFromManagedEndpoints(
 				: null;
 			return typeof upstream?.url === "string" ? [upstream.url] : [];
 		}),
+		scope,
 	);
 }
 

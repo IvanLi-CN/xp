@@ -234,8 +234,8 @@
   - submission_gate: `approved`
   - evidence_note: 托管 VLESS 新建页恢复与业务语义一致的地址自动补全入口；
     `canaryUpstreamUrl` 只展开同节点现有托管 endpoint 已声明的 upstream
-    origin 候选；`accepted host[:port]` 继续展开节点 `access_host`，不再回退到旧
-    `dest` / `serverNames` 形状。
+    origin 候选，并排除节点自己的公网 / 控制面 host；`accepted host[:port]`
+    继续展开节点 `access_host`，不再回退到旧 `dest` / `serverNames` 形状。
     PR: include
     ![Endpoint new managed VLESS autocomplete](./assets/endpoint-new-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
@@ -243,7 +243,8 @@
   - submission_gate: `approved`
   - evidence_note: 托管 VLESS 更新区块恢复与新建页一致的自动补全合同；
     `canaryUpstreamUrl` 使用同节点现有托管 endpoint 的 upstream origin 候选，
-    `accepted host[:port]` 使用所属节点 `access_host` 候选，更新页不再缺少对应建议面板。
+    但会过滤节点自己的公网 / 控制面 host；`accepted host[:port]` 使用所属节点
+    `access_host` 候选，更新页不再缺少对应建议面板。
     PR: include
     ![Endpoint details autocomplete](./assets/endpoint-details-managed-vless-autocomplete.png)
 - Real Mihomo validation

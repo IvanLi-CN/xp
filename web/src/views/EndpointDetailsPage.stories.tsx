@@ -55,6 +55,29 @@ const meta = {
 						active_short_id: "2a3b4c",
 					},
 					{
+						endpoint_id: "endpoint-managed-public-origin",
+						node_id: NODE_ID,
+						tag: "managed-public-origin",
+						kind: "vless_reality_vision_tcp",
+						port: 443,
+						meta: {
+							reality: {
+								dest: "127.0.0.1:39043",
+								server_names: ["edge.example.test"],
+								server_names_source: "manual",
+								fingerprint: "chrome",
+							},
+							managed_default: true,
+							canary_upstream: {
+								url: "https://tokyo-1.example.com",
+								mode: "auto",
+							},
+							accepted_authorities: [],
+						},
+						short_ids: ["c1d2e3"],
+						active_short_id: "c1d2e3",
+					},
+					{
 						endpoint_id: "endpoint-managed-sibling",
 						node_id: NODE_ID,
 						tag: "managed-sibling",
@@ -211,6 +234,9 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				name: "Show upstream origin suggestions",
 			}),
 		);
+		await expect(
+			within(document.body).queryByText("https://tokyo-1.example.com"),
+		).toBeNull();
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),

@@ -129,6 +129,20 @@ function setupMocks() {
 				},
 			},
 			{
+				endpoint_id: "endpoint-managed-public-origin",
+				node_id: "node-1",
+				tag: "managed-public-origin",
+				kind: "vless_reality_vision_tcp",
+				port: 443,
+				meta: {
+					managed_default: true,
+					canary_upstream: {
+						url: "https://tokyo-1.example.com",
+						mode: "auto",
+					},
+				},
+			},
+			{
 				endpoint_id: "endpoint-managed-sibling",
 				node_id: "node-1",
 				tag: "managed-sibling",
@@ -193,6 +207,7 @@ describe("EndpointDetailsPage", () => {
 				name: "Show upstream origin suggestions",
 			}),
 		);
+		expect(screen.queryByText("https://tokyo-1.example.com")).toBeNull();
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
