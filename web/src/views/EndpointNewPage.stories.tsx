@@ -36,98 +36,35 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-const expectSuggestionPanelToMatchInput = (input: HTMLElement) => {
-	const panel = document.querySelector(
-		'[data-testid="autocomplete-suggestions"]',
-	);
-	if (!(panel instanceof HTMLElement)) {
-		throw new Error("Autocomplete suggestions panel was not rendered.");
-	}
-	const inputRect = input.getBoundingClientRect();
-	const panelRect = panel.getBoundingClientRect();
-	expect(Math.abs(panelRect.left - inputRect.left)).toBeLessThanOrEqual(2);
-	expect(Math.abs(panelRect.width - inputRect.width)).toBeLessThanOrEqual(2);
-};
-
-const expectTagSuggestionPanelToMatchControl = () => {
-	const control = document.querySelector('[data-testid="tag-input-control"]');
-	const panel = document.querySelector('[data-testid="tag-input-suggestions"]');
-	if (!(control instanceof HTMLElement)) {
-		throw new Error("Tag input control was not rendered.");
-	}
-	if (!(panel instanceof HTMLElement)) {
-		throw new Error("Tag input suggestions panel was not rendered.");
-	}
-	const controlRect = control.getBoundingClientRect();
-	const panelRect = panel.getBoundingClientRect();
-	expect(Math.abs(panelRect.left - controlRect.left)).toBeLessThanOrEqual(2);
-	expect(Math.abs(panelRect.width - controlRect.width)).toBeLessThanOrEqual(2);
-};
-
-export const ManualDestApiAddressSuggestion: Story = {};
-
-export const ServerNamesAccessAddressSuggestionShowsOnEmptyFocus: Story = {
+export const ManagedDefaultFieldsVisible: Story = {
 	tags: ["coverage-ui"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const serverNamesInput = await canvas.findByLabelText("serverNames");
-		await userEvent.click(serverNamesInput);
 		await expect(
-			await within(document.body).findByText("node-xp.example.test:443"),
-		).toBeVisible();
-		expectTagSuggestionPanelToMatchControl();
+			await canvas.findByRole("heading", { name: "New endpoint" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByLabelText("canaryUpstreamUrl"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByLabelText("canary upstream mode"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByLabelText("accepted host[:port]"),
+		).toBeInTheDocument();
+		await expect(canvas.queryByLabelText("dest")).toBeNull();
+		await expect(canvas.queryByLabelText("serverNames")).toBeNull();
 	},
 };
 
-export const ManualDestApiAddressSuggestionShowsOnEmptyFocus: Story = {
+export const ManagedDefaultAcceptedHostDefaultsTo443: Story = {
 	tags: ["coverage-ui"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const destInput = await canvas.findByLabelText("dest");
-		await expect(canvas.queryByText("node-xp.example.test:443")).toBeNull();
-		await expect(destInput).not.toHaveAttribute("list");
-		await userEvent.click(destInput);
+		const input = await canvas.findByLabelText("accepted host[:port]");
+		await userEvent.type(input, "edge.example.com{enter}");
 		await expect(
-			await within(document.body).findByText("127.0.0.1:62416"),
-		).toBeVisible();
-		expectSuggestionPanelToMatchInput(destInput);
-		const destPanel = document.querySelector(
-			'[data-testid="autocomplete-suggestions"]',
-		);
-		if (!(destPanel instanceof HTMLElement)) {
-			throw new Error("Autocomplete suggestions panel was not rendered.");
-		}
-		await expect(
-			within(destPanel).queryByText("node-xp.example.test:443"),
-		).toBeNull();
-		await expect(
-			within(document.body).queryByText("node-beta API address"),
-		).toBeNull();
-		await expect(
-			within(document.body).queryByText("Use this node's xp API origin."),
-		).toBeNull();
-		await userEvent.click(
-			await within(document.body).findByText("127.0.0.1:62416"),
-		);
-		await expect(destInput).toHaveValue("127.0.0.1:62416");
-		await userEvent.click(await canvas.findByLabelText("serverNames"));
-		await expect(
-			await within(document.body).findByText("node-xp.example.test:443"),
-		).toBeVisible();
-		expectTagSuggestionPanelToMatchControl();
-		await userEvent.click(destInput);
-		await userEvent.clear(destInput);
-		await userEvent.click(await canvas.findByLabelText("serverNames"));
-		await expect(
-			await within(document.body).findByText("node-xp.example.test:443"),
-		).toBeVisible();
-		expectTagSuggestionPanelToMatchControl();
-		await userEvent.click(destInput);
-		await userEvent.type(destInput, "origin.example.test:443");
-		await userEvent.click(await canvas.findByLabelText("serverNames"));
-		await expect(
-			await within(document.body).findByText("origin.example.test:443"),
-		).toBeVisible();
-		expectTagSuggestionPanelToMatchControl();
+			await canvas.findByText("edge.example.com:443"),
+		).toBeInTheDocument();
 	},
 };

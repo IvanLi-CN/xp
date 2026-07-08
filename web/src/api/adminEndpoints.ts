@@ -97,7 +97,16 @@ export type AdminEndpointCreateRequest =
 			node_id: string;
 			port: number;
 			reality: RealityConfig;
+			canary_upstream?: never;
+			accepted_authorities?: never;
+	  }
+	| {
+			kind: "vless_reality_vision_tcp";
+			node_id: string;
+			port: number;
+			reality?: never;
 			canary_upstream?: CanaryUpstreamConfig | null;
+			accepted_authorities?: string[] | null;
 	  }
 	| {
 			kind: "ss2022_2022_blake3_aes_128_gcm";

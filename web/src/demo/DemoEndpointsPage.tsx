@@ -7,9 +7,17 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { buttonVariants } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { validateAcceptedAuthority } from "../utils/acceptedAuthority";
+import {
+	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
+	MANAGED_VLESS_MODE_HELPER_TEXT,
+	findAcceptedAuthorityError,
+	normalizeAcceptedAuthorities,
+} from "../utils/managedVlessForm";
 import {
 	endpointKindLabel,
 	endpointStatusVariant,
@@ -275,19 +283,29 @@ export function DemoEndpointFormPage() {
 		"vless_reality_vision_tcp",
 	);
 	const [port, setPort] = useState("9443");
-	const [serverNames, setServerNames] = useState("cdn-a.example.test");
+	const [canaryUpstreamUrl, setCanaryUpstreamUrl] = useState(
+		"http://127.0.0.1:8080",
+	);
+	const [canaryUpstreamMode, setCanaryUpstreamMode] =
+		useState<NonNullable<DemoEndpoint["canaryUpstreamMode"]>>("auto");
+	const [acceptedAuthorities, setAcceptedAuthorities] = useState<string[]>([
+		"edge.example.com:443",
+	]);
 	const [submitted, setSubmitted] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const canWrite = state.session?.role !== "viewer";
 
 	const numericPort = Number(port);
+	const selectedNode = state.nodes.find((node) => node.id === nodeId);
 	const duplicate = state.endpoints.some(
 		(endpoint) => endpoint.nodeId === nodeId && endpoint.port === numericPort,
 	);
-	const serverNameList = serverNames
-		.split(",")
-		.map((item) => item.trim())
-		.filter(Boolean);
+	const normalizedAuthorities =
+		normalizeAcceptedAuthorities(acceptedAuthorities);
+	const acceptedAuthorityError =
+		kind === "vless_reality_vision_tcp"
+			? findAcceptedAuthorityError(acceptedAuthorities)
+			: null;
 	const error =
 		name.trim().length < 3
 			? "Name must be at least 3 characters."
@@ -299,13 +317,15 @@ export function DemoEndpointFormPage() {
 					? "Port must be an integer between 1 and 65535."
 					: duplicate
 						? "That node already has an endpoint on this port."
-						: kind === "vless_reality_vision_tcp" && serverNameList.length === 0
-							? "Reality endpoints need at least one serverName."
+						: acceptedAuthorityError
+							? acceptedAuthorityError
 							: null;
 	const dirty =
 		name !== "seoul-reality-443" ||
 		port !== "9443" ||
-		serverNames !== "cdn-a.example.test" ||
+		canaryUpstreamUrl !== "http://127.0.0.1:8080" ||
+		canaryUpstreamMode !== "auto" ||
+		acceptedAuthorities.join(",") !== "edge.example.com:443" ||
 		kind !== "vless_reality_vision_tcp";
 
 	return (
@@ -320,7 +340,6 @@ export function DemoEndpointFormPage() {
 					</Button>
 				}
 			/>
-
 			<form
 				className="xp-card"
 				onSubmit={(event) => {
@@ -335,7 +354,22 @@ export function DemoEndpointFormPage() {
 							kind,
 							port: numericPort,
 							serverNames:
-								kind === "vless_reality_vision_tcp" ? serverNameList : [],
+								kind === "vless_reality_vision_tcp" && selectedNode
+									? [selectedNode.accessHost]
+									: [],
+							managedDefault: kind === "vless_reality_vision_tcp",
+							canaryUpstreamUrl:
+								kind === "vless_reality_vision_tcp"
+									? canaryUpstreamUrl.trim()
+									: undefined,
+							canaryUpstreamMode:
+								kind === "vless_reality_vision_tcp"
+									? canaryUpstreamMode
+									: undefined,
+							acceptedAuthorities:
+								kind === "vless_reality_vision_tcp"
+									? normalizedAuthorities
+									: [],
 						});
 						setSaving(false);
 						pushToast({ variant: "success", message: "Endpoint created." });
@@ -421,26 +455,69 @@ export function DemoEndpointFormPage() {
 					</div>
 
 					{kind === "vless_reality_vision_tcp" ? (
-						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-endpoint-server-names"
-							>
-								serverNames
-							</label>
-							<Input
-								id="demo-endpoint-server-names"
-								value={serverNames}
-								onChange={(event) => setServerNames(event.target.value)}
-								placeholder="cdn-a.example.test, origin.example.test"
-								className="font-mono"
-							/>
-							<span className="text-xs text-muted-foreground">
-								Comma-separated Reality camouflage domains.
-							</span>
+						<div className="grid gap-4 md:grid-cols-[1fr_180px]">
+							<div className="xp-field-stack">
+								<label
+									className="text-sm font-medium font-mono"
+									htmlFor="demo-endpoint-canary-upstream-url"
+								>
+									canaryUpstreamUrl
+								</label>
+								<Input
+									id="demo-endpoint-canary-upstream-url"
+									value={canaryUpstreamUrl}
+									onChange={(event) => setCanaryUpstreamUrl(event.target.value)}
+									placeholder="http://127.0.0.1:8080"
+									className="font-mono"
+								/>
+								<span className="text-xs text-muted-foreground">
+									Requests other than GET/HEAD /generate_204 are proxied to this
+									origin.
+								</span>
+							</div>
+							<div className="xp-field-stack">
+								<label
+									className="text-sm font-medium font-mono"
+									htmlFor="demo-endpoint-canary-upstream-mode"
+								>
+									mode
+								</label>
+								<select
+									id="demo-endpoint-canary-upstream-mode"
+									className="xp-select"
+									value={canaryUpstreamMode}
+									onChange={(event) =>
+										setCanaryUpstreamMode(
+											event.target.value as NonNullable<
+												DemoEndpoint["canaryUpstreamMode"]
+											>,
+										)
+									}
+								>
+									<option value="auto">auto</option>
+									<option value="http1">http1</option>
+									<option value="h2c">h2c</option>
+								</select>
+								<span className="text-xs text-muted-foreground">
+									{MANAGED_VLESS_MODE_HELPER_TEXT}
+								</span>
+							</div>
 						</div>
 					) : null}
 
+					{kind === "vless_reality_vision_tcp" ? (
+						<TagInput
+							label="accepted host[:port]"
+							value={acceptedAuthorities}
+							onChange={(next) =>
+								setAcceptedAuthorities(normalizeAcceptedAuthorities(next))
+							}
+							placeholder="edge.example.com"
+							validateTag={validateAcceptedAuthority}
+							allowPrimary={false}
+							helperText={MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT}
+						/>
+					) : null}
 					{submitted && error ? (
 						<div className="xp-alert xp-alert-error">{error}</div>
 					) : null}
@@ -601,7 +678,10 @@ export function DemoEndpointDetailsPage() {
 						<PageState
 							variant="empty"
 							title="No assigned users"
-							description="Assign a user from the user details page to make this endpoint appear in a subscription."
+							description={
+								"Assign a user from the user details page to make this " +
+								"endpoint appear in a subscription."
+							}
 							action={
 								canWrite ? (
 									<Button asChild>

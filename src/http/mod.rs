@@ -48,6 +48,9 @@ use crate::{
     },
     internal_auth,
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
+    managed_default_endpoints::{
+        DEFAULT_VLESS_FINGERPRINT, DefaultVlessEndpointSpec, build_managed_default_vless_endpoint,
+    },
     mihomo_redact,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
     node_history::{NodeHistoryHandle, NodeHistorySnapshot},
@@ -796,7 +799,8 @@ enum CreateEndpointRequest {
     VlessRealityVisionTcp {
         node_id: String,
         port: u16,
-        reality: RealityConfig,
+        #[serde(default)]
+        reality: Option<RealityConfig>,
         #[serde(default)]
         canary_upstream: Option<CanaryUpstreamConfig>,
         #[serde(default)]
@@ -3837,7 +3841,7 @@ async fn admin_create_endpoint(
     Extension(state): Extension<AppState>,
     ApiJson(req): ApiJson<CreateEndpointRequest>,
 ) -> Result<Json<Endpoint>, ApiError> {
-    let (node_id, kind, port, meta) = match req {
+    let endpoint = match req {
         CreateEndpointRequest::VlessRealityVisionTcp {
             node_id,
             port,
@@ -3845,22 +3849,61 @@ async fn admin_create_endpoint(
             canary_upstream,
             accepted_authorities,
         } => {
-            if canary_upstream.is_some() {
-                return Err(ApiError::invalid_request(
-                    "canary_upstream is only editable on managed VLESS endpoints",
-                ));
+            let store = state.store.lock().await;
+            if let Some(reality) = reality {
+                if canary_upstream.is_some() {
+                    return Err(ApiError::invalid_request(
+                        "canary_upstream is only editable on managed VLESS endpoints",
+                    ));
+                }
+                if accepted_authorities.is_some() {
+                    return Err(ApiError::invalid_request(
+                        "accepted_authorities is only editable on managed VLESS endpoints",
+                    ));
+                }
+                store.build_endpoint(
+                    node_id,
+                    crate::domain::EndpointKind::VlessRealityVisionTcp,
+                    port,
+                    json!({ "reality": reality }),
+                )?
+            } else {
+                let node = store.get_node(&node_id).ok_or_else(|| {
+                    ApiError::invalid_request(format!("node not found: {node_id}"))
+                })?;
+                let reality =
+                    managed_vless_reality_for_node(&state, &node, DEFAULT_VLESS_FINGERPRINT)?;
+                let spec = DefaultVlessEndpointSpec {
+                    port,
+                    reality_dest: reality.dest,
+                    server_names: reality.server_names,
+                    server_names_source: reality.server_names_source,
+                    fingerprint: reality.fingerprint,
+                };
+                let mut endpoint =
+                    build_managed_default_vless_endpoint(&spec, node_id).map_err(|e| {
+                        ApiError::invalid_request(format!(
+                            "failed to create managed VLESS endpoint: {e}"
+                        ))
+                    })?;
+                let mut meta: VlessRealityVisionTcpEndpointMeta =
+                    serde_json::from_value(endpoint.meta.clone())
+                        .map_err(|e| ApiError::internal(e.to_string()))?;
+                meta.canary_upstream = canary_upstream.map(|mut upstream| {
+                    upstream.url = upstream.url.trim().to_string();
+                    upstream
+                });
+                meta.accepted_authorities =
+                    normalize_accepted_authorities(accepted_authorities.as_deref().unwrap_or(&[]))
+                        .map_err(|(reason, authority)| {
+                            ApiError::invalid_request(format!(
+                                "invalid accepted_authority: {authority} ({reason})"
+                            ))
+                        })?;
+                endpoint.meta =
+                    serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
+                endpoint
             }
-            if accepted_authorities.is_some() {
-                return Err(ApiError::invalid_request(
-                    "accepted_authorities is only editable on managed VLESS endpoints",
-                ));
-            }
-            (
-                node_id,
-                crate::domain::EndpointKind::VlessRealityVisionTcp,
-                port,
-                json!({ "reality": reality }),
-            )
         }
         CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm {
             node_id,
@@ -3878,18 +3921,14 @@ async fn admin_create_endpoint(
                     "accepted_authorities is only supported for managed vless endpoints",
                 ));
             }
-            (
+            let store = state.store.lock().await;
+            store.build_endpoint(
                 node_id,
                 crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                 port,
                 json!({}),
-            )
+            )?
         }
-    };
-
-    let endpoint = {
-        let store = state.store.lock().await;
-        store.build_endpoint(node_id, kind, port, meta)?
     };
     let _ = raft_write(
         &state,

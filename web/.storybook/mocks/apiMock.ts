@@ -46,6 +46,10 @@ import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
 import type { HealthResponse } from "../../src/api/health";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import type { VersionCheckResponse } from "../../src/api/versionCheck";
+import {
+	buildEndpointCreateMeta,
+	deriveGlobalServerNames,
+} from "./buildEndpointCreateMeta";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
@@ -266,24 +270,6 @@ function ensureEndpointRecord(
 		short_ids: shortIds,
 		active_short_id: activeShortId,
 	};
-}
-
-function deriveGlobalServerNames(
-	domains: AdminRealityDomain[],
-	nodeId: string,
-): string[] {
-	const out: string[] = [];
-	const seen = new Set<string>();
-	for (const domain of domains) {
-		if (domain.disabled_node_ids.includes(nodeId)) continue;
-		const trimmed = domain.server_name.trim();
-		if (!trimmed) continue;
-		const key = trimmed.toLowerCase();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		out.push(trimmed);
-	}
-	return out;
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
@@ -1724,35 +1710,18 @@ async function handleRequest(
 		const endpointId = `endpoint-mock-${state.counters.endpoint++}`;
 		const tag = `${payload.kind}-${endpointId}`;
 		let meta: Record<string, unknown> = {};
-		if (payload.kind === "vless_reality_vision_tcp") {
-			if (!payload.reality) {
-				return errorResponse(
-					400,
-					"invalid_request",
-					"missing vless reality fields",
-				);
-			}
-			const source = payload.reality.server_names_source ?? "manual";
-			const derived =
-				source === "global"
-					? deriveGlobalServerNames(state.realityDomains, payload.node_id)
-					: payload.reality.server_names;
-			if (!derived || derived.length === 0) {
-				return errorResponse(
-					400,
-					"invalid_request",
-					"server_names must be non-empty",
-				);
-			}
-			const normalizedReality = {
-				...payload.reality,
-				dest: `${derived[0]}:443`,
-				server_names: derived,
-				server_names_source: source,
-			};
-			meta = {
-				reality: normalizedReality,
-			};
+		try {
+			meta = buildEndpointCreateMeta(
+				payload,
+				state.nodes,
+				state.realityDomains,
+			);
+		} catch (error) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				error instanceof Error ? error.message : String(error),
+			);
 		}
 		const endpoint: AdminEndpoint = {
 			endpoint_id: endpointId,

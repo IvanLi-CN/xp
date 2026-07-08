@@ -991,10 +991,6 @@
 		"long_line_count": 1,
 		"max_line_length": 288
 	},
-	"web/src/demo/DemoEndpointsPage.tsx": {
-		"long_line_count": 1,
-		"max_line_length": 109
-	},
 	"web/src/demo/DemoLayout.tsx": {
 		"long_line_count": 3,
 		"max_line_length": 276
