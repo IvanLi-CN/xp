@@ -61,6 +61,7 @@ export const AutocompleteInput = React.forwardRef<
 	) => {
 		const [open, setOpen] = React.useState(false);
 		const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(0);
+		const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
 		const listboxId = React.useId();
 		const openTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
 			null,
@@ -68,6 +69,7 @@ export const AutocompleteInput = React.forwardRef<
 		const typedValue = typeof value === "string" ? value : "";
 		const query = normalize(typedValue);
 		const visibleSuggestions = suggestions.filter((suggestion) => {
+			if (showAllSuggestions) return true;
 			if (query.length === 0) return true;
 			const haystack = normalize(
 				`${suggestion.value} ${suggestion.label} ${suggestion.description ?? ""}`,
@@ -106,11 +108,18 @@ export const AutocompleteInput = React.forwardRef<
 
 		const selectSuggestion = (selectedValue: string) => {
 			onSuggestionSelect?.(selectedValue);
+			setShowAllSuggestions(false);
 			setOpen(false);
 		};
 
 		return (
-			<Popover open={open} onOpenChange={setOpen}>
+			<Popover
+				open={open}
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) setShowAllSuggestions(false);
+					setOpen(nextOpen);
+				}}
+			>
 				<PopoverAnchor asChild>
 					<div className="relative">
 						<Input
@@ -121,6 +130,7 @@ export const AutocompleteInput = React.forwardRef<
 							className={cn(hasSuggestions && "pr-12", className)}
 							onChange={(event) => {
 								setActiveSuggestionIndex(0);
+								setShowAllSuggestions(false);
 								promptForEmptyValue(event.currentTarget.value);
 								onChange?.(event);
 							}}
@@ -135,6 +145,7 @@ export const AutocompleteInput = React.forwardRef<
 							onKeyDown={(event) => {
 								if (event.key === "ArrowDown" && hasSuggestions) {
 									event.preventDefault();
+									setShowAllSuggestions(false);
 									setOpen(true);
 									if (visibleSuggestions.length > 0) {
 										setActiveSuggestionIndex((currentIndex) =>
@@ -183,6 +194,11 @@ export const AutocompleteInput = React.forwardRef<
 									disabled={disabled}
 									aria-label={suggestionLabel}
 									className={triggerButtonClass}
+									onClick={() => {
+										setShowAllSuggestions(true);
+										setActiveSuggestionIndex(0);
+										setOpen(true);
+									}}
 								>
 									<Icon name="tabler:chevron-down" size={16} ariaLabel="" />
 								</Button>

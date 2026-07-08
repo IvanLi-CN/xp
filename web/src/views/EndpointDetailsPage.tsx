@@ -15,6 +15,7 @@ import {
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
@@ -41,6 +42,10 @@ import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
 } from "../utils/acceptedAuthority";
+import {
+	acceptedAuthoritySuggestionsFromAccessHost,
+	canaryUpstreamSuggestionsFromApiBaseUrl,
+} from "../utils/managedVlessForm";
 import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
@@ -432,6 +437,10 @@ export function EndpointDetailsPage() {
 	const realityServerNameSuggestions = realityServerNameSuggestion
 		? [realityServerNameSuggestion]
 		: [];
+	const managedCanaryUpstreamSuggestions =
+		canaryUpstreamSuggestionsFromApiBaseUrl(endpointNode?.api_base_url);
+	const managedAcceptedAuthoritySuggestions =
+		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host);
 	const currentCanaryProbeResult =
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
@@ -681,16 +690,19 @@ export function EndpointDetailsPage() {
 												<span className="text-sm font-medium font-mono">
 													canaryUpstreamUrl
 												</span>
-												<Input
+												<AutocompleteInput
 													aria-label="canary upstream url"
 													type="url"
 													className={inputClass}
 													value={upstreamUrl}
 													placeholder="http://127.0.0.1:8080"
 													disabled={patchMutation.isPending}
+													suggestions={managedCanaryUpstreamSuggestions}
+													suggestionLabel="Show node API origin suggestions"
 													onChange={(event) =>
 														setUpstreamUrl(event.target.value)
 													}
+													onSuggestionSelect={setUpstreamUrl}
 												/>
 												<p className="text-xs opacity-70">
 													Requests other than GET/HEAD /generate_204 are proxied
@@ -743,6 +755,8 @@ export function EndpointDetailsPage() {
 											inputClass={inputClass}
 											validateTag={validateAcceptedAuthority}
 											allowPrimary={false}
+											suggestions={managedAcceptedAuthoritySuggestions}
+											suggestionLabel="Show access host suggestions"
 											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL."
 										/>
 									</div>

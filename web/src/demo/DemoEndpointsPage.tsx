@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
@@ -15,9 +16,12 @@ import { validateAcceptedAuthority } from "../utils/acceptedAuthority";
 import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
+	acceptedAuthoritySuggestionsFromAccessHost,
+	canaryUpstreamSuggestionsFromApiBaseUrl,
 	findAcceptedAuthorityError,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
+import { DemoFieldLabel } from "./DemoFieldLabel";
 import {
 	endpointKindLabel,
 	endpointStatusVariant,
@@ -26,6 +30,8 @@ import {
 } from "./format";
 import { useDemo } from "./store";
 import type { DemoEndpoint } from "./types";
+
+type DemoCanaryUpstreamMode = NonNullable<DemoEndpoint["canaryUpstreamMode"]>;
 
 export function DemoEndpointsPage() {
 	const navigate = useNavigate();
@@ -287,18 +293,22 @@ export function DemoEndpointFormPage() {
 		"http://127.0.0.1:8080",
 	);
 	const [canaryUpstreamMode, setCanaryUpstreamMode] =
-		useState<NonNullable<DemoEndpoint["canaryUpstreamMode"]>>("auto");
+		useState<DemoCanaryUpstreamMode>("auto");
 	const [acceptedAuthorities, setAcceptedAuthorities] = useState<string[]>([
 		"edge.example.com:443",
 	]);
 	const [submitted, setSubmitted] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const canWrite = state.session?.role !== "viewer";
-
 	const numericPort = Number(port);
 	const selectedNode = state.nodes.find((node) => node.id === nodeId);
+	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromApiBaseUrl(
+		selectedNode?.apiBaseUrl,
+	);
+	const acceptedAuthoritySuggestions =
+		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.accessHost);
 	const duplicate = state.endpoints.some(
-		(endpoint) => endpoint.nodeId === nodeId && endpoint.port === numericPort,
+		({ nodeId: id, port }) => id === nodeId && port === numericPort,
 	);
 	const normalizedAuthorities =
 		normalizeAcceptedAuthorities(acceptedAuthorities);
@@ -327,7 +337,6 @@ export function DemoEndpointFormPage() {
 		canaryUpstreamMode !== "auto" ||
 		acceptedAuthorities.join(",") !== "edge.example.com:443" ||
 		kind !== "vless_reality_vision_tcp";
-
 	return (
 		<div className="space-y-6">
 			<PageHeader
@@ -383,12 +392,7 @@ export function DemoEndpointFormPage() {
 				<div className="xp-card-body">
 					<div className="grid gap-4 md:grid-cols-2">
 						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-endpoint-name"
-							>
-								Name
-							</label>
+							<DemoFieldLabel htmlFor="demo-endpoint-name">Name</DemoFieldLabel>
 							<Input
 								id="demo-endpoint-name"
 								value={name}
@@ -396,12 +400,7 @@ export function DemoEndpointFormPage() {
 							/>
 						</div>
 						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-endpoint-node"
-							>
-								Node
-							</label>
+							<DemoFieldLabel htmlFor="demo-endpoint-node">Node</DemoFieldLabel>
 							<select
 								id="demo-endpoint-node"
 								className="xp-select"
@@ -416,12 +415,7 @@ export function DemoEndpointFormPage() {
 							</select>
 						</div>
 						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-endpoint-kind"
-							>
-								Kind
-							</label>
+							<DemoFieldLabel htmlFor="demo-endpoint-kind">Kind</DemoFieldLabel>
 							<select
 								id="demo-endpoint-kind"
 								className="xp-select"
@@ -439,12 +433,7 @@ export function DemoEndpointFormPage() {
 							</select>
 						</div>
 						<div className="xp-field-stack">
-							<label
-								className="text-sm font-medium"
-								htmlFor="demo-endpoint-port"
-							>
-								Port
-							</label>
+							<DemoFieldLabel htmlFor="demo-endpoint-port">Port</DemoFieldLabel>
 							<Input
 								id="demo-endpoint-port"
 								value={port}
@@ -453,22 +442,24 @@ export function DemoEndpointFormPage() {
 							/>
 						</div>
 					</div>
-
 					{kind === "vless_reality_vision_tcp" ? (
 						<div className="grid gap-4 md:grid-cols-[1fr_180px]">
 							<div className="xp-field-stack">
-								<label
+								<DemoFieldLabel
 									className="text-sm font-medium font-mono"
 									htmlFor="demo-endpoint-canary-upstream-url"
 								>
 									canaryUpstreamUrl
-								</label>
-								<Input
+								</DemoFieldLabel>
+								<AutocompleteInput
 									id="demo-endpoint-canary-upstream-url"
 									value={canaryUpstreamUrl}
 									onChange={(event) => setCanaryUpstreamUrl(event.target.value)}
+									onSuggestionSelect={setCanaryUpstreamUrl}
 									placeholder="http://127.0.0.1:8080"
 									className="font-mono"
+									suggestions={canaryUpstreamSuggestions}
+									suggestionLabel="Show node API origin suggestions"
 								/>
 								<span className="text-xs text-muted-foreground">
 									Requests other than GET/HEAD /generate_204 are proxied to this
@@ -476,12 +467,12 @@ export function DemoEndpointFormPage() {
 								</span>
 							</div>
 							<div className="xp-field-stack">
-								<label
+								<DemoFieldLabel
 									className="text-sm font-medium font-mono"
 									htmlFor="demo-endpoint-canary-upstream-mode"
 								>
 									mode
-								</label>
+								</DemoFieldLabel>
 								<select
 									id="demo-endpoint-canary-upstream-mode"
 									className="xp-select"
@@ -504,7 +495,6 @@ export function DemoEndpointFormPage() {
 							</div>
 						</div>
 					) : null}
-
 					{kind === "vless_reality_vision_tcp" ? (
 						<TagInput
 							label="accepted host[:port]"
@@ -515,6 +505,8 @@ export function DemoEndpointFormPage() {
 							placeholder="edge.example.com"
 							validateTag={validateAcceptedAuthority}
 							allowPrimary={false}
+							suggestions={acceptedAuthoritySuggestions}
+							suggestionLabel="Show access host suggestions"
 							helperText={MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT}
 						/>
 					) : null}

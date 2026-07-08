@@ -5,6 +5,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,6 +146,66 @@ describe("EndpointNewPage", () => {
 		});
 	});
 
+	it("restores managed autocomplete suggestions without changing create payload shape", async () => {
+		vi.mocked(createAdminEndpoint).mockResolvedValue({
+			endpoint_id: "ep-managed",
+			node_id: "node-alpha",
+			tag: "ep-managed",
+			kind: "vless_reality_vision_tcp",
+			port: 443,
+			meta: {
+				managed_default: true,
+			},
+		});
+
+		renderPage();
+
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: "Show node API origin suggestions",
+			}),
+		);
+		fireEvent.click(
+			await within(
+				await screen.findByTestId("autocomplete-suggestions"),
+			).findByText("https://node-xp.example.test"),
+		);
+		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
+			"https://node-xp.example.test",
+		);
+
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: "Show access host suggestions",
+			}),
+		);
+		fireEvent.click(
+			await within(
+				await screen.findByTestId("tag-input-suggestions"),
+			).findByText("node-xp.example.test"),
+		);
+		expect(
+			await screen.findByText("node-xp.example.test:443"),
+		).toBeInTheDocument();
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Create endpoint" }),
+		);
+
+		await waitFor(() => {
+			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
+				kind: "vless_reality_vision_tcp",
+				node_id: "node-alpha",
+				port: 443,
+				canary_upstream: {
+					url: "https://node-xp.example.test",
+					mode: "auto",
+				},
+				accepted_authorities: ["node-xp.example.test:443"],
+			});
+		});
+	});
+
 	it("shows the backend error when managed create fails", async () => {
 		vi.mocked(createAdminEndpoint).mockRejectedValue(
 			new Error("400 invalid_request: invalid canary upstream"),
@@ -184,5 +245,38 @@ describe("EndpointNewPage", () => {
 			expect(screen.queryByLabelText("canaryUpstreamUrl")).toBeNull();
 			expect(screen.queryByLabelText("accepted host[:port]")).toBeNull();
 		});
+	});
+
+	it("hides autocomplete triggers when selected node has no valid managed suggestions", async () => {
+		vi.mocked(fetchAdminNodes).mockResolvedValue({
+			items: [
+				{
+					node_id: "node-alpha",
+					node_name: "alpha",
+					access_host: "",
+					api_base_url: "not-a-url",
+					quota_limit_bytes: 0,
+					quota_reset: {
+						policy: "monthly",
+						day_of_month: 1,
+						tz_offset_minutes: null,
+					},
+				},
+			],
+		});
+
+		renderPage();
+
+		await screen.findByLabelText("canaryUpstreamUrl");
+		expect(
+			screen.queryByRole("button", {
+				name: "Show node API origin suggestions",
+			}),
+		).toBeNull();
+		expect(
+			screen.queryByRole("button", {
+				name: "Show access host suggestions",
+			}),
+		).toBeNull();
 	});
 });

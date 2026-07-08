@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -40,6 +41,8 @@ import { validateAcceptedAuthority } from "../utils/acceptedAuthority";
 import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
+	acceptedAuthoritySuggestionsFromAccessHost,
+	canaryUpstreamSuggestionsFromApiBaseUrl,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
 
@@ -99,14 +102,20 @@ export function EndpointNewPage() {
 
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
+	const nodes = nodesQuery.data?.items ?? [];
+	const selectedNode = nodes.find((node) => node.node_id === nodeId);
+	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromApiBaseUrl(
+		selectedNode?.api_base_url,
+	);
+	const acceptedAuthoritySuggestions =
+		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.access_host);
 
 	useEffect(() => {
-		const nodes = nodesQuery.data?.items ?? [];
 		if (nodes.length === 0) return;
 		if (!nodeId || !nodes.some((node) => node.node_id === nodeId)) {
 			form.setValue("nodeId", nodes[0]?.node_id ?? "", { shouldDirty: false });
 		}
-	}, [form, nodeId, nodesQuery.data]);
+	}, [form, nodeId, nodes]);
 
 	const createMutation = useMutation({
 		mutationFn: async (values: EndpointFormValues) => {
@@ -234,7 +243,6 @@ export function EndpointNewPage() {
 		);
 	}
 
-	const nodes = nodesQuery.data?.items ?? [];
 	if (nodes.length === 0) {
 		return (
 			<div className="space-y-6">
@@ -401,10 +409,13 @@ export function EndpointNewPage() {
 															canaryUpstreamUrl
 														</FormLabel>
 														<FormControl>
-															<Input
+															<AutocompleteInput
 																{...field}
 																type="url"
 																placeholder="http://127.0.0.1:8080"
+																suggestions={canaryUpstreamSuggestions}
+																suggestionLabel="Show node API origin suggestions"
+																onSuggestionSelect={field.onChange}
 															/>
 														</FormControl>
 														<FormDescription>
@@ -462,6 +473,8 @@ export function EndpointNewPage() {
 															disabled={createMutation.isPending}
 															validateTag={validateAcceptedAuthority}
 															allowPrimary={false}
+															suggestions={acceptedAuthoritySuggestions}
+															suggestionLabel="Show access host suggestions"
 															helperText={
 																MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT
 															}

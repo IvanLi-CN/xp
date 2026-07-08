@@ -229,6 +229,19 @@
     `port`、`canaryUpstreamUrl`、`mode`、`accepted host[:port]`，不再暴露旧的
     `dest` / `serverNames` 手工 REALITY 输入。
     ![Endpoint new managed VLESS form](./assets/endpoint-new-managed-vless-create.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/EndpointNewPage/ManagedDefaultFieldsVisible`
+  - evidence_note: 托管 VLESS 新建页恢复节点来源的地址自动补全入口；
+    `canaryUpstreamUrl` 可展开节点 `api_base_url` 归一化后的 origin 候选，
+    与 `accepted host[:port]` 的托管字段合同共存，不再回退到旧
+    `dest` / `serverNames` 形状。
+    ![Endpoint new managed VLESS autocomplete](./assets/endpoint-new-managed-vless-autocomplete.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/EndpointDetailsPage/ManagedDefaultAliases`
+  - evidence_note: 托管 VLESS 更新区块恢复与新建页一致的 `accepted host[:port]`
+    自动补全入口；候选来自 endpoint 所属节点的 `access_host`，更新页不再缺少
+    对应建议面板。
+    ![Endpoint details autocomplete](./assets/endpoint-details-managed-vless-autocomplete.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
   - result: provider-hosted `*-ss-chain` can reference a main-config `dialer-proxy`; missing main-config dialer fails immediately, proving provider payload chains depend on main-config relay groups.

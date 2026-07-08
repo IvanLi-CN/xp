@@ -37,7 +37,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ManagedDefaultFieldsVisible: Story = {
-	tags: ["coverage-ui"],
+	tags: ["coverage-ui", "managed-vless-autocomplete"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -52,19 +52,91 @@ export const ManagedDefaultFieldsVisible: Story = {
 		await expect(
 			await canvas.findByLabelText("accepted host[:port]"),
 		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", {
+				name: "Show node API origin suggestions",
+			}),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", {
+				name: "Show access host suggestions",
+			}),
+		).toBeInTheDocument();
 		await expect(canvas.queryByLabelText("dest")).toBeNull();
 		await expect(canvas.queryByLabelText("serverNames")).toBeNull();
 	},
 };
 
+export const ManagedDefaultAutocompleteSuggestions: Story = {
+	tags: ["coverage-ui", "managed-vless-autocomplete"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Show node API origin suggestions",
+			}),
+		);
+		await userEvent.click(
+			await within(
+				await within(document.body).findByTestId("autocomplete-suggestions"),
+			).findByText("https://node-xp.example.test"),
+		);
+		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
+			"https://node-xp.example.test",
+		);
+
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Show access host suggestions",
+			}),
+		);
+		await userEvent.click(
+			await within(
+				await within(document.body).findByTestId("tag-input-suggestions"),
+			).findByText("node-xp.example.test"),
+		);
+		await expect(
+			await canvas.findByTitle("node-xp.example.test:443"),
+		).toBeInTheDocument();
+	},
+};
+
 export const ManagedDefaultAcceptedHostDefaultsTo443: Story = {
-	tags: ["coverage-ui"],
+	tags: ["coverage-ui", "managed-vless-autocomplete"],
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [
+					{
+						node_id: NODE_ID,
+						node_name: "alpha",
+						access_host: "",
+						api_base_url: "not-a-url",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+				],
+				endpoints: [],
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const input = await canvas.findByLabelText("accepted host[:port]");
-		await userEvent.type(input, "edge.example.com{enter}");
+		const tagInputControl = input.closest("[data-testid='tag-input-control']");
+		if (!(tagInputControl instanceof HTMLElement)) {
+			throw new Error("accepted host tag input control not found");
+		}
+		await userEvent.type(input, "edge.example.com");
+		await userEvent.click(
+			await within(tagInputControl).findByRole("button", { name: "Add" }),
+		);
 		await expect(
-			await canvas.findByText("edge.example.com:443"),
+			await within(tagInputControl).findByTitle("edge.example.com:443"),
 		).toBeInTheDocument();
 	},
 };

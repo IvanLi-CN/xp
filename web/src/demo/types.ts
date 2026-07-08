@@ -13,6 +13,7 @@ export type DemoNode = {
 	name: string;
 	region: string;
 	accessHost: string;
+	apiBaseUrl: string;
 	role: "leader" | "follower";
 	term: number;
 	status: DemoNodeStatus;
