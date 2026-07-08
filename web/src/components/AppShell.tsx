@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useRef,
+	useState,
+} from "react";
 
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +53,8 @@ import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
+import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
+import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { ReadStateIndicator } from "./ReadStateIndicator";
@@ -120,6 +129,7 @@ export function AppShell({
 		lastEventAtMs: null,
 		error: null,
 	});
+	const lastUpgradeStateRef = useRef<string | null>(null);
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -274,6 +284,28 @@ export function AppShell({
 
 		return () => window.removeEventListener("focus", onFocus);
 	}, [runVersionCheck]);
+
+	useEffect(() => {
+		const nextState = adminUpgradeStatus.data?.status.state ?? null;
+		const prevState = lastUpgradeStateRef.current;
+		lastUpgradeStateRef.current = nextState;
+
+		if (!shouldRefreshAfterUpgradeTransition(prevState, nextState)) {
+			return;
+		}
+
+		void clusterInfo.refetch();
+		void health.refetch();
+		void runVersionCheck({ force: true });
+		if (nextState === "succeeded") {
+			void requestServiceWorkerUpdateCheck();
+		}
+	}, [
+		adminUpgradeStatus.data?.status.state,
+		clusterInfo,
+		health,
+		runVersionCheck,
+	]);
 
 	const effectiveNavGroups =
 		navGroups ??

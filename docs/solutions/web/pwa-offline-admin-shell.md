@@ -49,6 +49,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   blocks same-origin mutating `/api/*` requests when offline.
 - Feed app-wide operational status through a shared SSE stream, then bridge
   those snapshots back into the persisted React Query cache.
+- Reconnect shared SSE streams automatically after backend restarts, and when an
+  upgrade job leaves `running`/`restarting`, force a fresh cluster-info read and
+  a Service Worker `registration.update()` so the UI can surface a frontend
+  reload prompt without waiting for focus or a manual refresh.
 
 ## Guardrails / Reuse notes
 

@@ -12,7 +12,8 @@
   block offline same-origin API writes.
 - `web/src/components/PwaStatusPrompt.tsx` adds a separate UX channel for new
   frontend bundle availability; it does not reuse the backend
-  `VersionIndicator` upgrade job wording.
+  `VersionIndicator` upgrade job wording. The prompt now actively polls the
+  registered Service Worker for updates while the app is open.
 
 ## Offline read-only console
 
@@ -36,6 +37,13 @@
 - `web/src/api/adminStatusEvents.ts` consumes the new stream, and
   `web/src/components/AppShell.tsx` bridges incoming snapshots into React Query
   caches so the warm cache remains current while the app is open.
+- `web/src/api/sse.ts` now reconnects application SSE streams with bounded
+  backoff so admin status snapshots recover after the backend restarts during an
+  upgrade.
+- When the polled admin upgrade job moves from `running`/`restarting` into a
+  terminal state, `AppShell` now forces fresh `clusterInfo` / `health` reads,
+  reruns the version check, and asks the registered Service Worker to check for
+  a newer frontend bundle immediately.
 - Existing node-detail runtime streaming remains in place; the new admin
   stream covers the shared shell-level status surfaces.
 
@@ -48,4 +56,5 @@
   `cd web && bun run typecheck`
   `cd web && bun run test`
 - Storybook coverage includes offline page stories for Nodes and Node details,
-  plus component stories for `PageState` and `ReadStateBanner`.
+  plus component stories for `PageState`, `ReadStateBanner`, and the PWA update
+  prompt card.
