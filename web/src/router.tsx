@@ -9,6 +9,7 @@ import {
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
+import { PwaStatusPrompt } from "./components/PwaStatusPrompt";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
 import { hasDemoSession } from "./demo/session";
@@ -386,7 +387,12 @@ declare module "@tanstack/react-router" {
 }
 
 function RootLayout() {
-	return <Outlet />;
+	return (
+		<>
+			<Outlet />
+			<PwaStatusPrompt />
+		</>
+	);
 }
 
 function AppShell() {

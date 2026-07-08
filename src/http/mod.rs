@@ -490,7 +490,7 @@ struct AdminEndpointProbeRunSseNotFound {
     run_id: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ClusterInfoResponse {
     cluster_id: String,
     node_id: String,
@@ -498,6 +498,32 @@ struct ClusterInfoResponse {
     leader_api_base_url: String,
     term: u64,
     xp_version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminStatusEventsHello {
+    node_id: String,
+    connected_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminStatusHealthSnapshot {
+    status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminStatusSnapshot {
+    emitted_at: String,
+    health: AdminStatusHealthSnapshot,
+    cluster_info: ClusterInfoResponse,
+    nodes_runtime: AdminNodesRuntimeResponse,
+    alerts: AlertsResponse,
+    upgrade: AdminUpgradeStatusResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminStatusSnapshotError {
+    message: String,
 }
 
 #[derive(Deserialize)]
@@ -932,6 +958,7 @@ pub fn build_router(
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/upgrade/status", get(admin_get_upgrade_status))
         .route("/upgrade/start", post(admin_start_upgrade))
+        .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
         .route(
             "/nodes/{node_id}/delete-preview",
@@ -1344,24 +1371,28 @@ async fn redirect_follower_writes(req: Request<Body>, next: Next) -> Response {
     Redirect::temporary(&location).into_response()
 }
 
-async fn cluster_info(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<ClusterInfoResponse>, ApiError> {
-    let metrics = raft_metrics(&state);
+fn build_cluster_info_response(state: &AppState) -> ClusterInfoResponse {
+    let metrics = raft_metrics(state);
     let leader_api_base_url = leader_api_base_url(&metrics).unwrap_or_default();
     let role = if is_leader(&metrics) {
         "leader"
     } else {
         "follower"
     };
-    Ok(Json(ClusterInfoResponse {
+    ClusterInfoResponse {
         cluster_id: state.cluster.cluster_id.clone(),
         node_id: state.cluster.node_id.clone(),
         role,
         leader_api_base_url,
         term: metrics.current_term,
         xp_version: crate::version::VERSION.to_string(),
-    }))
+    }
+}
+
+async fn cluster_info(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<ClusterInfoResponse>, ApiError> {
+    Ok(Json(build_cluster_info_response(&state)))
 }
 
 const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);
@@ -2148,16 +2179,16 @@ fn node_runtime_detail_from_snapshot(
     }
 }
 
-async fn admin_list_nodes_runtime(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<AdminNodesRuntimeResponse>, ApiError> {
+async fn admin_list_nodes_runtime_response(
+    state: &AppState,
+) -> Result<AdminNodesRuntimeResponse, ApiError> {
     let nodes = {
         let store = state.store.lock().await;
         store.list_nodes()
     };
     let local_node_id = state.cluster.node_id.clone();
 
-    let client = build_cluster_http_client(&state)?;
+    let client = build_cluster_http_client(state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -2229,11 +2260,17 @@ async fn admin_list_nodes_runtime(
     unreachable_nodes.sort();
     unreachable_nodes.dedup();
 
-    Ok(Json(AdminNodesRuntimeResponse {
+    Ok(AdminNodesRuntimeResponse {
         partial: !unreachable_nodes.is_empty(),
         unreachable_nodes,
         items,
-    }))
+    })
+}
+
+async fn admin_list_nodes_runtime(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminNodesRuntimeResponse>, ApiError> {
+    Ok(Json(admin_list_nodes_runtime_response(&state).await?))
 }
 
 async fn admin_get_node_runtime(
@@ -3781,9 +3818,9 @@ async fn admin_redact_mihomo_source(
     Ok(Json(AdminMihomoRedactResponse { redacted_text }))
 }
 
-async fn admin_get_upgrade_status(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
+fn build_admin_upgrade_status_response(
+    state: &AppState,
+) -> Result<AdminUpgradeStatusResponse, ApiError> {
     let status = read_reconciled_status(&state.config.data_dir).map_err(|e| {
         ApiError::new(
             "upgrade_status_unavailable",
@@ -3791,10 +3828,118 @@ async fn admin_get_upgrade_status(
             format!("read upgrade status: {e}"),
         )
     })?;
-    Ok(Json(AdminUpgradeStatusResponse {
+    Ok(AdminUpgradeStatusResponse {
         support: support_status(),
         status,
-    }))
+    })
+}
+
+async fn build_admin_status_snapshot(state: &AppState) -> Result<AdminStatusSnapshot, ApiError> {
+    Ok(AdminStatusSnapshot {
+        emitted_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        health: AdminStatusHealthSnapshot { status: "ok" },
+        cluster_info: build_cluster_info_response(state),
+        nodes_runtime: admin_list_nodes_runtime_response(state).await?,
+        alerts: admin_get_alerts_response(state, None).await?,
+        upgrade: build_admin_upgrade_status_response(state)?,
+    })
+}
+
+async fn admin_get_upgrade_status(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
+    Ok(Json(build_admin_upgrade_status_response(&state)?))
+}
+
+async fn admin_stream_status_events(
+    Extension(state): Extension<AppState>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
+    let hello = AdminStatusEventsHello {
+        node_id: state.cluster.node_id.clone(),
+        connected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+    };
+
+    let mut initial_events = VecDeque::new();
+    initial_events.push_back(sse_json_event("hello", &hello));
+
+    let (tx, rx) = mpsc::channel::<Event>(32);
+    let state_for_stream = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        let mut last_snapshot_json: Option<String> = None;
+        interval.tick().await;
+
+        loop {
+            if tx.is_closed() {
+                return;
+            }
+
+            match build_admin_status_snapshot(&state_for_stream).await {
+                Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                    Ok(snapshot_json) => {
+                        if last_snapshot_json.as_ref() != Some(&snapshot_json) {
+                            if tx
+                                .send(
+                                    Event::default()
+                                        .event("snapshot")
+                                        .data(snapshot_json.clone()),
+                                )
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            last_snapshot_json = Some(snapshot_json);
+                        }
+                    }
+                    Err(err) => {
+                        if tx
+                            .send(sse_json_event(
+                                "snapshot_error",
+                                &AdminStatusSnapshotError {
+                                    message: format!("serialize status snapshot: {err}"),
+                                },
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                },
+                Err(err) => {
+                    if tx
+                        .send(sse_json_event(
+                            "snapshot_error",
+                            &AdminStatusSnapshotError {
+                                message: err.message.clone(),
+                            },
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+
+            interval.tick().await;
+        }
+    });
+
+    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
+        if let Some(event) = initial.pop_front() {
+            return Some((Ok(event), (initial, rx)));
+        }
+        let next = rx.recv().await?;
+        Some((Ok(next), (initial, rx)))
+    });
+
+    Ok(Sse::new(out_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    ))
 }
 
 async fn admin_start_upgrade(
@@ -7218,11 +7363,11 @@ fn build_admin_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiE
     ))
 }
 
-async fn admin_get_alerts(
-    Extension(state): Extension<AppState>,
-    Query(query): Query<AlertsQuery>,
-) -> Result<Json<AlertsResponse>, ApiError> {
-    if let Some(scope) = query.scope.as_deref()
+async fn admin_get_alerts_response(
+    state: &AppState,
+    scope: Option<&str>,
+) -> Result<AlertsResponse, ApiError> {
+    if let Some(scope) = scope
         && scope != "local"
     {
         return Err(ApiError::invalid_request(
@@ -7236,19 +7381,19 @@ async fn admin_get_alerts(
         build_local_alerts(&store, &local_node_id)
     };
 
-    if query.scope.as_deref() == Some("local") {
-        return Ok(Json(AlertsResponse {
+    if scope == Some("local") {
+        return Ok(AlertsResponse {
             partial: false,
             unreachable_nodes: Vec::new(),
             items: local_items,
-        }));
+        });
     }
 
     let nodes = {
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(&state)?;
+    let client = build_admin_http_client(state)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_ref()
@@ -7301,11 +7446,20 @@ async fn admin_get_alerts(
     }
 
     let partial = !unreachable_nodes.is_empty();
-    Ok(Json(AlertsResponse {
+    Ok(AlertsResponse {
         partial,
         unreachable_nodes,
         items,
-    }))
+    })
+}
+
+async fn admin_get_alerts(
+    Extension(state): Extension<AppState>,
+    Query(query): Query<AlertsQuery>,
+) -> Result<Json<AlertsResponse>, ApiError> {
+    Ok(Json(
+        admin_get_alerts_response(&state, query.scope.as_deref()).await?,
+    ))
 }
 
 async fn fallback_not_found() -> ApiError {

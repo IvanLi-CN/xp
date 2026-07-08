@@ -9,8 +9,16 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -104,6 +112,7 @@ function FieldBlock({ label, value, copyText }: FieldBlockProps) {
 export function ServiceConfigPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
+	const runtime = useAppRuntime();
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -144,7 +153,7 @@ export function ServiceConfigPage() {
 				variant="primary"
 				size="sm"
 				loading={configQuery.isFetching}
-				disabled={adminToken.length === 0}
+				disabled={adminToken.length === 0 || runtime.isReadOnly}
 				onClick={() => configQuery.refetch()}
 			>
 				Refresh
@@ -163,7 +172,7 @@ export function ServiceConfigPage() {
 			);
 		}
 
-		if (configQuery.isLoading) {
+		if (configQuery.isLoading && !hasQueryData(configQuery)) {
 			return (
 				<PageState
 					variant="loading"
@@ -173,7 +182,23 @@ export function ServiceConfigPage() {
 			);
 		}
 
-		if (configQuery.isError) {
+		if (
+			!hasQueryData(configQuery) &&
+			queryIsOfflineBlocked(configQuery, runtime.isOnline)
+		) {
+			return (
+				<PageState
+					variant="offline"
+					title="Offline cache unavailable"
+					description={
+						"Open Service config once while online to keep the latest " +
+						"effective config available offline."
+					}
+				/>
+			);
+		}
+
+		if (configQuery.isError && !hasQueryData(configQuery)) {
 			return (
 				<PageState
 					variant="error"
@@ -364,6 +389,20 @@ export function ServiceConfigPage() {
 			</div>
 		);
 	})();
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		configQuery,
+		clusterInfo,
+		health,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(configQuery) ||
+			hasQueryData(clusterInfo) ||
+			hasQueryData(health)) &&
+		(!runtime.isOnline ||
+			configQuery.isError ||
+			clusterInfo.isError ||
+			health.isError);
 
 	return (
 		<div className="space-y-5">
@@ -372,6 +411,15 @@ export function ServiceConfigPage() {
 				description="只读展示当前进程配置与订阅入口，便于部署核对与排障。"
 				actions={headerActions}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={!runtime.isOnline ? "离线配置快照" : "当前展示的是缓存配置"}
+					description={`最近一次成功同步：${formatSyncTimestamp(latestSyncedAt)}。`}
+				/>
+			) : null}
 			{content}
 		</div>
 	);

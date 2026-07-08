@@ -43,6 +43,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
@@ -66,6 +67,13 @@ import {
 	SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
 function formatErrorMessage(error: unknown): string {
@@ -469,6 +477,7 @@ function formatEndpointKind(
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
+	const appRuntime = useAppRuntime();
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -793,7 +802,7 @@ export function NodeDetailsPage() {
 			);
 		}
 
-		if (nodeQuery.isLoading) {
+		if (nodeQuery.isLoading && !hasQueryData(nodeQuery)) {
 			return (
 				<PageState
 					variant="loading"
@@ -803,7 +812,20 @@ export function NodeDetailsPage() {
 			);
 		}
 
-		if (nodeQuery.isError) {
+		if (
+			!hasQueryData(nodeQuery) &&
+			queryIsOfflineBlocked(nodeQuery, appRuntime.isOnline)
+		) {
+			return (
+				<PageState
+					variant="offline"
+					title="Offline cache unavailable"
+					description="Open this node once while online to keep its latest runtime snapshot and history available offline."
+				/>
+			);
+		}
+
+		if (nodeQuery.isError && !hasQueryData(nodeQuery)) {
 			return (
 				<PageState
 					variant="error"
@@ -910,7 +932,20 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{runtimeQuery.isError && !runtime && !history ? (
+							{!runtime &&
+							!history &&
+							queryIsOfflineBlocked(runtimeQuery, appRuntime.isOnline) ? (
+								<PageState
+									variant="offline"
+									title="Offline runtime cache unavailable"
+									description="Open this node's runtime tab while online to keep the latest timeline and events available offline."
+								/>
+							) : null}
+
+							{runtimeQuery.isError &&
+							!runtime &&
+							!history &&
+							!queryIsOfflineBlocked(runtimeQuery, appRuntime.isOnline) ? (
 								<PageState
 									variant="error"
 									title="Failed to load runtime"
@@ -919,6 +954,7 @@ export function NodeDetailsPage() {
 										<Button
 											variant="secondary"
 											loading={runtimeQuery.isFetching}
+											disabled={!appRuntime.isOnline}
 											onClick={() => runtimeQuery.refetch()}
 										>
 											Retry
@@ -1093,6 +1129,7 @@ export function NodeDetailsPage() {
 											<Button
 												variant="secondary"
 												loading={runtimeQuery.isFetching}
+												disabled={!appRuntime.isOnline}
 												onClick={() => runtimeQuery.refetch()}
 											>
 												Refresh runtime
@@ -1216,6 +1253,7 @@ export function NodeDetailsPage() {
 										<Button
 											variant="secondary"
 											loading={isRefreshingEgressProbe}
+											disabled={appRuntime.isReadOnly}
 											onClick={() => void handleRefreshEgressProbe()}
 										>
 											Refresh probe
@@ -1343,7 +1381,7 @@ export function NodeDetailsPage() {
 								</div>
 								<NodeQuotaEditor
 									value={nodeQuery.data.quota_limit_bytes}
-									disabled={isSaving}
+									disabled={isSaving || appRuntime.isReadOnly}
 									onApply={async (nextBytes: number) => {
 										try {
 											await patchAdminNode(adminToken, nodeId, {
@@ -1468,6 +1506,7 @@ export function NodeDetailsPage() {
 											variant="secondary"
 											type="button"
 											loading={nodeQuery.isFetching}
+											disabled={!appRuntime.isOnline}
 											onClick={() => nodeQuery.refetch()}
 										>
 											Refresh
@@ -1475,7 +1514,7 @@ export function NodeDetailsPage() {
 										<Button
 											type="submit"
 											loading={isSaving}
-											disabled={!isDirty}
+											disabled={!isDirty || appRuntime.isReadOnly}
 										>
 											Save changes
 										</Button>
@@ -1495,7 +1534,18 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{ipUsageQuery.isError && !ipUsageQuery.data ? (
+							{!ipUsageQuery.data &&
+							queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
+								<PageState
+									variant="offline"
+									title="Offline IP usage cache unavailable"
+									description="Open this tab while online to keep the latest inbound IP report available offline."
+								/>
+							) : null}
+
+							{ipUsageQuery.isError &&
+							!ipUsageQuery.data &&
+							!queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
 								<PageState
 									variant="error"
 									title="Failed to load IP usage"
@@ -1537,7 +1587,24 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{tcpConnectionsQuery.isError && !tcpConnectionsQuery.data ? (
+							{!tcpConnectionsQuery.data &&
+							queryIsOfflineBlocked(
+								tcpConnectionsQuery,
+								appRuntime.isOnline,
+							) ? (
+								<PageState
+									variant="offline"
+									title="Offline TCP history cache unavailable"
+									description="Open this tab while online to keep the latest TCP connection history available offline."
+								/>
+							) : null}
+
+							{tcpConnectionsQuery.isError &&
+							!tcpConnectionsQuery.data &&
+							!queryIsOfflineBlocked(
+								tcpConnectionsQuery,
+								appRuntime.isOnline,
+							) ? (
 								<PageState
 									variant="error"
 									title="Failed to load TCP connection count"
@@ -1578,7 +1645,7 @@ export function NodeDetailsPage() {
 									variant="danger"
 									onClick={() => void handleOpenDeleteDialog()}
 									loading={isPreparingDelete}
-									disabled={isDeleting}
+									disabled={isDeleting || appRuntime.isReadOnly}
 								>
 									Delete node
 								</Button>
@@ -1681,6 +1748,22 @@ export function NodeDetailsPage() {
 			</div>
 		);
 	})();
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		nodeQuery,
+		runtimeQuery,
+		historyQuery,
+		ipUsageQuery,
+		tcpConnectionsQuery,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(nodeQuery) ||
+			hasQueryData(runtimeQuery) ||
+			hasQueryData(historyQuery)) &&
+		(!appRuntime.isOnline ||
+			nodeQuery.isError ||
+			runtimeQuery.isError ||
+			historyQuery.isError);
 
 	return (
 		<div className="space-y-4 sm:space-y-6">
@@ -1693,6 +1776,19 @@ export function NodeDetailsPage() {
 					</Button>
 				}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!appRuntime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!appRuntime.isOnline
+							? "Offline node snapshot"
+							: "Showing cached node detail data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 			{content}
 		</div>
 	);

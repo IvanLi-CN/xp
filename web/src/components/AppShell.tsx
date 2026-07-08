@@ -3,6 +3,7 @@ import { Link, Outlet, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
+import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -44,8 +45,10 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { fetchVersionCheck } from "../api/versionCheck";
+import { useAppRuntime } from "../offline/appRuntime";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
 import { clearAdminToken, readAdminToken } from "./auth";
@@ -96,6 +99,7 @@ export function AppShell({
 }: AppShellProps) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -107,6 +111,15 @@ export function AppShell({
 	const [versionCheckLastAtMs, setVersionCheckLastAtMs] = useState<
 		number | null
 	>(() => readVersionCheckLastAtMs());
+	const [statusStream, setStatusStream] = useState<{
+		connected: boolean;
+		lastEventAtMs: number | null;
+		error: string | null;
+	}>({
+		connected: false,
+		lastEventAtMs: null,
+		error: null,
+	});
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -160,6 +173,7 @@ export function AppShell({
 	const runVersionCheck = useCallback(
 		async (options?: { force?: boolean }) => {
 			const force = options?.force ?? false;
+			if (!runtime.isOnline) return;
 			const nowMs = Date.now();
 			const canRun =
 				force ||
@@ -185,8 +199,68 @@ export function AppShell({
 				dispatchVersionCheck({ type: "fail", message });
 			}
 		},
-		[adminToken, versionCheckLastAtMs],
+		[adminToken, runtime.isOnline, versionCheckLastAtMs],
 	);
+
+	useEffect(() => {
+		if (adminToken.length === 0) {
+			setStatusStream({ connected: false, lastEventAtMs: null, error: null });
+			return;
+		}
+
+		const handle = startAdminStatusEvents({
+			adminToken,
+			onOpen: () => {
+				setStatusStream((prev) => ({ ...prev, connected: true, error: null }));
+			},
+			onClose: () => {
+				setStatusStream((prev) => ({ ...prev, connected: false }));
+			},
+			onError: (error) => {
+				setStatusStream((prev) => ({
+					...prev,
+					connected: false,
+					error: error instanceof Error ? error.message : String(error),
+				}));
+			},
+			onMessage: (message) => {
+				if (message.type === "snapshot_error") {
+					setStatusStream((prev) => ({
+						...prev,
+						error: message.data.message,
+					}));
+					return;
+				}
+
+				if (message.type === "snapshot") {
+					const lastEventAtMs = Date.parse(message.data.emitted_at);
+					queryClient.setQueryData(["health"], message.data.health);
+					queryClient.setQueryData(["clusterInfo"], message.data.cluster_info);
+					queryClient.setQueryData(
+						["adminAlerts", adminToken],
+						message.data.alerts,
+					);
+					queryClient.setQueryData(
+						["adminNodesRuntime", adminToken],
+						message.data.nodes_runtime,
+					);
+					queryClient.setQueryData(
+						["adminUpgradeStatus", adminToken],
+						message.data.upgrade,
+					);
+					setStatusStream({
+						connected: true,
+						lastEventAtMs: Number.isFinite(lastEventAtMs)
+							? lastEventAtMs
+							: Date.now(),
+						error: null,
+					});
+				}
+			},
+		});
+
+		return () => handle.close();
+	}, [adminToken, queryClient]);
 
 	useEffect(() => {
 		const onFocus = () => {
@@ -292,6 +366,31 @@ export function AppShell({
 			);
 		}
 
+		items.push(
+			<Badge
+				key="realtime"
+				variant={
+					!runtime.isOnline
+						? "warning"
+						: statusStream.connected
+							? "success"
+							: "outline"
+				}
+				size="sm"
+				className="gap-2 font-mono"
+				title="Realtime status stream"
+			>
+				<span>realtime:</span>
+				<span>
+					{!runtime.isOnline
+						? "offline"
+						: statusStream.connected
+							? "live"
+							: "reconnecting"}
+				</span>
+			</Badge>,
+		);
+
 		return items;
 	}, [
 		adminAlerts.data,
@@ -300,6 +399,8 @@ export function AppShell({
 		clusterInfo.isSuccess,
 		health.data,
 		health.isSuccess,
+		runtime.isOnline,
+		statusStream.connected,
 	]);
 
 	const statusMenuBadges = headerStatus ?? statusBadges;
@@ -341,6 +442,17 @@ export function AppShell({
 		runVersionCheck,
 		versionCheck,
 	]);
+
+	const globalReadStateIndicator = runtime.isReadOnly ? (
+		<ReadStateIndicator
+			tone="warning"
+			label="Offline cached"
+			title={
+				runtime.readOnlyReason ??
+				"Offline read-only mode is active. Cached data remains available."
+			}
+		/>
+	) : null;
 
 	const navContent = (
 		<nav aria-label="Primary navigation" className="xp-panel p-4">
@@ -434,6 +546,7 @@ export function AppShell({
 
 							<div className="flex items-center justify-end gap-2">
 								<div className="flex items-center gap-2">
+									{globalReadStateIndicator}
 									{versionIndicator}
 								</div>
 

@@ -40,9 +40,12 @@ SOURCE_SIZE_SUFFIXES = {
 SKIP_DIRS = {
     ".codex",
     ".git",
+    ".impeccable",
     ".storybook-static",
     "dist",
     "node_modules",
+    "playwright-report",
+    "storybook-static",
     "target",
 }
 

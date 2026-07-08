@@ -271,3 +271,23 @@ export const RuntimeHistoryFallback: Story = {
 		).toBeInTheDocument();
 	},
 };
+
+export const OfflineCachedRuntime: Story = {
+	parameters: {
+		appRuntime: {
+			initialIsOnline: false,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText(/offline cached/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/offline node snapshot/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/last successful sync:/i),
+		).toBeInTheDocument();
+	},
+};

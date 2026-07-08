@@ -31,6 +31,7 @@ import type {
 	AdminMihomoRedactRequest,
 	AdminMihomoRedactResponse,
 } from "../../src/api/adminTools";
+import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
@@ -1040,6 +1041,30 @@ function mockRedactOutput(payload: AdminMihomoRedactRequest): string {
 		.replaceAll("public_key_value", "publ****alue");
 }
 
+function buildAdminUpgradeStatus(
+	overrides?: Partial<AdminUpgradeStatusResponse>,
+): AdminUpgradeStatusResponse {
+	return {
+		support: {
+			supported: true,
+			reason: null,
+			trigger: "xp-upgrade-trigger",
+			...overrides?.support,
+		},
+		status: {
+			state: "idle",
+			target_tag: null,
+			repo: "IvanLi-CN/xp",
+			started_at: null,
+			finished_at: null,
+			exit_code: null,
+			message: null,
+			updated_at: new Date().toISOString(),
+			...overrides?.status,
+		},
+	};
+}
+
 async function handleRequest(
 	state: MockState,
 	req: Request,
@@ -1065,6 +1090,54 @@ async function handleRequest(
 			return errorResponse(502, "upstream_error", "mock version check failure");
 		}
 		return jsonResponse(clone(state.versionCheck));
+	}
+
+	if (path === "/api/admin/upgrade/status" && method === "GET") {
+		return jsonResponse(buildAdminUpgradeStatus());
+	}
+
+	if (path === "/api/admin/upgrade/start" && method === "POST") {
+		const payload = await readJson<{ target_tag?: string }>(req);
+		return jsonResponse(
+			buildAdminUpgradeStatus({
+				status: {
+					state: "running",
+					target_tag: payload?.target_tag ?? "v0.0.0",
+					started_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+					message: "storybook mock upgrade started",
+				},
+			}),
+		);
+	}
+
+	if (path === "/api/admin/status/events" && method === "GET") {
+		const upgrade = buildAdminUpgradeStatus();
+		const nodesRuntime = {
+			partial: false,
+			unreachable_nodes: [],
+			items: state.nodes.map((node) => buildNodeRuntimeListItem(node)),
+		};
+		return sseResponse([
+			{
+				event: "hello",
+				data: {
+					node_id: state.clusterInfo.node_id,
+					connected_at: new Date().toISOString(),
+				},
+			},
+			{
+				event: "snapshot",
+				data: {
+					emitted_at: new Date().toISOString(),
+					health: clone(state.health),
+					cluster_info: clone(state.clusterInfo),
+					nodes_runtime: clone(nodesRuntime),
+					alerts: clone(state.alerts),
+					upgrade,
+				},
+			},
+		]);
 	}
 
 	if (path === "/api/admin/tools/mihomo/redact" && method === "POST") {

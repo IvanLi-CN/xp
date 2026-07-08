@@ -11,8 +11,16 @@ import { Button } from "../components/Button";
 import { EndpointsTable } from "../components/EndpointsTable";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -25,6 +33,7 @@ function formatErrorMessage(error: unknown): string {
 
 export function EndpointsPage() {
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
@@ -73,13 +82,18 @@ export function EndpointsPage() {
 				<Button
 					variant="secondary"
 					loading={probeRunMutation.isPending}
+					disabled={runtime.isReadOnly}
 					onClick={() => probeRunMutation.mutate()}
 				>
 					Test all now
 				</Button>
-				<Link className={buttonVariants()} to="/endpoints/new">
-					New endpoint
-				</Link>
+				{runtime.isReadOnly ? (
+					<Button disabled>New endpoint</Button>
+				) : (
+					<Link className={buttonVariants()} to="/endpoints/new">
+						New endpoint
+					</Link>
+				)}
 				<Button
 					variant="secondary"
 					loading={endpointsQuery.isFetching}
@@ -101,7 +115,7 @@ export function EndpointsPage() {
 			);
 		}
 
-		if (endpointsQuery.isLoading) {
+		if (endpointsQuery.isLoading && !hasQueryData(endpointsQuery)) {
 			return (
 				<PageState
 					variant="loading"
@@ -111,7 +125,20 @@ export function EndpointsPage() {
 			);
 		}
 
-		if (endpointsQuery.isError) {
+		if (
+			!hasQueryData(endpointsQuery) &&
+			queryIsOfflineBlocked(endpointsQuery, runtime.isOnline)
+		) {
+			return (
+				<PageState
+					variant="offline"
+					title="Offline cache unavailable"
+					description="Open Endpoints once while online to keep the latest list available offline."
+				/>
+			);
+		}
+
+		if (endpointsQuery.isError && !hasQueryData(endpointsQuery)) {
 			const description = formatErrorMessage(endpointsQuery.error);
 			return (
 				<PageState
@@ -150,6 +177,11 @@ export function EndpointsPage() {
 		const nodeById = new Map(nodes.map((n) => [n.node_id, n] as const));
 		return <EndpointsTable endpoints={endpoints} nodeById={nodeById} />;
 	})();
+	const latestSyncedAt = latestQueryDataUpdatedAt([endpointsQuery, nodesQuery]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		hasQueryData(endpointsQuery) &&
+		(!runtime.isOnline || endpointsQuery.isError || nodesQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -158,6 +190,19 @@ export function EndpointsPage() {
 				description="Manage ingress endpoints for the cluster."
 				actions={<div className="flex flex-wrap gap-2">{actions}</div>}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline endpoint list"
+							: "Showing cached endpoint data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 			{content}
 		</div>
 	);

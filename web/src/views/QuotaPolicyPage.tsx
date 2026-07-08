@@ -33,6 +33,7 @@ import { Button } from "../components/Button";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -50,6 +51,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import {
 	RATIO_BASIS_POINTS,
 	basisPointsToWeights,
@@ -494,6 +502,7 @@ function TablePercentInlineEditor({
 
 export function QuotaPolicyPage() {
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
 
@@ -1235,9 +1244,9 @@ export function QuotaPolicyPage() {
 	}
 
 	if (
-		nodesQuery.isLoading ||
-		usersQuery.isLoading ||
-		globalWeightRowsQuery.isLoading
+		(nodesQuery.isLoading && !hasQueryData(nodesQuery)) ||
+		(usersQuery.isLoading && !hasQueryData(usersQuery)) ||
+		(globalWeightRowsQuery.isLoading && !hasQueryData(globalWeightRowsQuery))
 	) {
 		return (
 			<PageState
@@ -1249,9 +1258,24 @@ export function QuotaPolicyPage() {
 	}
 
 	if (
-		nodesQuery.isError ||
-		usersQuery.isError ||
-		globalWeightRowsQuery.isError
+		!hasQueryData(nodesQuery) &&
+		!hasQueryData(usersQuery) &&
+		!hasQueryData(globalWeightRowsQuery) &&
+		queryIsOfflineBlocked(globalWeightRowsQuery, runtime.isOnline)
+	) {
+		return (
+			<PageState
+				variant="offline"
+				title="Offline cache unavailable"
+				description="Open Quota policy once while online to keep the latest budget and ratio snapshots available offline."
+			/>
+		);
+	}
+
+	if (
+		(nodesQuery.isError && !hasQueryData(nodesQuery)) ||
+		(usersQuery.isError && !hasQueryData(usersQuery)) ||
+		(globalWeightRowsQuery.isError && !hasQueryData(globalWeightRowsQuery))
 	) {
 		const message = nodesQuery.isError
 			? formatError(nodesQuery.error)
@@ -1285,6 +1309,24 @@ export function QuotaPolicyPage() {
 	const globalRatioStatusClass = badgeClass(
 		ratioStatusTone(globalTotalBasisPoints),
 	);
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		nodesQuery,
+		usersQuery,
+		globalWeightRowsQuery,
+		weightRowsQuery,
+		nodePolicyQuery,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(nodesQuery) ||
+			hasQueryData(usersQuery) ||
+			hasQueryData(globalWeightRowsQuery)) &&
+		(!runtime.isOnline ||
+			nodesQuery.isError ||
+			usersQuery.isError ||
+			globalWeightRowsQuery.isError ||
+			weightRowsQuery.isError ||
+			nodePolicyQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -1292,6 +1334,19 @@ export function QuotaPolicyPage() {
 				title="Quota policy"
 				description="Shared node quota budgets, user tiers, and node-scoped ratio weights."
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline quota snapshot"
+							: "Showing cached quota policy data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<div className={cn(surfaceClass, "p-6", "space-y-4")}>
 				<div className="space-y-1">
@@ -1330,6 +1385,7 @@ export function QuotaPolicyPage() {
 							<td className="align-top">
 								<NodeQuotaEditor
 									value={node.quota_limit_bytes}
+									disabled={runtime.isReadOnly}
 									onApply={async (nextBytes) => {
 										try {
 											await patchAdminNode(adminToken, node.node_id, {
@@ -1848,7 +1904,7 @@ export function QuotaPolicyPage() {
 									<Button
 										variant="primary"
 										loading={isSavingGlobalRatio}
-										disabled={!canSaveGlobalRatio}
+										disabled={!canSaveGlobalRatio || runtime.isReadOnly}
 										onClick={() => void persistGlobalRatioRows()}
 									>
 										Save global ratios
@@ -1925,6 +1981,7 @@ export function QuotaPolicyPage() {
 							<td className="align-top">
 								<Select
 									value={user.priority_tier}
+									disabled={runtime.isReadOnly}
 									onValueChange={async (value) => {
 										const next = value as "p1" | "p2" | "p3";
 										try {
@@ -1988,7 +2045,8 @@ export function QuotaPolicyPage() {
 									disabled={
 										!selectedNodeId ||
 										nodePolicyQuery.isLoading ||
-										isUpdatingNodePolicy
+										isUpdatingNodePolicy ||
+										runtime.isReadOnly
 									}
 									onCheckedChange={(checked) =>
 										void updateNodeInheritGlobal(checked === true)
@@ -2520,7 +2578,7 @@ export function QuotaPolicyPage() {
 									<Button
 										variant="primary"
 										loading={isSavingRatio}
-										disabled={!canSaveRatio}
+										disabled={!canSaveRatio || runtime.isReadOnly}
 										onClick={() => void persistRatioRows()}
 									>
 										Save ratios
