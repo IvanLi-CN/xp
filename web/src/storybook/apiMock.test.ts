@@ -255,19 +255,31 @@ describe("storybook api mock", () => {
 					node_id: "node-1",
 					kind: "vless_reality_vision_tcp",
 					port: 9443,
-					reality: {
-						dest: "example.com:443",
-						server_names: ["example.com"],
-						server_names_source: "manual",
-						fingerprint: "chrome",
+					canary_upstream: {
+						url: "http://127.0.0.1:8080",
+						mode: "auto",
 					},
+					accepted_authorities: ["EDGE.EXAMPLE.COM."],
 				}),
 			}),
 		);
 		expect(createEndpointRes.ok).toBe(true);
 		const createdEndpoint = (await createEndpointRes.json()) as {
 			endpoint_id: string;
+			meta: {
+				managed_default: boolean;
+				reality: { server_names: string[]; dest: string };
+				accepted_authorities: string[];
+			};
 		};
+		expect(createdEndpoint.meta.managed_default).toBe(true);
+		expect(createdEndpoint.meta.reality.server_names).toEqual([
+			"tokyo-1.example.com",
+		]);
+		expect(createdEndpoint.meta.reality.dest).toBe("127.0.0.1:39043");
+		expect(createdEndpoint.meta.accepted_authorities).toEqual([
+			"edge.example.com:443",
+		]);
 
 		const vlessAccessRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${vlessUserId}/access`, { method: "GET" }),

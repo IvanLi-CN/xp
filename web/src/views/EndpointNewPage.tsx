@@ -4,11 +4,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { fetchAdminConfig } from "../api/adminConfig";
 import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
-import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
@@ -38,12 +36,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
-import { realityDestFromBindAddress } from "../utils/realityDestSuggestions";
+import { validateAcceptedAuthority } from "../utils/acceptedAuthority";
 import {
-	realityServerNameSuggestionFromAccessHost,
-	realityServerNameSuggestionFromDest,
-	validateRealityServerName,
-} from "../utils/realityServerName";
+	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
+	MANAGED_VLESS_MODE_HELPER_TEXT,
+	normalizeAcceptedAuthorities,
+} from "../utils/managedVlessForm";
 
 const kindOptions = [
 	{
@@ -69,9 +67,9 @@ const endpointSchema = z.object({
 	kind: z.enum(["vless_reality_vision_tcp", "ss2022_2022_blake3_aes_128_gcm"]),
 	nodeId: z.string().min(1, "Node is required."),
 	port: z.coerce.number().int().positive("Please enter a valid port."),
-	realityDest: z.string(),
-	realityServerNames: z.array(z.string()),
-	realityFingerprint: z.string(),
+	canaryUpstreamUrl: z.string(),
+	canaryUpstreamMode: z.enum(["auto", "http1", "h2c"]),
+	acceptedAuthorities: z.array(z.string()),
 });
 
 type EndpointFormValues = z.infer<typeof endpointSchema>;
@@ -87,56 +85,20 @@ export function EndpointNewPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
-	const adminConfigQuery = useQuery({
-		queryKey: ["adminConfig", adminToken],
-		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
-	});
 	const form = useForm<EndpointFormInput, unknown, EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
 		defaultValues: {
 			kind: "vless_reality_vision_tcp",
 			nodeId: "",
 			port: 443,
-			realityDest: "",
-			realityServerNames: [],
-			realityFingerprint: "chrome",
+			canaryUpstreamUrl: "",
+			canaryUpstreamMode: "auto",
+			acceptedAuthorities: [],
 		},
 	});
 
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
-	const port = form.watch("port");
-	const endpointPort =
-		typeof port === "number" || typeof port === "string" ? port : "";
-	const realityDest = form.watch("realityDest");
-	const selectedNode = nodesQuery.data?.items.find(
-		(node) => node.node_id === nodeId,
-	);
-	const destinationServerNameSuggestion =
-		realityServerNameSuggestionFromDest(realityDest);
-	const accessHostServerNameSuggestion = selectedNode
-		? realityServerNameSuggestionFromAccessHost(
-				selectedNode.access_host,
-				endpointPort,
-			)
-		: null;
-	const realityServerNameSuggestion =
-		destinationServerNameSuggestion ?? accessHostServerNameSuggestion;
-	const realityServerNameSuggestions = realityServerNameSuggestion
-		? [realityServerNameSuggestion]
-		: [];
-	const localXpApiDest = adminConfigQuery.data
-		? realityDestFromBindAddress(adminConfigQuery.data.bind)
-		: null;
-	const realityDestSuggestions = localXpApiDest
-		? [
-				{
-					value: localXpApiDest,
-					label: localXpApiDest,
-				},
-			]
-		: [];
 
 	useEffect(() => {
 		const nodes = nodesQuery.data?.items ?? [];
@@ -153,19 +115,13 @@ export function EndpointNewPage() {
 			}
 
 			if (values.kind === "vless_reality_vision_tcp") {
-				const serverNames = values.realityServerNames
-					.map((serverName) => serverName.trim().replace(/\.$/, ""))
-					.filter((serverName) => serverName.length > 0);
-				const dest = values.realityDest.trim();
+				const canaryUpstreamUrl = values.canaryUpstreamUrl.trim();
+				const acceptedAuthorities = normalizeAcceptedAuthorities(
+					values.acceptedAuthorities,
+				);
 
-				if (dest.length === 0) {
-					throw new Error("dest is required.");
-				}
-				if (serverNames.length === 0) {
-					throw new Error("serverName is required.");
-				}
-				for (const name of serverNames) {
-					const err = validateRealityServerName(name);
+				for (const authority of acceptedAuthorities) {
+					const err = validateAcceptedAuthority(authority);
 					if (err) throw new Error(err);
 				}
 
@@ -173,12 +129,14 @@ export function EndpointNewPage() {
 					kind: values.kind,
 					node_id: values.nodeId,
 					port: values.port,
-					reality: {
-						dest,
-						server_names: serverNames,
-						server_names_source: "manual",
-						fingerprint: values.realityFingerprint.trim() || "chrome",
-					},
+					canary_upstream: canaryUpstreamUrl
+						? {
+								url: canaryUpstreamUrl,
+								mode: values.canaryUpstreamMode,
+							}
+						: undefined,
+					accepted_authorities:
+						acceptedAuthorities.length > 0 ? acceptedAuthorities : undefined,
 				});
 			}
 
@@ -432,48 +390,80 @@ export function EndpointNewPage() {
 								/>
 
 								{kind === "vless_reality_vision_tcp" ? (
-									<>
+									<div className="space-y-4">
+										<div className="grid gap-4 md:grid-cols-[1fr_180px]">
+											<FormField
+												control={form.control}
+												name="canaryUpstreamUrl"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel className="font-mono">
+															canaryUpstreamUrl
+														</FormLabel>
+														<FormControl>
+															<Input
+																{...field}
+																type="url"
+																placeholder="http://127.0.0.1:8080"
+															/>
+														</FormControl>
+														<FormDescription>
+															Requests other than GET/HEAD /generate_204 are
+															proxied to this origin.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={form.control}
+												name="canaryUpstreamMode"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel className="font-mono">mode</FormLabel>
+														<Select
+															value={field.value}
+															onValueChange={field.onChange}
+														>
+															<FormControl>
+																<SelectTrigger aria-label="canary upstream mode">
+																	<SelectValue />
+																</SelectTrigger>
+															</FormControl>
+															<SelectContent>
+																<SelectItem value="auto">auto</SelectItem>
+																<SelectItem value="http1">http1</SelectItem>
+																<SelectItem value="h2c">h2c</SelectItem>
+															</SelectContent>
+														</Select>
+														<FormDescription>
+															{MANAGED_VLESS_MODE_HELPER_TEXT}
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+										</div>
 										<FormField
 											control={form.control}
-											name="realityDest"
-											render={({ field }) => (
-												<FormItem>
-													<FormLabel className="font-mono">dest</FormLabel>
-													<FormControl>
-														<AutocompleteInput
-															{...field}
-															type="text"
-															placeholder="origin.example.test:443"
-															suggestions={realityDestSuggestions}
-															suggestionLabel="Show API address suggestions"
-															onSuggestionSelect={field.onChange}
-														/>
-													</FormControl>
-													<FormDescription>
-														REALITY destination origin for this endpoint.
-													</FormDescription>
-													<FormMessage />
-												</FormItem>
-											)}
-										/>
-										<FormField
-											control={form.control}
-											name="realityServerNames"
+											name="acceptedAuthorities"
 											render={({ field }) => (
 												<FormItem>
 													<FormControl>
 														<TagInput
-															label="serverNames"
+															label="accepted host[:port]"
 															value={field.value ?? []}
-															onChange={field.onChange}
-															placeholder="download.example.com"
+															onChange={(next) =>
+																field.onChange(
+																	normalizeAcceptedAuthorities(next),
+																)
+															}
+															placeholder="edge.example.com"
 															disabled={createMutation.isPending}
-															validateTag={validateRealityServerName}
-															suggestions={realityServerNameSuggestions}
-															suggestionLabel="Show access address suggestion"
+															validateTag={validateAcceptedAuthority}
+															allowPrimary={false}
 															helperText={
-																"Use the selected node access address, or the " +
-																"endpoint destination when it is filled."
+																MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT
 															}
 														/>
 													</FormControl>
@@ -481,37 +471,7 @@ export function EndpointNewPage() {
 												</FormItem>
 											)}
 										/>
-										<details className="rounded-2xl border border-border/70 bg-muted/35 px-4 py-3">
-											<summary className="cursor-pointer text-sm font-medium">
-												Advanced (optional)
-											</summary>
-											<div className="mt-4">
-												<FormField
-													control={form.control}
-													name="realityFingerprint"
-													render={({ field }) => (
-														<FormItem>
-															<FormLabel className="font-mono">
-																fingerprint
-															</FormLabel>
-															<FormControl>
-																<Input
-																	{...field}
-																	type="text"
-																	placeholder="chrome"
-																/>
-															</FormControl>
-															<FormDescription>
-																Defaults to{" "}
-																<span className="font-mono">chrome</span>.
-															</FormDescription>
-															<FormMessage />
-														</FormItem>
-													)}
-												/>
-											</div>
-										</details>
-									</>
+									</div>
 								) : null}
 							</div>
 

@@ -40,6 +40,10 @@ type DemoEndpointInput = {
 	kind: DemoEndpoint["kind"];
 	port: number;
 	serverNames: string[];
+	managedDefault?: boolean;
+	canaryUpstreamUrl?: string;
+	canaryUpstreamMode?: DemoEndpoint["canaryUpstreamMode"];
+	acceptedAuthorities?: string[];
 };
 
 type DemoUserInput = {
@@ -266,6 +270,10 @@ function buildEndpoint(
 		port: input.port,
 		status: "serving",
 		serverNames: input.serverNames,
+		managedDefault: input.managedDefault,
+		canaryUpstreamUrl: input.canaryUpstreamUrl,
+		canaryUpstreamMode: input.canaryUpstreamMode,
+		acceptedAuthorities: input.acceptedAuthorities ?? [],
 		assignedUserIds: [],
 		probeLatencyMs: null,
 		lastProbeAt: null,

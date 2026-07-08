@@ -30,6 +30,10 @@ export type DemoEndpoint = {
 	port: number;
 	status: DemoEndpointStatus;
 	serverNames: string[];
+	managedDefault?: boolean;
+	canaryUpstreamUrl?: string;
+	canaryUpstreamMode?: "auto" | "http1" | "h2c";
+	acceptedAuthorities?: string[];
 	assignedUserIds: string[];
 	probeLatencyMs: number | null;
 	lastProbeAt: string | null;
