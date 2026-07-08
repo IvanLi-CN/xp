@@ -10,11 +10,13 @@ import {
 import {
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
+	fetchAdminEndpoints,
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
@@ -50,23 +52,22 @@ import {
 	validateAcceptedAuthority,
 } from "../utils/acceptedAuthority";
 import {
+	type CanaryUpstreamMode,
+	arraysEqual,
+	authoritySetsEqual,
+	dedupeAuthorities,
+	parseVlessMeta,
+	routeAuthority,
+} from "../utils/endpointDetailsVless";
+import {
+	acceptedAuthoritySuggestionsFromAccessHost,
+	canaryUpstreamSuggestionsFromManagedEndpoints,
+} from "../utils/managedVlessForm";
+import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "../utils/realityServerName";
-
-type CanaryUpstreamMode = "auto" | "http1" | "h2c";
-
-type VlessMetaSnapshot = {
-	realityDest: string;
-	realityServerNames: string[];
-	realityServerNamesSource: "manual" | "global";
-	realityFingerprint: string;
-	managedDefault: boolean;
-	canaryUpstreamUrl: string;
-	canaryUpstreamMode: CanaryUpstreamMode;
-	acceptedAuthorities: string[];
-};
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -75,72 +76,6 @@ function formatErrorMessage(error: unknown): string {
 	}
 	if (error instanceof Error) return error.message;
 	return String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
-
-function asStringArray(value: unknown): string[] | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const filtered = value.filter((entry) => typeof entry === "string");
-	return filtered.length === value.length ? filtered : undefined;
-}
-
-function asRealityServerNamesSource(
-	value: unknown,
-): "manual" | "global" | undefined {
-	if (value === "manual" || value === "global") return value;
-	return undefined;
-}
-
-function asCanaryUpstreamMode(value: unknown): CanaryUpstreamMode | undefined {
-	if (value === "auto" || value === "http1" || value === "h2c") return value;
-	return undefined;
-}
-
-function parseVlessMeta(meta: Record<string, unknown>): VlessMetaSnapshot {
-	const reality = isRecord(meta.reality) ? meta.reality : undefined;
-	const upstream = isRecord(meta.canary_upstream)
-		? meta.canary_upstream
-		: undefined;
-	return {
-		realityDest: asString(reality?.dest) ?? "",
-		realityServerNames: asStringArray(reality?.server_names) ?? [],
-		realityServerNamesSource:
-			asRealityServerNamesSource(reality?.server_names_source) ?? "manual",
-		realityFingerprint: asString(reality?.fingerprint) ?? "",
-		managedDefault: meta.managed_default === true,
-		canaryUpstreamUrl: asString(upstream?.url) ?? "",
-		canaryUpstreamMode: asCanaryUpstreamMode(upstream?.mode) ?? "auto",
-		acceptedAuthorities: asStringArray(meta.accepted_authorities) ?? [],
-	};
-}
-
-function routeAuthority(hostname: string | undefined, port: number): string {
-	const host = hostname?.trim().replace(/\.$/, "") || "-";
-	if (host === "-") return host;
-	return port === 443 ? host : `${host}:${port}`;
-}
-
-function arraysEqual(left: string[], right: string[]): boolean {
-	if (left.length !== right.length) return false;
-	return left.every((value, index) => value === right[index]);
-}
-
-function authoritySetsEqual(left: string[], right: string[]): boolean {
-	if (left.length !== right.length) return false;
-	const leftSorted = [...left].sort();
-	const rightSorted = [...right].sort();
-	return leftSorted.every((value, index) => value === rightSorted[index]);
-}
-
-function dedupeAuthorities(values: string[]): string[] {
-	return [...new Set(values)];
 }
 
 export function EndpointDetailsPage() {
@@ -165,6 +100,11 @@ export function EndpointDetailsPage() {
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+	const endpointsQuery = useQuery({
+		queryKey: ["adminEndpoints", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
 	const [port, setPort] = useState("");
@@ -454,6 +394,17 @@ export function EndpointDetailsPage() {
 	const realityServerNameSuggestions = realityServerNameSuggestion
 		? [realityServerNameSuggestion]
 		: [];
+	const managedCanaryUpstreamSuggestions =
+		canaryUpstreamSuggestionsFromManagedEndpoints(
+			endpointsQuery.data?.items ?? [],
+			{
+				nodeId: endpoint.node_id,
+				accessHost: endpointNode?.access_host,
+				apiBaseUrl: endpointNode?.api_base_url,
+			},
+		);
+	const managedAcceptedAuthoritySuggestions =
+		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host);
 	const currentCanaryProbeResult =
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
@@ -726,7 +677,7 @@ export function EndpointDetailsPage() {
 												<span className="text-sm font-medium font-mono">
 													canaryUpstreamUrl
 												</span>
-												<Input
+												<AutocompleteInput
 													aria-label="canary upstream url"
 													type="url"
 													className={inputClass}
@@ -735,9 +686,12 @@ export function EndpointDetailsPage() {
 													disabled={
 														patchMutation.isPending || runtime.isReadOnly
 													}
+													suggestions={managedCanaryUpstreamSuggestions}
+													suggestionLabel="Show upstream origin suggestions"
 													onChange={(event) =>
 														setUpstreamUrl(event.target.value)
 													}
+													onSuggestionSelect={setUpstreamUrl}
 												/>
 												<p className="text-xs opacity-70">
 													Requests other than GET/HEAD /generate_204 are proxied
@@ -792,6 +746,8 @@ export function EndpointDetailsPage() {
 											inputClass={inputClass}
 											validateTag={validateAcceptedAuthority}
 											allowPrimary={false}
+											suggestions={managedAcceptedAuthoritySuggestions}
+											suggestionLabel="Show access host suggestions"
 											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL."
 										/>
 									</div>
