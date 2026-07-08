@@ -66,14 +66,23 @@ function ProblematicComponentsField({
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const componentBadgeRefs = useRef<Array<HTMLSpanElement | null>>([]);
 	const plusBadgeRefs = useRef<Record<number, HTMLSpanElement | null>>({});
+	const problematicSignature = problematic
+		.map((item) => `${item.component}:${item.status}`)
+		.join("|");
+	const stableProblematicRef = useRef(problematic);
 	const [visibleCount, setVisibleCount] = useState(problematic.length);
 
 	useEffect(() => {
+		stableProblematicRef.current = problematic;
 		setVisibleCount(problematic.length);
-	}, [problematic.length]);
+	}, [problematic, problematic.length]);
 
 	useLayoutEffect(() => {
-		if (problematic.length <= 1) return;
+		void problematicSignature;
+		void problematic.length;
+
+		const stableProblematic = stableProblematicRef.current;
+		if (stableProblematic.length <= 1) return;
 
 		let frame = 0;
 		let observer: ResizeObserver | null = null;
@@ -84,7 +93,7 @@ function ProblematicComponentsField({
 			const availableWidth = Math.floor(container.clientWidth);
 			if (availableWidth <= 0) return;
 
-			const componentWidths = problematic.map((_, index) =>
+			const componentWidths = stableProblematic.map((_, index) =>
 				Math.ceil(
 					componentBadgeRefs.current[index]?.getBoundingClientRect().width ?? 0,
 				),
@@ -94,21 +103,21 @@ function ProblematicComponentsField({
 				return;
 			}
 
-			const prefixWidths = new Array(problematic.length + 1).fill(0);
-			for (let i = 0; i < problematic.length; i += 1) {
+			const prefixWidths = new Array(stableProblematic.length + 1).fill(0);
+			for (let i = 0; i < stableProblematic.length; i += 1) {
 				prefixWidths[i + 1] = prefixWidths[i] + componentWidths[i];
 			}
 
 			const allVisibleWidth =
-				prefixWidths[problematic.length] +
-				BADGE_GAP_PX * Math.max(0, problematic.length - 1);
+				prefixWidths[stableProblematic.length] +
+				BADGE_GAP_PX * Math.max(0, stableProblematic.length - 1);
 
 			let bestVisibleCount = 0;
 			if (allVisibleWidth <= availableWidth) {
-				bestVisibleCount = problematic.length;
+				bestVisibleCount = stableProblematic.length;
 			} else {
-				for (let shown = 0; shown <= problematic.length; shown += 1) {
-					const remaining = problematic.length - shown;
+				for (let shown = 0; shown <= stableProblematic.length; shown += 1) {
+					const remaining = stableProblematic.length - shown;
 					const shownWidth =
 						prefixWidths[shown] + BADGE_GAP_PX * Math.max(0, shown - 1);
 
@@ -148,9 +157,11 @@ function ProblematicComponentsField({
 			if (frame) window.cancelAnimationFrame(frame);
 			observer?.disconnect();
 		};
-	}, [problematic]);
+	}, [problematicSignature, problematic.length]);
 
-	if (problematic.length === 0) {
+	const stableProblematic = stableProblematicRef.current;
+
+	if (stableProblematic.length === 0) {
 		return (
 			<span
 				className={badgeClass("success", "sm")}
@@ -161,9 +172,12 @@ function ProblematicComponentsField({
 		);
 	}
 
-	const shownCount = Math.max(0, Math.min(visibleCount, problematic.length));
-	const shown = problematic.slice(0, shownCount);
-	const remaining = problematic.slice(shownCount);
+	const shownCount = Math.max(
+		0,
+		Math.min(visibleCount, stableProblematic.length),
+	);
+	const shown = stableProblematic.slice(0, shownCount);
+	const remaining = stableProblematic.slice(shownCount);
 	const remainingTitle = remaining
 		.map((item) => `${item.component}:${item.status}`)
 		.join(", ");
@@ -193,7 +207,7 @@ function ProblematicComponentsField({
 				aria-hidden="true"
 				className="pointer-events-none fixed left-[-9999px] top-0 invisible whitespace-nowrap"
 			>
-				{problematic.map((item, index) => (
+				{stableProblematic.map((item, index) => (
 					<span
 						key={`measure-${item.component}-${index}`}
 						ref={(el) => {
@@ -204,7 +218,7 @@ function ProblematicComponentsField({
 						{item.component}:{item.status}
 					</span>
 				))}
-				{Array.from({ length: problematic.length }, (_, i) => {
+				{Array.from({ length: stableProblematic.length }, (_, i) => {
 					const count = i + 1;
 					return (
 						<span

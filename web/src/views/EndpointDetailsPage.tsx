@@ -21,6 +21,7 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -39,10 +40,25 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
 } from "../utils/acceptedAuthority";
+import {
+	type CanaryUpstreamMode,
+	arraysEqual,
+	authoritySetsEqual,
+	dedupeAuthorities,
+	parseVlessMeta,
+	routeAuthority,
+} from "../utils/endpointDetailsVless";
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
 	canaryUpstreamSuggestionsFromManagedEndpoints,
@@ -53,19 +69,6 @@ import {
 	validateRealityServerName,
 } from "../utils/realityServerName";
 
-type CanaryUpstreamMode = "auto" | "http1" | "h2c";
-
-type VlessMetaSnapshot = {
-	realityDest: string;
-	realityServerNames: string[];
-	realityServerNamesSource: "manual" | "global";
-	realityFingerprint: string;
-	managedDefault: boolean;
-	canaryUpstreamUrl: string;
-	canaryUpstreamMode: CanaryUpstreamMode;
-	acceptedAuthorities: string[];
-};
-
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
 		const code = error.code ? ` ${error.code}` : "";
@@ -75,78 +78,13 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
-
-function asStringArray(value: unknown): string[] | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const filtered = value.filter((entry) => typeof entry === "string");
-	return filtered.length === value.length ? filtered : undefined;
-}
-
-function asRealityServerNamesSource(
-	value: unknown,
-): "manual" | "global" | undefined {
-	if (value === "manual" || value === "global") return value;
-	return undefined;
-}
-
-function asCanaryUpstreamMode(value: unknown): CanaryUpstreamMode | undefined {
-	if (value === "auto" || value === "http1" || value === "h2c") return value;
-	return undefined;
-}
-
-function parseVlessMeta(meta: Record<string, unknown>): VlessMetaSnapshot {
-	const reality = isRecord(meta.reality) ? meta.reality : undefined;
-	const upstream = isRecord(meta.canary_upstream)
-		? meta.canary_upstream
-		: undefined;
-	return {
-		realityDest: asString(reality?.dest) ?? "",
-		realityServerNames: asStringArray(reality?.server_names) ?? [],
-		realityServerNamesSource:
-			asRealityServerNamesSource(reality?.server_names_source) ?? "manual",
-		realityFingerprint: asString(reality?.fingerprint) ?? "",
-		managedDefault: meta.managed_default === true,
-		canaryUpstreamUrl: asString(upstream?.url) ?? "",
-		canaryUpstreamMode: asCanaryUpstreamMode(upstream?.mode) ?? "auto",
-		acceptedAuthorities: asStringArray(meta.accepted_authorities) ?? [],
-	};
-}
-
-function routeAuthority(hostname: string | undefined, port: number): string {
-	const host = hostname?.trim().replace(/\.$/, "") || "-";
-	if (host === "-") return host;
-	return port === 443 ? host : `${host}:${port}`;
-}
-
-function arraysEqual(left: string[], right: string[]): boolean {
-	if (left.length !== right.length) return false;
-	return left.every((value, index) => value === right[index]);
-}
-
-function authoritySetsEqual(left: string[], right: string[]): boolean {
-	if (left.length !== right.length) return false;
-	const leftSorted = [...left].sort();
-	const rightSorted = [...right].sort();
-	return leftSorted.every((value, index) => value === rightSorted[index]);
-}
-
-function dedupeAuthorities(values: string[]): string[] {
-	return [...new Set(values)];
-}
-
 export function EndpointDetailsPage() {
 	const { endpointId } = useParams({ from: "/app/endpoints/$endpointId" });
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 
 	const inputClass = inputControlClass(prefs.density);
@@ -390,7 +328,7 @@ export function EndpointDetailsPage() {
 		);
 	}
 
-	if (endpointQuery.isLoading) {
+	if (endpointQuery.isLoading && !hasQueryData(endpointQuery)) {
 		return (
 			<PageState
 				variant="loading"
@@ -400,7 +338,20 @@ export function EndpointDetailsPage() {
 		);
 	}
 
-	if (endpointQuery.isError) {
+	if (
+		!hasQueryData(endpointQuery) &&
+		queryIsOfflineBlocked(endpointQuery, runtime.isOnline)
+	) {
+		return (
+			<PageState
+				variant="offline"
+				title="Offline cache unavailable"
+				description="Open this endpoint once while online to keep its latest configuration available offline."
+			/>
+		);
+	}
+
+	if (endpointQuery.isError && !hasQueryData(endpointQuery)) {
 		return (
 			<PageState
 				variant="error"
@@ -454,6 +405,11 @@ export function EndpointDetailsPage() {
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
 			: null;
+	const latestSyncedAt = latestQueryDataUpdatedAt([endpointQuery, nodesQuery]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(endpointQuery) || hasQueryData(nodesQuery)) &&
+		(!runtime.isOnline || endpointQuery.isError || nodesQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -468,6 +424,7 @@ export function EndpointDetailsPage() {
 						<Button
 							variant="secondary"
 							loading={endpointQuery.isFetching}
+							disabled={!runtime.isOnline}
 							onClick={() => endpointQuery.refetch()}
 						>
 							Refresh
@@ -475,6 +432,19 @@ export function EndpointDetailsPage() {
 					</div>
 				}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline endpoint snapshot"
+							: "Showing cached endpoint data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<div className="grid gap-6 lg:grid-cols-2">
 				<div className="xp-card">
@@ -620,6 +590,7 @@ export function EndpointDetailsPage() {
 										className={inputClass}
 										value={port}
 										min={1}
+										disabled={patchMutation.isPending || runtime.isReadOnly}
 										onChange={(event) => setPort(event.target.value)}
 									/>
 									<p className="text-xs opacity-70">
@@ -641,7 +612,7 @@ export function EndpointDetailsPage() {
 												className={inputClass}
 												value={realityDest}
 												placeholder="origin.example.test:443"
-												disabled={patchMutation.isPending}
+												disabled={patchMutation.isPending || runtime.isReadOnly}
 												onChange={(event) => setRealityDest(event.target.value)}
 											/>
 											<p className="text-xs opacity-70">
@@ -655,7 +626,7 @@ export function EndpointDetailsPage() {
 											value={realityServerNamesManual}
 											onChange={setRealityServerNamesManual}
 											placeholder="download.example.com"
-											disabled={patchMutation.isPending}
+											disabled={patchMutation.isPending || runtime.isReadOnly}
 											inputClass={inputClass}
 											validateTag={validateRealityServerName}
 											suggestions={realityServerNameSuggestions}
@@ -677,6 +648,9 @@ export function EndpointDetailsPage() {
 														type="text"
 														className={inputClass}
 														value={realityFingerprint}
+														disabled={
+															patchMutation.isPending || runtime.isReadOnly
+														}
 														placeholder="chrome"
 														onChange={(event) =>
 															setRealityFingerprint(event.target.value)
@@ -705,7 +679,9 @@ export function EndpointDetailsPage() {
 													className={inputClass}
 													value={upstreamUrl}
 													placeholder="http://127.0.0.1:8080"
-													disabled={patchMutation.isPending}
+													disabled={
+														patchMutation.isPending || runtime.isReadOnly
+													}
 													suggestions={managedCanaryUpstreamSuggestions}
 													suggestionLabel="Show upstream origin suggestions"
 													onChange={(event) =>
@@ -727,7 +703,9 @@ export function EndpointDetailsPage() {
 													onValueChange={(value) =>
 														setUpstreamMode(value as CanaryUpstreamMode)
 													}
-													disabled={patchMutation.isPending}
+													disabled={
+														patchMutation.isPending || runtime.isReadOnly
+													}
 												>
 													<SelectTrigger
 														className={selectClass}
@@ -760,7 +738,7 @@ export function EndpointDetailsPage() {
 												)
 											}
 											placeholder="edge.example.com"
-											disabled={patchMutation.isPending}
+											disabled={patchMutation.isPending || runtime.isReadOnly}
 											inputClass={inputClass}
 											validateTag={validateAcceptedAuthority}
 											allowPrimary={false}
@@ -774,7 +752,11 @@ export function EndpointDetailsPage() {
 						</div>
 
 						<div className="xp-card-actions justify-end">
-							<Button loading={patchMutation.isPending} type="submit">
+							<Button
+								loading={patchMutation.isPending}
+								type="submit"
+								disabled={runtime.isReadOnly}
+							>
 								Save changes
 							</Button>
 						</div>
@@ -798,6 +780,7 @@ export function EndpointDetailsPage() {
 								<Button
 									variant="secondary"
 									loading={probeRunMutation.isPending}
+									disabled={runtime.isReadOnly}
 									onClick={() => probeRunMutation.mutate()}
 								>
 									Test now
@@ -888,6 +871,7 @@ export function EndpointDetailsPage() {
 									<Button
 										variant="secondary"
 										loading={canaryProbeMutation.isPending}
+										disabled={runtime.isReadOnly}
 										onClick={() => canaryProbeMutation.mutate()}
 									>
 										Test canary
@@ -910,6 +894,7 @@ export function EndpointDetailsPage() {
 							<Button
 								variant="secondary"
 								loading={rotateMutation.isPending}
+								disabled={runtime.isReadOnly}
 								onClick={() => setConfirmRotateOpen(true)}
 							>
 								Rotate shortId
@@ -928,7 +913,7 @@ export function EndpointDetailsPage() {
 					<Button
 						variant="danger"
 						onClick={() => setConfirmDeleteOpen(true)}
-						disabled={deleteMutation.isPending}
+						disabled={deleteMutation.isPending || runtime.isReadOnly}
 					>
 						Delete endpoint
 					</Button>

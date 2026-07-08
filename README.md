@@ -8,7 +8,8 @@ Each host runs two processes: `xp` and `xray`. `xp` stores cluster-wide desired 
 (OpenRaft) and reconciles the local `xray` runtime via the Xray gRPC API.
 
 This repository also includes an admin UI (Vite + React). The built assets (`web/dist`) are embedded
-into the `xp` binary at build time and served as a SPA by default.
+into the `xp` binary at build time and served as a SPA by default. After the first successful load,
+the UI can now be installed as a PWA and revisited in offline read-only mode from warm local cache.
 
 ## Features
 
@@ -18,6 +19,7 @@ into the `xp` binary at build time and served as a SPA by default.
 - Quotas: cycle windows, bidirectional traffic, auto-ban, optional auto-unban (see `docs/desgin/quota.md` and `XP_QUOTA_*`)
 - Cluster consistency: 1–20 nodes Raft (OpenRaft); write requests are serialized by the leader
 - Embedded admin UI: served by `xp` (default: `http://127.0.0.1:62416/`)
+- Installable admin PWA: precached app shell, offline read-only warm cache, and live status stream while open
 - Ops tool: `xp-ops` (install/init services, unified `upgrade`, optional Cloudflare Tunnel, `container run`)
 - Official container image: `ghcr.io/ivanli-cn/xp` (single-image node runtime with optional Cloudflare Tunnel)
 

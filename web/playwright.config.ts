@@ -4,6 +4,7 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:60080";
 const baseUrlObj = new URL(baseURL);
 // Vite accepts the last `--port` flag; let E2E runs override the default 60080 safely.
 const devPort = baseUrlObj.port || "60080";
+const usePreview = process.env.E2E_USE_PREVIEW === "1";
 
 export default defineConfig({
 	testDir: "./tests/e2e",
@@ -26,7 +27,9 @@ export default defineConfig({
 		viewport: { width: 1280, height: 900 },
 	},
 	webServer: {
-		command: `bun run dev -- --port ${devPort}`,
+		command: usePreview
+			? `bun run build && bun run preview -- --host 127.0.0.1 --port ${devPort}`
+			: `bun run dev -- --port ${devPort}`,
 		url: baseURL,
 		// Avoid silently reusing an unrelated server on the same port in local runs.
 		// Opt-in via `E2E_REUSE_EXISTING_SERVER=1` when you intentionally pre-started the app.

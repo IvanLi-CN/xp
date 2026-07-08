@@ -15,6 +15,9 @@ function Empty() {
 const meta: Meta<typeof Empty> = {
 	title: "Design/Pages",
 	component: Empty,
+	// Keep this page gallery available for visual review, but exclude it from
+	// Storybook's interaction test runner to avoid CI timeouts on full-page demos.
+	tags: ["!test"],
 	parameters: {
 		layout: "fullscreen",
 	},

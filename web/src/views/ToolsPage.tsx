@@ -12,6 +12,7 @@ import { CopyButton } from "../components/CopyButton";
 import { MihomoSplitEditor } from "../components/MihomoSplitEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useUiPrefs } from "../components/UiPrefs";
 import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
@@ -27,6 +28,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useAppRuntime } from "../offline/appRuntime";
 
 const SOURCE_KIND_OPTIONS: Array<{
 	value: AdminMihomoRedactSourceKind;
@@ -68,6 +70,7 @@ function formatErrorMessage(error: unknown): string {
 
 export function ToolsPage() {
 	const [adminToken] = useState(() => readAdminToken());
+	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
@@ -151,6 +154,15 @@ export function ToolsPage() {
 				title="Tools"
 				description="Safe admin-side helpers for one-off diagnostics and shareable outputs."
 			/>
+			{runtime.isReadOnly ? (
+				<ReadStateBanner
+					tone="warning"
+					variant="inline"
+					dismissible
+					title="Offline read-only mode"
+					description="这些工具需要直接访问后端。断网时只能查看本地输入与已有结果，不能发起新的处理请求。"
+				/>
+			) : null}
 
 			<section className="xp-card">
 				<div className="xp-card-body space-y-5">
@@ -172,6 +184,7 @@ export function ToolsPage() {
 										invalidatePreview();
 										setSourceKind(value as AdminMihomoRedactSourceKind);
 									}}
+									disabled={runtime.isReadOnly}
 								>
 									<SelectTrigger
 										aria-label="Source kind"
@@ -197,6 +210,7 @@ export function ToolsPage() {
 										invalidatePreview();
 										setSourceFormat(value as AdminMihomoSourceFormat);
 									}}
+									disabled={runtime.isReadOnly}
 								>
 									<SelectTrigger
 										aria-label="Source format"
@@ -222,6 +236,7 @@ export function ToolsPage() {
 										invalidatePreview();
 										setLevel(value as AdminMihomoRedactionLevel);
 									}}
+									disabled={runtime.isReadOnly}
 								>
 									<SelectTrigger
 										aria-label="Redaction level"
@@ -261,6 +276,7 @@ export function ToolsPage() {
 											aria-label={sourceLabel}
 											className={inputClassName}
 											value={source}
+											disabled={runtime.isReadOnly}
 											placeholder={sourcePlaceholder}
 											onChange={(event) => {
 												invalidatePreview();
@@ -314,7 +330,7 @@ export function ToolsPage() {
 								<Button
 									type="submit"
 									loading={isSubmitting}
-									disabled={source.trim().length === 0}
+									disabled={runtime.isReadOnly || source.trim().length === 0}
 								>
 									Run redact
 								</Button>
