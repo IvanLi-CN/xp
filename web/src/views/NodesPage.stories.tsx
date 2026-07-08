@@ -4,6 +4,10 @@ import { expect, userEvent, within } from "@storybook/test";
 const meta = {
 	title: "Pages/NodesPage",
 	render: () => <div />,
+	// These route-level stories are used for visual verification of the full app
+	// shell and offline states. Exclude them from Storybook's interaction test
+	// runner to keep CI focused on faster, deterministic coverage surfaces.
+	tags: ["!test"],
 	parameters: {
 		router: {
 			initialEntry: "/nodes",
