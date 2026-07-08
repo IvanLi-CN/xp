@@ -30,15 +30,26 @@ function resolveBuildId() {
 	return packageJson.version;
 }
 
+function resolveSwUpdateIntervalMs() {
+	const raw = process.env.XP_WEB_SW_UPDATE_INTERVAL_MS?.trim();
+	if (!raw) return 60_000;
+
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || parsed < 0) return 60_000;
+	return Math.floor(parsed);
+}
+
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, process.cwd(), "VITE_");
 	const backend = env.VITE_BACKEND_PROXY ?? "http://127.0.0.1:62416";
 	const buildId = resolveBuildId();
+	const swUpdateIntervalMs = resolveSwUpdateIntervalMs();
 
 	return {
 		define: {
 			__XP_WEB_BUILD_ID__: JSON.stringify(buildId),
 			__XP_WEB_PACKAGE_VERSION__: JSON.stringify(packageJson.version),
+			__XP_WEB_SW_UPDATE_INTERVAL_MS__: JSON.stringify(swUpdateIntervalMs),
 		},
 		plugins: [
 			react(),
