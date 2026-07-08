@@ -1,3 +1,4 @@
+import type { AdminEndpoint } from "../api/adminEndpoints";
 import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
@@ -38,27 +39,77 @@ export function findAcceptedAuthorityError(values: string[]): string | null {
 	);
 }
 
-export function canaryUpstreamSuggestionsFromApiBaseUrl(
-	apiBaseUrl: string | null | undefined,
-): ManagedVlessAutocompleteSuggestion[] {
-	const trimmed = apiBaseUrl?.trim() ?? "";
-	if (!trimmed) return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function normalizeCanaryUpstreamOrigin(
+	value: string | null | undefined,
+): string | null {
+	const trimmed = value?.trim() ?? "";
+	if (!trimmed) return null;
 
 	let url: URL;
 	try {
 		url = new URL(trimmed);
 	} catch {
-		return [];
+		return null;
 	}
 
 	if (
 		(url.protocol !== "http:" && url.protocol !== "https:") ||
 		!url.hostname
 	) {
-		return [];
+		return null;
 	}
 
-	return [{ value: url.origin, label: url.origin }];
+	return url.origin;
+}
+
+export function canaryUpstreamSuggestionsFromUrls(
+	values: Iterable<string | null | undefined>,
+): ManagedVlessAutocompleteSuggestion[] {
+	const suggestions: ManagedVlessAutocompleteSuggestion[] = [];
+	const seen = new Set<string>();
+
+	for (const value of values) {
+		const normalized = normalizeCanaryUpstreamOrigin(value);
+		if (!normalized || seen.has(normalized)) continue;
+		seen.add(normalized);
+		suggestions.push({ value: normalized, label: normalized });
+	}
+
+	return suggestions;
+}
+
+export function canaryUpstreamSuggestionsFromManagedEndpoints(
+	endpoints: readonly Pick<
+		AdminEndpoint,
+		"endpoint_id" | "node_id" | "kind" | "meta"
+	>[],
+	nodeId: string | null | undefined,
+): ManagedVlessAutocompleteSuggestion[] {
+	const trimmedNodeId = nodeId?.trim() ?? "";
+	if (!trimmedNodeId) return [];
+
+	return canaryUpstreamSuggestionsFromUrls(
+		endpoints.flatMap((endpoint) => {
+			if (
+				endpoint.kind !== "vless_reality_vision_tcp" ||
+				endpoint.node_id !== trimmedNodeId
+			) {
+				return [];
+			}
+
+			const meta = isRecord(endpoint.meta) ? endpoint.meta : null;
+			if (!meta || meta.managed_default !== true) return [];
+
+			const upstream = isRecord(meta.canary_upstream)
+				? meta.canary_upstream
+				: null;
+			return typeof upstream?.url === "string" ? [upstream.url] : [];
+		}),
+	);
 }
 
 export function acceptedAuthoritySuggestionsFromAccessHost(

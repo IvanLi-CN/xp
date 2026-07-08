@@ -4,7 +4,10 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { createAdminEndpoint } from "../api/adminEndpoints";
+import {
+	createAdminEndpoint,
+	fetchAdminEndpoints,
+} from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { AutocompleteInput } from "../components/AutocompleteInput";
@@ -42,7 +45,7 @@ import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromApiBaseUrl,
+	canaryUpstreamSuggestionsFromManagedEndpoints,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
 
@@ -88,6 +91,11 @@ export function EndpointNewPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
+	const endpointsQuery = useQuery({
+		queryKey: ["adminEndpoints", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
+	});
 	const form = useForm<EndpointFormInput, unknown, EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
 		defaultValues: {
@@ -104,9 +112,11 @@ export function EndpointNewPage() {
 	const nodeId = form.watch("nodeId");
 	const nodes = nodesQuery.data?.items ?? [];
 	const selectedNode = nodes.find((node) => node.node_id === nodeId);
-	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromApiBaseUrl(
-		selectedNode?.api_base_url,
-	);
+	const canaryUpstreamSuggestions =
+		canaryUpstreamSuggestionsFromManagedEndpoints(
+			endpointsQuery.data?.items ?? [],
+			selectedNode?.node_id ?? nodeId,
+		);
 	const acceptedAuthoritySuggestions =
 		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.access_host);
 
@@ -414,7 +424,7 @@ export function EndpointNewPage() {
 																type="url"
 																placeholder="http://127.0.0.1:8080"
 																suggestions={canaryUpstreamSuggestions}
-																suggestionLabel="Show node API origin suggestions"
+																suggestionLabel="Show upstream origin suggestions"
 																onSuggestionSelect={field.onChange}
 															/>
 														</FormControl>

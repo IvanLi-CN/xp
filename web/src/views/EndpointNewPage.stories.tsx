@@ -26,7 +26,22 @@ const meta = {
 						},
 					},
 				],
-				endpoints: [],
+				endpoints: [
+					{
+						endpoint_id: "existing-managed-upstream",
+						node_id: NODE_ID,
+						tag: "existing-managed-upstream",
+						kind: "vless_reality_vision_tcp",
+						port: 8443,
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "http://127.0.0.1:8080",
+								mode: "auto",
+							},
+						},
+					},
+				],
 			},
 		},
 	},
@@ -54,7 +69,7 @@ export const ManagedDefaultFieldsVisible: Story = {
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		).toBeInTheDocument();
 		await expect(
@@ -73,16 +88,16 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(
 			await canvas.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		);
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText("https://node-xp.example.test"),
+			).findByText("http://127.0.0.1:8080"),
 		);
 		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://node-xp.example.test",
+			"http://127.0.0.1:8080",
 		);
 
 		await userEvent.click(

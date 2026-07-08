@@ -9,7 +9,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAdminEndpoint, patchAdminEndpoint } from "../api/adminEndpoints";
+import {
+	fetchAdminEndpoint,
+	fetchAdminEndpoints,
+	patchAdminEndpoint,
+} from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -108,6 +112,38 @@ function setupMocks() {
 			],
 		},
 	});
+	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
+		items: [
+			{
+				endpoint_id: "endpoint-managed-vless",
+				node_id: "node-1",
+				tag: "managed-vless",
+				kind: "vless_reality_vision_tcp",
+				port: 53844,
+				meta: {
+					managed_default: true,
+					canary_upstream: {
+						url: "http://127.0.0.1:8080",
+						mode: "auto",
+					},
+				},
+			},
+			{
+				endpoint_id: "endpoint-managed-sibling",
+				node_id: "node-1",
+				tag: "managed-sibling",
+				kind: "vless_reality_vision_tcp",
+				port: 9443,
+				meta: {
+					managed_default: true,
+					canary_upstream: {
+						url: "http://127.0.0.1:9000",
+						mode: "auto",
+					},
+				},
+			},
+		],
+	});
 }
 
 describe("EndpointDetailsPage", () => {
@@ -139,7 +175,7 @@ describe("EndpointDetailsPage", () => {
 				},
 				managed_default: true,
 				canary_upstream: {
-					url: "https://tokyo-1.example.com",
+					url: "http://127.0.0.1:9000",
 					mode: "auto",
 				},
 				accepted_authorities: [
@@ -154,16 +190,16 @@ describe("EndpointDetailsPage", () => {
 
 		fireEvent.click(
 			await screen.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		);
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
-			).findByText("https://tokyo-1.example.com"),
+			).findByText("http://127.0.0.1:9000"),
 		);
 		expect(await screen.findByLabelText("canary upstream url")).toHaveValue(
-			"https://tokyo-1.example.com",
+			"http://127.0.0.1:9000",
 		);
 
 		fireEvent.click(
@@ -191,7 +227,7 @@ describe("EndpointDetailsPage", () => {
 				{
 					port: 53844,
 					canary_upstream: {
-						url: "https://tokyo-1.example.com",
+						url: "http://127.0.0.1:9000",
 						mode: "auto",
 					},
 					accepted_authorities: [
@@ -221,13 +257,14 @@ describe("EndpointDetailsPage", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 
 		renderPage();
 
 		await screen.findByLabelText("canary upstream url");
 		expect(
 			screen.queryByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		).toBeNull();
 		expect(

@@ -54,6 +54,29 @@ const meta = {
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
 					},
+					{
+						endpoint_id: "endpoint-managed-sibling",
+						node_id: NODE_ID,
+						tag: "managed-sibling",
+						kind: "vless_reality_vision_tcp",
+						port: 9443,
+						meta: {
+							reality: {
+								dest: "127.0.0.1:39043",
+								server_names: ["edge.example.test"],
+								server_names_source: "manual",
+								fingerprint: "chrome",
+							},
+							managed_default: true,
+							canary_upstream: {
+								url: "http://127.0.0.1:9000",
+								mode: "auto",
+							},
+							accepted_authorities: ["edge.example.test:443"],
+						},
+						short_ids: ["7f8e9d"],
+						active_short_id: "7f8e9d",
+					},
 				],
 			},
 		},
@@ -174,7 +197,7 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		const canvas = within(canvasElement);
 		await expect(
 			await canvas.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		).toBeInTheDocument();
 		await expect(
@@ -185,17 +208,17 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 
 		await userEvent.click(
 			await canvas.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		);
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText("https://tokyo-1.example.com"),
+			).findByText("http://127.0.0.1:9000"),
 		);
 		await expect(
 			await canvas.findByLabelText("canary upstream url"),
-		).toHaveValue("https://tokyo-1.example.com");
+		).toHaveValue("http://127.0.0.1:9000");
 
 		await userEvent.click(
 			await canvas.findByRole("button", {

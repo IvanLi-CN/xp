@@ -2,31 +2,103 @@ import { describe, expect, it } from "vitest";
 
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromApiBaseUrl,
+	canaryUpstreamSuggestionsFromManagedEndpoints,
+	canaryUpstreamSuggestionsFromUrls,
 } from "./managedVlessForm";
 
-describe("canaryUpstreamSuggestionsFromApiBaseUrl", () => {
-	it("returns a normalized origin suggestion", () => {
+describe("canaryUpstreamSuggestionsFromUrls", () => {
+	it("returns deduplicated normalized origin suggestions", () => {
 		expect(
-			canaryUpstreamSuggestionsFromApiBaseUrl(
+			canaryUpstreamSuggestionsFromUrls([
 				"https://node.example.com:443/api/admin",
-			),
+				"https://node.example.com",
+				"http://127.0.0.1:8080/path",
+			]),
 		).toEqual([
 			{
 				value: "https://node.example.com",
 				label: "https://node.example.com",
 			},
+			{
+				value: "http://127.0.0.1:8080",
+				label: "http://127.0.0.1:8080",
+			},
 		]);
 	});
 
 	it("rejects invalid or unsupported values", () => {
-		expect(canaryUpstreamSuggestionsFromApiBaseUrl("")).toEqual([]);
+		expect(canaryUpstreamSuggestionsFromUrls([""])).toEqual([]);
 		expect(
-			canaryUpstreamSuggestionsFromApiBaseUrl("node.example.com:62416"),
+			canaryUpstreamSuggestionsFromUrls(["node.example.com:62416"]),
 		).toEqual([]);
 		expect(
-			canaryUpstreamSuggestionsFromApiBaseUrl("ftp://node.example.com"),
+			canaryUpstreamSuggestionsFromUrls(["ftp://node.example.com"]),
 		).toEqual([]);
+	});
+});
+
+describe("canaryUpstreamSuggestionsFromManagedEndpoints", () => {
+	it("uses managed canary upstream origins from the selected node only", () => {
+		expect(
+			canaryUpstreamSuggestionsFromManagedEndpoints(
+				[
+					{
+						endpoint_id: "managed-a",
+						node_id: "node-alpha",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "http://127.0.0.1:8080/path",
+							},
+						},
+					},
+					{
+						endpoint_id: "managed-b",
+						node_id: "node-alpha",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "https://origin.example.com",
+							},
+						},
+					},
+					{
+						endpoint_id: "managed-c",
+						node_id: "node-beta",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: true,
+							canary_upstream: {
+								url: "https://other.example.com",
+							},
+						},
+					},
+					{
+						endpoint_id: "legacy-a",
+						node_id: "node-alpha",
+						kind: "vless_reality_vision_tcp",
+						meta: {
+							managed_default: false,
+							canary_upstream: {
+								url: "https://legacy.example.com",
+							},
+						},
+					},
+				],
+				"node-alpha",
+			),
+		).toEqual([
+			{
+				value: "http://127.0.0.1:8080",
+				label: "http://127.0.0.1:8080",
+			},
+			{
+				value: "https://origin.example.com",
+				label: "https://origin.example.com",
+			},
+		]);
 	});
 });
 

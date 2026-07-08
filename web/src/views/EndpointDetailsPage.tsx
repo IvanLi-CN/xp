@@ -10,6 +10,7 @@ import {
 import {
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
+	fetchAdminEndpoints,
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
@@ -44,7 +45,7 @@ import {
 } from "../utils/acceptedAuthority";
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromApiBaseUrl,
+	canaryUpstreamSuggestionsFromManagedEndpoints,
 } from "../utils/managedVlessForm";
 import {
 	normalizeRealityServerName,
@@ -161,6 +162,11 @@ export function EndpointDetailsPage() {
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+	const endpointsQuery = useQuery({
+		queryKey: ["adminEndpoints", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
 	const [port, setPort] = useState("");
@@ -438,7 +444,10 @@ export function EndpointDetailsPage() {
 		? [realityServerNameSuggestion]
 		: [];
 	const managedCanaryUpstreamSuggestions =
-		canaryUpstreamSuggestionsFromApiBaseUrl(endpointNode?.api_base_url);
+		canaryUpstreamSuggestionsFromManagedEndpoints(
+			endpointsQuery.data?.items ?? [],
+			endpoint.node_id,
+		);
 	const managedAcceptedAuthoritySuggestions =
 		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host);
 	const currentCanaryProbeResult =
@@ -698,7 +707,7 @@ export function EndpointDetailsPage() {
 													placeholder="http://127.0.0.1:8080"
 													disabled={patchMutation.isPending}
 													suggestions={managedCanaryUpstreamSuggestions}
-													suggestionLabel="Show node API origin suggestions"
+													suggestionLabel="Show upstream origin suggestions"
 													onChange={(event) =>
 														setUpstreamUrl(event.target.value)
 													}

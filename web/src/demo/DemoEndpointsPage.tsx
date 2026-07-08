@@ -17,7 +17,7 @@ import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromApiBaseUrl,
+	canaryUpstreamSuggestionsFromUrls,
 	findAcceptedAuthorityError,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
@@ -302,8 +302,15 @@ export function DemoEndpointFormPage() {
 	const canWrite = state.session?.role !== "viewer";
 	const numericPort = Number(port);
 	const selectedNode = state.nodes.find((node) => node.id === nodeId);
-	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromApiBaseUrl(
-		selectedNode?.apiBaseUrl,
+	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromUrls(
+		state.endpoints
+			.filter(
+				(endpoint) =>
+					endpoint.nodeId === nodeId &&
+					endpoint.kind === "vless_reality_vision_tcp" &&
+					endpoint.managedDefault,
+			)
+			.map((endpoint) => endpoint.canaryUpstreamUrl),
 	);
 	const acceptedAuthoritySuggestions =
 		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.accessHost);
@@ -459,7 +466,7 @@ export function DemoEndpointFormPage() {
 									placeholder="http://127.0.0.1:8080"
 									className="font-mono"
 									suggestions={canaryUpstreamSuggestions}
-									suggestionLabel="Show node API origin suggestions"
+									suggestionLabel="Show upstream origin suggestions"
 								/>
 								<span className="text-xs text-muted-foreground">
 									Requests other than GET/HEAD /generate_204 are proxied to this

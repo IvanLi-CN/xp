@@ -9,7 +9,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createAdminEndpoint } from "../api/adminEndpoints";
+import {
+	createAdminEndpoint,
+	fetchAdminEndpoints,
+} from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { ToastProvider } from "../components/Toast";
 import { createQueryClient } from "../queryClient";
@@ -82,6 +85,27 @@ function setupNodeMocks() {
 	});
 }
 
+function setupEndpointMocks() {
+	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
+		items: [
+			{
+				endpoint_id: "existing-managed-upstream",
+				node_id: "node-alpha",
+				tag: "existing-managed-upstream",
+				kind: "vless_reality_vision_tcp",
+				port: 8443,
+				meta: {
+					managed_default: true,
+					canary_upstream: {
+						url: "http://127.0.0.1:8080",
+						mode: "auto",
+					},
+				},
+			},
+		],
+	});
+}
+
 describe("EndpointNewPage", () => {
 	beforeEach(() => {
 		mockNavigate.mockReset();
@@ -89,6 +113,7 @@ describe("EndpointNewPage", () => {
 		mockReadAdminToken.mockReturnValue("admintoken");
 		vi.clearAllMocks();
 		setupNodeMocks();
+		setupEndpointMocks();
 	});
 
 	afterEach(() => {
@@ -162,16 +187,16 @@ describe("EndpointNewPage", () => {
 
 		fireEvent.click(
 			await screen.findByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		);
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
-			).findByText("https://node-xp.example.test"),
+			).findByText("http://127.0.0.1:8080"),
 		);
 		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://node-xp.example.test",
+			"http://127.0.0.1:8080",
 		);
 
 		fireEvent.click(
@@ -198,7 +223,7 @@ describe("EndpointNewPage", () => {
 				node_id: "node-alpha",
 				port: 443,
 				canary_upstream: {
-					url: "https://node-xp.example.test",
+					url: "http://127.0.0.1:8080",
 					mode: "auto",
 				},
 				accepted_authorities: ["node-xp.example.test:443"],
@@ -264,13 +289,14 @@ describe("EndpointNewPage", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 
 		renderPage();
 
 		await screen.findByLabelText("canaryUpstreamUrl");
 		expect(
 			screen.queryByRole("button", {
-				name: "Show node API origin suggestions",
+				name: "Show upstream origin suggestions",
 			}),
 		).toBeNull();
 		expect(
