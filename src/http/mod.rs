@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Extension, FromRequest, Path, Query, Request, State},
-    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, header},
     middleware::{self, Next},
     response::{
         IntoResponse, Redirect, Response,
@@ -26,6 +26,8 @@ use tokio::{
     sync::{Mutex, mpsc},
     time::Duration,
 };
+
+mod embedded_ui;
 
 use crate::{
     admin_token::{AdminTokenHash, verify_admin_token},
@@ -1160,8 +1162,8 @@ pub fn build_router(
 
     let mut app = Router::new()
         .nest("/api", api)
-        .route("/assets/{*path}", get(embedded_asset))
-        .fallback(embedded_spa_fallback);
+        .route("/assets/{*path}", get(embedded_ui::embedded_asset))
+        .fallback(embedded_ui::embedded_spa_fallback);
 
     if let Some(raft) = raft_rpc {
         app = app.merge(crate::raft::http_rpc::build_raft_rpc_router(
@@ -7477,98 +7479,6 @@ const CSP_HEADER_VALUE: &str = concat!(
     "style-src 'self' 'unsafe-inline'; ",
     "font-src 'self';"
 );
-
-fn embedded_content_type(path: &str) -> &'static str {
-    match std::path::Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-    {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("ico") => "image/x-icon",
-        Some("json") => "application/json; charset=utf-8",
-        Some("map") => "application/json; charset=utf-8",
-        Some("woff2") => "font/woff2",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("webmanifest") => "application/manifest+json; charset=utf-8",
-        _ => "application/octet-stream",
-    }
-}
-
-fn embedded_bytes_response(
-    body: &'static [u8],
-    content_type: &'static str,
-    cache_control: &'static str,
-    csp: bool,
-) -> Response {
-    let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static(cache_control),
-    );
-    headers.insert(
-        header::HeaderName::from_static("x-content-type-options"),
-        HeaderValue::from_static("nosniff"),
-    );
-    if csp {
-        headers.insert(
-            header::HeaderName::from_static("content-security-policy"),
-            HeaderValue::from_static(CSP_HEADER_VALUE),
-        );
-    }
-    (headers, body).into_response()
-}
-
-fn embedded_index_response() -> Response {
-    let Some(index) = web_assets::get("index.html") else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    embedded_bytes_response(index, "text/html; charset=utf-8", "no-cache", true)
-}
-
-async fn embedded_asset(Path(path): Path<String>) -> Response {
-    let key = format!("assets/{path}");
-    let Some(asset) = web_assets::get(&key) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    embedded_bytes_response(
-        asset,
-        embedded_content_type(&key),
-        "public, max-age=31536000, immutable",
-        false,
-    )
-}
-
-async fn embedded_spa_fallback(req: Request<Body>) -> Response {
-    if !matches!(*req.method(), Method::GET | Method::HEAD) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let path = req.uri().path().trim_start_matches('/');
-    if path.is_empty() {
-        return embedded_index_response();
-    }
-
-    if let Some(bytes) = web_assets::get(path) {
-        let cache_control = if path.starts_with("assets/") {
-            "public, max-age=31536000, immutable"
-        } else {
-            "no-cache"
-        };
-        return embedded_bytes_response(
-            bytes,
-            embedded_content_type(path),
-            cache_control,
-            path == "index.html",
-        );
-    }
-
-    embedded_index_response()
-}
 
 #[derive(Debug, Deserialize)]
 struct SubscriptionQuery {

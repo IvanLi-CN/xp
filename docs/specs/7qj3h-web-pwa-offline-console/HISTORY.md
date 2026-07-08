@@ -7,3 +7,6 @@
   admin SSE stream after backend restarts, refreshing shell status when the
   upgrade job reaches a terminal state, and proactively polling the registered
   Service Worker for newer bundles.
+- 2026-07-09: Hardened `/sw.js` delivery with browser and CDN cache-bypass
+  headers after live validation showed the public edge caching the Service
+  Worker for four hours and suppressing the frontend update prompt.
