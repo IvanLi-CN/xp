@@ -19,6 +19,7 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -37,6 +38,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
@@ -141,6 +149,7 @@ export function EndpointDetailsPage() {
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 
 	const inputClass = inputControlClass(prefs.density);
@@ -379,7 +388,7 @@ export function EndpointDetailsPage() {
 		);
 	}
 
-	if (endpointQuery.isLoading) {
+	if (endpointQuery.isLoading && !hasQueryData(endpointQuery)) {
 		return (
 			<PageState
 				variant="loading"
@@ -389,7 +398,20 @@ export function EndpointDetailsPage() {
 		);
 	}
 
-	if (endpointQuery.isError) {
+	if (
+		!hasQueryData(endpointQuery) &&
+		queryIsOfflineBlocked(endpointQuery, runtime.isOnline)
+	) {
+		return (
+			<PageState
+				variant="offline"
+				title="Offline cache unavailable"
+				description="Open this endpoint once while online to keep its latest configuration available offline."
+			/>
+		);
+	}
+
+	if (endpointQuery.isError && !hasQueryData(endpointQuery)) {
 		return (
 			<PageState
 				variant="error"
@@ -436,6 +458,11 @@ export function EndpointDetailsPage() {
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
 			: null;
+	const latestSyncedAt = latestQueryDataUpdatedAt([endpointQuery, nodesQuery]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(endpointQuery) || hasQueryData(nodesQuery)) &&
+		(!runtime.isOnline || endpointQuery.isError || nodesQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -450,6 +477,7 @@ export function EndpointDetailsPage() {
 						<Button
 							variant="secondary"
 							loading={endpointQuery.isFetching}
+							disabled={!runtime.isOnline}
 							onClick={() => endpointQuery.refetch()}
 						>
 							Refresh
@@ -457,6 +485,19 @@ export function EndpointDetailsPage() {
 					</div>
 				}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline endpoint snapshot"
+							: "Showing cached endpoint data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<div className="grid gap-6 lg:grid-cols-2">
 				<div className="xp-card">
@@ -602,6 +643,7 @@ export function EndpointDetailsPage() {
 										className={inputClass}
 										value={port}
 										min={1}
+										disabled={patchMutation.isPending || runtime.isReadOnly}
 										onChange={(event) => setPort(event.target.value)}
 									/>
 									<p className="text-xs opacity-70">
@@ -623,7 +665,7 @@ export function EndpointDetailsPage() {
 												className={inputClass}
 												value={realityDest}
 												placeholder="origin.example.test:443"
-												disabled={patchMutation.isPending}
+												disabled={patchMutation.isPending || runtime.isReadOnly}
 												onChange={(event) => setRealityDest(event.target.value)}
 											/>
 											<p className="text-xs opacity-70">
@@ -637,7 +679,7 @@ export function EndpointDetailsPage() {
 											value={realityServerNamesManual}
 											onChange={setRealityServerNamesManual}
 											placeholder="download.example.com"
-											disabled={patchMutation.isPending}
+											disabled={patchMutation.isPending || runtime.isReadOnly}
 											inputClass={inputClass}
 											validateTag={validateRealityServerName}
 											suggestions={realityServerNameSuggestions}
@@ -659,6 +701,9 @@ export function EndpointDetailsPage() {
 														type="text"
 														className={inputClass}
 														value={realityFingerprint}
+														disabled={
+															patchMutation.isPending || runtime.isReadOnly
+														}
 														placeholder="chrome"
 														onChange={(event) =>
 															setRealityFingerprint(event.target.value)
@@ -687,7 +732,9 @@ export function EndpointDetailsPage() {
 													className={inputClass}
 													value={upstreamUrl}
 													placeholder="http://127.0.0.1:8080"
-													disabled={patchMutation.isPending}
+													disabled={
+														patchMutation.isPending || runtime.isReadOnly
+													}
 													onChange={(event) =>
 														setUpstreamUrl(event.target.value)
 													}
@@ -706,7 +753,9 @@ export function EndpointDetailsPage() {
 													onValueChange={(value) =>
 														setUpstreamMode(value as CanaryUpstreamMode)
 													}
-													disabled={patchMutation.isPending}
+													disabled={
+														patchMutation.isPending || runtime.isReadOnly
+													}
 												>
 													<SelectTrigger
 														className={selectClass}
@@ -739,7 +788,7 @@ export function EndpointDetailsPage() {
 												)
 											}
 											placeholder="edge.example.com"
-											disabled={patchMutation.isPending}
+											disabled={patchMutation.isPending || runtime.isReadOnly}
 											inputClass={inputClass}
 											validateTag={validateAcceptedAuthority}
 											allowPrimary={false}
@@ -751,7 +800,11 @@ export function EndpointDetailsPage() {
 						</div>
 
 						<div className="xp-card-actions justify-end">
-							<Button loading={patchMutation.isPending} type="submit">
+							<Button
+								loading={patchMutation.isPending}
+								type="submit"
+								disabled={runtime.isReadOnly}
+							>
 								Save changes
 							</Button>
 						</div>
@@ -775,6 +828,7 @@ export function EndpointDetailsPage() {
 								<Button
 									variant="secondary"
 									loading={probeRunMutation.isPending}
+									disabled={runtime.isReadOnly}
 									onClick={() => probeRunMutation.mutate()}
 								>
 									Test now
@@ -865,6 +919,7 @@ export function EndpointDetailsPage() {
 									<Button
 										variant="secondary"
 										loading={canaryProbeMutation.isPending}
+										disabled={runtime.isReadOnly}
 										onClick={() => canaryProbeMutation.mutate()}
 									>
 										Test canary
@@ -887,6 +942,7 @@ export function EndpointDetailsPage() {
 							<Button
 								variant="secondary"
 								loading={rotateMutation.isPending}
+								disabled={runtime.isReadOnly}
 								onClick={() => setConfirmRotateOpen(true)}
 							>
 								Rotate shortId
@@ -905,7 +961,7 @@ export function EndpointDetailsPage() {
 					<Button
 						variant="danger"
 						onClick={() => setConfirmDeleteOpen(true)}
-						disabled={deleteMutation.isPending}
+						disabled={deleteMutation.isPending || runtime.isReadOnly}
 					>
 						Delete endpoint
 					</Button>

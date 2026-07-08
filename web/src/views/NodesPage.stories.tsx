@@ -72,3 +72,23 @@ export const WithJoinToken: Story = {
 		).toBeInTheDocument();
 	},
 };
+
+export const OfflineCachedInventory: Story = {
+	parameters: {
+		appRuntime: {
+			initialIsOnline: false,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText(/offline cached/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/offline node inventory/i),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/last successful sync:/i),
+		).toBeInTheDocument();
+	},
+};

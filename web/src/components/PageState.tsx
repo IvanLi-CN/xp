@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 
-type PageStateVariant = "loading" | "empty" | "error";
+type PageStateVariant = "loading" | "empty" | "error" | "offline";
 
 type PageStateProps = {
 	variant: PageStateVariant;
@@ -15,6 +15,7 @@ const variantTone: Record<PageStateVariant, string> = {
 	loading: "text-info",
 	empty: "text-foreground",
 	error: "text-destructive",
+	offline: "text-warning",
 };
 
 export function PageState({

@@ -27,3 +27,11 @@ export const Empty: Story = {
 export const ErrorState: Story = {
 	args: { variant: "error", title: "Something went wrong" },
 };
+
+export const Offline: Story = {
+	args: {
+		variant: "offline",
+		title: "Offline cache unavailable",
+		description: "Reconnect to hydrate this page for offline use.",
+	},
+};

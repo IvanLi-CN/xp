@@ -44,6 +44,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
@@ -62,6 +63,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
 const PROTOCOLS = [
@@ -230,6 +238,7 @@ function formatInlineList(items: string[]): string {
 
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const navigate = useNavigate();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
@@ -898,7 +907,7 @@ export function UserDetailsPage() {
 		}
 	}
 
-	if (userQuery.isLoading) {
+	if (userQuery.isLoading && !hasQueryData(userQuery)) {
 		return <PageState variant="loading" title="Loading user" />;
 	}
 	if (adminToken.length === 0) {
@@ -910,7 +919,19 @@ export function UserDetailsPage() {
 			/>
 		);
 	}
-	if (userQuery.isError) {
+	if (
+		!hasQueryData(userQuery) &&
+		queryIsOfflineBlocked(userQuery, runtime.isOnline)
+	) {
+		return (
+			<PageState
+				variant="offline"
+				title="Offline cache unavailable"
+				description="Open this user once while online to keep the latest profile, access matrix, and quota snapshot available offline."
+			/>
+		);
+	}
+	if (userQuery.isError && !hasQueryData(userQuery)) {
 		return (
 			<PageState
 				variant="error"
@@ -948,6 +969,25 @@ export function UserDetailsPage() {
 		if (item.quota_limit_bytes === 0) return "Remaining: unlimited";
 		return `Remaining: ${formatQuotaBytesHuman(item.remaining_bytes)}`;
 	}
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		userQuery,
+		mihomoProfileQuery,
+		nodesQuery,
+		endpointsQuery,
+		accessQuery,
+		nodeQuotasQuery,
+		nodeQuotaStatusQuery,
+		ipUsageQuery,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(userQuery) ||
+			hasQueryData(accessQuery) ||
+			hasQueryData(nodeQuotaStatusQuery)) &&
+		(!runtime.isOnline ||
+			userQuery.isError ||
+			accessQuery.isError ||
+			nodeQuotaStatusQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -956,21 +996,43 @@ export function UserDetailsPage() {
 				description="Manage profile, access, quota status, and usage details"
 				actions={
 					<div className="flex items-center gap-2">
-						<Button variant="ghost" onClick={() => setResetTokenOpen(true)}>
+						<Button
+							variant="ghost"
+							disabled={runtime.isReadOnly}
+							onClick={() => setResetTokenOpen(true)}
+						>
 							Reset token
 						</Button>
 						<Button
 							variant="ghost"
+							disabled={runtime.isReadOnly}
 							onClick={() => setResetCredentialsOpen(true)}
 						>
 							Reset credentials
 						</Button>
-						<Button variant="danger" onClick={() => setDeleteOpen(true)}>
+						<Button
+							variant="danger"
+							disabled={runtime.isReadOnly}
+							onClick={() => setDeleteOpen(true)}
+						>
 							Delete user
 						</Button>
 					</div>
 				}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline user snapshot"
+							: "Showing cached user data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<div className="overflow-x-auto">
 				<div className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm">
@@ -1088,6 +1150,7 @@ export function UserDetailsPage() {
 									data-testid="subscription-fetch"
 									iconLeft={<Icon name="tabler:cloud-download" />}
 									loading={subLoading}
+									disabled={runtime.isReadOnly}
 									onClick={async () => {
 										setSubOpen(true);
 										await loadSubscriptionPreview();
@@ -1121,6 +1184,7 @@ export function UserDetailsPage() {
 								onChange={setMihomoMixinYaml}
 								placeholder="Paste Mihomo mixin YAML"
 								minRows={14}
+								readOnly={runtime.isReadOnly}
 								showShortcutHint
 							/>
 							<YamlCodeEditor
@@ -1129,6 +1193,7 @@ export function UserDetailsPage() {
 								onChange={setMihomoExtraProxiesYaml}
 								placeholder="- name: custom-ss\n  type: ss\n  ..."
 								minRows={8}
+								readOnly={runtime.isReadOnly}
 							/>
 							<YamlCodeEditor
 								label="extra_proxy_providers_yaml"
@@ -1136,6 +1201,7 @@ export function UserDetailsPage() {
 								onChange={setMihomoExtraProxyProvidersYaml}
 								placeholder="ProviderA:\n  type: http\n  ..."
 								minRows={8}
+								readOnly={runtime.isReadOnly}
 							/>
 							{mihomoProfileSaveError ? (
 								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -1145,6 +1211,7 @@ export function UserDetailsPage() {
 							<div>
 								<Button
 									loading={isSavingMihomoProfile}
+									disabled={runtime.isReadOnly}
 									onClick={saveUserMihomoProfile}
 								>
 									Save mihomo mixin
@@ -1158,7 +1225,11 @@ export function UserDetailsPage() {
 							</div>
 						) : null}
 						<div>
-							<Button onClick={saveUserProfile} loading={isSavingUser}>
+							<Button
+								onClick={saveUserProfile}
+								loading={isSavingUser}
+								disabled={runtime.isReadOnly}
+							>
 								Save user
 							</Button>
 						</div>
@@ -1169,20 +1240,20 @@ export function UserDetailsPage() {
 						<div className="rounded-xl border border-border/70 bg-muted/35 px-4 py-2 text-sm">
 							Node quota editing is currently unavailable in this view.
 						</div>
-						{nodesQuery.isLoading ? (
+						{nodesQuery.isLoading && !hasQueryData(nodesQuery) ? (
 							<PageState variant="loading" title="Loading nodes" />
 						) : null}
-						{nodesQuery.isError ? (
+						{nodesQuery.isError && !hasQueryData(nodesQuery) ? (
 							<PageState
 								variant="error"
 								title="Failed to load nodes"
 								description={formatError(nodesQuery.error)}
 							/>
 						) : null}
-						{nodeQuotasQuery.isLoading ? (
+						{nodeQuotasQuery.isLoading && !hasQueryData(nodeQuotasQuery) ? (
 							<PageState variant="loading" title="Loading node quotas" />
 						) : null}
-						{nodeQuotasQuery.isError ? (
+						{nodeQuotasQuery.isError && !hasQueryData(nodeQuotasQuery) ? (
 							<PageState
 								variant="error"
 								title="Failed to load node quotas"
@@ -1225,7 +1296,7 @@ export function UserDetailsPage() {
 						<Button
 							onClick={applyAccessMatrix}
 							loading={isApplyingAccess}
-							disabled={!isAccessReady}
+							disabled={!isAccessReady || runtime.isReadOnly}
 						>
 							Apply access
 						</Button>
@@ -1253,10 +1324,16 @@ export function UserDetailsPage() {
 							</div>
 						</output>
 					) : null}
-					{isAccessDataLoading ? (
+					{isAccessDataLoading &&
+					(!hasQueryData(nodesQuery) ||
+						!hasQueryData(endpointsQuery) ||
+						!hasQueryData(accessQuery)) ? (
 						<PageState variant="loading" title="Loading access matrix" />
 					) : null}
-					{accessDataError ? (
+					{accessDataError &&
+					(!hasQueryData(nodesQuery) ||
+						!hasQueryData(endpointsQuery) ||
+						!hasQueryData(accessQuery)) ? (
 						<div className="space-y-3">
 							<PageState
 								variant="error"
@@ -1287,7 +1364,9 @@ export function UserDetailsPage() {
 								label: protocol.label,
 							}))}
 							cells={cells}
-							disabled={isAccessDataLoading || !isAccessReady}
+							disabled={
+								isAccessDataLoading || !isAccessReady || runtime.isReadOnly
+							}
 							onToggleCell={(nodeId, protocolId) =>
 								toggleCell(nodeId, protocolId as SupportedProtocolId)
 							}
@@ -1318,7 +1397,17 @@ export function UserDetailsPage() {
 							description="Fetching minute-level inbound IP usage grouped by node."
 						/>
 					) : null}
-					{ipUsageQuery.isError && !ipUsageQuery.data ? (
+					{!ipUsageQuery.data &&
+					queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
+						<PageState
+							variant="offline"
+							title="Offline usage cache unavailable"
+							description="Open this usage tab while online to keep the latest inbound IP timeline available offline."
+						/>
+					) : null}
+					{ipUsageQuery.isError &&
+					!ipUsageQuery.data &&
+					!queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
 						<PageState
 							variant="error"
 							title="Failed to load usage details"
@@ -1402,10 +1491,20 @@ export function UserDetailsPage() {
 
 			{tab === "quotaStatus" ? (
 				<div className="xp-card p-4 space-y-3">
-					{nodeQuotaStatusQuery.isLoading ? (
+					{nodeQuotaStatusQuery.isLoading &&
+					!hasQueryData(nodeQuotaStatusQuery) ? (
 						<PageState variant="loading" title="Loading quota status" />
 					) : null}
-					{nodeQuotaStatusQuery.isError ? (
+					{!hasQueryData(nodeQuotaStatusQuery) &&
+					queryIsOfflineBlocked(nodeQuotaStatusQuery, runtime.isOnline) ? (
+						<PageState
+							variant="offline"
+							title="Offline quota cache unavailable"
+							description="Open the quota status tab while online to keep the latest remaining-quota snapshot available offline."
+						/>
+					) : null}
+					{nodeQuotaStatusQuery.isError &&
+					!hasQueryData(nodeQuotaStatusQuery) ? (
 						<PageState
 							variant="error"
 							title="Failed to load quota status"
@@ -1498,7 +1597,7 @@ export function UserDetailsPage() {
 						</Button>
 						<Button
 							variant="danger"
-							disabled={isDeleting}
+							disabled={isDeleting || runtime.isReadOnly}
 							onClick={confirmDeleteUser}
 						>
 							{isDeleting ? "Deleting..." : "Delete"}

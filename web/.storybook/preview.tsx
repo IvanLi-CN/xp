@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 
 import { AppLayout } from "../src/components/AppLayout";
+import { PwaStatusPrompt } from "../src/components/PwaStatusPrompt";
 import { ToastProvider } from "../src/components/Toast";
 import { UiPrefsProvider } from "../src/components/UiPrefs";
 import {
@@ -40,6 +41,7 @@ import {
 	DemoUsersPage,
 } from "../src/demo/DemoUsersPage";
 import { clearDemoFallbackState, getDemoStorageKey } from "../src/demo/store";
+import { AppRuntimeProvider } from "../src/offline/appRuntime";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
@@ -65,6 +67,10 @@ import {
 
 type StorybookRouterParameters = {
 	initialEntry?: string;
+};
+
+type StorybookAppRuntimeParameters = {
+	initialIsOnline?: boolean;
 };
 
 installStorybookFetchMock();
@@ -140,6 +146,10 @@ const preview: Preview = {
 			const routerParams =
 				(context.parameters?.router as StorybookRouterParameters | undefined) ??
 				undefined;
+			const appRuntimeParams =
+				(context.parameters?.appRuntime as
+					| StorybookAppRuntimeParameters
+					| undefined) ?? undefined;
 			const theme = context.globals.theme === "light" ? "light" : "dark";
 			const density =
 				context.globals.density === "compact" ? "compact" : "comfortable";
@@ -413,9 +423,14 @@ const preview: Preview = {
 			return (
 				<QueryClientProvider client={queryClient}>
 					<UiPrefsProvider key={`${theme}-${density}`}>
-						<ToastProvider>
-							<RouterProvider router={router} />
-						</ToastProvider>
+						<AppRuntimeProvider
+							initialIsOnline={appRuntimeParams?.initialIsOnline}
+						>
+							<ToastProvider>
+								<RouterProvider router={router} />
+								<PwaStatusPrompt />
+							</ToastProvider>
+						</AppRuntimeProvider>
 					</UiPrefsProvider>
 				</QueryClientProvider>
 			);

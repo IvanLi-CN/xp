@@ -72,6 +72,7 @@ type ClusterInfo = {
 	role: string;
 	leader_api_base_url: string;
 	term: number;
+	xp_version: string;
 };
 
 type AlertsResponse = {
@@ -109,6 +110,7 @@ type MockApiOptions = {
 	subscriptionContentRaw?: string;
 	subscriptionContentClash?: string;
 	userMihomoProfiles?: Record<string, MockMihomoProfile>;
+	mockStatusEvents?: boolean;
 };
 
 type MockState = {
@@ -179,6 +181,7 @@ const defaultClusterInfo: ClusterInfo = {
 	role: "leader",
 	leader_api_base_url: "http://127.0.0.1:62416",
 	term: 1,
+	xp_version: "v0.1.0",
 };
 
 const defaultAlerts: AlertsResponse = {
@@ -208,6 +211,18 @@ function textResponse(route: Route, payload: string, status = 200): void {
 	void route.fulfill({
 		status,
 		contentType: "text/plain",
+		body: payload,
+	});
+}
+
+function sseResponse(route: Route, payload: string, status = 200): void {
+	void route.fulfill({
+		status,
+		contentType: "text/event-stream",
+		headers: {
+			"cache-control": "no-cache",
+			connection: "keep-alive",
+		},
 		body: payload,
 	});
 }
@@ -483,8 +498,52 @@ export async function setupApiMocks(
 			return;
 		}
 
+		if (path === "/api/version/check" && method === "GET") {
+			jsonResponse(route, {
+				current: {
+					package: "0.1.0",
+					release_tag: "v0.1.0",
+				},
+				latest: {
+					release_tag: "v0.1.0",
+					published_at: "2026-03-01T00:00:00Z",
+				},
+				has_update: false,
+				checked_at: "2026-03-01T00:00:00Z",
+				compare_reason: "up_to_date",
+				source: {
+					kind: "github_release",
+					repo: "IvanLi-CN/xp",
+					api_base: "https://api.github.com",
+					channel: "stable",
+				},
+			});
+			return;
+		}
+
 		if (path === "/api/admin/alerts" && method === "GET") {
 			jsonResponse(route, state.alerts);
+			return;
+		}
+
+		if (path === "/api/admin/upgrade/status" && method === "GET") {
+			jsonResponse(route, {
+				support: {
+					supported: true,
+					reason: null,
+					trigger: "systemd",
+				},
+				status: {
+					state: "idle",
+					target_tag: null,
+					repo: "IvanLi-CN/xp",
+					started_at: null,
+					finished_at: null,
+					exit_code: null,
+					message: null,
+					updated_at: "2026-03-01T00:00:00Z",
+				},
+			});
 			return;
 		}
 
@@ -524,6 +583,76 @@ export async function setupApiMocks(
 				unreachable_nodes: [],
 				items,
 			});
+			return;
+		}
+
+		if (
+			path === "/api/admin/status/events" &&
+			method === "GET" &&
+			options.mockStatusEvents !== false
+		) {
+			const items = state.nodes.map((node) => ({
+				node_id: node.node_id,
+				node_name: node.node_name,
+				api_base_url: node.api_base_url,
+				access_host: node.access_host,
+				summary: {
+					status: "up",
+					updated_at: "2026-03-01T00:00:00Z",
+				},
+				components: [
+					{
+						component: "xp",
+						status: "up",
+						consecutive_failures: 0,
+						recoveries_observed: 1,
+						restart_attempts: 0,
+					},
+				],
+				recent_slots: [
+					{
+						slot_start: "2026-03-01T00:00:00Z",
+						status: "up",
+					},
+				],
+			}));
+			const payload = [
+				`event: hello\ndata: ${JSON.stringify({
+					node_id: state.clusterInfo.node_id,
+					connected_at: "2026-03-01T00:00:00Z",
+				})}\n`,
+				`event: snapshot\ndata: ${JSON.stringify({
+					emitted_at: "2026-03-01T00:00:00Z",
+					health: { status: "ok" },
+					cluster_info: state.clusterInfo,
+					nodes_runtime: {
+						partial: false,
+						unreachable_nodes: [],
+						items,
+					},
+					alerts: state.alerts,
+					upgrade: {
+						support: {
+							supported: true,
+							reason: null,
+							trigger: "systemd",
+						},
+						status: {
+							state: "idle",
+							target_tag: null,
+							repo: "IvanLi-CN/xp",
+							started_at: null,
+							finished_at: null,
+							exit_code: null,
+							message: null,
+							updated_at: "2026-03-01T00:00:00Z",
+						},
+					},
+				})}\n`,
+			]
+				.map((event) => `${event}\n`)
+				.join("");
+			sseResponse(route, payload);
 			return;
 		}
 

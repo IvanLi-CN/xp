@@ -11,8 +11,16 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 
 function formatError(err: unknown): string {
@@ -34,6 +42,7 @@ function formatUtcOffset(minutes: number): string {
 
 export function UsersPage() {
 	const adminToken = readAdminToken();
+	const runtime = useAppRuntime();
 	const usersQuery = useQuery({
 		queryKey: ["adminUsers", adminToken],
 		enabled: adminToken.length > 0,
@@ -54,6 +63,8 @@ export function UsersPage() {
 			<Link to="/login" className={buttonVariants()}>
 				Go to login
 			</Link>
+		) : runtime.isReadOnly ? (
+			<Button disabled>New user</Button>
 		) : (
 			<Link to="/users/new" className={buttonVariants()}>
 				New user
@@ -71,7 +82,7 @@ export function UsersPage() {
 			);
 		}
 
-		if (usersQuery.isLoading) {
+		if (usersQuery.isLoading && !hasQueryData(usersQuery)) {
 			return (
 				<PageState
 					variant="loading"
@@ -81,7 +92,20 @@ export function UsersPage() {
 			);
 		}
 
-		if (usersQuery.isError) {
+		if (
+			!hasQueryData(usersQuery) &&
+			queryIsOfflineBlocked(usersQuery, runtime.isOnline)
+		) {
+			return (
+				<PageState
+					variant="offline"
+					title="Offline cache unavailable"
+					description="Open Users once while online to keep the latest directory available offline."
+				/>
+			);
+		}
+
+		if (usersQuery.isError && !hasQueryData(usersQuery)) {
 			return (
 				<PageState
 					variant="error"
@@ -307,6 +331,14 @@ export function UsersPage() {
 			</ResourceTable>
 		);
 	})();
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		usersQuery,
+		quotaSummariesQuery,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		hasQueryData(usersQuery) &&
+		(!runtime.isOnline || usersQuery.isError || quotaSummariesQuery.isError);
 
 	return (
 		<div className="space-y-6">
@@ -315,6 +347,19 @@ export function UsersPage() {
 				description="Manage subscription owners and defaults."
 				actions={actions}
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline user directory"
+							: "Showing cached user data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 			{content}
 		</div>
 	);

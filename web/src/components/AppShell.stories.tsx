@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, within } from "@storybook/test";
 
 import { AppShell } from "./AppShell";
 
@@ -28,3 +29,17 @@ export default meta;
 type Story = StoryObj<typeof AppShell>;
 
 export const Default: Story = {};
+
+export const OfflineTopbarIndicator: Story = {
+	parameters: {
+		appRuntime: {
+			initialIsOnline: false,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText(/offline cached/i),
+		).toBeInTheDocument();
+	},
+};

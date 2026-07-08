@@ -820,6 +820,24 @@ async fn body_text(res: axum::response::Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+async fn read_sse_until(mut body: Body, marker: &str) -> String {
+    let mut out = String::new();
+    for _ in 0..6 {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+            .await
+            .expect("timed out waiting for SSE frame")
+            .expect("SSE stream ended before expected event")
+            .expect("failed to read SSE frame");
+        if let Ok(data) = frame.into_data() {
+            out.push_str(std::str::from_utf8(&data).unwrap());
+            if out.contains(marker) {
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn warning_codes(value: &Value) -> Vec<String> {
     let mut out = value
         .as_array()
@@ -2939,6 +2957,52 @@ async fn admin_upgrade_status_recovers_persisted_job() {
     let body = body_json(res).await;
     assert_eq!(body["status"]["state"], "succeeded");
     assert_eq!(body["status"]["target_tag"], "v0.2.0");
+}
+
+#[tokio::test]
+async fn admin_status_events_requires_auth() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req("GET", "/api/admin/status/events"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn admin_status_events_streams_sse() {
+    let tmp = TempDir::new().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req_authed("GET", "/api/admin/status/events"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let content_type = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "unexpected content-type: {content_type}"
+    );
+
+    let body = read_sse_until(res.into_body(), "event: snapshot").await;
+    assert!(body.contains("event: hello"), "missing hello event: {body}");
+    assert!(
+        body.contains("event: snapshot"),
+        "missing snapshot event: {body}"
+    );
+    assert!(
+        body.contains("\"health\""),
+        "missing health snapshot: {body}"
+    );
 }
 
 #[tokio::test]

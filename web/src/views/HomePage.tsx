@@ -11,6 +11,7 @@ import { fetchHealth } from "../api/health";
 import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { useUiPrefs } from "../components/UiPrefs";
 import {
@@ -24,6 +25,12 @@ import {
 	inputClass as inputControlClass,
 } from "../components/ui-helpers";
 import { Input } from "../components/ui/input";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+} from "../offline/queryReadState";
 import { parseAdminTokenInput } from "../utils/adminToken";
 
 function formatError(err: unknown): string {
@@ -55,6 +62,7 @@ function DashboardCard(props: {
 
 export function HomePage() {
 	const prefs = useUiPrefs();
+	const runtime = useAppRuntime();
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
 		readAdminToken(),
@@ -84,9 +92,36 @@ export function HomePage() {
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		health,
+		clusterInfo,
+		adminAlerts,
+		adminNodes,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(!runtime.isOnline ||
+			health.isError ||
+			clusterInfo.isError ||
+			adminAlerts.isError ||
+			adminNodes.isError);
+
 	return (
 		<div className="space-y-6">
 			<PageHeader title="Dashboard" description="Cluster bootstrap UI." />
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline read-only view"
+							: "Showing cached dashboard data"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<DashboardCard
 				title="Backend health"
@@ -100,9 +135,9 @@ export function HomePage() {
 					</Button>
 				}
 			>
-				{health.isLoading ? (
+				{health.isLoading && !hasQueryData(health) ? (
 					<p>Loading...</p>
-				) : health.isError ? (
+				) : health.isError && !hasQueryData(health) ? (
 					<p className="text-destructive">Failed to reach backend.</p>
 				) : (
 					<p>
@@ -121,7 +156,7 @@ export function HomePage() {
 						<Button
 							variant="secondary"
 							loading={isSavingAdminToken}
-							disabled={isSavingAdminToken}
+							disabled={isSavingAdminToken || runtime.isReadOnly}
 							onClick={async () => {
 								const parsed = parseAdminTokenInput(adminTokenDraft);
 								if ("error" in parsed) {
@@ -202,9 +237,9 @@ export function HomePage() {
 					</Button>
 				}
 			>
-				{clusterInfo.isLoading ? (
+				{clusterInfo.isLoading && !hasQueryData(clusterInfo) ? (
 					<p>Loading...</p>
-				) : clusterInfo.isError ? (
+				) : clusterInfo.isError && !hasQueryData(clusterInfo) ? (
 					<div className="space-y-1">
 						<p className="text-destructive">Failed to load cluster info.</p>
 						{isBackendApiError(clusterInfo.error) ? (
@@ -259,9 +294,9 @@ export function HomePage() {
 			>
 				{adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token.</p>
-				) : adminAlerts.isLoading ? (
+				) : adminAlerts.isLoading && !hasQueryData(adminAlerts) ? (
 					<p>Loading...</p>
-				) : adminAlerts.isError ? (
+				) : adminAlerts.isError && !hasQueryData(adminAlerts) ? (
 					<div className="space-y-1">
 						<p className="text-destructive">Failed to load alerts.</p>
 						<p className="font-mono text-sm text-muted-foreground">
@@ -330,9 +365,9 @@ export function HomePage() {
 			<DashboardCard title="Nodes">
 				{adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token.</p>
-				) : adminNodes.isLoading ? (
+				) : adminNodes.isLoading && !hasQueryData(adminNodes) ? (
 					<p>Loading...</p>
-				) : adminNodes.isError ? (
+				) : adminNodes.isError && !hasQueryData(adminNodes) ? (
 					<div className="space-y-3">
 						<p className="text-destructive">Failed to load nodes.</p>
 						<p className="font-mono text-sm text-muted-foreground">

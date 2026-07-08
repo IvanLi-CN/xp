@@ -10,11 +10,20 @@ import { CopyButton } from "../components/CopyButton";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 import { inputClass as inputControlClass } from "../components/ui-helpers";
 import { Input } from "../components/ui/input";
+import { useAppRuntime } from "../offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "../offline/queryReadState";
+import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -58,6 +67,7 @@ function highlightShell(text: string) {
 
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
+	const runtime = useAppRuntime();
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
 	const [ttlSeconds, setTtlSeconds] = useState(3600);
@@ -69,12 +79,20 @@ export function NodesPage() {
 		queryKey: ["clusterInfo"],
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
+	const clusterInfoState = useQueryWithOfflineFallback(
+		["clusterInfo"],
+		clusterInfoQuery,
+	);
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
+	const nodesState = useQueryWithOfflineFallback(
+		["adminNodesRuntime", adminToken],
+		nodesQuery,
+	);
 
 	const joinCommand = useMemo(() => {
 		return joinToken ? `xp join --token ${joinToken}` : "";
@@ -82,7 +100,7 @@ export function NodesPage() {
 
 	const deployCommand = useMemo(() => {
 		if (!joinToken) return "";
-		const xpVersion = clusterInfoQuery.data?.xp_version;
+		const xpVersion = clusterInfoState.data?.xp_version;
 		if (!xpVersion) return "";
 
 		const tag = xpVersion.startsWith("v") ? xpVersion : `v${xpVersion}`;
@@ -114,7 +132,7 @@ export function NodesPage() {
 			"",
 			`sudo xp-ops deploy --no-cloudflare --api-base-url \"$API_BASE_URL\" --node-name \"$NODE_NAME\" --access-host \"$ACCESS_HOST\" --join-token '${joinToken}' --enable-services --non-interactive -y`,
 		].join("\n");
-	}, [joinToken, clusterInfoQuery.data?.xp_version]);
+	}, [joinToken, clusterInfoState.data?.xp_version]);
 
 	const handleCreateJoinToken = async () => {
 		setJoinTokenError(null);
@@ -156,7 +174,7 @@ export function NodesPage() {
 			);
 		}
 
-		if (nodesQuery.isLoading) {
+		if (nodesState.isLoading && !hasQueryData(nodesState)) {
 			return (
 				<PageState
 					variant="loading"
@@ -166,17 +184,30 @@ export function NodesPage() {
 			);
 		}
 
-		if (nodesQuery.isError) {
+		if (
+			!hasQueryData(nodesState) &&
+			queryIsOfflineBlocked(nodesState, runtime.isOnline)
+		) {
+			return (
+				<PageState
+					variant="offline"
+					title="Offline cache unavailable"
+					description="Open Nodes once while online to keep the latest cluster inventory available offline."
+				/>
+			);
+		}
+
+		if (nodesState.isError && !hasQueryData(nodesState)) {
 			return (
 				<PageState
 					variant="error"
 					title="Failed to load nodes"
-					description={formatErrorMessage(nodesQuery.error)}
+					description={formatErrorMessage(nodesState.error)}
 					action={
 						<Button
 							variant="secondary"
-							loading={nodesQuery.isFetching}
-							onClick={() => nodesQuery.refetch()}
+							loading={nodesState.isFetching}
+							onClick={() => nodesState.refetch()}
 						>
 							Retry
 						</Button>
@@ -185,7 +216,7 @@ export function NodesPage() {
 			);
 		}
 
-		const nodes = nodesQuery.data?.items ?? [];
+		const nodes = nodesState.data?.items ?? [];
 		if (nodes.length === 0) {
 			return (
 				<PageState
@@ -195,8 +226,8 @@ export function NodesPage() {
 					action={
 						<Button
 							variant="secondary"
-							loading={nodesQuery.isFetching}
-							onClick={() => nodesQuery.refetch()}
+							loading={nodesState.isFetching}
+							onClick={() => nodesState.refetch()}
 						>
 							Refresh
 						</Button>
@@ -208,13 +239,21 @@ export function NodesPage() {
 		return (
 			<NodeInventoryList
 				items={nodes}
-				partial={nodesQuery.data?.partial ?? false}
-				unreachableNodes={nodesQuery.data?.unreachable_nodes ?? []}
-				isRefreshing={nodesQuery.isFetching}
-				onRefresh={() => nodesQuery.refetch()}
+				partial={nodesState.data?.partial ?? false}
+				unreachableNodes={nodesState.data?.unreachable_nodes ?? []}
+				isRefreshing={nodesState.isFetching}
+				onRefresh={() => nodesState.refetch()}
 			/>
 		);
 	})();
+	const latestSyncedAt = latestQueryDataUpdatedAt([
+		nodesState,
+		clusterInfoState,
+	]);
+	const showCachedBanner =
+		latestSyncedAt !== null &&
+		(hasQueryData(nodesState) || hasQueryData(clusterInfoState)) &&
+		(!runtime.isOnline || nodesState.isError || clusterInfoState.isError);
 
 	return (
 		<div className="space-y-6">
@@ -222,6 +261,19 @@ export function NodesPage() {
 				title="Nodes"
 				description="Inspect cluster nodes and issue join tokens for new members."
 			/>
+			{showCachedBanner ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					dismissible
+					title={
+						!runtime.isOnline
+							? "Offline node inventory"
+							: "Showing cached node inventory"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestSyncedAt)}.`}
+				/>
+			) : null}
 
 			<div className="xp-card">
 				<div className="xp-card-body space-y-4">
@@ -251,7 +303,11 @@ export function NodesPage() {
 							<Button
 								variant="secondary"
 								loading={isCreatingJoinToken}
-								disabled={ttlSeconds <= 0 || adminToken.length === 0}
+								disabled={
+									ttlSeconds <= 0 ||
+									adminToken.length === 0 ||
+									runtime.isReadOnly
+								}
 								onClick={handleCreateJoinToken}
 							>
 								Create token
