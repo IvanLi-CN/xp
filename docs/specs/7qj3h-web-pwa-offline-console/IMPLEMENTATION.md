@@ -44,13 +44,18 @@
   terminal state, `AppShell` now forces fresh `clusterInfo` / `health` reads,
   reruns the version check, and asks the registered Service Worker to check for
   a newer frontend bundle immediately.
+- `src/http/mod.rs` now serves `/sw.js` with `no-store`-oriented browser and
+  CDN cache headers (`Cache-Control`, `CDN-Cache-Control`,
+  `Cloudflare-CDN-Cache-Control`, and `Pragma`) so the public edge cannot pin an
+  old Service Worker and suppress the update prompt after a release.
 - Existing node-detail runtime streaming remains in place; the new admin
   stream covers the shared shell-level status surfaces.
 
 ## Coverage and validation
 
 - `src/http/tests.rs` covers the new auth gate and SSE response contract for
-  `/api/admin/status/events`.
+  `/api/admin/status/events`, and now also verifies the cache-bypass headers on
+  `/sw.js`.
 - Web coverage passed through the standard web checks:
   `cd web && bun run lint`
   `cd web && bun run typecheck`

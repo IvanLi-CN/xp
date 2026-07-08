@@ -53,6 +53,9 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   upgrade job leaves `running`/`restarting`, force a fresh cluster-info read and
   a Service Worker `registration.update()` so the UI can surface a frontend
   reload prompt without waiting for focus or a manual refresh.
+- Serve `/sw.js` with stronger no-store semantics than ordinary HTML routes,
+  including CDN-facing cache-bypass headers, so an edge cache cannot pin an old
+  Service Worker for hours after a release.
 
 ## Guardrails / Reuse notes
 
@@ -64,6 +67,9 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   pre-fix bundle cannot discover new Service Worker update behavior just because the backend was
   upgraded underneath it; reload once onto the fixed bundle first, then observe the next version
   change.
+- Check the public `sw.js` response headers from the deployed origin, not just the loopback admin
+  port. A proxy or CDN that rewrites the Service Worker cache policy can silently break update
+  prompts even when the source app returns `no-cache`.
 - Offline UX should always surface whether the user is seeing cached data, when it last synced, and
   whether the current view has no local snapshot at all.
 - When adding a new admin page, decide whether it belongs to the persisted allowlist and whether its
