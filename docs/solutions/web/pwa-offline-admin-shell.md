@@ -60,6 +60,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   persistence allowlist explicit and reviewable.
 - The PWA update prompt should stay separate from server upgrade state. Frontend bundle refresh and
   backend rollout are different operator actions.
+- Validate the prompt on the next release after the fix lands. A page that is still running the
+  pre-fix bundle cannot discover new Service Worker update behavior just because the backend was
+  upgraded underneath it; reload once onto the fixed bundle first, then observe the next version
+  change.
 - Offline UX should always surface whether the user is seeing cached data, when it last synced, and
   whether the current view has no local snapshot at all.
 - When adding a new admin page, decide whether it belongs to the persisted allowlist and whether its
