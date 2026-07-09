@@ -17,7 +17,7 @@ import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromUrls,
+	canaryUpstreamSuggestionsFromAuthorities,
 	findAcceptedAuthorityError,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
@@ -32,6 +32,8 @@ import { useDemo } from "./store";
 import type { DemoEndpoint } from "./types";
 
 type DemoCanaryUpstreamMode = NonNullable<DemoEndpoint["canaryUpstreamMode"]>;
+
+const DEMO_XP_HTTPS_LISTENER = "127.0.0.1:39043";
 
 export function DemoEndpointsPage() {
 	const navigate = useNavigate();
@@ -302,20 +304,9 @@ export function DemoEndpointFormPage() {
 	const canWrite = state.session?.role !== "viewer";
 	const numericPort = Number(port);
 	const selectedNode = state.nodes.find((node) => node.id === nodeId);
-	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromUrls(
-		state.endpoints
-			.filter(
-				(endpoint) =>
-					endpoint.nodeId === nodeId &&
-					endpoint.kind === "vless_reality_vision_tcp" &&
-					endpoint.managedDefault,
-			)
-			.map((endpoint) => endpoint.canaryUpstreamUrl),
-		{
-			accessHost: selectedNode?.accessHost,
-			apiBaseUrl: selectedNode?.apiBaseUrl,
-		},
-	);
+	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromAuthorities([
+		DEMO_XP_HTTPS_LISTENER,
+	]);
 	const duplicate = state.endpoints.some(
 		({ nodeId: id, port }) => id === nodeId && port === numericPort,
 	);
@@ -466,7 +457,7 @@ export function DemoEndpointFormPage() {
 									placeholder="http://127.0.0.1:8080"
 									className="font-mono"
 									suggestions={canaryUpstreamSuggestions}
-									suggestionLabel="Show upstream origin suggestions"
+									suggestionLabel="Show XP HTTPS listener suggestions"
 								/>
 								<span className="text-xs text-muted-foreground">
 									Requests other than GET/HEAD /generate_204 are proxied to this

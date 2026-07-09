@@ -9,11 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-	fetchAdminEndpoint,
-	fetchAdminEndpoints,
-	patchAdminEndpoint,
-} from "../api/adminEndpoints";
+import { fetchAdminEndpoint, patchAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -112,52 +108,6 @@ function setupMocks() {
 			],
 		},
 	});
-	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
-		items: [
-			{
-				endpoint_id: "endpoint-managed-vless",
-				node_id: "node-1",
-				tag: "managed-vless",
-				kind: "vless_reality_vision_tcp",
-				port: 53844,
-				meta: {
-					managed_default: true,
-					canary_upstream: {
-						url: "http://127.0.0.1:8080",
-						mode: "auto",
-					},
-				},
-			},
-			{
-				endpoint_id: "endpoint-managed-public-origin",
-				node_id: "node-1",
-				tag: "managed-public-origin",
-				kind: "vless_reality_vision_tcp",
-				port: 443,
-				meta: {
-					managed_default: true,
-					canary_upstream: {
-						url: "https://tokyo-1.example.com",
-						mode: "auto",
-					},
-				},
-			},
-			{
-				endpoint_id: "endpoint-managed-sibling",
-				node_id: "node-1",
-				tag: "managed-sibling",
-				kind: "vless_reality_vision_tcp",
-				port: 9443,
-				meta: {
-					managed_default: true,
-					canary_upstream: {
-						url: "http://127.0.0.1:9000",
-						mode: "auto",
-					},
-				},
-			},
-		],
-	});
 }
 
 describe("EndpointDetailsPage", () => {
@@ -189,13 +139,13 @@ describe("EndpointDetailsPage", () => {
 				},
 				managed_default: true,
 				canary_upstream: {
-					url: "http://127.0.0.1:9000",
+					url: "https://tokyo-1.example.com",
 					mode: "auto",
 				},
 				accepted_authorities: [
 					"endpoint.example.test:53844",
 					"edge.example.com:53844",
-					"edge.example.test:443",
+					"edge.example.test:53844",
 				],
 			},
 		});
@@ -204,17 +154,16 @@ describe("EndpointDetailsPage", () => {
 
 		fireEvent.click(
 			await screen.findByRole("button", {
-				name: "Show upstream origin suggestions",
+				name: "Show XP HTTPS listener suggestions",
 			}),
 		);
-		expect(screen.queryByText("https://tokyo-1.example.com")).toBeNull();
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
-			).findByText("http://127.0.0.1:9000"),
+			).findByText("https://127.0.0.1:39043"),
 		);
 		expect(await screen.findByLabelText("canary upstream url")).toHaveValue(
-			"http://127.0.0.1:9000",
+			"https://127.0.0.1:39043",
 		);
 
 		fireEvent.click(
@@ -225,10 +174,10 @@ describe("EndpointDetailsPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("tag-input-suggestions"),
-			).findByText("edge.example.test"),
+			).findByText("edge.example.test:53844"),
 		);
 		expect(
-			await screen.findByText("edge.example.test:443"),
+			await screen.findByTitle("edge.example.test:53844"),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -242,20 +191,135 @@ describe("EndpointDetailsPage", () => {
 				{
 					port: 53844,
 					canary_upstream: {
-						url: "http://127.0.0.1:9000",
+						url: "https://127.0.0.1:39043",
 						mode: "auto",
 					},
 					accepted_authorities: [
 						"endpoint.example.test:53844",
 						"edge.example.com:53844",
-						"edge.example.test:443",
+						"edge.example.test:53844",
 					],
 				},
 			);
 		});
 	});
 
-	it("hides managed suggestion triggers when endpoint node data is invalid", async () => {
+	it(
+		[
+			"keeps the XP HTTPS listener suggestion available",
+			"when the managed endpoint has no canary history",
+		].join(" "),
+		{ timeout: 20_000 },
+		async () => {
+			vi.mocked(fetchAdminNodes).mockResolvedValue({
+				items: [
+					{
+						node_id: "node-hinet",
+						node_name: "hinet",
+						access_host: "hinet-ep.707979.xyz",
+						api_base_url: "https://hinet-xp.707979.xyz",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+				],
+			});
+			vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+				endpoint_id: "endpoint-managed-vless",
+				node_id: "node-hinet",
+				tag: "managed-hinet",
+				kind: "vless_reality_vision_tcp",
+				port: 53844,
+				meta: {
+					reality: {
+						dest: "127.0.0.1:39043",
+						server_names: ["hinet-ep.707979.xyz"],
+						server_names_source: "manual",
+						fingerprint: "chrome",
+					},
+					managed_default: true,
+				},
+			});
+			vi.mocked(patchAdminEndpoint).mockResolvedValue({
+				endpoint_id: "endpoint-managed-vless",
+				node_id: "node-hinet",
+				tag: "managed-hinet",
+				kind: "vless_reality_vision_tcp",
+				port: 53844,
+				meta: {
+					reality: {
+						dest: "127.0.0.1:39043",
+						server_names: ["hinet-ep.707979.xyz"],
+						server_names_source: "manual",
+						fingerprint: "chrome",
+					},
+					managed_default: true,
+					canary_upstream: {
+						url: "https://127.0.0.1:39043",
+						mode: "auto",
+					},
+					accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+				},
+			});
+
+			renderPage();
+
+			fireEvent.click(
+				await screen.findByRole("button", {
+					name: "Show XP HTTPS listener suggestions",
+				}),
+			);
+			fireEvent.click(
+				await within(
+					await screen.findByTestId("autocomplete-suggestions"),
+				).findByText("https://127.0.0.1:39043"),
+			);
+			expect(await screen.findByLabelText("canary upstream url")).toHaveValue(
+				"https://127.0.0.1:39043",
+			);
+
+			fireEvent.click(
+				await screen.findByRole("button", {
+					name: "Show access host suggestions",
+				}),
+			);
+			fireEvent.click(
+				await within(
+					await screen.findByTestId("tag-input-suggestions"),
+				).findByText("hinet-ep.707979.xyz:53844"),
+			);
+			expect(
+				await screen.findByTitle("hinet-ep.707979.xyz:53844"),
+			).toBeInTheDocument();
+
+			fireEvent.click(
+				await screen.findByRole("button", { name: "Save changes" }),
+			);
+
+			await waitFor(() => {
+				expect(patchAdminEndpoint).toHaveBeenCalledWith(
+					"admintoken",
+					"endpoint-managed-vless",
+					{
+						port: 53844,
+						canary_upstream: {
+							url: "https://127.0.0.1:39043",
+							mode: "auto",
+						},
+						accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+					},
+				);
+			});
+		},
+	);
+
+	it([
+		"keeps the XP HTTPS listener suggestion",
+		"when endpoint node access-host data is invalid",
+	].join(" "), async () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
@@ -272,16 +336,15 @@ describe("EndpointDetailsPage", () => {
 				},
 			],
 		});
-		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 
 		renderPage();
 
 		await screen.findByLabelText("canary upstream url");
 		expect(
-			screen.queryByRole("button", {
-				name: "Show upstream origin suggestions",
+			screen.getByRole("button", {
+				name: "Show XP HTTPS listener suggestions",
 			}),
-		).toBeNull();
+		).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", {
 				name: "Show access host suggestions",

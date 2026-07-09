@@ -53,6 +53,7 @@ function setupMocks() {
 		node_name: "node-1",
 		access_host: "edge.example.com",
 		api_base_url: "https://api.example.com",
+		vless_https_canary_bind: "127.0.0.1:39043",
 		quota_poll_interval_secs: 10,
 		quota_auto_unban: true,
 		ip_geo_enabled: false,

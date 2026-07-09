@@ -54,52 +54,6 @@ const meta = {
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
 					},
-					{
-						endpoint_id: "endpoint-managed-public-origin",
-						node_id: NODE_ID,
-						tag: "managed-public-origin",
-						kind: "vless_reality_vision_tcp",
-						port: 443,
-						meta: {
-							reality: {
-								dest: "127.0.0.1:39043",
-								server_names: ["edge.example.test"],
-								server_names_source: "manual",
-								fingerprint: "chrome",
-							},
-							managed_default: true,
-							canary_upstream: {
-								url: "https://tokyo-1.example.com",
-								mode: "auto",
-							},
-							accepted_authorities: [],
-						},
-						short_ids: ["c1d2e3"],
-						active_short_id: "c1d2e3",
-					},
-					{
-						endpoint_id: "endpoint-managed-sibling",
-						node_id: NODE_ID,
-						tag: "managed-sibling",
-						kind: "vless_reality_vision_tcp",
-						port: 9443,
-						meta: {
-							reality: {
-								dest: "127.0.0.1:39043",
-								server_names: ["edge.example.test"],
-								server_names_source: "manual",
-								fingerprint: "chrome",
-							},
-							managed_default: true,
-							canary_upstream: {
-								url: "http://127.0.0.1:9000",
-								mode: "auto",
-							},
-							accepted_authorities: ["edge.example.test:443"],
-						},
-						short_ids: ["7f8e9d"],
-						active_short_id: "7f8e9d",
-					},
 				],
 			},
 		},
@@ -220,7 +174,7 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		const canvas = within(canvasElement);
 		await expect(
 			await canvas.findByRole("button", {
-				name: "Show upstream origin suggestions",
+				name: "Show XP HTTPS listener suggestions",
 			}),
 		).toBeInTheDocument();
 		await expect(
@@ -231,20 +185,17 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 
 		await userEvent.click(
 			await canvas.findByRole("button", {
-				name: "Show upstream origin suggestions",
+				name: "Show XP HTTPS listener suggestions",
 			}),
 		);
-		await expect(
-			within(document.body).queryByText("https://tokyo-1.example.com"),
-		).toBeNull();
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText("http://127.0.0.1:9000"),
+			).findByText("https://127.0.0.1:39043"),
 		);
 		await expect(
 			await canvas.findByLabelText("canary upstream url"),
-		).toHaveValue("http://127.0.0.1:9000");
+		).toHaveValue("https://127.0.0.1:39043");
 
 		await userEvent.click(
 			await canvas.findByRole("button", {
@@ -254,10 +205,87 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("tag-input-suggestions"),
-			).findByText("edge.example.test"),
+			).findByText("edge.example.test:53844"),
 		);
 		await expect(
-			await canvas.findByTitle("edge.example.test:443"),
+			await canvas.findByTitle("edge.example.test:53844"),
+		).toBeInTheDocument();
+	},
+};
+
+export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
+	tags: ["managed-vless-autocomplete"],
+	parameters: {
+		router: {
+			initialEntry: "/endpoints/endpoint-hinet-managed",
+		},
+		mockApi: {
+			data: {
+				nodes: [
+					{
+						node_id: "node-hinet",
+						node_name: "hinet",
+						access_host: "hinet-ep.707979.xyz",
+						api_base_url: "https://hinet-xp.707979.xyz",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+				],
+				endpoints: [
+					{
+						endpoint_id: "endpoint-hinet-managed",
+						node_id: "node-hinet",
+						tag: "managed-hinet",
+						kind: "vless_reality_vision_tcp",
+						port: 53844,
+						meta: {
+							reality: {
+								dest: "127.0.0.1:39043",
+								server_names: ["hinet-ep.707979.xyz"],
+								server_names_source: "manual",
+								fingerprint: "chrome",
+							},
+							managed_default: true,
+						},
+						short_ids: ["2a3b4c"],
+						active_short_id: "2a3b4c",
+					},
+				],
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Show XP HTTPS listener suggestions",
+			}),
+		);
+		await userEvent.click(
+			await within(
+				await within(document.body).findByTestId("autocomplete-suggestions"),
+			).findByText("https://127.0.0.1:39043"),
+		);
+		await expect(
+			await canvas.findByLabelText("canary upstream url"),
+		).toHaveValue("https://127.0.0.1:39043");
+
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Show access host suggestions",
+			}),
+		);
+		await userEvent.click(
+			await within(
+				await within(document.body).findByTestId("tag-input-suggestions"),
+			).findByText("hinet-ep.707979.xyz:53844"),
+		);
+		await expect(
+			await canvas.findByTitle("hinet-ep.707979.xyz:53844"),
 		).toBeInTheDocument();
 	},
 };

@@ -10,7 +10,6 @@ import {
 import {
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
-	fetchAdminEndpoints,
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
@@ -61,7 +60,7 @@ import {
 } from "../utils/endpointDetailsVless";
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromManagedEndpoints,
+	canaryUpstreamSuggestionsFromAuthorities,
 } from "../utils/managedVlessForm";
 import {
 	normalizeRealityServerName,
@@ -100,11 +99,6 @@ export function EndpointDetailsPage() {
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
-	});
-	const endpointsQuery = useQuery({
-		queryKey: ["adminEndpoints", adminToken],
-		enabled: adminToken.length > 0,
-		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
 	const [port, setPort] = useState("");
@@ -395,16 +389,11 @@ export function EndpointDetailsPage() {
 		? [realityServerNameSuggestion]
 		: [];
 	const managedCanaryUpstreamSuggestions =
-		canaryUpstreamSuggestionsFromManagedEndpoints(
-			endpointsQuery.data?.items ?? [],
-			{
-				nodeId: endpoint.node_id,
-				accessHost: endpointNode?.access_host,
-				apiBaseUrl: endpointNode?.api_base_url,
-			},
+		canaryUpstreamSuggestionsFromAuthorities(
+			vlessMeta?.managedDefault ? [vlessMeta.realityDest] : [],
 		);
 	const managedAcceptedAuthoritySuggestions =
-		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host);
+		acceptedAuthoritySuggestionsFromAccessHost(endpointNode?.access_host, port);
 	const currentCanaryProbeResult =
 		canaryProbeResult?.endpointId === endpointId
 			? canaryProbeResult.result
@@ -687,7 +676,7 @@ export function EndpointDetailsPage() {
 														patchMutation.isPending || runtime.isReadOnly
 													}
 													suggestions={managedCanaryUpstreamSuggestions}
-													suggestionLabel="Show upstream origin suggestions"
+													suggestionLabel="Show XP HTTPS listener suggestions"
 													onChange={(event) =>
 														setUpstreamUrl(event.target.value)
 													}

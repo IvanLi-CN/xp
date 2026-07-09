@@ -1,6 +1,8 @@
 import type { Page, Route } from "@playwright/test";
 import yaml from "js-yaml";
 
+import { handleAdminConfigAndEndpointRoutes } from "./adminEndpointRouteMocks";
+
 const { load } = yaml;
 
 type QuotaResetSource = "user" | "node";
@@ -98,6 +100,7 @@ type MockMihomoProfile = {
 };
 
 type MockApiOptions = {
+	adminConfigVlessCanaryBind?: string;
 	users?: AdminUser[];
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
@@ -142,7 +145,6 @@ const defaultNodes: AdminNode[] = [
 		},
 	},
 ];
-
 const defaultEndpoints: AdminEndpoint[] = [
 	{
 		endpoint_id: "endpoint-1",
@@ -153,7 +155,6 @@ const defaultEndpoints: AdminEndpoint[] = [
 		meta: {},
 	},
 ];
-
 const defaultUsers: AdminUser[] = [
 	{
 		user_id: "user-1",
@@ -168,13 +169,11 @@ const defaultUsers: AdminUser[] = [
 		},
 	},
 ];
-
 const defaultUserAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 	"user-1": [
 		{ user_id: "user-1", endpoint_id: "endpoint-1", node_id: "node-1" },
 	],
 };
-
 const defaultClusterInfo: ClusterInfo = {
 	cluster_id: "cluster-1",
 	node_id: "node-1",
@@ -183,13 +182,11 @@ const defaultClusterInfo: ClusterInfo = {
 	term: 1,
 	xp_version: "v0.1.0",
 };
-
 const defaultAlerts: AlertsResponse = {
 	partial: false,
 	unreachable_nodes: [],
 	items: [],
 };
-
 const defaultSubscriptionClash = `proxies:
   - name: demo
     type: vless
@@ -415,13 +412,11 @@ export function normalizeMockMihomoProfilePayload(
 		profile: canonical,
 	};
 }
-
 export function normalizeMockStoredMihomoProfile(
 	profile: MockMihomoProfile | undefined,
 ): CanonicalMockMihomoProfile {
 	return canonicalizeMockMihomoProfile(profile);
 }
-
 export async function setupApiMocks(
 	page: Page,
 	options: MockApiOptions = {},
@@ -429,9 +424,7 @@ export async function setupApiMocks(
 	const state: MockState = {
 		users: options.users ? [...options.users] : [...defaultUsers],
 		nodes: options.nodes ? [...options.nodes] : [...defaultNodes],
-		endpoints: options.endpoints
-			? [...options.endpoints]
-			: [...defaultEndpoints],
+		endpoints: [...(options.endpoints ?? defaultEndpoints)],
 		nodeQuotas: options.nodeQuotas ? [...options.nodeQuotas] : [],
 		userNodeWeights: options.userNodeWeights
 			? Object.fromEntries(
@@ -474,10 +467,8 @@ export async function setupApiMocks(
 				]),
 			),
 	};
-
 	let userSeq = state.users.length + 1;
 	let tokenSeq = 1;
-
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
@@ -518,6 +509,19 @@ export async function setupApiMocks(
 					channel: "stable",
 				},
 			});
+			return;
+		}
+
+		if (
+			handleAdminConfigAndEndpointRoutes({
+				adminConfigVlessCanaryBind: options.adminConfigVlessCanaryBind,
+				path,
+				method,
+				route,
+				request,
+				state,
+			})
+		) {
 			return;
 		}
 
@@ -684,11 +688,6 @@ export async function setupApiMocks(
 				node.quota_reset = payload.quota_reset as NodeQuotaReset;
 			}
 			jsonResponse(route, node);
-			return;
-		}
-
-		if (path === "/api/admin/endpoints" && method === "GET") {
-			jsonResponse(route, { items: state.endpoints });
 			return;
 		}
 
