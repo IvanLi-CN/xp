@@ -2,161 +2,117 @@ import { describe, expect, it } from "vitest";
 
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromManagedEndpoints,
-	canaryUpstreamSuggestionsFromUrls,
+	canaryUpstreamSuggestionsFromAuthorities,
+	canaryUpstreamSuggestionsFromManagedEndpointDests,
 } from "./managedVlessForm";
 
-describe("canaryUpstreamSuggestionsFromUrls", () => {
-	it("returns deduplicated normalized origin suggestions", () => {
+describe("canaryUpstreamSuggestionsFromAuthorities", () => {
+	it("returns normalized XP HTTPS listener origin suggestions", () => {
 		expect(
-			canaryUpstreamSuggestionsFromUrls([
-				"https://node.example.com:443/api/admin",
-				"https://node.example.com",
-				"http://127.0.0.1:8080/path",
-			]),
+			canaryUpstreamSuggestionsFromAuthorities(["127.0.0.1:39043"]),
 		).toEqual([
 			{
-				value: "https://node.example.com",
-				label: "https://node.example.com",
+				value: "https://127.0.0.1:39043",
+				label: "https://127.0.0.1:39043",
 			},
+		]);
+		expect(
+			canaryUpstreamSuggestionsFromAuthorities([" Edge.Example.com. "]),
+		).toEqual([
 			{
-				value: "http://127.0.0.1:8080",
-				label: "http://127.0.0.1:8080",
+				value: "https://edge.example.com",
+				label: "https://edge.example.com",
 			},
 		]);
 	});
 
 	it("rejects invalid or unsupported values", () => {
-		expect(canaryUpstreamSuggestionsFromUrls([""])).toEqual([]);
+		expect(canaryUpstreamSuggestionsFromAuthorities([""])).toEqual([]);
 		expect(
-			canaryUpstreamSuggestionsFromUrls(["node.example.com:62416"]),
+			canaryUpstreamSuggestionsFromAuthorities(["https://node.example.com"]),
 		).toEqual([]);
 		expect(
-			canaryUpstreamSuggestionsFromUrls(["ftp://node.example.com"]),
+			canaryUpstreamSuggestionsFromAuthorities(["node example.com:39043"]),
 		).toEqual([]);
 	});
 });
 
-describe("canaryUpstreamSuggestionsFromManagedEndpoints", () => {
-	it("uses managed canary upstream origins from the selected node only", () => {
+describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
+	it("uses same-node managed endpoint dest values as HTTPS listener suggestions", () => {
 		expect(
-			canaryUpstreamSuggestionsFromManagedEndpoints(
+			canaryUpstreamSuggestionsFromManagedEndpointDests(
 				[
 					{
-						endpoint_id: "managed-a",
-						node_id: "node-alpha",
+						endpoint_id: "ep-managed",
+						node_id: "node-a",
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: true,
-							canary_upstream: {
-								url: "http://127.0.0.1:8080/path",
+							reality: {
+								dest: "127.0.0.1:39043",
 							},
 						},
 					},
 					{
-						endpoint_id: "managed-b",
-						node_id: "node-alpha",
-						kind: "vless_reality_vision_tcp",
-						meta: {
-							managed_default: true,
-							canary_upstream: {
-								url: "https://origin.example.com",
-							},
-						},
-					},
-					{
-						endpoint_id: "managed-c",
-						node_id: "node-beta",
-						kind: "vless_reality_vision_tcp",
-						meta: {
-							managed_default: true,
-							canary_upstream: {
-								url: "https://other.example.com",
-							},
-						},
-					},
-					{
-						endpoint_id: "legacy-a",
-						node_id: "node-alpha",
+						endpoint_id: "ep-manual",
+						node_id: "node-a",
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: false,
-							canary_upstream: {
-								url: "https://legacy.example.com",
-							},
-						},
-					},
-				],
-				{ nodeId: "node-alpha" },
-			),
-		).toEqual([
-			{
-				value: "http://127.0.0.1:8080",
-				label: "http://127.0.0.1:8080",
-			},
-			{
-				value: "https://origin.example.com",
-				label: "https://origin.example.com",
-			},
-		]);
-	});
-
-	it("filters node-owned public and control-plane origins from suggestions", () => {
-		expect(
-			canaryUpstreamSuggestionsFromManagedEndpoints(
-				[
-					{
-						endpoint_id: "managed-a",
-						node_id: "node-alpha",
-						kind: "vless_reality_vision_tcp",
-						meta: {
-							managed_default: true,
-							canary_upstream: {
-								url: "https://node-xp.example.test",
+							reality: {
+								dest: "origin.example.com:443",
 							},
 						},
 					},
 					{
-						endpoint_id: "managed-b",
-						node_id: "node-alpha",
+						endpoint_id: "ep-other-node",
+						node_id: "node-b",
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: true,
-							canary_upstream: {
-								url: "http://127.0.0.1:8080",
+							reality: {
+								dest: "127.0.0.1:49043",
 							},
 						},
 					},
 				],
-				{
-					nodeId: "node-alpha",
-					accessHost: "node-xp.example.test",
-					apiBaseUrl: "https://node-xp.example.test:443",
-				},
+				"node-a",
 			),
 		).toEqual([
 			{
-				value: "http://127.0.0.1:8080",
-				label: "http://127.0.0.1:8080",
+				value: "https://127.0.0.1:39043",
+				label: "https://127.0.0.1:39043",
 			},
 		]);
 	});
 });
 
 describe("acceptedAuthoritySuggestionsFromAccessHost", () => {
-	it("returns a normalized host suggestion without the default port", () => {
+	it("returns a normalized host suggestion that follows the endpoint port", () => {
 		expect(
-			acceptedAuthoritySuggestionsFromAccessHost(" Edge.Example.com. "),
+			acceptedAuthoritySuggestionsFromAccessHost(" Edge.Example.com. ", 443),
 		).toEqual(["edge.example.com"]);
-		expect(acceptedAuthoritySuggestionsFromAccessHost("[2001:DB8::1]")).toEqual(
-			["[2001:db8::1]"],
-		);
+		expect(
+			acceptedAuthoritySuggestionsFromAccessHost(" Edge.Example.com. ", 8443),
+		).toEqual(["edge.example.com:8443"]);
+		expect(
+			acceptedAuthoritySuggestionsFromAccessHost("[2001:DB8::1]", 8443),
+		).toEqual(["[2001:db8::1]:8443"]);
 	});
 
-	it("rejects invalid host values", () => {
-		expect(acceptedAuthoritySuggestionsFromAccessHost("")).toEqual([]);
+	it("rejects invalid host or port values", () => {
+		expect(acceptedAuthoritySuggestionsFromAccessHost("", 443)).toEqual([]);
 		expect(
-			acceptedAuthoritySuggestionsFromAccessHost("https://edge.example.com"),
+			acceptedAuthoritySuggestionsFromAccessHost(
+				"https://edge.example.com",
+				443,
+			),
+		).toEqual([]);
+		expect(
+			acceptedAuthoritySuggestionsFromAccessHost("edge.example.com", 0),
+		).toEqual([]);
+		expect(
+			acceptedAuthoritySuggestionsFromAccessHost("edge.example.com", "abc"),
 		).toEqual([]);
 	});
 });

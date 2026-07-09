@@ -10,12 +10,6 @@ export type ManagedVlessAutocompleteSuggestion = {
 	description?: string;
 };
 
-export type ManagedVlessSuggestionScope = {
-	nodeId: string | null | undefined;
-	accessHost?: string | null | undefined;
-	apiBaseUrl?: string | null | undefined;
-};
-
 export const MANAGED_VLESS_MODE_HELPER_TEXT =
 	"Use an origin URL only. WebSocket uses HTTP/1.1 upstream; h2c is for " +
 	"non-upgrade HTTP.";
@@ -49,109 +43,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function normalizeCanaryUpstreamOrigin(
+function normalizeHttpsOriginFromAuthority(
 	value: string | null | undefined,
 ): string | null {
 	const trimmed = value?.trim() ?? "";
 	if (!trimmed) return null;
 
-	let url: URL;
-	try {
-		url = new URL(trimmed);
-	} catch {
+	const normalized = normalizeAcceptedAuthority(trimmed);
+	if (!normalized || validateAcceptedAuthority(normalized)) {
 		return null;
 	}
 
-	if (
-		(url.protocol !== "http:" && url.protocol !== "https:") ||
-		!url.hostname
-	) {
-		return null;
-	}
-
-	return url.origin;
+	return normalized.endsWith(":443")
+		? `https://${normalized.slice(0, -":443".length)}`
+		: `https://${normalized}`;
 }
 
-function normalizeHostname(value: string): string {
-	return value
-		.trim()
-		.replace(/^\[(.+)\]$/, "$1")
-		.toLowerCase();
-}
-
-function hostnameFromOrigin(value: string | null | undefined): string | null {
-	const origin = normalizeCanaryUpstreamOrigin(value);
-	if (!origin) return null;
-
-	try {
-		return normalizeHostname(new URL(origin).hostname);
-	} catch {
-		return null;
-	}
-}
-
-function hostnameFromAcceptedAuthority(
-	value: string | null | undefined,
-): string | null {
-	const normalized = normalizeAcceptedAuthority(value ?? "");
-	if (!normalized || validateAcceptedAuthority(normalized)) return null;
-
-	if (normalized.startsWith("[")) {
-		const end = normalized.indexOf("]");
-		return end === -1 ? null : normalizeHostname(normalized.slice(1, end));
-	}
-
-	const splitIndex = normalized.lastIndexOf(":");
-	return normalizeHostname(
-		splitIndex === -1 ? normalized : normalized.slice(0, splitIndex),
-	);
-}
-
-function nodeOwnedCanaryUpstreamHosts(
-	scope:
-		| Pick<ManagedVlessSuggestionScope, "accessHost" | "apiBaseUrl">
-		| null
-		| undefined,
-): Set<string> {
-	const blockedHosts = new Set<string>();
-	const accessHost = hostnameFromAcceptedAuthority(scope?.accessHost);
-	if (accessHost) blockedHosts.add(accessHost);
-	const apiBaseUrlHost = hostnameFromOrigin(scope?.apiBaseUrl);
-	if (apiBaseUrlHost) blockedHosts.add(apiBaseUrlHost);
-	return blockedHosts;
-}
-
-export function canaryUpstreamSuggestionsFromUrls(
+export function canaryUpstreamSuggestionsFromAuthorities(
 	values: Iterable<string | null | undefined>,
-	scope?: Pick<ManagedVlessSuggestionScope, "accessHost" | "apiBaseUrl"> | null,
 ): ManagedVlessAutocompleteSuggestion[] {
 	const suggestions: ManagedVlessAutocompleteSuggestion[] = [];
 	const seen = new Set<string>();
-	const blockedHosts = nodeOwnedCanaryUpstreamHosts(scope);
 
 	for (const value of values) {
-		const normalized = normalizeCanaryUpstreamOrigin(value);
-		if (!normalized || seen.has(normalized)) continue;
-		const hostname = hostnameFromOrigin(normalized);
-		if (hostname && blockedHosts.has(hostname)) continue;
-		seen.add(normalized);
-		suggestions.push({ value: normalized, label: normalized });
+		const origin = normalizeHttpsOriginFromAuthority(value);
+		if (!origin || seen.has(origin)) continue;
+		seen.add(origin);
+		suggestions.push({ value: origin, label: origin });
 	}
 
 	return suggestions;
 }
 
-export function canaryUpstreamSuggestionsFromManagedEndpoints(
+export function canaryUpstreamSuggestionsFromManagedEndpointDests(
 	endpoints: readonly Pick<
 		AdminEndpoint,
 		"endpoint_id" | "node_id" | "kind" | "meta"
 	>[],
-	scope: ManagedVlessSuggestionScope,
+	nodeId: string | null | undefined,
 ): ManagedVlessAutocompleteSuggestion[] {
-	const trimmedNodeId = scope.nodeId?.trim() ?? "";
+	const trimmedNodeId = nodeId?.trim() ?? "";
 	if (!trimmedNodeId) return [];
 
-	return canaryUpstreamSuggestionsFromUrls(
+	return canaryUpstreamSuggestionsFromAuthorities(
 		endpoints.flatMap((endpoint) => {
 			if (
 				endpoint.kind !== "vless_reality_vision_tcp" ||
@@ -163,22 +97,37 @@ export function canaryUpstreamSuggestionsFromManagedEndpoints(
 			const meta = isRecord(endpoint.meta) ? endpoint.meta : null;
 			if (!meta || meta.managed_default !== true) return [];
 
-			const upstream = isRecord(meta.canary_upstream)
-				? meta.canary_upstream
-				: null;
-			return typeof upstream?.url === "string" ? [upstream.url] : [];
+			const reality = isRecord(meta.reality) ? meta.reality : null;
+			return typeof reality?.dest === "string" ? [reality.dest] : [];
 		}),
-		scope,
 	);
 }
 
 export function acceptedAuthoritySuggestionsFromAccessHost(
 	accessHost: string | null | undefined,
+	port: number | string | null | undefined = 443,
 ): string[] {
 	const trimmed = accessHost?.trim() ?? "";
 	if (!trimmed) return [];
 
-	const normalized = normalizeAcceptedAuthority(trimmed);
+	const parsedPort =
+		typeof port === "number"
+			? Number.isInteger(port) && port > 0 && port <= 65535
+				? port
+				: null
+			: typeof port === "string"
+				? (() => {
+						const numeric = Number.parseInt(port.trim(), 10);
+						return Number.isInteger(numeric) && numeric > 0 && numeric <= 65535
+							? numeric
+							: null;
+					})()
+				: null;
+	if (parsedPort === null) return [];
+
+	const normalized = normalizeAcceptedAuthority(
+		parsedPort === 443 ? trimmed : `${trimmed}:${parsedPort}`,
+	);
 	if (!normalized || validateAcceptedAuthority(normalized)) return [];
 
 	return normalized.endsWith(":443")

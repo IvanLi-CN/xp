@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { fetchAdminConfig } from "../api/adminConfig";
 import {
 	createAdminEndpoint,
 	fetchAdminEndpoints,
@@ -45,7 +46,8 @@ import {
 	MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT,
 	MANAGED_VLESS_MODE_HELPER_TEXT,
 	acceptedAuthoritySuggestionsFromAccessHost,
-	canaryUpstreamSuggestionsFromManagedEndpoints,
+	canaryUpstreamSuggestionsFromAuthorities,
+	canaryUpstreamSuggestionsFromManagedEndpointDests,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
 
@@ -96,6 +98,11 @@ export function EndpointNewPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
+	const adminConfigQuery = useQuery({
+		queryKey: ["adminConfig", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
+	});
 	const form = useForm<EndpointFormInput, unknown, EndpointFormValues>({
 		resolver: zodResolver(endpointSchema),
 		defaultValues: {
@@ -110,19 +117,18 @@ export function EndpointNewPage() {
 
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
+	const port = form.watch("port") as number | string | undefined;
 	const nodes = nodesQuery.data?.items ?? [];
 	const selectedNode = nodes.find((node) => node.node_id === nodeId);
-	const canaryUpstreamSuggestions =
-		canaryUpstreamSuggestionsFromManagedEndpoints(
+	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromAuthorities([
+		...canaryUpstreamSuggestionsFromManagedEndpointDests(
 			endpointsQuery.data?.items ?? [],
-			{
-				nodeId: selectedNode?.node_id ?? nodeId,
-				accessHost: selectedNode?.access_host,
-				apiBaseUrl: selectedNode?.api_base_url,
-			},
-		);
+			selectedNode?.node_id ?? nodeId,
+		).map((suggestion) => suggestion.value),
+		adminConfigQuery.data?.vless_https_canary_bind,
+	]);
 	const acceptedAuthoritySuggestions =
-		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.access_host);
+		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.access_host, port);
 
 	useEffect(() => {
 		if (nodes.length === 0) return;
@@ -428,7 +434,7 @@ export function EndpointNewPage() {
 																type="url"
 																placeholder="http://127.0.0.1:8080"
 																suggestions={canaryUpstreamSuggestions}
-																suggestionLabel="Show upstream origin suggestions"
+																suggestionLabel="Show XP HTTPS listener suggestions"
 																onSuggestionSelect={field.onChange}
 															/>
 														</FormControl>

@@ -9,6 +9,7 @@ export const AdminConfigResponseSchema = z.object({
 	node_name: z.string(),
 	access_host: z.string(),
 	api_base_url: z.string(),
+	vless_https_canary_bind: z.string(),
 	quota_poll_interval_secs: z.number(),
 	quota_auto_unban: z.boolean(),
 	ip_geo_enabled: z.boolean(),

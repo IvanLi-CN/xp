@@ -1169,7 +1169,6 @@ async function handleRequest(
 			return errorResponse(500, "internal", "mock admin config failure");
 		}
 		const node = state.nodes[0];
-		const token = "storybook-admin-token";
 		return jsonResponse({
 			bind: "127.0.0.1:62416",
 			xray_api_addr: "127.0.0.1:10085",
@@ -1177,12 +1176,13 @@ async function handleRequest(
 			node_name: node?.node_name ?? "node-1",
 			access_host: node?.access_host ?? "",
 			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
+			vless_https_canary_bind: "127.0.0.1:39043",
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
 			ip_geo_origin: "https://api.country.is",
 			admin_token_present: true,
-			admin_token_masked: "*".repeat(token.length),
+			admin_token_masked: "*".repeat("storybook-admin-token".length),
 		});
 	}
 

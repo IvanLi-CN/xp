@@ -233,23 +233,42 @@
   - state: `Pages/EndpointNewPage/ManagedDefaultAutocompleteSuggestions`
   - submission_gate: `approved`
   - evidence_note: 托管 VLESS 新建页恢复与业务语义一致的地址自动补全入口；
-    `canaryUpstreamUrl` 只展开同节点现有托管 endpoint 已声明的 upstream
-    origin 候选，并排除节点自己的公网 / 控制面 host；`accepted host[:port]`
-    继续展开节点 `access_host`，不再回退到旧 `dest` / `serverNames` 形状。
+    `canaryUpstreamUrl` 默认展开 XP HTTPS listener origin 候选：优先使用同 node
+    托管 VLESS 的 `reality.dest` 派生 `https://<authority>`，无同 node 历史时回退到
+    当前 xp 的 `vless_https_canary_bind`；`accepted host[:port]` 展开节点
+    `access_host[:endpoint_port]`（`443` 仍可省略端口），不再回退到旧
+    `dest` / `serverNames` 形状。
     PR: include
     ![Endpoint new managed VLESS autocomplete](./assets/endpoint-new-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAutocompleteSuggestions`
   - submission_gate: `approved`
   - evidence_note: 托管 VLESS 更新区块恢复与新建页一致的自动补全合同；
-    `canaryUpstreamUrl` 使用同节点现有托管 endpoint 的 upstream origin 候选，
-    但会过滤节点自己的公网 / 控制面 host；`accepted host[:port]` 使用所属节点
-    `access_host` 候选，更新页不再缺少对应建议面板。
+    `canaryUpstreamUrl` 默认使用当前托管 endpoint 的 `reality.dest` 派生
+    `https://<authority>` 作为 XP HTTPS listener origin 候选；`accepted host[:port]`
+    使用所属节点 `access_host[:endpoint_port]` 候选，
+    更新页不再缺少对应建议面板。
     PR: include
     ![Endpoint details autocomplete](./assets/endpoint-details-managed-vless-autocomplete.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/EndpointNewPage/ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory`
+  - evidence_note: 当托管 VLESS 节点还没有可信 `canary_upstream` 历史时，
+    新建页不会
+    丢失默认的 XP HTTPS listener 候选；此时 `canaryUpstreamUrl` 回退到当前 xp 的
+    `vless_https_canary_bind` 派生 `https://<authority>`，并继续保留
+    `accepted host[:port]` 的 `access_host[:endpoint_port]` 候选。
+    ![Endpoint new no-history](./assets/endpoint-new-no-history.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/EndpointDetailsPage/ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory`
+  - evidence_note: 托管 VLESS 更新区块与新建页保持同一合同；没有可信 upstream
+    历史时仍展示当前 endpoint `reality.dest` 派生的 XP HTTPS listener 候选，
+    同时保留 `accepted host[:port]` 的 `access_host[:endpoint_port]` 建议入口。
+    ![Endpoint details no-history](./assets/endpoint-details-no-history.png)
 - Real Mihomo validation
   - environment: local `mihomo v1.19.24`
-  - result: provider-hosted `*-ss-chain` can reference a main-config `dialer-proxy`; missing main-config dialer fails immediately, proving provider payload chains depend on main-config relay groups.
+  - result: provider-hosted `*-ss-chain` can reference a main-config
+    `dialer-proxy`; missing main-config dialer fails immediately, proving
+    provider payload chains depend on main-config relay groups.
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
