@@ -4,6 +4,7 @@ import {
 	acceptedAuthoritySuggestionsFromAccessHost,
 	canaryUpstreamSuggestionsFromAuthorities,
 	canaryUpstreamSuggestionsFromManagedEndpointDests,
+	mergeManagedVlessAutocompleteSuggestions,
 } from "./managedVlessForm";
 
 describe("canaryUpstreamSuggestionsFromAuthorities", () => {
@@ -79,6 +80,32 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 				"node-a",
 			),
 		).toEqual([
+			{
+				value: "https://127.0.0.1:39043",
+				label: "https://127.0.0.1:39043",
+			},
+		]);
+	});
+});
+
+describe("mergeManagedVlessAutocompleteSuggestions", () => {
+	it("preserves existing origin suggestions before fallback authorities", () => {
+		expect(
+			mergeManagedVlessAutocompleteSuggestions([
+				{
+					value: "https://127.0.0.1:49043",
+					label: "https://127.0.0.1:49043",
+				},
+				...canaryUpstreamSuggestionsFromAuthorities([
+					"127.0.0.1:39043",
+					"127.0.0.1:49043",
+				]),
+			]),
+		).toEqual([
+			{
+				value: "https://127.0.0.1:49043",
+				label: "https://127.0.0.1:49043",
+			},
 			{
 				value: "https://127.0.0.1:39043",
 				label: "https://127.0.0.1:39043",

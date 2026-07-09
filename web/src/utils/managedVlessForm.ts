@@ -75,6 +75,26 @@ export function canaryUpstreamSuggestionsFromAuthorities(
 	return suggestions;
 }
 
+export function mergeManagedVlessAutocompleteSuggestions(
+	values: Iterable<ManagedVlessAutocompleteSuggestion | null | undefined>,
+): ManagedVlessAutocompleteSuggestion[] {
+	const suggestions: ManagedVlessAutocompleteSuggestion[] = [];
+	const seen = new Set<string>();
+
+	for (const suggestion of values) {
+		const value = suggestion?.value.trim() ?? "";
+		if (!value || seen.has(value)) continue;
+		seen.add(value);
+		suggestions.push({
+			value,
+			label: suggestion?.label?.trim() || value,
+			description: suggestion?.description?.trim() || undefined,
+		});
+	}
+
+	return suggestions;
+}
+
 export function canaryUpstreamSuggestionsFromManagedEndpointDests(
 	endpoints: readonly Pick<
 		AdminEndpoint,

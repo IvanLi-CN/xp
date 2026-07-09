@@ -48,6 +48,7 @@ import {
 	acceptedAuthoritySuggestionsFromAccessHost,
 	canaryUpstreamSuggestionsFromAuthorities,
 	canaryUpstreamSuggestionsFromManagedEndpointDests,
+	mergeManagedVlessAutocompleteSuggestions,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
 
@@ -120,12 +121,14 @@ export function EndpointNewPage() {
 	const port = form.watch("port") as number | string | undefined;
 	const nodes = nodesQuery.data?.items ?? [];
 	const selectedNode = nodes.find((node) => node.node_id === nodeId);
-	const canaryUpstreamSuggestions = canaryUpstreamSuggestionsFromAuthorities([
+	const canaryUpstreamSuggestions = mergeManagedVlessAutocompleteSuggestions([
 		...canaryUpstreamSuggestionsFromManagedEndpointDests(
 			endpointsQuery.data?.items ?? [],
 			selectedNode?.node_id ?? nodeId,
-		).map((suggestion) => suggestion.value),
-		adminConfigQuery.data?.vless_https_canary_bind,
+		),
+		...canaryUpstreamSuggestionsFromAuthorities([
+			adminConfigQuery.data?.vless_https_canary_bind,
+		]),
 	]);
 	const acceptedAuthoritySuggestions =
 		acceptedAuthoritySuggestionsFromAccessHost(selectedNode?.access_host, port);

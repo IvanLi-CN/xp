@@ -18,6 +18,7 @@ type AdminEndpointLike = {
 };
 
 type ManagedEndpointState = {
+	adminConfigVlessCanaryBind?: string;
 	nodes: AdminNodeLike[];
 	endpoints: AdminEndpointLike[];
 };
@@ -27,6 +28,7 @@ type JsonRequest = {
 };
 
 type RouteContext = {
+	adminConfigVlessCanaryBind?: string;
 	path: string;
 	method: string;
 	route: Route;
@@ -65,6 +67,7 @@ function parseJsonBody(request: JsonRequest): Record<string, unknown> {
 }
 
 export function handleAdminConfigAndEndpointRoutes({
+	adminConfigVlessCanaryBind,
 	path,
 	method,
 	route,
@@ -82,9 +85,11 @@ export function handleAdminConfigAndEndpointRoutes({
 			| { dest?: unknown }
 			| undefined;
 		const vlessCanaryBind =
-			typeof reality?.dest === "string"
-				? reality.dest
-				: DEFAULT_VLESS_CANARY_BIND;
+			typeof adminConfigVlessCanaryBind === "string"
+				? adminConfigVlessCanaryBind
+				: typeof reality?.dest === "string"
+					? reality.dest
+					: DEFAULT_VLESS_CANARY_BIND;
 		jsonResponse(route, {
 			bind: "127.0.0.1:62416",
 			xray_api_addr: "127.0.0.1:10085",

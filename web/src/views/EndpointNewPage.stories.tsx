@@ -69,6 +69,44 @@ export const ManagedDefaultFieldsVisible: Story = {
 
 export const ManagedDefaultAutocompleteSuggestions: Story = {
 	tags: ["coverage-ui", "managed-vless-autocomplete"],
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [
+					{
+						node_id: NODE_ID,
+						node_name: "alpha",
+						access_host: "node-xp.example.test",
+						api_base_url: "https://node-xp.example.test:443",
+						quota_limit_bytes: 0,
+						quota_reset: {
+							policy: "monthly",
+							day_of_month: 1,
+							tz_offset_minutes: null,
+						},
+					},
+				],
+				endpoints: [
+					{
+						endpoint_id: "endpoint-existing",
+						node_id: NODE_ID,
+						tag: "managed-alpha",
+						kind: "vless_reality_vision_tcp",
+						port: 443,
+						meta: {
+							reality: {
+								dest: "127.0.0.1:49043",
+								server_names: ["node-xp.example.test"],
+								server_names_source: "manual",
+								fingerprint: "chrome",
+							},
+							managed_default: true,
+						},
+					},
+				],
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.clear(await canvas.findByLabelText("port"));
@@ -79,13 +117,19 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				name: "Show XP HTTPS listener suggestions",
 			}),
 		);
+		const suggestionPanel = await within(document.body).findByTestId(
+			"autocomplete-suggestions",
+		);
+		await expect(
+			within(suggestionPanel)
+				.getAllByText(/^https:\/\/127\.0\.0\.1:/)
+				.map((element) => element.textContent),
+		).toEqual(["https://127.0.0.1:49043", "https://127.0.0.1:39043"]);
 		await userEvent.click(
-			await within(
-				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText("https://127.0.0.1:39043"),
+			await within(suggestionPanel).findByText("https://127.0.0.1:49043"),
 		);
 		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:39043",
+			"https://127.0.0.1:49043",
 		);
 
 		await userEvent.click(

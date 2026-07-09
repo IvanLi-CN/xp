@@ -100,6 +100,7 @@ type MockMihomoProfile = {
 };
 
 type MockApiOptions = {
+	adminConfigVlessCanaryBind?: string;
 	users?: AdminUser[];
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
@@ -411,7 +412,6 @@ export function normalizeMockMihomoProfilePayload(
 		profile: canonical,
 	};
 }
-
 export function normalizeMockStoredMihomoProfile(
 	profile: MockMihomoProfile | undefined,
 ): CanonicalMockMihomoProfile {
@@ -424,9 +424,7 @@ export async function setupApiMocks(
 	const state: MockState = {
 		users: options.users ? [...options.users] : [...defaultUsers],
 		nodes: options.nodes ? [...options.nodes] : [...defaultNodes],
-		endpoints: options.endpoints
-			? [...options.endpoints]
-			: [...defaultEndpoints],
+		endpoints: [...(options.endpoints ?? defaultEndpoints)],
 		nodeQuotas: options.nodeQuotas ? [...options.nodeQuotas] : [],
 		userNodeWeights: options.userNodeWeights
 			? Object.fromEntries(
@@ -516,6 +514,7 @@ export async function setupApiMocks(
 
 		if (
 			handleAdminConfigAndEndpointRoutes({
+				adminConfigVlessCanaryBind: options.adminConfigVlessCanaryBind,
 				path,
 				method,
 				route,

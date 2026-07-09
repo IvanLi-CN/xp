@@ -8,6 +8,7 @@ test.describe("managed VLESS autocomplete", () => {
 	}) => {
 		await setAdminToken(page);
 		await setupApiMocks(page, {
+			adminConfigVlessCanaryBind: "127.0.0.1:39043",
 			nodes: [
 				{
 					node_id: "node-alpha",
@@ -22,7 +23,24 @@ test.describe("managed VLESS autocomplete", () => {
 					},
 				},
 			],
-			endpoints: [],
+			endpoints: [
+				{
+					endpoint_id: "endpoint-existing",
+					node_id: "node-alpha",
+					tag: "managed-alpha",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {
+						managed_default: true,
+						reality: {
+							dest: "127.0.0.1:49043",
+							server_names: ["node-xp.example.test"],
+							server_names_source: "manual",
+							fingerprint: "chrome",
+						},
+					},
+				},
+			],
 		});
 
 		await page.goto("/endpoints/new");
@@ -36,7 +54,15 @@ test.describe("managed VLESS autocomplete", () => {
 		await page
 			.getByRole("button", { name: "Show XP HTTPS listener suggestions" })
 			.click();
-		await expect(page.getByText("https://127.0.0.1:39043")).toBeVisible();
+		const canarySuggestions = page
+			.getByTestId("autocomplete-suggestions")
+			.getByRole("option");
+		await expect(canarySuggestions.nth(0)).toHaveText(
+			"https://127.0.0.1:49043",
+		);
+		await expect(canarySuggestions.nth(1)).toHaveText(
+			"https://127.0.0.1:39043",
+		);
 
 		await expect(
 			page.getByRole("button", { name: "Show access host suggestions" }),

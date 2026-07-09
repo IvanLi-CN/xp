@@ -248,6 +248,67 @@ describe("EndpointNewPage", () => {
 		});
 	});
 
+	it("keeps same-node XP HTTPS listener history ahead of the config fallback", async () => {
+		vi.mocked(fetchAdminEndpoints).mockResolvedValue({
+			items: [
+				{
+					endpoint_id: "endpoint-existing",
+					node_id: "node-alpha",
+					tag: "managed-alpha",
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {
+						reality: {
+							dest: "127.0.0.1:49043",
+							server_names: ["node-xp.example.test"],
+							server_names_source: "manual",
+							fingerprint: "chrome",
+						},
+						managed_default: true,
+					},
+				},
+			],
+		});
+		vi.mocked(fetchAdminConfig).mockResolvedValue({
+			bind: "127.0.0.1:62416",
+			xray_api_addr: "127.0.0.1:10085",
+			data_dir: "./data",
+			node_name: "alpha",
+			access_host: "node-xp.example.test",
+			api_base_url: "https://node-xp.example.test:443",
+			vless_https_canary_bind: "127.0.0.1:39043",
+			quota_poll_interval_secs: 10,
+			quota_auto_unban: true,
+			ip_geo_enabled: false,
+			ip_geo_origin: "https://api.country.is",
+			admin_token_present: true,
+			admin_token_masked: "********",
+		});
+
+		renderPage();
+
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: "Show XP HTTPS listener suggestions",
+			}),
+		);
+		const suggestionPanel = await screen.findByTestId(
+			"autocomplete-suggestions",
+		);
+		expect(
+			within(suggestionPanel)
+				.getAllByText(/^https:\/\/127\.0\.0\.1:/)
+				.map((element) => element.textContent),
+		).toEqual(["https://127.0.0.1:49043", "https://127.0.0.1:39043"]);
+
+		fireEvent.click(
+			within(suggestionPanel).getByText("https://127.0.0.1:49043"),
+		);
+		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
+			"https://127.0.0.1:49043",
+		);
+	});
+
 	it(
 		"derives access-host suggestions from the selected endpoint port",
 		{ timeout: 10_000 },
