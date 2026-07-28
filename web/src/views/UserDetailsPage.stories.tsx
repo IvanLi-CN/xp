@@ -138,6 +138,27 @@ export const QuotaStatusTab: Story = {
 	},
 };
 
+export const TrafficTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Traffic" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Traffic" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("combobox", { name: "Traffic nodes" }),
+		).toHaveTextContent("All nodes");
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Last 31 days" }),
+		);
+		await expect(
+			await canvas.findByRole("checkbox", { name: "Compare previous period" }),
+		).toBeChecked();
+	},
+};
+
 export const UsageDetailsTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

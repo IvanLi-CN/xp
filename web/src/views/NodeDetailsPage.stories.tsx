@@ -143,6 +143,25 @@ export const TcpConnectionsTab: Story = {
 	},
 };
 
+export const TrafficTab: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
+		await expect(
+			await canvas.findByRole("heading", { name: "Traffic" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("checkbox", { name: "Compare previous period" }),
+		).toBeChecked();
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Last 31 days" }),
+		);
+		await expect(
+			await canvas.findByRole("button", { name: "Last 31 days" }),
+		).toBeInTheDocument();
+	},
+};
+
 export const MetadataEgressProbe: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

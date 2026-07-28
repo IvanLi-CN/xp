@@ -8010,6 +8010,35 @@ async fn ip_usage_rejects_invalid_window_values() {
 }
 
 #[tokio::test]
+async fn traffic_rejects_invalid_window_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (node_id, user_id) = {
+        let mut store = store.lock().await;
+        let node_id = store
+            .state()
+            .nodes
+            .keys()
+            .next()
+            .cloned()
+            .expect("bootstrap node");
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        (node_id, user.user_id)
+    };
+
+    for uri in [
+        format!("/api/admin/nodes/{node_id}/traffic?window=nope"),
+        format!("/api/admin/users/{user_id}/traffic?window=nope"),
+    ] {
+        let res = app.clone().oneshot(req_authed("GET", &uri)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(res).await;
+        assert_eq!(json["error"]["code"], "invalid_request");
+    }
+}
+
+#[tokio::test]
 async fn node_tcp_connections_returns_per_endpoint_series() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

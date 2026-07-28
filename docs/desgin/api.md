@@ -402,7 +402,59 @@ SSE 事件类型：
 
 仅接受 internal signature 鉴权，用于 leader/follower 之间跨节点聚合与事件转发。
 
-### 2.11 更新节点（管理员）
+### 2.11 节点与用户 Traffic（管理员）
+
+节点：`GET /api/admin/nodes/{node_id}/traffic?window=24h|31d`
+
+用户：`GET /api/admin/users/{user_id}/traffic?window=24h|31d&node_id=<optional>`。
+用户省略 `node_id` 时按用户实际 membership 聚合所有节点；`nodes` 返回可筛选的节点选项。
+
+响应核心结构：
+
+```json
+{
+  "window": "24h|31d",
+  "window_start_at": "RFC3339 UTC",
+  "window_end_at": "RFC3339 UTC",
+  "timezone": "UTC",
+  "summary": {
+    "mode": "cycle|rolling_30d",
+    "cycle_start_at": "RFC3339|null",
+    "cycle_end_at": "RFC3339|null",
+    "uplink_bytes": 123,
+    "downlink_bytes": 456,
+    "total_bytes": 579,
+    "complete": false,
+    "tracking_since": "RFC3339|null"
+  },
+  "current": [
+    {
+      "start_at": "RFC3339 UTC",
+      "end_at": "RFC3339 UTC",
+      "uplink_bytes": 123,
+      "downlink_bytes": 456,
+      "total_bytes": 579,
+      "complete": true,
+      "is_current_day": false
+    }
+  ],
+  "reference": [],
+  "partial": true,
+  "last_sample_at": "RFC3339|null",
+  "warnings": ["sampling gap in current window"]
+}
+```
+
+`current` 与 `reference` 的缺失点省略 bytes 字段并保持断线；不得填零、插值或以前值延续。节点聚合包含 endpoint probe，用户接口只包含真实用户流量。`31d` 为 30 个完整 UTC 日加当前 UTC 日，当前日由 `is_current_day` 标记。
+
+节点镜像与用户 fan-out 使用以下 internal-signature 接口：
+
+- `GET /api/admin/_internal/nodes/traffic/local?window=24h|31d`
+- `GET /api/admin/_internal/users/{user_id}/traffic/local?window=24h|31d`
+
+Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供，最多保留 588 个五分钟桶（49 小时）和 90 个 UTC daily 桶；不保存 hourly rollup。
+
+### 2.12 更新节点（管理员）
 
 > 说明：该接口只更新 Node 的“展示/路由相关元数据”（例如 `access_host`），**不涉及** Raft membership 变更与节点移除。
 

@@ -16,7 +16,7 @@
     "max_line_length": 124
   },
   "AGENTS.md": {
-    "long_line_count": 10,
+    "long_line_count": 9,
     "max_line_length": 244
   },
   "Cargo.toml": {
@@ -44,7 +44,7 @@
     "max_line_length": 101
   },
   "docs/desgin/api.md": {
-    "long_line_count": 5,
+    "long_line_count": 7,
     "max_line_length": 164
   },
   "docs/desgin/cluster.md": {
@@ -72,7 +72,7 @@
     "max_line_length": 263
   },
   "docs/ops/README.md": {
-    "long_line_count": 115,
+    "long_line_count": 117,
     "max_line_length": 748
   },
   "docs/ops/cloudflare-tunnel.md": {
@@ -408,7 +408,7 @@
     "max_line_length": 189
   },
   "docs/specs/README.md": {
-    "long_line_count": 39,
+    "long_line_count": 37,
     "max_line_length": 474
   },
   "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
@@ -491,6 +491,18 @@
     "long_line_count": 5,
     "max_line_length": 164
   },
+  "docs/specs/r26nc-node-user-traffic-analytics/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 104
+  },
+  "docs/specs/r26nc-node-user-traffic-analytics/IMPLEMENTATION.md": {
+    "long_line_count": 3,
+    "max_line_length": 144
+  },
+  "docs/specs/r26nc-node-user-traffic-analytics/contracts/http-apis.md": {
+    "long_line_count": 5,
+    "max_line_length": 397
+  },
   "docs/specs/r7m2q-openrc-low-memory-runtime-recovery/HISTORY.md": {
     "long_line_count": 1,
     "max_line_length": 231
@@ -571,12 +583,12 @@
   "src/http/mod.rs": {
     "long_line_count": 4,
     "max_line_length": 128,
-    "source_lines": 7879
+    "source_lines": 8049
   },
   "src/http/tests.rs": {
     "long_line_count": 2,
     "max_line_length": 126,
-    "source_lines": 9680
+    "source_lines": 9709
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -589,10 +601,6 @@
   "src/main.rs": {
     "long_line_count": 2,
     "max_line_length": 105
-  },
-  "src/admin_token.rs": {
-    "long_line_count": 2,
-    "max_line_length": 135
   },
   "src/managed_default_endpoints.rs": {
     "long_line_count": 1,
@@ -609,6 +617,9 @@
     "long_line_count": 4,
     "max_line_length": 114
   },
+  "src/node_history.rs": {
+    "source_lines": 2154
+  },
   "src/openrc_process.rs": {
     "long_line_count": 1,
     "max_line_length": 101
@@ -618,18 +629,18 @@
     "max_line_length": 120
   },
   "src/ops/admin_token_tests.rs": {
-    "long_line_count": 3,
-    "max_line_length": 131
+    "long_line_count": 1,
+    "max_line_length": 125
   },
   "src/ops/cloudflare.rs": {
-    "long_line_count": 3,
-    "max_line_length": 504,
+    "long_line_count": 2,
+    "max_line_length": 431,
     "source_lines": 1087
   },
   "src/ops/container.rs": {
     "long_line_count": 10,
     "max_line_length": 155,
-    "source_lines": 1730
+    "source_lines": 1683
   },
   "src/ops/container/tests.rs": {
     "long_line_count": 1,
@@ -646,8 +657,7 @@
   },
   "src/ops/init.rs": {
     "long_line_count": 2,
-    "max_line_length": 363,
-    "source_lines": 1045
+    "max_line_length": 363
   },
   "src/ops/install.rs": {
     "long_line_count": 1,
@@ -661,7 +671,7 @@
   "src/ops/upgrade.rs": {
     "long_line_count": 3,
     "max_line_length": 108,
-    "source_lines": 1044
+    "source_lines": 1043
   },
   "src/ops/xp.rs": {
     "long_line_count": 7,
@@ -769,7 +779,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2266
+    "source_lines": 2466
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -855,6 +865,10 @@
   "web/src/components/TcpConnectionUsageView.tsx": {
     "long_line_count": 11,
     "max_line_length": 148
+  },
+  "web/src/components/TrafficView.tsx": {
+    "long_line_count": 2,
+    "max_line_length": 307
   },
   "web/src/components/Toast.stories.tsx": {
     "long_line_count": 2,
@@ -1047,9 +1061,9 @@
     "max_line_length": 118
   },
   "web/src/views/NodeDetailsPage.tsx": {
-    "long_line_count": 8,
+    "long_line_count": 9,
     "max_line_length": 134,
-    "source_lines": 1795
+    "source_lines": 1855
   },
   "web/src/views/NodesPage.stories.tsx": {
     "long_line_count": 1,
@@ -1085,7 +1099,7 @@
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
     "max_line_length": 151,
-    "source_lines": 1618
+    "source_lines": 1735
   },
   "web/src/views/UserNewPage.tsx": {
     "long_line_count": 1,

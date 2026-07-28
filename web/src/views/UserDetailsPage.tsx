@@ -10,6 +10,7 @@ import {
 	fetchAdminUserIpUsage,
 } from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { fetchAdminUserTraffic } from "../api/adminTraffic";
 import {
 	fetchAdminUserAccess,
 	putAdminUserAccess,
@@ -48,6 +49,7 @@ import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
+import { TrafficView } from "../components/TrafficView";
 import { useUiPrefs } from "../components/UiPrefs";
 import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
@@ -245,10 +247,13 @@ export function UserDetailsPage() {
 	const prefs = useUiPrefs();
 
 	const [tab, setTab] = useState<
-		"user" | "access" | "quotaStatus" | "usageDetails"
+		"user" | "access" | "quotaStatus" | "traffic" | "usageDetails"
 	>("user");
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
+		null,
+	);
+	const [activeTrafficNodeId, setActiveTrafficNodeId] = useState<string | null>(
 		null,
 	);
 	const [displayName, setDisplayName] = useState("");
@@ -346,6 +351,27 @@ export function UserDetailsPage() {
 			previousData?.user.user_id === userId ? previousData : undefined,
 	});
 
+	const trafficQuery = useQuery({
+		queryKey: [
+			"adminUserTraffic",
+			adminToken,
+			userId,
+			prefs.trafficWindow,
+			activeTrafficNodeId,
+		],
+		enabled: adminToken.length > 0 && tab === "traffic",
+		queryFn: ({ signal }) =>
+			fetchAdminUserTraffic(
+				adminToken,
+				userId,
+				prefs.trafficWindow,
+				activeTrafficNodeId,
+				signal,
+			),
+		placeholderData: (previousData) =>
+			previousData?.user.user_id === userId ? previousData : undefined,
+	});
+
 	const user = userQuery.data;
 	const usageGroups = ipUsageQuery.data?.groups ?? [];
 	const usageTabLabels = useMemo(() => {
@@ -412,6 +438,7 @@ export function UserDetailsPage() {
 	useEffect(() => {
 		if (!userId) return;
 		setIpUsageWindow("24h");
+		setActiveTrafficNodeId(null);
 	}, [userId]);
 
 	useEffect(() => {
@@ -1036,25 +1063,33 @@ export function UserDetailsPage() {
 
 			<div className="overflow-x-auto">
 				<div className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm">
-					{(["user", "access", "quotaStatus", "usageDetails"] as const).map(
-						(item) => (
-							<Button
-								key={item}
-								type="button"
-								size="sm"
-								variant={tab === item ? "primary" : "ghost"}
-								onClick={() => setTab(item)}
-							>
-								{item === "user"
-									? "User"
-									: item === "access"
-										? "Access"
-										: item === "quotaStatus"
-											? "Quota status"
+					{(
+						[
+							"user",
+							"access",
+							"quotaStatus",
+							"traffic",
+							"usageDetails",
+						] as const
+					).map((item) => (
+						<Button
+							key={item}
+							type="button"
+							size="sm"
+							variant={tab === item ? "primary" : "ghost"}
+							onClick={() => setTab(item)}
+						>
+							{item === "user"
+								? "User"
+								: item === "access"
+									? "Access"
+									: item === "quotaStatus"
+										? "Quota status"
+										: item === "traffic"
+											? "Traffic"
 											: "Usage details"}
-							</Button>
-						),
-					)}
+						</Button>
+					))}
 				</div>
 			</div>
 
@@ -1382,6 +1417,88 @@ export function UserDetailsPage() {
 									endpointId,
 									checked,
 								)
+							}
+						/>
+					) : null}
+				</div>
+			) : null}
+
+			{tab === "traffic" ? (
+				<div className="space-y-4">
+					{trafficQuery.isLoading && !trafficQuery.data ? (
+						<PageState
+							variant="loading"
+							title="Loading traffic"
+							description="Fetching actual user traffic across the selected nodes."
+						/>
+					) : null}
+					{!trafficQuery.data &&
+					queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
+						<PageState
+							variant="offline"
+							title="Offline traffic cache unavailable"
+							description="Open this tab while online to keep the latest traffic report available offline."
+						/>
+					) : null}
+					{trafficQuery.isError &&
+					!trafficQuery.data &&
+					!queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
+						<PageState
+							variant="error"
+							title="Failed to load traffic"
+							description={formatError(trafficQuery.error)}
+							action={
+								<Button
+									variant="secondary"
+									loading={trafficQuery.isFetching}
+									onClick={() => trafficQuery.refetch()}
+								>
+									Retry
+								</Button>
+							}
+						/>
+					) : null}
+					{trafficQuery.data ? (
+						<TrafficView
+							report={{
+								...trafficQuery.data.traffic,
+								partial:
+									trafficQuery.data.traffic.partial ||
+									trafficQuery.data.partial,
+								warnings: [
+									...trafficQuery.data.traffic.warnings,
+									...(trafficQuery.data.unreachable_nodes.length > 0
+										? [
+												`Unreachable nodes: ${trafficQuery.data.unreachable_nodes.join(", ")}`,
+											]
+										: []),
+								],
+							}}
+							window={prefs.trafficWindow}
+							onWindowChange={(next) => prefs.setTrafficWindow(next)}
+							isFetching={trafficQuery.isFetching}
+							nodeSelector={
+								<Select
+									value={activeTrafficNodeId ?? "all"}
+									onValueChange={(value) =>
+										setActiveTrafficNodeId(value === "all" ? null : value)
+									}
+								>
+									<SelectTrigger
+										className="w-[12rem]"
+										aria-label="Traffic nodes"
+									>
+										<SelectValue placeholder="All nodes" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="all">All nodes</SelectItem>
+										{trafficQuery.data.nodes.map((node) => (
+											<SelectItem key={node.node_id} value={node.node_id}>
+												{node.node_name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							}
 						/>
 					) : null}

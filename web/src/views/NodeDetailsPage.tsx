@@ -35,6 +35,7 @@ import {
 	type AdminTcpConnectionUsageWindow,
 	fetchAdminNodeTcpConnections,
 } from "../api/adminTcpConnections";
+import { fetchAdminNodeTraffic } from "../api/adminTraffic";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { Button } from "../components/Button";
@@ -46,6 +47,8 @@ import { PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
+import { TrafficView } from "../components/TrafficView";
+import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
 import { alertClass } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
@@ -188,6 +191,7 @@ type NodeDetailsTab =
 	| "runtime"
 	| "metadata"
 	| "quota"
+	| "traffic"
 	| "ipUsage"
 	| "tcpConnections"
 	| "danger";
@@ -199,6 +203,7 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 	{ value: "runtime", label: "Service runtime" },
 	{ value: "metadata", label: "Node metadata" },
 	{ value: "quota", label: "Quota reset" },
+	{ value: "traffic", label: "Traffic" },
 	{ value: "ipUsage", label: "IP usage" },
 	{ value: "tcpConnections", label: "TCP connections" },
 	{ value: "danger", label: "Danger zone" },
@@ -478,6 +483,7 @@ export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const appRuntime = useAppRuntime();
+	const prefs = useUiPrefs();
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -507,6 +513,14 @@ export function NodeDetailsPage() {
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [tcpConnectionsWindow, setTcpConnectionsWindow] =
 		useState<AdminTcpConnectionUsageWindow>("24h");
+	const trafficQuery = useQuery({
+		queryKey: ["adminNodeTraffic", adminToken, nodeId, prefs.trafficWindow],
+		enabled: adminToken.length > 0 && activeTab === "traffic",
+		queryFn: ({ signal }) =>
+			fetchAdminNodeTraffic(adminToken, nodeId, prefs.trafficWindow, signal),
+		placeholderData: (previousData) =>
+			previousData?.node.node_id === nodeId ? previousData : undefined,
+	});
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
 		enabled: adminToken.length > 0 && activeTab === "ipUsage",
@@ -1522,6 +1536,52 @@ export function NodeDetailsPage() {
 								</form>
 							</Form>
 						</section>
+					) : null}
+
+					{activeTab === "traffic" ? (
+						<div className="space-y-4">
+							{trafficQuery.isLoading && !trafficQuery.data ? (
+								<PageState
+									variant="loading"
+									title="Loading traffic"
+									description="Fetching five-minute node traffic rollups."
+								/>
+							) : null}
+							{!trafficQuery.data &&
+							queryIsOfflineBlocked(trafficQuery, appRuntime.isOnline) ? (
+								<PageState
+									variant="offline"
+									title="Offline traffic cache unavailable"
+									description="Open this tab while online to keep the latest traffic report available offline."
+								/>
+							) : null}
+							{trafficQuery.isError &&
+							!trafficQuery.data &&
+							!queryIsOfflineBlocked(trafficQuery, appRuntime.isOnline) ? (
+								<PageState
+									variant="error"
+									title="Failed to load traffic"
+									description={formatErrorMessage(trafficQuery.error)}
+									action={
+										<Button
+											variant="secondary"
+											loading={trafficQuery.isFetching}
+											onClick={() => trafficQuery.refetch()}
+										>
+											Retry
+										</Button>
+									}
+								/>
+							) : null}
+							{trafficQuery.data ? (
+								<TrafficView
+									report={trafficQuery.data.traffic}
+									window={prefs.trafficWindow}
+									onWindowChange={(next) => prefs.setTrafficWindow(next)}
+									isFetching={trafficQuery.isFetching}
+								/>
+							) : null}
+						</div>
 					) : null}
 
 					{activeTab === "ipUsage" ? (
