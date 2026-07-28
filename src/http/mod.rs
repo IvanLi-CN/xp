@@ -2609,7 +2609,7 @@ async fn admin_get_user_traffic(
     let mut unreachable_nodes = Vec::new();
     let mut missing_active_node_report = false;
     for (node, report, unreachable) in fanout_results {
-        if unreachable && current_node_ids.contains(&node.node_id) {
+        if unreachable {
             unreachable_nodes.push(node.node_id.clone());
         }
         if report.is_none()
@@ -6399,79 +6399,6 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
                 .await;
         }
     }
-    let client = match build_admin_http_client(state) {
-        Ok(client) => client,
-        Err(err) => {
-            tracing::warn!(user_id, error = ?err, "build client for user traffic history cleanup");
-            return;
-        }
-    };
-    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
-        tracing::warn!(
-            user_id,
-            "skip remote user traffic history cleanup without cluster ca key"
-        );
-        return;
-    };
-    let uri: axum::http::Uri = match format!("/_internal/users/{user_id}/traffic/local").parse() {
-        Ok(uri) => uri,
-        Err(_) => {
-            tracing::warn!(user_id, "invalid user traffic history cleanup path");
-            return;
-        }
-    };
-    let signature = match internal_auth::sign_request(ca_key_pem, &Method::DELETE, &uri) {
-        Ok(signature) => signature,
-        Err(err) => {
-            tracing::warn!(user_id, error = %err, "sign user traffic history cleanup request");
-            return;
-        }
-    };
-    for node in nodes {
-        if node.node_id == local_node_id {
-            continue;
-        }
-        let base = node.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
-            tracing::warn!(user_id, node_id = %node.node_id, "skip traffic cleanup");
-            continue;
-        }
-        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .delete(format!(
-                    "{base}/api/admin/_internal/users/{user_id}/traffic/local"
-                ))
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    signature.clone(),
-                )
-        });
-        match tokio::time::timeout(Duration::from_secs(3), request).await {
-            Ok(Ok(response)) if response.status().is_success() => {
-                state
-                    .node_history
-                    .complete_user_traffic_cleanup(&node.node_id, user_id)
-                    .await;
-            }
-            Ok(Ok(response)) => tracing::warn!(
-                user_id,
-                node_id = %node.node_id,
-                status = %response.status(),
-                "remote user traffic history cleanup failed"
-            ),
-            Ok(Err(err)) => tracing::warn!(
-                user_id,
-                node_id = %node.node_id,
-                error = %err,
-                "remote user traffic history cleanup request failed"
-            ),
-            Err(_) => tracing::warn!(
-                user_id,
-                node_id = %node.node_id,
-                "remote user traffic history cleanup timed out"
-            ),
-        }
-    }
 }
 
 async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &[Node]) {
@@ -6482,79 +6409,6 @@ async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &
                 .node_history
                 .queue_node_history_cleanup(&destination.node_id, node_id)
                 .await;
-        }
-    }
-    let client = match build_admin_http_client(state) {
-        Ok(client) => client,
-        Err(err) => {
-            tracing::warn!(node_id, error = ?err, "build client for node history cleanup");
-            return;
-        }
-    };
-    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
-        tracing::warn!(
-            node_id,
-            "skip remote node history cleanup without cluster ca key"
-        );
-        return;
-    };
-    let uri: axum::http::Uri = match format!("/_internal/nodes/{node_id}/history").parse() {
-        Ok(uri) => uri,
-        Err(_) => {
-            tracing::warn!(node_id, "invalid node history cleanup path");
-            return;
-        }
-    };
-    let signature = match internal_auth::sign_request(ca_key_pem, &Method::DELETE, &uri) {
-        Ok(signature) => signature,
-        Err(err) => {
-            tracing::warn!(node_id, error = %err, "sign node history cleanup request");
-            return;
-        }
-    };
-    for destination in nodes {
-        if destination.node_id == local_node_id {
-            continue;
-        }
-        let base = destination.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
-            tracing::warn!(node_id, destination_node_id = %destination.node_id, "skip node history cleanup");
-            continue;
-        }
-        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client
-                .delete(format!(
-                    "{base}/api/admin/_internal/nodes/{node_id}/history"
-                ))
-                .header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    signature.clone(),
-                )
-        });
-        match tokio::time::timeout(Duration::from_secs(3), request).await {
-            Ok(Ok(response)) if response.status().is_success() => {
-                state
-                    .node_history
-                    .complete_node_history_cleanup(&destination.node_id, node_id)
-                    .await;
-            }
-            Ok(Ok(response)) => tracing::warn!(
-                node_id,
-                destination_node_id = %destination.node_id,
-                status = %response.status(),
-                "remote node history cleanup failed"
-            ),
-            Ok(Err(err)) => tracing::warn!(
-                node_id,
-                destination_node_id = %destination.node_id,
-                error = %err,
-                "remote node history cleanup request failed"
-            ),
-            Err(_) => tracing::warn!(
-                node_id,
-                destination_node_id = %destination.node_id,
-                "remote node history cleanup timed out"
-            ),
         }
     }
 }

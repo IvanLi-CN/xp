@@ -1369,7 +1369,7 @@ fn build_traffic_report(
         .and_then(|sampled_at| sampled_at.parse::<DateTime<Utc>>().ok())
         .is_none_or(|sampled_at| floor_five_minute(sampled_at) < latest_sample);
     let mut summary = build_summary(rollup, latest_sample);
-    let mut warnings = summary_warnings(rollup, &current, &reference);
+    let mut warnings = summary_warnings(rollup, &current, &reference, window);
     if sample_is_stale {
         summary.complete = false;
         warnings.push("traffic sample is stale at the current UTC boundary".to_string());
@@ -1540,19 +1540,40 @@ fn summary_warnings(
     rollup: &NodeTrafficRollupSnapshot,
     current: &[TrafficSeriesPoint],
     reference: &[TrafficSeriesPoint],
+    window: TrafficWindow,
 ) -> Vec<String> {
-    let mut warnings = rollup
-        .five_minute
-        .iter()
-        .flat_map(|bucket| bucket.warnings.clone())
-        .chain(
-            rollup
-                .daily
+    let mut warnings = Vec::new();
+    match window {
+        TrafficWindow::Hours24 => {
+            let starts = current
                 .iter()
-                .flat_map(|bucket| bucket.warnings.clone()),
-        )
-        .chain(rollup.cycle.iter().flat_map(|cycle| cycle.warnings.clone()))
-        .collect::<Vec<_>>();
+                .chain(reference.iter())
+                .map(|point| point.start_at.as_str())
+                .collect::<BTreeSet<_>>();
+            warnings.extend(
+                rollup
+                    .five_minute
+                    .iter()
+                    .filter(|bucket| starts.contains(bucket.start_at.as_str()))
+                    .flat_map(|bucket| bucket.warnings.clone()),
+            );
+        }
+        TrafficWindow::Days31 => {
+            let dates = current
+                .iter()
+                .chain(reference.iter())
+                .filter_map(|point| point.start_at.get(..10))
+                .collect::<BTreeSet<_>>();
+            warnings.extend(
+                rollup
+                    .daily
+                    .iter()
+                    .filter(|bucket| dates.contains(bucket.date.as_str()))
+                    .flat_map(|bucket| bucket.warnings.clone()),
+            );
+        }
+    }
+    warnings.extend(rollup.cycle.iter().flat_map(|cycle| cycle.warnings.clone()));
     if current.iter().any(|point| point.uplink_bytes.is_none()) {
         warnings.push("sampling gap in current window".to_string());
     }
@@ -2605,11 +2626,80 @@ mod tests {
             cycle: accumulator,
             ..NodeTrafficRollupSnapshot::default()
         };
-        let warnings = summary_warnings(&rollup, &[], &[]);
+        let warnings = summary_warnings(&rollup, &[], &[], TrafficWindow::Hours24);
         assert!(
             warnings
                 .iter()
                 .any(|warning| warning.contains("configuration changed"))
+        );
+    }
+
+    #[test]
+    fn summary_warnings_only_include_buckets_in_requested_window() {
+        let rollup = NodeTrafficRollupSnapshot {
+            five_minute: vec![
+                NodeTrafficBucket {
+                    start_at: "2026-07-28T00:00:00Z".to_string(),
+                    end_at: "2026-07-28T00:05:00Z".to_string(),
+                    uplink_bytes: None,
+                    downlink_bytes: None,
+                    complete: false,
+                    warnings: vec!["old five-minute warning".to_string()],
+                },
+                NodeTrafficBucket {
+                    start_at: "2026-07-29T00:00:00Z".to_string(),
+                    end_at: "2026-07-29T00:05:00Z".to_string(),
+                    uplink_bytes: None,
+                    downlink_bytes: None,
+                    complete: false,
+                    warnings: vec!["current five-minute warning".to_string()],
+                },
+            ],
+            daily: vec![NodeTrafficDailyBucket {
+                date: "2026-07-28".to_string(),
+                uplink_bytes: None,
+                downlink_bytes: None,
+                complete: false,
+                warnings: vec!["daily warning".to_string()],
+            }],
+            ..NodeTrafficRollupSnapshot::default()
+        };
+        let current = vec![TrafficSeriesPoint {
+            start_at: "2026-07-29T00:00:00Z".to_string(),
+            end_at: "2026-07-29T00:05:00Z".to_string(),
+            uplink_bytes: None,
+            downlink_bytes: None,
+            total_bytes: None,
+            complete: false,
+            is_current_day: false,
+        }];
+        let warnings = summary_warnings(&rollup, &current, &[], TrafficWindow::Hours24);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "current five-minute warning")
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|warning| warning == "old five-minute warning")
+        );
+
+        let daily_current = vec![TrafficSeriesPoint {
+            start_at: "2026-07-28T00:00:00Z".to_string(),
+            end_at: "2026-07-29T00:00:00Z".to_string(),
+            uplink_bytes: None,
+            downlink_bytes: None,
+            total_bytes: None,
+            complete: false,
+            is_current_day: false,
+        }];
+        let warnings = summary_warnings(&rollup, &daily_current, &[], TrafficWindow::Days31);
+        assert!(warnings.iter().any(|warning| warning == "daily warning"));
+        assert!(
+            !warnings
+                .iter()
+                .any(|warning| warning == "old five-minute warning")
         );
     }
 
