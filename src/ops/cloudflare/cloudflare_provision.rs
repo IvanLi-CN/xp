@@ -43,9 +43,6 @@ pub(super) async fn run(
     let cloudflared_binary = cloudflared_binary_path(&paths, distro);
 
     ensure_cloudflared_present(&paths, distro, mode).await?;
-    if runtime == ProvisionRuntime::ManagedService {
-        ensure_cloudflared_service(&paths, distro, init_system, mode)?;
-    }
 
     let api_base = std::env::var("CLOUDFLARE_API_BASE_URL")
         .unwrap_or_else(|_| "https://api.cloudflare.com".to_string());
@@ -214,6 +211,17 @@ pub(super) async fn run(
     let settings_before_bytes = read_optional_file(&settings_path)?;
     let config_metadata_before = capture_file_metadata(&config_path)?;
     let credential_metadata_before = capture_file_metadata(&cred_path)?;
+    let service_file_path = cloudflared_service_file_path(&paths, init_system);
+    let service_file_before = service_file_path
+        .as_deref()
+        .map(read_optional_file)
+        .transpose()?
+        .flatten();
+    let service_file_metadata_before = service_file_path
+        .as_deref()
+        .map(capture_file_metadata)
+        .transpose()?
+        .flatten();
     let service_before = (args.enabled() && runtime == ProvisionRuntime::ManagedService)
         .then(|| capture_cloudflared_service_state(init_system, &paths))
         .transpose()?;
@@ -233,6 +241,10 @@ pub(super) async fn run(
     let mut service_change_attempted = false;
 
     let operation: Result<(), ExitError> = async {
+        if runtime == ProvisionRuntime::ManagedService {
+            service_change_attempted = true;
+            ensure_cloudflared_service(&paths, distro, init_system, mode)?;
+        }
         if let Some(created) = created.as_ref() {
             ensure_dir(&paths.etc_cloudflared_dir())
                 .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
@@ -295,7 +307,6 @@ pub(super) async fn run(
         save_settings(&paths, &settings)?;
 
         if args.enabled() && runtime == ProvisionRuntime::ManagedService {
-            service_change_attempted = true;
             enable_cloudflared_service(init_system, mode, &paths)?;
             if config_changed {
                 restart_cloudflared_service(init_system, &paths)?;
@@ -352,6 +363,18 @@ pub(super) async fn run(
         }
         if let Err(rollback) = restore_file_metadata(&cred_path, credential_metadata_before) {
             rollback_errors.push(format!("restore credential metadata: {rollback}"));
+        }
+        if let Some(service_file_path) = service_file_path.as_deref() {
+            if let Err(rollback) =
+                restore_optional_file(service_file_path, service_file_before.as_deref())
+            {
+                rollback_errors.push(format!("restore service file: {rollback}"));
+            }
+            if let Err(rollback) =
+                restore_file_metadata(service_file_path, service_file_metadata_before)
+            {
+                rollback_errors.push(format!("restore service file metadata: {rollback}"));
+            }
         }
         if let Err(rollback) =
             restore_optional_file(&settings_path, settings_before_bytes.as_deref())
@@ -530,6 +553,17 @@ fn restore_cloudflared_service_state(
         stop_command
     };
     ensure_service_command(command.0, command.1)
+}
+
+fn cloudflared_service_file_path(
+    paths: &Paths,
+    init_system: InitSystem,
+) -> Option<std::path::PathBuf> {
+    match init_system {
+        InitSystem::Systemd => Some(paths.systemd_unit_dir().join("cloudflared.service")),
+        InitSystem::OpenRc => Some(paths.openrc_initd_dir().join("cloudflared")),
+        InitSystem::None => None,
+    }
 }
 
 fn service_command_status(
