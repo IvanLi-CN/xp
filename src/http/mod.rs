@@ -6350,6 +6350,15 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
         let store = state.store.lock().await;
         store.list_nodes()
     };
+    let local_node_id = state.cluster.node_id.clone();
+    for node in &nodes {
+        if node.node_id != local_node_id {
+            state
+                .node_history
+                .queue_user_traffic_cleanup(&node.node_id, user_id)
+                .await;
+        }
+    }
     let client = match build_admin_http_client(state) {
         Ok(client) => client,
         Err(err) => {
@@ -6378,7 +6387,6 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
             return;
         }
     };
-    let local_node_id = state.cluster.node_id.clone();
     for node in nodes {
         if node.node_id == local_node_id {
             continue;
@@ -6399,7 +6407,12 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
                 )
         });
         match tokio::time::timeout(Duration::from_secs(3), request).await {
-            Ok(Ok(response)) if response.status().is_success() => {}
+            Ok(Ok(response)) if response.status().is_success() => {
+                state
+                    .node_history
+                    .complete_user_traffic_cleanup(&node.node_id, user_id)
+                    .await;
+            }
             Ok(Ok(response)) => tracing::warn!(
                 user_id,
                 node_id = %node.node_id,

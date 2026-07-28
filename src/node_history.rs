@@ -386,6 +386,8 @@ struct PersistedNodeHistoryCache {
     schema_version: u32,
     #[serde(default)]
     nodes: BTreeMap<String, PersistedNodeHistoryRecord>,
+    #[serde(default)]
+    pending_user_traffic_cleanup: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl PersistedNodeHistoryCache {
@@ -393,6 +395,7 @@ impl PersistedNodeHistoryCache {
         Self {
             schema_version: HISTORY_SCHEMA_VERSION,
             nodes: BTreeMap::new(),
+            pending_user_traffic_cleanup: BTreeMap::new(),
         }
     }
 }
@@ -511,6 +514,7 @@ impl NodeHistoryHandle {
         {
             let mut state = self.inner.write().await;
             state.nodes.remove(node_id);
+            state.pending_user_traffic_cleanup.remove(node_id);
         }
         self.persist().await;
     }
@@ -523,6 +527,47 @@ impl NodeHistoryHandle {
             }
         }
         self.persist().await;
+    }
+
+    pub async fn queue_user_traffic_cleanup(&self, node_id: &str, user_id: &str) {
+        let changed = {
+            let mut state = self.inner.write().await;
+            state
+                .pending_user_traffic_cleanup
+                .entry(node_id.to_string())
+                .or_default()
+                .insert(user_id.to_string())
+        };
+        if changed {
+            self.persist().await;
+        }
+    }
+
+    async fn pending_user_traffic_cleanup(&self, node_id: &str) -> Vec<String> {
+        let state = self.inner.read().await;
+        state
+            .pending_user_traffic_cleanup
+            .get(node_id)
+            .into_iter()
+            .flat_map(|users| users.iter().cloned())
+            .collect()
+    }
+
+    pub async fn complete_user_traffic_cleanup(&self, node_id: &str, user_id: &str) {
+        let changed = {
+            let mut state = self.inner.write().await;
+            let Some(users) = state.pending_user_traffic_cleanup.get_mut(node_id) else {
+                return;
+            };
+            let changed = users.remove(user_id);
+            if users.is_empty() {
+                state.pending_user_traffic_cleanup.remove(node_id);
+            }
+            changed
+        };
+        if changed {
+            self.persist().await;
+        }
     }
 
     pub async fn node_traffic_report(
@@ -630,7 +675,8 @@ fn record_traffic_sample(
     let bucket_end = bucket_start + ChronoDuration::seconds(TRAFFIC_ROLLUP_BUCKET_SECS);
     let mut node_up = 0u64;
     let mut node_down = 0u64;
-    let mut node_known = false;
+    let mut node_known =
+        sample.totals.is_empty() && sample.unavailable_users.is_empty() && sample.complete;
     let mut warnings = sample.warnings.clone();
     let mut complete = sample.complete;
     let mut gap_dates = BTreeSet::new();
@@ -1384,6 +1430,7 @@ fn summary_warnings(
                 .iter()
                 .flat_map(|bucket| bucket.warnings.clone()),
         )
+        .chain(rollup.cycle.iter().flat_map(|cycle| cycle.warnings.clone()))
         .collect::<Vec<_>>();
     if current.iter().any(|point| point.uplink_bytes.is_none()) {
         warnings.push("sampling gap in current window".to_string());
@@ -1809,6 +1856,24 @@ async fn sync_remote_node_histories(
             continue;
         }
 
+        for user_id in history.pending_user_traffic_cleanup(&node.node_id).await {
+            match clear_remote_user_traffic(client, ca_key_pem, base, &user_id).await {
+                Ok(()) => {
+                    history
+                        .complete_user_traffic_cleanup(&node.node_id, &user_id)
+                        .await;
+                }
+                Err(err) => {
+                    warn!(
+                        node_id = %node.node_id,
+                        user_id,
+                        error = %err,
+                        "retry remote user traffic history cleanup failed"
+                    );
+                }
+            }
+        }
+
         match fetch_remote_history(client, ca_key_pem, base).await {
             Ok(snapshot) => {
                 history
@@ -1822,6 +1887,37 @@ async fn sync_remote_node_histories(
             }
         }
     }
+}
+
+async fn clear_remote_user_traffic(
+    client: &Client,
+    ca_key_pem: &str,
+    base: &str,
+    user_id: &str,
+) -> anyhow::Result<()> {
+    let uri: axum::http::Uri = format!("/_internal/users/{user_id}/traffic/local")
+        .parse()
+        .context("invalid user traffic cleanup path")?;
+    let signature = internal_auth::sign_request(ca_key_pem, &axum::http::Method::DELETE, &uri)
+        .map_err(|err| anyhow::anyhow!("sign user traffic cleanup request: {err}"))?;
+    let response = tokio::time::timeout(
+        REMOTE_SYNC_TIMEOUT,
+        client
+            .delete(format!(
+                "{base}/api/admin/_internal/users/{user_id}/traffic/local"
+            ))
+            .header(
+                reqwest::header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                signature,
+            )
+            .send(),
+    )
+    .await
+    .context("user traffic cleanup request timeout")??;
+    if !response.status().is_success() {
+        anyhow::bail!("user traffic cleanup request failed: {}", response.status());
+    }
+    Ok(())
 }
 
 async fn fetch_remote_history(
@@ -2024,6 +2120,23 @@ mod tests {
         assert_eq!(snapshot.daily_traffic[0].downlink_bytes, 80);
         assert_eq!(snapshot.daily_component_status.len(), 1);
         assert_eq!(snapshot.daily_component_status[0].components.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn empty_membership_sample_is_known_zero_traffic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let now = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle
+            .record_local_sample(now, "node-a", Some(Vec::new()), runtime(Vec::new()))
+            .await;
+
+        let rollup = handle.snapshot("node-a").await.unwrap().traffic.unwrap();
+        let bucket = rollup.five_minute.last().unwrap();
+        assert_eq!(bucket.uplink_bytes, Some(0));
+        assert_eq!(bucket.downlink_bytes, Some(0));
+        assert!(bucket.complete);
     }
 
     #[tokio::test]
@@ -2246,6 +2359,76 @@ mod tests {
             "2026-05-20T00:05:00Z",
         );
         assert!(accumulator.unwrap().complete);
+    }
+
+    #[test]
+    fn cycle_configuration_warning_is_included_in_report_warnings() {
+        let first = TrafficCycleContext {
+            start_at: "2026-05-01T00:00:00Z".to_string(),
+            end_at: "2026-06-15T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+        let second = TrafficCycleContext {
+            start_at: "2026-06-01T00:00:00Z".to_string(),
+            end_at: "2026-07-01T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+        let mut accumulator = None;
+        update_cycle_accumulator(
+            &mut accumulator,
+            Some(&first),
+            Some(10),
+            Some(20),
+            true,
+            &[],
+            "2026-05-20T00:05:00Z",
+        );
+        update_cycle_accumulator(
+            &mut accumulator,
+            Some(&second),
+            Some(1),
+            Some(2),
+            true,
+            &[],
+            "2026-06-01T00:05:00Z",
+        );
+        let rollup = NodeTrafficRollupSnapshot {
+            cycle: accumulator,
+            ..NodeTrafficRollupSnapshot::default()
+        };
+        let warnings = summary_warnings(&rollup, &[], &[]);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("configuration changed"))
+        );
+    }
+
+    #[tokio::test]
+    async fn user_traffic_cleanup_tombstone_survives_reload_until_completed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("node_history_cache.json");
+        let handle = NodeHistoryHandle::new(path.clone());
+        handle.queue_user_traffic_cleanup("node-a", "user-a").await;
+        assert_eq!(
+            handle.pending_user_traffic_cleanup("node-a").await,
+            vec!["user-a"]
+        );
+
+        let reloaded = NodeHistoryHandle::new(path);
+        assert_eq!(
+            reloaded.pending_user_traffic_cleanup("node-a").await,
+            vec!["user-a"]
+        );
+        reloaded
+            .complete_user_traffic_cleanup("node-a", "user-a")
+            .await;
+        assert!(
+            reloaded
+                .pending_user_traffic_cleanup("node-a")
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]
