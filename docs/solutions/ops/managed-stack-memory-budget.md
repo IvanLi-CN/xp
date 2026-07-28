@@ -25,6 +25,12 @@ while size optimization and LTO reduce executable pages that contribute to
 PSS. Treat a smaller file as a build signal only; the production PSS sampler
 remains the acceptance gate.
 
+Compress text-based embedded Web assets deterministically at build time and
+negotiate gzip with `Accept-Encoding`. Serve the compressed representation to
+browsers and retain an on-demand decode fallback for clients that do not
+advertise gzip. This removes raw JavaScript and CSS payloads from executable
+mappings without changing the single-binary deployment contract.
+
 Use Argon2id `m=4096,t=3,p=1` for newly generated administrator PHC values
 and require administrator secrets to contain at least 32 bytes. Serialize
 raw-token verification behind one bounded worker; return HTTP 429 with

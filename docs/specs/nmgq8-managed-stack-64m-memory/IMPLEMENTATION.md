@@ -16,6 +16,7 @@
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.
 - PSS sampler, shared-testbox load profile, release rollout and production soak.
+- Build-time compression and HTTP negotiation for embedded Web assets.
 
 Implemented: low-memory administrator authentication and bounded verification,
 JWT-first authorization, Xray/cloudflared runtime defaults for
