@@ -3,7 +3,8 @@ use crate::ops::install;
 use crate::ops::paths::Paths;
 use crate::ops::platform::{Distro, InitSystem, detect_distro, detect_init_system};
 use crate::ops::util::{
-    Mode, chmod, ensure_dir, is_executable, is_test_root, write_string_if_changed,
+    Mode, chmod, ensure_dir, is_executable, is_test_root, write_bytes_if_changed,
+    write_string_if_changed,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,8 @@ use std::io::{self, Read};
 use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
+
+mod cloudflare_provision;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloudflareTokenSource {
@@ -78,7 +81,13 @@ pub async fn cmd_cloudflare_provision_with_token(
     args: CloudflareProvisionArgs,
     token: String,
 ) -> Result<(), ExitError> {
-    cmd_cloudflare_provision_with_mode(paths, args, token, ProvisionRuntime::ManagedService).await
+    cloudflare_provision::run(
+        paths,
+        args,
+        token,
+        cloudflare_provision::ProvisionRuntime::ManagedService,
+    )
+    .await
 }
 
 pub async fn cmd_cloudflare_provision_container(
@@ -86,152 +95,13 @@ pub async fn cmd_cloudflare_provision_container(
     args: CloudflareProvisionArgs,
     token: String,
 ) -> Result<(), ExitError> {
-    cmd_cloudflare_provision_with_mode(paths, args, token, ProvisionRuntime::Container).await
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProvisionRuntime {
-    ManagedService,
-    Container,
-}
-
-async fn cmd_cloudflare_provision_with_mode(
-    paths: Paths,
-    args: CloudflareProvisionArgs,
-    token: String,
-    runtime: ProvisionRuntime,
-) -> Result<(), ExitError> {
-    let mode = if args.dry_run {
-        Mode::DryRun
-    } else {
-        Mode::Real
-    };
-
-    let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
-    let init_system = detect_init_system(distro, None);
-
-    ensure_cloudflared_present(&paths, distro, mode).await?;
-    if runtime == ProvisionRuntime::ManagedService {
-        ensure_cloudflared_service(&paths, distro, init_system, mode)?;
-    }
-
-    if mode == Mode::DryRun {
-        eprintln!("would call Cloudflare API (token redacted)");
-        eprintln!(
-            "would provision: account_id={} zone_id={} hostname={} origin_url={}",
-            args.account_id, args.zone_id, args.hostname, args.origin_url
-        );
-        eprintln!(
-            "would write: {}",
-            paths.etc_xp_ops_cloudflare_settings().display()
-        );
-        eprintln!("would write: {}", paths.etc_cloudflared_config().display());
-        eprintln!("would write: /etc/cloudflared/<tunnel-id>.json");
-        if args.enabled() && runtime == ProvisionRuntime::ManagedService {
-            eprintln!("would enable cloudflared service ({init_system:?})");
-        }
-        return Ok(());
-    }
-
-    let api_base = std::env::var("CLOUDFLARE_API_BASE_URL")
-        .unwrap_or_else(|_| "https://api.cloudflare.com".to_string());
-    let client = CloudflareClient::new(api_base, token);
-
-    let mut settings = load_settings_or_default(&paths)?;
-    settings.enabled = args.enabled();
-    settings.install_mode = match runtime {
-        ProvisionRuntime::ManagedService => "external".to_string(),
-        ProvisionRuntime::Container => "container".to_string(),
-    };
-    settings.account_id = args.account_id.clone();
-    settings.zone_id = args.zone_id.clone();
-    settings.hostname = args.hostname.clone();
-    settings.origin_url = args.origin_url.clone();
-    if let Some(id) = args.dns_record_id_override.clone() {
-        settings.dns_record_id = Some(id);
-    }
-    if let Some(id) = args.tunnel_id_override.clone() {
-        settings.tunnel_id = Some(id);
-    }
-
-    let tunnel_name = args
-        .tunnel_name
-        .clone()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "xp".to_string());
-
-    let (tunnel_id, created_new) = if let Some(id) = settings.tunnel_id.clone() {
-        (id, false)
-    } else {
-        let created = client
-            .create_tunnel(&args.account_id, &tunnel_name)
-            .await
-            .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
-        let tunnel_id = created.id.clone();
-        let cred_path = paths
-            .etc_cloudflared_dir()
-            .join(format!("{tunnel_id}.json"));
-        ensure_dir(&paths.etc_cloudflared_dir())
-            .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
-        let cred_json = serde_json::to_string_pretty(&created.credentials_file)
-            .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
-        write_string_if_changed(&cred_path, &(cred_json + "\n"))
-            .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
-        chmod(&cred_path, 0o600).ok();
-        settings.tunnel_id = Some(tunnel_id.clone());
-        (tunnel_id, true)
-    };
-
-    let cred_path_abs = format!("/etc/cloudflared/{tunnel_id}.json");
-    let cred_path = paths
-        .etc_cloudflared_dir()
-        .join(format!("{tunnel_id}.json"));
-    if !created_new && !cred_path.exists() {
-        return Err(ExitError::new(
-            6,
-            format!(
-                "filesystem_error: missing credentials file {}",
-                cred_path.display()
-            ),
-        ));
-    }
-    write_cloudflared_config(&paths, &tunnel_id, &cred_path_abs)?;
-    ensure_cloudflared_file_ownership(&paths, &tunnel_id, mode, runtime)?;
-
-    client
-        .put_tunnel_config(
-            &args.account_id,
-            &tunnel_id,
-            &args.hostname,
-            &args.origin_url,
-        )
-        .await
-        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
-
-    let dns_record_id = if let Some(id) = settings.dns_record_id.clone() {
-        client
-            .patch_dns_record(&args.zone_id, &id, &args.hostname, &tunnel_id)
-            .await
-            .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
-        id
-    } else {
-        let id = client
-            .create_dns_record(&args.zone_id, &args.hostname, &tunnel_id)
-            .await
-            .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
-        settings.dns_record_id = Some(id.clone());
-        id
-    };
-
-    settings.tunnel_id = Some(tunnel_id);
-    settings.dns_record_id = Some(dns_record_id);
-    save_settings(&paths, &settings)?;
-
-    if args.enabled() && runtime == ProvisionRuntime::ManagedService {
-        enable_cloudflared_service(init_system, mode, &paths)?;
-    }
-
-    Ok(())
+    cloudflare_provision::run(
+        paths,
+        args,
+        token,
+        cloudflare_provision::ProvisionRuntime::Container,
+    )
+    .await
 }
 
 fn read_token_input(args: &CloudflareTokenSetArgs) -> Result<String, ExitError> {
@@ -437,25 +307,15 @@ fn enable_cloudflared_service(
     Ok(())
 }
 
-fn write_cloudflared_config(
-    paths: &Paths,
-    tunnel_id: &str,
-    cred_abs: &str,
-) -> Result<(), ExitError> {
-    let yml = format!("tunnel: {tunnel_id}\ncredentials-file: {cred_abs}\n");
-    write_string_if_changed(&paths.etc_cloudflared_config(), &yml)
-        .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
-    chmod(&paths.etc_cloudflared_config(), 0o640).ok();
-    Ok(())
-}
-
 fn ensure_cloudflared_file_ownership(
     paths: &Paths,
     tunnel_id: &str,
     mode: Mode,
-    runtime: ProvisionRuntime,
+    runtime: cloudflare_provision::ProvisionRuntime,
 ) -> Result<(), ExitError> {
-    if mode == Mode::DryRun || is_test_root(paths.root()) || runtime == ProvisionRuntime::Container
+    if mode == Mode::DryRun
+        || is_test_root(paths.root())
+        || runtime == cloudflare_provision::ProvisionRuntime::Container
     {
         return Ok(());
     }
@@ -514,14 +374,6 @@ struct Settings {
     dns_record_id: Option<String>,
 }
 
-fn load_settings_or_default(paths: &Paths) -> Result<Settings, ExitError> {
-    let p = paths.etc_xp_ops_cloudflare_settings();
-    let Ok(raw) = fs::read_to_string(&p) else {
-        return Ok(Settings::default());
-    };
-    serde_json::from_str(&raw).map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))
-}
-
 fn save_settings(paths: &Paths, s: &Settings) -> Result<(), ExitError> {
     ensure_dir(&paths.etc_xp_ops_cloudflare_dir())
         .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
@@ -573,30 +425,49 @@ impl CloudflareClient {
         parse_cloudflare_response::<CreateTunnelResult>(resp).await
     }
 
+    async fn delete_tunnel(&self, account_id: &str, tunnel_id: &str) -> anyhow::Result<()> {
+        let url = format!(
+            "{}/client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self
+            .client
+            .delete(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+        let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
+        Ok(())
+    }
+
+    async fn get_tunnel_config(
+        &self,
+        account_id: &str,
+        tunnel_id: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let url = format!(
+            "{}/client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self.client.get(url).bearer_auth(&self.token).send().await?;
+        parse_cloudflare_response::<serde_json::Value>(resp).await
+    }
+
     async fn put_tunnel_config(
         &self,
         account_id: &str,
         tunnel_id: &str,
-        hostname: &str,
-        origin_url: &str,
+        config: &serde_json::Value,
     ) -> anyhow::Result<()> {
         let url = format!(
             "{}/client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations",
             self.base.trim_end_matches('/')
         );
-        let body = serde_json::json!({
-          "config": {
-            "ingress": [
-              { "hostname": hostname, "service": origin_url },
-              { "service": "http_status:404" }
-            ]
-          }
-        });
         let resp = self
             .client
             .put(url)
             .bearer_auth(&self.token)
-            .json(&body)
+            .json(config)
             .send()
             .await?;
         let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
@@ -634,7 +505,7 @@ impl CloudflareClient {
         &self,
         zone_id: &str,
         dns_record_id: &str,
-        hostname: &str,
+        _hostname: &str,
         tunnel_id: &str,
     ) -> anyhow::Result<()> {
         let url = format!(
@@ -642,17 +513,35 @@ impl CloudflareClient {
             self.base.trim_end_matches('/')
         );
         let content = format!("{tunnel_id}.cfargotunnel.com");
-        let body = serde_json::json!({
-          "type": "CNAME",
-          "name": hostname,
-          "content": content,
-          "proxied": true
-        });
+        // PATCH only the owned CNAME target. Cloudflare keeps unrelated record
+        // attributes such as TTL, proxied mode, comments, and tags intact.
+        let body = serde_json::json!({ "content": content });
         let resp = self
             .client
             .patch(url)
             .bearer_auth(&self.token)
             .json(&body)
+            .send()
+            .await?;
+        let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
+        Ok(())
+    }
+
+    async fn patch_dns_content(
+        &self,
+        zone_id: &str,
+        dns_record_id: &str,
+        content: &str,
+    ) -> anyhow::Result<()> {
+        let url = format!(
+            "{}/client/v4/zones/{zone_id}/dns_records/{dns_record_id}",
+            self.base.trim_end_matches('/')
+        );
+        let resp = self
+            .client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({ "content": content }))
             .send()
             .await?;
         let _ = parse_cloudflare_response::<serde_json::Value>(resp).await?;
@@ -854,7 +743,7 @@ struct ZoneListResult {
     account: ZoneAccount,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsRecordInfo {
     pub id: String,
     #[serde(rename = "type")]
@@ -1083,5 +972,44 @@ mod tests {
         let err = load_cloudflare_token_for_deploy(&paths, None, None).unwrap_err();
         assert_eq!(err.code, 3);
         assert_eq!(err.message, "token_missing");
+    }
+
+    fn dns_record(content: &str) -> DnsRecordInfo {
+        DnsRecordInfo {
+            id: "record".to_string(),
+            record_type: "CNAME".to_string(),
+            name: "xp.example.com".to_string(),
+            content: content.to_string(),
+            proxied: Some(false),
+            ttl: Some(120),
+        }
+    }
+
+    #[test]
+    fn dns_selection_rejects_unmanaged_record_without_migration() {
+        let error = cloudflare_provision::select_dns_record(
+            &[dns_record("other.cfargotunnel.com")],
+            None,
+            "xp.example.com",
+            "new",
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, 5);
+        assert!(error.message.contains("unmanaged or ambiguous"));
+    }
+
+    #[test]
+    fn dns_selection_allows_verified_previous_tunnel_for_migration() {
+        let selected = cloudflare_provision::select_dns_record(
+            &[dns_record("old.cfargotunnel.com")],
+            Some("record"),
+            "xp.example.com",
+            "new",
+            Some("old"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(selected.content, "old.cfargotunnel.com");
     }
 }

@@ -861,7 +861,6 @@ fn ensure_container_layout(
     }
     Ok(())
 }
-
 async fn provision_cloudflare(
     paths: &Paths,
     cf: &ContainerCloudflare,
@@ -877,6 +876,7 @@ async fn provision_cloudflare(
             origin_url: cf.origin_url.clone(),
             dns_record_id_override: None,
             tunnel_id_override: None,
+            migrate_existing_tunnel: false,
             enable: false,
             no_enable: true,
             dry_run: mode == Mode::DryRun,

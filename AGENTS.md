@@ -30,6 +30,11 @@
   must reconcile the durable `running` / `restarting` status to `failed`.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
+- Cloudflare Tunnel provisioning preserves shared-Tunnel configuration outside the XP hostname.
+  It reuses the existing single `cloudflared` process and validates before an atomic replacement.
+  Moving an XP hostname requires `--migrate-existing-tunnel` preflight and rollback.
+  A legacy Tunnel with additional hostnames is intentionally not migrated automatically; operators
+  must split it first, so XP cannot move another service by mistake.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.
 - When deployment or upgrade behavior changes, update `AGENTS.md`, `docs/ops/**`, and the owning spec together so the supported-environment matrix stays aligned.
 

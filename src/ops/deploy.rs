@@ -437,7 +437,6 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 e
             }
         })?;
-
         // Ensure deploy uses the exact token resolved for this run (incl. --cloudflare-token-stdin).
         // `cmd_cloudflare_provision` remains the standalone CLI entry which reads from env/file.
         cloudflare::cmd_cloudflare_provision_with_token(
@@ -450,6 +449,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 origin_url: cf.origin_url,
                 dns_record_id_override: cf.dns_override.map(|r| r.id),
                 tunnel_id_override: cf.tunnel_override.map(|t| t.id),
+                migrate_existing_tunnel: args.migrate_existing_tunnel,
                 enable: plan.enable_services,
                 no_enable: !plan.enable_services,
                 dry_run: mode == Mode::DryRun,
