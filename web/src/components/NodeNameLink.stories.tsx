@@ -9,7 +9,7 @@ const meta = {
 	tags: ["autodocs", "coverage-ui"],
 	decorators: [
 		(Story) => (
-			<div className="w-full max-w-none space-y-4 rounded-lg border border-border bg-card p-6">
+			<div className="w-full max-w-none space-y-4 rounded-lg border border-white/30 bg-card p-6">
 				<Story />
 			</div>
 		),
