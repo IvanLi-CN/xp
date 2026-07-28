@@ -2513,9 +2513,17 @@ async fn admin_get_user_traffic(
             .collect::<BTreeSet<_>>();
         (user, store.list_nodes(), current_node_ids)
     };
+    let mut relevant_node_ids = current_node_ids.clone();
+    relevant_node_ids.extend(state.node_history.user_traffic_node_ids(&user_id).await);
     let selected_nodes = all_nodes
         .iter()
-        .filter(|node| query.node_id.as_deref().is_none_or(|id| id == node.node_id))
+        .filter(|node| {
+            query
+                .node_id
+                .as_deref()
+                .is_some_and(|id| id == node.node_id)
+                || (query.node_id.is_none() && relevant_node_ids.contains(&node.node_id))
+        })
         .cloned()
         .collect::<Vec<_>>();
     if query.node_id.is_some() && selected_nodes.is_empty() {
@@ -2525,7 +2533,7 @@ async fn admin_get_user_traffic(
     }
     let mut node_options = all_nodes
         .iter()
-        .filter(|node| current_node_ids.contains(&node.node_id))
+        .filter(|node| relevant_node_ids.contains(&node.node_id))
         .map(|node| {
             (
                 node.node_id.clone(),

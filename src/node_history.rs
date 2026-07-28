@@ -679,6 +679,16 @@ impl NodeHistoryHandle {
         Some(build_traffic_report(&aggregate, window, now))
     }
 
+    pub async fn user_traffic_node_ids(&self, user_id: &str) -> BTreeSet<String> {
+        let state = self.inner.read().await;
+        state
+            .nodes
+            .iter()
+            .filter(|(_, record)| record.user_traffic.contains_key(user_id))
+            .map(|(node_id, _)| node_id.clone())
+            .collect()
+    }
+
     pub async fn mark_sync_error(&self, now: DateTime<Utc>, node_id: &str, error: String) {
         let mut should_persist = false;
         {
@@ -1208,6 +1218,20 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
             }
         }
         if let Some(current) = &record.cycle {
+            let has_active_cycle = records.iter().any(|candidate| {
+                candidate.membership_active
+                    && candidate.cycle.as_ref().is_some_and(|cycle| {
+                        cycle.start_at == current.start_at && cycle.end_at == current.end_at
+                    })
+            });
+            if !record.membership_active
+                && records
+                    .iter()
+                    .any(|candidate| candidate.membership_active && candidate.cycle.is_some())
+                && !has_active_cycle
+            {
+                continue;
+            }
             if let Some(existing) = cycle.as_mut() {
                 if existing.start_at == current.start_at && existing.end_at == current.end_at {
                     existing.uplink_bytes =
@@ -1233,10 +1257,11 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
     }
     for (start_at, bucket) in &mut five_minute {
         if records.iter().any(|record| {
-            !record
-                .five_minute
-                .iter()
-                .any(|candidate| candidate.start_at == *start_at)
+            five_minute_bucket_is_applicable(record, start_at)
+                && !record
+                    .five_minute
+                    .iter()
+                    .any(|candidate| candidate.start_at == *start_at)
         }) {
             bucket.uplink_bytes = None;
             bucket.downlink_bytes = None;
@@ -1247,10 +1272,10 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
         }
     }
     for (date, bucket) in &mut daily {
-        if records
-            .iter()
-            .any(|record| !record.daily.iter().any(|candidate| candidate.date == *date))
-        {
+        if records.iter().any(|record| {
+            daily_bucket_is_applicable(record, date)
+                && !record.daily.iter().any(|candidate| candidate.date == *date)
+        }) {
             bucket.uplink_bytes = None;
             bucket.downlink_bytes = None;
             bucket.complete = false;
@@ -1274,6 +1299,34 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
         cycle,
         last_sample_at,
     }
+}
+
+fn five_minute_bucket_is_applicable(record: &PersistedUserTrafficRecord, start_at: &str) -> bool {
+    let Some(first) = record.five_minute.first() else {
+        return false;
+    };
+    if start_at < first.start_at.as_str() {
+        return false;
+    }
+    record.membership_active
+        || record
+            .five_minute
+            .last()
+            .is_some_and(|last| start_at <= last.start_at.as_str())
+}
+
+fn daily_bucket_is_applicable(record: &PersistedUserTrafficRecord, date: &str) -> bool {
+    let Some(first) = record.daily.first() else {
+        return false;
+    };
+    if date < first.date.as_str() {
+        return false;
+    }
+    record.membership_active
+        || record
+            .daily
+            .last()
+            .is_some_and(|last| date <= last.date.as_str())
 }
 
 fn add_required(left: Option<u64>, right: Option<u64>) -> Option<u64> {
@@ -2703,6 +2756,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn inactive_user_records_do_not_create_future_gaps_or_replace_active_cycle() {
+        let inactive = PersistedUserTrafficRecord {
+            five_minute: vec![NodeTrafficBucket {
+                start_at: "2026-07-28T00:00:00Z".to_string(),
+                end_at: "2026-07-28T00:05:00Z".to_string(),
+                uplink_bytes: Some(10),
+                downlink_bytes: Some(20),
+                complete: true,
+                warnings: Vec::new(),
+            }],
+            cycle: Some(TrafficCycleAccumulator {
+                mode: "monthly".to_string(),
+                start_at: "2026-07-01T00:00:00Z".to_string(),
+                end_at: "2026-08-01T00:00:00Z".to_string(),
+                uplink_bytes: 10,
+                downlink_bytes: 20,
+                complete: true,
+                tracking_since: "2026-07-28T00:05:00Z".to_string(),
+                warnings: Vec::new(),
+            }),
+            membership_active: false,
+            ..PersistedUserTrafficRecord::default()
+        };
+        let active = PersistedUserTrafficRecord {
+            five_minute: vec![NodeTrafficBucket {
+                start_at: "2026-07-29T00:00:00Z".to_string(),
+                end_at: "2026-07-29T00:05:00Z".to_string(),
+                uplink_bytes: Some(30),
+                downlink_bytes: Some(40),
+                complete: true,
+                warnings: Vec::new(),
+            }],
+            cycle: Some(TrafficCycleAccumulator {
+                mode: "monthly".to_string(),
+                start_at: "2026-08-01T00:00:00Z".to_string(),
+                end_at: "2026-09-01T00:00:00Z".to_string(),
+                uplink_bytes: 30,
+                downlink_bytes: 40,
+                complete: true,
+                tracking_since: "2026-08-01T00:05:00Z".to_string(),
+                warnings: Vec::new(),
+            }),
+            membership_active: true,
+            ..PersistedUserTrafficRecord::default()
+        };
+
+        let aggregate = aggregate_user_records(&[&inactive, &active]);
+        assert!(aggregate.five_minute.iter().all(|bucket| bucket.complete));
+        assert_eq!(aggregate.cycle.unwrap().start_at, "2026-08-01T00:00:00Z");
+    }
+
     #[tokio::test]
     async fn user_traffic_cleanup_tombstone_survives_reload_until_completed() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2745,6 +2850,34 @@ mod tests {
                 .pending_node_history_cleanup("node-b")
                 .await
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn user_traffic_node_ids_include_retained_history_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let now = "2026-07-29T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        handle
+            .record_local_sample(
+                now,
+                "node-a",
+                Some(vec![user_traffic("membership-a", "user-a", 100, 200)]),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample(
+                now,
+                "node-b",
+                Some(vec![user_traffic("membership-b", "user-b", 100, 200)]),
+                runtime(Vec::new()),
+            )
+            .await;
+
+        assert_eq!(
+            handle.user_traffic_node_ids("user-a").await,
+            BTreeSet::from(["node-a".to_string()])
         );
     }
 
