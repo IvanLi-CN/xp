@@ -592,7 +592,7 @@
   "src/http/tests.rs": {
     "long_line_count": 2,
     "max_line_length": 126,
-    "source_lines": 9709
+    "source_lines": 9760
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -622,7 +622,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 3111
+    "source_lines": 3166
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,

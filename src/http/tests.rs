@@ -8039,6 +8039,57 @@ async fn traffic_rejects_invalid_window_values() {
 }
 
 #[tokio::test]
+async fn user_traffic_returns_partial_report_when_all_membership_nodes_are_unreachable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+
+    let (user_id, remote_node_id) = {
+        let mut store = store.lock().await;
+        let remote_node_id = new_ulid_string();
+        store
+            .upsert_node(Node {
+                node_id: remote_node_id.clone(),
+                node_name: "node-unreachable".to_string(),
+                access_host: String::new(),
+                api_base_url: "https://127.0.0.1:1".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .unwrap();
+        let user = store.create_user("alice".to_string(), None).unwrap();
+        let endpoint = store
+            .create_endpoint(
+                remote_node_id.clone(),
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        DesiredStateCommand::ReplaceUserAccess {
+            user_id: user.user_id.clone(),
+            endpoint_ids: vec![endpoint.endpoint_id],
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        (user.user_id, remote_node_id)
+    };
+
+    let res = app
+        .oneshot(req_authed(
+            "GET",
+            &format!("/api/admin/users/{user_id}/traffic?window=24h"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["partial"], true);
+    assert_eq!(json["traffic"]["partial"], true);
+    assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
+    assert_eq!(json["traffic"]["current"].as_array().unwrap().len(), 288);
+}
+
+#[tokio::test]
 async fn node_tcp_connections_returns_per_endpoint_series() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

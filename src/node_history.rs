@@ -1604,19 +1604,37 @@ pub fn merge_traffic_reports(
                 .map(|index| point_at(reference_start + bucket_step * index as i32, true))
                 .collect::<Vec<_>>()
         });
+    let summaries_compatible = reports.iter().all(|report| {
+        report.summary.mode == first.summary.mode
+            && report.summary.cycle_start_at == first.summary.cycle_start_at
+            && report.summary.cycle_end_at == first.summary.cycle_end_at
+    });
     let mut summary = first.summary.clone();
-    summary.uplink_bytes = reports.iter().fold(0u64, |sum, report| {
-        sum.saturating_add(report.summary.uplink_bytes)
-    });
-    summary.downlink_bytes = reports.iter().fold(0u64, |sum, report| {
-        sum.saturating_add(report.summary.downlink_bytes)
-    });
-    summary.total_bytes = summary.uplink_bytes.saturating_add(summary.downlink_bytes);
-    summary.complete = reports.iter().all(|report| report.summary.complete);
+    if summaries_compatible {
+        summary.uplink_bytes = reports.iter().fold(0u64, |sum, report| {
+            sum.saturating_add(report.summary.uplink_bytes)
+        });
+        summary.downlink_bytes = reports.iter().fold(0u64, |sum, report| {
+            sum.saturating_add(report.summary.downlink_bytes)
+        });
+        summary.total_bytes = summary.uplink_bytes.saturating_add(summary.downlink_bytes);
+        summary.complete = reports.iter().all(|report| report.summary.complete);
+    } else {
+        summary.cycle_start_at = None;
+        summary.cycle_end_at = None;
+        summary.uplink_bytes = 0;
+        summary.downlink_bytes = 0;
+        summary.total_bytes = 0;
+        summary.complete = false;
+        summary.tracking_since = None;
+    }
     let mut warnings = reports
         .iter()
         .flat_map(|report| report.warnings.clone())
         .collect::<Vec<_>>();
+    if !summaries_compatible {
+        warnings.push("traffic summaries span different quota cycles".to_string());
+    }
     if current
         .iter()
         .any(|point| point.uplink_bytes.is_none() || !point.complete)
@@ -2999,6 +3017,43 @@ mod tests {
         assert_eq!(at_five.uplink_bytes, Some(30));
         assert_eq!(at_ten.uplink_bytes, None);
         assert!(merged.partial);
+    }
+
+    #[test]
+    fn merged_reports_do_not_sum_incompatible_quota_cycles() {
+        let mut first = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
+        first.summary.mode = "cycle".to_string();
+        first.summary.cycle_start_at = Some("2026-05-01T00:00:00Z".to_string());
+        first.summary.cycle_end_at = Some("2026-06-01T00:00:00Z".to_string());
+        first.summary.uplink_bytes = 100;
+        first.summary.downlink_bytes = 200;
+        first.summary.total_bytes = 300;
+
+        let mut second = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
+        second.summary.mode = "cycle".to_string();
+        second.summary.cycle_start_at = Some("2026-05-15T00:00:00Z".to_string());
+        second.summary.cycle_end_at = Some("2026-06-15T00:00:00Z".to_string());
+        second.summary.uplink_bytes = 400;
+        second.summary.downlink_bytes = 500;
+        second.summary.total_bytes = 900;
+
+        let merged = merge_traffic_reports(
+            &[first, second],
+            TrafficWindow::Hours24,
+            "2026-05-20T00:10:00Z".parse().unwrap(),
+        );
+
+        assert_eq!(merged.summary.uplink_bytes, 0);
+        assert_eq!(merged.summary.downlink_bytes, 0);
+        assert_eq!(merged.summary.total_bytes, 0);
+        assert!(!merged.summary.complete);
+        assert!(merged.summary.cycle_start_at.is_none());
+        assert!(
+            merged
+                .warnings
+                .iter()
+                .any(|warning| warning == "traffic summaries span different quota cycles")
+        );
     }
 
     #[tokio::test]

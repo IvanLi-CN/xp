@@ -2630,7 +2630,7 @@ async fn admin_get_user_traffic(
             reports.push(report);
         }
     }
-    if reports.is_empty() {
+    if reports.is_empty() && unreachable_nodes.is_empty() {
         return Err(ApiError::not_found("traffic is not available yet"));
     }
     let mut traffic = merge_traffic_reports(&reports, window, Utc::now());
