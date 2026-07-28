@@ -64,3 +64,26 @@ fn low_memory_backfill_restores_openrc_executable_mode() {
         0o755
     );
 }
+
+#[test]
+fn low_memory_backfill_supports_provider_wrapper_script() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+    let service = paths.openrc_initd_dir().join("cloudflared");
+    fs::write(
+        &service,
+        "#!/sbin/openrc-run\ncommand=/usr/local/libexec/cloudflared-tunnel\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let updated = fs::read_to_string(&service).unwrap();
+    assert!(updated.starts_with("#!/sbin/openrc-run\nexport GOMEMLIMIT="));
+    assert!(updated.contains("GOMEMLIMIT:-12MiB"));
+    assert_eq!(
+        fs::metadata(service).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+}

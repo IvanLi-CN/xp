@@ -218,9 +218,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             "export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\nexport GOGC=\"${{GOGC:-50}}\"\n"
         );
         let marker = "command_user=\"";
-        let Some(pos) = raw.find(marker) else {
-            continue;
-        };
+        let pos = raw.find(marker).unwrap_or(0);
         let end = raw[pos..]
             .find('\n')
             .map(|n| pos + n + 1)

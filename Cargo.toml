@@ -56,6 +56,11 @@ protoc-bin-vendored = "3.2.0"
 tonic-build = "0.14.2"
 tonic-prost-build = "0.14.2"
 
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
 [dev-dependencies]
 assert_cmd = "2.1.2"
 bytes = "1"
