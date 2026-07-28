@@ -304,7 +304,7 @@ pub struct DeployArgs {
     #[arg(long, value_name = "URL")]
     pub origin_url: Option<String>,
 
-    /// Allow moving an existing XP-managed hostname from a different Tunnel.
+    /// Deprecated compatibility option. Verified Tunnel migrations are automatic.
     #[arg(long)]
     pub migrate_existing_tunnel: bool,
 
@@ -499,12 +499,11 @@ pub struct CloudflareProvisionArgs {
     #[arg(long, hide = true, value_name = "ID")]
     pub dns_record_id_override: Option<String>,
 
-    /// Target an existing Tunnel. Changing the persisted Tunnel also requires
-    /// --migrate-existing-tunnel.
+    /// Target an existing Tunnel. A verified persisted XP hostname migrates automatically.
     #[arg(long = "tunnel-id", value_name = "ID")]
     pub tunnel_id_override: Option<String>,
 
-    /// Explicitly authorize a verified migration from another Tunnel.
+    /// Deprecated compatibility option. Verified Tunnel migrations are automatic.
     #[arg(long)]
     pub migrate_existing_tunnel: bool,
 

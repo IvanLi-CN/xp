@@ -1210,10 +1210,12 @@ async fn resolve_tunnel_conflict(
             1 => {
                 let name = prompt("New tunnel name: ")?;
                 args.tunnel_name = Some(name.trim().to_string());
+                args.migrate_existing_tunnel = true;
             }
             2 => {
                 let name = generate_tunnel_name(&cf.tunnel_name);
                 args.tunnel_name = Some(name);
+                args.migrate_existing_tunnel = true;
                 auto_generated = true;
             }
             3 => return Err(ExitError::new(2, "deploy_cancelled")),
@@ -1292,6 +1294,7 @@ async fn auto_resolve_tunnel_conflict(
         }
         let name = generate_tunnel_name(&cf.tunnel_name);
         args.tunnel_name = Some(name);
+        args.migrate_existing_tunnel = true;
         let mut new_plan = build_plan(paths, &args).await?;
         if let Some(cf_plan) = new_plan.cloudflare.as_mut() {
             cf_plan.tunnel_name_source = ValueSource::Generated;
@@ -1303,7 +1306,6 @@ async fn auto_resolve_tunnel_conflict(
         attempts += 1;
     }
 }
-
 fn derive_hostname(
     node_name: &str,
     zone_name: &str,
@@ -1339,7 +1341,6 @@ fn generate_hostname(node_name: &str, zone_name: &str) -> Result<String, ExitErr
     };
     Ok(format!("{label}.{zone_name}"))
 }
-
 fn generate_tunnel_name(current: &str) -> String {
     let (base, _) = sanitize_label(current);
     let suffix = nanoid!(HOSTNAME_SUFFIX_LEN, HOSTNAME_ALPHABET);
@@ -1349,7 +1350,6 @@ fn generate_tunnel_name(current: &str) -> String {
         format!("{base}-{suffix}")
     }
 }
-
 fn sanitize_label(input: &str) -> (String, bool) {
     let mut out = String::new();
     let mut changed = false;

@@ -50,24 +50,21 @@ rollback reports the retained local snapshot paths for manual recovery.
 
 ### Moving an existing XP Tunnel
 
-Changing the persisted Tunnel ID is rejected by default. Use `--migrate-existing-tunnel` only after
-confirming that the old settings hostname, zone, legacy Tunnel ingress, DNS CNAME, and credentials
-all belong to the same XP installation:
+Changing the persisted Tunnel ID automatically migrates the persisted XP hostname after confirming
+that the old settings hostname, zone, DNS CNAME, and credentials all belong to the same XP
+installation. After a successful single-host preflight, XP migrates only its persisted hostname:
 
 ```bash
 sudo xp-ops cloudflare provision \
   --account-id <id> --zone-id <id> --hostname app.example.com \
   --origin-url http://127.0.0.1:62416 \
-  --tunnel-id <target-tunnel-id> \
-  --migrate-existing-tunnel
+  --tunnel-id <target-tunnel-id>
 ```
 
-`xp-ops deploy --migrate-existing-tunnel ...` passes the same explicit authorization into its
-Cloudflare provision stage. Any incomplete ownership proof fails before a write; XP does not guess
-across zones, accounts, DNS records, or unrelated hostnames.
-For safety, this automated migration accepts a legacy Tunnel only when its ingress contains exactly
-the persisted XP hostname. A shared legacy Tunnel with other hostnames needs an operator-led split;
-XP leaves it unchanged rather than risk moving another service.
+Any incomplete ownership proof fails before a write; XP does not guess across zones, accounts, or
+DNS records. A single cloudflared process can migrate automatically only when the legacy Tunnel
+contains the persisted XP hostname alone. A shared legacy Tunnel is rejected before writes because
+its other hostnames would otherwise lose their connector.
 
 Use `--dry-run` to perform read-only preflight and receive an ingress/DNS impact summary.
 It never writes a file, calls a mutating Cloudflare API, or restarts a service.

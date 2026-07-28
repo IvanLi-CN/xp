@@ -4,8 +4,8 @@
 
 - `src/ops/cloudflare_config.rs` 承载本地 YAML 定点编辑与远端 ingress 合并的
   纯函数。
-- `xp-ops cloudflare provision` 和 `xp-ops deploy` 提供
-  `--migrate-existing-tunnel`，默认拒绝 Tunnel ID 切换。
+- `xp-ops cloudflare provision` 和 `xp-ops deploy` 自动迁移已证明归属的 XP hostname；
+  `--migrate-existing-tunnel` 仅保留为兼容选项。
 - Cloudflare DNS 更新使用最小 PATCH，只更新目标 CNAME 的 Tunnel 内容。
 
 ## Runtime safety
