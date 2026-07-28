@@ -388,6 +388,10 @@ struct PersistedNodeHistoryCache {
     nodes: BTreeMap<String, PersistedNodeHistoryRecord>,
     #[serde(default)]
     pending_user_traffic_cleanup: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    pending_node_history_cleanup: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    deleted_users: BTreeSet<String>,
 }
 
 impl PersistedNodeHistoryCache {
@@ -396,6 +400,8 @@ impl PersistedNodeHistoryCache {
             schema_version: HISTORY_SCHEMA_VERSION,
             nodes: BTreeMap::new(),
             pending_user_traffic_cleanup: BTreeMap::new(),
+            pending_node_history_cleanup: BTreeMap::new(),
+            deleted_users: BTreeSet::new(),
         }
     }
 }
@@ -458,6 +464,7 @@ impl NodeHistoryHandle {
     ) {
         {
             let mut state = self.inner.write().await;
+            let deleted_users = state.deleted_users.clone();
             let record = state
                 .nodes
                 .entry(node_id.to_string())
@@ -466,7 +473,7 @@ impl NodeHistoryHandle {
             record.last_sync_error = None;
 
             if let Some(sample) = sample {
-                record_traffic_sample(record, now, sample);
+                record_traffic_sample(record, now, sample, &deleted_users);
             }
             record_daily_components(record, now, runtime);
             record.prune(now);
@@ -515,6 +522,13 @@ impl NodeHistoryHandle {
             let mut state = self.inner.write().await;
             state.nodes.remove(node_id);
             state.pending_user_traffic_cleanup.remove(node_id);
+            state.pending_node_history_cleanup.remove(node_id);
+            for targets in state.pending_node_history_cleanup.values_mut() {
+                targets.remove(node_id);
+            }
+            state
+                .pending_node_history_cleanup
+                .retain(|_, targets| !targets.is_empty());
         }
         self.persist().await;
     }
@@ -522,6 +536,7 @@ impl NodeHistoryHandle {
     pub async fn clear_user(&self, user_id: &str) {
         {
             let mut state = self.inner.write().await;
+            state.deleted_users.insert(user_id.to_string());
             for record in state.nodes.values_mut() {
                 record.user_traffic.remove(user_id);
             }
@@ -562,6 +577,52 @@ impl NodeHistoryHandle {
             let changed = users.remove(user_id);
             if users.is_empty() {
                 state.pending_user_traffic_cleanup.remove(node_id);
+            }
+            changed
+        };
+        if changed {
+            self.persist().await;
+        }
+    }
+
+    pub async fn queue_node_history_cleanup(&self, destination_node_id: &str, node_id: &str) {
+        let changed = {
+            let mut state = self.inner.write().await;
+            state
+                .pending_node_history_cleanup
+                .entry(destination_node_id.to_string())
+                .or_default()
+                .insert(node_id.to_string())
+        };
+        if changed {
+            self.persist().await;
+        }
+    }
+
+    async fn pending_node_history_cleanup(&self, destination_node_id: &str) -> Vec<String> {
+        let state = self.inner.read().await;
+        state
+            .pending_node_history_cleanup
+            .get(destination_node_id)
+            .into_iter()
+            .flat_map(|nodes| nodes.iter().cloned())
+            .collect()
+    }
+
+    pub async fn complete_node_history_cleanup(&self, destination_node_id: &str, node_id: &str) {
+        let changed = {
+            let mut state = self.inner.write().await;
+            let Some(nodes) = state
+                .pending_node_history_cleanup
+                .get_mut(destination_node_id)
+            else {
+                return;
+            };
+            let changed = nodes.remove(node_id);
+            if nodes.is_empty() {
+                state
+                    .pending_node_history_cleanup
+                    .remove(destination_node_id);
             }
             changed
         };
@@ -669,6 +730,7 @@ fn record_traffic_sample(
     record: &mut PersistedNodeHistoryRecord,
     now: DateTime<Utc>,
     sample: NodeTrafficSample,
+    deleted_users: &BTreeSet<String>,
 ) {
     let now_str = rfc3339(now);
     let bucket_start = floor_five_minute(now) - ChronoDuration::seconds(TRAFFIC_ROLLUP_BUCKET_SECS);
@@ -684,6 +746,9 @@ fn record_traffic_sample(
     let mut user_deltas = BTreeMap::<String, UserTrafficDelta>::new();
     let mut saw_new_baseline = false;
     for user_id in &sample.unavailable_users {
+        if deleted_users.contains(user_id) {
+            continue;
+        }
         let entry = user_deltas.entry(user_id.clone()).or_default();
         entry.complete = false;
         entry
@@ -691,8 +756,13 @@ fn record_traffic_sample(
             .push("traffic sample unavailable for user".to_string());
     }
     for totals in sample.totals {
+        let deleted_user = totals
+            .user_id
+            .as_ref()
+            .is_some_and(|user_id| deleted_users.contains(user_id));
         if let Some(user_id) = totals.user_id.as_ref()
             && !totals.is_probe
+            && !deleted_user
         {
             user_deltas.entry(user_id.clone()).or_default();
         }
@@ -719,6 +789,7 @@ fn record_traffic_sample(
             node_known = true;
             if let Some(user_id) = totals.user_id.as_ref()
                 && !totals.is_probe
+                && !deleted_user
             {
                 let entry = user_deltas.entry(user_id.clone()).or_default();
                 entry.uplink = entry.uplink.saturating_add(uplink);
@@ -730,6 +801,7 @@ fn record_traffic_sample(
             saw_new_baseline = true;
             if let Some(user_id) = totals.user_id.as_ref()
                 && !totals.is_probe
+                && !deleted_user
             {
                 let entry = user_deltas.entry(user_id.clone()).or_default();
                 entry.complete = false;
@@ -745,6 +817,7 @@ fn record_traffic_sample(
                 gap_dates.insert(previous_date.clone());
                 if let Some(user_id) = totals.user_id.as_ref()
                     && !totals.is_probe
+                    && !deleted_user
                 {
                     let entry = user_deltas.entry(user_id.clone()).or_default();
                     entry.gap_dates.insert(previous_date);
@@ -756,6 +829,7 @@ fn record_traffic_sample(
             ));
             if let Some(user_id) = totals.user_id.as_ref()
                 && !totals.is_probe
+                && !deleted_user
             {
                 let entry = user_deltas.entry(user_id.clone()).or_default();
                 entry.complete = false;
@@ -772,6 +846,7 @@ fn record_traffic_sample(
             ));
             if let Some(user_id) = totals.user_id.as_ref()
                 && !totals.is_probe
+                && !deleted_user
             {
                 let entry = user_deltas.entry(user_id.clone()).or_default();
                 entry.complete = false;
@@ -874,6 +949,9 @@ fn record_traffic_sample(
     // Keep retained user records aligned with the current cycle even after their
     // last membership is removed. No active membership means a known zero delta.
     for (user_id, context) in sample.user_cycles {
+        if deleted_users.contains(&user_id) {
+            continue;
+        }
         if user_deltas.contains_key(&user_id) {
             continue;
         }
@@ -1186,12 +1264,7 @@ fn build_traffic_report(
     window: TrafficWindow,
     now: DateTime<Utc>,
 ) -> TrafficReport {
-    let latest_sample = rollup
-        .last_sample_at
-        .as_deref()
-        .and_then(|value| value.parse::<DateTime<Utc>>().ok())
-        .map(floor_five_minute)
-        .unwrap_or_else(|| floor_five_minute(now));
+    let latest_sample = floor_five_minute(now);
     let (window_start, window_end, current, reference) = match window {
         TrafficWindow::Hours24 => {
             let end = latest_sample;
@@ -1856,6 +1929,24 @@ async fn sync_remote_node_histories(
             continue;
         }
 
+        for target_node_id in history.pending_node_history_cleanup(&node.node_id).await {
+            match clear_remote_node_history(client, ca_key_pem, base, &target_node_id).await {
+                Ok(()) => {
+                    history
+                        .complete_node_history_cleanup(&node.node_id, &target_node_id)
+                        .await;
+                }
+                Err(err) => {
+                    warn!(
+                        destination_node_id = %node.node_id,
+                        target_node_id,
+                        error = %err,
+                        "retry remote node history cleanup failed"
+                    );
+                }
+            }
+        }
+
         for user_id in history.pending_user_traffic_cleanup(&node.node_id).await {
             match clear_remote_user_traffic(client, ca_key_pem, base, &user_id).await {
                 Ok(()) => {
@@ -1887,6 +1978,37 @@ async fn sync_remote_node_histories(
             }
         }
     }
+}
+
+async fn clear_remote_node_history(
+    client: &Client,
+    ca_key_pem: &str,
+    base: &str,
+    node_id: &str,
+) -> anyhow::Result<()> {
+    let uri: axum::http::Uri = format!("/_internal/nodes/{node_id}/history")
+        .parse()
+        .context("invalid node history cleanup path")?;
+    let signature = internal_auth::sign_request(ca_key_pem, &axum::http::Method::DELETE, &uri)
+        .map_err(|err| anyhow::anyhow!("sign node history cleanup request: {err}"))?;
+    let response = tokio::time::timeout(
+        REMOTE_SYNC_TIMEOUT,
+        client
+            .delete(format!(
+                "{base}/api/admin/_internal/nodes/{node_id}/history"
+            ))
+            .header(
+                reqwest::header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                signature,
+            )
+            .send(),
+    )
+    .await
+    .context("node history cleanup request timeout")??;
+    if !response.status().is_success() {
+        anyhow::bail!("node history cleanup request failed: {}", response.status());
+    }
+    Ok(())
 }
 
 async fn clear_remote_user_traffic(
@@ -2410,9 +2532,14 @@ mod tests {
         let path = tmp.path().join("node_history_cache.json");
         let handle = NodeHistoryHandle::new(path.clone());
         handle.queue_user_traffic_cleanup("node-a", "user-a").await;
+        handle.queue_node_history_cleanup("node-b", "node-a").await;
         assert_eq!(
             handle.pending_user_traffic_cleanup("node-a").await,
             vec!["user-a"]
+        );
+        assert_eq!(
+            handle.pending_node_history_cleanup("node-b").await,
+            vec!["node-a"]
         );
 
         let reloaded = NodeHistoryHandle::new(path);
@@ -2420,12 +2547,25 @@ mod tests {
             reloaded.pending_user_traffic_cleanup("node-a").await,
             vec!["user-a"]
         );
+        assert_eq!(
+            reloaded.pending_node_history_cleanup("node-b").await,
+            vec!["node-a"]
+        );
         reloaded
             .complete_user_traffic_cleanup("node-a", "user-a")
+            .await;
+        reloaded
+            .complete_node_history_cleanup("node-b", "node-a")
             .await;
         assert!(
             reloaded
                 .pending_user_traffic_cleanup("node-a")
+                .await
+                .is_empty()
+        );
+        assert!(
+            reloaded
+                .pending_node_history_cleanup("node-b")
                 .await
                 .is_empty()
         );
@@ -2616,6 +2756,20 @@ mod tests {
                 .is_some()
         );
         handle.clear_user("user-a").await;
+        assert!(
+            handle
+                .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)
+                .await
+                .is_none()
+        );
+        handle
+            .record_local_sample(
+                "2026-05-20T00:10:00Z".parse().unwrap(),
+                "node-a",
+                Some(vec![user_traffic("membership-a", "user-a", 200, 450)]),
+                runtime(Vec::new()),
+            )
+            .await;
         assert!(
             handle
                 .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)

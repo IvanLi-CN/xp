@@ -10,7 +10,10 @@ import {
 	fetchAdminUserIpUsage,
 } from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
-import { fetchAdminUserTraffic } from "../api/adminTraffic";
+import {
+	type UserTrafficNodeOption,
+	fetchAdminUserTraffic,
+} from "../api/adminTraffic";
 import {
 	fetchAdminUserAccess,
 	putAdminUserAccess,
@@ -256,6 +259,9 @@ export function UserDetailsPage() {
 	const [activeTrafficNodeId, setActiveTrafficNodeId] = useState<string | null>(
 		null,
 	);
+	const [trafficNodeOptions, setTrafficNodeOptions] = useState<
+		UserTrafficNodeOption[]
+	>([]);
 	const [displayName, setDisplayName] = useState("");
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -370,7 +376,41 @@ export function UserDetailsPage() {
 			),
 	});
 
+	useEffect(() => {
+		if (trafficQuery.data?.nodes) {
+			setTrafficNodeOptions(trafficQuery.data.nodes);
+		}
+	}, [trafficQuery.data?.nodes]);
+
 	const user = userQuery.data;
+	const availableTrafficNodes =
+		trafficQuery.data?.nodes ??
+		(trafficNodeOptions.length > 0
+			? trafficNodeOptions
+			: (nodesQuery.data?.items ?? []).map((node) => ({
+					node_id: node.node_id,
+					node_name: node.node_name,
+				})));
+	const trafficNodeSelector = (
+		<Select
+			value={activeTrafficNodeId ?? "all"}
+			onValueChange={(value) =>
+				setActiveTrafficNodeId(value === "all" ? null : value)
+			}
+		>
+			<SelectTrigger className="w-[12rem]" aria-label="Traffic nodes">
+				<SelectValue placeholder="All nodes" />
+			</SelectTrigger>
+			<SelectContent>
+				<SelectItem value="all">All nodes</SelectItem>
+				{availableTrafficNodes.map((node) => (
+					<SelectItem key={node.node_id} value={node.node_id}>
+						{node.node_name}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
 	const usageGroups = ipUsageQuery.data?.groups ?? [];
 	const usageTabLabels = useMemo(() => {
 		const counts = new Map<string, number>();
@@ -1436,6 +1476,7 @@ export function UserDetailsPage() {
 							variant="offline"
 							title="Offline traffic cache unavailable"
 							description="Open this tab while online to keep the latest traffic report available offline."
+							action={trafficNodeSelector}
 						/>
 					) : null}
 					{trafficQuery.isError &&
@@ -1446,13 +1487,16 @@ export function UserDetailsPage() {
 							title="Failed to load traffic"
 							description={formatError(trafficQuery.error)}
 							action={
-								<Button
-									variant="secondary"
-									loading={trafficQuery.isFetching}
-									onClick={() => trafficQuery.refetch()}
-								>
-									Retry
-								</Button>
+								<>
+									{trafficNodeSelector}
+									<Button
+										variant="secondary"
+										loading={trafficQuery.isFetching}
+										onClick={() => trafficQuery.refetch()}
+									>
+										Retry
+									</Button>
+								</>
 							}
 						/>
 					) : null}
@@ -1475,29 +1519,7 @@ export function UserDetailsPage() {
 							window={prefs.trafficWindow}
 							onWindowChange={(next) => prefs.setTrafficWindow(next)}
 							isFetching={trafficQuery.isFetching}
-							nodeSelector={
-								<Select
-									value={activeTrafficNodeId ?? "all"}
-									onValueChange={(value) =>
-										setActiveTrafficNodeId(value === "all" ? null : value)
-									}
-								>
-									<SelectTrigger
-										className="w-[12rem]"
-										aria-label="Traffic nodes"
-									>
-										<SelectValue placeholder="All nodes" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="all">All nodes</SelectItem>
-										{trafficQuery.data.nodes.map((node) => (
-											<SelectItem key={node.node_id} value={node.node_id}>
-												{node.node_name}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							}
+							nodeSelector={trafficNodeSelector}
 						/>
 					) : null}
 				</div>

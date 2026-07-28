@@ -56,6 +56,7 @@ export const UserTrafficNodeOptionSchema = z.object({
 	node_id: z.string(),
 	node_name: z.string(),
 });
+export type UserTrafficNodeOption = z.infer<typeof UserTrafficNodeOptionSchema>;
 
 export const AdminUserTrafficResponseSchema = z.object({
 	user: z.object({ user_id: z.string(), display_name: z.string() }),

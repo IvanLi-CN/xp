@@ -581,9 +581,9 @@
     "source_lines": 1244
   },
   "src/http/mod.rs": {
-    "long_line_count": 4,
+    "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8173
+    "source_lines": 8280
   },
   "src/http/tests.rs": {
     "long_line_count": 2,
@@ -618,7 +618,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 2865
+    "source_lines": 3019
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,
@@ -1099,7 +1099,7 @@
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
     "max_line_length": 151,
-    "source_lines": 1735
+    "source_lines": 1755
   },
   "web/src/views/UserNewPage.tsx": {
     "long_line_count": 1,

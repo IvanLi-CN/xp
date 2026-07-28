@@ -16,7 +16,7 @@ use axum::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
@@ -1154,6 +1154,10 @@ pub fn build_router(
         .route(
             "/_internal/nodes/history/local",
             get(admin_internal_get_local_node_history),
+        )
+        .route(
+            "/_internal/nodes/{node_id}/history",
+            delete(admin_internal_clear_node_history),
         )
         .route(
             "/_internal/nodes/traffic/local",
@@ -3589,6 +3593,18 @@ async fn admin_internal_get_local_node_history(
         .ok_or_else(|| ApiError::not_found("node history is not available yet"))
 }
 
+async fn admin_internal_clear_node_history(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<StatusCode, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    state.node_history.clear_node(&node_id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn admin_internal_stream_local_node_runtime_events(
     Extension(state): Extension<AppState>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
@@ -3938,6 +3954,11 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete local node"));
     }
 
+    let cleanup_nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+
     let expected_endpoint_ids = query
         .expected_endpoint_ids
         .unwrap_or_default()
@@ -4055,6 +4076,7 @@ async fn admin_delete_node(
         state.reconcile.request_remove_inbound(tag);
     }
     state.node_history.clear_node(&node_id).await;
+    clear_node_history_on_cluster(&state, &node_id, &cleanup_nodes).await;
     state.reconcile.request_full();
 
     Ok(StatusCode::NO_CONTENT)
@@ -6429,6 +6451,91 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
                 user_id,
                 node_id = %node.node_id,
                 "remote user traffic history cleanup timed out"
+            ),
+        }
+    }
+}
+
+async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &[Node]) {
+    let local_node_id = state.cluster.node_id.clone();
+    for destination in nodes {
+        if destination.node_id != local_node_id && destination.node_id != node_id {
+            state
+                .node_history
+                .queue_node_history_cleanup(&destination.node_id, node_id)
+                .await;
+        }
+    }
+    let client = match build_admin_http_client(state) {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::warn!(node_id, error = ?err, "build client for node history cleanup");
+            return;
+        }
+    };
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
+        tracing::warn!(
+            node_id,
+            "skip remote node history cleanup without cluster ca key"
+        );
+        return;
+    };
+    let uri: axum::http::Uri = match format!("/_internal/nodes/{node_id}/history").parse() {
+        Ok(uri) => uri,
+        Err(_) => {
+            tracing::warn!(node_id, "invalid node history cleanup path");
+            return;
+        }
+    };
+    let signature = match internal_auth::sign_request(ca_key_pem, &Method::DELETE, &uri) {
+        Ok(signature) => signature,
+        Err(err) => {
+            tracing::warn!(node_id, error = %err, "sign node history cleanup request");
+            return;
+        }
+    };
+    for destination in nodes {
+        if destination.node_id == local_node_id || destination.node_id == node_id {
+            continue;
+        }
+        let base = destination.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            tracing::warn!(node_id, destination_node_id = %destination.node_id, "skip node history cleanup");
+            continue;
+        }
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .delete(format!(
+                    "{base}/api/admin/_internal/nodes/{node_id}/history"
+                ))
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    signature.clone(),
+                )
+        });
+        match tokio::time::timeout(Duration::from_secs(3), request).await {
+            Ok(Ok(response)) if response.status().is_success() => {
+                state
+                    .node_history
+                    .complete_node_history_cleanup(&destination.node_id, node_id)
+                    .await;
+            }
+            Ok(Ok(response)) => tracing::warn!(
+                node_id,
+                destination_node_id = %destination.node_id,
+                status = %response.status(),
+                "remote node history cleanup failed"
+            ),
+            Ok(Err(err)) => tracing::warn!(
+                node_id,
+                destination_node_id = %destination.node_id,
+                error = %err,
+                "remote node history cleanup request failed"
+            ),
+            Err(_) => tracing::warn!(
+                node_id,
+                destination_node_id = %destination.node_id,
+                "remote node history cleanup timed out"
             ),
         }
     }
