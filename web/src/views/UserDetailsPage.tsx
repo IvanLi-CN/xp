@@ -477,6 +477,7 @@ export function UserDetailsPage() {
 		if (!userId) return;
 		setIpUsageWindow("24h");
 		setActiveTrafficNodeId(null);
+		setTrafficNodeOptions([]);
 	}, [userId]);
 
 	useEffect(() => {

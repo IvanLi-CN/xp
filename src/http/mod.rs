@@ -2515,10 +2515,7 @@ async fn admin_get_user_traffic(
     };
     let selected_nodes = all_nodes
         .iter()
-        .filter(|node| {
-            current_node_ids.contains(&node.node_id)
-                && query.node_id.as_deref().is_none_or(|id| id == node.node_id)
-        })
+        .filter(|node| query.node_id.as_deref().is_none_or(|id| id == node.node_id))
         .cloned()
         .collect::<Vec<_>>();
     if query.node_id.is_some() && selected_nodes.is_empty() {
@@ -2612,7 +2609,7 @@ async fn admin_get_user_traffic(
     let mut unreachable_nodes = Vec::new();
     let mut missing_active_node_report = false;
     for (node, report, unreachable) in fanout_results {
-        if unreachable {
+        if unreachable && current_node_ids.contains(&node.node_id) {
             unreachable_nodes.push(node.node_id.clone());
         }
         if report.is_none()
