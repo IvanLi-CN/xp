@@ -10,7 +10,7 @@
 - XP 仅拥有本次指定 hostname 的 ingress 规则与其可证明归属的 DNS CNAME。
 - 保留共享 Tunnel 的其他 hostname、服务、规则顺序、顶层配置和 DNS 属性。
 - 支持单个既有 `cloudflared` 进程；本地配置验证后受控重启该进程。
-- 仅在显式 `--migrate-existing-tunnel` 下迁移已证明归属的旧 XP Tunnel 资源。
+- 当旧 settings 与目标 Tunnel 不同时，自动迁移已证明归属的 XP hostname；证据不足时零写入失败。
 - 所有写入在预检后执行，失败时提供可恢复诊断并补偿已完成的写入。
 
 ## 非目标
@@ -28,10 +28,9 @@
   全部规则被替换为 XP 整站规则。唯一合法 catch-all 必须在最后且原样保留；缺失时补
   `http_status:404`，歧义时零写入失败。
 - DNS PATCH 只变更 XP 所有 CNAME 的 `content`，不得重置 TTL、proxied 或其他非 XP 属性。
-- 存量 settings Tunnel ID 与请求目标不一致时默认失败。`--migrate-existing-tunnel` 必须在所有
-  旧 hostname、DNS 和凭据预检成功后才允许写入。
-- 自动迁移仅接受 ingress 恰好只含已持久化 XP hostname 的旧 Tunnel；含其他 hostname 的共享旧
-  Tunnel 必须由运维人员拆分，XP 会零写入拒绝该请求。
+- 存量 settings Tunnel ID 与请求目标不一致时，XP 自动执行旧 hostname、DNS 和凭据预检；任一
+  证明不足时零写入失败。单进程场景仅在旧 Tunnel 只承载 XP hostname 时迁移；共享旧 Tunnel
+  必须零写入拒绝，避免其余服务失去 connector。
 - `--dry-run` 可以执行只读 Cloudflare GET 并输出影响摘要；不得发出 POST/PUT/PATCH/DELETE、
   写文件或重启服务。
 - 修改本地配置前必须运行 `cloudflared tunnel ingress validate`；本地文件原子替换且服务启动/
@@ -41,7 +40,7 @@
 
 - Hinet 形状 fixture 在重复 provision 后，外部 hostname、注释、排版及其他键保持不变。
 - 远端 fixture 的未知字段、SSH/TCP/path 规则及合法 catch-all 保持不变；XP hostname 的全部规则被替换。
-- 未传迁移开关的 Tunnel ID 冲突不得产生本地、Cloudflare、DNS、settings 或服务变更。
+- 自动迁移的任一所有权预检失败不得产生本地、Cloudflare、DNS、settings 或服务变更。
 - 每个写入阶段失败时已完成变更按逆序补偿；补偿失败保留快照并输出人工恢复信息。
 
 ## 实现里程碑

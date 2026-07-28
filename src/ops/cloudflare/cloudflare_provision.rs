@@ -62,48 +62,22 @@ pub(super) async fn run(
     if let Some(id) = args.dns_record_id_override.clone() {
         settings.dns_record_id = Some(id);
     }
-    if let (Some(existing), Some(requested)) = (
-        settings_before.tunnel_id.as_deref(),
-        args.tunnel_id_override.as_deref(),
-    ) && existing != requested
-        && !args.migrate_existing_tunnel
-    {
-        return Err(ExitError::new(
-            2,
-            "tunnel_mismatch: pass --migrate-existing-tunnel after verifying shared resources",
-        ));
-    }
-
     let tunnel_name = args
         .tunnel_name
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "xp".to_string());
 
-    let requested_tunnel_id = args
-        .tunnel_id_override
-        .clone()
-        .or_else(|| settings_before.tunnel_id.clone());
-    let (tunnel_id, created) = if let Some(id) = requested_tunnel_id {
-        (id, None)
-    } else if mode == Mode::DryRun {
-        eprintln!("dry-run: no existing tunnel id; changes are suppressed");
-        return Ok(());
-    } else {
-        let created = client
-            .create_tunnel(&args.account_id, &tunnel_name)
-            .await
-            .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
-        let tunnel_id = created.id.clone();
-        settings.tunnel_id = Some(tunnel_id.clone());
-        (tunnel_id, Some(created))
-    };
-
+    let requested_tunnel_id = args.tunnel_id_override.clone().or_else(|| {
+        (!args.migrate_existing_tunnel)
+            .then(|| settings_before.tunnel_id.clone())
+            .flatten()
+    });
     let migrating_from = settings_before
         .tunnel_id
         .as_deref()
-        .filter(|existing| *existing != tunnel_id && args.migrate_existing_tunnel);
-    let old_remote_before = if let Some(old_tunnel_id) = migrating_from {
+        .filter(|existing| requested_tunnel_id.as_deref() != Some(*existing));
+    let old_preflight = if let Some(old_tunnel_id) = migrating_from {
         if settings_before.hostname != args.hostname || settings_before.zone_id != args.zone_id {
             return Err(ExitError::new(
                 2,
@@ -117,16 +91,65 @@ pub(super) async fn run(
             .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
         let hostnames = ingress_hostnames(&old)
             .map_err(|e| ExitError::new(4, format!("migration_preflight_failed: {e}")))?;
-        if hostnames != [args.hostname.clone()] {
+        if !migration_owns_only_hostname(&hostnames, &args.hostname) {
             return Err(ExitError::new(
                 2,
-                "migration_preflight_failed: only a verified single-hostname Tunnel can migrate",
+                "migration_preflight_failed: shared Tunnel requires another connector",
             ));
         }
-        Some(old)
+        let dns = client
+            .list_dns_records(&args.zone_id, &args.hostname)
+            .await
+            .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
+        select_dns_record(
+            &dns,
+            settings.dns_record_id.as_deref(),
+            &args.hostname,
+            old_tunnel_id,
+            Some(old_tunnel_id),
+        )?;
+        Some((old, dns))
     } else {
         None
     };
+    let (tunnel_id, created) = if let Some(id) = requested_tunnel_id {
+        (id, None)
+    } else if mode == Mode::DryRun {
+        if old_preflight.is_none() {
+            eprintln!("dry-run: no existing tunnel id; changes are suppressed");
+            return Ok(());
+        }
+        let dns = match old_preflight.as_ref() {
+            Some((_, dns)) => dns.clone(),
+            None => unreachable!("migration preflight is required before target creation"),
+        };
+        select_dns_record(
+            &dns,
+            settings.dns_record_id.as_deref(),
+            &args.hostname,
+            "new-tunnel",
+            migrating_from,
+        )?;
+        eprintln!("dry-run: GET preflight completed for a new Tunnel");
+        eprintln!(
+            "dry-run: would {} the target CNAME only",
+            if dns.is_empty() { "create" } else { "patch" }
+        );
+        eprintln!("dry-run: would create a Tunnel and replace XP ingress rules only");
+        eprintln!(
+            "dry-run: no POST/PUT/PATCH/DELETE, file write, or service restart was performed"
+        );
+        return Ok(());
+    } else {
+        let created = client
+            .create_tunnel(&args.account_id, &tunnel_name)
+            .await
+            .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+        let tunnel_id = created.id.clone();
+        settings.tunnel_id = Some(tunnel_id.clone());
+        (tunnel_id, Some(created))
+    };
+    let old_remote_before = old_preflight.as_ref().map(|(remote, _)| remote.clone());
     let old_remote_after = old_remote_before
         .as_ref()
         .map(|config| remove_remote_hostname_rules(config, &args.hostname))
@@ -141,10 +164,13 @@ pub(super) async fn run(
         let remote_after =
             merge_remote_tunnel_config(&remote_before, &args.hostname, &args.origin_url)
                 .map_err(|e| ExitError::new(4, format!("cloudflare_config_error: {e}")))?;
-        let dns_before = client
-            .list_dns_records(&args.zone_id, &args.hostname)
-            .await
-            .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
+        let dns_before = match old_preflight.as_ref() {
+            Some((_, dns)) => dns.clone(),
+            None => client
+                .list_dns_records(&args.zone_id, &args.hostname)
+                .await
+                .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?,
+        };
         let dns_target = select_dns_record(
             &dns_before,
             settings.dns_record_id.as_deref(),
@@ -274,19 +300,6 @@ pub(super) async fn run(
             .await
             .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
         target_config_written = true;
-        if let (Some(old_tunnel_id), Some(old_config)) = (migrating_from, old_remote_after.as_ref())
-        {
-            client
-                .put_tunnel_config(
-                    &args.account_id,
-                    old_tunnel_id,
-                    &remote_config_payload(old_config.clone()),
-                )
-                .await
-                .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
-            old_config_written = true;
-        }
-
         let dns_record_id = if let Some(record) = dns_target.as_ref() {
             client
                 .patch_dns_record(&args.zone_id, &record.id, &args.hostname, &tunnel_id)
@@ -302,6 +315,19 @@ pub(super) async fn run(
             created_dns_id = Some(id.clone());
             id
         };
+
+        if let (Some(old_tunnel_id), Some(old_config)) = (migrating_from, old_remote_after.as_ref())
+        {
+            client
+                .put_tunnel_config(
+                    &args.account_id,
+                    old_tunnel_id,
+                    &remote_config_payload(old_config.clone()),
+                )
+                .await
+                .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+            old_config_written = true;
+        }
 
         settings.tunnel_id = Some(tunnel_id.clone());
         settings.dns_record_id = Some(dns_record_id);
@@ -320,18 +346,6 @@ pub(super) async fn run(
 
     if let Err(error) = operation {
         let mut rollback_errors = Vec::new();
-        if let Some(id) = created_dns_id.as_deref()
-            && let Err(rollback) = client.delete_dns_record(&args.zone_id, id).await
-        {
-            rollback_errors.push(format!("delete created DNS {id}: {rollback}"));
-        }
-        if let Some(record) = patched_dns.as_ref()
-            && let Err(rollback) = client
-                .patch_dns_content(&args.zone_id, &record.id, &record.content)
-                .await
-        {
-            rollback_errors.push(format!("restore DNS {}: {rollback}", record.id));
-        }
         if old_config_written
             && let (Some(old_tunnel_id), Some(old_config)) =
                 (migrating_from, old_remote_before.as_ref())
@@ -344,6 +358,18 @@ pub(super) async fn run(
                 .await
         {
             rollback_errors.push(format!("restore old Tunnel {old_tunnel_id}: {rollback}"));
+        }
+        if let Some(id) = created_dns_id.as_deref()
+            && let Err(rollback) = client.delete_dns_record(&args.zone_id, id).await
+        {
+            rollback_errors.push(format!("delete created DNS {id}: {rollback}"));
+        }
+        if let Some(record) = patched_dns.as_ref()
+            && let Err(rollback) = client
+                .patch_dns_content(&args.zone_id, &record.id, &record.content)
+                .await
+        {
+            rollback_errors.push(format!("restore DNS {}: {rollback}", record.id));
         }
         if target_config_written
             && let Err(rollback) = client
@@ -431,6 +457,10 @@ pub(super) async fn run(
     }
     let _ = fs::remove_dir_all(&snapshot_dir);
     Ok(())
+}
+
+fn migration_owns_only_hostname(hostnames: &[String], hostname: &str) -> bool {
+    !hostnames.is_empty() && hostnames.iter().all(|existing| existing == hostname)
 }
 
 fn restart_cloudflared_service(init_system: InitSystem, paths: &Paths) -> Result<(), ExitError> {
@@ -904,20 +934,5 @@ fn persist_rollback_snapshots(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn credentials_must_belong_to_the_requested_tunnel() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = Paths::new(tmp.path().to_path_buf());
-        let credentials = paths.etc_cloudflared_dir().join("expected.json");
-        fs::create_dir_all(credentials.parent().unwrap()).unwrap();
-        fs::write(&credentials, r#"{"TunnelID":"different"}"#).unwrap();
-
-        let error = verify_tunnel_credentials(&paths, "expected", "preflight").unwrap_err();
-
-        assert_eq!(error.code, 6);
-        assert!(error.message.contains("do not belong"));
-    }
-}
+#[path = "cloudflare_provision_tests.rs"]
+mod tests;

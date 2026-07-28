@@ -469,4 +469,33 @@ mod tests {
             "remote_tunnel_ingress_has_ambiguous_catch_all"
         );
     }
+
+    #[test]
+    fn remote_migration_removes_only_the_owned_hostname() {
+        let remote = json!({
+            "config": {
+                "ingress": [
+                    { "hostname": "ssh.example.com", "service": "ssh://localhost:22" },
+                    { "hostname": "xp.example.com", "service": "http://old" },
+                    { "hostname": "tcp.example.com", "service": "tcp://localhost:5432" },
+                    { "service": "http_status:404" }
+                ]
+            }
+        });
+
+        let migrated = remove_remote_hostname_rules(&remote, "xp.example.com").unwrap();
+
+        assert_eq!(
+            migrated["config"]["ingress"][0],
+            remote["config"]["ingress"][0]
+        );
+        assert_eq!(
+            migrated["config"]["ingress"][1],
+            remote["config"]["ingress"][2]
+        );
+        assert_eq!(
+            migrated["config"]["ingress"][2],
+            remote["config"]["ingress"][3]
+        );
+    }
 }
