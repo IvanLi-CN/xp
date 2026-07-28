@@ -9,7 +9,7 @@ const meta = {
 	tags: ["autodocs", "coverage-ui"],
 	decorators: [
 		(Story) => (
-			<div className="w-full max-w-5xl space-y-4 rounded-lg border border-border bg-card p-6">
+			<div className="w-full max-w-none space-y-4 rounded-lg border border-border bg-card p-6">
 				<Story />
 			</div>
 		),
@@ -55,6 +55,10 @@ export const NameUnavailable: Story = {
 };
 
 export const StateMatrix: Story = {
+	args: {
+		nodeId: "01KYWKVPF8BEJ5C5XWN657AS0YW",
+		nodeName: "Tokyo edge 01",
+	},
 	render: () => (
 		<div className="flex min-h-[720px] flex-col justify-center gap-10">
 			<div className="space-y-2">
