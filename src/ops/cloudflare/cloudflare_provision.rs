@@ -230,6 +230,7 @@ pub(super) async fn run(
     let mut old_config_written = false;
     let mut patched_dns: Option<DnsRecordInfo> = None;
     let mut created_dns_id: Option<String> = None;
+    let mut service_change_attempted = false;
 
     let operation: Result<(), ExitError> = async {
         if let Some(created) = created.as_ref() {
@@ -294,6 +295,7 @@ pub(super) async fn run(
         save_settings(&paths, &settings)?;
 
         if args.enabled() && runtime == ProvisionRuntime::ManagedService {
+            service_change_attempted = true;
             enable_cloudflared_service(init_system, mode, &paths)?;
             if config_changed {
                 restart_cloudflared_service(init_system, &paths)?;
@@ -362,7 +364,7 @@ pub(super) async fn run(
         {
             rollback_errors.push(format!("remove created credentials: {rollback}"));
         }
-        if config_changed
+        if service_change_attempted
             && let Some(service_before) = service_before
             && let Err(rollback) =
                 restore_cloudflared_service_state(init_system, &paths, service_before)
