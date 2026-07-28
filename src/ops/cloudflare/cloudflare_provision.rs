@@ -232,6 +232,7 @@ pub(super) async fn run(
         &remote_before,
         old_remote_before.as_ref(),
         &dns_before,
+        service_file_before.as_deref(),
     )?;
     let mut config_changed = false;
     let mut target_config_written = false;
@@ -375,6 +376,15 @@ pub(super) async fn run(
             {
                 rollback_errors.push(format!("restore service file metadata: {rollback}"));
             }
+        }
+        if service_file_path.is_some()
+            && init_system == InitSystem::Systemd
+            && let Err(rollback) = reload_systemd_units(&paths)
+        {
+            rollback_errors.push(format!(
+                "reload restored systemd unit: {}",
+                rollback.message
+            ));
         }
         if let Err(rollback) =
             restore_optional_file(&settings_path, settings_before_bytes.as_deref())
@@ -553,6 +563,13 @@ fn restore_cloudflared_service_state(
         stop_command
     };
     ensure_service_command(command.0, command.1)
+}
+
+fn reload_systemd_units(paths: &Paths) -> Result<(), ExitError> {
+    if is_test_root(paths.root()) {
+        return Ok(());
+    }
+    ensure_service_command("systemctl", &["daemon-reload"])
 }
 
 fn cloudflared_service_file_path(
@@ -844,6 +861,7 @@ fn persist_rollback_snapshots(
     target_remote: &serde_json::Value,
     old_remote: Option<&serde_json::Value>,
     dns: &[DnsRecordInfo],
+    service_file: Option<&[u8]>,
 ) -> Result<std::path::PathBuf, ExitError> {
     let directory = paths
         .etc_xp_ops_cloudflare_dir()
@@ -871,6 +889,10 @@ fn persist_rollback_snapshots(
                 .map_err(|error| ExitError::new(6, format!("filesystem_error: {error}")))?,
         )
         .map_err(|error| ExitError::new(6, format!("filesystem_error: {error}")))?;
+    }
+    if let Some(bytes) = service_file {
+        fs::write(directory.join("service-definition"), bytes)
+            .map_err(|error| ExitError::new(6, format!("filesystem_error: {error}")))?;
     }
     fs::write(
         directory.join("dns.json"),
