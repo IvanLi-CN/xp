@@ -6,6 +6,8 @@ description="cloudflared (Cloudflare Tunnel)"
 command="/usr/local/bin/cloudflared"
 command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
+export GOMEMLIMIT="${GOMEMLIMIT:-12MiB}"
+export GOGC="${GOGC:-50}"
 
 # Ensure automatic recovery on crashes without busy-looping.
 supervisor=supervise-daemon

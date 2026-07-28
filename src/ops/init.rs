@@ -130,9 +130,10 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
       },
       "stats": {},
       "policy": {
-        "levels": {
-          "0": {
-            "handshake": 4,
+      "levels": {
+        "0": {
+          "bufferSize": 0,
+          "handshake": 4,
             "connIdle": 300,
             "uplinkOnly": 2,
             "downlinkOnly": 5,
@@ -178,6 +179,57 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     write_string_if_changed(&paths.etc_xray_config(), &(content + "\n"))
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&paths.etc_xray_config(), 0o644).ok();
+    Ok(())
+}
+
+/// Backfill memory defaults during upgrades without replacing operator-managed units.
+pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
+    let systemd = paths.systemd_unit_dir();
+    if systemd.join("xray.service").exists() {
+        let dir = systemd.join("xray.service.d");
+        ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+        write_string_if_changed(
+            &dir.join("20-xp-memory.conf"),
+            "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+        )
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    }
+    if systemd.join("cloudflared.service").exists() {
+        let dir = systemd.join("cloudflared.service.d");
+        ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+        write_string_if_changed(
+            &dir.join("20-xp-memory.conf"),
+            "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n",
+        )
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    }
+    for (path, limit) in [
+        (paths.openrc_initd_dir().join("xray"), "16MiB"),
+        (paths.openrc_initd_dir().join("cloudflared"), "12MiB"),
+    ] {
+        if !path.exists() {
+            continue;
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+        if raw.contains("GOMEMLIMIT") {
+            continue;
+        }
+        let value = format!(
+            "export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\nexport GOGC=\"${{GOGC:-50}}\"\n"
+        );
+        let marker = "command_user=\"";
+        let Some(pos) = raw.find(marker) else {
+            continue;
+        };
+        let end = raw[pos..]
+            .find('\n')
+            .map(|n| pos + n + 1)
+            .unwrap_or(raw.len());
+        let updated = format!("{}{}{}", &raw[..end], value, &raw[end..]);
+        write_string_if_changed(&path, &updated)
+            .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    }
     Ok(())
 }
 
@@ -261,6 +313,8 @@ Type=simple\n\
 User=xray\n\
 Group=xray\n\
 WorkingDirectory={}\n\
+Environment=GOMEMLIMIT=16MiB\n\
+Environment=GOGC=50\n\
 ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json\n\
 Restart=always\n\
 RestartSec=2s\n\
@@ -635,6 +689,8 @@ description="xray (local proxy runtime)"
 command="/usr/local/bin/xray"
 command_args="run -c /etc/xray/config.json"
 command_user="xray:xray"
+export GOMEMLIMIT="${GOMEMLIMIT:-16MiB}"
+export GOGC="${GOGC:-50}"
 
 # Ensure automatic recovery on crashes without busy-looping.
 supervisor=supervise-daemon
@@ -958,6 +1014,8 @@ mod tests {
     fn openrc_xray_script_does_not_background_when_supervised() {
         let script = openrc_xray_script();
         assert!(script.contains("supervisor=supervise-daemon"));
+        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\""));
+        assert!(script.contains("GOGC=\"${GOGC:-50}\""));
         assert!(!script.contains("command_background="));
         assert!(!script.contains("pidfile="));
     }
@@ -973,6 +1031,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&content).unwrap();
 
         assert_eq!(value["policy"]["levels"]["0"]["handshake"], 4);
+        assert_eq!(value["policy"]["levels"]["0"]["bufferSize"], 0);
         assert_eq!(value["policy"]["levels"]["0"]["connIdle"], 300);
         assert_eq!(value["policy"]["levels"]["0"]["uplinkOnly"], 2);
         assert_eq!(value["policy"]["levels"]["0"]["downlinkOnly"], 5);

@@ -1,4 +1,7 @@
-use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash as parse_hash_value};
+use crate::admin_token::{
+    hash_admin_token_argon2id, is_default_admin_token_hash_profile,
+    parse_admin_token_hash as parse_hash_value,
+};
 use crate::ops::cli::{AdminTokenSetArgs, AdminTokenShowArgs, ExitError};
 use crate::ops::paths::Paths;
 use crate::ops::util::{
@@ -42,6 +45,12 @@ pub async fn cmd_admin_token_set(paths: Paths, args: AdminTokenSetArgs) -> Resul
                 "invalid_input: --hash must be an argon2id PHC string",
             ));
         };
+        if !is_default_admin_token_hash_profile(&hash) {
+            return Err(ExitError::new(
+                2,
+                "invalid_input: --hash must use argon2id m=4096,t=3,p=1",
+            ));
+        }
         hash.as_str().to_string()
     } else {
         let token = if let Some(token) = args.token.as_deref() {

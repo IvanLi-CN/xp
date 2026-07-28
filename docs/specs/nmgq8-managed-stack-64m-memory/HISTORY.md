@@ -1,5 +1,8 @@
 # History
 
+- 2026-07-29: added low-memory administrator authentication, child-process Go
+  heap defaults, upgrade backfill, and PSS sampling.
+
 - 2026-07-29: created after production OOM diagnosis on a 128 MB node.
 - The 64 MiB aggregate PSS target supersedes the memory sizing assumption in #r7m2q without
   replacing its restart/backoff contract.

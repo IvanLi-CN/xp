@@ -181,7 +181,7 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
 
     let mut cloudflared_child = None;
     if spec.startup.needs_join_wait() && spec.cloudflare.is_some() {
-        let mut child = spawn_cloudflared(&binaries.cloudflared)?;
+        let mut child = spawn_cloudflared(&binaries.cloudflared, &spec.runtime_env)?;
         if let Err(err) =
             wait_for_child_startup("cloudflared", &mut child, CLOUDFLARED_STARTUP_GRACE).await
         {
@@ -204,7 +204,7 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
         }
     };
 
-    let mut xray_child = match spawn_xray(&binaries.xray, &paths) {
+    let mut xray_child = match spawn_xray(&binaries.xray, &paths, &spec.runtime_env) {
         Ok(child) => child,
         Err(err) => {
             cleanup_optional_child(&mut cloudflared_child).await;
@@ -219,7 +219,7 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
     }
 
     if cloudflared_child.is_none() && spec.cloudflare.is_some() {
-        match spawn_cloudflared(&binaries.cloudflared) {
+        match spawn_cloudflared(&binaries.cloudflared, &spec.runtime_env) {
             Ok(child) => cloudflared_child = Some(child),
             Err(err) => {
                 cleanup_child(&mut xray_child).await;
@@ -497,6 +497,10 @@ fn build_runtime_env(
         "XP_DEFAULT_VLESS_SERVER_NAMES",
         "XP_DEFAULT_VLESS_FINGERPRINT",
         "XP_DEFAULT_SS_PORT",
+        "XP_XRAY_GOMEMLIMIT",
+        "XP_XRAY_GOGC",
+        "XP_CLOUDFLARED_GOMEMLIMIT",
+        "XP_CLOUDFLARED_GOGC",
     ] {
         if let Some(value) = optional_env(env_map, key) {
             out.insert(key.to_string(), value);
@@ -513,6 +517,14 @@ fn build_runtime_env(
             ddns.token_file.display().to_string(),
         );
     }
+    out.entry("XP_XRAY_GOMEMLIMIT".to_string())
+        .or_insert_with(|| "16MiB".to_string());
+    out.entry("XP_XRAY_GOGC".to_string())
+        .or_insert_with(|| "50".to_string());
+    out.entry("XP_CLOUDFLARED_GOMEMLIMIT".to_string())
+        .or_insert_with(|| "12MiB".to_string());
+    out.entry("XP_CLOUDFLARED_GOGC".to_string())
+        .or_insert_with(|| "50".to_string());
     out
 }
 
@@ -1047,24 +1059,59 @@ async fn run_xp_command(
     ))
 }
 
-fn spawn_xray(xray_bin: &Path, paths: &Paths) -> Result<Child, ExitError> {
+fn spawn_xray(
+    xray_bin: &Path,
+    paths: &Paths,
+    runtime_env: &BTreeMap<String, String>,
+) -> Result<Child, ExitError> {
     Command::new(xray_bin)
         .arg("run")
         .arg("-c")
         .arg(paths.etc_xray_config())
+        .env(
+            "GOMEMLIMIT",
+            runtime_env
+                .get("XP_XRAY_GOMEMLIMIT")
+                .map(String::as_str)
+                .unwrap_or("16MiB"),
+        )
+        .env(
+            "GOGC",
+            runtime_env
+                .get("XP_XRAY_GOGC")
+                .map(String::as_str)
+                .unwrap_or("50"),
+        )
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| ExitError::new(6, format!("container_start_failed: spawn xray: {e}")))
 }
 
-fn spawn_cloudflared(cloudflared_bin: &Path) -> Result<Child, ExitError> {
+fn spawn_cloudflared(
+    cloudflared_bin: &Path,
+    runtime_env: &BTreeMap<String, String>,
+) -> Result<Child, ExitError> {
     Command::new(cloudflared_bin)
         .arg("--no-autoupdate")
         .arg("--config")
         .arg("/etc/cloudflared/config.yml")
         .arg("tunnel")
         .arg("run")
+        .env(
+            "GOMEMLIMIT",
+            runtime_env
+                .get("XP_CLOUDFLARED_GOMEMLIMIT")
+                .map(String::as_str)
+                .unwrap_or("12MiB"),
+        )
+        .env(
+            "GOGC",
+            runtime_env
+                .get("XP_CLOUDFLARED_GOGC")
+                .map(String::as_str)
+                .unwrap_or("50"),
+        )
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
