@@ -299,12 +299,26 @@ fn enable_cloudflared_service(
             }
         }
         InitSystem::OpenRc => {
-            let _ = Command::new("rc-update")
+            let enable_status = Command::new("rc-update")
                 .args(["add", "cloudflared", "default"])
-                .status();
-            let _ = Command::new("rc-service")
+                .status()
+                .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
+            if !enable_status.success() {
+                return Err(ExitError::new(
+                    6,
+                    "filesystem_error: enable cloudflared failed",
+                ));
+            }
+            let start_status = Command::new("rc-service")
                 .args(["cloudflared", "start"])
-                .status();
+                .status()
+                .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
+            if !start_status.success() {
+                return Err(ExitError::new(
+                    6,
+                    "filesystem_error: start cloudflared failed",
+                ));
+            }
         }
         InitSystem::None => {}
     }
