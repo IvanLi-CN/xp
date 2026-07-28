@@ -1,9 +1,12 @@
+use std::io::Read;
+
 use axum::{
     body::Body,
     extract::{Path, Request},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use flate2::read::GzDecoder;
 
 use super::{CSP_HEADER_VALUE, web_assets};
 
@@ -62,10 +65,11 @@ fn embedded_content_type(path: &str) -> &'static str {
 }
 
 fn embedded_bytes_response(
-    body: &'static [u8],
+    asset: web_assets::EmbeddedAsset,
     content_type: &'static str,
     cache_policy: EmbeddedCachePolicy,
     csp: bool,
+    accepts_gzip: bool,
 ) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
@@ -92,6 +96,22 @@ fn embedded_bytes_response(
         header::HeaderName::from_static("x-content-type-options"),
         HeaderValue::from_static("nosniff"),
     );
+    let body = if asset.gzip && accepts_gzip {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        Body::from(asset.bytes)
+    } else if asset.gzip {
+        let mut decoder = GzDecoder::new(asset.bytes);
+        let mut decoded = Vec::new();
+        if decoder.read_to_end(&mut decoded).is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Body::from(decoded)
+    } else {
+        Body::from(asset.bytes)
+    };
+    if asset.gzip {
+        headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    }
     if csp {
         headers.insert(
             header::HeaderName::from_static("content-security-policy"),
@@ -101,7 +121,31 @@ fn embedded_bytes_response(
     (headers, body).into_response()
 }
 
-fn embedded_index_response() -> Response {
+fn client_accepts_gzip(headers: &HeaderMap) -> bool {
+    let mut gzip = None;
+    let mut wildcard = None;
+    for value in headers.get_all(header::ACCEPT_ENCODING) {
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        for entry in value.split(',') {
+            let mut parts = entry.split(';');
+            let coding = parts.next().unwrap_or_default().trim();
+            let quality = parts
+                .find_map(|part| part.trim().strip_prefix("q="))
+                .and_then(|quality| quality.parse::<f32>().ok())
+                .unwrap_or(1.0);
+            if coding.eq_ignore_ascii_case("gzip") {
+                gzip = Some(quality);
+            } else if coding == "*" {
+                wildcard = Some(quality);
+            }
+        }
+    }
+    gzip.or(wildcard).is_some_and(|quality| quality > 0.0)
+}
+
+fn embedded_index_response(accepts_gzip: bool) -> Response {
     let Some(index) = web_assets::get("index.html") else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
@@ -110,10 +154,11 @@ fn embedded_index_response() -> Response {
         "text/html; charset=utf-8",
         EMBEDDED_NO_CACHE_POLICY,
         true,
+        accepts_gzip,
     )
 }
 
-pub async fn embedded_asset(Path(path): Path<String>) -> Response {
+pub async fn embedded_asset(Path(path): Path<String>, headers: HeaderMap) -> Response {
     let key = format!("assets/{path}");
     let Some(asset) = web_assets::get(&key) else {
         return StatusCode::NOT_FOUND.into_response();
@@ -123,6 +168,7 @@ pub async fn embedded_asset(Path(path): Path<String>) -> Response {
         embedded_content_type(&key),
         EMBEDDED_IMMUTABLE_CACHE_POLICY,
         false,
+        client_accepts_gzip(&headers),
     )
 }
 
@@ -131,9 +177,10 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    let accepts_gzip = client_accepts_gzip(req.headers());
     let path = req.uri().path().trim_start_matches('/');
     if path.is_empty() {
-        return embedded_index_response();
+        return embedded_index_response(accepts_gzip);
     }
 
     if let Some(bytes) = web_assets::get(path) {
@@ -149,19 +196,24 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
             embedded_content_type(path),
             cache_policy,
             path == "index.html",
+            accepts_gzip,
         );
     }
 
-    embedded_index_response()
+    embedded_index_response(accepts_gzip)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::embedded_spa_fallback;
+    use std::io::Read;
+
+    use super::{client_accepts_gzip, embedded_spa_fallback};
     use axum::{
         body::Body,
-        http::{Method, StatusCode, header},
+        http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     };
+    use flate2::read::GzDecoder;
+    use http_body_util::BodyExt;
 
     fn req(method: Method, uri: &str) -> axum::extract::Request {
         axum::extract::Request::builder()
@@ -200,5 +252,43 @@ mod tests {
             "no-store"
         );
         assert_eq!(headers.get(header::PRAGMA).unwrap(), "no-cache");
+        assert!(headers.get(header::CONTENT_ENCODING).is_none());
+        assert_eq!(headers.get(header::VARY).unwrap(), "Accept-Encoding");
+    }
+
+    #[tokio::test]
+    async fn embedded_index_uses_gzip_when_accepted() {
+        let request = axum::extract::Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .header(header::ACCEPT_ENCODING, "br, GZIP")
+            .body(Body::empty())
+            .unwrap();
+        let response = embedded_spa_fallback(request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_ENCODING).unwrap(),
+            "gzip"
+        );
+        assert_eq!(
+            response.headers().get(header::VARY).unwrap(),
+            "Accept-Encoding"
+        );
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let mut decoder = GzDecoder::new(body.as_ref());
+        let mut decoded = String::new();
+        decoder.read_to_string(&mut decoded).unwrap();
+        assert!(decoded.contains("<!doctype html>"));
+    }
+
+    #[test]
+    fn explicit_gzip_rejection_overrides_wildcard() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip;q=0, *;q=1"),
+        );
+        assert!(!client_accepts_gzip(&headers));
     }
 }
