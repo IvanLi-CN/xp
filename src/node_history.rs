@@ -618,16 +618,26 @@ fn record_traffic_sample(
             user_deltas.entry(user_id.clone()).or_default();
         }
         let previous = record.traffic_baselines.get(&totals.membership_key);
-        let delta = previous.and_then(|previous| {
-            (totals.uplink_total >= previous.uplink_total
-                && totals.downlink_total >= previous.downlink_total)
-                .then(|| {
-                    (
-                        totals.uplink_total - previous.uplink_total,
-                        totals.downlink_total - previous.downlink_total,
-                    )
-                })
+        let previous_is_contiguous = previous.is_some_and(|previous| {
+            previous
+                .updated_at
+                .parse::<DateTime<Utc>>()
+                .ok()
+                .map(floor_five_minute)
+                == Some(bucket_start)
         });
+        let delta = previous
+            .filter(|_| previous_is_contiguous)
+            .and_then(|previous| {
+                (totals.uplink_total >= previous.uplink_total
+                    && totals.downlink_total >= previous.downlink_total)
+                    .then(|| {
+                        (
+                            totals.uplink_total - previous.uplink_total,
+                            totals.downlink_total - previous.downlink_total,
+                        )
+                    })
+            });
         if let Some((uplink, downlink)) = delta {
             node_up = node_up.saturating_add(uplink);
             node_down = node_down.saturating_add(downlink);
@@ -643,6 +653,12 @@ fn record_traffic_sample(
         } else if previous.is_none() {
             complete = false;
             saw_new_baseline = true;
+        } else if !previous_is_contiguous {
+            complete = false;
+            warnings.push(format!(
+                "sampling gap for {}; recovered bucket has no delta",
+                totals.membership_key
+            ));
         } else if previous.is_some() {
             complete = false;
             warnings.push(format!(
@@ -859,9 +875,11 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
     for record in records {
         for bucket in &record.five_minute {
             if let Some(entry) = five_minute.get_mut(&bucket.start_at) {
-                entry.uplink_bytes = add_optional(entry.uplink_bytes, bucket.uplink_bytes);
-                entry.downlink_bytes = add_optional(entry.downlink_bytes, bucket.downlink_bytes);
-                entry.complete &= bucket.complete;
+                entry.uplink_bytes = add_required(entry.uplink_bytes, bucket.uplink_bytes);
+                entry.downlink_bytes = add_required(entry.downlink_bytes, bucket.downlink_bytes);
+                entry.complete &= bucket.complete
+                    && entry.uplink_bytes.is_some()
+                    && entry.downlink_bytes.is_some();
                 entry.warnings.extend(bucket.warnings.clone());
             } else {
                 five_minute.insert(bucket.start_at.clone(), bucket.clone());
@@ -869,9 +887,11 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
         }
         for bucket in &record.daily {
             if let Some(entry) = daily.get_mut(&bucket.date) {
-                entry.uplink_bytes = add_optional(entry.uplink_bytes, bucket.uplink_bytes);
-                entry.downlink_bytes = add_optional(entry.downlink_bytes, bucket.downlink_bytes);
-                entry.complete &= bucket.complete;
+                entry.uplink_bytes = add_required(entry.uplink_bytes, bucket.uplink_bytes);
+                entry.downlink_bytes = add_required(entry.downlink_bytes, bucket.downlink_bytes);
+                entry.complete &= bucket.complete
+                    && entry.uplink_bytes.is_some()
+                    && entry.downlink_bytes.is_some();
                 entry.warnings.extend(bucket.warnings.clone());
             } else {
                 daily.insert(bucket.date.clone(), bucket.clone());
@@ -901,6 +921,34 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
             last_sample_at = record.last_sample_at.clone();
         }
     }
+    for (start_at, bucket) in &mut five_minute {
+        if records.iter().any(|record| {
+            !record
+                .five_minute
+                .iter()
+                .any(|candidate| candidate.start_at == *start_at)
+        }) {
+            bucket.uplink_bytes = None;
+            bucket.downlink_bytes = None;
+            bucket.complete = false;
+            bucket
+                .warnings
+                .push("sampling gap across aggregated nodes".to_string());
+        }
+    }
+    for (date, bucket) in &mut daily {
+        if records
+            .iter()
+            .any(|record| !record.daily.iter().any(|candidate| candidate.date == *date))
+        {
+            bucket.uplink_bytes = None;
+            bucket.downlink_bytes = None;
+            bucket.complete = false;
+            bucket
+                .warnings
+                .push("sampling gap across aggregated nodes".to_string());
+        }
+    }
 
     let mut five_minute = five_minute.into_values().collect::<Vec<_>>();
     five_minute.sort_by(|a, b| a.start_at.cmp(&b.start_at));
@@ -918,12 +966,10 @@ fn aggregate_user_records(records: &[&PersistedUserTrafficRecord]) -> NodeTraffi
     }
 }
 
-fn add_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+fn add_required(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
+        (_, _) => None,
     }
 }
 
@@ -1192,62 +1238,67 @@ pub fn merge_traffic_reports(
         return build_traffic_report(&NodeTrafficRollupSnapshot::default(), window, now);
     }
     let first = &reports[0];
-    let merge_points = |index: usize, reference: bool| -> TrafficSeriesPoint {
-        let base = if reference {
-            reports[0]
-                .reference
-                .as_ref()
-                .and_then(|points| points.get(index))
-        } else {
-            reports[0].current.get(index)
-        };
-        let fallback = TrafficSeriesPoint {
-            start_at: String::new(),
-            end_at: String::new(),
-            uplink_bytes: None,
-            downlink_bytes: None,
-            total_bytes: None,
-            complete: false,
-            is_current_day: false,
-        };
-        let base = base.unwrap_or(&fallback);
-        let mut uplink = None;
-        let mut downlink = None;
+    let window_end = reports
+        .iter()
+        .filter_map(|report| report.window_end_at.parse::<DateTime<Utc>>().ok())
+        .max()
+        .unwrap_or_else(|| floor_five_minute(now));
+    let (bucket_count, bucket_duration) = match window {
+        TrafficWindow::Hours24 => (288usize, ChronoDuration::hours(24)),
+        TrafficWindow::Days31 => (31usize, ChronoDuration::days(31)),
+    };
+    let bucket_step = match window {
+        TrafficWindow::Hours24 => ChronoDuration::minutes(5),
+        TrafficWindow::Days31 => ChronoDuration::days(1),
+    };
+    let window_start = window_end - bucket_duration;
+    let reference_start = window_start - bucket_duration;
+    let point_at = |start: DateTime<Utc>, is_reference: bool| -> TrafficSeriesPoint {
+        let key = rfc3339(start);
+        let mut uplink = Some(0u64);
+        let mut downlink = Some(0u64);
         let mut complete = true;
         for report in reports {
-            let point = if reference {
+            let point = if is_reference {
                 report
                     .reference
                     .as_ref()
-                    .and_then(|points| points.get(index))
+                    .and_then(|points| points.iter().find(|point| point.start_at == key))
             } else {
-                report.current.get(index)
+                report.current.iter().find(|point| point.start_at == key)
             };
             let Some(point) = point else {
                 complete = false;
+                uplink = None;
+                downlink = None;
                 continue;
             };
-            uplink = add_optional(uplink, point.uplink_bytes);
-            downlink = add_optional(downlink, point.downlink_bytes);
+            uplink = add_required(uplink, point.uplink_bytes);
+            downlink = add_required(downlink, point.downlink_bytes);
             complete &= point.complete;
         }
+        let is_current_day = matches!(window, TrafficWindow::Days31)
+            && start.date_naive() == (window_end - ChronoDuration::days(1)).date_naive();
         traffic_point(
-            base.start_at.clone(),
-            base.end_at.clone(),
+            rfc3339(start),
+            rfc3339(start + bucket_step),
             uplink,
             downlink,
             complete && uplink.is_some() && downlink.is_some(),
-            base.is_current_day,
+            is_current_day,
         )
     };
-    let current = (0..first.current.len())
-        .map(|index| merge_points(index, false))
+    let current = (0..bucket_count)
+        .map(|index| point_at(window_start + bucket_step * index as i32, false))
         .collect::<Vec<_>>();
-    let reference = first.reference.as_ref().map(|points| {
-        (0..points.len())
-            .map(|index| merge_points(index, true))
-            .collect::<Vec<_>>()
-    });
+    let reference = reports
+        .iter()
+        .any(|report| report.reference.is_some())
+        .then(|| {
+            (0..bucket_count)
+                .map(|index| point_at(reference_start + bucket_step * index as i32, true))
+                .collect::<Vec<_>>()
+        });
     let mut summary = first.summary.clone();
     summary.uplink_bytes = reports.iter().fold(0u64, |sum, report| {
         sum.saturating_add(report.summary.uplink_bytes)
@@ -1261,6 +1312,19 @@ pub fn merge_traffic_reports(
         .iter()
         .flat_map(|report| report.warnings.clone())
         .collect::<Vec<_>>();
+    if current
+        .iter()
+        .any(|point| point.uplink_bytes.is_none() || !point.complete)
+    {
+        warnings.push("sampling gap in current window".to_string());
+    }
+    if reference.as_ref().is_some_and(|points| {
+        points
+            .iter()
+            .any(|point| point.uplink_bytes.is_none() || !point.complete)
+    }) {
+        warnings.push("sampling gap in reference window".to_string());
+    }
     warnings.sort();
     warnings.dedup();
     let partial = !summary.complete
@@ -1274,8 +1338,8 @@ pub fn merge_traffic_reports(
         });
     TrafficReport {
         window: window.as_str().to_string(),
-        window_start_at: first.window_start_at.clone(),
-        window_end_at: first.window_end_at.clone(),
+        window_start_at: rfc3339(window_start),
+        window_end_at: rfc3339(window_end),
         timezone: "UTC".to_string(),
         summary,
         current,
@@ -1735,12 +1799,39 @@ mod tests {
         }
     }
 
+    fn report_with_current_points(
+        window_end_at: &str,
+        current: Vec<TrafficSeriesPoint>,
+    ) -> TrafficReport {
+        TrafficReport {
+            window: "24h".to_string(),
+            window_start_at: "2026-05-19T00:00:00Z".to_string(),
+            window_end_at: window_end_at.to_string(),
+            timezone: "UTC".to_string(),
+            summary: TrafficSummary {
+                mode: "rolling_30d".to_string(),
+                cycle_start_at: None,
+                cycle_end_at: None,
+                uplink_bytes: 0,
+                downlink_bytes: 0,
+                total_bytes: 0,
+                complete: true,
+                tracking_since: None,
+            },
+            current,
+            reference: None,
+            partial: false,
+            last_sample_at: Some(window_end_at.to_string()),
+            warnings: Vec::new(),
+        }
+    }
+
     #[tokio::test]
     async fn records_daily_traffic_delta_and_component_snapshot() {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
         let t0 = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let t1 = "2026-05-20T01:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let t1 = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
 
         handle
             .record_local_sample(
@@ -1772,8 +1863,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
         let t0 = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let t1 = "2026-05-20T01:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let t2 = "2026-05-20T02:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let t1 = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        let t2 = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
 
         for (at, up, down) in [(t0, 100, 300), (t1, 90, 290), (t2, 120, 340)] {
             handle
@@ -1924,7 +2015,7 @@ mod tests {
     async fn daily_rollup_uses_five_minute_bucket_utc_date() {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
-        let first = "2026-05-19T23:50:00Z".parse::<DateTime<Utc>>().unwrap();
+        let first = "2026-05-19T23:55:00Z".parse::<DateTime<Utc>>().unwrap();
         let boundary = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
 
         for (at, up, down) in [(first, 100, 300), (boundary, 160, 380)] {
@@ -2044,6 +2135,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn merged_reports_align_by_timestamp_and_preserve_missing_node_values() {
+        let first = report_with_current_points(
+            "2026-05-20T00:10:00Z",
+            vec![
+                traffic_point(
+                    "2026-05-20T00:00:00Z".to_string(),
+                    "2026-05-20T00:05:00Z".to_string(),
+                    Some(100),
+                    Some(1),
+                    true,
+                    false,
+                ),
+                traffic_point(
+                    "2026-05-20T00:05:00Z".to_string(),
+                    "2026-05-20T00:10:00Z".to_string(),
+                    Some(10),
+                    Some(1),
+                    true,
+                    false,
+                ),
+            ],
+        );
+        let second = report_with_current_points(
+            "2026-05-20T00:15:00Z",
+            vec![
+                traffic_point(
+                    "2026-05-20T00:05:00Z".to_string(),
+                    "2026-05-20T00:10:00Z".to_string(),
+                    Some(20),
+                    Some(2),
+                    true,
+                    false,
+                ),
+                traffic_point(
+                    "2026-05-20T00:10:00Z".to_string(),
+                    "2026-05-20T00:15:00Z".to_string(),
+                    Some(30),
+                    Some(3),
+                    true,
+                    false,
+                ),
+            ],
+        );
+
+        let merged = merge_traffic_reports(
+            &[first, second],
+            TrafficWindow::Hours24,
+            "2026-05-20T00:15:00Z".parse().unwrap(),
+        );
+        let at_five = merged
+            .current
+            .iter()
+            .find(|point| point.start_at == "2026-05-20T00:05:00Z")
+            .unwrap();
+        let at_ten = merged
+            .current
+            .iter()
+            .find(|point| point.start_at == "2026-05-20T00:10:00Z")
+            .unwrap();
+        assert_eq!(at_five.uplink_bytes, Some(30));
+        assert_eq!(at_ten.uplink_bytes, None);
+        assert!(merged.partial);
+    }
+
     #[tokio::test]
     async fn five_minute_rollup_is_capped_at_588_buckets() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2069,8 +2225,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
         let t0 = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let t1 = "2026-05-20T01:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let t2 = "2026-05-20T02:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let t1 = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        let t2 = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
 
         handle
             .record_local_sample(
@@ -2104,8 +2260,8 @@ mod tests {
             .await;
 
         let snapshot = handle.snapshot("node-a").await.unwrap();
-        assert_eq!(snapshot.daily_traffic[0].uplink_bytes, 50);
-        assert_eq!(snapshot.daily_traffic[0].downlink_bytes, 100);
+        assert_eq!(snapshot.daily_traffic[0].uplink_bytes, 20);
+        assert_eq!(snapshot.daily_traffic[0].downlink_bytes, 40);
     }
 
     #[tokio::test]

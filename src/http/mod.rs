@@ -1165,7 +1165,8 @@ pub fn build_router(
         )
         .route(
             "/_internal/users/{user_id}/traffic/local",
-            get(admin_internal_get_local_user_traffic),
+            get(admin_internal_get_local_user_traffic)
+                .delete(admin_internal_clear_local_user_traffic),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -2494,45 +2495,43 @@ async fn admin_get_user_traffic(
     Query(query): Query<TrafficQuery>,
 ) -> Result<Json<AdminUserTrafficResponse>, ApiError> {
     let window = parse_traffic_window(&query)?;
-    let (user, relevant_nodes) = {
+    let (user, all_nodes, current_node_ids) = {
         let store = state.store.lock().await;
         let user = store
             .get_user(&user_id)
             .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
-        let nodes_by_id = store
-            .list_nodes()
-            .into_iter()
-            .map(|node| (node.node_id.clone(), node))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut nodes = Vec::new();
-        let mut seen = BTreeSet::new();
-        for membership in store.state().node_user_endpoint_memberships.iter() {
-            if membership.user_id != user_id || !seen.insert(membership.node_id.clone()) {
-                continue;
-            }
-            if let Some(node) = nodes_by_id.get(&membership.node_id) {
-                nodes.push(node.clone());
-            }
-        }
-        nodes.sort_by(|left, right| left.node_id.cmp(&right.node_id));
-        (user, nodes)
+        let current_node_ids = store
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|membership| membership.user_id == user_id)
+            .map(|membership| membership.node_id.clone())
+            .collect::<BTreeSet<_>>();
+        (user, store.list_nodes(), current_node_ids)
     };
-    let node_options = relevant_nodes
+    let selected_nodes = all_nodes
         .iter()
-        .map(|node| UserTrafficNodeOption {
-            node_id: node.node_id.clone(),
-            node_name: node.node_name.clone(),
-        })
-        .collect::<Vec<_>>();
-    let selected_nodes = relevant_nodes
-        .into_iter()
         .filter(|node| query.node_id.as_deref().is_none_or(|id| id == node.node_id))
+        .cloned()
         .collect::<Vec<_>>();
-    if selected_nodes.is_empty() {
+    if query.node_id.is_some() && selected_nodes.is_empty() {
         return Err(ApiError::not_found(
             "user has no traffic on the selected node",
         ));
     }
+    let mut node_options = all_nodes
+        .iter()
+        .filter(|node| current_node_ids.contains(&node.node_id))
+        .map(|node| {
+            (
+                node.node_id.clone(),
+                UserTrafficNodeOption {
+                    node_id: node.node_id.clone(),
+                    node_name: node.node_name.clone(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let local_node_id = state.cluster.node_id.clone();
     let client = build_admin_http_client(&state)?;
@@ -2551,8 +2550,13 @@ async fn admin_get_user_traffic(
                 .await
             {
                 reports.push(report);
-            } else {
-                unreachable_nodes.push(node.node_id);
+                node_options.insert(
+                    node.node_id.clone(),
+                    UserTrafficNodeOption {
+                        node_id: node.node_id.clone(),
+                        node_name: node.node_name.clone(),
+                    },
+                );
             }
             continue;
         }
@@ -2584,6 +2588,9 @@ async fn admin_get_user_traffic(
             unreachable_nodes.push(node.node_id);
             continue;
         };
+        if response.status() == StatusCode::NOT_FOUND {
+            continue;
+        }
         if !response.status().is_success() {
             unreachable_nodes.push(node.node_id);
             continue;
@@ -2592,7 +2599,16 @@ async fn admin_get_user_traffic(
             .json::<AdminInternalUserTrafficLocalResponse>()
             .await
         {
-            Ok(remote) => reports.push(remote.traffic),
+            Ok(remote) => {
+                node_options.insert(
+                    node.node_id.clone(),
+                    UserTrafficNodeOption {
+                        node_id: node.node_id,
+                        node_name: node.node_name,
+                    },
+                );
+                reports.push(remote.traffic);
+            }
             Err(_) => unreachable_nodes.push(node.node_id),
         }
     }
@@ -2607,7 +2623,7 @@ async fn admin_get_user_traffic(
             display_name: user.display_name,
         },
         traffic,
-        nodes: node_options,
+        nodes: node_options.into_values().collect(),
         partial,
         unreachable_nodes,
     }))
@@ -2642,6 +2658,18 @@ async fn admin_internal_get_local_user_traffic(
         node,
         traffic,
     }))
+}
+
+async fn admin_internal_clear_local_user_traffic(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<StatusCode, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    state.node_history.clear_user(&user_id).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError> {
@@ -6307,7 +6335,84 @@ async fn admin_delete_user(
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
     state.node_history.clear_user(&user_id).await;
+    clear_user_history_on_cluster(&state, &user_id).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let client = match build_admin_http_client(state) {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::warn!(user_id, error = ?err, "build client for user traffic history cleanup");
+            return;
+        }
+    };
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
+        tracing::warn!(
+            user_id,
+            "skip remote user traffic history cleanup without cluster ca key"
+        );
+        return;
+    };
+    let uri: axum::http::Uri = match format!("/_internal/users/{user_id}/traffic/local").parse() {
+        Ok(uri) => uri,
+        Err(_) => {
+            tracing::warn!(user_id, "invalid user traffic history cleanup path");
+            return;
+        }
+    };
+    let signature = match internal_auth::sign_request(ca_key_pem, &Method::DELETE, &uri) {
+        Ok(signature) => signature,
+        Err(err) => {
+            tracing::warn!(user_id, error = %err, "sign user traffic history cleanup request");
+            return;
+        }
+    };
+    let local_node_id = state.cluster.node_id.clone();
+    for node in nodes {
+        if node.node_id == local_node_id {
+            continue;
+        }
+        let base = node.api_base_url.trim_end_matches('/');
+        if base.is_empty() {
+            tracing::warn!(user_id, node_id = %node.node_id, "skip traffic cleanup");
+            continue;
+        }
+        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
+            client
+                .delete(format!(
+                    "{base}/api/admin/_internal/users/{user_id}/traffic/local"
+                ))
+                .header(
+                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                    signature.clone(),
+                )
+        });
+        match tokio::time::timeout(Duration::from_secs(3), request).await {
+            Ok(Ok(response)) if response.status().is_success() => {}
+            Ok(Ok(response)) => tracing::warn!(
+                user_id,
+                node_id = %node.node_id,
+                status = %response.status(),
+                "remote user traffic history cleanup failed"
+            ),
+            Ok(Err(err)) => tracing::warn!(
+                user_id,
+                node_id = %node.node_id,
+                error = %err,
+                "remote user traffic history cleanup request failed"
+            ),
+            Err(_) => tracing::warn!(
+                user_id,
+                node_id = %node.node_id,
+                "remote user traffic history cleanup timed out"
+            ),
+        }
+    }
 }
 
 #[derive(Serialize)]
