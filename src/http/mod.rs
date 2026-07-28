@@ -2515,7 +2515,10 @@ async fn admin_get_user_traffic(
     };
     let selected_nodes = all_nodes
         .iter()
-        .filter(|node| query.node_id.as_deref().is_none_or(|id| id == node.node_id))
+        .filter(|node| {
+            current_node_ids.contains(&node.node_id)
+                && query.node_id.as_deref().is_none_or(|id| id == node.node_id)
+        })
         .cloned()
         .collect::<Vec<_>>();
     if query.node_id.is_some() && selected_nodes.is_empty() {
@@ -6513,7 +6516,7 @@ async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &
         }
     };
     for destination in nodes {
-        if destination.node_id == local_node_id || destination.node_id == node_id {
+        if destination.node_id == local_node_id {
             continue;
         }
         let base = destination.api_base_url.trim_end_matches('/');

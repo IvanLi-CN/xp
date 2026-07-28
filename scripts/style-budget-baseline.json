@@ -587,7 +587,7 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8328
+    "source_lines": 8331
   },
   "src/http/tests.rs": {
     "long_line_count": 2,
@@ -622,7 +622,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 3304
+    "source_lines": 3369
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,

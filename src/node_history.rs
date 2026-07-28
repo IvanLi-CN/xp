@@ -1363,8 +1363,27 @@ fn build_traffic_report(
         }
     };
 
-    let summary = build_summary(rollup, latest_sample);
+    let sample_is_stale = rollup
+        .last_sample_at
+        .as_deref()
+        .and_then(|sampled_at| sampled_at.parse::<DateTime<Utc>>().ok())
+        .is_none_or(|sampled_at| floor_five_minute(sampled_at) < latest_sample);
+    let mut summary = build_summary(rollup, latest_sample);
     let mut warnings = summary_warnings(rollup, &current, &reference);
+    if sample_is_stale {
+        summary.complete = false;
+        warnings.push("traffic sample is stale at the current UTC boundary".to_string());
+    }
+    let mut current = current;
+    if sample_is_stale
+        && window == TrafficWindow::Days31
+        && let Some(point) = current.iter_mut().find(|point| point.is_current_day)
+    {
+        point.uplink_bytes = None;
+        point.downlink_bytes = None;
+        point.total_bytes = None;
+        point.complete = false;
+    }
     warnings.sort();
     warnings.dedup();
     let partial = !summary.complete
@@ -2858,6 +2877,52 @@ mod tests {
         assert_eq!(
             summary.tracking_since.as_deref(),
             Some("2026-05-20T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn stale_current_day_is_nullable_and_partial() {
+        let latest = "2026-05-20T12:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        let report = build_traffic_report(
+            &NodeTrafficRollupSnapshot {
+                daily: vec![NodeTrafficDailyBucket {
+                    date: "2026-05-20".to_string(),
+                    uplink_bytes: Some(10),
+                    downlink_bytes: Some(20),
+                    complete: true,
+                    warnings: Vec::new(),
+                }],
+                cycle: Some(TrafficCycleAccumulator {
+                    mode: "monthly".to_string(),
+                    start_at: "2026-05-01T00:00:00Z".to_string(),
+                    end_at: "2026-06-01T00:00:00Z".to_string(),
+                    uplink_bytes: 10,
+                    downlink_bytes: 20,
+                    complete: true,
+                    tracking_since: "2026-05-01T00:00:00Z".to_string(),
+                    warnings: Vec::new(),
+                }),
+                last_sample_at: Some("2026-05-20T11:55:00Z".to_string()),
+                ..NodeTrafficRollupSnapshot::default()
+            },
+            TrafficWindow::Days31,
+            latest,
+        );
+
+        let current_day = report
+            .current
+            .iter()
+            .find(|point| point.is_current_day)
+            .unwrap();
+        assert!(!current_day.complete);
+        assert!(current_day.total_bytes.is_none());
+        assert!(!report.summary.complete);
+        assert!(report.partial);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("stale"))
         );
     }
 
