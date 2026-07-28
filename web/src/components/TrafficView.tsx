@@ -257,7 +257,9 @@ export function TrafficView({
 				</div>
 			) : null}
 			<div className="rounded-xl border border-border/70 bg-card p-2 sm:p-4">
-				{report.current.every((point) => point.total_bytes == null) ? (
+				{report.current.every((point) => point.total_bytes == null) &&
+				(report.reference?.every((point) => point.total_bytes == null) ??
+					true) ? (
 					<PageState
 						variant="empty"
 						title="No traffic samples yet"

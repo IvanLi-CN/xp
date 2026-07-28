@@ -86,6 +86,9 @@ pub struct NodeHistorySnapshot {
     pub component_status_events: Vec<NodeHistoryComponentStatusEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traffic: Option<NodeTrafficRollupSnapshot>,
+    /// Bounded user ID index mirrored with node history for post-membership queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_traffic_users: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -279,6 +282,8 @@ struct PersistedNodeHistoryRecord {
     traffic_rollup: NodeTrafficRollupSnapshot,
     #[serde(default)]
     user_traffic: BTreeMap<String, PersistedUserTrafficRecord>,
+    #[serde(default)]
+    user_traffic_users: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -309,10 +314,13 @@ impl PersistedNodeHistoryRecord {
             traffic_baselines: BTreeMap::new(),
             traffic_rollup: NodeTrafficRollupSnapshot::default(),
             user_traffic: BTreeMap::new(),
+            user_traffic_users: BTreeSet::new(),
         }
     }
 
     fn snapshot(&self) -> NodeHistorySnapshot {
+        let mut user_traffic_users = self.user_traffic_users.clone();
+        user_traffic_users.extend(self.user_traffic.keys().cloned());
         NodeHistorySnapshot {
             node_id: self.node_id.clone(),
             last_synced_at: self.last_synced_at.clone(),
@@ -321,6 +329,7 @@ impl PersistedNodeHistoryRecord {
             daily_component_status: self.daily_component_status.values().cloned().collect(),
             component_status_events: self.component_status_events.clone(),
             traffic: Some(self.traffic_rollup.clone()),
+            user_traffic_users: user_traffic_users.into_iter().collect(),
         }
     }
 
@@ -520,6 +529,8 @@ impl NodeHistoryHandle {
                 .map(|item| (item.date.clone(), item))
                 .collect();
             record.component_status_events = snapshot.component_status_events;
+            record.user_traffic.clear();
+            record.user_traffic_users = snapshot.user_traffic_users.into_iter().collect();
             if let Some(traffic) = snapshot.traffic {
                 record.traffic_rollup = traffic;
             }
@@ -552,6 +563,7 @@ impl NodeHistoryHandle {
             state.deleted_users.insert(user_id.to_string());
             for record in state.nodes.values_mut() {
                 record.user_traffic.remove(user_id);
+                record.user_traffic_users.remove(user_id);
             }
         }
         self.persist().await;
@@ -684,7 +696,10 @@ impl NodeHistoryHandle {
         state
             .nodes
             .iter()
-            .filter(|(_, record)| record.user_traffic.contains_key(user_id))
+            .filter(|(_, record)| {
+                record.user_traffic.contains_key(user_id)
+                    || record.user_traffic_users.contains(user_id)
+            })
             .map(|(node_id, _)| node_id.clone())
             .collect()
     }
@@ -919,7 +934,7 @@ fn record_traffic_sample(
             format!("sampling gap before {date}"),
         );
     }
-    update_legacy_daily_traffic(record, now, node_up, node_down, node_known);
+    update_legacy_daily_traffic(record, bucket_start, now, node_up, node_down, node_known);
     update_cycle_accumulator(
         &mut record.traffic_rollup.cycle,
         sample.cycle.as_ref(),
@@ -1021,12 +1036,16 @@ fn record_traffic_sample(
 
 fn update_legacy_daily_traffic(
     record: &mut PersistedNodeHistoryRecord,
-    now: DateTime<Utc>,
+    bucket_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     uplink: u64,
     downlink: u64,
     known: bool,
 ) {
-    let date = date_key(now);
+    let date = date_key(bucket_at);
+    if !known && !record.daily_traffic.contains_key(&date) {
+        return;
+    }
     let entry =
         record
             .daily_traffic
@@ -1035,13 +1054,13 @@ fn update_legacy_daily_traffic(
                 date,
                 uplink_bytes: 0,
                 downlink_bytes: 0,
-                updated_at: rfc3339(now),
+                updated_at: rfc3339(updated_at),
             });
     if known {
         entry.uplink_bytes = entry.uplink_bytes.saturating_add(uplink);
         entry.downlink_bytes = entry.downlink_bytes.saturating_add(downlink);
     }
-    entry.updated_at = rfc3339(now);
+    entry.updated_at = rfc3339(updated_at);
 }
 
 fn upsert_five_minute_bucket(buckets: &mut Vec<NodeTrafficBucket>, bucket: NodeTrafficBucket) {
@@ -2390,6 +2409,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn midnight_delta_is_attributed_to_the_closing_utc_day() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let before_midnight = "2026-05-19T23:55:00Z".parse::<DateTime<Utc>>().unwrap();
+        let midnight = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle
+            .record_local_sample(
+                before_midnight,
+                "node-a",
+                Some(vec![traffic("membership-a", 100, 300)]),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample(
+                midnight,
+                "node-a",
+                Some(vec![traffic("membership-a", 160, 380)]),
+                runtime(Vec::new()),
+            )
+            .await;
+
+        let snapshot = handle.snapshot("node-a").await.unwrap();
+        assert_eq!(snapshot.daily_traffic.len(), 1);
+        assert_eq!(snapshot.daily_traffic[0].date, "2026-05-19");
+        assert_eq!(snapshot.daily_traffic[0].uplink_bytes, 60);
+        assert_eq!(snapshot.daily_traffic[0].downlink_bytes, 80);
+    }
+
+    #[tokio::test]
     async fn empty_membership_sample_is_known_zero_traffic() {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
@@ -2882,6 +2932,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mirrored_node_snapshot_keeps_remote_user_history_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let now = "2026-07-29T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle
+            .replace_node_snapshot(
+                now,
+                "node-b",
+                NodeHistorySnapshot {
+                    node_id: "node-b".to_string(),
+                    last_synced_at: Some("2026-07-29T00:05:00Z".to_string()),
+                    last_sync_error: None,
+                    daily_traffic: Vec::new(),
+                    daily_component_status: Vec::new(),
+                    component_status_events: Vec::new(),
+                    traffic: Some(NodeTrafficRollupSnapshot::default()),
+                    user_traffic_users: vec!["user-a".to_string()],
+                },
+            )
+            .await;
+
+        assert_eq!(
+            handle.user_traffic_node_ids("user-a").await,
+            BTreeSet::from(["node-b".to_string()])
+        );
+    }
+
+    #[tokio::test]
     async fn retained_user_cycle_resets_without_active_membership() {
         let tmp = tempfile::tempdir().unwrap();
         let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
@@ -3223,6 +3302,7 @@ mod tests {
                     daily_component_status: Vec::new(),
                     component_status_events: Vec::new(),
                     traffic: Some(NodeTrafficRollupSnapshot::default()),
+                    user_traffic_users: Vec::new(),
                 },
             )
             .await;
