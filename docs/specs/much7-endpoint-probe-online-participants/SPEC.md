@@ -115,6 +115,44 @@
 - 风险：顶层 history 响应仍保留单个 `participating_nodes` 兼容字段；真正用于逐小时展示的分母在 slot 级别。
 - 假设：离线节点的正确定义是“该小时从未接受/启动 probe run”，而不是运行时组件状态本身。
 
+## Visual Evidence
+
+PR: none
+
+- source_type: storybook_docs
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: 1440x1200
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  sensitive_exclusion: N/A
+  submission_gate: pending-owner-approval
+  docs_entry_or_title: Pages/EndpointProbe/Docs
+  state: historical probe results with resolved and unavailable node names
+  latest_sha: `b5d63b0d7cf7f4b445194b118975c3c8370565a4`
+  evidence_note: historical per-node results show linked, name-sorted nodes and a plain ID
+  fallback when a node name is unavailable.
+
+![Endpoint probe history node names](./assets/endpoint-probe-history-node-names.png)
+
+- source_type: storybook_docs
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: 1440x1200
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  sensitive_exclusion: N/A
+  submission_gate: pending-owner-approval
+  docs_entry_or_title: Pages/EndpointProbe/Docs
+  state: live run with node runners expanded
+  latest_sha: `b5d63b0d7cf7f4b445194b118975c3c8370565a4`
+  evidence_note: live run node runners show the same linked, name-sorted nodes and the
+  unavailable-name ID fallback.
+
+![Endpoint probe run node names](./assets/endpoint-probe-run-node-names.png)
+
 ## 变更记录（Change log）
 
 - 2026-03-11: 创建 much7 规格，冻结“离线节点不参与 endpoint probe 分母”的实现口径。
