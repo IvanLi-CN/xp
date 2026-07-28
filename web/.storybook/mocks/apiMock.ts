@@ -51,39 +51,35 @@ import {
 	buildEndpointCreateMeta,
 	deriveGlobalServerNames,
 } from "./buildEndpointCreateMeta";
+import { handleEndpointProbeRequest } from "./endpointProbeMock";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
+	probe?: Parameters<typeof handleEndpointProbeRequest>[1];
 	failAdminConfig?: boolean;
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
 };
-
 type MockEndpointSeed = AdminEndpoint & {
 	active_short_id?: string;
 	short_ids?: string[];
 };
-
 type MockEndpointRecord = AdminEndpoint & {
 	active_short_id: string;
 	short_ids: string[];
 };
-
 type MockWindowedNodeIpUsage =
 	| AdminNodeIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminNodeIpUsageResponse>>;
-
 type MockWindowedNodeTcpConnections =
 	| AdminNodeTcpConnectionsResponse
 	| Partial<
 			Record<AdminTcpConnectionUsageWindow, AdminNodeTcpConnectionsResponse>
 	  >;
-
 type MockWindowedUserIpUsage =
 	| AdminUserIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminUserIpUsageResponse>>;
-
 type MockStateSeed = {
 	health: HealthResponse;
 	clusterInfo: ClusterInfoResponse;
@@ -121,7 +117,6 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 		user: number;
 	};
 };
-
 type MockApi = {
 	reset: (config?: StorybookApiMockConfig) => void;
 	handle: (req: Request) => Promise<Response>;
@@ -2211,12 +2206,16 @@ async function handleRequest(
 
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
+	let probe = config?.probe;
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
+			probe = nextConfig?.probe;
 		},
 		async handle(req: Request) {
-			return handleRequest(state, req);
+			return (
+				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
+			);
 		},
 	};
 }

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminEndpointProbeRunStatus } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { startSseStream } from "../api/sse";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -51,6 +52,7 @@ vi.mock("../api/adminEndpointProbes", async (importOriginal) => {
 	};
 });
 vi.mock("../api/adminEndpoints");
+vi.mock("../api/adminNodes");
 vi.mock("../api/sse", () => ({
 	startSseStream: vi.fn(),
 }));
@@ -158,6 +160,34 @@ describe("<EndpointProbeRunPage />", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminNodes).mockResolvedValue({
+			items: [
+				{
+					node_id: "node-a",
+					node_name: "Tokyo edge",
+					api_base_url: "https://tokyo.example.invalid",
+					access_host: "tokyo.example.invalid",
+					quota_limit_bytes: 0,
+					quota_reset: { policy: "unlimited" },
+				},
+				{
+					node_id: "node-b",
+					node_name: "Amsterdam edge",
+					api_base_url: "https://amsterdam.example.invalid",
+					access_host: "amsterdam.example.invalid",
+					quota_limit_bytes: 0,
+					quota_reset: { policy: "unlimited" },
+				},
+				{
+					node_id: "node-c",
+					node_name: "Singapore edge",
+					api_base_url: "https://singapore.example.invalid",
+					access_host: "singapore.example.invalid",
+					quota_limit_bytes: 0,
+					quota_reset: { policy: "unlimited" },
+				},
+			],
+		});
 		vi.mocked(startSseStream).mockImplementation(({ onOpen, onMessage }) => {
 			onOpen?.();
 			onMessage?.({
@@ -210,5 +240,33 @@ describe("<EndpointProbeRunPage />", () => {
 		);
 		expect(await screen.findByText("Up")).toBeInTheDocument();
 		expect(screen.queryByText("Missing")).toBeNull();
+	});
+
+	it("shows node runners by linked display name", async () => {
+		renderPage();
+
+		const links = await screen.findAllByRole("link", {
+			name: /Open node details:/i,
+		});
+		expect(links.map((link) => link.textContent)).toEqual([
+			"Amsterdam edge",
+			"Singapore edge",
+			"Tokyo edge",
+		]);
+		expect(links.map((link) => link.getAttribute("href"))).toEqual([
+			"/nodes/node-b",
+			"/nodes/node-c",
+			"/nodes/node-a",
+		]);
+	});
+
+	it("falls back to runner IDs when the node-name lookup fails", async () => {
+		vi.mocked(fetchAdminNodes).mockRejectedValueOnce(
+			new Error("nodes unavailable"),
+		);
+		renderPage();
+
+		expect(await screen.findByText("node-a")).toBeInTheDocument();
+		expect(screen.queryByText("Failed to load probe status")).toBeNull();
 	});
 });

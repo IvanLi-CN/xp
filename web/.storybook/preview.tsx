@@ -45,6 +45,8 @@ import { AppRuntimeProvider } from "../src/offline/appRuntime";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
 import { EndpointNewPage } from "../src/views/EndpointNewPage";
+import { EndpointProbeRunPage } from "../src/views/EndpointProbeRunPage";
+import { EndpointProbeStatsPage } from "../src/views/EndpointProbeStatsPage";
 import { EndpointsPage } from "../src/views/EndpointsPage";
 import { HomePage } from "../src/views/HomePage";
 import { LoginPage } from "../src/views/LoginPage";
@@ -231,6 +233,18 @@ const preview: Preview = {
 				component: EndpointDetailsPage,
 			});
 
+			const endpointProbeRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/endpoints/$endpointId/probe",
+				component: EndpointProbeStatsPage,
+			});
+
+			const endpointProbeRunRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/endpoints/probe/runs/$runId",
+				component: EndpointProbeRunPage,
+			});
+
 			const usersRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/users",
@@ -380,6 +394,8 @@ const preview: Preview = {
 				endpointsRoute,
 				endpointNewRoute,
 				endpointDetailsRoute,
+				endpointProbeRoute,
+				endpointProbeRunRoute,
 				usersRoute,
 				userNewRoute,
 				userDetailsRoute,
