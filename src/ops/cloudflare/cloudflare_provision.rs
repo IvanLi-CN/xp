@@ -3,11 +3,27 @@ use crate::ops::cloudflare_config::{
     edit_local_config_for_hostname, ingress_hostnames, merge_remote_tunnel_config,
     remote_config_payload, remove_remote_hostname_rules,
 };
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProvisionRuntime {
     ManagedService,
     Container,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ServiceState {
+    enabled: bool,
+    running: bool,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+struct FileMetadata {
+    mode: u32,
+    uid: u32,
+    gid: u32,
 }
 
 pub(super) async fn run(
@@ -24,6 +40,7 @@ pub(super) async fn run(
 
     let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
     let init_system = detect_init_system(distro, None);
+    let cloudflared_binary = cloudflared_binary_path(&paths, distro);
 
     ensure_cloudflared_present(&paths, distro, mode).await?;
     if runtime == ProvisionRuntime::ManagedService {
@@ -119,24 +136,41 @@ pub(super) async fn run(
         .transpose()
         .map_err(|e| ExitError::new(4, format!("migration_preflight_failed: {e}")))?;
 
-    let remote_before = client
-        .get_tunnel_config(&args.account_id, &tunnel_id)
-        .await
-        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
-    let remote_after = merge_remote_tunnel_config(&remote_before, &args.hostname, &args.origin_url)
-        .map_err(|e| ExitError::new(4, format!("cloudflare_config_error: {e}")));
-    let remote_after = remote_after?;
-    let dns_before = client
-        .list_dns_records(&args.zone_id, &args.hostname)
-        .await
-        .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
-    let dns_target = select_dns_record(
-        &dns_before,
-        settings.dns_record_id.as_deref(),
-        &args.hostname,
-        &tunnel_id,
-        migrating_from,
-    )?;
+    let preflight: Result<_, ExitError> = async {
+        let remote_before = client
+            .get_tunnel_config(&args.account_id, &tunnel_id)
+            .await
+            .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+        let remote_after =
+            merge_remote_tunnel_config(&remote_before, &args.hostname, &args.origin_url)
+                .map_err(|e| ExitError::new(4, format!("cloudflare_config_error: {e}")))?;
+        let dns_before = client
+            .list_dns_records(&args.zone_id, &args.hostname)
+            .await
+            .map_err(|e| ExitError::new(5, format!("dns_error: {e}")))?;
+        let dns_target = select_dns_record(
+            &dns_before,
+            settings.dns_record_id.as_deref(),
+            &args.hostname,
+            &tunnel_id,
+            migrating_from,
+        )?;
+        Ok((remote_before, remote_after, dns_before, dns_target))
+    }
+    .await;
+    let (remote_before, remote_after, dns_before, dns_target) = match preflight {
+        Ok(preflight) => preflight,
+        Err(error) => {
+            return Err(cleanup_created_tunnel_after_preflight(
+                &client,
+                &args.account_id,
+                &tunnel_id,
+                created.is_some(),
+                error,
+            )
+            .await);
+        }
+    };
 
     if mode == Mode::DryRun {
         eprintln!("dry-run: GET preflight completed for tunnel {tunnel_id}");
@@ -178,6 +212,11 @@ pub(super) async fn run(
     let settings_path = paths.etc_xp_ops_cloudflare_settings();
     let local_before = read_optional_file(&config_path)?;
     let settings_before_bytes = read_optional_file(&settings_path)?;
+    let config_metadata_before = capture_file_metadata(&config_path)?;
+    let credential_metadata_before = capture_file_metadata(&cred_path)?;
+    let service_before = (args.enabled() && runtime == ProvisionRuntime::ManagedService)
+        .then(|| capture_cloudflared_service_state(init_system, &paths))
+        .transpose()?;
     let snapshot_dir = persist_rollback_snapshots(
         &paths,
         local_before.as_deref(),
@@ -208,6 +247,7 @@ pub(super) async fn run(
             &cred_path_abs,
             &args.hostname,
             &args.origin_url,
+            &cloudflared_binary,
         )?;
         ensure_cloudflared_file_ownership(&paths, &tunnel_id, mode, runtime)?;
 
@@ -305,6 +345,12 @@ pub(super) async fn run(
         if let Err(rollback) = restore_optional_file(&config_path, local_before.as_deref()) {
             rollback_errors.push(format!("restore local config: {rollback}"));
         }
+        if let Err(rollback) = restore_file_metadata(&config_path, config_metadata_before) {
+            rollback_errors.push(format!("restore config metadata: {rollback}"));
+        }
+        if let Err(rollback) = restore_file_metadata(&cred_path, credential_metadata_before) {
+            rollback_errors.push(format!("restore credential metadata: {rollback}"));
+        }
         if let Err(rollback) =
             restore_optional_file(&settings_path, settings_before_bytes.as_deref())
         {
@@ -317,12 +363,12 @@ pub(super) async fn run(
             rollback_errors.push(format!("remove created credentials: {rollback}"));
         }
         if config_changed
-            && args.enabled()
-            && runtime == ProvisionRuntime::ManagedService
-            && let Err(rollback) = restart_cloudflared_service(init_system, &paths)
+            && let Some(service_before) = service_before
+            && let Err(rollback) =
+                restore_cloudflared_service_state(init_system, &paths, service_before)
         {
             rollback_errors.push(format!(
-                "restart restored cloudflared: {}",
+                "restore cloudflared service state: {}",
                 rollback.message
             ));
         }
@@ -405,6 +451,106 @@ fn verify_cloudflared_service(init_system: InitSystem, paths: &Paths) -> Result<
     }
 }
 
+fn capture_cloudflared_service_state(
+    init_system: InitSystem,
+    paths: &Paths,
+) -> Result<ServiceState, ExitError> {
+    if is_test_root(paths.root()) || init_system == InitSystem::None {
+        return Ok(ServiceState {
+            enabled: false,
+            running: false,
+        });
+    }
+    let (enabled, running) = match init_system {
+        InitSystem::Systemd => (
+            service_command_status(
+                "systemctl",
+                &["is-enabled", "--quiet", "cloudflared.service"],
+            )?
+            .success(),
+            service_command_status(
+                "systemctl",
+                &["is-active", "--quiet", "cloudflared.service"],
+            )?
+            .success(),
+        ),
+        InitSystem::OpenRc => {
+            let output = Command::new("rc-update")
+                .args(["show", "default"])
+                .output()
+                .map_err(|error| {
+                    ExitError::new(6, format!("service_error: rc-update show: {error}"))
+                })?;
+            let enabled = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some("cloudflared"));
+            let running =
+                service_command_status("rc-service", &["cloudflared", "status"])?.success();
+            (enabled, running)
+        }
+        InitSystem::None => unreachable!(),
+    };
+    Ok(ServiceState { enabled, running })
+}
+
+fn restore_cloudflared_service_state(
+    init_system: InitSystem,
+    paths: &Paths,
+    state: ServiceState,
+) -> Result<(), ExitError> {
+    if is_test_root(paths.root()) || init_system == InitSystem::None {
+        return Ok(());
+    }
+    let (enable_command, disable_command, start_command, stop_command) = match init_system {
+        InitSystem::Systemd => (
+            ("systemctl", &["enable", "cloudflared.service"][..]),
+            ("systemctl", &["disable", "cloudflared.service"][..]),
+            ("systemctl", &["start", "cloudflared.service"][..]),
+            ("systemctl", &["stop", "cloudflared.service"][..]),
+        ),
+        InitSystem::OpenRc => (
+            ("rc-update", &["add", "cloudflared", "default"][..]),
+            ("rc-update", &["del", "cloudflared", "default"][..]),
+            ("rc-service", &["cloudflared", "start"][..]),
+            ("rc-service", &["cloudflared", "stop"][..]),
+        ),
+        InitSystem::None => unreachable!(),
+    };
+    let command = if state.enabled {
+        enable_command
+    } else {
+        disable_command
+    };
+    ensure_service_command(command.0, command.1)?;
+    let command = if state.running {
+        start_command
+    } else {
+        stop_command
+    };
+    ensure_service_command(command.0, command.1)
+}
+
+fn service_command_status(
+    program: &str,
+    args: &[&str],
+) -> Result<std::process::ExitStatus, ExitError> {
+    Command::new(program)
+        .args(args)
+        .status()
+        .map_err(|error| ExitError::new(6, format!("service_error: {program}: {error}")))
+}
+
+fn ensure_service_command(program: &str, args: &[&str]) -> Result<(), ExitError> {
+    if service_command_status(program, args)?.success() {
+        Ok(())
+    } else {
+        Err(ExitError::new(
+            6,
+            format!("service_error: {program} {:?}", args),
+        ))
+    }
+}
+
 pub(super) fn select_dns_record(
     records: &[DnsRecordInfo],
     configured_id: Option<&str>,
@@ -466,6 +612,7 @@ fn write_cloudflared_config(
     cred_abs: &str,
     hostname: &str,
     origin_url: &str,
+    cloudflared_binary: &Path,
 ) -> Result<bool, ExitError> {
     let config_path = paths.etc_cloudflared_config();
     let original = match fs::read(&config_path) {
@@ -484,7 +631,7 @@ fn write_cloudflared_config(
     if original.as_deref() == Some(yml.as_slice()) {
         return Ok(false);
     }
-    validate_cloudflared_config(paths, &yml)?;
+    validate_cloudflared_config(paths, cloudflared_binary, &yml)?;
     write_bytes_if_changed(&config_path, &yml)
         .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
     chmod(&config_path, 0o640).ok();
@@ -528,7 +675,11 @@ fn verify_tunnel_credentials(
     }
 }
 
-fn validate_cloudflared_config(paths: &Paths, config: &[u8]) -> Result<(), ExitError> {
+fn validate_cloudflared_config(
+    paths: &Paths,
+    cloudflared_binary: &Path,
+    config: &[u8],
+) -> Result<(), ExitError> {
     if is_test_root(paths.root()) {
         return Ok(());
     }
@@ -536,8 +687,7 @@ fn validate_cloudflared_config(paths: &Paths, config: &[u8]) -> Result<(), ExitE
     let candidate_path = crate::ops::util::tmp_path_next_to(&config_path);
     fs::write(&candidate_path, config)
         .map_err(|error| ExitError::new(6, format!("filesystem_error: {error}")))?;
-    let cloudflared = paths.map_abs(Path::new("/usr/bin/cloudflared"));
-    let status = Command::new(cloudflared)
+    let status = Command::new(cloudflared_binary)
         .args([
             "--config",
             candidate_path.to_string_lossy().as_ref(),
@@ -558,6 +708,34 @@ fn validate_cloudflared_config(paths: &Paths, config: &[u8]) -> Result<(), ExitE
     }
 }
 
+async fn cleanup_created_tunnel_after_preflight(
+    client: &CloudflareClient,
+    account_id: &str,
+    tunnel_id: &str,
+    created: bool,
+    error: ExitError,
+) -> ExitError {
+    if !created {
+        return error;
+    }
+    match client.delete_tunnel(account_id, tunnel_id).await {
+        Ok(()) => ExitError::new(
+            error.code,
+            format!(
+                "{}; deleted newly created Tunnel after preflight failure",
+                error.message
+            ),
+        ),
+        Err(rollback) => ExitError::new(
+            error.code,
+            format!(
+                "{}; failed to delete newly created Tunnel {tunnel_id}: {rollback}",
+                error.message
+            ),
+        ),
+    }
+}
+
 fn load_settings_or_default(paths: &Paths) -> Result<Settings, ExitError> {
     let p = paths.etc_xp_ops_cloudflare_settings();
     let Ok(raw) = fs::read_to_string(&p) else {
@@ -572,6 +750,41 @@ fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, ExitError> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(ExitError::new(6, format!("filesystem_error: {error}"))),
     }
+}
+
+#[cfg(unix)]
+fn capture_file_metadata(path: &Path) -> Result<Option<FileMetadata>, ExitError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(Some(FileMetadata {
+            mode: metadata.permissions().mode(),
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+        })),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ExitError::new(6, format!("filesystem_error: {error}"))),
+    }
+}
+
+#[cfg(not(unix))]
+fn capture_file_metadata(_path: &Path) -> Result<Option<()>, ExitError> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn restore_file_metadata(path: &Path, metadata: Option<FileMetadata>) -> Result<(), io::Error> {
+    let Some(metadata) = metadata else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(metadata.mode))?;
+    std::os::unix::fs::chown(path, Some(metadata.uid), Some(metadata.gid))
+}
+
+#[cfg(not(unix))]
+fn restore_file_metadata(_path: &Path, _metadata: Option<()>) -> Result<(), io::Error> {
+    Ok(())
 }
 
 fn restore_optional_file(path: &Path, original: Option<&[u8]>) -> Result<(), io::Error> {

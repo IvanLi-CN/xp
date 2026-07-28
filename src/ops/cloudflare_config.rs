@@ -220,8 +220,8 @@ fn edit_local_ingress(source: String, hostname: &str, origin_url: &str) -> Resul
             matching.push((*start, *finish));
         }
     }
-    if let Some((first_start, _)) = matching.first().copied() {
-        replace_entry_service(&mut lines, first_start, hostname, origin_url);
+    if let Some((first_start, first_end)) = matching.first().copied() {
+        replace_entry_service(&mut lines, first_start, first_end, origin_url);
         for (start, finish) in matching.into_iter().skip(1).rev() {
             lines.drain(start..finish);
         }
@@ -323,10 +323,7 @@ fn yaml_scalar_after_key(line: &str, key: &str) -> Option<String> {
     Some(value.trim_matches(['\'', '"']).to_string())
 }
 
-fn replace_entry_service(lines: &mut Vec<String>, start: usize, hostname: &str, origin_url: &str) {
-    let finish = (start + 1..lines.len())
-        .find(|index| lines[*index].trim_start().starts_with('-'))
-        .unwrap_or(lines.len());
+fn replace_entry_service(lines: &mut Vec<String>, start: usize, finish: usize, origin_url: &str) {
     if let Some(index) =
         (start..finish).find(|index| yaml_scalar_after_key(&lines[*index], "service").is_some())
     {
@@ -350,10 +347,6 @@ fn replace_entry_service(lines: &mut Vec<String>, start: usize, hostname: &str, 
             .take_while(|ch| ch.is_whitespace())
             .collect();
         lines.insert(start + 1, format!("{indent}  service: {origin_url}\n"));
-    }
-    if entry_hostname(&lines[start..finish.min(lines.len())]).is_none_or(|value| value != hostname)
-    {
-        lines.insert(start + 1, format!("  hostname: {hostname}\n"));
     }
 }
 
@@ -403,6 +396,27 @@ mod tests {
         assert!(rendered.contains("service: http://127.0.0.1:62416 # owned"));
         assert!(!rendered.contains("also-old"));
         assert!(rendered.contains("  - service: http_status:404\nother: \"unchanged\"\n"));
+    }
+
+    #[test]
+    fn local_ingress_edit_does_not_cross_the_ingress_section() {
+        let source = concat!(
+            "ingress:\n  - hostname: xp.example.com\n",
+            "other:\n  - service: keep-this\n",
+        );
+
+        let rendered = edit_local_ingress(
+            source.to_string(),
+            "xp.example.com",
+            "http://127.0.0.1:62416",
+        )
+        .unwrap();
+
+        assert!(
+            rendered
+                .contains("  - hostname: xp.example.com\n    service: http://127.0.0.1:62416\n")
+        );
+        assert!(rendered.contains("other:\n  - service: keep-this\n"));
     }
 
     #[test]

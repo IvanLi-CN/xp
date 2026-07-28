@@ -178,11 +178,7 @@ async fn ensure_cloudflared_present(
     distro: Distro,
     mode: Mode,
 ) -> Result<(), ExitError> {
-    let bin_abs: &Path = match distro {
-        Distro::Arch | Distro::Debian | Distro::Rhel => Path::new("/usr/bin/cloudflared"),
-        Distro::Alpine => Path::new("/usr/local/bin/cloudflared"),
-    };
-    let bin = paths.map_abs(bin_abs);
+    let bin = cloudflared_binary_path(paths, distro);
     if bin.exists() && is_executable(&bin) {
         return Ok(());
     }
@@ -195,6 +191,14 @@ async fn ensure_cloudflared_present(
     };
     install::cmd_install(paths.clone(), install_args).await?;
     Ok(())
+}
+
+pub(super) fn cloudflared_binary_path(paths: &Paths, distro: Distro) -> std::path::PathBuf {
+    let bin_abs = match distro {
+        Distro::Arch | Distro::Debian | Distro::Rhel => Path::new("/usr/bin/cloudflared"),
+        Distro::Alpine => Path::new("/usr/local/bin/cloudflared"),
+    };
+    paths.map_abs(bin_abs)
 }
 
 fn ensure_cloudflared_service(
@@ -1011,5 +1015,16 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(selected.content, "old.cfargotunnel.com");
+    }
+
+    #[test]
+    fn alpine_cloudflared_binary_uses_the_install_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+
+        assert_eq!(
+            cloudflared_binary_path(&paths, Distro::Alpine),
+            tmp.path().join("usr/local/bin/cloudflared")
+        );
     }
 }

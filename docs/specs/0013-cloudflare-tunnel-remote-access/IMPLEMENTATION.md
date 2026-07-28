@@ -10,8 +10,11 @@
 
 ## Runtime safety
 
-- 本地 Cloudflared 配置写入前运行 ingress validation，使用同目录临时文件和原子替换。
-- host-managed 服务在配置变化后重启并检查既有 `cloudflared` 服务；不会创建第二个常驻进程。
+- 本地 Cloudflared 配置写入前用当前发行版安装路径运行 ingress validation，使用同目录临时文件和
+  原子替换。
+- host-managed 服务在配置变化后重启并检查既有 `cloudflared` 服务；失败时恢复原 enable/running
+  状态及受影响文件的内容、权限和属主，不会创建第二个常驻进程。
+- 新 Tunnel 的后续远端配置或 DNS 预检失败会立即删除刚创建的 Tunnel，避免留下未受管资源。
 
 ## Validation
 
