@@ -69,6 +69,7 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
         hostname: values.hostname,
         tunnel_name: None,
         origin_url: values.origin_url,
+        migrate_existing_tunnel: false,
         ddns_zone_id: values.ddns_zone_id,
         vless_canary_acme_contact_email: values.vless_canary_acme_contact_email,
         default_vless_port: values.default_vless_port,

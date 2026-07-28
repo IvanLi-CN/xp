@@ -25,6 +25,53 @@ Cloudflare-side resources:
 - A DNS record (CNAME, proxied) for `hostname` → `<tunnel-id>.cfargotunnel.com`
 - Optional runtime-managed `A` / `AAAA` records for `XP_ACCESS_HOST` when deploy is run with `--ddns`
 
+## Shared Tunnel safety
+
+`xp-ops` supports an existing, shared Tunnel and keeps one `cloudflared` process.
+It owns only the requested XP hostname:
+
+- Local `config.yml` is edited in place. Unrelated keys, comments, quoting, order, and formatting
+  remain intact. If the file did not contain local `ingress`, XP does not add one.
+- The current remote Tunnel configuration is read before changes. Rules for other hostnames,
+  protocol-specific services, `originRequest`, unknown top-level fields, and a valid final catch-all
+  remain unchanged. All rules for the requested XP hostname are replaced with the current XP origin.
+- A valid existing final catch-all is retained. A missing catch-all is completed with
+  `http_status:404`; multiple or non-final catch-all rules are rejected without writes.
+- Existing CNAME records are adopted only when they exactly point to the configured XP Tunnel.
+  DNS PATCH changes only the owned CNAME content, leaving TTL, proxied mode, comments, and other
+  record attributes untouched.
+
+Before replacing a changed local configuration, `xp-ops` runs
+`cloudflared tunnel ingress validate` against a candidate file and atomically installs it.
+A host-managed node then restarts the existing service; it never starts a second `cloudflared`
+program. If a later write or restart fails, the command attempts reverse-order rollback of remote
+ingress, DNS, local files, settings, credentials, and the service configuration. An incomplete
+rollback reports the retained local snapshot paths for manual recovery.
+
+### Moving an existing XP Tunnel
+
+Changing the persisted Tunnel ID is rejected by default. Use `--migrate-existing-tunnel` only after
+confirming that the old settings hostname, zone, legacy Tunnel ingress, DNS CNAME, and credentials
+all belong to the same XP installation:
+
+```bash
+sudo xp-ops cloudflare provision \
+  --account-id <id> --zone-id <id> --hostname app.example.com \
+  --origin-url http://127.0.0.1:62416 \
+  --tunnel-id <target-tunnel-id> \
+  --migrate-existing-tunnel
+```
+
+`xp-ops deploy --migrate-existing-tunnel ...` passes the same explicit authorization into its
+Cloudflare provision stage. Any incomplete ownership proof fails before a write; XP does not guess
+across zones, accounts, DNS records, or unrelated hostnames.
+For safety, this automated migration accepts a legacy Tunnel only when its ingress contains exactly
+the persisted XP hostname. A shared legacy Tunnel with other hostnames needs an operator-led split;
+XP leaves it unchanged rather than risk moving another service.
+
+Use `--dry-run` to perform read-only preflight and receive an ingress/DNS impact summary.
+It never writes a file, calls a mutating Cloudflare API, or restarts a service.
+
 ## Required API token permissions
 
 Create a Cloudflare API token with:

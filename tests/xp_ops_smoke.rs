@@ -362,6 +362,34 @@ async fn cloudflare_provision_uses_mock_api_and_writes_files() {
         .mount(&server)
         .await;
 
+    Mock::given(method("GET"))
+        .and(path_regex(format!(
+            "^/client/v4/accounts/acc/cfd_tunnel/{tunnel_id}/configurations$"
+        )))
+        .and(header("authorization", "Bearer testtoken"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "success": true,
+          "errors": [],
+          "result": {
+            "config": {
+              "ingress": [{ "service": "http_status:404" }]
+            }
+          }
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/client/v4/zones/zone/dns_records"))
+        .and(header("authorization", "Bearer testtoken"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "success": true,
+          "errors": [],
+          "result": []
+        })))
+        .mount(&server)
+        .await;
+
     Mock::given(method("POST"))
         .and(path("/client/v4/zones/zone/dns_records"))
         .and(header("authorization", "Bearer testtoken"))
