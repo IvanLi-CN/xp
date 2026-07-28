@@ -1,5 +1,5 @@
 use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
-use crate::ops::init::write_static_xray_config;
+use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
@@ -803,6 +803,7 @@ fn rollback_xp_after_xray_failure(
 }
 
 fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitError> {
+    backfill_low_memory_runtime_defaults(paths)?;
     let config_path = paths.etc_xray_config();
     let backup = backup_path(&config_path);
     let had_old = config_path.exists();

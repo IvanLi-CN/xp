@@ -11,8 +11,6 @@ use axum::{
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::admin_token::verify_admin_token;
-
 use super::{ApiError, AppState};
 
 #[derive(Clone, Default)]
@@ -85,7 +83,7 @@ pub(super) async fn api_version_check(
         .into_iter()
         .any(|key| query.get(key).is_some_and(|value| value.trim() == "1"));
     if refresh {
-        ensure_refresh_authorized(&state, &headers)?;
+        ensure_refresh_authorized(&state, &headers).await?;
     }
 
     let cached = if refresh {
@@ -139,7 +137,7 @@ pub(super) async fn api_version_check(
     }))
 }
 
-fn ensure_refresh_authorized(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+async fn ensure_refresh_authorized(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     let Some(token) = extract_bearer_token(headers) else {
         return Err(ApiError::unauthorized(
             "missing or invalid authorization token",
@@ -151,16 +149,22 @@ fn ensure_refresh_authorized(state: &AppState, headers: &HeaderMap) -> Result<()
         ));
     };
 
-    if verify_admin_token(&token, &expected)
-        || crate::login_token::decode_and_validate_login_token_jwt(
-            &token,
-            Utc::now(),
-            expected.as_str(),
-            &state.cluster.cluster_id,
-        )
-        .is_ok()
+    match super::authorize_admin_token(
+        token,
+        &expected,
+        &state.cluster.cluster_id,
+        &state.admin_token_verifier,
+    )
+    .await
     {
-        return Ok(());
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(crate::admin_token::AdminTokenVerifyError::Busy) => {
+            return Err(ApiError::too_many_requests("admin authentication is busy"));
+        }
+        Err(crate::admin_token::AdminTokenVerifyError::Unavailable) => {
+            return Err(ApiError::internal("admin authentication is unavailable"));
+        }
     }
 
     Err(ApiError::unauthorized(

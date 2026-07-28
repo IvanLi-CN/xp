@@ -101,7 +101,7 @@ jobs:
 
           XP_NODE_NAME=node-1 \
           XP_API_BASE_URL=https://node-1.example.com \
-          XP_ADMIN_TOKEN=test-token \
+          XP_ADMIN_TOKEN=0123456789abcdef0123456789abcdef \
           cargo run --quiet --bin xp-ops -- container run --dry-run
 
   docs:
@@ -214,5 +214,5 @@ jobs:
           docker run --rm \
             -e XP_NODE_NAME=node-1 \
             -e XP_API_BASE_URL=https://node-1.example.com \
-            -e XP_ADMIN_TOKEN=test-token \
+            -e XP_ADMIN_TOKEN=0123456789abcdef0123456789abcdef \
             xp:smoke --dry-run

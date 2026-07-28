@@ -3,7 +3,8 @@ use crate::ops::cli::AdminTokenSetArgs;
 use crate::ops::paths::Paths;
 use tempfile::tempdir;
 
-const VALID_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
+const VALID_HASH: &str = "$argon2id$v=19$m=4096,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$QdZvInnh6DNxvD4ZfwAGd/C/eR43+tT7eBPaPcqVjFM";
+const HIGH_MEMORY_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
 
 #[tokio::test]
 async fn admin_token_set_creates_env_when_missing() {
@@ -97,4 +98,46 @@ async fn admin_token_set_writes_shell_safe_hash() {
 
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout), VALID_HASH);
+}
+
+#[tokio::test]
+async fn admin_token_set_rejects_high_memory_hash() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let err = cmd_admin_token_set(
+        paths,
+        AdminTokenSetArgs {
+            hash: Some(HIGH_MEMORY_HASH.to_string()),
+            token: None,
+            token_stdin: false,
+            keep_plaintext: false,
+            quiet: true,
+            dry_run: false,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(err.message.contains("m=4096,t=3,p=1"));
+}
+
+#[tokio::test]
+async fn admin_token_set_rejects_short_plaintext() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let err = cmd_admin_token_set(
+        paths,
+        AdminTokenSetArgs {
+            hash: None,
+            token: Some("short".to_string()),
+            token_stdin: false,
+            keep_plaintext: false,
+            quiet: true,
+            dry_run: false,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(err.message.contains("at least 32 bytes"));
 }

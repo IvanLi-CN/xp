@@ -39,7 +39,7 @@ async fn bootstrap_derives_access_host_from_api_base_url() {
     let env = env_map(&[
         ("XP_NODE_NAME", "node-1"),
         ("XP_API_BASE_URL", "https://node-1.example.com"),
-        ("XP_ADMIN_TOKEN", "secret"),
+        ("XP_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef"),
     ]);
     let spec = ContainerSpec::from_env_map(&paths, &env, None)
         .await
@@ -62,7 +62,7 @@ async fn managed_vless_uses_derived_access_host_when_access_host_env_is_absent()
     let env = env_map(&[
         ("XP_NODE_NAME", "node-1"),
         ("XP_API_BASE_URL", "https://node-1.example.com"),
-        ("XP_ADMIN_TOKEN", "secret"),
+        ("XP_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef"),
         ("XP_DEFAULT_VLESS_PORT", "53842"),
     ]);
     let spec = ContainerSpec::from_env_map(&paths, &env, None)

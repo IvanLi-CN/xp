@@ -30,7 +30,7 @@ use tokio::{
 mod embedded_ui;
 
 use crate::{
-    admin_token::{AdminTokenHash, verify_admin_token},
+    admin_token::{AdminTokenHash, AdminTokenVerifier, AdminTokenVerifyError},
     cloudflared_supervisor::CloudflaredHealthHandle,
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
@@ -117,6 +117,7 @@ pub struct AppState {
     pub ops_github_api_base_url: Arc<String>,
     pub ops_github_client: reqwest::Client,
     pub mesh_proxy_state: MeshProxyStateHandle,
+    pub admin_token_verifier: AdminTokenVerifier,
 }
 
 #[derive(Debug)]
@@ -164,6 +165,10 @@ impl ApiError {
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
+
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
+    }
 }
 
 impl From<StoreError> for ApiError {
@@ -203,6 +208,7 @@ struct ErrorBody {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let retry_after = self.status == StatusCode::TOO_MANY_REQUESTS;
         let body = ErrorResponse {
             error: ErrorBody {
                 code: self.code.to_string(),
@@ -210,7 +216,13 @@ impl IntoResponse for ApiError {
                 details: self.details,
             },
         };
-        (self.status, Json(body)).into_response()
+        let mut response = (self.status, Json(body)).into_response();
+        if retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, "1".parse().expect("valid header"));
+        }
+        response
     }
 }
 
@@ -902,6 +914,7 @@ pub fn build_router(
         admin_token_hash: config.admin_token_hash(),
         cluster_id,
         cluster_ca_key_pem: cluster_ca_key_pem.clone(),
+        verifier: AdminTokenVerifier::default(),
     };
 
     let ops_github_repo =
@@ -936,6 +949,7 @@ pub fn build_router(
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
         mesh_proxy_state,
+        admin_token_verifier: auth_state.verifier.clone(),
     };
 
     let admin = Router::new()
@@ -1197,18 +1211,15 @@ async fn admin_auth(
         return ApiError::unauthorized("missing or invalid authorization token").into_response();
     };
 
-    if verify_admin_token(&token, expected) {
-        return next.run(req).await;
-    }
-    if crate::login_token::decode_and_validate_login_token_jwt(
-        &token,
-        Utc::now(),
-        expected.as_str(),
-        &auth.cluster_id,
-    )
-    .is_ok()
-    {
-        return next.run(req).await;
+    match authorize_admin_token(token, expected, &auth.cluster_id, &auth.verifier).await {
+        Ok(true) => return next.run(req).await,
+        Ok(false) => {}
+        Err(AdminTokenVerifyError::Busy) => {
+            return ApiError::too_many_requests("admin authentication is busy").into_response();
+        }
+        Err(AdminTokenVerifyError::Unavailable) => {
+            return ApiError::internal("admin authentication is unavailable").into_response();
+        }
     }
 
     ApiError::unauthorized("missing or invalid authorization token").into_response()
@@ -1236,6 +1247,25 @@ struct AdminAuthState {
     admin_token_hash: Option<AdminTokenHash>,
     cluster_id: String,
     cluster_ca_key_pem: Option<String>,
+    verifier: AdminTokenVerifier,
+}
+
+pub(super) async fn authorize_admin_token(
+    token: String,
+    expected: &AdminTokenHash,
+    cluster_id: &str,
+    verifier: &AdminTokenVerifier,
+) -> Result<bool, AdminTokenVerifyError> {
+    if token.bytes().filter(|byte| *byte == b'.').count() == 2 {
+        return Ok(crate::login_token::decode_and_validate_login_token_jwt(
+            &token,
+            Utc::now(),
+            expected.as_str(),
+            cluster_id,
+        )
+        .is_ok());
+    }
+    verifier.verify(token, expected.clone()).await
 }
 
 async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {

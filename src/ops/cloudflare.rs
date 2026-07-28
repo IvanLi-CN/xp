@@ -367,6 +367,8 @@ After=network-online.target\n\
 Type=simple\n\
 User=cloudflared\n\
 Group=cloudflared\n\
+Environment=GOMEMLIMIT=12MiB\n\
+Environment=GOGC=50\n\
 ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run\n\
 Restart=always\n\
 RestartSec=2s\n\
@@ -377,7 +379,7 @@ WantedBy=multi-user.target\n"
 }
 
 fn openrc_cloudflared_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
+    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\nexport GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"\nexport GOGC=\"${GOGC:-50}\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -904,6 +906,8 @@ mod tests {
     fn openrc_cloudflared_script_is_supervised() {
         let script = openrc_cloudflared_script();
         assert!(script.contains("supervisor=supervise-daemon"));
+        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\""));
+        assert!(script.contains("GOGC=\"${GOGC:-50}\""));
         assert!(script.contains("respawn_delay=2"));
         assert!(script.contains("respawn_max=0"));
 

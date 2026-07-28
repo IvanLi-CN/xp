@@ -6,6 +6,8 @@ description="xray (local proxy runtime)"
 command="/usr/local/bin/xray"
 command_args="run -c /etc/xray/config.json"
 command_user="xray:xray"
+export GOMEMLIMIT="${GOMEMLIMIT:-16MiB}"
+export GOGC="${GOGC:-50}"
 
 # Ensure automatic recovery on crashes without busy-looping.
 supervisor=supervise-daemon

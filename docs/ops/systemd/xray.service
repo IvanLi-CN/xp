@@ -9,6 +9,8 @@ Type=simple
 # Create this user/group (example): useradd --system --home /var/lib/xray --shell /usr/sbin/nologin xray
 User=xray
 Group=xray
+Environment=GOMEMLIMIT=16MiB
+Environment=GOGC=50
 
 ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json
 
