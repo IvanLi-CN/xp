@@ -1056,11 +1056,16 @@ fn update_daily_rollup(
         });
         buckets.last_mut().expect("daily bucket was just inserted")
     };
-    if let Some(value) = uplink {
-        entry.uplink_bytes = Some(entry.uplink_bytes.unwrap_or(0).saturating_add(value));
-    }
-    if let Some(value) = downlink {
-        entry.downlink_bytes = Some(entry.downlink_bytes.unwrap_or(0).saturating_add(value));
+    if complete && entry.complete {
+        if let Some(value) = uplink {
+            entry.uplink_bytes = Some(entry.uplink_bytes.unwrap_or(0).saturating_add(value));
+        }
+        if let Some(value) = downlink {
+            entry.downlink_bytes = Some(entry.downlink_bytes.unwrap_or(0).saturating_add(value));
+        }
+    } else {
+        entry.uplink_bytes = None;
+        entry.downlink_bytes = None;
     }
     entry.complete &= complete;
     entry.warnings.extend(warnings);
@@ -1087,6 +1092,8 @@ fn mark_daily_rollup_incomplete(
         buckets.last_mut().expect("daily bucket was just inserted")
     };
     entry.complete = false;
+    entry.uplink_bytes = None;
+    entry.downlink_bytes = None;
     entry.warnings.push(warning);
     entry.warnings.sort();
     entry.warnings.dedup();
@@ -1376,12 +1383,13 @@ fn traffic_point_from_five_minute(
     is_current_day: bool,
 ) -> TrafficSeriesPoint {
     let end = start + ChronoDuration::seconds(TRAFFIC_ROLLUP_BUCKET_SECS);
+    let complete_bucket = bucket.filter(|bucket| bucket.complete);
     traffic_point(
         rfc3339(start),
         rfc3339(end),
-        bucket.and_then(|bucket| bucket.uplink_bytes),
-        bucket.and_then(|bucket| bucket.downlink_bytes),
-        bucket.map(|bucket| bucket.complete).unwrap_or(false),
+        complete_bucket.and_then(|bucket| bucket.uplink_bytes),
+        complete_bucket.and_then(|bucket| bucket.downlink_bytes),
+        complete_bucket.is_some(),
         is_current_day,
     )
 }
@@ -1396,12 +1404,13 @@ fn traffic_point_from_daily(
         .and_hms_opt(0, 0, 0)
         .unwrap()
         .and_utc();
+    let complete_bucket = bucket.filter(|bucket| bucket.complete);
     traffic_point(
         rfc3339(start),
         rfc3339(end),
-        bucket.and_then(|bucket| bucket.uplink_bytes),
-        bucket.and_then(|bucket| bucket.downlink_bytes),
-        bucket.map(|bucket| bucket.complete).unwrap_or(false),
+        complete_bucket.and_then(|bucket| bucket.uplink_bytes),
+        complete_bucket.and_then(|bucket| bucket.downlink_bytes),
+        complete_bucket.is_some(),
         is_current_day,
     )
 }
@@ -1564,9 +1573,14 @@ pub fn merge_traffic_reports(
                 downlink = None;
                 continue;
             };
+            if !point.complete {
+                complete = false;
+                uplink = None;
+                downlink = None;
+                continue;
+            }
             uplink = add_required(uplink, point.uplink_bytes);
             downlink = add_required(downlink, point.downlink_bytes);
-            complete &= point.complete;
         }
         let is_current_day = matches!(window, TrafficWindow::Days31)
             && start.date_naive() == (window_end - ChronoDuration::days(1)).date_naive();
@@ -2693,8 +2707,9 @@ mod tests {
         let daily = snapshot.traffic.unwrap().daily;
         assert_eq!(daily.len(), 1);
         assert_eq!(daily[0].date, "2026-05-19");
-        assert_eq!(daily[0].uplink_bytes, Some(60));
-        assert_eq!(daily[0].downlink_bytes, Some(80));
+        assert!(!daily[0].complete);
+        assert_eq!(daily[0].uplink_bytes, None);
+        assert_eq!(daily[0].downlink_bytes, None);
     }
 
     #[tokio::test]
@@ -2731,6 +2746,61 @@ mod tests {
                 .iter()
                 .any(|bucket| { bucket.date == "2026-05-20" && !bucket.complete })
         );
+    }
+
+    #[tokio::test]
+    async fn incomplete_daily_bucket_clears_prior_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let first = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let second = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        let third = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle
+            .record_local_sample(
+                first,
+                "node-a",
+                Some(vec![user_traffic("membership-a", "user-a", 100, 200)]),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample(
+                second,
+                "node-a",
+                Some(vec![user_traffic("membership-a", "user-a", 120, 240)]),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample_with_status(
+                third,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: Vec::new(),
+                    unavailable_users: BTreeSet::from(["user-a".to_string()]),
+                    complete: false,
+                    warnings: vec!["user-a sample unavailable".to_string()],
+                    cycle: None,
+                    user_cycles: BTreeMap::new(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+
+        let bucket = handle
+            .snapshot("node-a")
+            .await
+            .unwrap()
+            .traffic
+            .unwrap()
+            .daily
+            .into_iter()
+            .find(|bucket| bucket.date == "2026-05-20")
+            .unwrap();
+        assert!(!bucket.complete);
+        assert_eq!(bucket.uplink_bytes, None);
+        assert_eq!(bucket.downlink_bytes, None);
     }
 
     #[test]

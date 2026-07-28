@@ -622,7 +622,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 3041
+    "source_lines": 3111
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,
@@ -1068,7 +1068,7 @@
   "web/src/views/NodeDetailsPage.tsx": {
     "long_line_count": 9,
     "max_line_length": 134,
-    "source_lines": 1855
+    "source_lines": 1858
   },
   "web/src/views/NodesPage.stories.tsx": {
     "long_line_count": 1,

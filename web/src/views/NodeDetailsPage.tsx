@@ -519,7 +519,10 @@ export function NodeDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminNodeTraffic(adminToken, nodeId, prefs.trafficWindow, signal),
 		placeholderData: (previousData) =>
-			previousData?.node.node_id === nodeId ? previousData : undefined,
+			previousData?.node.node_id === nodeId &&
+			previousData.traffic.window === prefs.trafficWindow
+				? previousData
+				: undefined,
 	});
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
