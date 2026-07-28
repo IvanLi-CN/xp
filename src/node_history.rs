@@ -870,12 +870,13 @@ fn record_traffic_sample(
         warnings.push("traffic tracking started; first sample has no delta".to_string());
     }
 
+    let node_complete = complete && node_known;
     let node_bucket = NodeTrafficBucket {
         start_at: rfc3339(bucket_start),
         end_at: rfc3339(bucket_end),
-        uplink_bytes: node_known.then_some(node_up),
-        downlink_bytes: node_known.then_some(node_down),
-        complete: complete && node_known,
+        uplink_bytes: node_complete.then_some(node_up),
+        downlink_bytes: node_complete.then_some(node_down),
+        complete: node_complete,
         warnings: warnings.clone(),
     };
     upsert_five_minute_bucket(&mut record.traffic_rollup.five_minute, node_bucket);
@@ -883,9 +884,9 @@ fn record_traffic_sample(
     update_daily_rollup(
         &mut record.traffic_rollup.daily,
         bucket_start,
-        node_known.then_some(node_up),
-        node_known.then_some(node_down),
-        complete && node_known,
+        node_complete.then_some(node_up),
+        node_complete.then_some(node_down),
+        node_complete,
         warnings.clone(),
     );
     for date in gap_dates {
@@ -899,9 +900,9 @@ fn record_traffic_sample(
     update_cycle_accumulator(
         &mut record.traffic_rollup.cycle,
         sample.cycle.as_ref(),
-        node_known.then_some(node_up),
-        node_known.then_some(node_down),
-        complete && node_known,
+        node_complete.then_some(node_up),
+        node_complete.then_some(node_down),
+        node_complete,
         &warnings,
         &now_str,
     );
@@ -1112,6 +1113,7 @@ fn update_cycle_accumulator(
     let configuration_changed = accumulator.as_ref().is_some_and(|current| {
         current.mode != mode || (mode == "monthly" && current.end_at != context.start_at)
     });
+    let had_accumulator = accumulator.is_some();
     if reset {
         let warning = if configuration_changed {
             "quota cycle configuration changed; traffic accumulator reset"
@@ -1126,7 +1128,11 @@ fn update_cycle_accumulator(
             end_at: context.end_at.clone(),
             uplink_bytes: 0,
             downlink_bytes: 0,
-            complete: !configuration_changed && complete && uplink.is_some() && downlink.is_some(),
+            complete: had_accumulator
+                && !configuration_changed
+                && complete
+                && uplink.is_some()
+                && downlink.is_some(),
             tracking_since: sampled_at.to_string(),
             warnings: vec![warning.to_string()],
         });
@@ -2377,6 +2383,7 @@ mod tests {
             .cycle
             .unwrap();
         assert_eq!(cycle.tracking_since, "2026-05-20T00:05:00Z");
+        assert!(!cycle.complete);
     }
 
     #[tokio::test]
@@ -2456,11 +2463,17 @@ mod tests {
             .user_traffic_report("user-b", Some("node-a"), TrafficWindow::Hours24, second)
             .await
             .unwrap();
+        let node = handle
+            .node_traffic_report("node-a", TrafficWindow::Hours24, second)
+            .await
+            .unwrap();
         assert!(user_a.partial);
         assert!(user_a.current.last().unwrap().total_bytes.is_none());
         assert!(user_b.current.last().unwrap().complete);
         assert_eq!(user_b.current.last().unwrap().uplink_bytes, Some(20));
         assert_eq!(user_b.current.last().unwrap().downlink_bytes, Some(60));
+        assert!(node.partial);
+        assert!(node.current.last().unwrap().total_bytes.is_none());
     }
 
     #[test]
@@ -2470,7 +2483,16 @@ mod tests {
             end_at: "2026-06-01T00:00:00Z".to_string(),
             mode: TrafficCycleMode::Monthly,
         };
-        let mut accumulator = None;
+        let mut accumulator = Some(TrafficCycleAccumulator {
+            mode: "monthly".to_string(),
+            start_at: "2026-04-01T00:00:00Z".to_string(),
+            end_at: "2026-05-01T00:00:00Z".to_string(),
+            uplink_bytes: 100,
+            downlink_bytes: 200,
+            complete: true,
+            tracking_since: "2026-04-01T00:05:00Z".to_string(),
+            warnings: Vec::new(),
+        });
         update_cycle_accumulator(
             &mut accumulator,
             Some(&context),

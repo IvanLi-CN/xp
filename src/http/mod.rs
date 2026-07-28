@@ -2607,9 +2607,17 @@ async fn admin_get_user_traffic(
     .await;
     let mut reports = Vec::new();
     let mut unreachable_nodes = Vec::new();
+    let mut missing_active_node_report = false;
     for (node, report, unreachable) in fanout_results {
         if unreachable {
             unreachable_nodes.push(node.node_id.clone());
+        }
+        if report.is_none()
+            && !unreachable
+            && query.node_id.is_none()
+            && current_node_ids.contains(&node.node_id)
+        {
+            missing_active_node_report = true;
         }
         if let Some(report) = report {
             node_options.insert(
@@ -2625,8 +2633,18 @@ async fn admin_get_user_traffic(
     if reports.is_empty() {
         return Err(ApiError::not_found("traffic is not available yet"));
     }
-    let traffic = merge_traffic_reports(&reports, window, Utc::now());
-    let partial = traffic.partial || !unreachable_nodes.is_empty();
+    let mut traffic = merge_traffic_reports(&reports, window, Utc::now());
+    if missing_active_node_report {
+        traffic.partial = true;
+        traffic
+            .warnings
+            .push("traffic report is missing for an active node".to_string());
+        traffic.warnings.sort();
+        traffic.warnings.dedup();
+    }
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    let partial = traffic.partial || missing_active_node_report || !unreachable_nodes.is_empty();
     Ok(Json(AdminUserTrafficResponse {
         user: UserTrafficUserSummary {
             user_id: user.user_id,
