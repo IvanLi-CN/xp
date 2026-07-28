@@ -2,8 +2,11 @@
 
 ## Status
 
-- Implemented and released in `v3.19.9`; production rollout is pending the
-  runtime-activation hotfix release and final SG preflight.
+- Authentication, runtime defaults, upgrade activation, OpenRC compatibility,
+  and the initial release-footprint changes are released through `v3.20.1`.
+  SG runs `v3.20.1` with the rotated administrator PHC, but its aggregate PSS
+  preflight reached `71,356 KiB`; rollout remains stopped at the first follower
+  while the XP executable-code footprint is reduced further.
 
 ## Work areas
 
@@ -19,6 +22,7 @@ JWT-first authorization, Xray/cloudflared runtime defaults for
 systemd/OpenRC/container launches, upgrade backfill, and the PSS sampler at
 `scripts/ops/sample-managed-stack-pss.sh`.
 
-Remaining gates: build the web bundle for embedded-UI tests, run shared-testbox
-load/soak, publish and verify the release, then perform the four-node token
-rotation and 24-hour observation.
+Remaining gates: release and measure the size-oriented XP build, pass the SG
+hard gate, roll the same release and PHC across the other three nodes, run the
+load/soak gates, and complete the 24-hour production observation. The shared
+testbox run is blocked until space is available under its managed workspace.
