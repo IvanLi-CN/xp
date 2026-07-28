@@ -2,6 +2,9 @@ use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerA
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
+use crate::ops::runtime_activation::{
+    reload_systemd_units, restart_cloudflared_service, restart_xray_service,
+};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -330,7 +333,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         eprintln!("would download asset: {xp_asset_name}");
         eprintln!("would install to: {}", xp_dest.display());
         eprintln!("would backup old binary to: {}", xp_backup.display());
-        eprintln!("would restart service: xp (systemd/OpenRC auto)");
         eprintln!("would download asset: {xp_ops_asset_name}");
         eprintln!("would install to: {}", xp_ops_dest.display());
         eprintln!("would backup old binary to: {}", xp_ops_backup.display());
@@ -804,6 +806,12 @@ fn rollback_xp_after_xray_failure(
 
 fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitError> {
     backfill_low_memory_runtime_defaults(paths)?;
+    if !reload_systemd_units(paths) {
+        return Err(ExitError::new(
+            7,
+            "service_error: systemd daemon-reload failed",
+        ));
+    }
     let config_path = paths.etc_xray_config();
     let backup = backup_path(&config_path);
     let had_old = config_path.exists();
@@ -819,7 +827,6 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
         fs::copy(&config_path, &backup)
             .map_err(|e| ExitError::new(7, format!("service_error: backup xray config: {e}")))?;
     }
-
     if let Err(err) = write_static_xray_config(paths)
         .and_then(|_| preserve_control_plane_listeners(paths, existing_config.as_deref()))
     {
@@ -830,7 +837,20 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
         return Err(err);
     }
 
-    if restart_xray_service(paths) {
+    if restart_xray_service(
+        paths,
+        &read_xray_systemd_unit(paths),
+        &read_xray_openrc_service(paths),
+    ) {
+        if !restart_cloudflared_service(paths) {
+            if had_old {
+                let _ = fs::remove_file(&backup);
+            }
+            return Err(ExitError::new(
+                7,
+                "service_error: cloudflared restart failed",
+            ));
+        }
         if had_old {
             let _ = fs::remove_file(&backup);
         }
@@ -844,7 +864,11 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
 
     fs::copy(&backup, &config_path)
         .map_err(|e| ExitError::new(8, format!("rollback_failed: restore xray config: {e}")))?;
-    let rollback_restarted = restart_xray_service(paths);
+    let rollback_restarted = restart_xray_service(
+        paths,
+        &read_xray_systemd_unit(paths),
+        &read_xray_openrc_service(paths),
+    );
     let _ = fs::remove_file(&backup);
 
     Err(ExitError::new(
@@ -856,7 +880,6 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
         },
     ))
 }
-
 fn preserve_control_plane_listeners(
     paths: &Paths,
     existing_config: Option<&str>,
@@ -972,29 +995,6 @@ fn restart_xp_service(paths: &Paths) -> bool {
 
     Command::new("rc-service")
         .args(["xp", "restart"])
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
-}
-
-fn restart_xray_service(paths: &Paths) -> bool {
-    if is_test_root(paths.root()) && !test_enable_service_restart() {
-        return true;
-    }
-
-    let systemd_unit = read_xray_systemd_unit(paths);
-    if Command::new("systemctl")
-        .args(["restart", &systemd_unit])
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
-    {
-        return true;
-    }
-
-    let openrc_service = read_xray_openrc_service(paths);
-    Command::new("rc-service")
-        .args([openrc_service.as_str(), "restart"])
         .status()
         .ok()
         .is_some_and(|status| status.success())
