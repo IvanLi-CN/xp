@@ -125,7 +125,7 @@ Storybook覆盖=通过
 
 证据落盘=已落盘
 
-证据绑定sha=ab7a4b4
+证据绑定sha=5f6dd41
 
 桌面 Node details 与 User details 页面，以及移动端 TrafficView 状态：
 

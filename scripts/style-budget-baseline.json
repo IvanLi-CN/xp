@@ -779,7 +779,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2466
+    "source_lines": 2470
   },
   "web/package.json": {
     "long_line_count": 1,
