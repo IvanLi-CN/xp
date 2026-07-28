@@ -2540,76 +2540,82 @@ async fn admin_get_user_traffic(
         .as_ref()
         .as_ref()
         .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let mut reports = Vec::new();
-    let mut unreachable_nodes = Vec::new();
-    for node in selected_nodes {
-        if node.node_id == local_node_id {
-            if let Some(report) = state
-                .node_history
-                .user_traffic_report(&user_id, Some(&node.node_id), window, Utc::now())
+    let uri: axum::http::Uri = format!(
+        "/_internal/users/{user_id}/traffic/local?window={}",
+        window.as_str()
+    )
+    .parse()
+    .map_err(|_| ApiError::invalid_request("invalid traffic window"))?;
+    let signature = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+    let report_now = Utc::now();
+    let history = state.node_history.clone();
+    let fanout_results = stream::iter(selected_nodes.into_iter().map(|node| {
+        let client = client.clone();
+        let local_node_id = local_node_id.clone();
+        let history = history.clone();
+        let signature = signature.clone();
+        let request_user_id = user_id.clone();
+        let request_uri = uri.clone();
+        async move {
+            let node_id = node.node_id.clone();
+            if node_id == local_node_id {
+                let report = history
+                    .user_traffic_report(&request_user_id, Some(&node_id), window, report_now)
+                    .await;
+                return (node, report, false);
+            }
+            let base = node.api_base_url.trim_end_matches('/');
+            if base.is_empty() {
+                return (node, None, true);
+            }
+            let url = format!("{base}/api/admin{request_uri}");
+            let response = tokio::time::timeout(
+                Duration::from_secs(3),
+                client.send_with_fallback(Duration::from_secs(3), |client| {
+                    client.get(url.clone()).header(
+                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                        signature.clone(),
+                    )
+                }),
+            )
+            .await;
+            let Ok(Ok(response)) = response else {
+                return (node, None, true);
+            };
+            if response.status() == StatusCode::NOT_FOUND {
+                return (node, None, false);
+            }
+            if !response.status().is_success() {
+                return (node, None, true);
+            }
+            match response
+                .json::<AdminInternalUserTrafficLocalResponse>()
                 .await
             {
-                reports.push(report);
-                node_options.insert(
-                    node.node_id.clone(),
-                    UserTrafficNodeOption {
-                        node_id: node.node_id.clone(),
-                        node_name: node.node_name.clone(),
-                    },
-                );
+                Ok(remote) => (node, Some(remote.traffic), false),
+                Err(_) => (node, None, true),
             }
-            continue;
         }
-        let base = node.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
-            unreachable_nodes.push(node.node_id);
-            continue;
+    }))
+    .buffer_unordered(4)
+    .collect::<Vec<_>>()
+    .await;
+    let mut reports = Vec::new();
+    let mut unreachable_nodes = Vec::new();
+    for (node, report, unreachable) in fanout_results {
+        if unreachable {
+            unreachable_nodes.push(node.node_id.clone());
         }
-        let uri: axum::http::Uri = format!(
-            "/_internal/users/{user_id}/traffic/local?window={}",
-            window.as_str()
-        )
-        .parse()
-        .map_err(|_| ApiError::invalid_request("invalid traffic window"))?;
-        let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-            .map_err(|err| ApiError::internal(err.to_string()))?;
-        let url = format!("{base}/api/admin{uri}");
-        let response = tokio::time::timeout(
-            Duration::from_secs(3),
-            client.send_with_fallback(Duration::from_secs(3), |client| {
-                client.get(url.clone()).header(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                    sig.clone(),
-                )
-            }),
-        )
-        .await;
-        let Ok(Ok(response)) = response else {
-            unreachable_nodes.push(node.node_id);
-            continue;
-        };
-        if response.status() == StatusCode::NOT_FOUND {
-            continue;
-        }
-        if !response.status().is_success() {
-            unreachable_nodes.push(node.node_id);
-            continue;
-        }
-        match response
-            .json::<AdminInternalUserTrafficLocalResponse>()
-            .await
-        {
-            Ok(remote) => {
-                node_options.insert(
-                    node.node_id.clone(),
-                    UserTrafficNodeOption {
-                        node_id: node.node_id,
-                        node_name: node.node_name,
-                    },
-                );
-                reports.push(remote.traffic);
-            }
-            Err(_) => unreachable_nodes.push(node.node_id),
+        if let Some(report) = report {
+            node_options.insert(
+                node.node_id.clone(),
+                UserTrafficNodeOption {
+                    node_id: node.node_id,
+                    node_name: node.node_name,
+                },
+            );
+            reports.push(report);
         }
     }
     if reports.is_empty() {

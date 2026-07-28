@@ -583,7 +583,7 @@
   "src/http/mod.rs": {
     "long_line_count": 4,
     "max_line_length": 128,
-    "source_lines": 8154
+    "source_lines": 8160
   },
   "src/http/tests.rs": {
     "long_line_count": 2,
@@ -618,7 +618,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 2310
+    "source_lines": 2527
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,
@@ -779,7 +779,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2470
+    "source_lines": 2472
   },
   "web/package.json": {
     "long_line_count": 1,

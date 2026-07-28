@@ -227,6 +227,26 @@ pub struct NodeTrafficSample {
     pub user_cycles: BTreeMap<String, TrafficCycleContext>,
 }
 
+struct UserTrafficDelta {
+    uplink: u64,
+    downlink: u64,
+    known: bool,
+    complete: bool,
+    warnings: Vec<String>,
+}
+
+impl Default for UserTrafficDelta {
+    fn default() -> Self {
+        Self {
+            uplink: 0,
+            downlink: 0,
+            known: false,
+            complete: true,
+            warnings: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TrafficBaseline {
     uplink_total: u64,
@@ -606,10 +626,14 @@ fn record_traffic_sample(
     let mut warnings = sample.warnings.clone();
     let mut complete = sample.complete;
 
-    let mut user_deltas = BTreeMap::<String, (u64, u64, bool)>::new();
+    let mut user_deltas = BTreeMap::<String, UserTrafficDelta>::new();
     let mut saw_new_baseline = false;
     for user_id in &sample.unavailable_users {
-        user_deltas.entry(user_id.clone()).or_default();
+        let entry = user_deltas.entry(user_id.clone()).or_default();
+        entry.complete = false;
+        entry
+            .warnings
+            .push("traffic sample unavailable for user".to_string());
     }
     for totals in sample.totals {
         if let Some(user_id) = totals.user_id.as_ref()
@@ -646,25 +670,55 @@ fn record_traffic_sample(
                 && !totals.is_probe
             {
                 let entry = user_deltas.entry(user_id.clone()).or_default();
-                entry.0 = entry.0.saturating_add(uplink);
-                entry.1 = entry.1.saturating_add(downlink);
-                entry.2 = true;
+                entry.uplink = entry.uplink.saturating_add(uplink);
+                entry.downlink = entry.downlink.saturating_add(downlink);
+                entry.known = true;
             }
         } else if previous.is_none() {
             complete = false;
             saw_new_baseline = true;
+            if let Some(user_id) = totals.user_id.as_ref()
+                && !totals.is_probe
+            {
+                let entry = user_deltas.entry(user_id.clone()).or_default();
+                entry.complete = false;
+                entry.warnings.push(format!(
+                    "traffic tracking started; first sample has no delta for {}",
+                    totals.membership_key
+                ));
+            }
         } else if !previous_is_contiguous {
             complete = false;
             warnings.push(format!(
                 "sampling gap for {}; recovered bucket has no delta",
                 totals.membership_key
             ));
+            if let Some(user_id) = totals.user_id.as_ref()
+                && !totals.is_probe
+            {
+                let entry = user_deltas.entry(user_id.clone()).or_default();
+                entry.complete = false;
+                entry.warnings.push(format!(
+                    "sampling gap for {}; recovered bucket has no delta",
+                    totals.membership_key
+                ));
+            }
         } else if previous.is_some() {
             complete = false;
             warnings.push(format!(
                 "counter reset or decreased for {}",
                 totals.membership_key
             ));
+            if let Some(user_id) = totals.user_id.as_ref()
+                && !totals.is_probe
+            {
+                let entry = user_deltas.entry(user_id.clone()).or_default();
+                entry.complete = false;
+                entry.warnings.push(format!(
+                    "counter reset or decreased for {}",
+                    totals.membership_key
+                ));
+            }
         }
         record.traffic_baselines.insert(
             totals.membership_key,
@@ -709,35 +763,55 @@ fn record_traffic_sample(
         &now_str,
     );
 
-    for (user_id, (uplink, downlink, known)) in user_deltas {
+    for (user_id, delta) in &user_deltas {
         let user = record.user_traffic.entry(user_id.clone()).or_default();
+        let user_complete = delta.complete && delta.known;
         let user_bucket = NodeTrafficBucket {
             start_at: rfc3339(bucket_start),
             end_at: rfc3339(bucket_end),
-            uplink_bytes: known.then_some(uplink),
-            downlink_bytes: known.then_some(downlink),
-            complete: complete && known,
-            warnings: warnings.clone(),
+            uplink_bytes: user_complete.then_some(delta.uplink),
+            downlink_bytes: user_complete.then_some(delta.downlink),
+            complete: user_complete,
+            warnings: delta.warnings.clone(),
         };
         upsert_five_minute_bucket(&mut user.five_minute, user_bucket);
         user.last_sample_at = Some(now_str.clone());
         update_daily_rollup(
             &mut user.daily,
             bucket_start,
-            known.then_some(uplink),
-            known.then_some(downlink),
-            complete && known,
-            warnings.clone(),
+            user_complete.then_some(delta.uplink),
+            user_complete.then_some(delta.downlink),
+            user_complete,
+            delta.warnings.clone(),
         );
         update_cycle_accumulator(
             &mut user.cycle,
-            sample.user_cycles.get(&user_id),
-            known.then_some(uplink),
-            known.then_some(downlink),
-            complete && known,
-            &warnings,
+            sample.user_cycles.get(user_id),
+            user_complete.then_some(delta.uplink),
+            user_complete.then_some(delta.downlink),
+            user_complete,
+            &delta.warnings,
             &now_str,
         );
+    }
+
+    // Keep retained user records aligned with the current cycle even after their
+    // last membership is removed. No active membership means a known zero delta.
+    for (user_id, context) in sample.user_cycles {
+        if user_deltas.contains_key(&user_id) {
+            continue;
+        }
+        if let Some(user) = record.user_traffic.get_mut(&user_id) {
+            update_cycle_accumulator(
+                &mut user.cycle,
+                Some(&context),
+                Some(0),
+                Some(0),
+                true,
+                &[],
+                &now_str,
+            );
+        }
     }
 }
 
@@ -822,25 +896,31 @@ fn update_cycle_accumulator(
     sampled_at: &str,
 ) {
     let Some(context) = context else { return };
+    let mode = match context.mode {
+        TrafficCycleMode::Monthly => "monthly",
+        TrafficCycleMode::Unlimited => "unlimited",
+    };
     let reset = accumulator.as_ref().is_none_or(|current| {
         current.start_at != context.start_at || current.end_at != context.end_at
     });
+    let configuration_changed = accumulator.as_ref().is_some_and(|current| {
+        current.mode != mode || (mode == "monthly" && current.end_at != context.start_at)
+    });
     if reset {
-        let warning = if accumulator.is_some() {
+        let warning = if configuration_changed {
+            "quota cycle configuration changed; traffic accumulator reset"
+        } else if accumulator.is_some() {
             "quota cycle changed; traffic accumulator reset"
         } else {
             "traffic tracking started; prior cycle usage is unavailable"
         };
         *accumulator = Some(TrafficCycleAccumulator {
-            mode: match context.mode {
-                TrafficCycleMode::Monthly => "monthly".to_string(),
-                TrafficCycleMode::Unlimited => "unlimited".to_string(),
-            },
+            mode: mode.to_string(),
             start_at: context.start_at.clone(),
             end_at: context.end_at.clone(),
             uplink_bytes: 0,
             downlink_bytes: 0,
-            complete: false,
+            complete: !configuration_changed && complete && uplink.is_some() && downlink.is_some(),
             tracking_since: sampled_at.to_string(),
             warnings: vec![warning.to_string()],
         });
@@ -854,7 +934,7 @@ fn update_cycle_accumulator(
     if let Some(value) = downlink {
         accumulator.downlink_bytes = accumulator.downlink_bytes.saturating_add(value);
     }
-    accumulator.complete &= complete;
+    accumulator.complete &= complete && uplink.is_some() && downlink.is_some();
     accumulator.warnings.extend(warnings.iter().cloned());
     accumulator.warnings.sort();
     accumulator.warnings.dedup();
@@ -1413,6 +1493,8 @@ pub fn spawn_node_history_local_worker(
         loop {
             ticker.tick().await;
             let now = Utc::now();
+            let bucket_start =
+                floor_five_minute(now) - ChronoDuration::seconds(TRAFFIC_ROLLUP_BUCKET_SECS);
             let collection = collect_local_traffic_totals(&config, &store, &local_node_id).await;
             let (node, users) = {
                 let store = store.lock().await;
@@ -1425,11 +1507,12 @@ pub fn spawn_node_history_local_worker(
                 warnings: collection.warnings,
                 cycle: node
                     .as_ref()
-                    .and_then(|node| traffic_cycle_for_node(node, now)),
+                    .and_then(|node| traffic_cycle_for_node(node, bucket_start)),
                 user_cycles: users
                     .iter()
                     .filter_map(|user| {
-                        traffic_cycle_for_user(user, now).map(|cycle| (user.user_id.clone(), cycle))
+                        traffic_cycle_for_user(user, bucket_start)
+                            .map(|cycle| (user.user_id.clone(), cycle))
                     })
                     .collect(),
             });
@@ -2009,6 +2092,136 @@ mod tests {
                 .iter()
                 .any(|point| point.total_bytes.is_none())
         );
+    }
+
+    #[tokio::test]
+    async fn user_sampling_failure_does_not_make_other_users_partial() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let first = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let second = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle
+            .record_local_sample(
+                first,
+                "node-a",
+                Some(vec![
+                    user_traffic("membership-a", "user-a", 100, 300),
+                    user_traffic("membership-b", "user-b", 200, 500),
+                ]),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample_with_status(
+                second,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: vec![user_traffic("membership-b", "user-b", 220, 560)],
+                    unavailable_users: BTreeSet::from(["user-a".to_string()]),
+                    complete: false,
+                    warnings: vec!["user-a sample unavailable".to_string()],
+                    cycle: None,
+                    user_cycles: BTreeMap::new(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+
+        let user_a = handle
+            .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)
+            .await
+            .unwrap();
+        let user_b = handle
+            .user_traffic_report("user-b", Some("node-a"), TrafficWindow::Hours24, second)
+            .await
+            .unwrap();
+        assert!(user_a.partial);
+        assert!(user_a.current.last().unwrap().total_bytes.is_none());
+        assert!(user_b.current.last().unwrap().complete);
+        assert_eq!(user_b.current.last().unwrap().uplink_bytes, Some(20));
+        assert_eq!(user_b.current.last().unwrap().downlink_bytes, Some(60));
+    }
+
+    #[test]
+    fn cycle_accumulator_can_be_complete_after_a_valid_starting_bucket() {
+        let context = TrafficCycleContext {
+            start_at: "2026-05-01T00:00:00Z".to_string(),
+            end_at: "2026-06-01T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+        let mut accumulator = None;
+        update_cycle_accumulator(
+            &mut accumulator,
+            Some(&context),
+            Some(10),
+            Some(20),
+            true,
+            &[],
+            "2026-05-20T00:05:00Z",
+        );
+        assert!(accumulator.unwrap().complete);
+    }
+
+    #[tokio::test]
+    async fn retained_user_cycle_resets_without_active_membership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let first = "2026-05-31T23:55:00Z".parse::<DateTime<Utc>>().unwrap();
+        let second = "2026-06-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let old_cycle = TrafficCycleContext {
+            start_at: "2026-05-01T00:00:00Z".to_string(),
+            end_at: "2026-06-01T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+        let new_cycle = TrafficCycleContext {
+            start_at: "2026-06-01T00:00:00Z".to_string(),
+            end_at: "2026-07-01T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+
+        handle
+            .record_local_sample_with_status(
+                first,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: vec![user_traffic("membership-a", "user-a", 100, 200)],
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: BTreeMap::from([("user-a".to_string(), old_cycle)]),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample_with_status(
+                second,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: Vec::new(),
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: BTreeMap::from([("user-a".to_string(), new_cycle)]),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+
+        let state = handle.snapshot("node-a").await.unwrap();
+        let record = handle
+            .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)
+            .await
+            .unwrap();
+        assert_eq!(
+            record.summary.cycle_start_at.as_deref(),
+            Some("2026-06-01T00:00:00Z")
+        );
+        assert_eq!(record.summary.uplink_bytes, 0);
+        assert!(state.traffic.unwrap().five_minute.len() >= 2);
     }
 
     #[tokio::test]

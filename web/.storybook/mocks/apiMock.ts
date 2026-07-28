@@ -2420,7 +2420,9 @@ export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 			probe = nextConfig?.probe;
 		},
 		async handle(req: Request) {
-			return handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req);
+			return (
+				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
+			);
 		},
 	};
 }

@@ -368,8 +368,6 @@ export function UserDetailsPage() {
 				activeTrafficNodeId,
 				signal,
 			),
-		placeholderData: (previousData) =>
-			previousData?.user.user_id === userId ? previousData : undefined,
 	});
 
 	const user = userQuery.data;
