@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminEndpointProbeHistory } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoint } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
 import { EndpointProbeStatsPage } from "./EndpointProbeStatsPage";
@@ -41,6 +42,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../api/adminEndpointProbes");
 vi.mock("../api/adminEndpoints");
+vi.mock("../api/adminNodes");
 
 vi.mock("../components/auth", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../components/auth")>();
@@ -108,6 +110,26 @@ describe("<EndpointProbeStatsPage />", () => {
 				},
 			],
 		});
+		vi.mocked(fetchAdminNodes).mockResolvedValue({
+			items: [
+				{
+					node_id: "node-1",
+					node_name: "Tokyo edge",
+					api_base_url: "https://tokyo.example.invalid",
+					access_host: "tokyo.example.invalid",
+					quota_limit_bytes: 0,
+					quota_reset: { policy: "unlimited" },
+				},
+				{
+					node_id: "node-2",
+					node_name: "Amsterdam edge",
+					api_base_url: "https://amsterdam.example.invalid",
+					access_host: "amsterdam.example.invalid",
+					quota_limit_bytes: 0,
+					quota_reset: { policy: "unlimited" },
+				},
+			],
+		});
 	});
 
 	it("shows participant-based labels and reported counts", async () => {
@@ -171,5 +193,32 @@ describe("<EndpointProbeStatsPage />", () => {
 			await screen.findByText(/Participating nodes:/i),
 		).toBeInTheDocument();
 		expect(screen.getAllByText("2/2").length).toBeGreaterThan(0);
+	});
+
+	it("shows linked node names in display-name order", async () => {
+		renderPage();
+
+		const links = await screen.findAllByRole("link", {
+			name: /Open node details:/i,
+		});
+		expect(links.map((link) => link.textContent)).toEqual([
+			"Amsterdam edge",
+			"Tokyo edge",
+		]);
+		expect(links.map((link) => link.getAttribute("href"))).toEqual([
+			"/nodes/node-2",
+			"/nodes/node-1",
+		]);
+		expect(links[0]).toHaveAttribute("title", "node-2");
+	});
+
+	it("keeps probe stats available when the node-name lookup fails", async () => {
+		vi.mocked(fetchAdminNodes).mockRejectedValueOnce(
+			new Error("nodes unavailable"),
+		);
+		renderPage();
+
+		expect(await screen.findByText("node-1")).toBeInTheDocument();
+		expect(screen.queryByText("Failed to load probe stats")).toBeNull();
 	});
 });

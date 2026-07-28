@@ -7,8 +7,13 @@ import { buttonVariants } from "@/components/ui/button";
 import { fetchAdminEndpointProbeHistory } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoint } from "../api/adminEndpoints";
 import type { EndpointProbeStatus } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
+import {
+	NodeNameLink,
+	compareNodeIdsByDisplayName,
+} from "../components/NodeNameLink";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -74,6 +79,23 @@ export function EndpointProbeStatsPage() {
 			fetchAdminEndpointProbeHistory(adminToken, endpointId, 24, signal),
 	});
 
+	const nodesQuery = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+
+	const nodeNamesById = useMemo(
+		() =>
+			new Map(
+				(nodesQuery.data?.items ?? []).map((node) => [
+					node.node_id,
+					node.node_name,
+				]),
+			),
+		[nodesQuery.data],
+	);
+
 	const slots = historyQuery.data?.slots ?? [];
 	const latestParticipatingNodes =
 		historyQuery.data?.participating_nodes ??
@@ -99,6 +121,19 @@ export function EndpointProbeStatsPage() {
 	}, [slots, selectedHour]);
 	const selectedParticipatingNodes =
 		selected?.participating_nodes ?? latestParticipatingNodes;
+	const selectedSamples = useMemo(
+		() =>
+			selected
+				? [...selected.by_node].sort((first, second) =>
+						compareNodeIdsByDisplayName(
+							first.node_id,
+							second.node_id,
+							nodeNamesById,
+						),
+					)
+				: [],
+		[selected, nodeNamesById],
+	);
 
 	if (adminToken.length === 0) {
 		return (
@@ -314,7 +349,7 @@ export function EndpointProbeStatsPage() {
 				<div className="xp-card-body space-y-4">
 					<h2 className="xp-card-title">Per-node results</h2>
 					{selected ? (
-						selected.by_node.length === 0 ? (
+						selectedSamples.length === 0 ? (
 							<p className="text-sm text-muted-foreground">
 								No samples for this hour.
 							</p>
@@ -328,9 +363,14 @@ export function EndpointProbeStatsPage() {
 									{ key: "error", label: "Error" },
 								]}
 							>
-								{selected.by_node.map((sample) => (
+								{selectedSamples.map((sample) => (
 									<tr key={sample.node_id}>
-										<td className="font-mono text-xs">{sample.node_id}</td>
+										<td>
+											<NodeNameLink
+												nodeId={sample.node_id}
+												nodeName={nodeNamesById.get(sample.node_id)}
+											/>
+										</td>
 										<td>
 											<span className={sampleBadgeClass(sample)}>
 												{sample.skipped === true

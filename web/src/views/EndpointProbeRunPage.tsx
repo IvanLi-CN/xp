@@ -20,9 +20,14 @@ import {
 	type EndpointProbeStatus,
 	fetchAdminEndpoints,
 } from "../api/adminEndpoints";
+import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { startSseStream } from "../api/sse";
 import { Button } from "../components/Button";
+import {
+	NodeNameLink,
+	compareNodeIdsByDisplayName,
+} from "../components/NodeNameLink";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
@@ -173,6 +178,23 @@ export function EndpointProbeRunPage() {
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
+
+	const nodesQuery = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+
+	const nodeNamesById = useMemo(
+		() =>
+			new Map(
+				(nodesQuery.data?.items ?? []).map((node) => [
+					node.node_id,
+					node.node_name,
+				]),
+			),
+		[nodesQuery.data],
+	);
 
 	useEffect(() => {
 		const data = statusQuery.data;
@@ -330,11 +352,17 @@ export function EndpointProbeRunPage() {
 		if (liveNodes.length > 0) {
 			return liveNodes
 				.slice()
-				.sort((a, b) => a.node_id.localeCompare(b.node_id));
+				.sort((a, b) =>
+					compareNodeIdsByDisplayName(a.node_id, b.node_id, nodeNamesById),
+				);
 		}
 
-		return data.nodes;
-	}, [nodeRunnersById, statusQuery.data]);
+		return data.nodes
+			.slice()
+			.sort((a, b) =>
+				compareNodeIdsByDisplayName(a.node_id, b.node_id, nodeNamesById),
+			);
+	}, [nodeNamesById, nodeRunnersById, statusQuery.data]);
 
 	const overallStatus = useMemo(() => {
 		const data = statusQuery.data;
@@ -629,7 +657,12 @@ export function EndpointProbeRunPage() {
 
 				return (
 					<tr key={node.node_id}>
-						<td className="font-mono text-xs">{node.node_id}</td>
+						<td>
+							<NodeNameLink
+								nodeId={node.node_id}
+								nodeName={nodeNamesById.get(node.node_id)}
+							/>
+						</td>
 						<td>
 							<span className={statusBadgeClass(node.status)}>
 								{statusLabel(node.status)}

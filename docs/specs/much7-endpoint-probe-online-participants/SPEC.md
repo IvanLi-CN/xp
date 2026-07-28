@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-11
-- Last: 2026-03-11
+- Last: 2026-07-28
 
 ## 背景 / 问题陈述
 
@@ -77,6 +77,10 @@
 - stats 页面把 `Expected nodes` 改为 `Participating nodes`。
 - stats 页面每个小时条的 `Reported x/y` 使用该 slot 的 participant 分母，而不是固定集群节点数。
 - live run 页面用 requested/progress 节点数（加 SSE 已回报样本节点兜底）计算临时聚合状态，保证离线/忙碌节点不会把 live 结果误判为 `missing`。
+- stats 页的 per-node results 与 live run 页的 node runners 都从现有节点清单解析
+  `node_name`；名称有效时显示为节点详情链接，完整 `node_id` 仅保留在 hover 与可访问名称中。
+- 两页按最终显示名称排序，同名时以 `node_id` 稳定排序；名称缺失、节点已删除或节点清单请求失败时，
+  保持探针页可用并回退显示不可点击的 `node_id`。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -85,6 +89,10 @@
 - Given 一个节点已经登记参与某小时 run，When 它缺少某个 endpoint 的样本，Then 该 endpoint 小时桶仍为 `missing`。
 - Given 历史 24h 数据来自旧版本且没有 participant metadata，When 新版本读取 `/api/admin/endpoints/{id}/probe-history`，Then 分母从同小时全 endpoint 样本 union 推导，避免把离线但未参与的当前节点硬算进分母。
 - Given live run 页面同时存在 2 个 requested 节点和 1 个 `busy` 节点，When 2 个 requested 节点都回报同一 endpoint 成功，Then 页面显示 `Up`，不是 `Missing`。
+- Given probe sample 的 `node_id` 可从节点清单解析名称，When 查看 stats 或 live run 页面，Then 页面显示
+  按名称排序的节点详情链接，hover 与可访问名称仍可取得完整 ID。
+- Given 历史 sample 的节点已不存在或节点清单请求失败，When 查看 stats 或 live run 页面，Then 页面显示回退 ID，
+  且不把名称解析失败升级为页面错误。
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
@@ -96,6 +104,10 @@
 
 - Rust：`cargo test endpoint_probe -- --nocapture`
 - Web：`cd web && bun run test src/utils/endpointProbeStatus.test.ts src/views/EndpointProbeStatsPage.test.tsx src/views/EndpointProbeRunPage.test.tsx`
+- Web：
+  - `cd web && bun run test src/components/NodeNameLink.test.tsx`
+  - `cd web && bun run test src/views/EndpointProbeStatsPage.test.tsx`
+  - `cd web && bun run test src/views/EndpointProbeRunPage.test.tsx`
 
 ## 风险 / 开放问题 / 假设
 
@@ -107,3 +119,4 @@
 
 - 2026-03-11: 创建 much7 规格，冻结“离线节点不参与 endpoint probe 分母”的实现口径。
 - 2026-03-11: 完成 participant 持久化、legacy fallback、Web 文案/聚合与 targeted Rust/Vitest tests。
+- 2026-07-28: stats 与 live run 的节点结果改为名称优先、详情可跳转、名称排序，并保留 ID 回退语义。
