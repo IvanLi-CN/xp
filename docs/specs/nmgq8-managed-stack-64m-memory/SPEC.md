@@ -28,7 +28,8 @@
 
 ## 观测与预算
 
-- 每秒从目标进程树的 `/proc/<pid>/smaps_rollup` 读取 `Pss`，记录角色、版本、
+- 每秒从目标进程树的 `/proc/<pid>/smaps_rollup` 读取 `Pss`；旧内核缺失该文件时汇总
+  `/proc/<pid>/smaps` 的 `Pss` 条目，记录角色、版本、
   当前值和峰值。
 - 诊断子预算为 `xp <=18 MiB`、`xray <=22 MiB`、`cloudflared <=18 MiB`、
   临时 canary `<=4 MiB`；总预算是唯一发布硬门禁。

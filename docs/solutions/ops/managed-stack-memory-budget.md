@@ -15,6 +15,10 @@ memory growth while the host remains otherwise healthy.
 
 ## Remediation
 
+PSS includes mapped executable code as well as heap. If Go heap limits are
+active and the aggregate still misses the gate, optimize the Rust release
+profile before lowering Go limits into GC churn.
+
 Use Argon2id `m=4096,t=3,p=1` for newly generated administrator PHC values
 and require administrator secrets to contain at least 32 bytes. Serialize
 raw-token verification behind one bounded worker; return HTTP 429 with
@@ -30,5 +34,6 @@ values to child processes and retain explicit `XP_*` overrides.
 ## Verification
 
 Use `scripts/ops/sample-managed-stack-pss.sh` to sample process-tree PSS from
-`/proc/*/smaps_rollup` once per second. The hard gate is a combined peak of
+`/proc/*/smaps_rollup` once per second, falling back to summing `Pss` entries in
+`/proc/*/smaps` on older kernels. The hard gate is a combined peak of
 `65,536 KiB`; an OOM, restart, or budget breach fails the run.

@@ -15,9 +15,16 @@ done
 
 peak_xp=0; peak_xray=0; peak_cloudflared=0; peak_canary=0; peak_total=0
 read_pss() {
-  local pid="$1" value
-  [[ -r "/proc/$pid/smaps_rollup" ]] || return 0
-  value=$(awk '/^Pss:/ {print $2}' "/proc/$pid/smaps_rollup")
+  local pid="$1" source value
+  if [[ -r "/proc/$pid/smaps_rollup" ]]; then
+    source="/proc/$pid/smaps_rollup"
+  elif [[ -r "/proc/$pid/smaps" ]]; then
+    source="/proc/$pid/smaps"
+  else
+    printf '0\n'
+    return
+  fi
+  value=$(awk '/^Pss:/ {sum += $2} END {print sum + 0}' "$source")
   printf '%s\n' "${value:-0}"
 }
 role_pss() {
