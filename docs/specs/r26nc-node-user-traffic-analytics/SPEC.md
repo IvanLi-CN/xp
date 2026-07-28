@@ -85,7 +85,7 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 ## 验收标准（Acceptance Criteria）
 
 - Given 节点有可用 Xray stats，When 五分钟采样完成，Then 节点与用户-节点上/下行 rollup 同时更新且总量等于两者之和。
-- Given 页面选择 24h 或 31d，When 参考线开启，Then 当前与此前等长窗口按 UTC 对齐显示，缺失桶断线。
+- Given 页面选择 24h 或 31d，When 页面加载或切换窗口，Then 当前与此前等长窗口按 UTC 对齐显示，缺失桶断线。
 - Given 用户跨多个节点，When User Traffic 使用 All nodes，Then summary 和图表聚合所有可达节点并报告 partial 节点。
 - Given 数据超过保留窗口，When 新采样或加载发生，Then 五分钟数据不超过 49 小时、daily 不超过 90 天。
 - Given quota reset 周期或 counter reset 变化，When 下一次采样完成，Then 累加器重新建立窗口且不产生负值。
@@ -125,7 +125,7 @@ Storybook覆盖=通过
 
 证据落盘=已落盘
 
-证据绑定sha=fd213dd
+证据绑定sha=ddfe183
 
 桌面 Node details 与 User details 页面，以及移动端 TrafficView 状态：
 
