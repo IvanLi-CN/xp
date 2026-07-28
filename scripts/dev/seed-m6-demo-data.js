@@ -5,7 +5,7 @@ const baseUrl = (process.env.XP_API_BASE_URL || "http://127.0.0.1:62416").replac
 	/\/+$/,
 	"",
 );
-const adminToken = process.env.XP_ADMIN_TOKEN || "testtoken";
+const adminToken = process.env.XP_ADMIN_TOKEN || "0123456789abcdef0123456789abcdef";
 
 const headers = {
 	Accept: "application/json",
