@@ -16,7 +16,7 @@
     "max_line_length": 124
   },
   "AGENTS.md": {
-    "long_line_count": 9,
+    "long_line_count": 10,
     "max_line_length": 244
   },
   "Cargo.toml": {
@@ -408,7 +408,7 @@
     "max_line_length": 189
   },
   "docs/specs/README.md": {
-    "long_line_count": 37,
+    "long_line_count": 40,
     "max_line_length": 474
   },
   "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
@@ -575,6 +575,10 @@
     "long_line_count": 1,
     "max_line_length": 106
   },
+  "src/admin_token.rs": {
+    "long_line_count": 2,
+    "max_line_length": 135
+  },
   "src/endpoint_probe.rs": {
     "long_line_count": 1,
     "max_line_length": 103,
@@ -583,7 +587,7 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8280
+    "source_lines": 8310
   },
   "src/http/tests.rs": {
     "long_line_count": 2,
@@ -629,18 +633,18 @@
     "max_line_length": 120
   },
   "src/ops/admin_token_tests.rs": {
-    "long_line_count": 1,
-    "max_line_length": 125
+    "long_line_count": 2,
+    "max_line_length": 131
   },
   "src/ops/cloudflare.rs": {
-    "long_line_count": 2,
-    "max_line_length": 431,
+    "long_line_count": 3,
+    "max_line_length": 504,
     "source_lines": 1087
   },
   "src/ops/container.rs": {
     "long_line_count": 10,
     "max_line_length": 155,
-    "source_lines": 1683
+    "source_lines": 1730
   },
   "src/ops/container/tests.rs": {
     "long_line_count": 1,
@@ -657,7 +661,8 @@
   },
   "src/ops/init.rs": {
     "long_line_count": 2,
-    "max_line_length": 363
+    "max_line_length": 363,
+    "source_lines": 1045
   },
   "src/ops/install.rs": {
     "long_line_count": 1,
@@ -671,7 +676,7 @@
   "src/ops/upgrade.rs": {
     "long_line_count": 3,
     "max_line_length": 108,
-    "source_lines": 1043
+    "source_lines": 1044
   },
   "src/ops/xp.rs": {
     "long_line_count": 7,
