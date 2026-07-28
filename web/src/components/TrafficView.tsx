@@ -9,7 +9,7 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 
 import type {
 	TrafficReport,
@@ -64,7 +64,6 @@ function formatTimestamp(value: string | null | undefined): string {
 function buildTooltip(
 	report: TrafficReport,
 	window: TrafficWindow,
-	referenceEnabled: boolean,
 ): EChartsOption["tooltip"] {
 	return {
 		trigger: "axis",
@@ -79,7 +78,7 @@ function buildTooltip(
 				point
 					? `<div><strong>${label}</strong> · up ${point.uplink_bytes == null ? "-" : formatQuotaBytesHuman(point.uplink_bytes)} · down ${point.downlink_bytes == null ? "-" : formatQuotaBytesHuman(point.downlink_bytes)} · total ${point.total_bytes == null ? "-" : formatQuotaBytesHuman(point.total_bytes)}</div>`
 					: "";
-			return `<div class="space-y-1"><div>${formatTimestamp(current.start_at)}</div>${row("Current", current)}${referenceEnabled ? row(`Previous ${window}`, reference) : ""}</div>`;
+			return `<div class="space-y-1"><div>${formatTimestamp(current.start_at)}</div>${row("Current", current)}${row(`Previous ${window}`, reference)}</div>`;
 		},
 	};
 }
@@ -91,7 +90,6 @@ export function TrafficView({
 	isFetching,
 	nodeSelector,
 }: TrafficViewProps) {
-	const [referenceEnabled, setReferenceEnabled] = useState(true);
 	const currentDayIndex = report.current.findIndex(
 		(point) => point.is_current_day,
 	);
@@ -156,7 +154,7 @@ export function TrafficView({
 				},
 				splitLine: { lineStyle: { color: CHART_GRID_COLOR } },
 			},
-			tooltip: buildTooltip(report, window, referenceEnabled),
+			tooltip: buildTooltip(report, window),
 			series: [
 				{
 					name: "Current",
@@ -170,7 +168,7 @@ export function TrafficView({
 					markArea,
 					markLine,
 				},
-				...(referenceEnabled && report.reference
+				...(report.reference
 					? [
 							{
 								name: "Previous",
@@ -189,7 +187,7 @@ export function TrafficView({
 					: []),
 			],
 		};
-	}, [currentDayIndex, referenceEnabled, report, window]);
+	}, [currentDayIndex, report, window]);
 
 	return (
 		<section className="space-y-4">
@@ -215,14 +213,6 @@ export function TrafficView({
 							</Button>
 						))}
 					</fieldset>
-					<label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-						<input
-							type="checkbox"
-							checked={referenceEnabled}
-							onChange={(event) => setReferenceEnabled(event.target.checked)}
-						/>
-						Compare previous period
-					</label>
 				</div>
 			</div>
 

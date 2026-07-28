@@ -57,7 +57,7 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 
 - 本地采样读取当前节点 membership 的 Xray uplink/downlink 累计值，计算非负 delta，同时更新节点和用户-节点 rollup。
 - Node Traffic 默认 24h；User Traffic 默认聚合全部节点，可切换单节点；用户和节点范围选择共享并持久化。
-- 主图是圆角阶梯面积图，当前总量有填充，参考总量为虚线；tooltip 展示上下行与总量。31d 当前日有不同背景，前方有竖向虚线。
+- 主图是圆角阶梯面积图，当前总量有填充，参考总量固定以虚线展示；tooltip 展示上下行与总量。31d 当前日有不同背景，前方有竖向虚线。
 
 ### Edge cases / errors
 

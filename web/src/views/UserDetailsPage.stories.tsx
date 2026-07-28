@@ -153,9 +153,6 @@ export const TrafficTab: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Last 31 days" }),
 		);
-		await expect(
-			await canvas.findByRole("checkbox", { name: "Compare previous period" }),
-		).toBeChecked();
 	},
 };
 

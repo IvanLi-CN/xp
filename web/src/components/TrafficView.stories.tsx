@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
 import { useState } from "react";
 
 import type {
@@ -100,18 +99,6 @@ export const Last24Hours: Story = {};
 
 export const Last31Days: Story = {
 	args: { window: "31d", report: makeReport("31d") },
-};
-
-export const ReferenceDisabled: Story = {
-	args: { report: makeReport("24h") },
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const toggle = canvas.getByRole("checkbox", {
-			name: "Compare previous period",
-		});
-		await userEvent.click(toggle);
-		expect(toggle).not.toBeChecked();
-	},
 };
 
 export const SamplingGap: Story = {

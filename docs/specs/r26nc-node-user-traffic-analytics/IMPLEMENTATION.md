@@ -11,7 +11,8 @@
 ## Coverage / rollout summary
 
 - Backend sampling, retention, lifecycle cleanup, mirror/fan-out APIs and schema v2 are implemented.
-- Node/User Traffic tabs share `TrafficView`; UTC range preference, comparison toggle, gaps and partial states are covered by Storybook stories.
+- Node/User Traffic tabs share `TrafficView`; UTC range preference and fixed previous-period comparison are covered by Storybook stories.
+- Gap and partial states are covered by the same Storybook stories.
 - Storybook component/page interaction tests and Web/Rust validation are complete; final visual evidence is recorded in `SPEC.md`.
 
 ## Remaining Gaps
