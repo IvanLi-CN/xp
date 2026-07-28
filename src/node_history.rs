@@ -376,6 +376,9 @@ impl PersistedNodeHistoryRecord {
             user.baselines
                 .retain(|_, baseline| baseline.updated_at > traffic_cutoff);
         }
+        self.user_traffic.retain(|_, user| {
+            user.membership_active || !user.five_minute.is_empty() || !user.daily.is_empty()
+        });
         self.traffic_baselines
             .retain(|_, baseline| baseline.updated_at > traffic_cutoff);
     }
@@ -392,6 +395,8 @@ struct PersistedNodeHistoryCache {
     pending_node_history_cleanup: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     deleted_users: BTreeSet<String>,
+    #[serde(default)]
+    deleted_nodes: BTreeSet<String>,
 }
 
 impl PersistedNodeHistoryCache {
@@ -402,6 +407,7 @@ impl PersistedNodeHistoryCache {
             pending_user_traffic_cleanup: BTreeMap::new(),
             pending_node_history_cleanup: BTreeMap::new(),
             deleted_users: BTreeSet::new(),
+            deleted_nodes: BTreeSet::new(),
         }
     }
 }
@@ -464,6 +470,9 @@ impl NodeHistoryHandle {
     ) {
         {
             let mut state = self.inner.write().await;
+            if state.deleted_nodes.contains(node_id) {
+                return;
+            }
             let deleted_users = state.deleted_users.clone();
             let record = state
                 .nodes
@@ -489,6 +498,9 @@ impl NodeHistoryHandle {
     ) {
         {
             let mut state = self.inner.write().await;
+            if state.deleted_nodes.contains(node_id) {
+                return;
+            }
             let mut record = state
                 .nodes
                 .remove(node_id)
@@ -520,6 +532,7 @@ impl NodeHistoryHandle {
     pub async fn clear_node(&self, node_id: &str) {
         {
             let mut state = self.inner.write().await;
+            state.deleted_nodes.insert(node_id.to_string());
             state.nodes.remove(node_id);
             state.pending_user_traffic_cleanup.remove(node_id);
             state.pending_node_history_cleanup.remove(node_id);
@@ -947,8 +960,8 @@ fn record_traffic_sample(
         );
     }
 
-    // Keep retained user records aligned with the current cycle even after their
-    // last membership is removed. No active membership means a known zero delta.
+    // Record one incomplete transition after a membership is removed, then let the
+    // retained buckets expire without refreshing the inactive record forever.
     for (user_id, context) in sample.user_cycles {
         if deleted_users.contains(&user_id) {
             continue;
@@ -957,14 +970,12 @@ fn record_traffic_sample(
             continue;
         }
         if let Some(user) = record.user_traffic.get_mut(&user_id) {
+            if !user.membership_active {
+                continue;
+            }
             let warning = "membership removed; bucket has no delta".to_string();
-            let was_active = user.membership_active;
             user.membership_active = false;
-            let (uplink, downlink, complete, warnings) = if was_active {
-                (None, None, false, vec![warning.clone()])
-            } else {
-                (Some(0), Some(0), true, Vec::new())
-            };
+            let (uplink, downlink, complete, warnings) = (None, None, false, vec![warning.clone()]);
             upsert_five_minute_bucket(
                 &mut user.five_minute,
                 NodeTrafficBucket {
@@ -1478,7 +1489,10 @@ fn build_summary(
         complete &=
             bucket.complete && bucket.uplink_bytes.is_some() && bucket.downlink_bytes.is_some();
         if tracking_since.is_none() {
-            tracking_since = Some(bucket.date.clone());
+            tracking_since = chrono::NaiveDate::parse_from_str(&bucket.date, "%Y-%m-%d")
+                .ok()
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|date| rfc3339(date.and_utc()));
         }
     }
     TrafficSummary {
@@ -2699,7 +2713,8 @@ mod tests {
             Some("2026-06-01T00:00:00Z")
         );
         assert_eq!(record.summary.uplink_bytes, 0);
-        assert_eq!(record.current.last().unwrap().total_bytes, Some(0));
+        assert_eq!(record.current.last().unwrap().total_bytes, None);
+        assert!(!record.current.last().unwrap().complete);
         assert!(state.traffic.unwrap().five_minute.len() >= 2);
     }
 
@@ -2840,6 +2855,10 @@ mod tests {
         assert!(!summary.complete);
         assert_eq!(summary.uplink_bytes, 10);
         assert_eq!(summary.downlink_bytes, 20);
+        assert_eq!(
+            summary.tracking_since.as_deref(),
+            Some("2026-05-20T00:00:00Z")
+        );
     }
 
     #[tokio::test]
@@ -2894,6 +2913,125 @@ mod tests {
         );
         handle.clear_node("node-a").await;
         assert!(handle.snapshot("node-a").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn deleted_node_tombstone_blocks_stale_snapshot_recreation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("node_history_cache.json");
+        let handle = NodeHistoryHandle::new(path.clone());
+        let now = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        handle.clear_node("node-a").await;
+        handle
+            .replace_node_snapshot(
+                now,
+                "node-a",
+                NodeHistorySnapshot {
+                    node_id: "node-a".to_string(),
+                    last_synced_at: None,
+                    last_sync_error: None,
+                    daily_traffic: Vec::new(),
+                    daily_component_status: Vec::new(),
+                    component_status_events: Vec::new(),
+                    traffic: Some(NodeTrafficRollupSnapshot::default()),
+                },
+            )
+            .await;
+
+        assert!(handle.snapshot("node-a").await.is_none());
+        let reloaded = NodeHistoryHandle::new(path);
+        assert!(reloaded.snapshot("node-a").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn removed_membership_history_expires_after_retention_window() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let first = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let second = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        let removed = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
+        let expired = "2026-08-19T00:15:00Z".parse::<DateTime<Utc>>().unwrap();
+        let cycle = TrafficCycleContext {
+            start_at: "2026-05-01T00:00:00Z".to_string(),
+            end_at: "2026-06-01T00:00:00Z".to_string(),
+            mode: TrafficCycleMode::Monthly,
+        };
+        let cycles = || BTreeMap::from([("user-a".to_string(), cycle.clone())]);
+
+        handle
+            .record_local_sample_with_status(
+                first,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: vec![user_traffic("membership-a", "user-a", 100, 200)],
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: cycles(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample_with_status(
+                second,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: vec![user_traffic("membership-a", "user-a", 130, 250)],
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: cycles(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        handle
+            .record_local_sample_with_status(
+                removed,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: Vec::new(),
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: cycles(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        assert!(
+            handle
+                .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, removed)
+                .await
+                .is_some()
+        );
+
+        handle
+            .record_local_sample_with_status(
+                expired,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: Vec::new(),
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
+                    user_cycles: cycles(),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        assert!(
+            handle
+                .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, expired)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
