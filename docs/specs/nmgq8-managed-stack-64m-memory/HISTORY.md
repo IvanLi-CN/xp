@@ -1,5 +1,10 @@
 # History
 
+- 2026-07-29: release builds use Fat LTO, size optimization, abort-on-panic,
+  one codegen unit, and stripped symbols after production PSS showed that
+  cloudflared's live heap was already small and mapped executable pages were
+  the remaining controllable budget.
+
 - 2026-07-29: release builds use Thin LTO, one codegen unit, and stripped
   symbols to reduce XP's mapped code footprint; OpenRC backfill now supports
   provider wrapper scripts without `command_user`.

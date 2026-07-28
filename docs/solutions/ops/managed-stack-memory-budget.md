@@ -19,6 +19,12 @@ PSS includes mapped executable code as well as heap. If Go heap limits are
 active and the aggregate still misses the gate, optimize the Rust release
 profile before lowering Go limits into GC churn.
 
+For XP release binaries, use one codegen unit, Fat LTO, `opt-level="z"`,
+`panic="abort"`, and symbol stripping. Symbol stripping reduces the artifact,
+while size optimization and LTO reduce executable pages that contribute to
+PSS. Treat a smaller file as a build signal only; the production PSS sampler
+remains the acceptance gate.
+
 Use Argon2id `m=4096,t=3,p=1` for newly generated administrator PHC values
 and require administrator secrets to contain at least 32 bytes. Serialize
 raw-token verification behind one bounded worker; return HTTP 429 with
