@@ -16,7 +16,7 @@ use axum::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use chrono::{SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
@@ -55,7 +55,10 @@ use crate::{
     },
     mihomo_redact,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
-    node_history::{NodeHistoryHandle, NodeHistorySnapshot},
+    node_history::{
+        NodeHistoryHandle, NodeHistorySnapshot, TrafficReport, TrafficWindow,
+        UserTrafficNodeOption, merge_traffic_reports,
+    },
     node_runtime::{
         ComponentRuntimeStatus, LocalNodeRuntimeSnapshot, NodeRuntimeEvent, NodeRuntimeHandle,
         NodeRuntimeHistorySlot, NodeRuntimeSummary, RuntimeComponent, RuntimeStatus,
@@ -987,6 +990,7 @@ pub fn build_router(
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/{node_id}/runtime", get(admin_get_node_runtime))
         .route("/nodes/{node_id}/history", get(admin_get_node_history))
+        .route("/nodes/{node_id}/traffic", get(admin_get_node_traffic))
         .route("/nodes/{node_id}/ip-usage", get(admin_get_node_ip_usage))
         .route(
             "/nodes/{node_id}/tcp-connections",
@@ -1078,6 +1082,7 @@ pub fn build_router(
             get(admin_get_user_node_quota_status),
         )
         .route("/users/{user_id}/ip-usage", get(admin_get_user_ip_usage))
+        .route("/users/{user_id}/traffic", get(admin_get_user_traffic))
         .route(
             "/users/{user_id}/node-quotas",
             get(admin_list_user_node_quotas),
@@ -1151,8 +1156,21 @@ pub fn build_router(
             get(admin_internal_get_local_node_history),
         )
         .route(
+            "/_internal/nodes/{node_id}/history",
+            delete(admin_internal_clear_node_history),
+        )
+        .route(
+            "/_internal/nodes/traffic/local",
+            get(admin_internal_get_local_node_traffic),
+        )
+        .route(
             "/_internal/users/{user_id}/ip-usage/local",
             get(admin_internal_get_local_user_ip_usage),
+        )
+        .route(
+            "/_internal/users/{user_id}/traffic/local",
+            get(admin_internal_get_local_user_traffic)
+                .delete(admin_internal_clear_local_user_traffic),
         )
         .route("/alerts", get(admin_get_alerts))
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
@@ -1976,6 +1994,39 @@ struct AdminNodeHistoryResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminNodeTrafficResponse {
+    node: Node,
+    traffic: TrafficReport,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminInternalNodeTrafficLocalResponse {
+    node: Node,
+    traffic: TrafficReport,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminUserTrafficResponse {
+    user: UserTrafficUserSummary,
+    traffic: TrafficReport,
+    nodes: Vec<UserTrafficNodeOption>,
+    partial: bool,
+    unreachable_nodes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct UserTrafficUserSummary {
+    user_id: String,
+    display_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AdminInternalUserTrafficLocalResponse {
+    node: Node,
+    traffic: TrafficReport,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AdminInternalNodeRuntimeLocalResponse {
     node_id: String,
     summary: NodeRuntimeSummary,
@@ -1999,6 +2050,12 @@ impl From<LocalNodeRuntimeSnapshot> for AdminInternalNodeRuntimeLocalResponse {
 #[derive(Debug, Deserialize)]
 struct IpUsageQuery {
     window: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrafficQuery {
+    window: Option<String>,
+    node_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2384,6 +2441,271 @@ async fn admin_get_node_history(
     };
     let history = state.node_history.snapshot(&node_id).await;
     Ok(Json(AdminNodeHistoryResponse { node, history }))
+}
+
+fn parse_traffic_window(query: &TrafficQuery) -> Result<TrafficWindow, ApiError> {
+    TrafficWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
+}
+
+async fn admin_get_node_traffic(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    Query(query): Query<TrafficQuery>,
+) -> Result<Json<AdminNodeTrafficResponse>, ApiError> {
+    let window = parse_traffic_window(&query)?;
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    let traffic = state
+        .node_history
+        .node_traffic_report(&node_id, window, Utc::now())
+        .await
+        .ok_or_else(|| ApiError::not_found("traffic is not available yet"))?;
+    Ok(Json(AdminNodeTrafficResponse { node, traffic }))
+}
+
+async fn admin_internal_get_local_node_traffic(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    Query(query): Query<TrafficQuery>,
+) -> Result<Json<AdminInternalNodeTrafficLocalResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let window = parse_traffic_window(&query)?;
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&state.cluster.node_id)
+            .ok_or_else(|| ApiError::not_found("local node not found"))?
+    };
+    let traffic = state
+        .node_history
+        .node_traffic_report(&state.cluster.node_id, window, Utc::now())
+        .await
+        .ok_or_else(|| ApiError::not_found("traffic is not available yet"))?;
+    Ok(Json(AdminInternalNodeTrafficLocalResponse {
+        node,
+        traffic,
+    }))
+}
+
+async fn admin_get_user_traffic(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    Query(query): Query<TrafficQuery>,
+) -> Result<Json<AdminUserTrafficResponse>, ApiError> {
+    let window = parse_traffic_window(&query)?;
+    let (user, all_nodes, current_node_ids) = {
+        let store = state.store.lock().await;
+        let user = store
+            .get_user(&user_id)
+            .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
+        let current_node_ids = store
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .filter(|membership| membership.user_id == user_id)
+            .map(|membership| membership.node_id.clone())
+            .collect::<BTreeSet<_>>();
+        (user, store.list_nodes(), current_node_ids)
+    };
+    let mut relevant_node_ids = current_node_ids.clone();
+    relevant_node_ids.extend(state.node_history.user_traffic_node_ids(&user_id).await);
+    let selected_nodes = all_nodes
+        .iter()
+        .filter(|node| {
+            query
+                .node_id
+                .as_deref()
+                .is_some_and(|id| id == node.node_id)
+                || (query.node_id.is_none() && relevant_node_ids.contains(&node.node_id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if query.node_id.is_some() && selected_nodes.is_empty() {
+        return Err(ApiError::not_found(
+            "user has no traffic on the selected node",
+        ));
+    }
+    let mut node_options = all_nodes
+        .iter()
+        .filter(|node| relevant_node_ids.contains(&node.node_id))
+        .map(|node| {
+            (
+                node.node_id.clone(),
+                UserTrafficNodeOption {
+                    node_id: node.node_id.clone(),
+                    node_name: node.node_name.clone(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let local_node_id = state.cluster.node_id.clone();
+    let client = build_admin_http_client(&state)?;
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
+    let uri: axum::http::Uri = format!(
+        "/_internal/users/{user_id}/traffic/local?window={}",
+        window.as_str()
+    )
+    .parse()
+    .map_err(|_| ApiError::invalid_request("invalid traffic window"))?;
+    let signature = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+    let report_now = Utc::now();
+    let history = state.node_history.clone();
+    let fanout_results = stream::iter(selected_nodes.into_iter().map(|node| {
+        let client = client.clone();
+        let local_node_id = local_node_id.clone();
+        let history = history.clone();
+        let signature = signature.clone();
+        let request_user_id = user_id.clone();
+        let request_uri = uri.clone();
+        async move {
+            let node_id = node.node_id.clone();
+            if node_id == local_node_id {
+                let report = history
+                    .user_traffic_report(&request_user_id, Some(&node_id), window, report_now)
+                    .await;
+                return (node, report, false);
+            }
+            let base = node.api_base_url.trim_end_matches('/');
+            if base.is_empty() {
+                return (node, None, true);
+            }
+            let url = format!("{base}/api/admin{request_uri}");
+            let response = tokio::time::timeout(
+                Duration::from_secs(3),
+                client.send_with_fallback(Duration::from_secs(3), |client| {
+                    client.get(url.clone()).header(
+                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
+                        signature.clone(),
+                    )
+                }),
+            )
+            .await;
+            let Ok(Ok(response)) = response else {
+                return (node, None, true);
+            };
+            if response.status() == StatusCode::NOT_FOUND {
+                return (node, None, false);
+            }
+            if !response.status().is_success() {
+                return (node, None, true);
+            }
+            match response
+                .json::<AdminInternalUserTrafficLocalResponse>()
+                .await
+            {
+                Ok(remote) => (node, Some(remote.traffic), false),
+                Err(_) => (node, None, true),
+            }
+        }
+    }))
+    .buffer_unordered(4)
+    .collect::<Vec<_>>()
+    .await;
+    let mut reports = Vec::new();
+    let mut unreachable_nodes = Vec::new();
+    let mut missing_active_node_report = false;
+    for (node, report, unreachable) in fanout_results {
+        if unreachable {
+            unreachable_nodes.push(node.node_id.clone());
+        }
+        if report.is_none()
+            && !unreachable
+            && query.node_id.is_none()
+            && current_node_ids.contains(&node.node_id)
+        {
+            missing_active_node_report = true;
+        }
+        if let Some(report) = report {
+            node_options.insert(
+                node.node_id.clone(),
+                UserTrafficNodeOption {
+                    node_id: node.node_id,
+                    node_name: node.node_name,
+                },
+            );
+            reports.push(report);
+        }
+    }
+    if reports.is_empty() && unreachable_nodes.is_empty() {
+        return Err(ApiError::not_found("traffic is not available yet"));
+    }
+    let mut traffic = merge_traffic_reports(&reports, window, Utc::now());
+    if missing_active_node_report {
+        traffic.partial = true;
+        traffic
+            .warnings
+            .push("traffic report is missing for an active node".to_string());
+        traffic.warnings.sort();
+        traffic.warnings.dedup();
+    }
+    unreachable_nodes.sort();
+    unreachable_nodes.dedup();
+    let partial = traffic.partial || missing_active_node_report || !unreachable_nodes.is_empty();
+    Ok(Json(AdminUserTrafficResponse {
+        user: UserTrafficUserSummary {
+            user_id: user.user_id,
+            display_name: user.display_name,
+        },
+        traffic,
+        nodes: node_options.into_values().collect(),
+        partial,
+        unreachable_nodes,
+    }))
+}
+
+async fn admin_internal_get_local_user_traffic(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    Query(query): Query<TrafficQuery>,
+) -> Result<Json<AdminInternalUserTrafficLocalResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let window = parse_traffic_window(&query)?;
+    let (user, node) = {
+        let store = state.store.lock().await;
+        let user = store
+            .get_user(&user_id)
+            .ok_or_else(|| ApiError::not_found(format!("user not found: {user_id}")))?;
+        let node = store
+            .get_node(&state.cluster.node_id)
+            .ok_or_else(|| ApiError::not_found("local node not found"))?;
+        (user, node)
+    };
+    let traffic = state
+        .node_history
+        .user_traffic_report(&user.user_id, Some(&node.node_id), window, Utc::now())
+        .await
+        .ok_or_else(|| ApiError::not_found("traffic is not available yet"))?;
+    Ok(Json(AdminInternalUserTrafficLocalResponse {
+        node,
+        traffic,
+    }))
+}
+
+async fn admin_internal_clear_local_user_traffic(
+    Extension(state): Extension<AppState>,
+    Path(user_id): Path<String>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<StatusCode, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    state.node_history.clear_user(&user_id).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError> {
@@ -3297,6 +3619,18 @@ async fn admin_internal_get_local_node_history(
         .ok_or_else(|| ApiError::not_found("node history is not available yet"))
 }
 
+async fn admin_internal_clear_node_history(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<StatusCode, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    state.node_history.clear_node(&node_id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn admin_internal_stream_local_node_runtime_events(
     Extension(state): Extension<AppState>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, ApiError> {
@@ -3646,6 +3980,11 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete local node"));
     }
 
+    let cleanup_nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+
     let expected_endpoint_ids = query
         .expected_endpoint_ids
         .unwrap_or_default()
@@ -3762,6 +4101,8 @@ async fn admin_delete_node(
     for tag in deleted_endpoint_tags {
         state.reconcile.request_remove_inbound(tag);
     }
+    state.node_history.clear_node(&node_id).await;
+    clear_node_history_on_cluster(&state, &node_id, &cleanup_nodes).await;
     state.reconcile.request_full();
 
     Ok(StatusCode::NO_CONTENT)
@@ -6047,7 +6388,37 @@ async fn admin_delete_user(
     if !deleted {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
+    state.node_history.clear_user(&user_id).await;
+    clear_user_history_on_cluster(&state, &user_id).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
+    let nodes = {
+        let store = state.store.lock().await;
+        store.list_nodes()
+    };
+    let local_node_id = state.cluster.node_id.clone();
+    for node in &nodes {
+        if node.node_id != local_node_id {
+            state
+                .node_history
+                .queue_user_traffic_cleanup(&node.node_id, user_id)
+                .await;
+        }
+    }
+}
+
+async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &[Node]) {
+    let local_node_id = state.cluster.node_id.clone();
+    for destination in nodes {
+        if destination.node_id != local_node_id && destination.node_id != node_id {
+            state
+                .node_history
+                .queue_node_history_cleanup(&destination.node_id, node_id)
+                .await;
+        }
+    }
 }
 
 #[derive(Serialize)]

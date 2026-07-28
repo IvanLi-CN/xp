@@ -397,6 +397,7 @@ ${XP_DATA_DIR}/
     snapshots/
   state.json
   usage.json
+  node_history_cache.json
   inbound_ip_usage.json
   service_runtime.json
   ddns_state.json
@@ -408,6 +409,8 @@ Notes:
 - `raft/` holds the raft write-ahead log and snapshots.
 - `state.json` and `usage.json` are raft-backed JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
 - `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
+- `node_history_cache.json` stores local node history and Traffic analytics. Traffic sampling runs on UTC five-minute boundaries and writes the same Xray counter delta to node and real-user rollups. It retains at most 588 five-minute buckets (49 hours) and 90 UTC daily buckets; hourly rollups are not stored. Endpoint probe traffic is included in node totals but is never exposed as a normal user.
+- Missing samples, first tracking, and counter resets remain partial and are surfaced as warnings; operators must not treat gaps as zero traffic. Deleting a user clears its stored history, deleting a node clears its node and user-node history, and removed memberships expire naturally with the retention windows.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
 - `ddns_state.json` stores local Cloudflare DDNS reconcile state (last synced IPs, record ids, error state, fast-mode window). It is **not** replicated via raft.
 - Geo enrichment uses a hosted API (`https://api.country.is/`); there are no local Geo DB files under `XP_DATA_DIR`.

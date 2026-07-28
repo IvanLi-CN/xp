@@ -4,9 +4,11 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 export type UiThemePreference = "system" | "light" | "dark";
 export type UiThemeResolved = "light" | "dark";
 export type UiDensity = "comfortable" | "compact";
+export type TrafficWindowPreference = "24h" | "31d";
 
 export const UI_THEME_STORAGE_KEY = "xp_ui_theme";
 export const UI_DENSITY_STORAGE_KEY = "xp_ui_density";
+export const TRAFFIC_WINDOW_STORAGE_KEY = "xp_traffic_window";
 
 type UiPrefsContextValue = {
 	theme: UiThemePreference;
@@ -14,6 +16,8 @@ type UiPrefsContextValue = {
 	setTheme: (next: UiThemePreference) => void;
 	density: UiDensity;
 	setDensity: (next: UiDensity) => void;
+	trafficWindow: TrafficWindowPreference;
+	setTrafficWindow: (next: TrafficWindowPreference) => void;
 };
 
 const UiPrefsContext = createContext<UiPrefsContextValue | null>(null);
@@ -44,6 +48,10 @@ function parseDensity(value: string | null): UiDensity {
 	return value === "compact" || value === "comfortable" ? value : "comfortable";
 }
 
+function parseTrafficWindow(value: string | null): TrafficWindowPreference {
+	return value === "31d" ? "31d" : "24h";
+}
+
 function resolveTheme(preference: UiThemePreference): UiThemeResolved {
 	if (preference === "light" || preference === "dark") return preference;
 	const prefersDark =
@@ -70,6 +78,10 @@ export function UiPrefsProvider({ children }: { children: ReactNode }) {
 	const [density, setDensityState] = useState<UiDensity>(() =>
 		parseDensity(safeLocalStorageGet(UI_DENSITY_STORAGE_KEY)),
 	);
+	const [trafficWindow, setTrafficWindowState] =
+		useState<TrafficWindowPreference>(() =>
+			parseTrafficWindow(safeLocalStorageGet(TRAFFIC_WINDOW_STORAGE_KEY)),
+		);
 	const [resolvedTheme, setResolvedTheme] = useState<UiThemeResolved>(() =>
 		resolveTheme(theme),
 	);
@@ -85,6 +97,10 @@ export function UiPrefsProvider({ children }: { children: ReactNode }) {
 		applyDensity(density);
 		safeLocalStorageSet(UI_DENSITY_STORAGE_KEY, density);
 	}, [density]);
+
+	useEffect(() => {
+		safeLocalStorageSet(TRAFFIC_WINDOW_STORAGE_KEY, trafficWindow);
+	}, [trafficWindow]);
 
 	useEffect(() => {
 		if (theme !== "system" || typeof window.matchMedia !== "function") return;
@@ -105,8 +121,10 @@ export function UiPrefsProvider({ children }: { children: ReactNode }) {
 			setTheme: setThemeState,
 			density,
 			setDensity: setDensityState,
+			trafficWindow,
+			setTrafficWindow: setTrafficWindowState,
 		}),
-		[theme, resolvedTheme, density],
+		[theme, resolvedTheme, density, trafficWindow],
 	);
 
 	return (

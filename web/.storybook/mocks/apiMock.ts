@@ -31,6 +31,12 @@ import type {
 	AdminMihomoRedactRequest,
 	AdminMihomoRedactResponse,
 } from "../../src/api/adminTools";
+import type {
+	AdminNodeTrafficResponse,
+	AdminUserTrafficResponse,
+	TrafficReport,
+	TrafficWindow,
+} from "../../src/api/adminTraffic";
 import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
@@ -61,25 +67,39 @@ export type StorybookApiMockConfig = {
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
 };
+
 type MockEndpointSeed = AdminEndpoint & {
 	active_short_id?: string;
 	short_ids?: string[];
 };
+
 type MockEndpointRecord = AdminEndpoint & {
 	active_short_id: string;
 	short_ids: string[];
 };
+
 type MockWindowedNodeIpUsage =
 	| AdminNodeIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminNodeIpUsageResponse>>;
+
 type MockWindowedNodeTcpConnections =
 	| AdminNodeTcpConnectionsResponse
 	| Partial<
 			Record<AdminTcpConnectionUsageWindow, AdminNodeTcpConnectionsResponse>
 	  >;
+
 type MockWindowedUserIpUsage =
 	| AdminUserIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminUserIpUsageResponse>>;
+
+type MockWindowedNodeTraffic =
+	| AdminNodeTrafficResponse
+	| Partial<Record<TrafficWindow, AdminNodeTrafficResponse>>;
+
+type MockWindowedUserTraffic =
+	| AdminUserTrafficResponse
+	| Partial<Record<TrafficWindow, AdminUserTrafficResponse>>;
+
 type MockStateSeed = {
 	health: HealthResponse;
 	clusterInfo: ClusterInfoResponse;
@@ -95,6 +115,8 @@ type MockStateSeed = {
 	nodeTcpConnectionsByNodeId: Record<string, MockWindowedNodeTcpConnections>;
 	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
+	nodeTrafficByNodeId: Record<string, MockWindowedNodeTraffic>;
+	userTrafficByUserId: Record<string, MockWindowedUserTraffic>;
 	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
 	userGlobalWeights: Record<string, number>;
 	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
@@ -117,6 +139,7 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 		user: number;
 	};
 };
+
 type MockApi = {
 	reset: (config?: StorybookApiMockConfig) => void;
 	handle: (req: Request) => Promise<Response>;
@@ -189,6 +212,32 @@ function selectWindowedUserIpUsage(
 		...clone(report),
 		window,
 	};
+}
+
+function selectWindowedNodeTraffic(
+	entry: MockWindowedNodeTraffic,
+	window: TrafficWindow,
+): AdminNodeTrafficResponse {
+	if ("traffic" in entry) {
+		return { ...clone(entry), traffic: { ...clone(entry.traffic), window } };
+	}
+	const report = entry[window] ?? entry["24h"] ?? entry["31d"];
+	if (!report)
+		throw new Error(`missing node traffic report for window ${window}`);
+	return { ...clone(report), traffic: { ...clone(report.traffic), window } };
+}
+
+function selectWindowedUserTraffic(
+	entry: MockWindowedUserTraffic,
+	window: TrafficWindow,
+): AdminUserTrafficResponse {
+	if ("traffic" in entry) {
+		return { ...clone(entry), traffic: { ...clone(entry.traffic), window } };
+	}
+	const report = entry[window] ?? entry["24h"] ?? entry["31d"];
+	if (!report)
+		throw new Error(`missing user traffic report for window ${window}`);
+	return { ...clone(report), traffic: { ...clone(report.traffic), window } };
 }
 
 function clone<T>(value: T): T {
@@ -438,6 +487,108 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 			from_status: event.from_status,
 			to_status: event.to_status,
 		})),
+	};
+}
+
+function buildTrafficReport(window: TrafficWindow, factor = 1): TrafficReport {
+	const count = window === "24h" ? 288 : 31;
+	const end = new Date();
+	end.setUTCMinutes(Math.floor(end.getUTCMinutes() / 5) * 5, 0, 0);
+	const step = window === "24h" ? 5 * 60_000 : 24 * 60 * 60_000;
+	const start = new Date(end.getTime() - (count - 1) * step);
+	const current = Array.from({ length: count }, (_, index) => {
+		const at = new Date(start.getTime() + index * step);
+		const total = Math.round((120 + (index % 9) * 16) * 1024 * 1024 * factor);
+		const next = new Date(at.getTime() + step);
+		return {
+			start_at: at.toISOString(),
+			end_at: next.toISOString(),
+			uplink_bytes: Math.round(total * 0.42),
+			downlink_bytes: Math.round(total * 0.58),
+			total_bytes: total,
+			complete: true,
+			is_current_day: window === "31d" && index === count - 1,
+		};
+	});
+	const reference = current.map((point) => ({
+		...point,
+		start_at: new Date(
+			new Date(point.start_at).getTime() - count * step,
+		).toISOString(),
+		end_at: new Date(
+			new Date(point.end_at).getTime() - count * step,
+		).toISOString(),
+		uplink_bytes: Math.round((point.uplink_bytes ?? 0) * 0.8),
+		downlink_bytes: Math.round((point.downlink_bytes ?? 0) * 0.8),
+		total_bytes: Math.round((point.total_bytes ?? 0) * 0.8),
+		is_current_day: false,
+	}));
+	const uplink = current.reduce(
+		(sum, point) => sum + (point.uplink_bytes ?? 0),
+		0,
+	);
+	const downlink = current.reduce(
+		(sum, point) => sum + (point.downlink_bytes ?? 0),
+		0,
+	);
+	return {
+		window,
+		window_start_at: current[0]?.start_at ?? end.toISOString(),
+		window_end_at: current.at(-1)?.end_at ?? end.toISOString(),
+		timezone: "UTC",
+		summary: {
+			mode: "cycle",
+			cycle_start_at: new Date(
+				Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1),
+			).toISOString(),
+			cycle_end_at: new Date(
+				Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1),
+			).toISOString(),
+			uplink_bytes: uplink,
+			downlink_bytes: downlink,
+			total_bytes: uplink + downlink,
+			complete: true,
+			tracking_since: current[0]?.start_at ?? null,
+		},
+		current,
+		reference,
+		partial: false,
+		last_sample_at: end.toISOString(),
+		warnings: [],
+	};
+}
+
+function buildDefaultNodeTraffic(node: AdminNode): MockWindowedNodeTraffic {
+	const factor = node.node_id.endsWith("2") ? 0.75 : 1;
+	return {
+		"24h": { node, traffic: buildTrafficReport("24h", factor) },
+		"31d": { node, traffic: buildTrafficReport("31d", factor) },
+	};
+}
+
+function buildDefaultUserTraffic(
+	user: AdminUser,
+	nodes: AdminNode[],
+): MockWindowedUserTraffic {
+	const nodeOptions = nodes.map((node) => ({
+		node_id: node.node_id,
+		node_name: node.node_name,
+	}));
+	return {
+		"24h": {
+			user: { user_id: user.user_id, display_name: user.display_name },
+			traffic: buildTrafficReport("24h", 0.65),
+			nodes: nodeOptions,
+			partial: false,
+			unreachable_nodes: [],
+		},
+		"31d": {
+			user: { user_id: user.user_id, display_name: user.display_name },
+			traffic: buildTrafficReport("31d", 0.65),
+			nodes: nodeOptions,
+			partial: false,
+			unreachable_nodes: [],
+		},
 	};
 }
 
@@ -793,6 +944,12 @@ node-2`,
 	const userIpUsageByUserId = Object.fromEntries(
 		users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
 	) satisfies Record<string, AdminUserIpUsageResponse>;
+	const nodeTrafficByNodeId = Object.fromEntries(
+		nodes.map((node) => [node.node_id, buildDefaultNodeTraffic(node)]),
+	) satisfies Record<string, MockWindowedNodeTraffic>;
+	const userTrafficByUserId = Object.fromEntries(
+		users.map((user) => [user.user_id, buildDefaultUserTraffic(user, nodes)]),
+	) satisfies Record<string, MockWindowedUserTraffic>;
 
 	return {
 		health: { status: "ok" },
@@ -828,6 +985,8 @@ node-2`,
 		nodeTcpConnectionsByNodeId,
 		nodeHistoryByNodeId,
 		userIpUsageByUserId,
+		nodeTrafficByNodeId,
+		userTrafficByUserId,
 		userNodeWeights,
 		userGlobalWeights,
 		nodeWeightPolicies,
@@ -872,6 +1031,14 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		userIpUsageByUserId: {
 			...base.userIpUsageByUserId,
 			...(overrides?.userIpUsageByUserId ?? {}),
+		},
+		nodeTrafficByNodeId: {
+			...base.nodeTrafficByNodeId,
+			...(overrides?.nodeTrafficByNodeId ?? {}),
+		},
+		userTrafficByUserId: {
+			...base.userTrafficByUserId,
+			...(overrides?.userTrafficByUserId ?? {}),
 		},
 		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
 		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
@@ -1266,6 +1433,20 @@ async function handleRequest(
 		});
 	}
 
+	const nodeTrafficMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/traffic$/,
+	);
+	if (nodeTrafficMatch && method === "GET") {
+		const nodeId = decodeURIComponent(nodeTrafficMatch[1]);
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		const entry =
+			state.nodeTrafficByNodeId[nodeId] ??
+			(node ? buildDefaultNodeTraffic(node) : null);
+		if (!entry) return errorResponse(404, "not_found", "node not found");
+		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
+		return jsonResponse(selectWindowedNodeTraffic(entry, window));
+	}
+
 	const nodeRuntimeEventsMatch = path.match(
 		/^\/api\/admin\/nodes\/([^/]+)\/runtime\/events$/,
 	);
@@ -1342,6 +1523,32 @@ async function handleRequest(
 		}
 		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
 		return jsonResponse(selectWindowedUserIpUsage(report, window));
+	}
+
+	const userTrafficMatch = path.match(
+		/^\/api\/admin\/users\/([^/]+)\/traffic$/,
+	);
+	if (userTrafficMatch && method === "GET") {
+		const userId = decodeURIComponent(userTrafficMatch[1]);
+		const user = state.users.find((item) => item.user_id === userId);
+		const entry =
+			state.userTrafficByUserId[userId] ??
+			(user ? buildDefaultUserTraffic(user, state.nodes) : null);
+		if (!entry) return errorResponse(404, "not_found", "user not found");
+		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
+		const selectedNodeId = url.searchParams.get("node_id");
+		const report = selectWindowedUserTraffic(entry, window);
+		if (selectedNodeId) {
+			const node = report.nodes.find((item) => item.node_id === selectedNodeId);
+			if (!node)
+				return errorResponse(
+					404,
+					"not_found",
+					"user has no traffic on the selected node",
+				);
+			return jsonResponse({ ...report, nodes: [node] });
+		}
+		return jsonResponse(report);
 	}
 
 	const userNodeQuotasMatch = path.match(
