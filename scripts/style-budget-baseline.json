@@ -618,7 +618,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 2527
+    "source_lines": 2682
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,

@@ -233,6 +233,7 @@ struct UserTrafficDelta {
     known: bool,
     complete: bool,
     warnings: Vec<String>,
+    gap_dates: BTreeSet<String>,
 }
 
 impl Default for UserTrafficDelta {
@@ -243,8 +244,13 @@ impl Default for UserTrafficDelta {
             known: false,
             complete: true,
             warnings: Vec::new(),
+            gap_dates: BTreeSet::new(),
         }
     }
+}
+
+fn default_membership_active() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -287,6 +293,8 @@ struct PersistedUserTrafficRecord {
     cycle: Option<TrafficCycleAccumulator>,
     #[serde(default)]
     last_sample_at: Option<String>,
+    #[serde(default = "default_membership_active")]
+    membership_active: bool,
 }
 
 impl PersistedNodeHistoryRecord {
@@ -625,6 +633,7 @@ fn record_traffic_sample(
     let mut node_known = false;
     let mut warnings = sample.warnings.clone();
     let mut complete = sample.complete;
+    let mut gap_dates = BTreeSet::new();
 
     let mut user_deltas = BTreeMap::<String, UserTrafficDelta>::new();
     let mut saw_new_baseline = false;
@@ -642,14 +651,10 @@ fn record_traffic_sample(
             user_deltas.entry(user_id.clone()).or_default();
         }
         let previous = record.traffic_baselines.get(&totals.membership_key);
-        let previous_is_contiguous = previous.is_some_and(|previous| {
-            previous
-                .updated_at
-                .parse::<DateTime<Utc>>()
-                .ok()
-                .map(floor_five_minute)
-                == Some(bucket_start)
-        });
+        let previous_sample_at =
+            previous.and_then(|previous| previous.updated_at.parse::<DateTime<Utc>>().ok());
+        let previous_is_contiguous =
+            previous_sample_at.map(floor_five_minute) == Some(bucket_start);
         let delta = previous
             .filter(|_| previous_is_contiguous)
             .and_then(|previous| {
@@ -689,6 +694,16 @@ fn record_traffic_sample(
             }
         } else if !previous_is_contiguous {
             complete = false;
+            if let Some(previous_sample_at) = previous_sample_at {
+                let previous_date = date_key(previous_sample_at);
+                gap_dates.insert(previous_date.clone());
+                if let Some(user_id) = totals.user_id.as_ref()
+                    && !totals.is_probe
+                {
+                    let entry = user_deltas.entry(user_id.clone()).or_default();
+                    entry.gap_dates.insert(previous_date);
+                }
+            }
             warnings.push(format!(
                 "sampling gap for {}; recovered bucket has no delta",
                 totals.membership_key
@@ -752,6 +767,13 @@ fn record_traffic_sample(
         complete && node_known,
         warnings.clone(),
     );
+    for date in gap_dates {
+        mark_daily_rollup_incomplete(
+            &mut record.traffic_rollup.daily,
+            &date,
+            format!("sampling gap before {date}"),
+        );
+    }
     update_legacy_daily_traffic(record, now, node_up, node_down, node_known);
     update_cycle_accumulator(
         &mut record.traffic_rollup.cycle,
@@ -765,6 +787,7 @@ fn record_traffic_sample(
 
     for (user_id, delta) in &user_deltas {
         let user = record.user_traffic.entry(user_id.clone()).or_default();
+        user.membership_active = true;
         let user_complete = delta.complete && delta.known;
         let user_bucket = NodeTrafficBucket {
             start_at: rfc3339(bucket_start),
@@ -784,6 +807,13 @@ fn record_traffic_sample(
             user_complete,
             delta.warnings.clone(),
         );
+        for date in &delta.gap_dates {
+            mark_daily_rollup_incomplete(
+                &mut user.daily,
+                date,
+                format!("sampling gap before {date}"),
+            );
+        }
         update_cycle_accumulator(
             &mut user.cycle,
             sample.user_cycles.get(user_id),
@@ -802,13 +832,41 @@ fn record_traffic_sample(
             continue;
         }
         if let Some(user) = record.user_traffic.get_mut(&user_id) {
+            let warning = "membership removed; bucket has no delta".to_string();
+            let was_active = user.membership_active;
+            user.membership_active = false;
+            let (uplink, downlink, complete, warnings) = if was_active {
+                (None, None, false, vec![warning.clone()])
+            } else {
+                (Some(0), Some(0), true, Vec::new())
+            };
+            upsert_five_minute_bucket(
+                &mut user.five_minute,
+                NodeTrafficBucket {
+                    start_at: rfc3339(bucket_start),
+                    end_at: rfc3339(bucket_end),
+                    uplink_bytes: uplink,
+                    downlink_bytes: downlink,
+                    complete,
+                    warnings: warnings.clone(),
+                },
+            );
+            user.last_sample_at = Some(now_str.clone());
+            update_daily_rollup(
+                &mut user.daily,
+                bucket_start,
+                uplink,
+                downlink,
+                complete,
+                warnings.clone(),
+            );
             update_cycle_accumulator(
                 &mut user.cycle,
                 Some(&context),
-                Some(0),
-                Some(0),
-                true,
-                &[],
+                uplink,
+                downlink,
+                complete,
+                &warnings,
                 &now_str,
             );
         }
@@ -881,6 +939,30 @@ fn update_daily_rollup(
     }
     entry.complete &= complete;
     entry.warnings.extend(warnings);
+    entry.warnings.sort();
+    entry.warnings.dedup();
+    buckets.sort_by(|a, b| a.date.cmp(&b.date));
+}
+
+fn mark_daily_rollup_incomplete(
+    buckets: &mut Vec<NodeTrafficDailyBucket>,
+    date: &str,
+    warning: String,
+) {
+    let entry = if let Some(entry) = buckets.iter_mut().find(|entry| entry.date == date) {
+        entry
+    } else {
+        buckets.push(NodeTrafficDailyBucket {
+            date: date.to_string(),
+            uplink_bytes: None,
+            downlink_bytes: None,
+            complete: false,
+            warnings: Vec::new(),
+        });
+        buckets.last_mut().expect("daily bucket was just inserted")
+    };
+    entry.complete = false;
+    entry.warnings.push(warning);
     entry.warnings.sort();
     entry.warnings.dedup();
     buckets.sort_by(|a, b| a.date.cmp(&b.date));
@@ -1243,13 +1325,16 @@ fn build_summary(
     let mut downlink = 0u64;
     let mut complete = true;
     let mut tracking_since = None;
-    for bucket in &rollup.daily {
-        let Ok(date) = bucket.date.parse::<chrono::NaiveDate>() else {
+    for index in 0..30 {
+        let date = cutoff + chrono::Days::new(index);
+        let bucket = rollup
+            .daily
+            .iter()
+            .find(|bucket| bucket.date == date.to_string());
+        let Some(bucket) = bucket else {
+            complete = false;
             continue;
         };
-        if date < cutoff || date > latest_sample.date_naive() {
-            continue;
-        }
         if let Some(value) = bucket.uplink_bytes {
             uplink = uplink.saturating_add(value);
         }
@@ -2205,6 +2290,22 @@ mod tests {
                     complete: true,
                     warnings: Vec::new(),
                     cycle: None,
+                    user_cycles: BTreeMap::from([("user-a".to_string(), new_cycle.clone())]),
+                }),
+                runtime(Vec::new()),
+            )
+            .await;
+        let third = "2026-06-01T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        handle
+            .record_local_sample_with_status(
+                third,
+                "node-a",
+                Some(NodeTrafficSample {
+                    totals: Vec::new(),
+                    unavailable_users: BTreeSet::new(),
+                    complete: true,
+                    warnings: Vec::new(),
+                    cycle: None,
                     user_cycles: BTreeMap::from([("user-a".to_string(), new_cycle)]),
                 }),
                 runtime(Vec::new()),
@@ -2213,7 +2314,7 @@ mod tests {
 
         let state = handle.snapshot("node-a").await.unwrap();
         let record = handle
-            .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)
+            .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, third)
             .await
             .unwrap();
         assert_eq!(
@@ -2221,6 +2322,7 @@ mod tests {
             Some("2026-06-01T00:00:00Z")
         );
         assert_eq!(record.summary.uplink_bytes, 0);
+        assert_eq!(record.current.last().unwrap().total_bytes, Some(0));
         assert!(state.traffic.unwrap().five_minute.len() >= 2);
     }
 
@@ -2248,6 +2350,63 @@ mod tests {
         assert_eq!(daily[0].date, "2026-05-19");
         assert_eq!(daily[0].uplink_bytes, Some(60));
         assert_eq!(daily[0].downlink_bytes, Some(80));
+    }
+
+    #[tokio::test]
+    async fn sampling_gap_across_utc_midnight_marks_both_daily_buckets_partial() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+        let first = "2026-05-19T23:50:00Z".parse::<DateTime<Utc>>().unwrap();
+        let recovered = "2026-05-20T00:05:00Z".parse::<DateTime<Utc>>().unwrap();
+        for (at, up, down) in [(first, 100, 300), (recovered, 160, 380)] {
+            handle
+                .record_local_sample(
+                    at,
+                    "node-a",
+                    Some(vec![traffic("membership-a", up, down)]),
+                    runtime(Vec::new()),
+                )
+                .await;
+        }
+
+        let daily = handle
+            .snapshot("node-a")
+            .await
+            .unwrap()
+            .traffic
+            .unwrap()
+            .daily;
+        assert!(
+            daily
+                .iter()
+                .any(|bucket| { bucket.date == "2026-05-19" && !bucket.complete })
+        );
+        assert!(
+            daily
+                .iter()
+                .any(|bucket| { bucket.date == "2026-05-20" && !bucket.complete })
+        );
+    }
+
+    #[test]
+    fn rolling_summary_is_partial_when_an_expected_utc_day_is_missing() {
+        let latest = "2026-05-20T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let summary = build_summary(
+            &NodeTrafficRollupSnapshot {
+                daily: vec![NodeTrafficDailyBucket {
+                    date: "2026-05-20".to_string(),
+                    uplink_bytes: Some(10),
+                    downlink_bytes: Some(20),
+                    complete: true,
+                    warnings: Vec::new(),
+                }],
+                ..NodeTrafficRollupSnapshot::default()
+            },
+            latest,
+        );
+        assert!(!summary.complete);
+        assert_eq!(summary.uplink_bytes, 10);
+        assert_eq!(summary.downlink_bytes, 20);
     }
 
     #[tokio::test]
