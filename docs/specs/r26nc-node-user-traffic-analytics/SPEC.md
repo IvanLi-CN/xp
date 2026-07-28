@@ -111,7 +111,7 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 
 ## Visual Evidence
 
-PR: none
+PR: #200 (https://github.com/IvanLi-CN/xp/pull/200)
 
 Storybook覆盖=通过
 
@@ -125,7 +125,7 @@ Storybook覆盖=通过
 
 证据落盘=已落盘
 
-证据绑定sha=eecb913
+证据绑定sha=ab7a4b4
 
 桌面 Node details 与 User details 页面，以及移动端 TrafficView 状态：
 
@@ -141,7 +141,7 @@ PR 正文保持无图。
 
 ## Related PRs
 
-- None
+- #200 (https://github.com/IvanLi-CN/xp/pull/200)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

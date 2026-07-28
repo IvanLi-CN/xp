@@ -58,5 +58,7 @@ Returns user traffic aggregated across all reachable nodes unless `node_id` is s
 
 - `GET /api/admin/_internal/nodes/traffic/local?window=24h|31d`
 - `GET /api/admin/_internal/users/{user_id}/traffic/local?window=24h|31d`
+- `DELETE /api/admin/_internal/users/{user_id}/traffic/local`
 
-Both require the existing internal signature authentication.
+All internal traffic endpoints require the existing internal signature authentication. The DELETE
+endpoint clears the local user rollup after a replicated cluster-wide user deletion.

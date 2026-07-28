@@ -17,7 +17,7 @@
 
 ## Remaining Gaps
 
-- Remaining delivery gate: owner approval is required before pushing any screenshot-bearing commit or opening the PR.
+- Remaining delivery gate: PR #200 must pass the latest CI and review proof before merge.
 
 ## Related Changes
 
