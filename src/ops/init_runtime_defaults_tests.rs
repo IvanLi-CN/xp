@@ -1,6 +1,7 @@
 use crate::ops::init::backfill_low_memory_runtime_defaults;
 use crate::ops::paths::Paths;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use tempfile::tempdir;
 
 #[test]
@@ -45,4 +46,21 @@ fn low_memory_backfill_preserves_openrc_override() {
     backfill_low_memory_runtime_defaults(&paths).unwrap();
 
     assert_eq!(fs::read_to_string(service).unwrap(), original);
+}
+
+#[test]
+fn low_memory_backfill_restores_openrc_executable_mode() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+    let service = paths.openrc_initd_dir().join("xray");
+    fs::write(&service, "command_user=\"xray:xray\"\n").unwrap();
+    fs::set_permissions(&service, fs::Permissions::from_mode(0o640)).unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    assert_eq!(
+        fs::metadata(service).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
 }

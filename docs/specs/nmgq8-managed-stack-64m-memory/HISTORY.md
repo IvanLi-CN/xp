@@ -1,5 +1,8 @@
 # History
 
+- 2026-07-29: OpenRC memory backfill now preserves executable service-script
+  permissions after atomic replacement.
+
 - 2026-07-29: upgrade backfill now reloads systemd and restarts cloudflared so
   runtime defaults are active before an upgrade is reported successful.
 
