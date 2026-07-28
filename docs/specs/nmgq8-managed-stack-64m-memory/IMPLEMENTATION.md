@@ -2,14 +2,16 @@
 
 ## Status
 
-- Implemented locally; production rollout pending release and owner-approved
-  SG access.
+- Implemented and released in `v3.19.9`; production rollout is pending the
+  runtime-activation hotfix release and final SG preflight.
 
 ## Work areas
 
 - Low-memory admin authentication and bounded verification concurrency.
 - Go runtime defaults for host-managed and container deployments.
 - Xray low-buffer static policy and upgrade backfill.
+- Upgrade activation reloads systemd units and restarts both Xray and
+  cloudflared before reporting success.
 - PSS sampler, shared-testbox load profile, release rollout and production soak.
 
 Implemented: low-memory administrator authentication and bounded verification,

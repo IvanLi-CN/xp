@@ -1,5 +1,8 @@
 # History
 
+- 2026-07-29: upgrade backfill now reloads systemd and restarts cloudflared so
+  runtime defaults are active before an upgrade is reported successful.
+
 - 2026-07-29: added low-memory administrator authentication, child-process Go
   heap defaults, upgrade backfill, and PSS sampling.
 
