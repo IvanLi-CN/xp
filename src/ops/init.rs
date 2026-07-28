@@ -182,7 +182,6 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     Ok(())
 }
 
-/// Backfill memory defaults during upgrades without replacing operator-managed units.
 pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
     let systemd = paths.systemd_unit_dir();
     if systemd.join("xray.service").exists() {
@@ -228,6 +227,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             .unwrap_or(raw.len());
         let updated = format!("{}{}{}", &raw[..end], value, &raw[end..]);
         write_string_if_changed(&path, &updated)
+            .and_then(|_| chmod(&path, 0o755))
             .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     }
     Ok(())
