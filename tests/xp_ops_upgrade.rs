@@ -297,7 +297,7 @@ mod linux {
         assert!(marker_raw.contains("systemctl restart xray.service"));
         let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
         let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();
-        let xp_ops_backup_bytes = fs::read(xp_ops_backup).unwrap();
+        let xp_ops_backup_bytes = fs::read(&xp_ops_backup).unwrap();
         assert_eq!(xp_ops_backup_bytes, original_xp_ops);
         fs::write(&marker, "").unwrap();
         fs::write(&expected_xp_ops, &new_xp_ops).unwrap();
