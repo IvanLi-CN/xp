@@ -210,14 +210,14 @@ mod linux {
     }
 
     #[tokio::test]
-    async fn upgrade_self_reexecs_then_rewrites_xray_config_and_restarts_services() {
+    async fn upgrade_completes_service_phase_before_replacing_xp_ops() {
         let server = MockServer::start().await;
 
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
 
         let new_xp = b"xp-new-binary";
-        let new_xp_ops = current_xp_ops_bytes();
+        let new_xp_ops = b"xp-ops-new-binary".to_vec();
 
         let xp_checksum = sha256_hex(new_xp);
         let xp_ops_checksum = sha256_hex(&new_xp_ops);
@@ -307,7 +307,7 @@ mod linux {
         assert!(marker_raw.contains("systemctl restart xray.service"));
 
         let new_xp_ops_bytes = fs::read(&dest).unwrap();
-        assert_eq!(new_xp_ops_bytes, original_xp_ops);
+        assert_eq!(new_xp_ops_bytes, new_xp_ops);
 
         let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
         let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();

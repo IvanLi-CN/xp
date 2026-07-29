@@ -495,8 +495,8 @@ sudo xp-ops upgrade --version latest
 Current rollout semantics:
 
 - `xp-ops upgrade` first locks the target release.
-- If `xp-ops` itself needs an update, it upgrades the local `xp-ops` binary and re-executes the same command against the locked release.
-- The resumed phase upgrades `xp`, installs the checksummed release-managed Xray and cloudflared pair when present, rewrites `/etc/xray/config.json` to the current static baseline, and restarts both services.
+- It upgrades `xp`, installs the checksummed release-managed Xray and cloudflared pair when present, rewrites `/etc/xray/config.json` to the current static baseline, and restarts both services before replacing `xp-ops` itself.
+- Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - During static config rewrite, `xp-ops upgrade` preserves control-plane listener bindings that are already authoritative on the node: `XP_XRAY_API_ADDR` remains the source of truth for the `api` inbound, and an existing `mesh-proxy` inbound keeps its previous listener shape.
 - If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable.
 

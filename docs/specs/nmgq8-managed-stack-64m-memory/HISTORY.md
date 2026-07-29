@@ -1,5 +1,9 @@
 # History
 
+- Host-managed upgrades now complete the locked XP and managed runtime phase before
+  replacing `xp-ops`, preventing a successful tool self-update from skipping the
+  corresponding service release.
+
 - Joined Docker/Compose nodes now reconcile an explicitly configured low-memory
   administrator PHC into the persisted cluster state at startup. This keeps
   token rotation on the host Compose path and rejects high-memory PHCs before

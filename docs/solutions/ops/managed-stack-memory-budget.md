@@ -43,6 +43,11 @@ starting XP, atomically synchronize that low-memory PHC to the persisted cluster
 metadata file. During the first join, preserve the leader-provided hash instead.
 Do not rotate a container node through `docker exec` or direct volume edits.
 
+A host-managed upgrade must finish the locked `xp`, Xray, and cloudflared phase
+before it replaces `xp-ops`. Treat the tool's own version as independent from the
+service release state: a self-update must not cause a resumed invocation to report
+the release current while XP and its managed runtimes remain on the previous version.
+
 Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
 Set cloudflared `GOMEMLIMIT=8MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values
