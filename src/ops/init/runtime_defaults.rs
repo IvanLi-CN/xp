@@ -17,12 +17,16 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
                 ("GOMEMLIMIT", "8MiB", Some("12MiB")),
                 ("GOGC", "50", None),
                 ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false", None),
+                ("XP_CLOUDFLARED_PROTOCOL", "http2", None),
             ][..],
         ),
     ] {
         let unit = systemd.join(format!("{service}.service"));
         if !unit.exists() {
             continue;
+        }
+        if service == "cloudflared" {
+            backfill_systemd_cloudflared_protocol(&unit)?;
         }
         let dir = systemd.join(format!("{service}.service.d"));
         ensure_dir(&dir).map_err(filesystem_error)?;
@@ -58,6 +62,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
                 "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"",
                 1,
             );
+            updated = backfill_openrc_cloudflared_protocol(&updated);
         }
         let mut value = String::new();
         if !updated.contains("GOMEMLIMIT") {
@@ -91,6 +96,68 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
     Ok(())
 }
 
+fn backfill_systemd_cloudflared_protocol(unit: &Path) -> Result<(), ExitError> {
+    let raw = fs::read_to_string(unit).map_err(filesystem_error)?;
+    let mut needs_protocol_default = !raw
+        .lines()
+        .flat_map(parse_systemd_environment_line)
+        .any(|(key, _)| key == "XP_CLOUDFLARED_PROTOCOL");
+    let updated = raw
+        .split_inclusive('\n')
+        .map(|line| {
+            let is_managed_cloudflared_start = line.trim_start().starts_with("ExecStart=")
+                && line.contains("cloudflared")
+                && line.contains("tunnel run")
+                && line.contains(" --config ");
+            if !is_managed_cloudflared_start {
+                return line.to_string();
+            }
+            let updated_line = if line.contains("--protocol") {
+                line.to_string()
+            } else {
+                line.replacen(
+                    " --config ",
+                    " --protocol ${XP_CLOUDFLARED_PROTOCOL} --config ",
+                    1,
+                )
+            };
+            if needs_protocol_default
+                && updated_line.contains("--protocol ${XP_CLOUDFLARED_PROTOCOL}")
+            {
+                needs_protocol_default = false;
+                let indentation = &line[..line.len() - line.trim_start().len()];
+                format!("{indentation}Environment=XP_CLOUDFLARED_PROTOCOL=http2\n{updated_line}")
+            } else {
+                updated_line
+            }
+        })
+        .collect::<String>();
+    if updated != raw {
+        write_string_if_changed(unit, &updated).map_err(filesystem_error)?;
+    }
+    Ok(())
+}
+
+fn backfill_openrc_cloudflared_protocol(script: &str) -> String {
+    script
+        .split_inclusive('\n')
+        .map(|line| {
+            let is_managed_cloudflared_start = line.trim_start().starts_with("command_args=")
+                && line.contains("tunnel run")
+                && line.contains(" --config ");
+            if is_managed_cloudflared_start && !line.contains("--protocol") {
+                line.replacen(
+                    " --config ",
+                    " --protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config ",
+                    1,
+                )
+            } else {
+                line.to_string()
+            }
+        })
+        .collect()
+}
+
 fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
     let legacy = match service {
         "xray" => "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
@@ -107,6 +174,7 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
             ("GOMEMLIMIT", "8MiB"),
             ("GOGC", "50"),
             ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false"),
+            ("XP_CLOUDFLARED_PROTOCOL", "http2"),
         ][..],
         _ => return false,
     };

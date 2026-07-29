@@ -23,6 +23,7 @@ pub(super) fn build_runtime_env(
         "XP_CLOUDFLARED_GOMEMLIMIT",
         "XP_CLOUDFLARED_GOGC",
         "XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS",
+        "XP_CLOUDFLARED_PROTOCOL",
     ] {
         if let Some(value) = optional_env(env_map, key) {
             out.insert(key.to_string(), value);
@@ -45,6 +46,7 @@ pub(super) fn build_runtime_env(
         ("XP_CLOUDFLARED_GOMEMLIMIT", "8MiB"),
         ("XP_CLOUDFLARED_GOGC", "50"),
         ("XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS", "false"),
+        ("XP_CLOUDFLARED_PROTOCOL", "http2"),
     ] {
         out.entry(key.to_string())
             .or_insert_with(|| value.to_string());

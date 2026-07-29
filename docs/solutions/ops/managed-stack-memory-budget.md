@@ -44,6 +44,15 @@ through a managed systemd drop-in or an OpenRC script insertion that leaves
 existing operator values untouched. Container launches pass the same values
 to child processes and retain explicit `XP_*` overrides.
 
+Some provider networks block outbound UDP/7844. New cloudflared builds begin
+with QUIC, and a node can remain unreachable at Cloudflare's edge while its
+local process appears healthy.
+
+- Default managed cloudflared to `--protocol http2`.
+- Use `XP_CLOUDFLARED_PROTOCOL` only for an explicit operator override.
+- Upgrade backfill may update a recognizable managed command, but must leave
+  an existing explicit `--protocol` untouched.
+
 Heap tuning alone may not fit a sub-64 MiB process-tree budget because PSS also
 charges executable mappings. For the pinned upstream Xray and cloudflared
 versions, `go build -gcflags=all=-l -ldflags='-s -w -buildid='` reduced the

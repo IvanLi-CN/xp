@@ -23,7 +23,8 @@
 - JWT 形态凭据先走 JWT 校验，不得先执行 Argon2；原始 Token 校验使用单 worker
   和有界等待，饱和时返回 `429` 与 `Retry-After`。
 - Xray 默认 `GOMEMLIMIT=16MiB`、`GOGC=50`，level-0 `bufferSize=0`。
-- cloudflared 默认 `GOMEMLIMIT=8MiB`、`GOGC=50`，并关闭管理诊断采集。
+- cloudflared 默认 `GOMEMLIMIT=8MiB`、`GOGC=50`、`--protocol http2`，并关闭管理诊断采集；
+  `XP_CLOUDFLARED_PROTOCOL` 可覆盖传输协议。
 - Release 从固定上游提交以 Go 1.26.5、禁用内联和去符号参数构建 Xray 与
   cloudflared；宿主升级和官方容器镜像必须使用同一组带 checksum 的资产。
 - operator 已有显式 override 优先；升级只 backfill 缺失值。

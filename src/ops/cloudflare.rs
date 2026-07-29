@@ -370,7 +370,8 @@ Group=cloudflared\n\
 Environment=GOMEMLIMIT=8MiB\n\
 Environment=GOGC=50\n\
 Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n\
-ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run\n\
+Environment=XP_CLOUDFLARED_PROTOCOL=http2\n\
+ExecStart=/usr/bin/cloudflared --no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL} --config /etc/cloudflared/config.yml tunnel run\n\
 Restart=always\n\
 RestartSec=2s\n\
 \n\
@@ -386,7 +387,7 @@ name="cloudflared"
 description="cloudflared (Cloudflare Tunnel)"
 
 command="/usr/local/bin/cloudflared"
-command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_args="--no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
 export GOMEMLIMIT="${GOMEMLIMIT:-8MiB}"
 export GOGC="${GOGC:-50}"
@@ -935,12 +936,22 @@ mod tests {
             )
         );
         assert!(script.contains("GOGC=\"${GOGC:-50}\""));
+        assert!(script.contains(
+            "--protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml"
+        ));
         assert!(script.contains("respawn_delay=2"));
         assert!(script.contains("respawn_max=0"));
 
         // When supervised by OpenRC, the service should not be backgrounded by the script itself.
         assert!(!script.contains("command_background"));
         assert!(!script.contains("pidfile="));
+    }
+
+    #[test]
+    fn systemd_cloudflared_unit_defaults_to_http2_with_an_override() {
+        let unit = systemd_cloudflared_unit();
+        assert!(unit.contains("Environment=XP_CLOUDFLARED_PROTOCOL=http2"));
+        assert!(unit.contains("--protocol ${XP_CLOUDFLARED_PROTOCOL} --config"));
     }
 
     #[test]
