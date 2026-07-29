@@ -60,6 +60,12 @@
 - 四个生产节点版本和 PHC 指纹一致，旧 Token 失败，新 Token 成功，并完成
   24 小时脱敏 PSS 观察。
 
+## Visual Evidence
+
+PR: none
+
+本规格的变更仅涉及运行时配置、鉴权状态和部署路径，没有可独立验收的界面效果。
+
 ## 参考
 
 - `docs/specs/r7m2q-openrc-low-memory-runtime-recovery/SPEC.md`
