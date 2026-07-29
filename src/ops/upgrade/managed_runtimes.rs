@@ -56,6 +56,9 @@ fn rollback_runtime_binaries_and_services(
     paths: &Paths,
     backups: &[RuntimeBinaryBackup],
 ) -> Result<(), ExitError> {
+    if backups.is_empty() {
+        return Ok(());
+    }
     rollback_runtime_binaries(backups)?;
     let xray_ok = restart_xray_service(
         paths,
