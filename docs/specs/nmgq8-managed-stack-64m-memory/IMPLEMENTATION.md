@@ -23,6 +23,8 @@
   cloudflared before reporting success.
 - Host-managed upgrades replace `xp` and managed runtime assets before the optional
   `xp-ops` self-update, so a self-update cannot terminate the locked release phase early.
+- Upgrade activation waits for systemd/OpenRC service readiness after each restart and rolls back
+  rather than treating an asynchronous transition as success.
 - PSS sampler, shared-testbox load profile, release rollout and production soak.
 - Build-time compression and HTTP negotiation for embedded Web assets.
 - Pinned low-memory Go runtime assets shared by host upgrades and the official
