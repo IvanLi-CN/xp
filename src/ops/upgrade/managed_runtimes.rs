@@ -84,9 +84,6 @@ fn rollback_runtime_binaries_and_services(
     backups: &[RuntimeBinaryBackup],
     runtime_defaults: &RuntimeDefaultsBackup,
 ) -> Result<(), ExitError> {
-    if backups.is_empty() {
-        return Ok(());
-    }
     rollback_runtime_binaries(backups)?;
     restore_runtime_defaults(runtime_defaults)?;
     if !reload_systemd_units(paths) {
@@ -524,7 +521,7 @@ mod tests {
                 .contains("GOMEMLIMIT:-8MiB")
         );
 
-        restore_runtime_defaults(&snapshot).unwrap();
+        rollback_runtime_binaries_and_services(&paths, &[], &snapshot).unwrap();
 
         assert_eq!(
             fs::read_to_string(&cloudflared_drop_in).unwrap(),
