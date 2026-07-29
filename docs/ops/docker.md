@@ -30,7 +30,7 @@ xp-ops container run
 | Key                                            | Required when                | Notes                                                                                                                                   |
 | ---------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `XP_NODE_NAME`                                 | always                       | Node display name                                                                                                                       |
-| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH`      | bootstrap node               | Required on every bootstrap-node start                                                                                                  |
+| `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH`      | bootstrap node               | Required on every bootstrap-node start; a low-memory hash also rotates an existing joined node on restart                               |
 | `XP_JOIN_TOKEN`                                | join node first start        | Safe to keep set after join; restart will not re-run `xp join` if data already exists                                                   |
 | `XP_API_BASE_URL`                              | `XP_ENABLE_CLOUDFLARE=false` | Must be an HTTPS origin                                                                                                                 |
 | `XP_ENABLE_CLOUDFLARE=true`                    | optional                     | Enables Cloudflare provisioning + local `cloudflared`                                                                                   |
@@ -89,6 +89,9 @@ The container entrypoint treats the mounted data volume as the source of truth f
 
 - Existing `metadata.json` is automatically realigned when `XP_NODE_NAME`, `XP_ACCESS_HOST`, or `XP_API_BASE_URL` changes
 - After `xp` is running, the same values are synced back into the Raft state machine and membership metadata
+- On an existing joined node, an explicit `XP_ADMIN_TOKEN_HASH` replaces the persisted
+  administrator hash before XP starts. It must use Argon2id `m=4096,t=3,p=1`; a first join
+  always retains the hash returned by its leader.
 - On join nodes, the first runtime reconcile reuses the `leader_api_base_url` carried by `XP_JOIN_TOKEN`, so default endpoints and node-meta sync do not depend on the local follower learning leader routing first
 - Managed default endpoints are reconciled from env on every start:
   - first start creates them if missing

@@ -1,5 +1,10 @@
 # History
 
+- Joined Docker/Compose nodes now reconcile an explicitly configured low-memory
+  administrator PHC into the persisted cluster state at startup. This keeps
+  token rotation on the host Compose path and rejects high-memory PHCs before
+  any running XP process accepts them.
+
 - 2026-07-29: a provider network blocked cloudflared's outbound QUIC/7844 on
   HK2. The tunnel connected with HTTP/2 and served the public login normally,
   so all managed launch paths now default to `--protocol http2`, retain an

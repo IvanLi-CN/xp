@@ -6,7 +6,14 @@ use crate::protocol::VlessRealityVisionTcpEndpointMeta;
 use tempfile::tempdir;
 use tokio::process::Command;
 
-const VALID_ADMIN_TOKEN_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k";
+const VALID_ADMIN_TOKEN_HASH: &str = concat!(
+    "$argon2id$v=19$m=4096,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$",
+    "QdZvInnh6DNxvD4ZfwAGd/C/eR43+tT7eBPaPcqVjFM"
+);
+const HIGH_MEMORY_ADMIN_TOKEN_HASH: &str = concat!(
+    "$argon2id$v=19$m=65536,t=3,p=1$TqOws+M/ypxKCmnVcbWAdg$",
+    "VlLbEUvXvoESmlktijJp9QYD/jJklIIljA1vuce9P+k"
+);
 
 fn env_map(values: &[(&str, &str)]) -> BTreeMap<String, String> {
     values
@@ -49,7 +56,7 @@ async fn bootstrap_derives_access_host_from_api_base_url() {
         spec.startup,
         ContainerStartup::Bootstrap { needs_init: true }
     ));
-    assert!(spec.bootstrap_admin_token_hash.is_some());
+    assert!(spec.configured_admin_token_hash.is_some());
 }
 
 #[tokio::test]
@@ -146,6 +153,144 @@ async fn existing_container_metadata_ignores_stale_join_token_leader() {
         .unwrap();
 
     assert!(spec.join_leader_api_base_url.is_none());
+}
+
+#[tokio::test]
+async fn joined_container_syncs_configured_low_memory_admin_token_hash() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let data_dir = paths.map_abs(Path::new(DEFAULT_DATA_DIR));
+    let cluster_paths = ClusterPaths::new(&data_dir);
+    fs::create_dir_all(&cluster_paths.dir).unwrap();
+    fs::write(
+        &cluster_paths.admin_token_hash,
+        HIGH_MEMORY_ADMIN_TOKEN_HASH,
+    )
+    .unwrap();
+    let meta = ClusterMetadata {
+        schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
+        cluster_id: "cluster".to_string(),
+        node_id: "node-id".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "node-1.example.com".to_string(),
+        api_base_url: "https://node-1.example.com".to_string(),
+        has_cluster_ca_key: true,
+        is_bootstrap_node: Some(false),
+    };
+    let env = env_map(&[
+        ("XP_NODE_NAME", "node-1"),
+        ("XP_API_BASE_URL", "https://node-1.example.com"),
+        ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
+    ]);
+
+    let spec = ContainerSpec::from_env_map(&paths, &env, Some(&meta))
+        .await
+        .unwrap();
+    reconcile_configured_admin_token_hash(&paths, &spec).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&cluster_paths.admin_token_hash).unwrap(),
+        format!("{VALID_ADMIN_TOKEN_HASH}\n")
+    );
+    assert_eq!(
+        effective_admin_token_hash(&paths, &spec).unwrap(),
+        VALID_ADMIN_TOKEN_HASH
+    );
+}
+
+#[tokio::test]
+async fn first_join_preserves_leader_admin_token_hash() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let data_dir = paths.map_abs(Path::new(DEFAULT_DATA_DIR));
+    let cluster_paths = ClusterPaths::new(&data_dir);
+    fs::create_dir_all(&cluster_paths.dir).unwrap();
+    fs::write(
+        &cluster_paths.admin_token_hash,
+        HIGH_MEMORY_ADMIN_TOKEN_HASH,
+    )
+    .unwrap();
+    let env = env_map(&[
+        ("XP_NODE_NAME", "node-1"),
+        ("XP_API_BASE_URL", "https://node-1.example.com"),
+        ("XP_JOIN_TOKEN", "first-join-token"),
+        ("XP_ADMIN_TOKEN_HASH", VALID_ADMIN_TOKEN_HASH),
+    ]);
+
+    let spec = ContainerSpec::from_env_map(&paths, &env, None)
+        .await
+        .unwrap();
+    reconcile_configured_admin_token_hash(&paths, &spec).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&cluster_paths.admin_token_hash).unwrap(),
+        HIGH_MEMORY_ADMIN_TOKEN_HASH
+    );
+}
+
+#[tokio::test]
+async fn joined_container_rejects_high_memory_configured_admin_token_hash() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let meta = ClusterMetadata {
+        schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
+        cluster_id: "cluster".to_string(),
+        node_id: "node-id".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "node-1.example.com".to_string(),
+        api_base_url: "https://node-1.example.com".to_string(),
+        has_cluster_ca_key: true,
+        is_bootstrap_node: Some(false),
+    };
+    let env = env_map(&[
+        ("XP_NODE_NAME", "node-1"),
+        ("XP_API_BASE_URL", "https://node-1.example.com"),
+        ("XP_ADMIN_TOKEN_HASH", HIGH_MEMORY_ADMIN_TOKEN_HASH),
+    ]);
+
+    let err = ContainerSpec::from_env_map(&paths, &env, Some(&meta))
+        .await
+        .unwrap_err();
+
+    assert!(err.message.contains("m=4096,t=3,p=1"));
+}
+
+#[tokio::test]
+async fn joined_container_without_configured_hash_preserves_persisted_hash() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let data_dir = paths.map_abs(Path::new(DEFAULT_DATA_DIR));
+    let cluster_paths = ClusterPaths::new(&data_dir);
+    fs::create_dir_all(&cluster_paths.dir).unwrap();
+    fs::write(
+        &cluster_paths.admin_token_hash,
+        HIGH_MEMORY_ADMIN_TOKEN_HASH,
+    )
+    .unwrap();
+    let meta = ClusterMetadata {
+        schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
+        cluster_id: "cluster".to_string(),
+        node_id: "node-id".to_string(),
+        node_name: "node-1".to_string(),
+        access_host: "node-1.example.com".to_string(),
+        api_base_url: "https://node-1.example.com".to_string(),
+        has_cluster_ca_key: true,
+        is_bootstrap_node: Some(false),
+    };
+    let env = env_map(&[
+        ("XP_NODE_NAME", "node-1"),
+        ("XP_API_BASE_URL", "https://node-1.example.com"),
+    ]);
+
+    let spec = ContainerSpec::from_env_map(&paths, &env, Some(&meta))
+        .await
+        .unwrap();
+    reconcile_configured_admin_token_hash(&paths, &spec).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&cluster_paths.admin_token_hash).unwrap(),
+        HIGH_MEMORY_ADMIN_TOKEN_HASH
+    );
 }
 
 #[test]
@@ -394,7 +539,7 @@ fn prepare_runtime_inputs_honors_custom_canary_token_file() {
         bind: "127.0.0.1:62416".parse().unwrap(),
         xray_api_addr: "127.0.0.1:10085".parse().unwrap(),
         startup: ContainerStartup::Bootstrap { needs_init: true },
-        bootstrap_admin_token_hash: Some(VALID_ADMIN_TOKEN_HASH.to_string()),
+        configured_admin_token_hash: Some(VALID_ADMIN_TOKEN_HASH.to_string()),
         cloudflare: None,
         ddns: None,
         vless_canary_token: Some("custom-token".to_string()),

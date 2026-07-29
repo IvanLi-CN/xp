@@ -1,4 +1,6 @@
-use crate::admin_token::{hash_admin_token_argon2id, parse_admin_token_hash};
+use crate::admin_token::{
+    hash_admin_token_argon2id, is_default_admin_token_hash_profile, parse_admin_token_hash,
+};
 use crate::cluster_metadata::{ClusterMetadata, ClusterPaths};
 use crate::domain::Endpoint;
 use crate::managed_default_endpoints::{
@@ -26,7 +28,9 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout};
 
+mod admin_token_sync;
 mod runtime_env;
+use admin_token_sync::reconcile_configured_admin_token_hash;
 use runtime_env::build_runtime_env;
 
 #[cfg(unix)]
@@ -144,7 +148,7 @@ struct ContainerSpec {
     bind: SocketAddr,
     xray_api_addr: SocketAddr,
     startup: ContainerStartup,
-    bootstrap_admin_token_hash: Option<String>,
+    configured_admin_token_hash: Option<String>,
     cloudflare: Option<ContainerCloudflare>,
     ddns: Option<ContainerDdns>,
     vless_canary_token: Option<String>,
@@ -195,6 +199,11 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
     }
 
     if let Err(err) = ensure_cluster_bootstrap_state(&binaries.xp, &spec).await {
+        cleanup_optional_child(&mut cloudflared_child).await;
+        return Err(err);
+    }
+
+    if let Err(err) = reconcile_configured_admin_token_hash(&paths, &spec) {
         cleanup_optional_child(&mut cloudflared_child).await;
         return Err(err);
     }
@@ -310,10 +319,10 @@ impl ContainerSpec {
         let node_meta_needs_realign = existing_meta
             .is_some_and(|meta| node_meta_mismatch(meta, &node_name, &access_host, &api_base_url));
 
-        let bootstrap_admin_token_hash = if startup.requires_bootstrap_token() {
+        let configured_admin_token_hash = if startup.requires_bootstrap_token() {
             Some(resolve_bootstrap_admin_token_hash(env_map)?)
         } else {
-            None
+            resolve_configured_admin_token_hash(env_map)?
         };
 
         Ok(Self {
@@ -324,7 +333,7 @@ impl ContainerSpec {
             bind,
             xray_api_addr,
             startup,
-            bootstrap_admin_token_hash,
+            configured_admin_token_hash,
             cloudflare,
             ddns,
             vless_canary_token,
@@ -530,13 +539,7 @@ fn resolve_startup(
 fn resolve_bootstrap_admin_token_hash(
     env_map: &BTreeMap<String, String>,
 ) -> Result<String, ExitError> {
-    if let Some(hash) = optional_env(env_map, "XP_ADMIN_TOKEN_HASH") {
-        if parse_admin_token_hash(&hash).is_none() {
-            return Err(ExitError::new(
-                2,
-                "invalid_args: XP_ADMIN_TOKEN_HASH is present but invalid",
-            ));
-        }
+    if let Some(hash) = resolve_configured_admin_token_hash(env_map)? {
         return Ok(hash);
     }
 
@@ -553,6 +556,27 @@ fn resolve_bootstrap_admin_token_hash(
         2,
         "invalid_args: bootstrap mode requires XP_ADMIN_TOKEN or XP_ADMIN_TOKEN_HASH",
     ))
+}
+
+fn resolve_configured_admin_token_hash(
+    env_map: &BTreeMap<String, String>,
+) -> Result<Option<String>, ExitError> {
+    let Some(hash) = optional_env(env_map, "XP_ADMIN_TOKEN_HASH") else {
+        return Ok(None);
+    };
+    let Some(parsed) = parse_admin_token_hash(&hash) else {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: XP_ADMIN_TOKEN_HASH is present but invalid",
+        ));
+    };
+    if !is_default_admin_token_hash_profile(&parsed) {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: XP_ADMIN_TOKEN_HASH must use argon2id m=4096,t=3,p=1",
+        ));
+    }
+    Ok(Some(parsed.as_str().to_string()))
 }
 
 fn resolve_api_base_url(
@@ -647,7 +671,7 @@ fn render_node_meta_diffs(
 fn effective_admin_token_hash(paths: &Paths, spec: &ContainerSpec) -> Result<String, ExitError> {
     match &spec.startup {
         ContainerStartup::Bootstrap { .. } => spec
-            .bootstrap_admin_token_hash
+            .configured_admin_token_hash
             .clone()
             .ok_or_else(|| ExitError::new(2, "invalid_args: bootstrap admin token hash missing")),
         ContainerStartup::Join { .. } | ContainerStartup::ReuseJoined => {

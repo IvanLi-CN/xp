@@ -16,6 +16,8 @@
 - cloudflared HTTP/2 transport default with an explicit operator override for
   networks that block outbound QUIC/7844, including reload and restart when a
   managed service definition changes.
+- Joined Docker/Compose administrator-token reconciliation from an explicitly
+  configured low-memory PHC before the XP child starts.
 - Xray low-buffer static policy and upgrade backfill.
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.

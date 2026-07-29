@@ -159,6 +159,11 @@ Container-specific note:
 
 - `xp-ops container run` owns the `xray` / `cloudflared` child processes inside the container.
 - It also prepares DDNS runtime files and reconciles default managed SS/VLESS endpoints from container env on every start.
+- For an existing joined node, set `XP_ADMIN_TOKEN_HASH` in the host-owned Compose environment
+  file, then recreate the service to rotate the administrator credential. The entrypoint accepts
+  only the low-memory Argon2id profile (`m=4096,t=3,p=1`) and atomically reconciles the persisted
+  cluster hash before XP starts. A first join retains the leader-provided hash. Do not edit the
+  running container or its data volume by hand.
 - `xp` still reports `xray` health through `GET /api/health`.
 - `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
 
@@ -245,6 +250,11 @@ Required (or commonly set):
   - Optional bearer token for admin endpoints. Leaving it empty effectively disables token checks.
   - If you bootstrap via `xp-ops deploy`, the plaintext token is printed once for the operator, while the server stores only `XP_ADMIN_TOKEN_HASH` in `/etc/xp/xp.env`.
     - Show the current configured state on the server: `sudo xp-ops admin-token show` (or `--redacted`).
+- `XP_ADMIN_TOKEN_HASH` (optional)
+  - Argon2id PHC for the administrator credential. New host-managed writes and joined
+    container reconciles require `m=4096,t=3,p=1`.
+  - For Docker/Compose, place the PHC only in the host-owned Compose environment file, then
+    recreate the service through Compose. Do not place the plaintext token in the Compose file.
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
