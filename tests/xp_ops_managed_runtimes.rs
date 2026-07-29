@@ -256,6 +256,13 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         "[Service]\n",
     )
     .unwrap();
+    let cloudflared_drop_in = tmp
+        .path()
+        .join("etc/systemd/system/cloudflared.service.d/20-xp-memory.conf");
+    fs::create_dir_all(cloudflared_drop_in.parent().unwrap()).unwrap();
+    let original_runtime_defaults =
+        "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n";
+    fs::write(&cloudflared_drop_in, original_runtime_defaults).unwrap();
     let local_bin = tmp.path().join("usr/local/bin");
     fs::create_dir_all(&local_bin).unwrap();
     fs::write(local_bin.join("xp"), b"xp-old-binary").unwrap();
@@ -288,6 +295,15 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         .stderr(predicates::str::contains("cloudflared restart failed"));
 
     assert_eq!(fs::read_to_string(config_path).unwrap(), original);
+    assert_eq!(
+        fs::read_to_string(cloudflared_drop_in).unwrap(),
+        original_runtime_defaults
+    );
+    assert!(
+        !tmp.path()
+            .join("etc/systemd/system/xray.service.d/20-xp-memory.conf")
+            .exists()
+    );
     let marker = fs::read_to_string(marker).unwrap();
     assert_eq!(
         marker
