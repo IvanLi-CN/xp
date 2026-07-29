@@ -14,7 +14,8 @@
 - Low-memory admin authentication and bounded verification concurrency.
 - Go runtime defaults for host-managed and container deployments.
 - cloudflared HTTP/2 transport default with an explicit operator override for
-  networks that block outbound QUIC/7844.
+  networks that block outbound QUIC/7844, including reload and restart when a
+  managed service definition changes.
 - Xray low-buffer static policy and upgrade backfill.
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.

@@ -24,7 +24,8 @@
   和有界等待，饱和时返回 `429` 与 `Retry-After`。
 - Xray 默认 `GOMEMLIMIT=16MiB`、`GOGC=50`，level-0 `bufferSize=0`。
 - cloudflared 默认 `GOMEMLIMIT=8MiB`、`GOGC=50`、`--protocol http2`，并关闭管理诊断采集；
-  `XP_CLOUDFLARED_PROTOCOL` 可覆盖传输协议。
+  `XP_CLOUDFLARED_PROTOCOL` 可覆盖传输协议；托管服务定义变更后必须 reload 并重启，
+  使新传输协议立即生效。
 - Release 从固定上游提交以 Go 1.26.5、禁用内联和去符号参数构建 Xray 与
   cloudflared；宿主升级和官方容器镜像必须使用同一组带 checksum 的资产。
 - operator 已有显式 override 优先；升级只 backfill 缺失值。

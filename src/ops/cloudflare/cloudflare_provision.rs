@@ -261,6 +261,7 @@ pub(super) async fn run(
         service_file_before.as_deref(),
     )?;
     let mut config_changed = false;
+    let mut service_file_changed = false;
     let mut target_config_written = false;
     let mut old_config_written = false;
     let mut patched_dns: Option<DnsRecordInfo> = None;
@@ -270,7 +271,7 @@ pub(super) async fn run(
     let operation: Result<(), ExitError> = async {
         if runtime == ProvisionRuntime::ManagedService {
             service_change_attempted = true;
-            ensure_cloudflared_service(&paths, distro, init_system, mode)?;
+            service_file_changed = ensure_cloudflared_service(&paths, distro, init_system, mode)?;
         }
         if let Some(created) = created.as_ref() {
             ensure_dir(&paths.etc_cloudflared_dir())
@@ -334,8 +335,11 @@ pub(super) async fn run(
         save_settings(&paths, &settings)?;
 
         if args.enabled() && runtime == ProvisionRuntime::ManagedService {
+            if service_file_changed {
+                reload_cloudflared_service_definition(init_system, &paths)?;
+            }
             enable_cloudflared_service(init_system, mode, &paths)?;
-            if config_changed {
+            if config_changed || service_file_changed {
                 restart_cloudflared_service(init_system, &paths)?;
                 verify_cloudflared_service(init_system, &paths)?;
             }
@@ -457,6 +461,32 @@ pub(super) async fn run(
     }
     let _ = fs::remove_dir_all(&snapshot_dir);
     Ok(())
+}
+
+fn reload_cloudflared_service_definition(
+    init_system: InitSystem,
+    paths: &Paths,
+) -> Result<(), ExitError> {
+    if is_test_root(paths.root()) || init_system != InitSystem::Systemd {
+        return Ok(());
+    }
+    let status = Command::new("systemctl")
+        .args(["daemon-reload"])
+        .status()
+        .map_err(|error| {
+            ExitError::new(
+                6,
+                format!("service_error: cloudflared daemon-reload: {error}"),
+            )
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ExitError::new(
+            6,
+            "service_error: cloudflared daemon-reload failed",
+        ))
+    }
 }
 
 fn migration_owns_only_hostname(hostnames: &[String], hostname: &str) -> bool {

@@ -2,8 +2,9 @@
 
 - 2026-07-29: a provider network blocked cloudflared's outbound QUIC/7844 on
   HK2. The tunnel connected with HTTP/2 and served the public login normally,
-  so all managed launch paths now default to `--protocol http2` and retain an
-  explicit `XP_CLOUDFLARED_PROTOCOL=quic` operator override.
+  so all managed launch paths now default to `--protocol http2`, retain an
+  explicit `XP_CLOUDFLARED_PROTOCOL=quic` operator override, and reload/restart
+  a changed managed service definition before reporting success.
 
 - 2026-07-29: a production SG canary showed that Go executable mappings were a
   material part of the remaining PSS. Release automation now builds pinned

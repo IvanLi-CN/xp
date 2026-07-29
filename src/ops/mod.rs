@@ -5,6 +5,9 @@ mod admin_token;
 mod admin_token_tests;
 pub(crate) mod cloudflare;
 mod cloudflare_config;
+#[cfg(test)]
+#[path = "cloudflare_service_tests.rs"]
+mod cloudflare_service_tests;
 mod container;
 mod deploy;
 mod init;
