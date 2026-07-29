@@ -367,6 +367,19 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
             .map(String::as_str),
         Some("false")
     );
+    assert_eq!(
+        runtime_env
+            .get("XP_CLOUDFLARED_PROTOCOL")
+            .map(String::as_str),
+        Some("http2")
+    );
+}
+
+#[test]
+fn cloudflared_protocol_defaults_to_http2_and_allows_an_override() {
+    assert_eq!(cloudflared_protocol(&BTreeMap::new()), "http2");
+    let runtime_env = BTreeMap::from([("XP_CLOUDFLARED_PROTOCOL".to_string(), "quic".to_string())]);
+    assert_eq!(cloudflared_protocol(&runtime_env), "quic");
 }
 
 #[test]

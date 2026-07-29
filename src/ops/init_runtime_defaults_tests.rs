@@ -33,6 +33,7 @@ fn low_memory_backfill_writes_systemd_drop_ins() {
     assert!(xray.contains("GOMEMLIMIT=16MiB"));
     assert!(cloudflared.contains("GOMEMLIMIT=8MiB"));
     assert!(cloudflared.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
+    assert!(cloudflared.contains("XP_CLOUDFLARED_PROTOCOL=http2"));
 }
 
 #[test]
@@ -56,7 +57,14 @@ fn low_memory_backfill_preserves_systemd_operator_overrides() {
 
     let managed =
         fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
-    assert!(!managed.contains("Environment="));
+    assert_eq!(
+        managed,
+        concat!(
+            "[Service]\n",
+            "# Managed by xp-ops; use a separate drop-in for overrides\n",
+            "Environment=XP_CLOUDFLARED_PROTOCOL=http2\n",
+        )
+    );
 }
 
 #[test]
@@ -87,13 +95,22 @@ fn low_memory_backfill_preserves_customized_managed_systemd_drop_in() {
     let systemd = paths.systemd_unit_dir();
     let drop_in = systemd.join("cloudflared.service.d/20-xp-memory.conf");
     fs::create_dir_all(drop_in.parent().unwrap()).unwrap();
-    fs::write(systemd.join("cloudflared.service"), "[Service]\n").unwrap();
+    let unit = systemd.join("cloudflared.service");
+    let original_unit = concat!(
+        "[Service]\n",
+        "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+        "--config /etc/cloudflared/config.yml tunnel run\n",
+    );
+    fs::write(&unit, original_unit).unwrap();
     let custom = "[Service]\nEnvironment=GOMEMLIMIT=20MiB\nEnvironment=GOGC=75\n";
     fs::write(&drop_in, custom).unwrap();
 
     backfill_low_memory_runtime_defaults(&paths).unwrap();
 
     assert_eq!(fs::read_to_string(drop_in).unwrap(), custom);
+    let updated_unit = fs::read_to_string(unit).unwrap();
+    assert!(updated_unit.contains("Environment=XP_CLOUDFLARED_PROTOCOL=http2"));
+    assert!(updated_unit.contains("--protocol ${XP_CLOUDFLARED_PROTOCOL} --config"));
 }
 
 #[test]
@@ -120,6 +137,7 @@ fn low_memory_backfill_migrates_legacy_openrc_default() {
         &service,
         concat!(
             "command_user=\"cloudflared:cloudflared\"\n",
+            "command_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\n",
             "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"\n",
             "export GOGC=\"${GOGC:-50}\"\n",
         ),
@@ -132,6 +150,57 @@ fn low_memory_backfill_migrates_legacy_openrc_default() {
     assert!(updated.contains("GOMEMLIMIT:-8MiB"));
     assert!(!updated.contains("GOMEMLIMIT:-12MiB"));
     assert!(updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS:-false"));
+    assert!(updated.contains(concat!(
+        "--protocol ${XP_CLOUDFLARED_PROTOCOL:-http2}",
+        " --config /etc/cloudflared/config.yml",
+    )));
+}
+
+#[test]
+fn low_memory_backfill_adds_http2_without_replacing_explicit_protocols() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    let unit = systemd.join("cloudflared.service");
+    fs::write(
+        &unit,
+        concat!(
+            "[Service]\n",
+            "Environment=XP_CLOUDFLARED_PROTOCOL=quic\n",
+            "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+            "--config /etc/cloudflared/config.yml tunnel run\n",
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+    let openrc = paths.openrc_initd_dir().join("cloudflared");
+    fs::write(
+        &openrc,
+        concat!(
+            "command_args=\"--no-autoupdate --protocol quic ",
+            "--config /etc/cloudflared/config.yml tunnel run\"\n",
+        ),
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    assert!(
+        fs::read_to_string(&unit)
+            .unwrap()
+            .contains("--protocol ${XP_CLOUDFLARED_PROTOCOL} --config")
+    );
+    assert!(
+        fs::read_to_string(&unit)
+            .unwrap()
+            .contains("Environment=XP_CLOUDFLARED_PROTOCOL=quic")
+    );
+    assert!(
+        fs::read_to_string(openrc)
+            .unwrap()
+            .contains("--protocol quic --config")
+    );
 }
 
 #[test]

@@ -129,6 +129,7 @@ fn snapshot_runtime_defaults(paths: &Paths) -> Result<RuntimeDefaultsBackup, Exi
         paths
             .systemd_unit_dir()
             .join("cloudflared.service.d/20-xp-memory.conf"),
+        paths.systemd_unit_dir().join("cloudflared.service"),
         paths.openrc_initd_dir().join("xray"),
         paths.openrc_initd_dir().join("cloudflared"),
     ];
@@ -515,7 +516,13 @@ mod tests {
         let systemd = paths.systemd_unit_dir();
         fs::create_dir_all(&systemd).unwrap();
         fs::write(systemd.join("xray.service"), "[Service]\n").unwrap();
-        fs::write(systemd.join("cloudflared.service"), "[Service]\n").unwrap();
+        let cloudflared_unit = systemd.join("cloudflared.service");
+        let original_unit = concat!(
+            "[Service]\n",
+            "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+            "--config /etc/cloudflared/config.yml tunnel run\n",
+        );
+        fs::write(&cloudflared_unit, original_unit).unwrap();
         let cloudflared_drop_in = systemd.join("cloudflared.service.d/20-xp-memory.conf");
         fs::create_dir_all(cloudflared_drop_in.parent().unwrap()).unwrap();
         let original_drop_in = "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n";
@@ -559,6 +566,7 @@ mod tests {
             fs::read_to_string(&cloudflared_openrc).unwrap(),
             original_openrc
         );
+        assert_eq!(fs::read_to_string(cloudflared_unit).unwrap(), original_unit);
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(
                 &fs::metadata(&cloudflared_openrc).unwrap().permissions(),

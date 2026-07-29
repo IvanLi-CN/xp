@@ -1048,6 +1048,8 @@ fn spawn_cloudflared(
 ) -> Result<Child, ExitError> {
     Command::new(cloudflared_bin)
         .arg("--no-autoupdate")
+        .arg("--protocol")
+        .arg(cloudflared_protocol(runtime_env))
         .arg("--config")
         .arg("/etc/cloudflared/config.yml")
         .arg("tunnel")
@@ -1077,6 +1079,13 @@ fn spawn_cloudflared(
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| ExitError::new(6, format!("container_start_failed: spawn cloudflared: {e}")))
+}
+
+fn cloudflared_protocol(runtime_env: &BTreeMap<String, String>) -> &str {
+    runtime_env
+        .get("XP_CLOUDFLARED_PROTOCOL")
+        .map(String::as_str)
+        .unwrap_or("http2")
 }
 
 fn spawn_xp(

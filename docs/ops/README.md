@@ -459,6 +459,17 @@ sudo rc-service xray start
 sudo rc-service xp start
 ```
 
+### Cloudflare Tunnel transport
+
+Managed cloudflared services default to `--protocol http2`. This avoids
+startup stalls on networks that block outbound QUIC/7844. Override only when
+the local network has verified QUIC support:
+
+- systemd: add `Environment=XP_CLOUDFLARED_PROTOCOL=quic` in a separate
+  `cloudflared.service.d/` drop-in.
+- OpenRC: set `XP_CLOUDFLARED_PROTOCOL=quic` in `/etc/conf.d/cloudflared`.
+- containers: pass `XP_CLOUDFLARED_PROTOCOL=quic` to `xp-ops container run`.
+
 ## Upgrade and rollback strategy
 
 ### Recommended: upgrade via `xp-ops` (GitHub Releases)

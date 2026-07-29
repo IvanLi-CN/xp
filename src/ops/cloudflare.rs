@@ -201,15 +201,15 @@ pub(super) fn cloudflared_binary_path(paths: &Paths, distro: Distro) -> std::pat
     paths.map_abs(bin_abs)
 }
 
-fn ensure_cloudflared_service(
+pub(super) fn ensure_cloudflared_service(
     paths: &Paths,
     distro: Distro,
     init_system: InitSystem,
     mode: Mode,
-) -> Result<(), ExitError> {
+) -> Result<bool, ExitError> {
     if mode == Mode::DryRun {
         eprintln!("would ensure cloudflared service files exist");
-        return Ok(());
+        return Ok(false);
     }
 
     if !is_test_root(paths.root()) {
@@ -246,28 +246,29 @@ fn ensure_cloudflared_service(
         };
     }
 
-    match init_system {
+    let changed = match init_system {
         InitSystem::Systemd => {
             let dir = paths.systemd_unit_dir();
             ensure_dir(&dir).map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
             let unit_path = dir.join("cloudflared.service");
             let unit = systemd_cloudflared_unit();
             write_string_if_changed(&unit_path, &unit)
-                .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
+                .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?
         }
         InitSystem::OpenRc => {
             let initd = paths.openrc_initd_dir();
             ensure_dir(&initd).map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
             let script_path = initd.join("cloudflared");
             let script = openrc_cloudflared_script();
-            write_string_if_changed(&script_path, &script)
+            let changed = write_string_if_changed(&script_path, &script)
                 .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
             chmod(&script_path, 0o755).ok();
+            changed
         }
-        InitSystem::None => {}
-    }
+        InitSystem::None => false,
+    };
 
-    Ok(())
+    Ok(changed)
 }
 
 fn enable_cloudflared_service(
@@ -370,7 +371,8 @@ Group=cloudflared\n\
 Environment=GOMEMLIMIT=8MiB\n\
 Environment=GOGC=50\n\
 Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n\
-ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run\n\
+Environment=XP_CLOUDFLARED_PROTOCOL=http2\n\
+ExecStart=/usr/bin/cloudflared --no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL} --config /etc/cloudflared/config.yml tunnel run\n\
 Restart=always\n\
 RestartSec=2s\n\
 \n\
@@ -386,7 +388,7 @@ name="cloudflared"
 description="cloudflared (Cloudflare Tunnel)"
 
 command="/usr/local/bin/cloudflared"
-command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_args="--no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
 export GOMEMLIMIT="${GOMEMLIMIT:-8MiB}"
 export GOGC="${GOGC:-50}"
@@ -935,12 +937,22 @@ mod tests {
             )
         );
         assert!(script.contains("GOGC=\"${GOGC:-50}\""));
+        assert!(script.contains(
+            "--protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml"
+        ));
         assert!(script.contains("respawn_delay=2"));
         assert!(script.contains("respawn_max=0"));
 
         // When supervised by OpenRC, the service should not be backgrounded by the script itself.
         assert!(!script.contains("command_background"));
         assert!(!script.contains("pidfile="));
+    }
+
+    #[test]
+    fn systemd_cloudflared_unit_defaults_to_http2_with_an_override() {
+        let unit = systemd_cloudflared_unit();
+        assert!(unit.contains("Environment=XP_CLOUDFLARED_PROTOCOL=http2"));
+        assert!(unit.contains("--protocol ${XP_CLOUDFLARED_PROTOCOL} --config"));
     }
 
     #[test]

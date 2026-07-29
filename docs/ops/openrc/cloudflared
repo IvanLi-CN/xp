@@ -4,7 +4,7 @@ name="cloudflared"
 description="cloudflared (Cloudflare Tunnel)"
 
 command="/usr/local/bin/cloudflared"
-command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_args="--no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
 export GOMEMLIMIT="${GOMEMLIMIT:-8MiB}"
 export GOGC="${GOGC:-50}"
