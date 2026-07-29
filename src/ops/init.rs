@@ -7,6 +7,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+mod runtime_defaults;
+pub use runtime_defaults::backfill_low_memory_runtime_defaults;
+
 pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
@@ -179,55 +182,6 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     write_string_if_changed(&paths.etc_xray_config(), &(content + "\n"))
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&paths.etc_xray_config(), 0o644).ok();
-    Ok(())
-}
-
-pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
-    let systemd = paths.systemd_unit_dir();
-    if systemd.join("xray.service").exists() {
-        let dir = systemd.join("xray.service.d");
-        ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-        write_string_if_changed(
-            &dir.join("20-xp-memory.conf"),
-            "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
-        )
-        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    }
-    if systemd.join("cloudflared.service").exists() {
-        let dir = systemd.join("cloudflared.service.d");
-        ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-        write_string_if_changed(
-            &dir.join("20-xp-memory.conf"),
-            "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n",
-        )
-        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    }
-    for (path, limit) in [
-        (paths.openrc_initd_dir().join("xray"), "16MiB"),
-        (paths.openrc_initd_dir().join("cloudflared"), "12MiB"),
-    ] {
-        if !path.exists() {
-            continue;
-        }
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-        if raw.contains("GOMEMLIMIT") {
-            continue;
-        }
-        let value = format!(
-            "export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\nexport GOGC=\"${{GOGC:-50}}\"\n"
-        );
-        let marker = "command_user=\"";
-        let pos = raw.find(marker).unwrap_or(0);
-        let end = raw[pos..]
-            .find('\n')
-            .map(|n| pos + n + 1)
-            .unwrap_or(raw.len());
-        let updated = format!("{}{}{}", &raw[..end], value, &raw[end..]);
-        write_string_if_changed(&path, &updated)
-            .and_then(|_| chmod(&path, 0o755))
-            .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    }
     Ok(())
 }
 

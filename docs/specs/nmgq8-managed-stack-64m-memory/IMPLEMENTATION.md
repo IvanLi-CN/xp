@@ -3,10 +3,11 @@
 ## Status
 
 - Authentication, runtime defaults, upgrade activation, OpenRC compatibility,
-  and the initial release-footprint changes are released through `v3.20.1`.
-  SG runs `v3.20.1` with the rotated administrator PHC, but its aggregate PSS
-  preflight reached `71,356 KiB`; rollout remains stopped at the first follower
-  while the XP executable-code footprint is reduced further.
+  and XP release-footprint changes are released through `v3.20.3`.
+- On SG, pinned Xray/cloudflared builds with Go inlining disabled plus the
+  `8MiB` cloudflared profile passed a 60-second preflight at `63,632 KiB` peak
+  (`xp=15,500`, `xray=21,920`, `cloudflared=26,424`). These binaries remain a
+  production canary until the release-assets change is merged and rolled out.
 
 ## Work areas
 
@@ -17,13 +18,16 @@
   cloudflared before reporting success.
 - PSS sampler, shared-testbox load profile, release rollout and production soak.
 - Build-time compression and HTTP negotiation for embedded Web assets.
+- Pinned low-memory Go runtime assets shared by host upgrades and the official
+  container image, with paired checksum and rollback behavior.
 
 Implemented: low-memory administrator authentication and bounded verification,
 JWT-first authorization, Xray/cloudflared runtime defaults for
 systemd/OpenRC/container launches, upgrade backfill, and the PSS sampler at
 `scripts/ops/sample-managed-stack-pss.sh`.
 
-Remaining gates: release and measure the size-oriented XP build, pass the SG
-hard gate, roll the same release and PHC across the other three nodes, run the
-load/soak gates, and complete the 24-hour production observation. The shared
-testbox run is blocked until space is available under its managed workspace.
+Remaining gates: publish the managed-runtime assets, replace the SG canary with
+the formal release, pass the 15-minute load gate, roll the same release and PHC
+across the other three nodes, and complete the 24-hour production observation.
+The shared testbox run is blocked until space is available under its managed
+workspace.

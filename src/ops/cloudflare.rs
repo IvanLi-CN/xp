@@ -367,8 +367,9 @@ After=network-online.target\n\
 Type=simple\n\
 User=cloudflared\n\
 Group=cloudflared\n\
-Environment=GOMEMLIMIT=12MiB\n\
+Environment=GOMEMLIMIT=8MiB\n\
 Environment=GOGC=50\n\
+Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n\
 ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run\n\
 Restart=always\n\
 RestartSec=2s\n\
@@ -379,7 +380,28 @@ WantedBy=multi-user.target\n"
 }
 
 fn openrc_cloudflared_script() -> String {
-    "#!/sbin/openrc-run\n\nname=\"cloudflared\"\ndescription=\"cloudflared (Cloudflare Tunnel)\"\n\ncommand=\"/usr/local/bin/cloudflared\"\ncommand_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\ncommand_user=\"cloudflared:cloudflared\"\nexport GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"\nexport GOGC=\"${GOGC:-50}\"\n\n# Ensure automatic recovery on crashes without busy-looping.\nsupervisor=supervise-daemon\nrespawn_delay=2\nrespawn_max=0\n\ndepend() {\n  need net\n}\n".to_string()
+    r#"#!/sbin/openrc-run
+
+name="cloudflared"
+description="cloudflared (Cloudflare Tunnel)"
+
+command="/usr/local/bin/cloudflared"
+command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_user="cloudflared:cloudflared"
+export GOMEMLIMIT="${GOMEMLIMIT:-8MiB}"
+export GOGC="${GOGC:-50}"
+export TUNNEL_MANAGEMENT_DIAGNOSTICS="${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}"
+
+# Ensure automatic recovery on crashes without busy-looping.
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+
+depend() {
+  need net
+}
+"#
+    .to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -906,7 +928,12 @@ mod tests {
     fn openrc_cloudflared_script_is_supervised() {
         let script = openrc_cloudflared_script();
         assert!(script.contains("supervisor=supervise-daemon"));
-        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\""));
+        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\""));
+        assert!(
+            script.contains(
+                "TUNNEL_MANAGEMENT_DIAGNOSTICS=\"${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}\""
+            )
+        );
         assert!(script.contains("GOGC=\"${GOGC:-50}\""));
         assert!(script.contains("respawn_delay=2"));
         assert!(script.contains("respawn_max=0"));
