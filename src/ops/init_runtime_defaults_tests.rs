@@ -36,6 +36,51 @@ fn low_memory_backfill_writes_systemd_drop_ins() {
 }
 
 #[test]
+fn low_memory_backfill_preserves_systemd_operator_overrides() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(systemd.join("cloudflared.service.d")).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=20MiB\nEnvironment=GOGC=75\n",
+    )
+    .unwrap();
+    fs::write(
+        systemd.join("cloudflared.service.d/10-operator.conf"),
+        "[Service]\nEnvironment=TUNNEL_MANAGEMENT_DIAGNOSTICS=true\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert_eq!(managed, "[Service]\n");
+}
+
+#[test]
+fn low_memory_backfill_migrates_legacy_systemd_default() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(managed.contains("GOMEMLIMIT=8MiB"));
+    assert!(!managed.contains("Environment=GOGC=50"));
+    assert!(managed.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
+}
+
+#[test]
 fn low_memory_backfill_preserves_openrc_override() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());

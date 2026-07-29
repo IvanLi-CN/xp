@@ -1,29 +1,38 @@
 use super::*;
 use std::ffi::OsStr;
+use std::path::Path;
 
 pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
     let systemd = paths.systemd_unit_dir();
-    for (service, content) in [
+    for (service, defaults) in [
         (
             "xray",
-            "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+            &[("GOMEMLIMIT", "16MiB", None), ("GOGC", "50", None)][..],
         ),
         (
             "cloudflared",
-            concat!(
-                "[Service]\nEnvironment=GOMEMLIMIT=8MiB\n",
-                "Environment=GOGC=50\n",
-                "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n",
-            ),
+            &[
+                ("GOMEMLIMIT", "8MiB", Some("12MiB")),
+                ("GOGC", "50", None),
+                ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false", None),
+            ][..],
         ),
     ] {
-        if !systemd.join(format!("{service}.service")).exists() {
+        let unit = systemd.join(format!("{service}.service"));
+        if !unit.exists() {
             continue;
         }
         let dir = systemd.join(format!("{service}.service.d"));
         ensure_dir(&dir).map_err(filesystem_error)?;
-        write_string_if_changed(&dir.join("20-xp-memory.conf"), content)
-            .map_err(filesystem_error)?;
+        let managed = dir.join("20-xp-memory.conf");
+        let sources = systemd_environment_sources(&unit, &dir, &managed)?;
+        let mut content = String::from("[Service]\n");
+        for (key, value, legacy_default) in defaults {
+            if should_backfill_systemd_value(&sources, key, *legacy_default) {
+                content.push_str(&format!("Environment={key}={value}\n"));
+            }
+        }
+        write_string_if_changed(&managed, &content).map_err(filesystem_error)?;
     }
 
     for (path, limit) in [
@@ -64,6 +73,52 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             .map_err(filesystem_error)?;
     }
     Ok(())
+}
+
+fn systemd_environment_sources(
+    unit: &Path,
+    drop_in_dir: &Path,
+    managed: &Path,
+) -> Result<Vec<String>, ExitError> {
+    let mut sources = vec![fs::read_to_string(unit).map_err(filesystem_error)?];
+    let mut drop_ins = Vec::new();
+    for entry in fs::read_dir(drop_in_dir).map_err(filesystem_error)? {
+        let path = entry.map_err(filesystem_error)?.path();
+        if path.extension() == Some(OsStr::new("conf")) && path != managed {
+            drop_ins.push(path);
+        }
+    }
+    drop_ins.sort();
+    for path in drop_ins {
+        sources.push(fs::read_to_string(path).map_err(filesystem_error)?);
+    }
+    Ok(sources)
+}
+
+fn should_backfill_systemd_value(
+    sources: &[String],
+    key: &str,
+    legacy_default: Option<&str>,
+) -> bool {
+    let needle = format!("{key}=");
+    let assignments = sources
+        .iter()
+        .flat_map(|source| source.lines())
+        .filter(|line| line.trim_start().starts_with("Environment="))
+        .filter_map(|line| {
+            line.find(&needle)
+                .map(|index| &line[index + needle.len()..])
+        })
+        .map(|value| {
+            value
+                .trim_matches(['"', '\''])
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+        })
+        .collect::<Vec<_>>();
+    assignments.is_empty()
+        || legacy_default.is_some_and(|legacy| assignments.iter().all(|value| *value == legacy))
 }
 
 fn filesystem_error(error: std::io::Error) -> ExitError {
