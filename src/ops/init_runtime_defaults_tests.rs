@@ -56,7 +56,7 @@ fn low_memory_backfill_preserves_systemd_operator_overrides() {
 
     let managed =
         fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
-    assert_eq!(managed, "[Service]\n");
+    assert!(!managed.contains("Environment="));
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn low_memory_backfill_migrates_legacy_systemd_default() {
     fs::create_dir_all(&systemd).unwrap();
     fs::write(
         systemd.join("cloudflared.service"),
-        "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n",
+        "[Service]\nEnvironment=\"GOMEMLIMIT=12MiB\" \"GOGC=50\"\n",
     )
     .unwrap();
 
@@ -78,6 +78,22 @@ fn low_memory_backfill_migrates_legacy_systemd_default() {
     assert!(managed.contains("GOMEMLIMIT=8MiB"));
     assert!(!managed.contains("Environment=GOGC=50"));
     assert!(managed.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
+}
+
+#[test]
+fn low_memory_backfill_preserves_customized_managed_systemd_drop_in() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    let drop_in = systemd.join("cloudflared.service.d/20-xp-memory.conf");
+    fs::create_dir_all(drop_in.parent().unwrap()).unwrap();
+    fs::write(systemd.join("cloudflared.service"), "[Service]\n").unwrap();
+    let custom = "[Service]\nEnvironment=GOMEMLIMIT=20MiB\nEnvironment=GOGC=75\n";
+    fs::write(&drop_in, custom).unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    assert_eq!(fs::read_to_string(drop_in).unwrap(), custom);
 }
 
 #[test]
@@ -92,6 +108,30 @@ fn low_memory_backfill_preserves_openrc_override() {
     backfill_low_memory_runtime_defaults(&paths).unwrap();
 
     assert_eq!(fs::read_to_string(service).unwrap(), original);
+}
+
+#[test]
+fn low_memory_backfill_migrates_legacy_openrc_default() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+    let service = paths.openrc_initd_dir().join("cloudflared");
+    fs::write(
+        &service,
+        concat!(
+            "command_user=\"cloudflared:cloudflared\"\n",
+            "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"\n",
+            "export GOGC=\"${GOGC:-50}\"\n",
+        ),
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let updated = fs::read_to_string(service).unwrap();
+    assert!(updated.contains("GOMEMLIMIT:-8MiB"));
+    assert!(!updated.contains("GOMEMLIMIT:-12MiB"));
+    assert!(updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS:-false"));
 }
 
 #[test]

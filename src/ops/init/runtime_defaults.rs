@@ -2,6 +2,8 @@ use super::*;
 use std::ffi::OsStr;
 use std::path::Path;
 
+const MANAGED_MARKER: &str = "# Managed by xp-ops; use a separate drop-in for overrides";
+
 pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
     let systemd = paths.systemd_unit_dir();
     for (service, defaults) in [
@@ -25,8 +27,14 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let dir = systemd.join(format!("{service}.service.d"));
         ensure_dir(&dir).map_err(filesystem_error)?;
         let managed = dir.join("20-xp-memory.conf");
+        if managed.exists() {
+            let raw = fs::read_to_string(&managed).map_err(filesystem_error)?;
+            if !is_generated_systemd_drop_in(service, &raw) {
+                continue;
+            }
+        }
         let sources = systemd_environment_sources(&unit, &dir, &managed)?;
-        let mut content = String::from("[Service]\n");
+        let mut content = format!("[Service]\n{MANAGED_MARKER}\n");
         for (key, value, legacy_default) in defaults {
             if should_backfill_systemd_value(&sources, key, *legacy_default) {
                 content.push_str(&format!("Environment={key}={value}\n"));
@@ -43,36 +51,75 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             continue;
         }
         let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
+        let mut updated = raw.clone();
+        if path.file_name() == Some(OsStr::new("cloudflared")) {
+            updated = updated.replacen(
+                "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"",
+                "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"",
+                1,
+            );
+        }
         let mut value = String::new();
-        if !raw.contains("GOMEMLIMIT") {
+        if !updated.contains("GOMEMLIMIT") {
             value.push_str(&format!("export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\n"));
         }
-        if !raw.contains("GOGC") {
+        if !updated.contains("GOGC") {
             value.push_str("export GOGC=\"${GOGC:-50}\"\n");
         }
         if path.file_name() == Some(OsStr::new("cloudflared"))
-            && !raw.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS")
+            && !updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS")
         {
             value.push_str(concat!(
                 "export TUNNEL_MANAGEMENT_DIAGNOSTICS=\"",
                 "${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}\"\n",
             ));
         }
-        if value.is_empty() {
+        if value.is_empty() && updated == raw {
             continue;
         }
         let marker = "command_user=\"";
-        let pos = raw.find(marker).unwrap_or(0);
-        let end = raw[pos..]
+        let pos = updated.find(marker).unwrap_or(0);
+        let end = updated[pos..]
             .find('\n')
             .map(|offset| pos + offset + 1)
-            .unwrap_or(raw.len());
-        let updated = format!("{}{}{}", &raw[..end], value, &raw[end..]);
-        write_string_if_changed(&path, &updated)
+            .unwrap_or(updated.len());
+        let final_value = format!("{}{}{}", &updated[..end], value, &updated[end..]);
+        write_string_if_changed(&path, &final_value)
             .and_then(|_| chmod(&path, 0o755))
             .map_err(filesystem_error)?;
     }
     Ok(())
+}
+
+fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
+    let legacy = match service {
+        "xray" => "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+        "cloudflared" => "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n",
+        _ => return false,
+    };
+    if raw == legacy {
+        return true;
+    }
+
+    let allowed = match service {
+        "xray" => &[("GOMEMLIMIT", "16MiB"), ("GOGC", "50")][..],
+        "cloudflared" => &[
+            ("GOMEMLIMIT", "8MiB"),
+            ("GOGC", "50"),
+            ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false"),
+        ][..],
+        _ => return false,
+    };
+    let mut lines = raw.lines();
+    if lines.next() != Some("[Service]") || lines.next() != Some(MANAGED_MARKER) {
+        return false;
+    }
+    lines.all(|line| {
+        parse_systemd_environment_line(line)
+            .iter()
+            .all(|(key, value)| allowed.contains(&(key.as_str(), value.as_str())))
+            && line.starts_with("Environment=")
+    })
 }
 
 fn systemd_environment_sources(
@@ -100,25 +147,52 @@ fn should_backfill_systemd_value(
     key: &str,
     legacy_default: Option<&str>,
 ) -> bool {
-    let needle = format!("{key}=");
     let assignments = sources
         .iter()
         .flat_map(|source| source.lines())
-        .filter(|line| line.trim_start().starts_with("Environment="))
-        .filter_map(|line| {
-            line.find(&needle)
-                .map(|index| &line[index + needle.len()..])
-        })
-        .map(|value| {
-            value
-                .trim_matches(['"', '\''])
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-        })
+        .flat_map(parse_systemd_environment_line)
+        .filter_map(|(assignment_key, value)| (assignment_key == key).then_some(value))
         .collect::<Vec<_>>();
     assignments.is_empty()
-        || legacy_default.is_some_and(|legacy| assignments.iter().all(|value| *value == legacy))
+        || legacy_default.is_some_and(|legacy| assignments.iter().all(|value| value == legacy))
+}
+
+fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {
+    let Some(value) = line.trim_start().strip_prefix("Environment=") else {
+        return Vec::new();
+    };
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            token.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if quote == Some(ch) {
+            quote = None;
+        } else if quote.is_none() && matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+        } else if quote.is_none() && ch.is_whitespace() {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+        } else {
+            token.push(ch);
+        }
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+    tokens
+        .into_iter()
+        .filter_map(|assignment| {
+            let (key, value) = assignment.split_once('=')?;
+            Some((key.to_owned(), value.to_owned()))
+        })
+        .collect()
 }
 
 fn filesystem_error(error: std::io::Error) -> ExitError {
