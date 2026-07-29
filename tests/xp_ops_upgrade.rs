@@ -679,7 +679,7 @@ mod linux {
         write_executable(
             &bin_dir.join("systemctl"),
             &format!(
-                "#!/bin/sh\n\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
+                "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
                 count_file = xray_restart_count.display()
             ),
         );
@@ -782,7 +782,7 @@ mod linux {
         write_executable(
             &bin_dir.join("systemctl"),
             &format!(
-                "#!/bin/sh\n\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
+                "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
                 count_file = xray_restart_count.display()
             ),
         );
