@@ -547,7 +547,7 @@ mod linux {
     }
 
     #[tokio::test]
-    async fn upgrade_rolls_back_when_xp_restart_fails() {
+    async fn upgrade_rolls_back_when_openrc_xp_never_becomes_ready() {
         let server = MockServer::start().await;
 
         let new_xp = b"xp-new-binary";
@@ -586,13 +586,10 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
-            &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
-        );
+        write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\n\nexit 1\n");
         write_executable(
             &bin_dir.join("rc-service"),
-            "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
+            "#!/bin/sh\n\necho \"openrc $@\" >> \"$XP_OPS_TEST_MARKER\"\n[ \"$2\" = restart ]\n",
         );
 
         let xp_path = tmp.path().join("usr/local/bin/xp");
@@ -610,11 +607,15 @@ mod linux {
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
 
         cmd.assert().failure().code(7);
+        let marker_raw = fs::read_to_string(&marker).unwrap();
+        assert!(marker_raw.contains("openrc xp restart\nopenrc xp status"));
+        assert!(!marker_raw.contains("openrc xray restart"));
 
         let bytes = fs::read(&xp_path).unwrap();
         assert_eq!(bytes, b"xp-old-binary");
@@ -671,7 +672,6 @@ mod linux {
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_string_lossy().to_string();
-
         let marker = tmp.path().join("marker.txt");
         let xray_restart_count = tmp.path().join("xray-restart-count.txt");
         let bin_dir = tmp.path().join("bin");

@@ -1,6 +1,11 @@
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(45);
+const SERVICE_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn reload_systemd_units(paths: &Paths) -> bool {
     let systemd = paths.systemd_unit_dir();
@@ -14,11 +19,11 @@ pub fn reload_systemd_units(paths: &Paths) -> bool {
 }
 
 pub fn restart_xray_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
-    if service_commands_are_disabled(paths) {
-        return true;
-    }
-    command_succeeds("systemctl", &["restart", systemd_unit])
-        || command_succeeds("rc-service", &[openrc_service, "restart"])
+    restart_service(paths, systemd_unit, openrc_service)
+}
+
+pub fn restart_xp_service(paths: &Paths) -> bool {
+    restart_service(paths, "xp.service", "xp")
 }
 
 pub fn restart_cloudflared_service(paths: &Paths) -> bool {
@@ -27,11 +32,43 @@ pub fn restart_cloudflared_service(paths: &Paths) -> bool {
     if !systemd_service.exists() && !openrc_service.exists() {
         return true;
     }
+    restart_service(paths, "cloudflared.service", "cloudflared")
+}
+
+fn restart_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
     if service_commands_are_disabled(paths) {
         return true;
     }
-    (systemd_service.exists() && command_succeeds("systemctl", &["restart", "cloudflared.service"]))
-        || (openrc_service.exists() && command_succeeds("rc-service", &["cloudflared", "restart"]))
+    if command_succeeds("systemctl", &["restart", systemd_unit]) {
+        return wait_for_service_ready("systemctl", &["is-active", "--quiet", systemd_unit]);
+    }
+    if command_succeeds("rc-service", &[openrc_service, "restart"]) {
+        return wait_for_service_ready("rc-service", &[openrc_service, "status"]);
+    }
+    false
+}
+
+fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
+    let deadline = Instant::now() + service_ready_timeout();
+    loop {
+        if command_succeeds(program, args) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(SERVICE_READY_POLL_INTERVAL);
+    }
+}
+
+fn service_ready_timeout() -> Duration {
+    if cfg!(debug_assertions)
+        && let Ok(timeout_ms) = std::env::var("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS")
+        && let Ok(timeout_ms) = timeout_ms.parse::<u64>()
+    {
+        return Duration::from_millis(timeout_ms);
+    }
+    SERVICE_READY_TIMEOUT
 }
 
 fn service_commands_are_disabled(paths: &Paths) -> bool {
