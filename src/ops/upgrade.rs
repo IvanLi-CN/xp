@@ -361,28 +361,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
     let checksums = read_checksums(&checksums_path)?;
 
-    let locked_release = LockedRelease {
-        owner,
-        repo,
-        api_base,
-        tag: release.tag_name.clone(),
-    };
-
-    if resume.is_none()
-        && install_xp_ops_binary(
-            &paths,
-            &release,
-            &checksums,
-            xp_ops_asset_name,
-            &xp_ops_dest,
-            &xp_ops_backup,
-            true,
-        )
-        .await?
-    {
-        return reexec_after_xp_ops_upgrade(&locked_release, &args, &xp_ops_dest, &xp_ops_backup);
-    }
-
     let phase_result = async {
         upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
         upgrade_and_reconcile_managed_runtimes(&paths, &release, &checksums, platform, &xp_backup)
@@ -683,31 +661,6 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
         xp_ops_dest,
         xp_ops_backup,
     }))
-}
-
-fn reexec_after_xp_ops_upgrade(
-    locked_release: &LockedRelease,
-    args: &UpgradeArgs,
-    exe: &Path,
-    backup: &Path,
-) -> Result<(), ExitError> {
-    let mut cmd = Command::new(exe);
-    cmd.env(UPGRADE_RESUME_TAG, &locked_release.tag);
-    cmd.env(
-        UPGRADE_RESUME_REPO,
-        format!("{}/{}", locked_release.owner, locked_release.repo),
-    );
-    cmd.env(UPGRADE_RESUME_API_BASE, &locked_release.api_base);
-    cmd.env(UPGRADE_RESUME_XP_OPS_DEST, exe);
-    cmd.env(UPGRADE_RESUME_XP_OPS_BACKUP, backup);
-    cmd.args(std::env::args_os().skip(1));
-    if args.dry_run {
-        cmd.arg("--dry-run");
-    }
-    let status = cmd
-        .status()
-        .map_err(|e| ExitError::new(7, format!("install_failed: re-exec: {e}")))?;
-    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn clear_upgrade_resume_env() {

@@ -34,6 +34,8 @@
   text. If the one-shot runner fails before writing a terminal status, the admin upgrade status API
   must reconcile the durable `running` / `restarting` status to `failed`.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
+- A host-managed upgrade must complete the locked `xp` and managed runtime phase before
+  replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
 - Cloudflare Tunnel provisioning preserves shared-Tunnel configuration outside the XP hostname.
   It reuses the existing single `cloudflared` process and validates before an atomic replacement.

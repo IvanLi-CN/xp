@@ -44,6 +44,8 @@
 - host-managed unit/service 和容器 supervisor 都必须显式注入对应 Go runtime env。
 - host-managed 升级把 Xray 与 cloudflared 视为成对资产；缺失一项、checksum
   失败或服务重启失败时恢复两者和 XP，不允许留下混合版本。
+- host-managed 升级必须在可选的 `xp-ops` 自更新前完成锁定版本的 XP 和托管运行时
+  阶段；工具二进制更新不得提前结束服务升级。
 - 使用同一低内存 PHC 预写所有节点，再按健康 follower 到 leader 的顺序逐机
   重启或重建。
 - 已加入集群的官方 Docker/Compose 节点在宿主 env 显式提供有效 PHC 时，必须在
