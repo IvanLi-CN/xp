@@ -732,7 +732,7 @@ mod linux {
         let marker_raw = fs::read_to_string(&marker).unwrap();
         assert!(marker_raw.contains("systemctl restart xp.service"));
         assert!(marker_raw.contains("systemctl restart xray.service"));
-        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "2");
+        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "3");
 
         let xp_ops_bytes = fs::read(&dest).unwrap();
         assert_eq!(xp_ops_bytes, original_xp_ops);
@@ -836,7 +836,7 @@ mod linux {
         let marker_raw = fs::read_to_string(&marker).unwrap();
         assert!(marker_raw.contains("systemctl restart xp.service"));
         assert!(marker_raw.contains("systemctl restart xray.service"));
-        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "2");
+        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "3");
     }
 
     #[tokio::test]
@@ -903,9 +903,9 @@ mod linux {
 
         cmd.assert()
             .failure()
-            .code(7)
+            .code(8)
             .stderr(predicates::str::contains(
-                "service_error: xray restart failed; rolled back xp",
+                "service_error: xray restart failed; runtime rollback failed",
             ));
 
         assert!(!tmp.path().join("etc/xray/config.json").exists());
