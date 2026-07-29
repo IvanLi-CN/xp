@@ -1,10 +1,6 @@
 use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
-use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
-use crate::ops::runtime_activation::{
-    reload_systemd_units, restart_cloudflared_service, restart_xray_service,
-};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -17,7 +13,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
+mod managed_runtimes;
+use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -32,7 +29,6 @@ enum Platform {
     LinuxX86_64,
     LinuxAarch64,
 }
-
 impl Platform {
     fn xp_asset_name(&self) -> &'static str {
         match self {
@@ -336,6 +332,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         eprintln!("would download asset: {xp_ops_asset_name}");
         eprintln!("would install to: {}", xp_ops_dest.display());
         eprintln!("would backup old binary to: {}", xp_ops_backup.display());
+        managed_runtimes::describe_dry_run(platform);
         eprintln!(
             "would rewrite static xray config: {}",
             paths.etc_xray_config().display()
@@ -388,9 +385,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
 
     let phase_result = async {
         upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
-        if let Err(err) = reconcile_static_xray_config_and_restart(&paths) {
-            return rollback_xp_after_xray_failure(&paths, &xp_backup, err);
-        }
+        upgrade_and_reconcile_managed_runtimes(&paths, &release, &checksums, platform, &xp_backup)
+            .await?;
 
         if resume.is_some() {
             clear_upgrade_resume_env();
@@ -804,82 +800,6 @@ fn rollback_xp_after_xray_failure(
     ))
 }
 
-fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitError> {
-    backfill_low_memory_runtime_defaults(paths)?;
-    if !reload_systemd_units(paths) {
-        return Err(ExitError::new(
-            7,
-            "service_error: systemd daemon-reload failed",
-        ));
-    }
-    let config_path = paths.etc_xray_config();
-    let backup = backup_path(&config_path);
-    let had_old = config_path.exists();
-    let existing_config = if had_old {
-        Some(
-            fs::read_to_string(&config_path)
-                .map_err(|e| ExitError::new(7, format!("service_error: read xray config: {e}")))?,
-        )
-    } else {
-        None
-    };
-    if had_old {
-        fs::copy(&config_path, &backup)
-            .map_err(|e| ExitError::new(7, format!("service_error: backup xray config: {e}")))?;
-    }
-    if let Err(err) = write_static_xray_config(paths)
-        .and_then(|_| preserve_control_plane_listeners(paths, existing_config.as_deref()))
-    {
-        if had_old {
-            let _ = fs::copy(&backup, &config_path);
-            let _ = fs::remove_file(&backup);
-        }
-        return Err(err);
-    }
-
-    if restart_xray_service(
-        paths,
-        &read_xray_systemd_unit(paths),
-        &read_xray_openrc_service(paths),
-    ) {
-        if !restart_cloudflared_service(paths) {
-            if had_old {
-                let _ = fs::remove_file(&backup);
-            }
-            return Err(ExitError::new(
-                7,
-                "service_error: cloudflared restart failed",
-            ));
-        }
-        if had_old {
-            let _ = fs::remove_file(&backup);
-        }
-        return Ok(());
-    }
-
-    if !had_old {
-        let _ = fs::remove_file(&config_path);
-        return Err(ExitError::new(7, "service_error: xray restart failed"));
-    }
-
-    fs::copy(&backup, &config_path)
-        .map_err(|e| ExitError::new(8, format!("rollback_failed: restore xray config: {e}")))?;
-    let rollback_restarted = restart_xray_service(
-        paths,
-        &read_xray_systemd_unit(paths),
-        &read_xray_openrc_service(paths),
-    );
-    let _ = fs::remove_file(&backup);
-
-    Err(ExitError::new(
-        7,
-        if rollback_restarted {
-            "service_error: xray restart failed; restored previous config"
-        } else {
-            "service_error: xray restart failed; restored previous config; rollback restart failed"
-        },
-    ))
-}
 fn preserve_control_plane_listeners(
     paths: &Paths,
     existing_config: Option<&str>,

@@ -355,6 +355,18 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
         runtime_env.get("XP_DEFAULT_SS_PORT").map(String::as_str),
         Some("53843")
     );
+    assert_eq!(
+        runtime_env
+            .get("XP_CLOUDFLARED_GOMEMLIMIT")
+            .map(String::as_str),
+        Some("8MiB")
+    );
+    assert_eq!(
+        runtime_env
+            .get("XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS")
+            .map(String::as_str),
+        Some("false")
+    );
 }
 
 #[test]

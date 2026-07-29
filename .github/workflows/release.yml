@@ -222,6 +222,54 @@ jobs:
         with:
           tool: cross
 
+      - name: setup go
+        if: steps.intent.outputs.should_release == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.5
+
+      - name: build low-memory managed runtimes
+        if: steps.intent.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xray_commit=d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+          cloudflared_commit=3a2b45c2a511fcdd81b68c190938e4ffadbea5dc
+          cloudflared_version=2026.7.3
+          cloudflared_build_time=2026-07-23T00:00:00Z
+
+          git clone --filter=blob:none https://github.com/XTLS/Xray-core.git /tmp/xray-core
+          git -C /tmp/xray-core checkout --detach "${xray_commit}"
+          git clone --filter=blob:none \
+            https://github.com/cloudflare/cloudflared.git /tmp/cloudflared
+          git -C /tmp/cloudflared checkout --detach "${cloudflared_commit}"
+
+          mkdir -p release
+          for target in amd64:x86_64 arm64:aarch64; do
+            goarch="${target%%:*}"
+            suffix="${target##*:}"
+            (
+              cd /tmp/xray-core
+              CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build \
+                -trimpath -gcflags=all=-l -ldflags='-s -w -buildid=' \
+                -o "${GITHUB_WORKSPACE}/release/xray-linux-${suffix}" ./main
+            )
+            (
+              cd /tmp/cloudflared
+              cloudflared_ldflags=(
+                -s -w -buildid=
+                "-X main.Version=${cloudflared_version}"
+                "-X main.BuildTime=${cloudflared_build_time}"
+                "-X github.com/cloudflare/cloudflared/metrics.Runtime=virtual"
+              )
+              CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build \
+                -mod=vendor -trimpath -gcflags=all=-l \
+                -ldflags="${cloudflared_ldflags[*]}" \
+                -o "${GITHUB_WORKSPACE}/release/cloudflared-linux-${suffix}" \
+                ./cmd/cloudflared
+            )
+          done
+
       - name: build assets (linux musl)
         if: steps.intent.outputs.should_release == 'true'
         shell: bash
@@ -249,7 +297,7 @@ jobs:
           cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-aarch64
 
           cd release
-          sha256sum xp-* > checksums.txt
+          sha256sum *-linux-* > checksums.txt
 
       - name: setup qemu
         if: steps.intent.outputs.should_release == 'true'

@@ -18,7 +18,11 @@
 - Host-managed `xp + xray + cloudflared` on `OpenRC` Linux nodes.
 - Single-image Docker / Compose nodes driven by `xp-ops container run`.
 - Host-managed upgrades must not be treated as a compatibility afterthought for container-only features. If a managed-default VLESS / Mihomo relay / canary behavior is shipped, the expected host-managed upgrade path must be explicit and tested.
-- Managed runtime memory defaults are part of every deployment path: Xray uses `GOMEMLIMIT=16MiB`, `GOGC=50`, and level-0 `bufferSize=0`; cloudflared uses `GOMEMLIMIT=12MiB`, `GOGC=50`. Upgrade backfill must preserve operator overrides.
+- Managed runtime memory defaults are part of every deployment path: Xray uses
+  `GOMEMLIMIT=16MiB`, `GOGC=50`, and level-0 `bufferSize=0`; cloudflared uses
+  `GOMEMLIMIT=8MiB`, `GOGC=50`, and `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`.
+  Release assets use the pinned low-memory Go build, and upgrade backfill must
+  preserve operator overrides.
 - Web-triggered automatic upgrade is supported only for host-managed `systemd` / `OpenRC` nodes via
   the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
   nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow

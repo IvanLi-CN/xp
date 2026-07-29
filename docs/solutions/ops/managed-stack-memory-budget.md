@@ -38,10 +38,20 @@ raw-token verification behind one bounded worker; return HTTP 429 with
 considering the raw-token path.
 
 Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
-Set cloudflared `GOMEMLIMIT=12MiB`, `GOGC=50`. Host upgrades backfill these
-values through a managed systemd drop-in or an OpenRC script insertion that
-leaves existing operator values untouched. Container launches pass the same
-values to child processes and retain explicit `XP_*` overrides.
+Set cloudflared `GOMEMLIMIT=8MiB`, `GOGC=50`, and
+`TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values
+through a managed systemd drop-in or an OpenRC script insertion that leaves
+existing operator values untouched. Container launches pass the same values
+to child processes and retain explicit `XP_*` overrides.
+
+Heap tuning alone may not fit a sub-64 MiB process-tree budget because PSS also
+charges executable mappings. For the pinned upstream Xray and cloudflared
+versions, `go build -gcflags=all=-l -ldflags='-s -w -buildid='` reduced the
+combined production canary below the gate without lowering Xray's heap limit
+into GC churn. Treat these binaries as release-managed assets: publish both
+architectures with checksums, replace Xray and cloudflared as one upgrade set,
+and restore both if configuration reconciliation or either service restart
+fails.
 
 ## Verification
 

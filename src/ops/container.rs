@@ -26,6 +26,9 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout};
 
+mod runtime_env;
+use runtime_env::build_runtime_env;
+
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(unix)]
@@ -477,55 +480,6 @@ fn parse_default_ss_endpoint_spec(
 ) -> Result<Option<DefaultSsEndpointSpec>, ExitError> {
     build_default_ss_endpoint_spec(optional_port_env(env_map, "XP_DEFAULT_SS_PORT")?)
         .map_err(|err| ExitError::new(2, format!("invalid_args: {err}")))
-}
-
-fn build_runtime_env(
-    env_map: &BTreeMap<String, String>,
-    ddns: Option<&ContainerDdns>,
-) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    if let Some(value) = optional_env(env_map, "XP_MESH_PROXY_URL") {
-        out.insert("XP_MESH_PROXY_URL".to_string(), value);
-    }
-    for key in [
-        "XP_VLESS_CANARY_BIND",
-        "XP_VLESS_CANARY_ACME_DIRECTORY_URL",
-        "XP_VLESS_CANARY_ACME_CONTACT_EMAIL",
-        "XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE",
-        "XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID",
-        "XP_DEFAULT_VLESS_PORT",
-        "XP_DEFAULT_VLESS_SERVER_NAMES",
-        "XP_DEFAULT_VLESS_FINGERPRINT",
-        "XP_DEFAULT_SS_PORT",
-        "XP_XRAY_GOMEMLIMIT",
-        "XP_XRAY_GOGC",
-        "XP_CLOUDFLARED_GOMEMLIMIT",
-        "XP_CLOUDFLARED_GOGC",
-    ] {
-        if let Some(value) = optional_env(env_map, key) {
-            out.insert(key.to_string(), value);
-        }
-    }
-    if let Some(ddns) = ddns {
-        out.insert("XP_CLOUDFLARE_DDNS_ENABLED".to_string(), "true".to_string());
-        out.insert(
-            "XP_CLOUDFLARE_DDNS_ZONE_ID".to_string(),
-            ddns.zone_id.clone(),
-        );
-        out.insert(
-            "XP_CLOUDFLARE_DDNS_TOKEN_FILE".to_string(),
-            ddns.token_file.display().to_string(),
-        );
-    }
-    out.entry("XP_XRAY_GOMEMLIMIT".to_string())
-        .or_insert_with(|| "16MiB".to_string());
-    out.entry("XP_XRAY_GOGC".to_string())
-        .or_insert_with(|| "50".to_string());
-    out.entry("XP_CLOUDFLARED_GOMEMLIMIT".to_string())
-        .or_insert_with(|| "12MiB".to_string());
-    out.entry("XP_CLOUDFLARED_GOGC".to_string())
-        .or_insert_with(|| "50".to_string());
-    out
 }
 
 fn resolve_startup(
@@ -1103,7 +1057,7 @@ fn spawn_cloudflared(
             runtime_env
                 .get("XP_CLOUDFLARED_GOMEMLIMIT")
                 .map(String::as_str)
-                .unwrap_or("12MiB"),
+                .unwrap_or("8MiB"),
         )
         .env(
             "GOGC",
@@ -1111,6 +1065,13 @@ fn spawn_cloudflared(
                 .get("XP_CLOUDFLARED_GOGC")
                 .map(String::as_str)
                 .unwrap_or("50"),
+        )
+        .env(
+            "TUNNEL_MANAGEMENT_DIAGNOSTICS",
+            runtime_env
+                .get("XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS")
+                .map(String::as_str)
+                .unwrap_or("false"),
         )
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

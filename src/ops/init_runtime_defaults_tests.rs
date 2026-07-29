@@ -31,7 +31,8 @@ fn low_memory_backfill_writes_systemd_drop_ins() {
     )
     .unwrap();
     assert!(xray.contains("GOMEMLIMIT=16MiB"));
-    assert!(cloudflared.contains("GOMEMLIMIT=12MiB"));
+    assert!(cloudflared.contains("GOMEMLIMIT=8MiB"));
+    assert!(cloudflared.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
 }
 
 #[test]
@@ -81,7 +82,8 @@ fn low_memory_backfill_supports_provider_wrapper_script() {
 
     let updated = fs::read_to_string(&service).unwrap();
     assert!(updated.starts_with("#!/sbin/openrc-run\nexport GOMEMLIMIT="));
-    assert!(updated.contains("GOMEMLIMIT:-12MiB"));
+    assert!(updated.contains("GOMEMLIMIT:-8MiB"));
+    assert!(updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS:-false"));
     assert_eq!(
         fs::metadata(service).unwrap().permissions().mode() & 0o777,
         0o755

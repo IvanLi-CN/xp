@@ -10,8 +10,9 @@ Type=simple
 # Create this user/group (example): useradd --system --home /var/lib/cloudflared --shell /usr/sbin/nologin --user-group cloudflared
 User=cloudflared
 Group=cloudflared
-Environment=GOMEMLIMIT=12MiB
+Environment=GOMEMLIMIT=8MiB
 Environment=GOGC=50
+Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false
 
 # Avoid putting any API tokens on the command line.
 ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run

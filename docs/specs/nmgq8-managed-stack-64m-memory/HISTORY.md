@@ -1,5 +1,13 @@
 # History
 
+- 2026-07-29: a production SG canary showed that Go executable mappings were a
+  material part of the remaining PSS. Release automation now builds pinned
+  Xray and cloudflared sources with inlining disabled, publishes checksummed
+  assets for both Linux architectures, and installs them as a rollback unit.
+
+- 2026-07-29: cloudflared moved to `GOMEMLIMIT=8MiB` with management diagnostics
+  disabled after the combined canary reached a `63,632 KiB` 60-second peak.
+
 - 2026-07-29: text-based embedded Web assets are stored as deterministic gzip
   payloads with HTTP content negotiation, reducing release executable mappings
   while preserving uncompressed-client compatibility.

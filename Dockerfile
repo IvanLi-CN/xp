@@ -75,6 +75,8 @@ RUN --mount=type=bind,source=release,target=/tmp/release,ro \
   esac; \
   cp "/tmp/release/xp-linux-${suffix}" /usr/local/bin/xp; \
   cp "/tmp/release/xp-ops-linux-${suffix}" /usr/local/bin/xp-ops; \
-  chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops
+  cp "/tmp/release/xray-linux-${suffix}" /usr/local/bin/xray; \
+  cp "/tmp/release/cloudflared-linux-${suffix}" /usr/bin/cloudflared; \
+  chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops /usr/local/bin/xray /usr/bin/cloudflared
 
 FROM runtime-from-source AS runtime

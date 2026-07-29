@@ -115,6 +115,14 @@ impl Paths {
         self.map_abs(Path::new("/usr/local/bin/xray"))
     }
 
+    pub fn usr_local_bin_cloudflared(&self) -> PathBuf {
+        self.map_abs(Path::new("/usr/local/bin/cloudflared"))
+    }
+
+    pub fn usr_bin_cloudflared(&self) -> PathBuf {
+        self.map_abs(Path::new("/usr/bin/cloudflared"))
+    }
+
     pub fn usr_local_libexec_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/usr/local/libexec"))
     }
