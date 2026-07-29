@@ -148,6 +148,13 @@ xp-ops container run
 
 不需要人工进容器修文件。
 
+### 管理员 Token 轮换
+
+对于已经加入集群的容器节点，把低内存 Argon2id PHC
+`m=4096,t=3,p=1` 写入宿主 Compose 环境文件中的 `XP_ADMIN_TOKEN_HASH`，然后重新
+`docker compose up -d`。容器会在启动 XP 前原子同步持久化 hash；首次 join 始终保留
+leader 下发的 hash。不要进入容器或直接编辑数据卷。
+
 ## Cloudflare Tunnel 与 DDNS
 
 ### Tunnel

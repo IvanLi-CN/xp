@@ -37,6 +37,12 @@ raw-token verification behind one bounded worker; return HTTP 429 with
 `Retry-After: 1` when the worker is busy. Validate JWT credentials before
 considering the raw-token path.
 
+For an existing joined single-image Docker node, treat an explicit host-side
+`XP_ADMIN_TOKEN_HASH` as desired state when the container is recreated. Before
+starting XP, atomically synchronize that low-memory PHC to the persisted cluster
+metadata file. During the first join, preserve the leader-provided hash instead.
+Do not rotate a container node through `docker exec` or direct volume edits.
+
 Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
 Set cloudflared `GOMEMLIMIT=8MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values

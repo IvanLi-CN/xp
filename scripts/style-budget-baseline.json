@@ -646,10 +646,6 @@
     "max_line_length": 155,
     "source_lines": 1730
   },
-  "src/ops/container/tests.rs": {
-    "long_line_count": 1,
-    "max_line_length": 141
-  },
   "src/ops/deploy.rs": {
     "long_line_count": 21,
     "max_line_length": 187,
