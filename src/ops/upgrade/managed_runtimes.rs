@@ -116,15 +116,32 @@ fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitErr
     ) {
         if !restart_cloudflared_service(paths) {
             if had_old {
-                let _ = fs::copy(&backup, &config_path);
+                fs::copy(&backup, &config_path).map_err(|e| {
+                    ExitError::new(8, format!("rollback_failed: restore xray config: {e}"))
+                })?;
             } else {
                 let _ = fs::remove_file(&config_path);
             }
+            let rollback_restarted = restart_xray_service(
+                paths,
+                &read_xray_systemd_unit(paths),
+                &read_xray_openrc_service(paths),
+            );
             let _ = fs::remove_file(&backup);
-            return Err(ExitError::new(
-                7,
-                "service_error: cloudflared restart failed; restored previous xray config",
-            ));
+            return if rollback_restarted {
+                Err(ExitError::new(
+                    7,
+                    "service_error: cloudflared restart failed; restored previous xray config",
+                ))
+            } else {
+                Err(ExitError::new(
+                    8,
+                    concat!(
+                        "rollback_failed: cloudflared restart failed; restored previous xray ",
+                        "config; xray rollback restart failed",
+                    ),
+                ))
+            };
         }
         if had_old {
             let _ = fs::remove_file(&backup);

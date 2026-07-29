@@ -176,3 +176,124 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     assert!(marker.contains("rc-service xray restart"));
     assert!(marker.contains("rc-service cloudflared restart"));
 }
+
+#[tokio::test]
+async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure() {
+    let server = MockServer::start().await;
+    let xp_asset = asset("xp");
+    let xp_ops_asset = asset("xp-ops");
+    let new_xp = b"xp-new-binary";
+    let new_xp_ops = fs::read(assert_cmd::cargo::cargo_bin("xp-ops")).unwrap();
+    let release_assets = [
+        serde_json::json!({
+            "name": xp_asset,
+            "browser_download_url": format!("{}/download/{xp_asset}", server.uri())
+        }),
+        serde_json::json!({
+            "name": xp_ops_asset,
+            "browser_download_url": format!("{}/download/{xp_ops_asset}", server.uri())
+        }),
+        serde_json::json!({
+            "name": "checksums.txt",
+            "browser_download_url": format!("{}/download/checksums.txt", server.uri())
+        }),
+    ];
+    let release = serde_json::json!({
+        "tag_name": "v0.1.999",
+        "prerelease": false,
+        "published_at": "2026-07-29T00:00:00Z",
+        "assets": release_assets,
+    });
+    for release_path in [
+        "/repos/o/r/releases/latest",
+        "/repos/o/r/releases/tags/v0.1.999",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(release_path))
+            .respond_with(ResponseTemplate::new(200).set_body_json(release.clone()))
+            .mount(&server)
+            .await;
+    }
+    for (name, bytes) in [
+        (&xp_asset, new_xp.as_slice()),
+        (&xp_ops_asset, new_xp_ops.as_slice()),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{name}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes))
+            .mount(&server)
+            .await;
+    }
+    let checksums = format!(
+        "{}  {xp_asset}\n{}  {xp_ops_asset}\n",
+        sha256_hex(new_xp),
+        sha256_hex(&new_xp_ops),
+    );
+    Mock::given(method("GET"))
+        .and(path("/download/checksums.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(checksums))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_string_lossy().to_string();
+    let marker = tmp.path().join("marker.txt");
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("systemctl"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "[ \"$1 $2\" = \"restart cloudflared.service\" ] && exit 1\n",
+            "exit 0\n",
+        ),
+    );
+    write_executable(&bin_dir.join("rc-service"), "#!/bin/sh\nexit 1\n");
+    fs::create_dir_all(tmp.path().join("etc/systemd/system")).unwrap();
+    fs::write(
+        tmp.path().join("etc/systemd/system/cloudflared.service"),
+        "[Service]\n",
+    )
+    .unwrap();
+    let local_bin = tmp.path().join("usr/local/bin");
+    fs::create_dir_all(&local_bin).unwrap();
+    fs::write(local_bin.join("xp"), b"xp-old-binary").unwrap();
+    let config_path = tmp.path().join("etc/xray/config.json");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    let original = "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n";
+    fs::write(&config_path, original).unwrap();
+    let xp_ops_copy = tmp.path().join("xp-ops-copy");
+    fs::copy(assert_cmd::cargo::cargo_bin("xp-ops"), &xp_ops_copy).unwrap();
+    let mut permissions = fs::metadata(&xp_ops_copy).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&xp_ops_copy, permissions).unwrap();
+
+    let mut command = assert_cmd::Command::new(&xp_ops_copy);
+    command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+    command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+    command.env("XP_OPS_TEST_MARKER", &marker);
+    command.env(
+        "PATH",
+        format!(
+            "{}:{}",
+            bin_dir.display(),
+            env::var("PATH").unwrap_or_default()
+        ),
+    );
+    command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
+    command
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("cloudflared restart failed"));
+
+    assert_eq!(fs::read_to_string(config_path).unwrap(), original);
+    let marker = fs::read_to_string(marker).unwrap();
+    assert_eq!(
+        marker
+            .lines()
+            .filter(|line| *line == "systemctl restart xray.service")
+            .count(),
+        2,
+    );
+}
