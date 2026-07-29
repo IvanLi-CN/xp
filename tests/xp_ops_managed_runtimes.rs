@@ -310,6 +310,6 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
             .lines()
             .filter(|line| *line == "systemctl restart xray.service")
             .count(),
-        2,
+        3,
     );
 }

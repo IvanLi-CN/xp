@@ -58,25 +58,38 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     let runtime_defaults = match snapshot_runtime_defaults(paths) {
         Ok(snapshot) => snapshot,
         Err(err) => {
-            let err = match rollback_runtime_binaries_and_services(
-                paths,
-                &backups,
-                &RuntimeDefaultsBackup { files: Vec::new() },
-            ) {
-                Ok(()) => err,
-                Err(rollback) => rollback,
-            };
+            let err = retain_original_error(
+                err,
+                rollback_runtime_binaries_and_services(
+                    paths,
+                    &backups,
+                    &RuntimeDefaultsBackup { files: Vec::new() },
+                ),
+            );
             return rollback_xp_after_xray_failure(paths, xp_backup, err);
         }
     };
     if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
-        let err = match rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults) {
-            Ok(()) => err,
-            Err(rollback) => rollback,
-        };
+        let err = retain_original_error(
+            err,
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults),
+        );
         return rollback_xp_after_xray_failure(paths, xp_backup, err);
     }
     Ok(())
+}
+
+fn retain_original_error(original: ExitError, rollback: Result<(), ExitError>) -> ExitError {
+    match rollback {
+        Ok(()) => original,
+        Err(rollback) => ExitError::new(
+            rollback.code,
+            format!(
+                "{}; runtime rollback failed: {}",
+                original.message, rollback.message
+            ),
+        ),
+    }
 }
 
 fn rollback_runtime_binaries_and_services(
@@ -476,6 +489,21 @@ mod tests {
 
         assert_eq!(fs::read(xray).unwrap(), b"old-xray");
         assert_eq!(fs::read(cloudflared).unwrap(), b"old-cloudflared");
+    }
+
+    #[test]
+    fn runtime_rollback_failure_keeps_original_error() {
+        let result = retain_original_error(
+            ExitError::new(7, "service_error: cloudflared restart failed"),
+            Err(ExitError::new(
+                8,
+                "rollback_failed: restored runtime binaries but service restart failed",
+            )),
+        );
+
+        assert_eq!(result.code, 8);
+        assert!(result.message.contains("cloudflared restart failed"));
+        assert!(result.message.contains("runtime rollback failed"));
     }
 
     #[test]
