@@ -880,7 +880,7 @@ mod linux {
         fs::create_dir_all(&bin_dir).unwrap();
         write_executable(
             &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
+            "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
         );
         write_executable(
             &bin_dir.join("rc-service"),
