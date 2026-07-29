@@ -212,30 +212,23 @@ mod linux {
     #[tokio::test]
     async fn upgrade_completes_service_phase_before_replacing_xp_ops() {
         let server = MockServer::start().await;
-
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
-
         let new_xp = b"xp-new-binary";
         let new_xp_ops = b"xp-ops-new-binary".to_vec();
-
         let xp_checksum = sha256_hex(new_xp);
         let xp_ops_checksum = sha256_hex(&new_xp_ops);
-
         mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
-
         Mock::given(method("GET"))
             .and(path(format!("/download/{xp_asset}")))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp))
             .mount(&server)
             .await;
-
         Mock::given(method("GET"))
             .and(path(format!("/download/{xp_ops_asset}")))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(new_xp_ops.clone()))
             .mount(&server)
             .await;
-
         Mock::given(method("GET"))
             .and(path("/download/checksums.txt"))
             .respond_with(ResponseTemplate::new(200).set_body_string(format!(
@@ -243,22 +236,22 @@ mod linux {
             )))
             .mount(&server)
             .await;
-
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_string_lossy().to_string();
-
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
         write_executable(
             &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
+            concat!(
+                "#!/bin/sh\n\n[ -z \"$T\" ] || cmp -s \"$T\" \"$E\" || exit 1\n",
+                "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
+            ),
         );
         write_executable(
             &bin_dir.join("rc-service"),
             "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
         );
-
         let xp_path = tmp.path().join("usr/local/bin/xp");
         fs::create_dir_all(xp_path.parent().unwrap()).unwrap();
         fs::write(&xp_path, b"xp-old-binary").unwrap();
@@ -266,17 +259,18 @@ mod linux {
             tmp.path(),
             "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
         );
-
         let dest = tmp.path().join("xp-ops-copy");
         copy_current_xp_ops(&dest);
-
         let original_xp_ops = fs::read(&dest).unwrap();
-
+        let expected_xp_ops = tmp.path().join("expected-xp-ops");
+        fs::write(&expected_xp_ops, &original_xp_ops).unwrap();
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
+        cmd.env("T", &dest);
+        cmd.env("E", &expected_xp_ops);
         cmd.args([
             "--root",
             &root,
@@ -286,42 +280,53 @@ mod linux {
             "--repo",
             "o/r",
         ]);
-
         cmd.assert().success();
-
         let new_xp_bytes = fs::read(&xp_path).unwrap();
         assert_eq!(new_xp_bytes, new_xp);
         let xp_backup = find_backup(xp_path.parent().unwrap(), "xp.bak.").unwrap();
         let xp_backup_bytes = fs::read(xp_backup).unwrap();
         assert_eq!(xp_backup_bytes, b"xp-old-binary");
-
         let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
         assert!(xray_config.contains("\"handshake\": 4"));
         assert!(xray_config.contains("\"connIdle\": 300"));
         assert!(xray_config.contains("\"uplinkOnly\": 2"));
         assert!(xray_config.contains("\"downlinkOnly\": 5"));
         assert!(xray_config.contains("\"statsUserOnline\": true"));
-
         let marker_raw = fs::read_to_string(&marker).unwrap();
         assert!(marker_raw.contains("systemctl restart xp.service"));
         assert!(marker_raw.contains("systemctl restart xray.service"));
-
-        let new_xp_ops_bytes = fs::read(&dest).unwrap();
-        assert_eq!(new_xp_ops_bytes, new_xp_ops);
-
         let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
         let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();
         let xp_ops_backup_bytes = fs::read(xp_ops_backup).unwrap();
         assert_eq!(xp_ops_backup_bytes, original_xp_ops);
+        fs::write(&marker, "").unwrap();
+        fs::write(&expected_xp_ops, &new_xp_ops).unwrap();
+        let mut resumed = assert_cmd::Command::cargo_bin("xp-ops").unwrap();
+        resumed.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+        resumed.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        resumed.env("XP_OPS_TEST_MARKER", &marker);
+        resumed.env("PATH", prepend_path(&bin_dir));
+        resumed.env("T", &dest);
+        resumed.env("E", &expected_xp_ops);
+        resumed.env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999");
+        resumed.env("XP_OPS_UPGRADE_RESUME_REPO", "o/r");
+        resumed.env("XP_OPS_UPGRADE_RESUME_API_BASE", server.uri());
+        resumed.env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest);
+        resumed.env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &xp_ops_backup);
+        resumed.args(["--root", &root, "upgrade", "--repo", "o/r"]);
+        resumed.assert().success();
+        assert_eq!(fs::read(&dest).unwrap(), new_xp_ops);
+        assert_eq!(fs::read(&xp_ops_backup).unwrap(), original_xp_ops);
+        let marker_raw = fs::read_to_string(&marker).unwrap();
+        assert!(marker_raw.contains("systemctl restart xp.service"));
+        assert!(marker_raw.contains("systemctl restart xray.service"));
     }
 
     #[tokio::test]
     async fn upgrade_latest_prerelease_is_selected_by_published_at() {
         let server = MockServer::start().await;
-
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
-
         Mock::given(method("GET"))
             .and(path("/repos/o/r/releases"))
             .and(query_param("per_page", "100"))
@@ -349,7 +354,6 @@ mod linux {
             ])))
             .mount(&server)
             .await;
-
         let mut cmd = assert_cmd::Command::cargo_bin("xp-ops").unwrap();
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.args([
@@ -361,7 +365,6 @@ mod linux {
             "o/r",
             "--dry-run",
         ]);
-
         cmd.assert()
             .success()
             .stderr(predicates::str::contains("v0.1.999-rc.1"));
@@ -370,15 +373,12 @@ mod linux {
     #[tokio::test]
     async fn upgrade_restarts_xp_and_xray_when_test_override_enabled() {
         let server = MockServer::start().await;
-
         let new_xp = b"xp-new-binary";
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
-
         let new_xp_ops = current_xp_ops_bytes();
         let xp_checksum = sha256_hex(new_xp);
         let xp_ops_checksum = sha256_hex(&new_xp_ops);
-
         mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
 
         Mock::given(method("GET"))
