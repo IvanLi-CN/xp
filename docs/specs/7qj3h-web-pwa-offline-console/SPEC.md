@@ -125,7 +125,7 @@
 - Storybook `Pages/NodeDetailsPage/OfflineCachedRuntime`
   - PR: include
   - ![Offline node details runtime](./assets/offline-node-details-page.png)
-- Storybook `Components/PageState/Unauthorized`
+- Storybook `Components/ReadStateBanner/UnauthorizedCachedData`
   - PR: include
   - ![401 authentication recovery](./assets/auth-recovery-401.png)
 

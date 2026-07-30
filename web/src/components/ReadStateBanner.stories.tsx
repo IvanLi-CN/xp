@@ -15,6 +15,15 @@ const meta: Meta<typeof ReadStateBanner> = {
 			"Showing the most recently synced cluster snapshot. Writes stay " +
 			"disabled until the connection returns.",
 	},
+	decorators: [
+		(Story) => (
+			<div className="flex min-h-[calc(100vh-2rem)] items-center bg-background p-6">
+				<div className="xp-card mx-auto flex min-h-72 w-full max-w-4xl items-center p-6">
+					<Story />
+				</div>
+			</div>
+		),
+	],
 };
 
 export default meta;
