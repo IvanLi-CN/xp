@@ -353,6 +353,7 @@ export function UsersPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					error={usersQuery.error ?? quotaSummariesQuery.error}
 					title={
 						!runtime.isOnline
 							? "Offline user directory"

@@ -32,11 +32,12 @@
 ## Authentication recovery
 
 - `web/src/components/AuthRecoveryAction.tsx` classifies structured backend
-  errors and renders `Sign in again` only for an initial `401` failure. It
-  preserves the current relative path, query, and hash in the login redirect.
-- `PageState` and the Dashboard's direct error cards pass their query error to
-  that shared recovery action, so major management read pages retain `Retry`
-  while exposing an explicit re-authentication path.
+  errors and renders `Sign in again` only for a `401` failure. It preserves the
+  current relative path, query, and hash in the login redirect.
+- `PageState`, `ReadStateBanner`, and the Dashboard's direct error cards pass
+  their query error to that primitive. Initial failures retain `Retry`; cached
+  refresh failures expose recovery from the shared cache banner; `403` remains
+  outside the recovery path.
 - Login validation remains the only operation that writes a replacement token;
   a stored token is therefore kept until a new token has been verified. `403`
   errors remain permission failures and do not show the recovery action.

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { AuthRecoveryAction, isUnauthorizedError } from "./AuthRecoveryAction";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { alertClass } from "./ui-helpers";
@@ -10,6 +11,7 @@ type ReadStateBannerProps = {
 	description?: string;
 	variant?: "banner" | "inline";
 	dismissible?: boolean;
+	error?: unknown;
 };
 
 export function ReadStateBanner({
@@ -18,6 +20,7 @@ export function ReadStateBanner({
 	description,
 	variant = "banner",
 	dismissible = false,
+	error,
 }: ReadStateBannerProps) {
 	const [dismissed, setDismissed] = useState(false);
 
@@ -42,6 +45,17 @@ export function ReadStateBanner({
 			<Icon name="tabler:x" size={16} className="shrink-0" />
 		</Button>
 	) : null;
+	const recoveryAction =
+		tone === "info" && isUnauthorizedError(error) ? (
+			<AuthRecoveryAction error={error} />
+		) : null;
+	const actions =
+		recoveryAction || dismissButton ? (
+			<div className="flex shrink-0 items-center gap-2">
+				{recoveryAction}
+				{dismissButton}
+			</div>
+		) : null;
 
 	if (variant === "inline") {
 		return (
@@ -68,7 +82,7 @@ export function ReadStateBanner({
 						</div>
 					</div>
 				</div>
-				{dismissButton}
+				{actions}
 			</div>
 		);
 	}
@@ -88,7 +102,7 @@ export function ReadStateBanner({
 					) : null}
 				</div>
 			</div>
-			{dismissButton}
+			{actions}
 		</div>
 	);
 }

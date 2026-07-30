@@ -78,7 +78,6 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
-
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
 		const code = error.code ? ` ${error.code}` : "";
@@ -1844,6 +1843,7 @@ export function NodeDetailsPage() {
 					tone={!appRuntime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					error={nodeQuery.error ?? runtimeQuery.error ?? historyQuery.error}
 					title={
 						!appRuntime.isOnline
 							? "Offline node snapshot"

@@ -91,11 +91,9 @@ type MihomoProfileDraft = {
 };
 
 const { dump, load } = yaml;
-
 function isYamlMapping(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function parseYamlSequenceOrNull(raw: string): unknown[] | null {
 	if (raw.trim() === "") {
 		return [];
@@ -107,7 +105,6 @@ function parseYamlSequenceOrNull(raw: string): unknown[] | null {
 		return null;
 	}
 }
-
 function parseYamlMappingOrNull(raw: string): Record<string, unknown> | null {
 	if (raw.trim() === "") {
 		return {};
@@ -1091,6 +1088,9 @@ export function UserDetailsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					error={
+						userQuery.error ?? accessQuery.error ?? nodeQuotaStatusQuery.error
+					}
 					title={
 						!runtime.isOnline
 							? "Offline user snapshot"

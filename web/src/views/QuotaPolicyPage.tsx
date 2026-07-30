@@ -75,7 +75,6 @@ function formatError(err: unknown): string {
 	if (err instanceof Error) return err.message;
 	return String(err);
 }
-
 function formatUtcOffsetMinutes(minutes: number): string {
 	const sign = minutes >= 0 ? "+" : "-";
 	const abs = Math.abs(minutes);
@@ -83,7 +82,6 @@ function formatUtcOffsetMinutes(minutes: number): string {
 	const mm = String(abs % 60).padStart(2, "0");
 	return `UTC${sign}${hh}:${mm}`;
 }
-
 function formatNodeQuotaResetBrief(q: {
 	policy: "monthly" | "unlimited";
 	day_of_month?: number;
@@ -98,7 +96,6 @@ function formatNodeQuotaResetBrief(q: {
 	}
 	return `unlimited ${tz}`;
 }
-
 type RatioDraftRow = {
 	userId: string;
 	displayName: string;
@@ -109,20 +106,17 @@ type RatioDraftRow = {
 	serverStoredWeight: number | null;
 	source: "explicit" | "implicit_zero" | "implicit_default";
 };
-
 type SaveFailure = {
 	userId: string;
 	displayName: string;
 	targetWeight: number;
 	error: string;
 };
-
 type LastSaveState = {
 	status: "success" | "partial" | "error";
 	message: string;
 	at: string;
 };
-
 type PieSegment = {
 	key: string;
 	label: string;
@@ -130,7 +124,6 @@ type PieSegment = {
 	color: string;
 	userIds: string[];
 };
-
 const PIE_COLORS = [
 	"var(--color-primary)",
 	"var(--color-secondary)",
@@ -1339,6 +1332,13 @@ export function QuotaPolicyPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					error={
+						nodesQuery.error ??
+						usersQuery.error ??
+						globalWeightRowsQuery.error ??
+						weightRowsQuery.error ??
+						nodePolicyQuery.error
+					}
 					title={
 						!runtime.isOnline
 							? "Offline quota snapshot"

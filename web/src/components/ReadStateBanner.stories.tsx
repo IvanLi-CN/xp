@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
 
+import { BackendApiError } from "../api/backendError";
 import { ReadStateBanner } from "./ReadStateBanner";
 
 const meta: Meta<typeof ReadStateBanner> = {
@@ -8,6 +9,7 @@ const meta: Meta<typeof ReadStateBanner> = {
 	component: ReadStateBanner,
 	tags: ["autodocs", "coverage-ui"],
 	args: {
+		tone: "warning",
 		title: "Offline read-only mode is active",
 		description:
 			"Showing the most recently synced cluster snapshot. Writes stay " +
@@ -46,5 +48,29 @@ export const InlineDismissible: Story = {
 		await expect(
 			canvas.queryByText(/offline node snapshot/i),
 		).not.toBeInTheDocument();
+	},
+};
+
+export const UnauthorizedCachedData: Story = {
+	args: {
+		tone: "info",
+		variant: "inline",
+		dismissible: true,
+		title: "Showing cached node inventory",
+		description: "Last successful sync: 2026/07/30 11:41:56.",
+		error: new BackendApiError({
+			status: 401,
+			message: "missing or invalid authorization token",
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const signInLink = await canvas.findByRole("link", {
+			name: /sign in again/i,
+		});
+		await expect(signInLink).toHaveAttribute(
+			"href",
+			expect.stringContaining("/login?redirect="),
+		);
 	},
 };

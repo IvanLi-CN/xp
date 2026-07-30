@@ -199,12 +199,16 @@ describe("<NodesPage />", () => {
 
 		renderPage();
 
-		expect(
-			await screen.findByRole("link", { name: "Sign in again" }),
-		).toHaveAttribute(
-			"href",
-			"/login?redirect=%2Fnodes%3Fview%3Dtable%23history",
-		);
+		const signInLinks = await screen.findAllByRole("link", {
+			name: "Sign in again",
+		});
+		expect(signInLinks).toHaveLength(2);
+		for (const signInLink of signInLinks) {
+			expect(signInLink).toHaveAttribute(
+				"href",
+				"/login?redirect=%2Fnodes%3Fview%3Dtable%23history",
+			);
+		}
 		expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
 	});
 

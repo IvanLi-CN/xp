@@ -115,6 +115,12 @@ export function HomePage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					error={
+						health.error ??
+						clusterInfo.error ??
+						adminAlerts.error ??
+						adminNodes.error
+					}
 					title={
 						!runtime.isOnline
 							? "Offline read-only view"
