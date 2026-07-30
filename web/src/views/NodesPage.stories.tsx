@@ -1,6 +1,82 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
 
+import type { AdminNodesRuntimeResponse } from "../api/adminNodeRuntime";
+import { BackendApiError } from "../api/backendError";
+import { AppLayout } from "../components/AppLayout";
+import { NodeInventoryList } from "../components/NodeInventoryList";
+import { PageHeader } from "../components/PageHeader";
+import { ReadStateBanner } from "../components/ReadStateBanner";
+
+const cachedNodesRuntime: AdminNodesRuntimeResponse = {
+	partial: false,
+	unreachable_nodes: [],
+	items: [
+		{
+			node_id: "01J000000000000000000000001",
+			node_name: "node-a",
+			api_base_url: "https://node-a.example.invalid",
+			access_host: "node-a.example.invalid",
+			summary: {
+				status: "up",
+				updated_at: "2026-07-30T06:00:00.000Z",
+			},
+			components: [
+				{
+					component: "xp",
+					status: "up",
+					consecutive_failures: 0,
+					recoveries_observed: 2,
+					restart_attempts: 0,
+				},
+			],
+			recent_slots: [
+				{
+					slot_start: "2026-07-30T06:00:00.000Z",
+					status: "up",
+				},
+			],
+		},
+	],
+};
+
+const cachedUnauthorizedError = new BackendApiError({
+	status: 401,
+	code: "unauthorized",
+	message: "missing or invalid authorization token",
+});
+
+function CachedUnauthorizedNodesPage() {
+	return (
+		<AppLayout>
+			<div className="space-y-6">
+				<PageHeader
+					title="Nodes"
+					description="Inspect cluster nodes and issue join tokens for new members."
+				/>
+				<ReadStateBanner
+					tone="info"
+					variant="inline"
+					dismissible
+					error={cachedUnauthorizedError}
+					title="Showing cached node inventory"
+					description="Last successful sync: 2026/7/30 15:00:00."
+				/>
+				<section className="xp-card">
+					<div className="xp-card-body space-y-4">
+						<h2 className="xp-card-title">Node inventory</h2>
+						<NodeInventoryList
+							items={cachedNodesRuntime.items}
+							partial={cachedNodesRuntime.partial}
+							unreachableNodes={cachedNodesRuntime.unreachable_nodes}
+						/>
+					</div>
+				</section>
+			</div>
+		</AppLayout>
+	);
+}
+
 const meta = {
 	title: "Pages/NodesPage",
 	render: () => <div />,
@@ -94,5 +170,28 @@ export const OfflineCachedInventory: Story = {
 		await expect(
 			await canvas.findByText(/last successful sync:/i),
 		).toBeInTheDocument();
+	},
+};
+
+export const CachedUnauthorizedInventory: Story = {
+	parameters: {
+		router: {
+			initialEntry: "/__story",
+		},
+	},
+	render: () => <CachedUnauthorizedNodesPage />,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("Showing cached node inventory"),
+		).toBeInTheDocument();
+		const signInAgain = await canvas.findByRole("link", {
+			name: "Sign in again",
+		});
+		await expect(signInAgain).toHaveAttribute(
+			"href",
+			expect.stringContaining("/login?redirect="),
+		);
+		await expect(canvas.getByText("node-a")).toBeInTheDocument();
 	},
 };

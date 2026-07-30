@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
@@ -210,6 +211,27 @@ describe("<NodesPage />", () => {
 			);
 		}
 		expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+	});
+
+	it("keeps cached inventory visible after a refresh returns 401", async () => {
+		renderPage();
+
+		await screen.findByText("tokyo-1");
+		vi.mocked(fetchAdminNodesRuntime).mockRejectedValueOnce(
+			new BackendApiError({
+				status: 401,
+				code: "unauthorized",
+				message: "missing or invalid authorization token",
+			}),
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+		await screen.findByText("Showing cached node inventory");
+		expect(screen.getByText("tokyo-1")).toBeVisible();
+		expect(screen.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
+			"href",
+			"/login?redirect=%2F",
+		);
 	});
 
 	it("keeps forbidden errors on the normal retry path", async () => {
