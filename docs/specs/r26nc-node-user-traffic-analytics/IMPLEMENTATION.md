@@ -20,7 +20,8 @@
 - Traffic tooltip content has a unit test, a deterministic Storybook preview and
   Playwright pointer-hover coverage in dark/light plus a 320px boundary check.
   TCP retains its hover regression coverage through the same helper and the same narrow viewport
-  constraint; formatter content uses responsive widths rather than fixed minimums.
+  constraint; both charts use ECharts confinement and formatter content uses responsive widths
+  rather than fixed minimums.
 - IP usage was audited but intentionally remains outside the helper: its linked pointer
   events and custom-series interaction are distinct from the static Traffic/TCP contract.
 

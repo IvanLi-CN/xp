@@ -19,6 +19,8 @@
   完整页面 Storybook fallback；使用真实 hover 和原生移动端 section select，避免人为色框。
 - 2026-07-30: tooltip formatter 移除硬编码最小宽度，改为受容器约束的首选宽度；Traffic
   与 TCP 都通过 320px 真实 pointer-hover 验证，避免 ECharts 外层 confine 无法约束内部内容。
+- 2026-07-30: TCP tooltip 与 Traffic 对齐启用 ECharts `confine`；响应式内容宽度不替代
+  tooltip 的定位约束。
 
 ## Key Reasons / Replacements
 

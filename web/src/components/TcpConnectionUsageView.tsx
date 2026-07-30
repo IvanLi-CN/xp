@@ -493,6 +493,7 @@ export function TcpConnectionUsageView({
 			tooltip: {
 				...createThemedTooltipSurface(palette),
 				trigger: "axis",
+				confine: true,
 				formatter: (params: unknown) => {
 					const axisParams = Array.isArray(params) ? params : [params];
 					const firstParam = axisParams[0] as TooltipAxisParam | undefined;

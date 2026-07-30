@@ -49,6 +49,8 @@ a palette resolved only during render can otherwise keep values from the previou
   text, border, shadow and a dashed axis pointer. The tooltip caps width against the viewport and
   permits wrapping on narrow displays. Formatter HTML must use a preferred `width` capped by
   `100%`, never a fixed `min-width` that can exceed the confined ECharts tooltip.
+- Set `confine: true` on every static chart tooltip. Responsive formatter content constrains size;
+  ECharts confinement separately constrains the tooltip position within the chart.
 - In light theme, use a `0 4px 12px` shadow with 18% foreground opacity. Do not reuse the global
   `--xp-overlay` token there: its 58% opacity and dark-mode elevation are too heavy against a
   white popover. Dark tooltips retain their stronger existing elevation.
