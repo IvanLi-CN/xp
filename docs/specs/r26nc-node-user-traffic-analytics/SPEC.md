@@ -58,6 +58,9 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 - 本地采样读取当前节点 membership 的 Xray uplink/downlink 累计值，计算非负 delta，同时更新节点和用户-节点 rollup。
 - Node Traffic 默认 24h；User Traffic 默认聚合全部节点，可切换单节点；用户和节点范围选择共享并持久化。
 - 主图是圆角阶梯面积图，当前总量有填充，参考总量固定以虚线展示；tooltip 展示上下行与总量。31d 当前日有不同背景，前方有竖向虚线。
+- Traffic hover 使用随 UiPrefs resolved theme 更新的 tooltip surface 与虚线 axis
+  pointer；当前与参考静态序列在 hover 前后均保持可见，移动端 tooltip 必须限制在
+  视口内并换行。
 
 ### Edge cases / errors
 
@@ -89,14 +92,19 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 - Given 用户跨多个节点，When User Traffic 使用 All nodes，Then summary 和图表聚合所有可达节点并报告 partial 节点。
 - Given 数据超过保留窗口，When 新采样或加载发生，Then 五分钟数据不超过 49 小时、daily 不超过 90 天。
 - Given quota reset 周期或 counter reset 变化，When 下一次采样完成，Then 累加器重新建立窗口且不产生负值。
+- Given 管理员在 Traffic 图表 hover，When 深色或浅色主题的 tooltip 打开，Then
+  tooltip surface 使用当前主题 token，当前线、参考线和面积不会被 SVG emphasis
+  改写为不可见。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
 ### Testing
 
 - Rust unit/HTTP tests 覆盖 delta、裁剪、schema 兼容、周期、fan-out 和清理。
-- Web Vitest 覆盖 schema、Tab、范围记忆、节点筛选、partial/error/empty/offline 与 tooltip。
-- Storybook `play` 覆盖 24h/31d、参考线、当前日分隔和用户节点筛选。
+- Web Vitest 覆盖 schema、Tab、范围记忆、节点筛选、partial/error/empty/offline 与 tooltip 内容。
+- Storybook `play` 覆盖 24h/31d、参考线、当前日分隔、用户节点筛选和确定性
+  tooltip preview；Playwright 覆盖深浅主题的真实 pointer hover、SVG 路径稳定性和
+  移动端 tooltip 边界。
 
 ### UI / Storybook (if applicable)
 
@@ -111,33 +119,86 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 
 ## Visual Evidence
 
-PR: #200 (https://github.com/IvanLi-CN/xp/pull/200)
+PR: none
 
 Storybook覆盖=通过
 
-视觉证据目标源=storybook_canvas（TrafficView）+ Storybook page fallback（Node/User details）
+视觉证据目标源=storybook_canvas
 
 视觉证据=存在
 
-空白裁剪=已裁剪（component 使用 require_margin，page 使用 trim_only）
+空白裁剪=已裁剪
 
 聊天回图=已展示
 
 证据落盘=已落盘
 
-证据绑定sha=5f6dd41
+证据绑定sha=498cd0caa4cae5563753ef81c932c7e0e1cdfe35
 
-桌面 Node details 与 User details 页面，以及移动端 TrafficView 状态：
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1366x1040
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=trim_only
+  evidence_surface=page
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Pages/NodeDetailsPage/TrafficTab
+  state=dark real pointer hover
+  evidence_note=验证深色页面内的 tooltip、虚线十字线、当前阶梯面积与参考虚线在 hover 后同时可见。
 
-![Node Traffic page](assets/node-traffic-page.png)
+![Traffic hover dark](assets/traffic-hover-dark.png)
 
-![User Traffic page](assets/user-traffic-page.png)
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1366x1040
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=trim_only
+  evidence_surface=page
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Pages/NodeDetailsPage/TrafficTab
+  state=light real pointer hover
+  evidence_note=验证浅色页面内 tooltip 的 surface、文字和轻量阴影随主题 token 切换。
 
-![TrafficView 24h](assets/traffic-view-24h.png)
+![Traffic hover light](assets/traffic-hover-light.png)
 
-![TrafficView 31d mobile](assets/traffic-view-31d-mobile.png)
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=390x844
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=trim_only
+  evidence_surface=page
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Components/TrafficView/Last24Hours
+  state=dark mobile real pointer hover
+  evidence_note=验证 390px 视口的完整五分钟序列中，tooltip 换行且不越过可视边界；
+  完整页面的移动端 section select 由 Storybook interaction coverage 验证。
 
-PR 正文保持无图。
+![Traffic hover mobile](assets/traffic-hover-mobile.png)
+
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1366x1040
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=trim_only
+  evidence_surface=page
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Pages/NodeDetailsPage/TrafficTab
+  state=light desktop tab layout
+  evidence_note=验证桌面 TabList 按内容宽度收缩、保留窄屏换行约束，并与 Traffic 面板保持明确分组间距。
+
+![Traffic tab list content width](assets/traffic-tablist-content-width.png)
 
 ## Related PRs
 
@@ -153,3 +214,4 @@ PR 正文保持无图。
 - `../k7m2n-node-history-fallback/SPEC.md`
 - `../../desgin/quota.md`
 - `../../desgin/api.md`
+- `../../solutions/web/echarts-svg-tooltip-theming-hover-stability.md`
