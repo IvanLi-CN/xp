@@ -119,8 +119,6 @@ fallback；用户没有真实流量历史。管理员需要在节点和用户详
 
 ## Visual Evidence
 
-PR: none
-
 Storybook覆盖=通过
 
 视觉证据目标源=storybook_canvas
@@ -149,6 +147,8 @@ Storybook覆盖=通过
   state=dark real pointer hover
   evidence_note=验证深色页面内的 tooltip、虚线十字线、当前阶梯面积与参考虚线在 hover 后同时可见。
 
+PR: include
+
 ![Traffic hover dark](./assets/traffic-hover-dark.png)
 
 - source_type=storybook_canvas
@@ -164,6 +164,8 @@ Storybook覆盖=通过
   story_id_or_title=Pages/NodeDetailsPage/TrafficTab
   state=light real pointer hover
   evidence_note=验证浅色页面内 tooltip 的 surface、文字和轻量阴影随主题 token 切换。
+
+PR: include
 
 ![Traffic hover light](./assets/traffic-hover-light.png)
 
@@ -181,6 +183,8 @@ Storybook覆盖=通过
   state=dark mobile real pointer hover
   evidence_note=验证 320px 视口的完整五分钟序列中，tooltip 换行且不越过可视边界；
   完整页面的移动端 section select 由 Storybook interaction coverage 验证。
+
+PR: include
 
 ![Traffic hover mobile](./assets/traffic-hover-mobile.png)
 
