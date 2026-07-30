@@ -491,10 +491,6 @@
     "long_line_count": 5,
     "max_line_length": 164
   },
-  "docs/specs/r26nc-node-user-traffic-analytics/HISTORY.md": {
-    "long_line_count": 1,
-    "max_line_length": 104
-  },
   "docs/specs/r26nc-node-user-traffic-analytics/IMPLEMENTATION.md": {
     "long_line_count": 3,
     "max_line_length": 144

@@ -415,7 +415,11 @@ describe("<NodeDetailsPage />", () => {
 
 		const tablist = await screenByRole("tablist", "Node details sections");
 		expect(tablist.className).toContain("flex-wrap");
-		expect(tablist.className).toContain("w-full");
+		expect(tablist.className).toContain("max-w-full");
+		expect(tablist.classList.contains("w-full")).toBe(false);
+		expect(tablist.parentElement?.parentElement?.className).toContain(
+			"sm:space-y-3",
+		);
 
 		const tcpTab = await screenByRole("tab", "TCP connections");
 		expect(tcpTab.className).toContain("basis-[calc(50%-0.125rem)]");

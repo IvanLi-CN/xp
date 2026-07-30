@@ -15,6 +15,13 @@ import type {
 } from "../api/adminTcpConnections";
 import { Button } from "./Button";
 import { PageState } from "./PageState";
+import {
+	type EChartsTooltipPalette,
+	STATIC_LINE_SERIES_EMPHASIS,
+	createThemedTooltipSurface,
+	escapeEChartsHtml,
+	useEChartsThemePalette,
+} from "./echarts-theme";
 import { alertClass } from "./ui-helpers";
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
@@ -23,14 +30,6 @@ echarts.use([GridComponent, TooltipComponent, LineChart, SVGRenderer]);
 
 const SVG_RENDERER = { renderer: "svg" } as const;
 const CHART_HEIGHT = 280;
-const CHART_COLOR_FALLBACK = "var(--primary)";
-const CHART_GRID_COLOR = "rgba(148, 163, 184, 0.10)";
-const CHART_AXIS_COLOR = "rgba(148, 163, 184, 0.5)";
-const TOOLTIP_BACKGROUND_FALLBACK = "rgb(34, 40, 52)";
-const TOOLTIP_BORDER_FALLBACK = "rgba(148, 163, 184, 0.24)";
-const TOOLTIP_FOREGROUND_FALLBACK = "rgb(226, 232, 240)";
-const TOOLTIP_MUTED_FALLBACK = "rgb(148, 163, 184)";
-const TOOLTIP_SHADOW_FALLBACK = "rgba(15, 23, 42, 0.28)";
 
 type TcpConnectionUsageViewProps = {
 	window: AdminTcpConnectionUsageWindow;
@@ -57,14 +56,6 @@ type MinuteConnectionBreakdown = {
 type TooltipAxisParam = {
 	axisValue?: number | string;
 	marker?: string;
-};
-
-type TooltipThemePalette = {
-	background: string;
-	border: string;
-	foreground: string;
-	muted: string;
-	shadow: string;
 };
 
 type EChartsReactRef = InstanceType<typeof ReactEChartsCore>;
@@ -102,15 +93,6 @@ function formatTooltipDateTime(valueMs: number): string {
 
 function formatConnectionCount(count: number): string {
 	return `${count} connection${count === 1 ? "" : "s"}`;
-}
-
-function escapeHtml(value: string): string {
-	return value
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
 }
 
 function coerceTooltipMinuteMs(
@@ -204,7 +186,7 @@ export function buildTcpConnectionTooltipHtml({
 	totalCount: number;
 	selectedEndpoints: AdminNodeTcpConnectionsResponse["endpoints"];
 	endpointCounts: Record<string, number>;
-	palette: Pick<TooltipThemePalette, "border" | "foreground" | "muted">;
+	palette: Pick<EChartsTooltipPalette, "border" | "foreground" | "muted">;
 	totalMarker: string;
 }): string {
 	const endpointRows = selectedEndpoints
@@ -212,8 +194,10 @@ export function buildTcpConnectionTooltipHtml({
 			const count = endpointCounts[endpoint.endpoint_id] ?? 0;
 			return `
 				<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:6px;">
-					<span style="font-size:13px;color:${palette.muted};">${escapeHtml(endpointLabel(endpoint))}</span>
-					<span style="font-size:13px;color:${palette.foreground};font-weight:600;white-space:nowrap;">${escapeHtml(formatConnectionCount(count))}</span>
+					<span style="font-size:12px;color:${palette.muted};">${escapeEChartsHtml(endpointLabel(endpoint))}</span>
+					<span style="font-size:12px;color:${palette.foreground};font-weight:600;white-space:nowrap;">
+						${escapeEChartsHtml(formatConnectionCount(count))}
+					</span>
 				</div>
 			`;
 		})
@@ -222,15 +206,15 @@ export function buildTcpConnectionTooltipHtml({
 	return `
 		<div style="min-width:260px;">
 			<div style="font-size:14px;color:${palette.muted};font-weight:400;line-height:1.2;">
-				${escapeHtml(formatTooltipDateTime(minuteMs))}
+				${escapeEChartsHtml(formatTooltipDateTime(minuteMs))}
 			</div>
 			<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:10px;">
-				<span style="display:flex;align-items:center;gap:6px;font-size:13px;color:${palette.muted};">
+					<span style="display:flex;align-items:center;gap:6px;font-size:12px;color:${palette.muted};">
 					${totalMarker}
 					<span>Total</span>
 				</span>
 				<span style="font-size:14px;color:${palette.foreground};font-weight:800;white-space:nowrap;">
-					${escapeHtml(formatConnectionCount(totalCount))}
+					${escapeEChartsHtml(formatConnectionCount(totalCount))}
 				</span>
 			</div>
 			<div style="margin-top:8px;padding-top:8px;border-top:1px solid ${palette.border};">
@@ -245,49 +229,6 @@ function shouldRenderECharts(): boolean {
 	return !navigator.userAgent.toLowerCase().includes("jsdom");
 }
 
-function resolveCssColor(value: string, fallback: string): string {
-	if (typeof document === "undefined" || !document.body) return fallback;
-	const probe = document.createElement("span");
-	probe.style.color = value;
-	if (!probe.style.color) return fallback;
-	probe.style.opacity = "0";
-	probe.style.pointerEvents = "none";
-	probe.style.position = "fixed";
-	document.body.append(probe);
-	const resolved = getComputedStyle(probe).color;
-	probe.remove();
-	return resolved || fallback;
-}
-
-function resolveChartLineColor(): string {
-	if (
-		typeof window === "undefined" ||
-		typeof document === "undefined" ||
-		typeof window.getComputedStyle !== "function"
-	) {
-		return CHART_COLOR_FALLBACK;
-	}
-	return (
-		window
-			.getComputedStyle(document.documentElement)
-			.getPropertyValue("--primary")
-			.trim() || CHART_COLOR_FALLBACK
-	);
-}
-
-function resolveTooltipPalette(): TooltipThemePalette {
-	return {
-		background: resolveCssColor("var(--popover)", TOOLTIP_BACKGROUND_FALLBACK),
-		border: resolveCssColor("var(--border)", TOOLTIP_BORDER_FALLBACK),
-		foreground: resolveCssColor(
-			"var(--popover-foreground)",
-			TOOLTIP_FOREGROUND_FALLBACK,
-		),
-		muted: resolveCssColor("var(--muted-foreground)", TOOLTIP_MUTED_FALLBACK),
-		shadow: resolveCssColor("var(--xp-overlay)", TOOLTIP_SHADOW_FALLBACK),
-	};
-}
-
 function safeTimestamp(value: string | null | undefined): number | null {
 	if (!value) return null;
 	const timestamp = new Date(value).getTime();
@@ -295,7 +236,7 @@ function safeTimestamp(value: string | null | undefined): number | null {
 }
 
 function markerSwatch(color: string): string {
-	return `<span style="display:inline-block;margin-right:0;border-radius:10px;width:10px;height:10px;background-color:${color};"></span>`;
+	return `<span style="display:inline-block;margin-right:0;border-radius:50%;width:10px;height:10px;background-color:${color};"></span>`;
 }
 
 function TooltipPreviewCard({
@@ -304,7 +245,7 @@ function TooltipPreviewCard({
 	markerColor,
 }: {
 	data: TooltipPreviewData;
-	palette: TooltipThemePalette;
+	palette: EChartsTooltipPalette;
 	markerColor: string;
 }) {
 	return (
@@ -324,7 +265,7 @@ function TooltipPreviewCard({
 			</div>
 			<div className="mt-2.5 flex items-center justify-between gap-4">
 				<span
-					className="flex items-center gap-1.5 text-[13px]"
+					className="flex items-center gap-1.5 text-xs"
 					style={{ color: palette.muted }}
 				>
 					<span
@@ -349,11 +290,11 @@ function TooltipPreviewCard({
 						key={row.endpointId}
 						className="mt-1.5 flex items-center justify-between gap-4"
 					>
-						<span className="text-[13px]" style={{ color: palette.muted }}>
+						<span className="text-xs" style={{ color: palette.muted }}>
 							{row.label}
 						</span>
 						<span
-							className="whitespace-nowrap text-[13px] font-semibold"
+							className="whitespace-nowrap text-xs font-semibold"
 							style={{ color: palette.foreground }}
 						>
 							{formatConnectionCount(row.count)}
@@ -406,6 +347,7 @@ export function TcpConnectionUsageView({
 	isFetching = false,
 	tooltipPreviewMinute = null,
 }: TcpConnectionUsageViewProps) {
+	const palette = useEChartsThemePalette();
 	const endpointIds = useMemo(
 		() => report.endpoints.map((endpoint) => endpoint.endpoint_id),
 		[report.endpoints],
@@ -479,8 +421,8 @@ export function TcpConnectionUsageView({
 		0,
 		...aggregatedSeries.map((point) => point.count),
 	);
-	const chartLineColor = resolveChartLineColor();
-	const tooltipPalette = resolveTooltipPalette();
+	const chartLineColor = palette.primary;
+	const tooltipPalette = palette.tooltip;
 	const compactTimeAxis = shouldCompactTimeAxis();
 	const chartAriaLabel = hasSelection
 		? `TCP connections per minute chart, current ${currentCount} connections, peak ${peakCount}, ${selectedEndpoints.length} endpoints selected`
@@ -549,17 +491,7 @@ export function TcpConnectionUsageView({
 				left: 42,
 			},
 			tooltip: {
-				backgroundColor: tooltipPalette.background,
-				borderColor: tooltipPalette.border,
-				borderWidth: 1,
-				padding: 12,
-				shadowBlur: 18,
-				shadowColor: tooltipPalette.shadow,
-				shadowOffsetY: 10,
-				extraCssText: "border-radius: 16px;",
-				textStyle: {
-					color: tooltipPalette.foreground,
-				},
+				...createThemedTooltipSurface(palette),
 				trigger: "axis",
 				formatter: (params: unknown) => {
 					const axisParams = Array.isArray(params) ? params : [params];
@@ -568,7 +500,7 @@ export function TcpConnectionUsageView({
 					if (minuteMs === null) return "";
 					const breakdown = minuteBreakdownByMs.get(minuteMs);
 					if (!breakdown) {
-						return escapeHtml(formatTooltipDateTime(minuteMs));
+						return escapeEChartsHtml(formatTooltipDateTime(minuteMs));
 					}
 					return buildTcpConnectionTooltipHtml({
 						minuteMs,
@@ -583,13 +515,13 @@ export function TcpConnectionUsageView({
 			xAxis: {
 				type: "time",
 				axisLabel: {
-					color: CHART_AXIS_COLOR,
+					color: palette.axis,
 					formatter: (value: number) => formatAxisTime(value, window),
 					hideOverlap: true,
 					margin: compactTimeAxis ? 14 : 8,
 				},
 				axisLine: {
-					lineStyle: { color: CHART_GRID_COLOR },
+					lineStyle: { color: palette.grid },
 				},
 				axisTick: { show: false },
 				splitLine: { show: false },
@@ -598,7 +530,7 @@ export function TcpConnectionUsageView({
 			yAxis: {
 				type: "value",
 				axisLabel: {
-					color: CHART_AXIS_COLOR,
+					color: palette.axis,
 				},
 				axisLine: { show: false },
 				axisTick: { show: false },
@@ -606,7 +538,7 @@ export function TcpConnectionUsageView({
 				max: maxCount,
 				splitLine: {
 					lineStyle: {
-						color: CHART_GRID_COLOR,
+						color: palette.grid,
 					},
 				},
 				splitNumber: 4,
@@ -616,9 +548,7 @@ export function TcpConnectionUsageView({
 					type: "line",
 					smooth: false,
 					showSymbol: false,
-					emphasis: {
-						disabled: true,
-					},
+					emphasis: STATIC_LINE_SERIES_EMPHASIS,
 					data: points,
 					lineStyle: {
 						width: 2,
@@ -637,6 +567,7 @@ export function TcpConnectionUsageView({
 		chartPoints,
 		compactTimeAxis,
 		minuteBreakdownByMs,
+		palette,
 		selectedEndpoints,
 		tooltipPalette,
 		window,

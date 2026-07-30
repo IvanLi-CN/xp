@@ -19,6 +19,13 @@ import type {
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { Button } from "./Button";
 import { PageState } from "./PageState";
+import {
+	type EChartsThemePalette,
+	STATIC_LINE_SERIES_EMPHASIS,
+	createThemedTooltipSurface,
+	escapeEChartsHtml,
+	useEChartsThemePalette,
+} from "./echarts-theme";
 import { alertClass } from "./ui-helpers";
 
 echarts.use([
@@ -36,18 +43,8 @@ type TrafficViewProps = {
 	onWindowChange: (window: TrafficWindow) => void;
 	isFetching?: boolean;
 	nodeSelector?: ReactNode;
+	tooltipPreviewIndex?: number | null;
 };
-
-const CHART_GRID_COLOR =
-	"color-mix(in srgb, var(--color-muted-foreground) 18%, transparent)";
-const CHART_AXIS_COLOR =
-	"color-mix(in srgb, var(--color-muted-foreground) 78%, transparent)";
-const CHART_REFERENCE_COLOR =
-	"color-mix(in srgb, var(--color-muted-foreground) 82%, transparent)";
-const CHART_CURRENT_AREA =
-	"color-mix(in srgb, var(--color-primary) 18%, transparent)";
-const CHART_CURRENT_DAY =
-	"color-mix(in srgb, var(--color-primary) 7%, transparent)";
 
 function pointValue(point: TrafficSeriesPoint): number | null {
 	return point.total_bytes ?? null;
@@ -61,26 +58,124 @@ function formatTimestamp(value: string | null | undefined): string {
 		: date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
+function formatTrafficTooltipMetrics(point: TrafficSeriesPoint) {
+	const value = (bytes: number | null | undefined) =>
+		bytes == null ? "-" : formatQuotaBytesHuman(bytes);
+	return {
+		downlink: value(point.downlink_bytes),
+		total: value(point.total_bytes),
+		uplink: value(point.uplink_bytes),
+	};
+}
+
+function buildTrafficTooltipRow(
+	label: string,
+	point: TrafficSeriesPoint | undefined,
+	palette: EChartsThemePalette["tooltip"],
+): string {
+	if (!point) return "";
+	const metrics = formatTrafficTooltipMetrics(point);
+	return [
+		`<div style="margin-top:6px;font-size:12px;line-height:1.35;color:${palette.foreground};">`,
+		`<strong>${escapeEChartsHtml(label)}</strong>`,
+		`<span style="color:${palette.muted};">`,
+		` · up ${escapeEChartsHtml(metrics.uplink)}`,
+		` · down ${escapeEChartsHtml(metrics.downlink)}`,
+		` · total ${escapeEChartsHtml(metrics.total)}</span></div>`,
+	].join("");
+}
+
+export function buildTrafficTooltipHtml(
+	report: TrafficReport,
+	window: TrafficWindow,
+	palette: EChartsThemePalette["tooltip"],
+	index: number,
+): string {
+	const current = report.current[index];
+	const reference = report.reference?.[index];
+	if (!current) return "";
+	return [
+		'<div style="min-width:240px;">',
+		`<div style="font-size:12px;line-height:1.2;color:${palette.muted};">`,
+		escapeEChartsHtml(formatTimestamp(current.start_at)),
+		"</div>",
+		buildTrafficTooltipRow("Current", current, palette),
+		buildTrafficTooltipRow(`Previous ${window}`, reference, palette),
+		"</div>",
+	].join("");
+}
+
 function buildTooltip(
 	report: TrafficReport,
 	window: TrafficWindow,
+	palette: EChartsThemePalette,
 ): EChartsOption["tooltip"] {
 	return {
+		...createThemedTooltipSurface(palette),
 		trigger: "axis",
 		confine: true,
 		formatter: (params) => {
 			const items = Array.isArray(params) ? params : [params];
-			const index = Number(items[0]?.dataIndex ?? 0);
-			const current = report.current[index];
-			const reference = report.reference?.[index];
-			if (!current) return "";
-			const row = (label: string, point: TrafficSeriesPoint | undefined) =>
-				point
-					? `<div><strong>${label}</strong> · up ${point.uplink_bytes == null ? "-" : formatQuotaBytesHuman(point.uplink_bytes)} · down ${point.downlink_bytes == null ? "-" : formatQuotaBytesHuman(point.downlink_bytes)} · total ${point.total_bytes == null ? "-" : formatQuotaBytesHuman(point.total_bytes)}</div>`
-					: "";
-			return `<div class="space-y-1"><div>${formatTimestamp(current.start_at)}</div>${row("Current", current)}${row(`Previous ${window}`, reference)}</div>`;
+			return buildTrafficTooltipHtml(
+				report,
+				window,
+				palette.tooltip,
+				Number(items[0]?.dataIndex ?? 0),
+			);
 		},
 	};
+}
+
+function TrafficTooltipPreviewCard({
+	report,
+	window,
+	palette,
+	index,
+}: {
+	report: TrafficReport;
+	window: TrafficWindow;
+	palette: EChartsThemePalette["tooltip"];
+	index: number;
+}) {
+	const current = report.current[index];
+	if (!current) return null;
+	const rows = [
+		{ label: "Current", point: current },
+		{ label: `Previous ${window}`, point: report.reference?.[index] },
+	].filter(
+		(row): row is { label: string; point: TrafficSeriesPoint } =>
+			row.point != null,
+	);
+
+	return (
+		<div
+			className="pointer-events-none absolute right-4 top-4 z-10 max-w-[calc(100%-2rem)] rounded-xl border p-3 shadow-lg"
+			data-testid="traffic-tooltip-preview"
+			style={{
+				backgroundColor: palette.background,
+				borderColor: palette.border,
+				boxShadow: `${palette.shadowOffsetX}px ${palette.shadowOffsetY}px ${palette.shadowBlur}px 0 ${palette.shadow}`,
+				color: palette.foreground,
+			}}
+		>
+			<div className="text-xs" style={{ color: palette.muted }}>
+				{formatTimestamp(current.start_at)}
+			</div>
+			{rows.map(({ label, point }) => {
+				const metrics = formatTrafficTooltipMetrics(point);
+				return (
+					<div className="mt-1.5 text-xs" key={label}>
+						<strong>{label}</strong>
+						<span style={{ color: palette.muted }}>
+							{" "}
+							· up {metrics.uplink} · down {metrics.downlink} · total{" "}
+							{metrics.total}
+						</span>
+					</div>
+				);
+			})}
+		</div>
+	);
 }
 
 export function TrafficView({
@@ -89,7 +184,9 @@ export function TrafficView({
 	onWindowChange,
 	isFetching,
 	nodeSelector,
+	tooltipPreviewIndex = null,
 }: TrafficViewProps) {
+	const palette = useEChartsThemePalette();
 	const currentDayIndex = report.current.findIndex(
 		(point) => point.is_current_day,
 	);
@@ -104,7 +201,7 @@ export function TrafficView({
 			window === "31d" && currentDayIndex >= 0
 				? {
 						silent: true,
-						itemStyle: { color: CHART_CURRENT_DAY },
+						itemStyle: { color: palette.currentDay },
 						data: [
 							[{ xAxis: currentDayStart }, { xAxis: currentDayEnd }] as [
 								{ xAxis: number },
@@ -119,7 +216,7 @@ export function TrafficView({
 						silent: true,
 						symbol: "none",
 						lineStyle: {
-							color: CHART_REFERENCE_COLOR,
+							color: palette.reference,
 							type: "dashed" as const,
 							width: 1,
 						},
@@ -134,7 +231,7 @@ export function TrafficView({
 				boundaryGap: false,
 				data: categories,
 				axisLabel: {
-					color: CHART_AXIS_COLOR,
+					color: palette.axis,
 					formatter: (value: string, index: number) => {
 						if (window === "31d") return value.slice(5, 10);
 						if (index === 0 || index === categories.length - 1)
@@ -142,19 +239,19 @@ export function TrafficView({
 						return index % 48 === 0 ? formatTimestamp(value).slice(11, 16) : "";
 					},
 				},
-				axisLine: { lineStyle: { color: CHART_GRID_COLOR } },
+				axisLine: { lineStyle: { color: palette.grid } },
 				axisTick: { show: false },
 			},
 			yAxis: {
 				type: "value",
 				min: 0,
 				axisLabel: {
-					color: CHART_AXIS_COLOR,
+					color: palette.axis,
 					formatter: (value: number) => formatQuotaBytesHuman(value),
 				},
-				splitLine: { lineStyle: { color: CHART_GRID_COLOR } },
+				splitLine: { lineStyle: { color: palette.grid } },
 			},
-			tooltip: buildTooltip(report, window),
+			tooltip: buildTooltip(report, window, palette),
 			series: [
 				{
 					name: "Current",
@@ -163,8 +260,9 @@ export function TrafficView({
 					step: "end",
 					connectNulls: false,
 					symbol: "none",
-					lineStyle: { color: "var(--color-primary)", width: 2, join: "round" },
-					areaStyle: { color: CHART_CURRENT_AREA },
+					emphasis: STATIC_LINE_SERIES_EMPHASIS,
+					lineStyle: { color: palette.primary, width: 2, join: "round" },
+					areaStyle: { color: palette.currentArea },
 					markArea,
 					markLine,
 				},
@@ -177,8 +275,9 @@ export function TrafficView({
 								step: "end" as const,
 								connectNulls: false,
 								symbol: "none",
+								emphasis: STATIC_LINE_SERIES_EMPHASIS,
 								lineStyle: {
-									color: CHART_REFERENCE_COLOR,
+									color: palette.reference,
 									width: 1.5,
 									type: "dashed" as const,
 								},
@@ -187,8 +286,7 @@ export function TrafficView({
 					: []),
 			],
 		};
-	}, [currentDayIndex, report, window]);
-
+	}, [currentDayIndex, palette, report, window]);
 	return (
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -266,13 +364,23 @@ export function TrafficView({
 						description="The chart will populate after the first successful five-minute sample."
 					/>
 				) : (
-					<ReactEChartsCore
-						echarts={echarts}
-						option={option}
-						notMerge
-						style={{ height: 320, width: "100%" }}
-						opts={{ renderer: "svg" }}
-					/>
+					<div className="relative">
+						<ReactEChartsCore
+							echarts={echarts}
+							option={option}
+							notMerge
+							style={{ height: 320, width: "100%" }}
+							opts={{ renderer: "svg" }}
+						/>
+						{tooltipPreviewIndex !== null ? (
+							<TrafficTooltipPreviewCard
+								index={tooltipPreviewIndex}
+								palette={palette.tooltip}
+								report={report}
+								window={window}
+							/>
+						) : null}
+					</div>
 				)}
 			</div>
 		</section>

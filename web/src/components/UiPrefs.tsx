@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+	createContext,
+	useContext,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useState,
+} from "react";
 
 export type UiThemePreference = "system" | "light" | "dark";
 export type UiThemeResolved = "light" | "dark";
@@ -86,7 +93,7 @@ export function UiPrefsProvider({ children }: { children: ReactNode }) {
 		resolveTheme(theme),
 	);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const nextResolved = resolveTheme(theme);
 		setResolvedTheme(nextResolved);
 		applyResolvedTheme(nextResolved);
