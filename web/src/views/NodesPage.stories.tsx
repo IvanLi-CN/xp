@@ -4,8 +4,10 @@ import { expect, userEvent, within } from "@storybook/test";
 import type { AdminNodesRuntimeResponse } from "../api/adminNodeRuntime";
 import { BackendApiError } from "../api/backendError";
 import { AppLayout } from "../components/AppLayout";
+import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
+import { PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 
 const cachedNodesRuntime: AdminNodesRuntimeResponse = {
@@ -40,11 +42,36 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 	],
 };
 
-const cachedUnauthorizedError = new BackendApiError({
+const unauthorizedError = new BackendApiError({
 	status: 401,
 	code: "unauthorized",
 	message: "missing or invalid authorization token",
 });
+
+function UnauthorizedNodesErrorPage() {
+	return (
+		<AppLayout>
+			<div className="space-y-6">
+				<PageHeader
+					title="Nodes"
+					description="Inspect cluster nodes and issue join tokens for new members."
+				/>
+				<section className="xp-card">
+					<div className="xp-card-body space-y-4">
+						<h2 className="xp-card-title">Node inventory</h2>
+						<PageState
+							variant="error"
+							title="Failed to load nodes"
+							description="401 unauthorized: missing or invalid authorization token"
+							error={unauthorizedError}
+							action={<Button variant="secondary">Retry</Button>}
+						/>
+					</div>
+				</section>
+			</div>
+		</AppLayout>
+	);
+}
 
 function CachedUnauthorizedNodesPage() {
 	return (
@@ -58,7 +85,7 @@ function CachedUnauthorizedNodesPage() {
 					tone="info"
 					variant="inline"
 					dismissible
-					error={cachedUnauthorizedError}
+					error={unauthorizedError}
 					title="Showing cached node inventory"
 					description="Last successful sync: 2026/7/30 15:00:00."
 				/>
@@ -169,6 +196,35 @@ export const OfflineCachedInventory: Story = {
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(/last successful sync:/i),
+		).toBeInTheDocument();
+	},
+};
+
+export const UnauthorizedLoadError: Story = {
+	parameters: {
+		router: {
+			initialEntry: "/__story",
+		},
+		mockApi: {
+			adminToken: "storybook-error-token",
+		},
+	},
+	render: () => <UnauthorizedNodesErrorPage />,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("Failed to load nodes"),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByText(
+				"401 unauthorized: missing or invalid authorization token",
+			),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Sign in again" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("button", { name: "Retry" }),
 		).toBeInTheDocument();
 	},
 };

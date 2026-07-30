@@ -125,8 +125,11 @@
 - Storybook `Pages/NodeDetailsPage/OfflineCachedRuntime`
   - PR: include
   - ![Offline node details runtime](./assets/offline-node-details-page.png)
-- Storybook `Pages/NodesPage/CachedUnauthorizedInventory`
+- Storybook `Pages/NodesPage/UnauthorizedLoadError`
   - PR: include
+  - ![401 recovery in the Nodes error state](./assets/auth-recovery-nodes-error.png)
+- Storybook `Pages/NodesPage/CachedUnauthorizedInventory`
+  - PR: none
   - ![Cached 401 recovery on Nodes](./assets/auth-recovery-nodes-page.png)
 - Storybook `Components/ReadStateBanner/UnauthorizedCachedData`
   - PR: none
