@@ -203,6 +203,7 @@ Storybook覆盖=通过
 ## Related PRs
 
 - #200 (https://github.com/IvanLi-CN/xp/pull/200)
+- #212 (https://github.com/IvanLi-CN/xp/pull/212)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
