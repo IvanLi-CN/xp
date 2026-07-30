@@ -431,7 +431,7 @@ export function EndpointDetailsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={endpointQuery.error ?? nodesQuery.error}
+					errors={[endpointQuery.error, nodesQuery.error]}
 					title={
 						!runtime.isOnline
 							? "Offline endpoint snapshot"

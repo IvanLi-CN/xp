@@ -417,7 +417,7 @@ export function ServiceConfigPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={configQuery.error ?? clusterInfo.error ?? health.error}
+					errors={[configQuery.error, clusterInfo.error, health.error]}
 					title={!runtime.isOnline ? "离线配置快照" : "当前展示的是缓存配置"}
 					description={`最近一次成功同步：${formatSyncTimestamp(latestSyncedAt)}。`}
 				/>

@@ -1032,7 +1032,7 @@ export function UserDetailsPage() {
 		if (item.quota_limit_bytes === 0) return "Remaining: unlimited";
 		return `Remaining: ${formatQuotaBytesHuman(item.remaining_bytes)}`;
 	}
-	const latestSyncedAt = latestQueryDataUpdatedAt([
+	const cachedReadQueries = [
 		userQuery,
 		mihomoProfileQuery,
 		nodesQuery,
@@ -1041,18 +1041,15 @@ export function UserDetailsPage() {
 		nodeQuotasQuery,
 		nodeQuotaStatusQuery,
 		ipUsageQuery,
-	]);
+		trafficQuery,
+	];
+	const latestSyncedAt = latestQueryDataUpdatedAt(cachedReadQueries);
 	const showCachedBanner =
 		latestSyncedAt !== null &&
 		(hasQueryData(userQuery) ||
 			hasQueryData(accessQuery) ||
 			hasQueryData(nodeQuotaStatusQuery)) &&
-		(!runtime.isOnline ||
-			userQuery.isError ||
-			accessQuery.isError ||
-			nodeQuotaStatusQuery.isError ||
-			trafficQuery.isError ||
-			ipUsageQuery.isError);
+		(!runtime.isOnline || cachedReadQueries.some((query) => query.isError));
 
 	return (
 		<div className="space-y-6">
@@ -1090,13 +1087,7 @@ export function UserDetailsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={
-						userQuery.error ??
-						accessQuery.error ??
-						nodeQuotaStatusQuery.error ??
-						trafficQuery.error ??
-						ipUsageQuery.error
-					}
+					errors={cachedReadQueries.map((query) => query.error)}
 					title={
 						!runtime.isOnline
 							? "Offline user snapshot"

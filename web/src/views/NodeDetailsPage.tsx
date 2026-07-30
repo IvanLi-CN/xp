@@ -1811,14 +1811,14 @@ export function NodeDetailsPage() {
 					tone={!appRuntime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={
-						nodeQuery.error ??
-						runtimeQuery.error ??
-						historyQuery.error ??
-						trafficQuery.error ??
-						ipUsageQuery.error ??
-						tcpConnectionsQuery.error
-					}
+					errors={[
+						nodeQuery.error,
+						runtimeQuery.error,
+						historyQuery.error,
+						trafficQuery.error,
+						ipUsageQuery.error,
+						tcpConnectionsQuery.error,
+					]}
 					title={
 						!appRuntime.isOnline
 							? "Offline node snapshot"

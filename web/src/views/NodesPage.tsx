@@ -265,7 +265,7 @@ export function NodesPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={nodesState.error ?? clusterInfoState.error}
+					errors={[nodesState.error, clusterInfoState.error]}
 					title={
 						!runtime.isOnline
 							? "Offline node inventory"

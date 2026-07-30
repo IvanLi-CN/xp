@@ -12,6 +12,7 @@ type ReadStateBannerProps = {
 	variant?: "banner" | "inline";
 	dismissible?: boolean;
 	error?: unknown;
+	errors?: readonly unknown[];
 };
 
 export function ReadStateBanner({
@@ -21,6 +22,7 @@ export function ReadStateBanner({
 	variant = "banner",
 	dismissible = false,
 	error,
+	errors = [],
 }: ReadStateBannerProps) {
 	const [dismissed, setDismissed] = useState(false);
 
@@ -45,9 +47,10 @@ export function ReadStateBanner({
 			<Icon name="tabler:x" size={16} className="shrink-0" />
 		</Button>
 	) : null;
+	const unauthorizedError = [error, ...errors].find(isUnauthorizedError);
 	const recoveryAction =
-		tone === "info" && isUnauthorizedError(error) ? (
-			<AuthRecoveryAction error={error} />
+		tone === "info" && unauthorizedError ? (
+			<AuthRecoveryAction error={unauthorizedError} />
 		) : null;
 	const actions =
 		recoveryAction || dismissButton ? (

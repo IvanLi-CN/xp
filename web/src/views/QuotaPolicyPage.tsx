@@ -1332,13 +1332,13 @@ export function QuotaPolicyPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					error={
-						nodesQuery.error ??
-						usersQuery.error ??
-						globalWeightRowsQuery.error ??
-						weightRowsQuery.error ??
-						nodePolicyQuery.error
-					}
+					errors={[
+						nodesQuery.error,
+						usersQuery.error,
+						globalWeightRowsQuery.error,
+						weightRowsQuery.error,
+						nodePolicyQuery.error,
+					]}
 					title={
 						!runtime.isOnline
 							? "Offline quota snapshot"
