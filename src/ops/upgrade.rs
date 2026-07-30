@@ -1,6 +1,7 @@
 use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
+use crate::ops::runtime_activation::restart_xp_service;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -850,27 +851,6 @@ fn replace_inbound_by_tag(
 
 fn inbound_tag(inbound: &serde_json::Value) -> Option<&str> {
     inbound.get("tag").and_then(serde_json::Value::as_str)
-}
-
-fn restart_xp_service(paths: &Paths) -> bool {
-    if is_test_root(paths.root()) && !test_enable_service_restart() {
-        return true;
-    }
-
-    if Command::new("systemctl")
-        .args(["restart", "xp.service"])
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
-    {
-        return true;
-    }
-
-    Command::new("rc-service")
-        .args(["xp", "restart"])
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
 }
 
 fn read_xray_systemd_unit(paths: &Paths) -> String {

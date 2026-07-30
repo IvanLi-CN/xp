@@ -878,6 +878,7 @@ export function NodeDetailsPage() {
 		return (
 			<div className="space-y-4">
 				<Tabs
+					className="sm:space-y-3"
 					value={activeTab}
 					onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
 				>
@@ -900,7 +901,7 @@ export function NodeDetailsPage() {
 					</div>
 					<div className="hidden sm:block">
 						<TabsList
-							className="h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/70 bg-card p-0.5 sm:p-1 shadow-sm"
+							className="h-auto max-w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/70 bg-card p-0.5 sm:p-1 shadow-sm"
 							aria-label="Node details sections"
 						>
 							{NODE_DETAILS_TAB_OPTIONS.map((option) => (
@@ -915,7 +916,6 @@ export function NodeDetailsPage() {
 							))}
 						</TabsList>
 					</div>
-
 					{activeTab === "runtime" ? (
 						<section className="space-y-4">
 							<div className="flex items-center justify-between gap-3">

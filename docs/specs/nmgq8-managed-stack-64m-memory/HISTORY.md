@@ -1,5 +1,8 @@
 # History
 
+- OpenRC restart commands can return before `supervise-daemon` reports its child started.
+  Host upgrades now wait for manager readiness and roll back on timeout.
+
 - Host-managed upgrades now complete the locked XP and managed runtime phase before
   replacing `xp-ops`, preventing a successful tool self-update from skipping the
   corresponding service release.

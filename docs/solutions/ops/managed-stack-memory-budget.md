@@ -48,6 +48,11 @@ before it replaces `xp-ops`. Treat the tool's own version as independent from th
 service release state: a self-update must not cause a resumed invocation to report
 the release current while XP and its managed runtimes remain on the previous version.
 
+OpenRC `restart` can return after scheduling a `supervise-daemon` transition but before the
+service is ready. Treat a restart command as an initiation step, then poll the same service
+manager for readiness before the upgrade commits. On timeout, preserve the original error and
+run the ordinary binary and runtime rollback path.
+
 Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
 Set cloudflared `GOMEMLIMIT=8MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values

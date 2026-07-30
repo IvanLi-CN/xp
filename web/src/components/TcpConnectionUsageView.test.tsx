@@ -83,6 +83,8 @@ describe("<TcpConnectionUsageView />", () => {
 		expect(tooltipHtml).toContain("4 connections");
 		expect(tooltipHtml).toContain("tokyo-edge-b :8443");
 		expect(tooltipHtml).toContain("3 connections");
+		expect(tooltipHtml).toContain("width:min(260px,100%);max-width:100%");
+		expect(tooltipHtml).not.toContain("min-width:260px");
 	});
 
 	it("switches between 24h and 7d windows", () => {

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, within } from "@storybook/test";
 import { useState } from "react";
 
 import type {
@@ -103,6 +104,15 @@ export const Last31Days: Story = {
 
 export const SamplingGap: Story = {
 	args: { report: makeReport("24h", true) },
+};
+
+export const TooltipPreview: Story = {
+	args: { tooltipPreviewIndex: 144 },
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("traffic-tooltip-preview"),
+		).toBeVisible();
+	},
 };
 
 export const Empty: Story = {
