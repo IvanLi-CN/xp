@@ -38,6 +38,9 @@
   their query error to that primitive. Initial failures retain `Retry`; cached
   refresh failures expose recovery from the shared cache banner; `403` remains
   outside the recovery path.
+- Node and user detail pages pass their initial and lazy tab-query failures to
+  the same primitive, so `Traffic`, `IP usage`, `TCP connections`, and quota
+  reads retain both authentication recovery and their existing retry actions.
 - Login validation remains the only operation that writes a replacement token;
   a stored token is therefore kept until a new token has been verified. `403`
   errors remain permission failures and do not show the recovery action.

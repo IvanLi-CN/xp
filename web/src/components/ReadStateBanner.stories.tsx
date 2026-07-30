@@ -75,7 +75,7 @@ export const UnauthorizedCachedData: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const signInLink = await canvas.findByRole("link", {
-			name: /sign in again/i,
+			name: "Sign in",
 		});
 		await expect(signInLink).toHaveAttribute(
 			"href",
