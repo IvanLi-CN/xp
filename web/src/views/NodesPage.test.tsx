@@ -201,7 +201,7 @@ describe("<NodesPage />", () => {
 		renderPage();
 
 		const signInLinks = await screen.findAllByRole("link", {
-			name: "Sign in again",
+			name: "Sign in",
 		});
 		expect(signInLinks).toHaveLength(2);
 		for (const signInLink of signInLinks) {
@@ -228,7 +228,7 @@ describe("<NodesPage />", () => {
 
 		await screen.findByText("Showing cached node inventory");
 		expect(screen.getByText("tokyo-1")).toBeVisible();
-		expect(screen.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
+		expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
 			"href",
 			"/login?redirect=%2F",
 		);
@@ -247,7 +247,7 @@ describe("<NodesPage />", () => {
 
 		await screen.findByRole("button", { name: "Retry" });
 		expect(
-			screen.queryByRole("link", { name: "Sign in again" }),
+			screen.queryByRole("link", { name: "Sign in" }),
 		).not.toBeInTheDocument();
 	});
 });

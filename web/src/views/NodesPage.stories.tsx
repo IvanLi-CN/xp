@@ -221,7 +221,7 @@ export const UnauthorizedLoadError: Story = {
 			),
 		).toBeInTheDocument();
 		await expect(
-			canvas.getByRole("link", { name: "Sign in again" }),
+			canvas.getByRole("link", { name: "Sign in" }),
 		).toBeInTheDocument();
 		await expect(
 			canvas.getByRole("button", { name: "Retry" }),
@@ -242,7 +242,7 @@ export const CachedUnauthorizedInventory: Story = {
 			await canvas.findByText("Showing cached node inventory"),
 		).toBeInTheDocument();
 		const signInAgain = await canvas.findByRole("link", {
-			name: "Sign in again",
+			name: "Sign in",
 		});
 		await expect(signInAgain).toHaveAttribute(
 			"href",

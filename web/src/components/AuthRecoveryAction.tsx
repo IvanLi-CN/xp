@@ -20,7 +20,7 @@ export function AuthRecoveryAction({ error }: AuthRecoveryActionProps) {
 	return (
 		<Button asChild>
 			<Link to="/login" search={{ redirect: loginRedirect }}>
-				Sign in again
+				Sign in
 			</Link>
 		</Button>
 	);

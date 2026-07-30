@@ -31,9 +31,10 @@ export const Unauthorized: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByRole("link", { name: "Sign in again" }),
-		).toHaveAttribute("href", expect.stringContaining("/login?redirect="));
+		await expect(canvas.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+			"href",
+			expect.stringContaining("/login?redirect="),
+		);
 	},
 };
 
