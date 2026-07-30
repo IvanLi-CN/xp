@@ -149,7 +149,7 @@ Storybook覆盖=通过
   state=dark real pointer hover
   evidence_note=验证深色页面内的 tooltip、虚线十字线、当前阶梯面积与参考虚线在 hover 后同时可见。
 
-![Traffic hover dark](assets/traffic-hover-dark.png)
+![Traffic hover dark](./assets/traffic-hover-dark.png)
 
 - source_type=storybook_canvas
   target_program=mock-only
@@ -165,7 +165,7 @@ Storybook覆盖=通过
   state=light real pointer hover
   evidence_note=验证浅色页面内 tooltip 的 surface、文字和轻量阴影随主题 token 切换。
 
-![Traffic hover light](assets/traffic-hover-light.png)
+![Traffic hover light](./assets/traffic-hover-light.png)
 
 - source_type=storybook_canvas
   target_program=mock-only
@@ -182,7 +182,7 @@ Storybook覆盖=通过
   evidence_note=验证 390px 视口的完整五分钟序列中，tooltip 换行且不越过可视边界；
   完整页面的移动端 section select 由 Storybook interaction coverage 验证。
 
-![Traffic hover mobile](assets/traffic-hover-mobile.png)
+![Traffic hover mobile](./assets/traffic-hover-mobile.png)
 
 - source_type=storybook_canvas
   target_program=mock-only
@@ -198,7 +198,7 @@ Storybook覆盖=通过
   state=light desktop tab layout
   evidence_note=验证桌面 TabList 按内容宽度收缩、保留窄屏换行约束，并与 Traffic 面板保持明确分组间距。
 
-![Traffic tab list content width](assets/traffic-tablist-content-width.png)
+![Traffic tab list content width](./assets/traffic-tablist-content-width.png)
 
 ## Related PRs
 
