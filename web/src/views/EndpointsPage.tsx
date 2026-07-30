@@ -145,6 +145,7 @@ export function EndpointsPage() {
 					variant="error"
 					title="Failed to load endpoints"
 					description={description}
+					error={endpointsQuery.error}
 					action={
 						<Button
 							variant="secondary"
@@ -195,6 +196,7 @@ export function EndpointsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={[endpointsQuery.error, nodesQuery.error]}
 					title={
 						!runtime.isOnline
 							? "Offline endpoint list"

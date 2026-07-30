@@ -351,6 +351,7 @@ export function EndpointDetailsPage() {
 				variant="error"
 				title="Failed to load endpoint"
 				description={formatErrorMessage(endpointQuery.error)}
+				error={endpointQuery.error}
 				action={
 					<Button variant="secondary" onClick={() => endpointQuery.refetch()}>
 						Retry
@@ -430,6 +431,7 @@ export function EndpointDetailsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={[endpointQuery.error, nodesQuery.error]}
 					title={
 						!runtime.isOnline
 							? "Offline endpoint snapshot"

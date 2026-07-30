@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { AuthRecoveryAction, isUnauthorizedError } from "./AuthRecoveryAction";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { alertClass } from "./ui-helpers";
@@ -10,6 +11,8 @@ type ReadStateBannerProps = {
 	description?: string;
 	variant?: "banner" | "inline";
 	dismissible?: boolean;
+	error?: unknown;
+	errors?: readonly unknown[];
 };
 
 export function ReadStateBanner({
@@ -18,30 +21,45 @@ export function ReadStateBanner({
 	description,
 	variant = "banner",
 	dismissible = false,
+	error,
+	errors = [],
 }: ReadStateBannerProps) {
 	const [dismissed, setDismissed] = useState(false);
+	const unauthorizedError = [error, ...errors].find(isUnauthorizedError);
 
-	if (dismissed) {
+	if (dismissed && !unauthorizedError) {
 		return null;
 	}
 
 	const iconName =
 		tone === "warning" ? "tabler:alert-circle" : "tabler:info-circle";
 
-	const dismissButton = dismissible ? (
-		<Button
-			variant="ghost"
-			size="sm"
-			className={
-				"size-7 shrink-0 rounded-full px-0 text-foreground/60 " +
-				"hover:bg-background/40 hover:text-foreground"
-			}
-			aria-label={`Dismiss ${title}`}
-			onClick={() => setDismissed(true)}
-		>
-			<Icon name="tabler:x" size={16} className="shrink-0" />
-		</Button>
-	) : null;
+	const dismissButton =
+		dismissible && !unauthorizedError ? (
+			<Button
+				variant="ghost"
+				size="sm"
+				className={
+					"size-7 shrink-0 rounded-full px-0 text-foreground/60 " +
+					"hover:bg-background/40 hover:text-foreground"
+				}
+				aria-label={`Dismiss ${title}`}
+				onClick={() => setDismissed(true)}
+			>
+				<Icon name="tabler:x" size={16} className="shrink-0" />
+			</Button>
+		) : null;
+	const recoveryAction =
+		tone === "info" && unauthorizedError ? (
+			<AuthRecoveryAction error={unauthorizedError} />
+		) : null;
+	const actions =
+		recoveryAction || dismissButton ? (
+			<div className="flex shrink-0 items-center gap-2">
+				{recoveryAction}
+				{dismissButton}
+			</div>
+		) : null;
 
 	if (variant === "inline") {
 		return (
@@ -68,7 +86,7 @@ export function ReadStateBanner({
 						</div>
 					</div>
 				</div>
-				{dismissButton}
+				{actions}
 			</div>
 		);
 	}
@@ -88,7 +106,7 @@ export function ReadStateBanner({
 					) : null}
 				</div>
 			</div>
-			{dismissButton}
+			{actions}
 		</div>
 	);
 }

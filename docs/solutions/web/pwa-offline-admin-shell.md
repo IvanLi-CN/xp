@@ -56,6 +56,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
 - Serve `/sw.js` with stronger no-store semantics than ordinary HTML routes,
   including CDN-facing cache-bypass headers, so an edge cache cannot pin an old
   Service Worker for hours after a release.
+- Classify an initial `401` separately from offline and permission failures:
+  offer a re-login link that preserves the current relative location, retain
+  the existing token until login verifies a replacement, and do not offer that
+  action for `403`.
 
 ## Guardrails / Reuse notes
 
@@ -72,6 +76,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   prompts even when the source app returns `no-cache`.
 - Offline UX should always surface whether the user is seeing cached data, when it last synced, and
   whether the current view has no local snapshot at all.
+- Keep re-authentication recovery in shared error-state and cached-read banner
+  primitives so all management reads follow the same 401-only behavior. Initial
+  error states retain retry; cached refresh failures retain the useful snapshot
+  and expose re-authentication.
 - When adding a new admin page, decide whether it belongs to the persisted allowlist and whether its
   writes need extra offline guards before claiming that page supports offline warm-load.
 

@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 
+import { AuthRecoveryAction, isUnauthorizedError } from "./AuthRecoveryAction";
+
 type PageStateVariant = "loading" | "empty" | "error" | "offline";
 
 type PageStateProps = {
 	variant: PageStateVariant;
 	title: string;
 	description?: string;
+	error?: unknown;
 	action?: ReactNode;
 };
 
@@ -22,8 +25,12 @@ export function PageState({
 	variant,
 	title,
 	description,
+	error,
 	action,
 }: PageStateProps) {
+	const needsSignIn = variant === "error" && isUnauthorizedError(error);
+	const hasAction = needsSignIn || action;
+
 	return (
 		<Card>
 			<CardContent className="flex items-center justify-center px-6 py-12 text-center">
@@ -35,8 +42,9 @@ export function PageState({
 					{variant === "loading" ? (
 						<div className="xp-loading-spinner size-8 border-[3px]" />
 					) : null}
-					{action ? (
+					{hasAction ? (
 						<div className="flex flex-wrap items-center justify-center gap-2">
+							{needsSignIn ? <AuthRecoveryAction error={error} /> : null}
 							{action}
 						</div>
 					) : null}

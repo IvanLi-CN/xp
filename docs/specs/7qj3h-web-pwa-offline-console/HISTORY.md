@@ -10,3 +10,6 @@
 - 2026-07-09: Hardened `/sw.js` delivery with browser and CDN cache-bypass
   headers after live validation showed the public edge caching the Service
   Worker for four hours and suppressing the frontend update prompt.
+- 2026-07-30: Added shared 401 authentication recovery to initial management
+  read failures and cached refresh banners, preserving the failed route for
+  verified re-login while keeping 403 as a permission error.

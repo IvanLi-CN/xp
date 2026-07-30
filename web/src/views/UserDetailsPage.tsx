@@ -48,6 +48,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { QueryErrorState } from "../components/QueryErrorState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
@@ -91,11 +92,9 @@ type MihomoProfileDraft = {
 };
 
 const { dump, load } = yaml;
-
 function isYamlMapping(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function parseYamlSequenceOrNull(raw: string): unknown[] | null {
 	if (raw.trim() === "") {
 		return [];
@@ -107,7 +106,6 @@ function parseYamlSequenceOrNull(raw: string): unknown[] | null {
 		return null;
 	}
 }
-
 function parseYamlMappingOrNull(raw: string): Record<string, unknown> | null {
 	if (raw.trim() === "") {
 		return {};
@@ -339,7 +337,6 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotas(adminToken, userId, signal),
 	});
-
 	const nodeQuotaStatusQuery = useQuery({
 		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
 		enabled:
@@ -347,7 +344,6 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
-
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminUserIpUsage", adminToken, userId, ipUsageWindow],
 		enabled: adminToken.length > 0 && tab === "usageDetails",
@@ -999,17 +995,18 @@ export function UserDetailsPage() {
 	}
 	if (userQuery.isError && !hasQueryData(userQuery)) {
 		return (
-			<PageState
-				variant="error"
+			<QueryErrorState
 				title="Failed to load user"
 				description={formatError(userQuery.error)}
+				error={userQuery.error}
+				loading={userQuery.isFetching}
+				onRetry={() => userQuery.refetch()}
 			/>
 		);
 	}
 	if (!user) {
 		return <PageState variant="empty" title="User not found" />;
 	}
-
 	const nodeCards = nodesQuery.data?.items ?? [];
 	const nodeQuotasByNodeId = new Map(
 		(nodeQuotasQuery.data?.items ?? []).map((quota) => [quota.node_id, quota]),
@@ -1035,7 +1032,7 @@ export function UserDetailsPage() {
 		if (item.quota_limit_bytes === 0) return "Remaining: unlimited";
 		return `Remaining: ${formatQuotaBytesHuman(item.remaining_bytes)}`;
 	}
-	const latestSyncedAt = latestQueryDataUpdatedAt([
+	const cachedReadQueries = [
 		userQuery,
 		mihomoProfileQuery,
 		nodesQuery,
@@ -1044,16 +1041,15 @@ export function UserDetailsPage() {
 		nodeQuotasQuery,
 		nodeQuotaStatusQuery,
 		ipUsageQuery,
-	]);
+		trafficQuery,
+	];
+	const latestSyncedAt = latestQueryDataUpdatedAt(cachedReadQueries);
 	const showCachedBanner =
 		latestSyncedAt !== null &&
 		(hasQueryData(userQuery) ||
 			hasQueryData(accessQuery) ||
 			hasQueryData(nodeQuotaStatusQuery)) &&
-		(!runtime.isOnline ||
-			userQuery.isError ||
-			accessQuery.isError ||
-			nodeQuotaStatusQuery.isError);
+		(!runtime.isOnline || cachedReadQueries.some((query) => query.isError));
 
 	return (
 		<div className="space-y-6">
@@ -1091,6 +1087,7 @@ export function UserDetailsPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={cachedReadQueries.map((query) => query.error)}
 					title={
 						!runtime.isOnline
 							? "Offline user snapshot"
@@ -1483,22 +1480,13 @@ export function UserDetailsPage() {
 					{trafficQuery.isError &&
 					!trafficQuery.data &&
 					!queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
-						<PageState
-							variant="error"
+						<QueryErrorState
 							title="Failed to load traffic"
 							description={formatError(trafficQuery.error)}
-							action={
-								<>
-									{trafficNodeSelector}
-									<Button
-										variant="secondary"
-										loading={trafficQuery.isFetching}
-										onClick={() => trafficQuery.refetch()}
-									>
-										Retry
-									</Button>
-								</>
-							}
+							error={trafficQuery.error}
+							loading={trafficQuery.isFetching}
+							onRetry={() => trafficQuery.refetch()}
+							beforeRetry={trafficNodeSelector}
 						/>
 					) : null}
 					{trafficQuery.data ? (
@@ -1546,10 +1534,12 @@ export function UserDetailsPage() {
 					{ipUsageQuery.isError &&
 					!ipUsageQuery.data &&
 					!queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
-						<PageState
-							variant="error"
+						<QueryErrorState
 							title="Failed to load usage details"
 							description={formatError(ipUsageQuery.error)}
+							error={ipUsageQuery.error}
+							loading={ipUsageQuery.isFetching}
+							onRetry={() => ipUsageQuery.refetch()}
 						/>
 					) : null}
 					{ipUsageQuery.data?.partial ? (
@@ -1643,10 +1633,12 @@ export function UserDetailsPage() {
 					) : null}
 					{nodeQuotaStatusQuery.isError &&
 					!hasQueryData(nodeQuotaStatusQuery) ? (
-						<PageState
-							variant="error"
+						<QueryErrorState
 							title="Failed to load quota status"
 							description={formatError(nodeQuotaStatusQuery.error)}
+							error={nodeQuotaStatusQuery.error}
+							loading={nodeQuotaStatusQuery.isFetching}
+							onRetry={() => nodeQuotaStatusQuery.refetch()}
 						/>
 					) : null}
 					{nodeQuotaStatusQuery.data?.partial ? (
@@ -1697,7 +1689,6 @@ export function UserDetailsPage() {
 				error={subError}
 				onFormatChange={loadSubscriptionPreview}
 			/>
-
 			<ConfirmDialog
 				open={resetTokenOpen}
 				title="Reset subscription token"

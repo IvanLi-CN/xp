@@ -101,7 +101,7 @@ function FieldBlock({ label, value, copyText }: FieldBlockProps) {
 						errorLabel="error"
 						variant="secondary"
 						size="sm"
-						className="h-7 px-2 text-[11px] uppercase tracking-wide"
+						className="h-7 px-2 text-xs uppercase tracking-wide"
 					/>
 				) : null}
 			</div>
@@ -204,6 +204,7 @@ export function ServiceConfigPage() {
 					variant="error"
 					title="加载失败"
 					description={formatErrorMessage(configQuery.error)}
+					error={configQuery.error}
 					action={
 						<Button
 							variant="secondary"
@@ -416,6 +417,7 @@ export function ServiceConfigPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={[configQuery.error, clusterInfo.error, health.error]}
 					title={!runtime.isOnline ? "离线配置快照" : "当前展示的是缓存配置"}
 					description={`最近一次成功同步：${formatSyncTimestamp(latestSyncedAt)}。`}
 				/>

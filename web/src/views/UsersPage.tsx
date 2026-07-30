@@ -111,6 +111,7 @@ export function UsersPage() {
 					variant="error"
 					title="Failed to load users"
 					description={formatError(usersQuery.error)}
+					error={usersQuery.error}
 					action={
 						<Button variant="secondary" onClick={() => usersQuery.refetch()}>
 							Retry
@@ -352,6 +353,7 @@ export function UsersPage() {
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={[usersQuery.error, quotaSummariesQuery.error]}
 					title={
 						!runtime.isOnline
 							? "Offline user directory"

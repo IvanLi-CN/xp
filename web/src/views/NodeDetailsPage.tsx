@@ -44,6 +44,7 @@ import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { QueryErrorState } from "../components/QueryErrorState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
@@ -78,7 +79,6 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
-
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
 		const code = error.code ? ` ${error.code}` : "";
@@ -841,22 +841,14 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		if (nodeQuery.isError && !hasQueryData(nodeQuery)) {
 			return (
-				<PageState
-					variant="error"
+				<QueryErrorState
 					title="Failed to load node"
 					description={formatErrorMessage(nodeQuery.error)}
-					action={
-						<Button
-							variant="secondary"
-							loading={nodeQuery.isFetching}
-							onClick={() => nodeQuery.refetch()}
-						>
-							Retry
-						</Button>
-					}
+					error={nodeQuery.error}
+					loading={nodeQuery.isFetching}
+					onRetry={() => nodeQuery.refetch()}
 				/>
 			);
 		}
@@ -963,20 +955,13 @@ export function NodeDetailsPage() {
 							!runtime &&
 							!history &&
 							!queryIsOfflineBlocked(runtimeQuery, appRuntime.isOnline) ? (
-								<PageState
-									variant="error"
+								<QueryErrorState
 									title="Failed to load runtime"
 									description={formatErrorMessage(runtimeQuery.error)}
-									action={
-										<Button
-											variant="secondary"
-											loading={runtimeQuery.isFetching}
-											disabled={!appRuntime.isOnline}
-											onClick={() => runtimeQuery.refetch()}
-										>
-											Retry
-										</Button>
-									}
+									error={runtimeQuery.error}
+									loading={runtimeQuery.isFetching}
+									disabled={!appRuntime.isOnline}
+									onRetry={() => runtimeQuery.refetch()}
 								/>
 							) : null}
 
@@ -1561,19 +1546,12 @@ export function NodeDetailsPage() {
 							{trafficQuery.isError &&
 							!trafficQuery.data &&
 							!queryIsOfflineBlocked(trafficQuery, appRuntime.isOnline) ? (
-								<PageState
-									variant="error"
+								<QueryErrorState
 									title="Failed to load traffic"
 									description={formatErrorMessage(trafficQuery.error)}
-									action={
-										<Button
-											variant="secondary"
-											loading={trafficQuery.isFetching}
-											onClick={() => trafficQuery.refetch()}
-										>
-											Retry
-										</Button>
-									}
+									error={trafficQuery.error}
+									loading={trafficQuery.isFetching}
+									onRetry={() => trafficQuery.refetch()}
 								/>
 							) : null}
 							{trafficQuery.data ? (
@@ -1609,19 +1587,12 @@ export function NodeDetailsPage() {
 							{ipUsageQuery.isError &&
 							!ipUsageQuery.data &&
 							!queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
-								<PageState
-									variant="error"
+								<QueryErrorState
 									title="Failed to load IP usage"
 									description={formatErrorMessage(ipUsageQuery.error)}
-									action={
-										<Button
-											variant="secondary"
-											loading={ipUsageQuery.isFetching}
-											onClick={() => ipUsageQuery.refetch()}
-										>
-											Retry
-										</Button>
-									}
+									error={ipUsageQuery.error}
+									loading={ipUsageQuery.isFetching}
+									onRetry={() => ipUsageQuery.refetch()}
 								/>
 							) : null}
 
@@ -1668,19 +1639,12 @@ export function NodeDetailsPage() {
 								tcpConnectionsQuery,
 								appRuntime.isOnline,
 							) ? (
-								<PageState
-									variant="error"
+								<QueryErrorState
 									title="Failed to load TCP connection count"
 									description={formatErrorMessage(tcpConnectionsQuery.error)}
-									action={
-										<Button
-											variant="secondary"
-											loading={tcpConnectionsQuery.isFetching}
-											onClick={() => tcpConnectionsQuery.refetch()}
-										>
-											Retry
-										</Button>
-									}
+									error={tcpConnectionsQuery.error}
+									loading={tcpConnectionsQuery.isFetching}
+									onRetry={() => tcpConnectionsQuery.refetch()}
 								/>
 							) : null}
 
@@ -1826,7 +1790,10 @@ export function NodeDetailsPage() {
 		(!appRuntime.isOnline ||
 			nodeQuery.isError ||
 			runtimeQuery.isError ||
-			historyQuery.isError);
+			historyQuery.isError ||
+			trafficQuery.isError ||
+			ipUsageQuery.isError ||
+			tcpConnectionsQuery.isError);
 
 	return (
 		<div className="space-y-4 sm:space-y-6">
@@ -1844,6 +1811,14 @@ export function NodeDetailsPage() {
 					tone={!appRuntime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
+					errors={[
+						nodeQuery.error,
+						runtimeQuery.error,
+						historyQuery.error,
+						trafficQuery.error,
+						ipUsageQuery.error,
+						tcpConnectionsQuery.error,
+					]}
 					title={
 						!appRuntime.isOnline
 							? "Offline node snapshot"

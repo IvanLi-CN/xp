@@ -292,6 +292,7 @@ export function RealityDomainsPage() {
 				variant="error"
 				title="Failed to load nodes"
 				description={formatErrorMessage(nodesQuery.error)}
+				error={nodesQuery.error}
 				action={
 					<Button variant="secondary" onClick={() => nodesQuery.refetch()}>
 						Retry
@@ -307,6 +308,7 @@ export function RealityDomainsPage() {
 				variant="error"
 				title="Failed to load reality domains"
 				description={formatErrorMessage(domainsQuery.error)}
+				error={domainsQuery.error}
 				action={
 					<Button variant="secondary" onClick={() => domainsQuery.refetch()}>
 						Retry
