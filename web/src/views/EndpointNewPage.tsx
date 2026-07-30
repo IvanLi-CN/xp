@@ -256,6 +256,7 @@ export function EndpointNewPage() {
 					variant="error"
 					title="Failed to load nodes"
 					description={formatErrorMessage(nodesQuery.error)}
+					error={nodesQuery.error}
 					action={
 						<Button variant="secondary" onClick={() => nodesQuery.refetch()}>
 							Retry

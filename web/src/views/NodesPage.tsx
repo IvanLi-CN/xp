@@ -196,13 +196,13 @@ export function NodesPage() {
 				/>
 			);
 		}
-
 		if (nodesState.isError && !hasQueryData(nodesState)) {
 			return (
 				<PageState
 					variant="error"
 					title="Failed to load nodes"
 					description={formatErrorMessage(nodesState.error)}
+					error={nodesState.error}
 					action={
 						<Button
 							variant="secondary"

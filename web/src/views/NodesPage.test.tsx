@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
+import { BackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -19,17 +20,22 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			children,
 			to,
 			params,
+			search,
 			...rest
 		}: {
 			children: React.ReactNode;
 			to?: string;
 			params?: Record<string, string>;
+			search?: { redirect?: string };
 		}) => {
 			let href = to ?? "#";
 			if (params) {
 				for (const [key, value] of Object.entries(params)) {
 					href = href.replace(`$${key}`, value);
 				}
+			}
+			if (search?.redirect) {
+				href += `?redirect=${encodeURIComponent(search.redirect)}`;
 			}
 			return (
 				<a href={href} {...rest}>
@@ -73,6 +79,7 @@ function renderPage() {
 describe("<NodesPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		window.history.pushState({}, "", "/");
 		globalThis.ResizeObserver = class {
 			observe() {
 				// no-op for jsdom layout tests
@@ -178,5 +185,43 @@ describe("<NodesPage />", () => {
 			"https://node-1.example.com/?login_token=admintoken",
 			"https://node-2.example.com/?login_token=admintoken",
 		]);
+	});
+
+	it("offers sign-in recovery for an unauthorized nodes request", async () => {
+		window.history.pushState({}, "", "/nodes?view=table#history");
+		vi.mocked(fetchAdminNodesRuntime).mockRejectedValue(
+			new BackendApiError({
+				status: 401,
+				code: "unauthorized",
+				message: "missing or invalid authorization token",
+			}),
+		);
+
+		renderPage();
+
+		expect(
+			await screen.findByRole("link", { name: "Sign in again" }),
+		).toHaveAttribute(
+			"href",
+			"/login?redirect=%2Fnodes%3Fview%3Dtable%23history",
+		);
+		expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+	});
+
+	it("keeps forbidden errors on the normal retry path", async () => {
+		vi.mocked(fetchAdminNodesRuntime).mockRejectedValue(
+			new BackendApiError({
+				status: 403,
+				code: "forbidden",
+				message: "access denied",
+			}),
+		);
+
+		renderPage();
+
+		await screen.findByRole("button", { name: "Retry" });
+		expect(
+			screen.queryByRole("link", { name: "Sign in again" }),
+		).not.toBeInTheDocument();
 	});
 });

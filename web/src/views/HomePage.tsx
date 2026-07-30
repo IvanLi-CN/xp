@@ -8,6 +8,7 @@ import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { AuthRecoveryAction } from "../components/AuthRecoveryAction";
 import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
@@ -248,6 +249,7 @@ export function HomePage() {
 								{clusterInfo.error.message}
 							</p>
 						) : null}
+						<AuthRecoveryAction error={clusterInfo.error} />
 					</div>
 				) : (
 					<div className="space-y-1">
@@ -302,6 +304,7 @@ export function HomePage() {
 						<p className="font-mono text-sm text-muted-foreground">
 							{formatError(adminAlerts.error)}
 						</p>
+						<AuthRecoveryAction error={adminAlerts.error} />
 					</div>
 				) : !adminAlerts.data ? (
 					<p className="text-sm text-muted-foreground">No data.</p>
@@ -374,6 +377,7 @@ export function HomePage() {
 							{formatError(adminNodes.error)}
 						</p>
 						<div className="xp-card-actions justify-end">
+							<AuthRecoveryAction error={adminNodes.error} />
 							<Button
 								variant="secondary"
 								loading={adminNodes.isFetching}

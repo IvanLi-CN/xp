@@ -145,6 +145,7 @@ export function EndpointsPage() {
 					variant="error"
 					title="Failed to load endpoints"
 					description={description}
+					error={endpointsQuery.error}
 					action={
 						<Button
 							variant="secondary"

@@ -169,6 +169,7 @@ export function EndpointProbeStatsPage() {
 				variant="error"
 				title="Failed to load probe stats"
 				description={description}
+				error={endpointQuery.error ?? historyQuery.error}
 				action={
 					<Button
 						variant="secondary"

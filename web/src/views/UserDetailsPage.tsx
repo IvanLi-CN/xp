@@ -1003,13 +1003,13 @@ export function UserDetailsPage() {
 				variant="error"
 				title="Failed to load user"
 				description={formatError(userQuery.error)}
+				error={userQuery.error}
 			/>
 		);
 	}
 	if (!user) {
 		return <PageState variant="empty" title="User not found" />;
 	}
-
 	const nodeCards = nodesQuery.data?.items ?? [];
 	const nodeQuotasByNodeId = new Map(
 		(nodeQuotasQuery.data?.items ?? []).map((quota) => [quota.node_id, quota]),

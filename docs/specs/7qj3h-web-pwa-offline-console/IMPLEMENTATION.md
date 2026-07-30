@@ -29,6 +29,18 @@
   cached/offline/reconnecting banner primitive, with Storybook coverage for
   snapshot and reconnecting states.
 
+## Authentication recovery
+
+- `web/src/components/AuthRecoveryAction.tsx` classifies structured backend
+  errors and renders `Sign in again` only for an initial `401` failure. It
+  preserves the current relative path, query, and hash in the login redirect.
+- `PageState` and the Dashboard's direct error cards pass their query error to
+  that shared recovery action, so major management read pages retain `Retry`
+  while exposing an explicit re-authentication path.
+- Login validation remains the only operation that writes a replacement token;
+  a stored token is therefore kept until a new token has been verified. `403`
+  errors remain permission failures and do not show the recovery action.
+
 ## Status streaming
 
 - `src/http/mod.rs` adds `GET /api/admin/status/events`, an admin-only SSE
@@ -61,5 +73,6 @@
   `cd web && bun run typecheck`
   `cd web && bun run test`
 - Storybook coverage includes offline page stories for Nodes and Node details,
-  plus component stories for `PageState`, `ReadStateBanner`, and the PWA update
-  prompt card.
+  plus component stories for `PageState`, `AuthRecoveryAction`,
+  `ReadStateBanner`, and the PWA update prompt card. The unauthorized
+  `PageState` story also verifies its login redirect link.

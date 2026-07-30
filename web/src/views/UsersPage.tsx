@@ -111,6 +111,7 @@ export function UsersPage() {
 					variant="error"
 					title="Failed to load users"
 					description={formatError(usersQuery.error)}
+					error={usersQuery.error}
 					action={
 						<Button variant="secondary" onClick={() => usersQuery.refetch()}>
 							Retry

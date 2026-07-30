@@ -351,6 +351,7 @@ export function EndpointDetailsPage() {
 				variant="error"
 				title="Failed to load endpoint"
 				description={formatErrorMessage(endpointQuery.error)}
+				error={endpointQuery.error}
 				action={
 					<Button variant="secondary" onClick={() => endpointQuery.refetch()}>
 						Retry

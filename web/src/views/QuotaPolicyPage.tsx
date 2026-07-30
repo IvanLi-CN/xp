@@ -1242,7 +1242,6 @@ export function QuotaPolicyPage() {
 			/>
 		);
 	}
-
 	if (
 		(nodesQuery.isLoading && !hasQueryData(nodesQuery)) ||
 		(usersQuery.isLoading && !hasQueryData(usersQuery)) ||
@@ -1277,18 +1276,19 @@ export function QuotaPolicyPage() {
 		(usersQuery.isError && !hasQueryData(usersQuery)) ||
 		(globalWeightRowsQuery.isError && !hasQueryData(globalWeightRowsQuery))
 	) {
-		const message = nodesQuery.isError
-			? formatError(nodesQuery.error)
+		const loadError = nodesQuery.isError
+			? nodesQuery.error
 			: usersQuery.isError
-				? formatError(usersQuery.error)
+				? usersQuery.error
 				: globalWeightRowsQuery.isError
-					? formatError(globalWeightRowsQuery.error)
-					: "Unknown error";
+					? globalWeightRowsQuery.error
+					: undefined;
 		return (
 			<PageState
 				variant="error"
 				title="Failed to load quota policy"
-				description={message}
+				description={formatError(loadError)}
+				error={loadError}
 				action={
 					<Button
 						variant="secondary"

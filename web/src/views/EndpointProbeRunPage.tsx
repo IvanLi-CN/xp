@@ -455,6 +455,7 @@ export function EndpointProbeRunPage() {
 					variant="error"
 					title="Failed to load probe status"
 					description={formatErrorMessage(statusQuery.error)}
+					error={statusQuery.error}
 					action={
 						<Button variant="secondary" onClick={() => statusQuery.refetch()}>
 							Retry

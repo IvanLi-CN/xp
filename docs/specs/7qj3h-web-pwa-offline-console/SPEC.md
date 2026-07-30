@@ -53,6 +53,10 @@
 - 首次成功加载后，重复访问在断网场景下必须能显示可交互 app shell 与最近缓存内容，而不是浏览器错误页。
 - React Query 持久化必须只覆盖允许的 major read queries，`maxAge` 为 `24h`，且缓存 `buster` 绑定当前前端构建版本。
 - 离线时 major read pages 必须明确标记缓存视图与最近同步时间；无缓存时返回专门的 offline empty state。
+- Major read pages 的初始请求若因 `BackendApiError.status === 401` 失败，必须提供英文
+  `Sign in again` 入口，并把当前相对路径、查询参数和锚点作为登录完成后的返回地址；仅在验证成功后才用
+  新 token 替换本地保存的旧 token，且原有 `Retry` 仍可用。
+- `403` 表示已认证但无权访问，必须保留现有权限错误 / 重试状态，不得显示重新登录入口。
 - 离线时任何 `POST` / `PUT` / `PATCH` / `DELETE` 到同源 `/api/*` 的前端写入都必须被 UI 或全局保护拦截。
 - `GET /api/admin/status/events` 必须要求 admin auth，返回
   `text/event-stream`，并至少发送 `hello` 与聚合 `snapshot` 事件。
@@ -95,6 +99,9 @@
   Node details / Endpoints / Users / Quota policy / Service config / Tools，
   Then 页面进入离线只读态并显示 `last synced at`。
 - Given 设备断网且页面没有缓存，When 打开对应详情页，Then 页面显示专门的 offline empty state，而不是通用请求失败。
+- Given 已保存的 admin token 已失效，When 管理读页面的初始请求返回 `401`，Then 错误态同时提供
+  `Sign in again` 和 `Retry`；验证新 token 后返回触发错误的原路径、查询参数和锚点。
+- Given 管理读页面的初始请求返回 `403`，When 页面呈现错误态，Then 不提供 `Sign in again`。
 - Given 离线只读模式，When 用户尝试保存 / 删除 / 创建 / 触发 probe / 运行后端工具，Then 交互被禁用或请求在前端被拦截。
 - Given 管理台在线打开，When `GET /api/admin/status/events`
   持续推送状态变化，Then Dashboard / Nodes / Alerts / Upgrade badge

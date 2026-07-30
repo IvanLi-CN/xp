@@ -841,13 +841,13 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		if (nodeQuery.isError && !hasQueryData(nodeQuery)) {
 			return (
 				<PageState
 					variant="error"
 					title="Failed to load node"
 					description={formatErrorMessage(nodeQuery.error)}
+					error={nodeQuery.error}
 					action={
 						<Button
 							variant="secondary"
