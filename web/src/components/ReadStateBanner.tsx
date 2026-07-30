@@ -25,29 +25,30 @@ export function ReadStateBanner({
 	errors = [],
 }: ReadStateBannerProps) {
 	const [dismissed, setDismissed] = useState(false);
+	const unauthorizedError = [error, ...errors].find(isUnauthorizedError);
 
-	if (dismissed) {
+	if (dismissed && !unauthorizedError) {
 		return null;
 	}
 
 	const iconName =
 		tone === "warning" ? "tabler:alert-circle" : "tabler:info-circle";
 
-	const dismissButton = dismissible ? (
-		<Button
-			variant="ghost"
-			size="sm"
-			className={
-				"size-7 shrink-0 rounded-full px-0 text-foreground/60 " +
-				"hover:bg-background/40 hover:text-foreground"
-			}
-			aria-label={`Dismiss ${title}`}
-			onClick={() => setDismissed(true)}
-		>
-			<Icon name="tabler:x" size={16} className="shrink-0" />
-		</Button>
-	) : null;
-	const unauthorizedError = [error, ...errors].find(isUnauthorizedError);
+	const dismissButton =
+		dismissible && !unauthorizedError ? (
+			<Button
+				variant="ghost"
+				size="sm"
+				className={
+					"size-7 shrink-0 rounded-full px-0 text-foreground/60 " +
+					"hover:bg-background/40 hover:text-foreground"
+				}
+				aria-label={`Dismiss ${title}`}
+				onClick={() => setDismissed(true)}
+			>
+				<Icon name="tabler:x" size={16} className="shrink-0" />
+			</Button>
+		) : null;
 	const recoveryAction =
 		tone === "info" && unauthorizedError ? (
 			<AuthRecoveryAction error={unauthorizedError} />
