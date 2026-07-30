@@ -130,10 +130,8 @@
   - PR: include
   - ![401 recovery in the Nodes error state](./assets/auth-recovery-nodes-error.png)
 - Storybook `Pages/NodesPage/CachedUnauthorizedInventory`
-  - PR: none
   - ![Cached 401 recovery on Nodes](./assets/auth-recovery-nodes-page.png)
 - Storybook `Components/ReadStateBanner/UnauthorizedCachedData`
-  - PR: none
   - ![401 authentication recovery](./assets/auth-recovery-401.png)
 
 ## 文档更新（Docs to Update）
