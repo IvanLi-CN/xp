@@ -337,7 +337,6 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotas(adminToken, userId, signal),
 	});
-
 	const nodeQuotaStatusQuery = useQuery({
 		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
 		enabled:
@@ -345,7 +344,6 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
-
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminUserIpUsage", adminToken, userId, ipUsageWindow],
 		enabled: adminToken.length > 0 && tab === "usageDetails",
@@ -1052,7 +1050,9 @@ export function UserDetailsPage() {
 		(!runtime.isOnline ||
 			userQuery.isError ||
 			accessQuery.isError ||
-			nodeQuotaStatusQuery.isError);
+			nodeQuotaStatusQuery.isError ||
+			trafficQuery.isError ||
+			ipUsageQuery.isError);
 
 	return (
 		<div className="space-y-6">

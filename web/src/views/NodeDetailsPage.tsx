@@ -1790,7 +1790,10 @@ export function NodeDetailsPage() {
 		(!appRuntime.isOnline ||
 			nodeQuery.isError ||
 			runtimeQuery.isError ||
-			historyQuery.isError);
+			historyQuery.isError ||
+			trafficQuery.isError ||
+			ipUsageQuery.isError ||
+			tcpConnectionsQuery.isError);
 
 	return (
 		<div className="space-y-4 sm:space-y-6">
