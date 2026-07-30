@@ -133,7 +133,7 @@ Storybook覆盖=通过
 
 证据落盘=已落盘
 
-证据绑定sha=498cd0caa4cae5563753ef81c932c7e0e1cdfe35
+证据绑定sha=36b967da8da1f38b5090f493d74d0d8b12c089b2
 
 - source_type=storybook_canvas
   target_program=mock-only
@@ -170,7 +170,7 @@ Storybook覆盖=通过
 - source_type=storybook_canvas
   target_program=mock-only
   capture_scope=browser-viewport
-  requested_viewport=390x844
+  requested_viewport=320x844
   viewport_strategy=browser-resize-fallback
   （仓库未启用 Storybook viewport addon）
   margin_policy=trim_only
@@ -179,7 +179,7 @@ Storybook覆盖=通过
   submission_gate=approved
   story_id_or_title=Components/TrafficView/Last24Hours
   state=dark mobile real pointer hover
-  evidence_note=验证 390px 视口的完整五分钟序列中，tooltip 换行且不越过可视边界；
+  evidence_note=验证 320px 视口的完整五分钟序列中，tooltip 换行且不越过可视边界；
   完整页面的移动端 section select 由 Storybook interaction coverage 验证。
 
 ![Traffic hover mobile](./assets/traffic-hover-mobile.png)
