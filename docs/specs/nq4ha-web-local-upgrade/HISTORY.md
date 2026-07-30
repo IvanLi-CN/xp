@@ -12,6 +12,10 @@
 - 2026-07-05: hinet-lam 验证暴露 CentOS 7 `polkit` rules 目录默认不可由 `xp` 用户遍历；
   systemd delegate 支持检测收敛为 unit 存在加 polkit 授权验证，避免把有效委托误报为
   `missing installed upgrade delegate`，也避免只装 unit 的半安装被误判为 ready。
+- 2026-07-30: OpenRC `doas.conf` 的 root-only 权限使服务用户直接读取 policy 产生 false
+  negative。改由 root-owned fixed helper 执行 `--check`，以 doas 成功退出作为 readiness
+  事实，并在 Alpine/OpenDoas `0600 root:root` fixture 中验证正反例。已有节点首次跨越该边界
+  后由 root 显式运行 `xp-ops init` 安装新资产；不通过 status check 启动 one-shot service 迁移。
 - 2026-07-05: `VersionIndicator` unsupported 状态改为不可触发升级的 `Unavailable` 操作，
   current/latest 版本展示统一为 `vX.Y.Z` release tag 风格，并延迟 hover close 以降低状态刷新造成的闪烁。
 - 2026-07-05: hinet-lam Web upgrade start 暴露 CentOS 7 polkit 0.112 不提供

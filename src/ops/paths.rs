@@ -135,4 +135,9 @@ impl Paths {
     pub fn usr_local_libexec_xp_upgrade_trigger(&self) -> PathBuf {
         self.usr_local_libexec_dir().join("xp-upgrade-trigger")
     }
+
+    pub fn usr_local_libexec_xp_openrc_upgrade_trigger(&self) -> PathBuf {
+        self.usr_local_libexec_dir()
+            .join("xp-openrc-upgrade-trigger")
+    }
 }

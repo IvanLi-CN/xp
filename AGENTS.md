@@ -27,7 +27,15 @@
   the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
   nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow
   `/etc/sudoers.d/91-xp-upgrade` policy; the polkit rule is only a compatibility supplement because
-  CentOS 7-class polkit does not reliably expose `unit` / `verb` details. Docker / Compose nodes
+  CentOS 7-class polkit does not reliably expose `unit` / `verb` details. OpenRC nodes must include
+  the root-owned fixed `/usr/local/libexec/xp-openrc-upgrade-trigger` helper and narrow
+  `/etc/doas.conf` rules for its `--check` probe and fixed `xp-upgrade start`; the unprivileged
+  service verifies readiness through the helper and must not read root-only `doas.conf` directly.
+  This helper cannot be installed by the already-running pre-helper `xp-ops` binary: when an
+  existing OpenRC host crosses this release boundary, the root operator must run `xp-ops init`
+  after `xp-ops upgrade` completes. Missing or removed helper assets remain unsupported until that
+  explicit reinitialization; do not make readiness checks start the one-shot service as a fallback.
+  Docker / Compose nodes
   must keep using host-side image / Compose replacement and must be documented as Web-upgrade
   unsupported. The systemd `xp-upgrade.service` must invoke `xp-ops _upgrade-runner` directly and
   pass `XP_DATA_DIR` through the unit environment, not through shell-expanded `--data-dir` command

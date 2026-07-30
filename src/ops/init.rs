@@ -10,6 +10,9 @@ use std::process::Command;
 mod runtime_defaults;
 pub use runtime_defaults::backfill_low_memory_runtime_defaults;
 
+#[cfg(test)]
+mod openrc_upgrade_tests;
+
 pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
@@ -47,6 +50,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
             write_openrc_scripts(&paths, &args, mode)?;
             write_openrc_supervisor_kill_helper(&paths, mode)?;
             write_openrc_xray_restart_policy(&paths, mode)?;
+            write_openrc_upgrade_trigger_delegate(&paths, mode)?;
             write_openrc_upgrade_policy(&paths, mode)?;
             if args.enable_services {
                 enable_openrc_services(mode)?;
@@ -488,9 +492,18 @@ fn write_openrc_upgrade_policy(paths: &Paths, mode: Mode) -> Result<(), ExitErro
     }
 
     let existing = fs::read_to_string(&p).unwrap_or_default();
-    let marker = "# Managed by xp-ops: allow xp to start the upgrade runner";
-    let rule = "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start";
-    if existing.contains(rule) {
+    let marker = "# Managed by xp-ops: allow xp to check and start the upgrade runner";
+    let legacy_marker = "# Managed by xp-ops: allow xp to start the upgrade runner";
+    let rules = [
+        "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check",
+        "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start",
+    ];
+    let missing_rules: Vec<&str> = rules
+        .iter()
+        .copied()
+        .filter(|rule| !doas_policy_has_line(&existing, rule))
+        .collect();
+    if missing_rules.is_empty() {
         return Ok(());
     }
 
@@ -498,15 +511,59 @@ fn write_openrc_upgrade_policy(paths: &Paths, mode: Mode) -> Result<(), ExitErro
     if !out.ends_with('\n') && !out.is_empty() {
         out.push('\n');
     }
-    out.push_str(marker);
-    out.push('\n');
-    out.push_str(rule);
-    out.push('\n');
+    if !out.contains(marker) && !out.contains(legacy_marker) {
+        out.push_str(marker);
+        out.push('\n');
+    }
+    for rule in missing_rules {
+        out.push_str(rule);
+        out.push('\n');
+    }
 
     write_string_if_changed(&p, &out)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&p, 0o600).ok();
     Ok(())
+}
+
+fn doas_policy_has_line(content: &str, rule: &str) -> bool {
+    content.lines().any(|line| line.trim() == rule)
+}
+
+fn write_openrc_upgrade_trigger_delegate(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    let helper_dir = paths.usr_local_libexec_dir();
+    let helper = paths.usr_local_libexec_xp_openrc_upgrade_trigger();
+    if mode == Mode::DryRun {
+        eprintln!(
+            "would write OpenRC upgrade trigger helper: {}",
+            helper.display()
+        );
+        return Ok(());
+    }
+
+    ensure_dir(&helper_dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&helper, &openrc_upgrade_trigger_helper_script())
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    if !is_test_root(paths.root()) {
+        chown_root_root(&helper)?;
+    }
+    chmod(&helper, 0o755).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    Ok(())
+}
+
+fn openrc_upgrade_trigger_helper_script() -> String {
+    r#"#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ] || [ "$1" != "--check" ]; then
+  echo "usage: xp-openrc-upgrade-trigger --check" >&2
+  exit 64
+fi
+
+[ -x /etc/init.d/xp-upgrade ]
+grep -Fqx 'permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start' /etc/doas.conf
+"#
+    .to_string()
 }
 
 fn write_openrc_supervisor_kill_helper(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
@@ -926,29 +983,6 @@ mod tests {
         );
         assert!(!doas.contains("permit nopass xp as root cmd /bin/kill"));
         assert!(!doas.contains("permit nopass xp as root cmd /usr/bin/kill"));
-    }
-
-    #[test]
-    fn openrc_upgrade_policy_only_allows_runner_start() {
-        let tmp = tempdir().unwrap();
-        let paths = Paths::new(tmp.path().to_path_buf());
-        fs::create_dir_all(paths.etc_doas_conf().parent().unwrap()).unwrap();
-        fs::write(paths.etc_doas_conf(), "permit nopass root\n").unwrap();
-
-        write_openrc_upgrade_policy(&paths, Mode::Real).unwrap();
-
-        let doas = fs::read_to_string(paths.etc_doas_conf()).unwrap();
-        assert!(doas.contains("permit nopass root"));
-        assert!(
-            doas.contains("permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start")
-        );
-        assert!(!doas.contains("xp-upgrade restart"));
-
-        let script = openrc_xp_upgrade_script();
-        assert!(script.contains("xp-ops _upgrade-runner"));
-        assert!(script.contains(r#""${XP_DATA_DIR:-/var/lib/xp/data}""#));
-        assert!(!script.contains("command_background="));
-        assert!(!script.contains("pidfile="));
     }
 
     #[test]

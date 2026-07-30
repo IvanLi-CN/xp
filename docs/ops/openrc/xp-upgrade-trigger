@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ] || [ "$1" != "--check" ]; then
+  echo "usage: xp-openrc-upgrade-trigger --check" >&2
+  exit 64
+fi
+
+[ -x /etc/init.d/xp-upgrade ]
+grep -Fqx 'permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start' /etc/doas.conf
