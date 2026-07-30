@@ -47,7 +47,8 @@ a palette resolved only during render can otherwise keep values from the previou
   colors.
 - Build tooltip presentation through `createThemedTooltipSurface`. It supplies the popover surface,
   text, border, shadow and a dashed axis pointer. The tooltip caps width against the viewport and
-  permits wrapping on narrow displays.
+  permits wrapping on narrow displays. Formatter HTML must use a preferred `width` capped by
+  `100%`, never a fixed `min-width` that can exceed the confined ECharts tooltip.
 - In light theme, use a `0 4px 12px` shadow with 18% foreground opacity. Do not reuse the global
   `--xp-overlay` token there: its 58% opacity and dark-mode elevation are too heavy against a
   white popover. Dark tooltips retain their stronger existing elevation.
@@ -92,6 +93,6 @@ a palette resolved only during render can otherwise keep values from the previou
 - Give every new axis tooltip an explicit themed surface and axis pointer.
 - Disable `emphasis` only for static series; audit linked or custom-series charts first.
 - Test dark and light tooltip colors, visible line and area paths after pointer hover, and a narrow
-  viewport tooltip boundary.
+  viewport tooltip boundary below every formatter's preferred width.
 - Assert that the rendered Traffic story contains no screenshot-only colored evidence frame before
   accepting visual artifacts.

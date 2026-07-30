@@ -8,9 +8,12 @@ type ChartPathSnapshot = {
 
 const TCP_CONNECTIONS_STORY_ID = "pages-nodedetailspage--tcp-connections-tab";
 
-function tcpStoryUrl(theme: "dark" | "light") {
+function tcpStoryUrl(
+	theme: "dark" | "light",
+	storyId = TCP_CONNECTIONS_STORY_ID,
+) {
 	const globals = `theme:${theme};density:comfortable`;
-	return `/iframe.html?viewMode=story&id=${TCP_CONNECTIONS_STORY_ID}&globals=${globals}`;
+	return `/iframe.html?viewMode=story&id=${storyId}&globals=${globals}`;
 }
 
 function hasVisibleStroke(paths: ChartPathSnapshot[]): boolean {
@@ -54,6 +57,8 @@ async function visibleTooltipSurface(page: import("@playwright/test").Page) {
 					background: style.backgroundColor,
 					color: style.color,
 					height: rect.height,
+					left: rect.left,
+					right: rect.right,
 					text: element.textContent ?? "",
 					visible: style.display !== "none" && style.visibility !== "hidden",
 					width: rect.width,
@@ -72,6 +77,27 @@ async function visibleTooltipSurface(page: import("@playwright/test").Page) {
 		return candidates[0] ?? null;
 	});
 }
+
+test("confines the real TCP tooltip within a narrow mobile viewport", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 320, height: 844 });
+	await page.goto(
+		tcpStoryUrl("dark", "components-tcpconnectionusageview--default"),
+		{ waitUntil: "networkidle" },
+	);
+
+	const svg = page.locator(".echarts-for-react svg");
+	await expect(svg).toBeVisible();
+	const box = await svg.boundingBox();
+	if (!box) throw new Error("TCP chart bounding box not available");
+	await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3);
+	await expect.poll(() => visibleTooltipSurface(page)).not.toBeNull();
+
+	const tooltip = await visibleTooltipSurface(page);
+	expect(tooltip?.left).toBeGreaterThanOrEqual(0);
+	expect(tooltip?.right).toBeLessThanOrEqual(320);
+});
 
 for (const theme of ["dark", "light"] as const) {
 	test(`tcp connections chart keeps visible paths and themes the tooltip in ${theme} mode`, async ({

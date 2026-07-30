@@ -66,6 +66,8 @@ describe("buildTrafficTooltipHtml", () => {
 		expect(tooltip).toContain("down -");
 		expect(tooltip).toContain("color:var(--popover-foreground)");
 		expect(tooltip).toContain("color:var(--muted-foreground)");
+		expect(tooltip).toContain("width:min(240px,100%);max-width:100%");
+		expect(tooltip).not.toContain("min-width");
 	});
 
 	it("escapes an invalid timestamp before returning tooltip HTML", () => {

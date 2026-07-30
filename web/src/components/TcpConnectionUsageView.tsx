@@ -194,7 +194,7 @@ export function buildTcpConnectionTooltipHtml({
 			const count = endpointCounts[endpoint.endpoint_id] ?? 0;
 			return `
 				<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:6px;">
-					<span style="font-size:12px;color:${palette.muted};">${escapeEChartsHtml(endpointLabel(endpoint))}</span>
+					<span style="min-width:0;overflow-wrap:anywhere;font-size:12px;color:${palette.muted};">${escapeEChartsHtml(endpointLabel(endpoint))}</span>
 					<span style="font-size:12px;color:${palette.foreground};font-weight:600;white-space:nowrap;">
 						${escapeEChartsHtml(formatConnectionCount(count))}
 					</span>
@@ -204,7 +204,7 @@ export function buildTcpConnectionTooltipHtml({
 		.join("");
 
 	return `
-		<div style="min-width:260px;">
+		<div style="width:min(260px,100%);max-width:100%;">
 			<div style="font-size:14px;color:${palette.muted};font-weight:400;line-height:1.2;">
 				${escapeEChartsHtml(formatTooltipDateTime(minuteMs))}
 			</div>

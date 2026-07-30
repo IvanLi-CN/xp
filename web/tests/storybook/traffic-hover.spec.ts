@@ -117,7 +117,7 @@ test("does not add a colored evidence frame to TrafficView", async ({
 test("confines the real Traffic tooltip within a mobile viewport", async ({
 	page,
 }) => {
-	await page.setViewportSize({ width: 390, height: 844 });
+	await page.setViewportSize({ width: 320, height: 844 });
 	await page.goto(
 		trafficStoryUrl("components-trafficview--last-24-hours", "dark"),
 	);
@@ -130,7 +130,7 @@ test("confines the real Traffic tooltip within a mobile viewport", async ({
 
 	const tooltip = await visibleTooltipSurface(page);
 	expect(tooltip?.left).toBeGreaterThanOrEqual(0);
-	expect(tooltip?.right).toBeLessThanOrEqual(390);
+	expect(tooltip?.right).toBeLessThanOrEqual(320);
 });
 
 for (const theme of ["dark", "light"] as const) {

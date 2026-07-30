@@ -95,7 +95,7 @@ export function buildTrafficTooltipHtml(
 	const reference = report.reference?.[index];
 	if (!current) return "";
 	return [
-		'<div style="min-width:240px;">',
+		'<div style="width:min(240px,100%);max-width:100%;">',
 		`<div style="font-size:12px;line-height:1.2;color:${palette.muted};">`,
 		escapeEChartsHtml(formatTimestamp(current.start_at)),
 		"</div>",
