@@ -18,7 +18,7 @@ export function AuthRecoveryAction({ error }: AuthRecoveryActionProps) {
 
 	const loginRedirect = resolveLoginRedirectFromHref(window.location.href);
 	return (
-		<Button asChild>
+		<Button asChild variant="secondary">
 			<Link to="/login" search={{ redirect: loginRedirect }}>
 				Sign in
 			</Link>

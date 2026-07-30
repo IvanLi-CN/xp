@@ -55,7 +55,8 @@
 - 离线时 major read pages 必须明确标记缓存视图与最近同步时间；无缓存时返回专门的 offline empty state。
 - Major read pages 的初始请求或带缓存的后台刷新若因 `BackendApiError.status === 401` 失败，必须提供英文
   `Sign in` 入口，并把当前相对路径、查询参数和锚点作为登录完成后的返回地址；仅在验证成功后才用
-  新 token 替换本地保存的旧 token，且原有 `Retry` 仍可用。
+  新 token 替换本地保存的旧 token，且原有 `Retry` 仍可用。错误态中的 `Sign in` 与 `Retry` 必须使用
+  同级、同高的 secondary controls，避免重新登录入口以更大的主色块压过错误信息。
 - `403` 表示已认证但无权访问，必须保留现有权限错误 / 重试状态，不得显示重新登录入口。
 - 离线时任何 `POST` / `PUT` / `PATCH` / `DELETE` 到同源 `/api/*` 的前端写入都必须被 UI 或全局保护拦截。
 - `GET /api/admin/status/events` 必须要求 admin auth，返回
