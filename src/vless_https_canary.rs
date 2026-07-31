@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     fs, io,
-    net::IpAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -34,7 +33,7 @@ use openssl::{
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::{
     TokioAsyncResolver,
-    config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
+    config::{ResolverConfig, ResolverOpts},
 };
 
 use crate::{
@@ -51,12 +50,6 @@ const READY_ATTEMPTS: usize = 60;
 const READY_DELAY: Duration = Duration::from_secs(1);
 const DNS_PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AuthoritativeNameserver {
-    host: String,
-    ips: Vec<IpAddr>,
-}
 
 struct PreparedCanaryRuntime {
     paths: VlessHttpsCanaryPaths,
@@ -362,17 +355,12 @@ impl RepoCloudflareDns01Solver {
     }
 
     async fn wait_until_txt_visible(&self, fqdn: &str, content: &str) -> anyhow::Result<()> {
-        let nameservers = authoritative_nameservers_for_fqdn(fqdn).await?;
-        if nameservers.is_empty() {
-            anyhow::bail!("no authoritative nameservers discovered for {fqdn}");
-        }
-
         let deadline = tokio::time::Instant::now() + self.propagation_timeout;
         let fqdn = ensure_fqdn(fqdn);
         loop {
             let mut all_visible = true;
-            for nameserver in &nameservers {
-                if !authoritative_txt_contains_any_ip(nameserver, &fqdn, content).await? {
+            for (_, resolver_config) in dns_over_https_propagation_resolvers() {
+                if !dns_over_https_txt_contains(resolver_config, &fqdn, content).await {
                     all_visible = false;
                     break;
                 }
@@ -382,7 +370,8 @@ impl RepoCloudflareDns01Solver {
             }
             if tokio::time::Instant::now() >= deadline {
                 anyhow::bail!(
-                    "cloudflare TXT record {fqdn} did not become visible on authoritative nameservers within {}s",
+                    "cloudflare TXT record {fqdn} did not become visible through all \
+                     DNS-over-HTTPS propagation resolvers within {}s",
                     self.propagation_timeout.as_secs()
                 );
             }
@@ -1231,94 +1220,30 @@ fn ensure_fqdn(name: &str) -> String {
     format!("{trimmed}.")
 }
 
-async fn authoritative_nameservers_for_fqdn(
-    fqdn: &str,
-) -> anyhow::Result<Vec<AuthoritativeNameserver>> {
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), ResolverOpts::default());
-    for candidate in zone_name_candidates(fqdn) {
-        if candidate.split('.').count() < 2 {
-            continue;
-        }
-        let zone = ensure_fqdn(&candidate);
-        let response = match resolver.ns_lookup(zone.clone()).await {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-
-        let mut nameservers = Vec::new();
-        for record in response.iter() {
-            let host = ensure_fqdn(&record.to_string());
-            let lookup = resolver
-                .lookup_ip(host.clone())
-                .await
-                .with_context(|| format!("lookup IP for authoritative nameserver {host}"))?;
-            let mut ips = Vec::new();
-            for ip in lookup.iter() {
-                ips.push(ip);
-            }
-            ips.sort();
-            ips.dedup();
-            if !ips.is_empty() {
-                nameservers.push(AuthoritativeNameserver { host, ips });
-            }
-        }
-        nameservers.sort_by(|a, b| a.host.cmp(&b.host));
-        nameservers.dedup_by(|a, b| a.host == b.host);
-        if !nameservers.is_empty() {
-            return Ok(nameservers);
-        }
-    }
-    anyhow::bail!("could not discover authoritative nameservers for {fqdn}")
+fn dns_over_https_propagation_resolvers() -> [(&'static str, ResolverConfig); 2] {
+    [
+        ("cloudflare", ResolverConfig::cloudflare_https()),
+        ("google", ResolverConfig::google_https()),
+    ]
 }
 
-async fn authoritative_txt_contains_any_ip(
-    nameserver: &AuthoritativeNameserver,
+async fn dns_over_https_txt_contains(
+    resolver_config: ResolverConfig,
     fqdn: &str,
     expected: &str,
-) -> anyhow::Result<bool> {
-    let mut saw_reachable = false;
-    for ip in &nameserver.ips {
-        match authoritative_txt_contains(ip, fqdn, expected).await {
-            Ok(true) => {
-                saw_reachable = true;
-            }
-            Ok(false) => {
-                // Require all reachable addresses behind the same authoritative nameserver host
-                // to agree before telling ACME the TXT is ready; otherwise multi-IP/anycast NS
-                // pools can yield false positives.
-                return Ok(false);
-            }
-            Err(_) => {
-                continue;
-            }
-        }
-    }
-    Ok(saw_reachable)
-}
-
-async fn authoritative_txt_contains(
-    nameserver: &IpAddr,
-    fqdn: &str,
-    expected: &str,
-) -> anyhow::Result<bool> {
-    let config = ResolverConfig::from_parts(
-        None,
-        vec![],
-        NameServerConfigGroup::from_ips_clear(&[*nameserver], 53, true),
-    );
-    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
-    let lookup = match resolver.txt_lookup(fqdn).await {
-        Ok(lookup) => lookup,
-        Err(_) => return Ok(false),
+) -> bool {
+    let resolver = TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default());
+    let Ok(lookup) = resolver.txt_lookup(fqdn).await else {
+        return false;
     };
     for txt in lookup.iter() {
         for chunk in txt.txt_data() {
             if chunk.as_ref() == expected.as_bytes() {
-                return Ok(true);
+                return true;
             }
         }
     }
-    Ok(false)
+    false
 }
 
 #[cfg(test)]

@@ -79,7 +79,7 @@ If you want Mihomo relay `url-test` to probe the actual managed VLESS ingress in
 - `XP_VLESS_CANARY_ACME_CONTACT_EMAIL` is optional but recommended.
 - `XP_VLESS_CANARY_CLOUDFLARE_TOKEN_FILE` defaults to `/etc/xp/cloudflare_ddns_api_token` so host-managed nodes can reuse the same xp-readable Cloudflare runtime token as DDNS.
 - `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` is optional; when empty, `xp` first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID` when present, and only falls back to deriving the Cloudflare zone from `XP_ACCESS_HOST` when the DDNS zone is also unset.
-- `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` defaults to `180`; `xp` waits until the DNS-01 TXT is visible on every authoritative nameserver for the zone before asking the ACME server to validate it.
+- `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` defaults to `180`; `xp` waits until the DNS-01 TXT is visible through both Cloudflare and Google DNS-over-HTTPS resolvers before asking the ACME server to validate it. The propagation check does not require direct UDP/TCP 53 access to authoritative nameservers.
 
 Contract:
 
