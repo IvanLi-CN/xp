@@ -128,6 +128,9 @@ docker run --rm \
   --label "codex.scope=web-local-upgrade" \
   --label "codex.remote_run=$REMOTE_RUN" \
   --cap-drop=ALL \
+  --cap-add=CHOWN \
+  --cap-add=DAC_OVERRIDE \
+  --cap-add=FOWNER \
   --cap-add=SETGID \
   --cap-add=SETUID \
   -v "$REMOTE_RUN:/workspace:ro" \
