@@ -125,8 +125,15 @@ Status states:
 - systemd `xp-upgrade.service` 必须直接执行 `/usr/local/bin/xp-ops _upgrade-runner`，并通过
   unit environment / `/etc/xp/xp.env` 传递 `XP_DATA_DIR`。不得用 `/bin/sh -c` 包裹
   `--data-dir "${XP_DATA_DIR:-...}"` 这类命令行文本，因为 systemd 会先处理 `$` 展开。
-- OpenRC: `xp-upgrade` 是 root one-shot service，`xp` 用户只能通过窄 doas rule 执行
-  `rc-service xp-upgrade start`。
+- OpenRC: `xp-upgrade` 是 root one-shot service。root-owned fixed
+  `/usr/local/libexec/xp-openrc-upgrade-trigger` 只接受 `--check`，以 root 验证
+  `/etc/init.d/xp-upgrade` 可执行且 `/etc/doas.conf` 包含精确的 fixed start rule；
+  `xp` 用户只能通过窄 doas rule 调用该 check 或 `/sbin/rc-service xp-upgrade start`。
+  支持检测必须执行 `doas -n /usr/local/libexec/xp-openrc-upgrade-trigger --check`，而不是直接读取
+  root-only `/etc/doas.conf`。
+  旧版 `xp-ops` 无法在首次跨越该 helper 边界的升级中执行新代码，因此现有 OpenRC 节点完成普通
+  `xp-ops upgrade` 后，必须由 root 显式运行一次 `xp-ops init`；readiness check 不得通过启动
+  one-shot service 隐式迁移。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -148,6 +155,16 @@ Status states:
 - Given CentOS 7-class systemd/polkit，
   When `unit` / `verb` action detail 不可用于 polkit rule，
   Then systemd Web upgrade 仍可通过固定 helper + sudoers 触发 `xp-upgrade.service`。
+- Given OpenRC 的 `/etc/doas.conf` 是 `0600 root:root` 且 fixed helper 与两条窄 rule 有效，
+  When `xp` 查询 upgrade status，
+  Then support 返回 `supported=true` 与 `trigger=openrc`，且 `xp` 不读取该 policy。
+- Given OpenRC helper、runner 或 fixed start rule 缺失/篡改，
+  When `xp` 查询 upgrade status，
+  Then support 保持 unsupported，且 check 不调用 `rc-service`。
+- Given 旧版 OpenRC 节点尚未安装 helper，
+  When 完成普通 `xp-ops upgrade` 后由 root 显式执行 `xp-ops init`，
+  Then helper 与两条窄 doas rule 被安装且 `supported=true`；执行前保持 unsupported，readiness
+  check 不得启动 one-shot service。
 - Given 服务端版本检查缓存中仍保存旧 latest release，
   When 用户在版本 popover 内点击手动 Check，
   Then UI 必须请求 refresh 模式，后端必须绕过缓存重新查询 latest release。
@@ -189,6 +206,7 @@ Status states:
 - `docs/ops/systemd/sudoers-xp-upgrade`
 - `docs/ops/systemd/xp-upgrade.polkit.rules`
 - `docs/ops/openrc/xp-upgrade`
+- `docs/ops/openrc/xp-upgrade-trigger`
 - `docs/ops/openrc/doas-xp-upgrade.conf`
 - `AGENTS.md`
 
@@ -220,10 +238,14 @@ Status states:
   one-shot 自愈，防止 durable active status 残留为 running。
 - 2026-07-07: 手动 Check 改为调用 `/api/version/check?refresh=1`，绕过 1 小时后端缓存；
   自动焦点检查继续允许使用缓存以避免频繁访问 GitHub。
+- 2026-07-30: OpenRC readiness 改为调用 root-owned fixed helper 的 non-interactive doas
+  `--check`。这避免 `xp` 直接读取 root-only `/etc/doas.conf` 造成有效委托被误报为
+  unsupported，同时保留固定 `xp-upgrade start` 的最小授权边界。
 
 ## 参考（References）
 
 - `docs/plan/n5mtq:ui-version-check/PLAN.md`
 - `docs/plan/ap63t:xp-ops-upgrade-unified/PLAN.md`
 - `docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md`
+- `docs/solutions/ops/openrc-web-upgrade-delegate-readiness.md`
 - `src/ops/upgrade.rs`

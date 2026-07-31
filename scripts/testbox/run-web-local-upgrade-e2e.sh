@@ -12,6 +12,7 @@ set -euo pipefail
 
 TESTBOX="${TESTBOX:-codex-testbox}"
 RUST_IMAGE="${RUST_IMAGE:-rust:1.96-bookworm}"
+ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.22}"
 
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   :
@@ -48,16 +49,28 @@ s = re.sub(r'[^a-z0-9_.-]+', '_', s).strip('_.-')
 print(s[:63] if len(s) > 63 else s)
 PY
 )"
+OPENRC_CONTAINER_RAW="codex_${WORKSPACE_SLUG}_openrc_upgrade_${RUN_ID}"
+OPENRC_CONTAINER_NAME="$(python3 - "$OPENRC_CONTAINER_RAW" <<'PY'
+import re, sys
+s = sys.argv[1].lower()
+s = re.sub(r'[^a-z0-9_.-]+', '_', s).strip('_.-')
+print(s[:63] if len(s) > 63 else s)
+PY
+)"
 
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
 CONTAINER_NAME_B64="$(printf '%s' "$CONTAINER_NAME" | base64 | tr -d '\n')"
 RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
+OPENRC_CONTAINER_NAME_B64="$(printf '%s' "$OPENRC_CONTAINER_NAME" | base64 | tr -d '\n')"
+ALPINE_IMAGE_B64="$(printf '%s' "$ALPINE_IMAGE" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "container=$CONTAINER_NAME"
 echo "rust_image=$RUST_IMAGE"
+echo "openrc_container=$OPENRC_CONTAINER_NAME"
+echo "alpine_image=$ALPINE_IMAGE"
 
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" \
@@ -78,13 +91,17 @@ ssh -o BatchMode=yes "$TESTBOX" bash -s \
   "$REMOTE_RUN_B64" \
   "$REMOTE_WORKSPACE_B64" \
   "$CONTAINER_NAME_B64" \
-  "$RUST_IMAGE_B64" <<'REMOTE'
+  "$RUST_IMAGE_B64" \
+  "$OPENRC_CONTAINER_NAME_B64" \
+  "$ALPINE_IMAGE_B64" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${1:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${2:?}" | base64 -d)"
 CONTAINER_NAME="$(printf '%s' "${3:?}" | base64 -d)"
 RUST_IMAGE="$(printf '%s' "${4:?}" | base64 -d)"
+OPENRC_CONTAINER_NAME="$(printf '%s' "${5:?}" | base64 -d)"
+ALPINE_IMAGE="$(printf '%s' "${6:?}" | base64 -d)"
 CARGO_HOME_DIR="$REMOTE_WORKSPACE/cargo-home"
 RUSTUP_HOME_DIR="$REMOTE_WORKSPACE/rustup-home"
 
@@ -93,6 +110,9 @@ cleanup() {
   if [ -n "${CONTAINER_NAME:-}" ]; then
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
+  if [ -n "${OPENRC_CONTAINER_NAME:-}" ]; then
+    docker rm -f "$OPENRC_CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
   fi
@@ -100,6 +120,62 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$CARGO_HOME_DIR" "$RUSTUP_HOME_DIR"
+
+# This is a real Alpine/OpenDoas boundary check. It only runs the fixed readiness
+# helper, never rc-service or the upgrade runner.
+docker run --rm \
+  --name "$OPENRC_CONTAINER_NAME" \
+  --label "codex.scope=web-local-upgrade" \
+  --label "codex.remote_run=$REMOTE_RUN" \
+  --cap-drop=ALL \
+  --cap-add=CHOWN \
+  --cap-add=DAC_OVERRIDE \
+  --cap-add=FOWNER \
+  --cap-add=SETGID \
+  --cap-add=SETUID \
+  -v "$REMOTE_RUN:/workspace:ro" \
+  "$ALPINE_IMAGE" \
+  sh -ec '
+    set -euo pipefail
+    apk add --no-cache doas
+    adduser -D -s /bin/sh xp
+
+    install -Dm0755 /workspace/docs/ops/openrc/xp-upgrade /etc/init.d/xp-upgrade
+    install -Dm0755 /workspace/docs/ops/openrc/xp-upgrade-trigger /usr/local/libexec/xp-openrc-upgrade-trigger
+    install -Dm0600 /workspace/docs/ops/openrc/doas-xp-upgrade.conf /etc/doas.conf
+    chown root:root /etc/doas.conf /etc/init.d/xp-upgrade /usr/local/libexec/xp-openrc-upgrade-trigger
+
+    cat > /sbin/rc-service <<'"'"'EOF'"'"'
+#!/bin/sh
+touch /tmp/rc-service-called
+EOF
+    chmod 0755 /sbin/rc-service
+
+    su -s /bin/sh xp -c "test ! -r /etc/doas.conf"
+    su -s /bin/sh xp -c "doas -n /usr/local/libexec/xp-openrc-upgrade-trigger --check"
+    test ! -e /tmp/rc-service-called
+
+    if /usr/local/libexec/xp-openrc-upgrade-trigger unexpected >/dev/null 2>&1; then
+      echo "OpenRC readiness helper accepted an unexpected argument" >&2
+      exit 1
+    fi
+    if su -s /bin/sh xp -c "doas -n /usr/local/libexec/xp-openrc-upgrade-trigger"; then
+      echo "OpenRC doas policy allowed helper without --check" >&2
+      exit 1
+    fi
+
+    sed -i "\\|permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start|d" /etc/doas.conf
+    if su -s /bin/sh xp -c "doas -n /usr/local/libexec/xp-openrc-upgrade-trigger --check"; then
+      echo "OpenRC readiness check passed after the fixed start rule was removed" >&2
+      exit 1
+    fi
+
+    rm /usr/local/libexec/xp-openrc-upgrade-trigger
+    if su -s /bin/sh xp -c "doas -n /usr/local/libexec/xp-openrc-upgrade-trigger --check"; then
+      echo "OpenRC readiness check passed after the helper was removed" >&2
+      exit 1
+    fi
+  '
 
 docker run --rm \
   --name "$CONTAINER_NAME" \

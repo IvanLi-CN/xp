@@ -26,9 +26,7 @@ const SYSTEMD_UPGRADE_SUDOERS_CHECK_RULE: &str =
 const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
-const OPENRC_DOAS_CONF_PATH: &str = "/etc/doas.conf";
-const OPENRC_UPGRADE_DOAS_RULE: &str =
-    "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start";
+const OPENRC_UPGRADE_TRIGGER_PATH: &str = "/usr/local/libexec/xp-openrc-upgrade-trigger";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -404,12 +402,30 @@ fn systemd_upgrade_polkit_allows_current_process() -> bool {
 }
 
 fn openrc_upgrade_delegate_installed(root: &Path) -> bool {
-    if !root_abs(root, OPENRC_UPGRADE_SCRIPT_PATH).exists() {
+    if !openrc_upgrade_delegate_assets_installed(root) {
         return false;
     }
-    fs::read_to_string(root_abs(root, OPENRC_DOAS_CONF_PATH))
-        .ok()
-        .is_some_and(|content| content.contains(OPENRC_UPGRADE_DOAS_RULE))
+    Command::new(openrc_doas_program())
+        .args(openrc_doas_check_args())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn openrc_doas_program() -> String {
+    if cfg!(debug_assertions) {
+        return std::env::var("XP_UPGRADE_TEST_OPENRC_DOAS_PROGRAM")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "doas".to_string());
+    }
+    "doas".to_string()
+}
+
+fn openrc_upgrade_delegate_assets_installed(root: &Path) -> bool {
+    root_abs(root, OPENRC_UPGRADE_SCRIPT_PATH).exists()
+        && root_abs(root, OPENRC_UPGRADE_TRIGGER_PATH).exists()
 }
 
 fn root_abs(root: &Path, absolute_path: &str) -> PathBuf {
@@ -691,8 +707,12 @@ fn systemd_systemctl_trigger_args() -> [&'static str; 3] {
     ["start", "--no-block", SYSTEMD_UPGRADE_UNIT]
 }
 
-fn openrc_trigger_args() -> [&'static str; 3] {
-    [OPENRC_RC_SERVICE, OPENRC_UPGRADE_SERVICE, "start"]
+fn openrc_doas_check_args() -> [&'static str; 3] {
+    ["-n", OPENRC_UPGRADE_TRIGGER_PATH, "--check"]
+}
+
+fn openrc_trigger_args() -> [&'static str; 4] {
+    ["-n", OPENRC_RC_SERVICE, OPENRC_UPGRADE_SERVICE, "start"]
 }
 
 fn run_status(cmd: &mut Command) -> Result<(), String> {
@@ -731,6 +751,9 @@ fn is_container_runtime() -> bool {
     };
     cgroup.contains("docker") || cgroup.contains("containerd") || cgroup.contains("kubepods")
 }
+
+#[cfg(test)]
+mod openrc_delegate_tests;
 
 #[cfg(test)]
 mod tests {
@@ -859,7 +882,7 @@ mod tests {
     fn delegate_asset_detection_requires_installed_runner_files() {
         let tmp = tempdir().unwrap();
         assert!(!systemd_upgrade_delegate_installed(tmp.path()));
-        assert!(!openrc_upgrade_delegate_installed(tmp.path()));
+        assert!(!openrc_upgrade_delegate_assets_installed(tmp.path()));
 
         let systemd_unit = root_abs(tmp.path(), SYSTEMD_UPGRADE_UNIT_PATH);
         fs::create_dir_all(systemd_unit.parent().unwrap()).unwrap();
@@ -905,14 +928,6 @@ mod tests {
             tmp.path(),
             false
         ));
-
-        let openrc_script = root_abs(tmp.path(), OPENRC_UPGRADE_SCRIPT_PATH);
-        let doas_conf = root_abs(tmp.path(), OPENRC_DOAS_CONF_PATH);
-        fs::create_dir_all(openrc_script.parent().unwrap()).unwrap();
-        fs::create_dir_all(doas_conf.parent().unwrap()).unwrap();
-        fs::write(openrc_script, "script").unwrap();
-        fs::write(doas_conf, OPENRC_UPGRADE_DOAS_RULE).unwrap();
-        assert!(openrc_upgrade_delegate_installed(tmp.path()));
     }
 
     #[test]
@@ -944,14 +959,6 @@ mod tests {
         let _lock = StartLock::acquire(tmp.path()).unwrap();
         let err = start_upgrade(tmp.path(), "v0.2.0", None).unwrap_err();
         assert!(matches!(err, UpgradeStartError::Active));
-    }
-
-    #[test]
-    fn openrc_trigger_matches_installed_doas_policy() {
-        assert_eq!(
-            openrc_trigger_args(),
-            ["/sbin/rc-service", "xp-upgrade", "start"]
-        );
     }
 
     #[test]

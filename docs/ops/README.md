@@ -549,14 +549,23 @@ Host-managed root delegation:
 - `xp-ops init` also writes a narrow systemd polkit rule for hosts whose polkit exposes `unit` and
   `verb` action details. CentOS 7-class polkit does not expose those details reliably, so Web
   upgrade support must not depend on the polkit rule alone.
-- OpenRC nodes use `xp-upgrade` as a root one-shot service. `xp-ops init` appends a narrow doas rule
-  that only allows `rc-service xp-upgrade start`.
+- OpenRC nodes use `xp-upgrade` as a root one-shot service. `xp-ops init` writes the root-owned
+  fixed `/usr/local/libexec/xp-openrc-upgrade-trigger` helper and appends two narrow doas rules:
+  `xp` may run only `xp-openrc-upgrade-trigger --check` to verify the installed delegate, and may
+  start only `/sbin/rc-service xp-upgrade start`. The helper accepts only `--check`, verifies the
+  executable runner and exact start rule as root, and never starts the service. This lets the
+  service detect a root-owned `0600` `/etc/doas.conf` without granting it read access.
+  On an existing node that predates this helper, run `sudo xp-ops init` once after the ordinary
+  `sudo xp-ops upgrade --version latest` has completed. The old running `xp-ops` cannot execute
+  release code that it has not installed yet, so this root-approved reinitialization is required;
+  readiness checks must not start the one-shot service as an implicit migration.
 - Reference samples live at:
   - `docs/ops/systemd/xp-upgrade.service`
   - `docs/ops/systemd/xp-upgrade-trigger`
   - `docs/ops/systemd/sudoers-xp-upgrade`
   - `docs/ops/systemd/xp-upgrade.polkit.rules`
   - `docs/ops/openrc/xp-upgrade`
+  - `docs/ops/openrc/xp-upgrade-trigger`
   - `docs/ops/openrc/doas-xp-upgrade.conf`
 
 Rollback notes:
