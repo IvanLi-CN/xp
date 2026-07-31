@@ -1338,21 +1338,21 @@ fn inject_mihomo_proxy_groups(
         .map(|name| serde_yaml::Value::String(name.clone()))
         .collect::<Vec<_>>();
 
+    let direct_reality_names = node_selector::provider_reality_access_names(landing_proxy_name_set);
     let landing_groups =
         inject_mihomo_landing_groups(&mut groups, landing_proxy_name_set, &base_names);
-    let high_quality_proxies = provider_reality_access_names(landing_proxy_name_set);
     inject_mihomo_default_aggregate_groups(
         &mut groups,
         &provider_values,
         &landing_groups,
-        high_quality_proxies,
+        direct_reality_names.clone(),
     );
     inject_mihomo_relay_groups(
         &mut groups,
         &outer_provider_values,
         relay_context.relay_groups,
     );
-    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
+    node_selector::inject_mihomo_default(&mut groups, &landing_groups, &direct_reality_names);
     inject_mihomo_region_groups(
         &mut groups,
         &provider_values,
@@ -1431,6 +1431,8 @@ fn inject_mihomo_provider_proxy_groups(
         .map(|name| serde_yaml::Value::String(name.clone()))
         .collect::<Vec<_>>();
 
+    let direct_reality_names =
+        node_selector::provider_reality_access_names(provider_proxy_name_set);
     let landing_groups = inject_mihomo_provider_landing_groups(
         &mut groups,
         &system_provider_values,
@@ -1448,7 +1450,12 @@ fn inject_mihomo_provider_proxy_groups(
         &outer_provider_values,
         relay_context.relay_groups,
     );
-    inject_mihomo_default_node_selector_group(&mut groups, &landing_groups);
+    node_selector::inject_mihomo_provider(
+        &mut groups,
+        &landing_groups,
+        &system_provider_values,
+        &direct_reality_names,
+    );
     inject_mihomo_provider_region_groups(
         &mut groups,
         &provider_values,
@@ -1818,24 +1825,8 @@ fn inject_mihomo_landing_groups(
 
     for base in base_names {
         let group_name = format!("🛬 {base}");
-
-        let reality_name = format!("{base}-reality");
-        let ss_name = format!("{base}-ss");
-        let chain_name = format!("{base}-chain");
-
-        let mut proxies = Vec::<serde_yaml::Value>::new();
-
-        if proxy_name_set.contains(&reality_name) {
-            proxies.push(serde_yaml::Value::String(reality_name));
-            if proxy_name_set.contains(&chain_name) {
-                proxies.push(serde_yaml::Value::String(chain_name));
-            }
-        } else if proxy_name_set.contains(&ss_name) {
-            if proxy_name_set.contains(&chain_name) {
-                proxies.push(serde_yaml::Value::String(chain_name));
-            }
-            proxies.push(serde_yaml::Value::String(ss_name));
-        } else {
+        let proxy_names = base_landing_proxy_names(base, proxy_name_set);
+        if proxy_names.is_empty() {
             continue;
         }
 
@@ -1872,7 +1863,12 @@ fn inject_mihomo_landing_groups(
         );
         map.insert(
             serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(proxies),
+            serde_yaml::Value::Sequence(
+                proxy_names
+                    .into_iter()
+                    .map(serde_yaml::Value::String)
+                    .collect(),
+            ),
         );
         groups.push(serde_yaml::Value::Mapping(map));
     }
@@ -1909,6 +1905,24 @@ fn base_chain_proxy_names(
         .collect()
 }
 
+fn base_landing_proxy_names(
+    base: &str,
+    proxy_name_set: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let chain_names = base_chain_proxy_names(base, proxy_name_set);
+    if chain_names.is_empty() {
+        return Vec::new();
+    }
+
+    let reality_name = format!("{base}-reality");
+    let mut names = Vec::with_capacity(chain_names.len() + 1);
+    if proxy_name_set.contains(&reality_name) {
+        names.push(reality_name);
+    }
+    names.extend(chain_names);
+    names
+}
+
 fn inject_mihomo_provider_landing_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
@@ -1919,8 +1933,8 @@ fn inject_mihomo_provider_landing_groups(
 
     for base in base_names {
         let group_name = format!("🛬 {base}");
-        let chain_names = base_chain_proxy_names(base, provider_proxy_name_set);
-        if chain_names.is_empty() {
+        let proxy_names = base_landing_proxy_names(base, provider_proxy_name_set);
+        if proxy_names.is_empty() {
             continue;
         }
 
@@ -1961,7 +1975,7 @@ fn inject_mihomo_provider_landing_groups(
         );
         map.insert(
             serde_yaml::Value::String("filter".to_string()),
-            serde_yaml::Value::String(exact_proxy_names_filter(&chain_names)),
+            serde_yaml::Value::String(exact_proxy_names_filter(&proxy_names)),
         );
         groups.push(serde_yaml::Value::Mapping(map));
     }
@@ -2088,18 +2102,6 @@ fn inject_mihomo_provider_region_groups(
     }
 }
 
-fn provider_reality_access_names(
-    proxy_name_set: &std::collections::BTreeSet<String>,
-) -> Vec<String> {
-    proxy_name_set
-        .iter()
-        .filter_map(|name| {
-            let (kind, _) = classify_proxy_ref_name(name)?;
-            matches!(kind, ProxyRefKind::Reality).then_some(name.clone())
-        })
-        .collect()
-}
-
 fn provider_ss_direct_names(proxy_name_set: &std::collections::BTreeSet<String>) -> Vec<String> {
     proxy_name_set
         .iter()
@@ -2128,7 +2130,7 @@ fn inject_mihomo_provider_high_quality_reality_access(
     root: &mut serde_yaml::Mapping,
     provider_proxy_name_set: &std::collections::BTreeSet<String>,
 ) {
-    let reality_names = provider_reality_access_names(provider_proxy_name_set);
+    let reality_names = node_selector::provider_reality_access_names(provider_proxy_name_set);
     if reality_names.is_empty() {
         return;
     }
@@ -2409,21 +2411,6 @@ fn inject_mihomo_default_aggregate_groups(
     let insert_at = insert_at.unwrap_or(remaining.len());
     remaining.splice(insert_at..insert_at, generated);
     *groups = remaining;
-}
-
-fn inject_mihomo_default_node_selector_group(
-    groups: &mut Vec<serde_yaml::Value>,
-    landing_groups: &[String],
-) {
-    let mut proxies = default_region_wrapper_group_names().collect::<Vec<_>>();
-    proxies.extend(landing_groups.iter().cloned());
-    proxies.push("💎 高质量".to_string());
-    groups.push(mihomo_select_group("🚀 节点选择", false, proxies));
-    groups.push(mihomo_fallback_group(
-        "💎 节点选择",
-        true,
-        ["🚀 节点选择".to_string(), "🤯 All".to_string()],
-    ));
 }
 
 fn mihomo_high_quality_group(
@@ -5134,5 +5121,10 @@ struct ClashSsProxy {
     network: Option<String>,
 }
 
+mod node_selector;
+#[cfg(test)]
+mod reality_tests;
+#[cfg(test)]
+mod test_fixtures;
 #[cfg(test)]
 mod tests;

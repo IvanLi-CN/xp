@@ -66,7 +66,11 @@
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
   - per-base relay 组 `🛣️ {relay-base}`、hidden source 组 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、owner-facing `🔒 {Region}`、hidden `🤯 {Region}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
-- provider 方案下 `🛬 {base}` 必须通过 `use: [xp-system-generated]` 与精确 filter 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时候选顺序必须稳定为 ss-chain 在前、reality-chain 在后。
+- provider 方案下 `🛬 {base}` 仅在存在至少一个链式候选时生成，并通过
+  `use: [xp-system-generated]` 与精确 filter 消费 `{base}-reality`、`{base}-ss-chain` /
+  `{base}-reality-chain`；候选顺序固定为 reality 直连、ss-chain、reality-chain。
+- `🚀 节点选择` 在全部 `🛬 {base}` 后通过同一 system provider 的精确 Reality filter，按稳定
+  base 顺序直接列出 `{base}-reality`，而不暴露 `{base}-ss`。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
 - `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须至少包含 `🔒 高质量`，并且在最终输出中还必须提供一个非地区直连接入面的兜底聚合入口；当前命名族中该兜底入口为 `🤯 All`。若未来重命名或替换聚合组，仍必须保留“高质量入口之上存在全局兜底层”的语义，不能让 `💎 高质量` 退化成仅剩单一路径且无兜底的壳组。
 - 最终 Mihomo 配置图的强约束由 [contracts/final-mihomo-config.md](./contracts/final-mihomo-config.md) 定义：
@@ -130,7 +134,15 @@
 - Given 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy`，Then 不再返回 legacy Mihomo 主配置。
 - Given 请求 `/mihomo/provider/system`，When 返回 provider payload，Then 返回 `proxies:` YAML，且包含系统直连与链式节点（`-ss` / `-reality` / `-ss-chain` / `-reality-chain`）。
-- Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🛬 {base}`，Then 该组只通过 provider filter 暴露 `{base}-ss-chain` / `{base}-reality-chain`，并在 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
+- Given provider 方案同时存在 `base-reality` 与链式节点，When 检查 `🛬 {base}`，Then 该组只通过
+  provider filter 暴露 `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`，并在 Mihomo
+  运行时按 reality、ss-chain、reality-chain 顺序展示。
+- Given provider 或非 provider 方案存在 `base-reality`，When 检查 `🚀 节点选择`，Then 该选择器在
+  系统 `🛬 {base}` 列表之后包含每个 Reality 直连候选，且不包含 `{base}-ss`。非 provider 路径直接
+  引用 `{base}-reality`，provider 路径通过 `use: [xp-system-generated]` 与精确 filter 直接暴露
+  `{base}-reality`。
+- Given 某个 base 只有 `{base}-reality`、不存在任何链式节点，When 渲染 Mihomo 配置，Then
+  `🚀 节点选择` 保留该 Reality 直连候选，但不生成 `🛬 {base}`。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 {Region}`，Then 对应地区组能动态包含 `{base}-reality` 接入点。
 - Given 两个落地节点共享同一 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 只生成一个 per-base relay 组，且两个节点的 `*-chain.dialer-proxy` 都指向该组。
@@ -157,7 +169,8 @@
   `-> 💎 节点选择`
   `-> 🛣️ {relay-base}`，
   且 canonical region order 固定为 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
-- Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、`💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}`，无需更新用户模板。
+- Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、
+  `💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}` 和 Reality 直连入口，无需更新用户模板。
 - Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个 owner-facing 包装组稳定同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终可见入口缺失全局兜底。
 - Given 任一最终 Mihomo 配置，When 检查地区组三元关系，Then 必须满足 `🤯 {Region} -> 🌟 {Region} -> 🔒 {Region} -> leaf proxies`，且 `🔒` 只能被 `🌟` 作为单跳包装引用。
 - Given 托管 VLESS endpoint 已启用，When 请求 `https://<access_host[:port]>/generate_204`，Then 现有 VLESS/REALITY 接入点会把未认证 HTTPS 流量转到 xp 进程内 loopback TLS canary 并返回 `204`，且不新增公网 probe listener。
@@ -282,7 +295,8 @@
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：provider 路径若把 `{base}-reality` 或 `{base}-ss` 直连暴露到用户可见组，容易绕过链式中转，需要用测试锁死。
+- 风险：provider 主配置不能静态引用 system provider payload 中的原始节点；`🚀 节点选择` 必须通过
+  精确 `use + filter` 直接暴露 Reality 直连入口，并用测试锁死其顺序和 `{base}-ss` 排除规则。
 - 风险：请求头组合在反向代理下可能非常杂，需要优先以 live 请求头为准，并保留 `api_base_url` 回退。
 - 假设：项目自己的系统 provider 名称 `xp-system-generated` 当前未被现有用户配置占用；若占用，返回显式错误即可。
 - 部署支持矩阵：

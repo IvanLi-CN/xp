@@ -34,7 +34,9 @@ The generated system aggregate groups must obey these contracts:
 - `🔒 高质量` must be `type: select`.
 - `🔒 高质量` must include hidden region wrapper groups `🌟 {Region}`.
 - `🔒 高质量` must include landing groups `🛬 {base}` when present.
-- `🔒 高质量` must include raw managed reality proxies `{base}-reality` when present.
+- On the non-provider route, `🔒 高质量` must include raw managed reality proxies
+  `{base}-reality` when present.
+- On the provider route, its system-provider filter must include the same Reality candidates.
 - `🔒 高质量` must not be hidden.
 - `💎 高质量` is hidden.
 - `💎 高质量` must be `type: fallback`.
@@ -45,7 +47,17 @@ The generated system aggregate groups must obey these contracts:
 - `🚀 节点选择` is the visible owner-facing node selector.
 - `🚀 节点选择` must be `type: select`.
 - `🚀 节点选择` must contain hidden region wrapper groups `🌟 {Region}`.
-- `🚀 节点选择` may also contain `🛬 {base}` landing groups and `💎 高质量`.
+- `🚀 节点选择` must contain all `🛬 {base}` landing groups before direct Reality
+  candidates.
+- On the non-provider route, direct Reality candidates are raw managed proxies `{base}-reality`.
+- On the provider route, `🚀 节点选择` must consume the same raw managed proxies through
+  `use: [xp-system-generated]` and an exact Reality-only filter.
+- `🚀 节点选择` must contain every direct Reality candidate when present. It must not add
+  `{base}-ss` as a direct candidate.
+- A base with no chain proxy must not produce `🛬 {base}`. Its Reality direct candidate remains a
+  node-selector candidate.
+- `🚀 节点选择` must retain `💎 高质量` after system landing and direct Reality
+  candidates.
 - `💎 节点选择` is hidden.
 - `💎 节点选择` must be `type: fallback`.
 - `💎 节点选择` must contain exactly `["🚀 节点选择", "🤯 All"]` in that order.
@@ -92,6 +104,11 @@ The provider main config and the non-provider rendered config must expose the sa
 Required constraints:
 
 - The visible and hidden region-group relationship must be identical on both routes.
-- The high-quality and node-selector aggregate contracts must be identical on both routes.
+- The high-quality and node-selector aggregate contracts must be semantically identical on both
+  routes.
+  Provider mode consumes raw Reality candidates through the system provider because those nodes only
+  exist in provider payloads.
 - Provider mode must not reintroduce `🛬 {base}` or chain proxies into `🔒 {Region}`.
 - Provider mode must keep hidden relay groups outside the visible region/high-quality cluster.
+- Provider and non-provider routes must expose the same landing candidate order: reality direct,
+  ss-chain, reality-chain.
