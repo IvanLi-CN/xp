@@ -230,6 +230,8 @@
 
 ## Visual Evidence
 
+PR: none
+
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/ServiceConfigPage/ProviderOnly`
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
@@ -241,7 +243,6 @@
     别名集合，并明确说明它只影响普通 HTTPS Host 匹配；录入格式为
     `host[:port]`，省略端口时按 HTTPS 默认 `443` 解释，不影响 REALITY
     `server_names` 或 canonical `/generate_204`。
-    PR: include
     ![Endpoint details accepted host aliases](./assets/endpoint-details-accepted-authorities.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointNewPage/ManagedDefaultFieldsVisible`
@@ -258,7 +259,6 @@
     当前 xp 的 `vless_https_canary_bind`；`accepted host[:port]` 展开节点
     `access_host[:endpoint_port]`（`443` 仍可省略端口），不再回退到旧
     `dest` / `serverNames` 形状。
-    PR: include
     ![Endpoint new managed VLESS autocomplete](./assets/endpoint-new-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAutocompleteSuggestions`
@@ -268,7 +268,6 @@
     `https://<authority>` 作为 XP HTTPS listener origin 候选；`accepted host[:port]`
     使用所属节点 `access_host[:endpoint_port]` 候选，
     更新页不再缺少对应建议面板。
-    PR: include
     ![Endpoint details autocomplete](./assets/endpoint-details-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointNewPage/ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory`
