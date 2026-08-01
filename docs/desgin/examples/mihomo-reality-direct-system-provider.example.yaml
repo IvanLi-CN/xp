@@ -1,0 +1,138 @@
+# De-sensitized system provider payload for mihomo-reality-direct-provider-main.example.yaml.
+# Values below are fake. This file documents the generated node names and group references only.
+
+proxies:
+  - name: hinet-reality
+    type: vless
+    server: hinet.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000001
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: 0000000000000001
+  - name: hinet-ss
+    type: ss
+    server: hinet.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-HINET-SS-PASSWORD
+    udp: true
+  - name: hinet-ss-chain
+    type: ss
+    server: hinet.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-HINET-SS-PASSWORD
+    udp: true
+    dialer-proxy: 🛣️ hinet-example-invalid
+  - name: hinet-reality-chain
+    type: vless
+    server: hinet.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000001
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: 0000000000000001
+    dialer-proxy: 🛣️ hinet-example-invalid
+
+  - name: hk2-reality
+    type: vless
+    server: hk2.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000002
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+      short-id: 0000000000000002
+  - name: hk2-ss
+    type: ss
+    server: hk2.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-HK2-SS-PASSWORD
+    udp: true
+  - name: hk2-ss-chain
+    type: ss
+    server: hk2.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-HK2-SS-PASSWORD
+    udp: true
+    dialer-proxy: 🛣️ hk2-example-invalid
+  - name: hk2-reality-chain
+    type: vless
+    server: hk2.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000002
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+      short-id: 0000000000000002
+    dialer-proxy: 🛣️ hk2-example-invalid
+
+  - name: sg-reality
+    type: vless
+    server: sg.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000003
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+      short-id: 0000000000000003
+  - name: sg-ss
+    type: ss
+    server: sg.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-SG-SS-PASSWORD
+    udp: true
+  - name: sg-ss-chain
+    type: ss
+    server: sg.example.invalid
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: REDACTED-SG-SS-PASSWORD
+    udp: true
+    dialer-proxy: 🛣️ sg-example-invalid
+  - name: sg-reality-chain
+    type: vless
+    server: sg.example.invalid
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000003
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: edge.example.invalid
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+      short-id: 0000000000000003
+    dialer-proxy: 🛣️ sg-example-invalid

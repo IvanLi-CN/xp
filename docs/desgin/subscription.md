@@ -201,6 +201,14 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - `/api/health` 与 `/api/admin/config` 都会增量暴露 `vless_https_canary` 运行态，便于运维审计证书有效期、loopback bind 与最近一次续期错误；这些字段只读。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
 
-### 6.5 缺失混入配置回退
+### 6.5 脱敏 Provider 示例
+
+- [provider 主配置示例](./examples/mihomo-reality-direct-provider-main.example.yaml) 展示顶层分组、
+  `🚀 节点选择` 的 Reality-only provider filter，以及保留不变的用户自定义组。
+- [system provider payload 示例](./examples/mihomo-reality-direct-system-provider.example.yaml) 展示
+  `{base}-reality`、`{base}-ss`、`{base}-ss-chain` 与 `{base}-reality-chain` 的节点命名和链式引用。
+- 两份文件均为脱敏拓扑样例，使用无效域名与占位凭据，不能用于实际连接。
+
+### 6.6 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。
