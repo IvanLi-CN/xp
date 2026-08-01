@@ -12,6 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::{net::SocketAddr, sync::Once};
 use tempfile::tempdir;
 use time::OffsetDateTime;
+use trust_dns_resolver::config::Protocol;
 
 static RUSTLS_PROVIDER: Once = Once::new();
 
@@ -610,26 +611,19 @@ async fn wait_until_ready_accepts_self_signed_canary_cert() {
 }
 
 #[test]
-fn authoritative_txt_policy_requires_all_reachable_ips_to_match() {
-    fn reduce(results: &[Result<bool, ()>]) -> bool {
-        let mut saw_reachable = false;
-        for result in results {
-            match result {
-                Ok(true) => {
-                    saw_reachable = true;
-                }
-                Ok(false) => {
-                    return false;
-                }
-                Err(()) => continue,
-            }
-        }
-        saw_reachable
-    }
+fn dns_propagation_uses_only_dns_over_https_resolvers() {
+    let resolvers = dns_over_https_propagation_resolvers();
 
-    assert!(!reduce(&[Ok(true), Ok(false)]));
-    assert!(reduce(&[Ok(true), Err(())]));
-    assert!(!reduce(&[Err(()), Err(())]));
+    assert_eq!(
+        resolvers.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        ["cloudflare", "google"]
+    );
+    for (_, config) in resolvers {
+        assert!(!config.name_servers().is_empty());
+        assert!(config.name_servers().iter().all(|server| {
+            server.protocol == Protocol::Https && !server.trust_negative_responses
+        }));
+    }
 }
 
 #[test]

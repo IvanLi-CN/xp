@@ -91,6 +91,10 @@
 - provider 主配置里的 hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在 `💎 高质量` 与地区组之间。
 - provider 主配置里的系统 owner-facing 地区组 `🔒 {Region}` 与 hidden source 组 `🌟 {Region}` 必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - `GET /api/health` 与 `GET /api/admin/config` 必须增量暴露 `vless_https_canary` 运行态，包括 enabled/bind、证书到期时间与最近一次续期错误；管理面视图保持只读，不提供手工修改接入面 probe URL 的入口。
+- 托管 VLESS HTTPS canary 的 ACME 证书只使用 Cloudflare DNS-01。
+  TXT 传播预检必须同时通过 Cloudflare 与 Google 的 DNS-over-HTTPS 解析器，
+  且不得要求节点直连权威 DNS 的 UDP/TCP 53 端口。单个 DoH upstream 的负缓存响应
+  必须可重试，不得直接终止 TXT 可见性等待。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
 
 ### SHOULD
@@ -149,6 +153,9 @@
 - Given 两个落地节点使用不同 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 生成不同 per-base relay 组，且链式节点不会合并到共享 `🛣️ JP/HK/SG`。
 - Given 同一 `access_host` 下存在托管 VLESS endpoint，When 请求 provider 主配置，Then 对应 relay 组 `url` 必须使用最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`。
 - Given host-managed node upgrades from a legacy single-endpoint VLESS deployment, When the new `xp` version starts or `xp-ops xp sync-node-meta` runs, Then that lone VLESS endpoint is auto-adopted into the managed-default contract only when its metadata still predates the `managed_default` flag, but `reality.dest` is only rewritten after the loopback canary is ready; if canary preparation fails, the existing endpoint stays untouched and the blocker is exposed through `vless_https_canary_status.last_error`.
+- Given 托管 VLESS canary 需要首次签发或续期证书，When Cloudflare DNS-01 TXT
+  已在 Cloudflare 和 Google DoH 解析器中可见，Then canary 继续 ACME 验证；
+  节点到权威 DNS 的 UDP/TCP 53 不可达不得阻断签发或续期。
 - Given 同一 `access_host` 下不存在托管 VLESS endpoint，When 请求 provider 主配置，Then relay 组必须回退到“唯一公开 `api_base_url` 的 `/api/health`”，若仍不能唯一确定，则回退到 `https://www.gstatic.com/generate_204`。
 - Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
@@ -223,6 +230,8 @@
 
 ## Visual Evidence
 
+PR: none
+
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/ServiceConfigPage/ProviderOnly`
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
@@ -234,7 +243,6 @@
     别名集合，并明确说明它只影响普通 HTTPS Host 匹配；录入格式为
     `host[:port]`，省略端口时按 HTTPS 默认 `443` 解释，不影响 REALITY
     `server_names` 或 canonical `/generate_204`。
-    PR: include
     ![Endpoint details accepted host aliases](./assets/endpoint-details-accepted-authorities.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointNewPage/ManagedDefaultFieldsVisible`
@@ -251,7 +259,6 @@
     当前 xp 的 `vless_https_canary_bind`；`accepted host[:port]` 展开节点
     `access_host[:endpoint_port]`（`443` 仍可省略端口），不再回退到旧
     `dest` / `serverNames` 形状。
-    PR: include
     ![Endpoint new managed VLESS autocomplete](./assets/endpoint-new-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAutocompleteSuggestions`
@@ -261,7 +268,6 @@
     `https://<authority>` 作为 XP HTTPS listener origin 候选；`accepted host[:port]`
     使用所属节点 `access_host[:endpoint_port]` 候选，
     更新页不再缺少对应建议面板。
-    PR: include
     ![Endpoint details autocomplete](./assets/endpoint-details-managed-vless-autocomplete.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointNewPage/ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory`
