@@ -308,7 +308,9 @@ Required (or commonly set):
 - `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID` (default: empty)
   - Optional explicit Cloudflare zone id for DNS-01; when empty, `xp` first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID` when present, and only falls back to deriving the zone from `XP_ACCESS_HOST` when the DDNS zone is also unset.
 - `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` (default: `180`)
-  - Maximum wait budget for the DNS-01 TXT to become visible on every authoritative nameserver before ACME validation starts.
+  - Maximum wait budget for the DNS-01 TXT to become visible through both Cloudflare and Google
+    DNS-over-HTTPS resolvers before ACME validation starts. Nodes do not need direct authority
+    access on UDP/TCP port 53.
 - `XP_MESH_PROXY_URL` (default: unset)
   - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
   - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
