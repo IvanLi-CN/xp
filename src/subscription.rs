@@ -1278,7 +1278,7 @@ struct MihomoRelayInjectionContext<'a> {
 fn inject_mihomo_proxy_groups(
     root: &mut serde_yaml::Mapping,
     provider_names: &[String],
-    landing_proxy_name_set: &std::collections::BTreeSet<String>,
+    generated_proxy_name_set: &std::collections::BTreeSet<String>,
     region_proxy_name_set: &std::collections::BTreeSet<String>,
     base_region_map: &std::collections::BTreeMap<String, NodeSubscriptionRegion>,
     relay_context: MihomoRelayInjectionContext<'_>,
@@ -1288,7 +1288,7 @@ fn inject_mihomo_proxy_groups(
         _ => Vec::new(),
     };
 
-    let base_names = collect_mihomo_base_names(landing_proxy_name_set);
+    let base_names = collect_mihomo_base_names(generated_proxy_name_set);
 
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
@@ -1338,9 +1338,10 @@ fn inject_mihomo_proxy_groups(
         .map(|name| serde_yaml::Value::String(name.clone()))
         .collect::<Vec<_>>();
 
-    let direct_reality_names = node_selector::provider_reality_access_names(landing_proxy_name_set);
+    let direct_reality_names =
+        node_selector::provider_reality_access_names(generated_proxy_name_set);
     let landing_groups =
-        inject_mihomo_landing_groups(&mut groups, landing_proxy_name_set, &base_names);
+        inject_mihomo_landing_groups(&mut groups, generated_proxy_name_set, &base_names);
     inject_mihomo_default_aggregate_groups(
         &mut groups,
         &provider_values,

@@ -157,3 +157,79 @@ fn provider_reality_direct_names_follow_base_order() {
         vec!["a-reality".to_string(), "a-2-reality".to_string()]
     );
 }
+
+#[test]
+fn user_reality_named_proxy_is_not_injected_into_system_node_selector() {
+    let user = user("u1", "alice");
+    let node = node("n1", "Tokyo A", "example.com");
+    let endpoints = vec![endpoint_vless(
+        "e1",
+        "n1",
+        "vless",
+        8443,
+        vless_meta("example.com:443", &["sni.example.com"], true),
+    )];
+    let memberships = vec![membership("u1", "n1", "e1")];
+    let profile = UserMihomoProfile {
+        mixin_yaml: "port: 0\nrules: []\n".to_string(),
+        extra_proxies_yaml: r#"
+- name: Personal-reality
+  type: ss
+  server: personal.example.invalid
+  port: 443
+  cipher: aes-128-gcm
+  password: placeholder
+"#
+        .to_string(),
+        extra_proxy_providers_yaml: String::new(),
+    };
+    let probes = probe_map(&[("n1", NodeSubscriptionRegion::Japan)]);
+
+    let yaml = build_mihomo_yaml_with_node_probes(
+        SEED,
+        &user,
+        &memberships,
+        &endpoints,
+        std::slice::from_ref(&node),
+        &probes,
+        &profile,
+    )
+    .unwrap();
+    let root: Value = serde_yaml::from_str(&yaml).unwrap();
+    assert!(
+        root["proxies"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .any(|proxy| proxy["name"].as_str() == Some("Personal-reality"))
+    );
+    assert!(!group_proxies(group(&root, "🚀 节点选择")).contains(&"Personal-reality"));
+
+    let provider_yaml = build_mihomo_provider_yaml_with_node_probes(
+        SEED,
+        &user,
+        &memberships,
+        &endpoints,
+        &[node],
+        &probes,
+        &profile,
+        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+    )
+    .unwrap();
+    let provider_root: Value = serde_yaml::from_str(&provider_yaml).unwrap();
+    let node_selector = group(&provider_root, "🚀 节点选择");
+    assert!(
+        provider_root["proxies"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .any(|proxy| proxy["name"].as_str() == Some("Personal-reality"))
+    );
+    assert!(
+        !node_selector
+            .get("filter")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Personal\\-reality")
+    );
+}
