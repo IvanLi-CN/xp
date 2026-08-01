@@ -1,0 +1,312 @@
+# De-sensitized provider main configuration example.
+# Pair this file with mihomo-reality-direct-system-provider.example.yaml.
+# The URL, hosts, UUIDs, keys, and passwords are placeholders and cannot connect.
+
+mixed-port: 7890
+mode: rule
+log-level: warning
+
+proxies: []
+
+proxy-providers:
+  xp-system-generated:
+    type: http
+    url: https://sub.example.invalid/api/sub/REDACTED/mihomo/provider/system
+    path: ./providers/xp-system-generated.yaml
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+proxy-groups:
+  # User-defined groups are preserved. System candidates are not injected here.
+  - name: Custom Select
+    type: select
+    proxies:
+      - DIRECT
+
+  - name: 🔒 高质量
+    type: select
+    proxies:
+      - 🌟 Japan
+      - 🌟 HongKong
+      - 🌟 Taiwan
+      - 🌟 Korea
+      - 🌟 Singapore
+      - 🌟 US
+      - 🌟 Other
+      - 🛬 hinet
+      - 🛬 hk2
+      - 🛬 sg
+    use:
+      - xp-system-generated
+    filter: '^(?:hinet\-reality|hk2\-reality|sg\-reality)$'
+    exclude-filter: '^(?:hinet\-ss|hk2\-ss|sg\-ss)$'
+
+  - name: 💎 高质量
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies:
+      - 🔒 高质量
+      - 🤯 All
+
+  # Visible regional leaves only consume direct Reality candidates.
+  - name: 🔒 Japan
+    type: select
+    use: [xp-system-generated]
+    filter: '(?:日本|🇯🇵|Japan|JP)|(?:^hinet\-reality$)'
+    exclude-filter: '^hinet\-ss$'
+  - name: 🔒 HongKong
+    type: select
+    use: [xp-system-generated]
+    filter: '(?:香港|🇭🇰|HongKong|Hong Kong|HK)|(?:^hk2\-reality$)'
+    exclude-filter: '^hk2\-ss$'
+  - name: 🔒 Taiwan
+    type: select
+    use: [xp-system-generated]
+    filter: '台湾|台灣|🇹🇼|Taiwan|TW'
+  - name: 🔒 Korea
+    type: select
+    use: [xp-system-generated]
+    filter: '韩国|韓國|🇰🇷|Korea|KR'
+  - name: 🔒 Singapore
+    type: select
+    use: [xp-system-generated]
+    filter: '(?:新加坡|🇸🇬|Singapore|SG)|(?:^sg\-reality$)'
+    exclude-filter: '^sg\-ss$'
+  - name: 🔒 US
+    type: select
+    use: [xp-system-generated]
+    filter: '美国|🇺🇸|United States|USA|US'
+  - name: 🔒 Other
+    type: select
+    use: [xp-system-generated]
+    filter: '.*'
+    exclude-filter: "(?:日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|\
+      台湾|台灣|🇹🇼|Taiwan|TW|韩国|韓國|🇰🇷|Korea|KR|\
+      新加坡|🇸🇬|Singapore|SG|美国|🇺🇸|United States|USA|US)|(?:^(?:hinet\\-ss|hk2\\-ss|sg\\-ss)$)"
+
+  # Hidden region wrappers and probes use the same managed source.
+  - name: 🌟 Japan
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '(?:日本|🇯🇵|Japan|JP)|(?:^hinet\-reality$)'
+    exclude-filter: '^hinet\-ss$'
+    proxies: [🔒 Japan]
+  - name: 🌟 HongKong
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '(?:香港|🇭🇰|HongKong|Hong Kong|HK)|(?:^hk2\-reality$)'
+    exclude-filter: '^hk2\-ss$'
+    proxies: [🔒 HongKong]
+  - name: 🌟 Taiwan
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '台湾|台灣|🇹🇼|Taiwan|TW'
+    proxies: [🔒 Taiwan]
+  - name: 🌟 Korea
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '韩国|韓國|🇰🇷|Korea|KR'
+    proxies: [🔒 Korea]
+  - name: 🌟 Singapore
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '(?:新加坡|🇸🇬|Singapore|SG)|(?:^sg\-reality$)'
+    exclude-filter: '^sg\-ss$'
+    proxies: [🔒 Singapore]
+  - name: 🌟 US
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '美国|🇺🇸|United States|USA|US'
+    proxies: [🔒 US]
+  - name: 🌟 Other
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '.*'
+    exclude-filter: "(?:日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|\
+      台湾|台灣|🇹🇼|Taiwan|TW|韩国|韓國|🇰🇷|Korea|KR|\
+      新加坡|🇸🇬|Singapore|SG|美国|🇺🇸|United States|USA|US)|(?:^(?:hinet\\-ss|hk2\\-ss|sg\\-ss)$)"
+    proxies: [🔒 Other]
+
+  - name: 🤯 Japan
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 Japan]
+  - name: 🤯 HongKong
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 HongKong]
+  - name: 🤯 Taiwan
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 Taiwan]
+  - name: 🤯 Korea
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 Korea]
+  - name: 🤯 Singapore
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 Singapore]
+  - name: 🤯 US
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 US]
+  - name: 🤯 Other
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🌟 Other]
+
+  # A landing group exists only when its system provider payload has a chain node.
+  # Candidate order is Reality direct, SS chain, then Reality chain.
+  - name: 🛬 hinet
+    type: fallback
+    url: https://www.gstatic.com/generate_204
+    interval: 30
+    timeout: 1000
+    max-failed-times: 1
+    lazy: false
+    use: [xp-system-generated]
+    filter: '^(?:hinet\-reality|hinet\-ss\-chain|hinet\-reality\-chain)$'
+  - name: 🛬 hk2
+    type: fallback
+    url: https://www.gstatic.com/generate_204
+    interval: 30
+    timeout: 1000
+    max-failed-times: 1
+    lazy: false
+    use: [xp-system-generated]
+    filter: '^(?:hk2\-reality|hk2\-ss\-chain|hk2\-reality\-chain)$'
+  - name: 🛬 sg
+    type: fallback
+    url: https://www.gstatic.com/generate_204
+    interval: 30
+    timeout: 1000
+    max-failed-times: 1
+    lazy: false
+    use: [xp-system-generated]
+    filter: '^(?:sg\-reality|sg\-ss\-chain|sg\-reality\-chain)$'
+
+  - name: 🔒 落地
+    type: select
+    proxies: [🛬 hinet, 🛬 hk2, 🛬 sg]
+  - name: 🤯 All
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies:
+      - 🤯 Japan
+      - 🤯 HongKong
+      - 🤯 Taiwan
+      - 🤯 Korea
+      - 🤯 Singapore
+      - 🤯 US
+      - 🤯 Other
+
+  # `proxies` keeps the structural order. The `use` filter exposes only Reality
+  # direct nodes from the system payload; it deliberately excludes *-ss.
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - 🌟 Japan
+      - 🌟 HongKong
+      - 🌟 Taiwan
+      - 🌟 Korea
+      - 🌟 Singapore
+      - 🌟 US
+      - 🌟 Other
+      - 🛬 hinet
+      - 🛬 hk2
+      - 🛬 sg
+      - 💎 高质量
+    use: [xp-system-generated]
+    filter: '^(?:hinet\-reality|hk2\-reality|sg\-reality)$'
+  - name: 💎 节点选择
+    type: fallback
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    proxies: [🚀 节点选择, 🤯 All]
+
+  # Relay groups are hidden and live at the end of the system-managed sequence.
+  - name: 🛣️ hinet-example-invalid
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies: [DIRECT]
+  - name: 🛣️ hk2-example-invalid
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies: [DIRECT]
+  - name: 🛣️ sg-example-invalid
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies: [DIRECT]
+
+rules:
+  - MATCH,DIRECT

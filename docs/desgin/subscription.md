@@ -156,9 +156,14 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 系统托管的地区面固定为：visible leaf `🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、hidden `fallback` 包装 `🌟 {Region}`、hidden `url-test` 包装 `🤯 {Region}`；同时生成 `🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All`。
 - `💎 高质量` 必须保留 owner-facing 兜底层语义，不能退化成只剩 `🔒 高质量` 的单层入口；若 `💎 高质量` 本身不直接挂 `🤯 All`，则最终输出必须另有一个稳定包装入口同时暴露 `💎 高质量` 与 `🤯 All`。
 - 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
-- `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，并依赖 system provider payload 的稳定排序让 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
+- `🛬 {base}` 仅在存在至少一个链式候选时生成。它通过 `use: [xp-system-generated]`
+  与精确 `filter` 消费 `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`，并依赖
+  system provider payload 的稳定排序让 Mihomo 运行时按 reality、ss-chain、reality-chain 顺序展示。
+- `🚀 节点选择` 在全部 `🛬 {base}` 后追加 Reality 直连候选，不追加 `{base}-ss`：非 provider
+  输出直接追加 `{base}-reality`，provider 主配置通过 system provider 的精确 filter 直接追加
+  `{base}-reality`。
 - provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
-- provider 方案隐藏系统直连节点，不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定。
+- provider 方案的原始系统直连节点保留在 provider payload；主配置不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定，但 `🚀 节点选择` 会通过 system provider 的精确 filter 稳定提供 `{base}-reality` 的可见直连入口。
 
 ### 6.4 Provider 渲染规则
 
@@ -184,13 +189,26 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
 - `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只做 YAML 结构校验与最终渲染校验，不做自动抽取或规范化。
 - `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
-- 落地组生成策略：只通过 provider `use + filter` 匹配 `{base}-ss-chain` / `{base}-reality-chain`；同一 base 的 system provider payload 顺序必须保证过滤后 ss-chain 在 reality-chain 前。
+- 落地组生成策略：仅当同一 base 存在链式候选时，通过 provider `use + filter` 匹配
+  `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`；system provider payload 顺序必须
+  保证过滤后 reality 直连在首位、ss-chain 在 reality-chain 前。
+- 顶层 `🚀 节点选择` 在全部落地组后稳定列出 Reality 直连：非 provider 直接为
+  `{base}-reality`，provider 通过 `xp-system-generated` 的精确 Reality filter 直接列出
+  `{base}-reality`；系统不向用户自定义分组注入任何候选。
 - hidden per-base relay 组 `🛣️ {relay-base}` 会在最终 `proxy-groups` 中统一移动到系统托管组尾部，位于地区组、`🛬 {base}`、`🔒 落地`、`🤯 All`、`🚀 节点选择` 之后。
 - `💎 高质量` 的兜底要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
 - 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪；地区组合同固定为 `🔒 {Region}` visible select leaf、`🌟 {Region}` hidden `fallback` wrapper、`🤯 {Region}` hidden `url-test` wrapper。
 - `/api/health` 与 `/api/admin/config` 都会增量暴露 `vless_https_canary` 运行态，便于运维审计证书有效期、loopback bind 与最近一次续期错误；这些字段只读。
 - Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
 
-### 6.5 缺失混入配置回退
+### 6.5 脱敏 Provider 示例
+
+- [provider 主配置示例](./examples/mihomo-reality-direct-provider-main.example.yaml) 展示顶层分组、
+  `🚀 节点选择` 的 Reality-only provider filter，以及保留不变的用户自定义组。
+- [system provider payload 示例](./examples/mihomo-reality-direct-system-provider.example.yaml) 展示
+  `{base}-reality`、`{base}-ss`、`{base}-ss-chain` 与 `{base}-reality-chain` 的节点命名和链式引用。
+- 两份文件均为脱敏拓扑样例，使用无效域名与占位凭据，不能用于实际连接。
+
+### 6.6 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。

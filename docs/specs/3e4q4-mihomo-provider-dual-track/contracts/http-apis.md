@@ -92,7 +92,12 @@ Response:
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
 - 顶层 `proxies` 仅保留 `extra_proxies_yaml`；系统动态节点不写入主配置顶层。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
-- `🛬 {base}` 通过 `use: [xp-system-generated]` 与精确 `filter` 消费 `{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时按 ss-chain、reality-chain 顺序展示。
+- `🛬 {base}` 仅在存在链式候选时生成，并通过 `use: [xp-system-generated]` 与精确 `filter`
+  消费 `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时按
+  reality、ss-chain、reality-chain 顺序展示。
+- `🚀 节点选择` 在全部 `🛬 {base}` 后追加 Reality 直连候选，不追加 `{base}-ss`。非 provider
+  输出直接列出 `{base}-reality`，provider 主配置则通过 `use: [xp-system-generated]` 和精确
+  `filter` 直接暴露对应 `{base}-reality`。
 - `🔒 高质量` 与 `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点，并通过 `exclude-filter` 排除系统 `{base}-ss` 直连接入候选。
 - `💎 高质量` 作为 owner-facing 高质量入口不得失去兜底层；最终主配置必须稳定提供“高质量入口 + 全局兜底入口”两层语义。若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个稳定 owner-facing 包装组同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终入口仅剩 `🔒 高质量` 单一路径。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
@@ -133,7 +138,10 @@ Rules:
 
 - 包含系统直连与链式节点：`{base}-ss`、`{base}-reality`、`{base}-ss-chain`、`{base}-reality-chain`。
 - `{base}-ss-chain` 与 `{base}-reality-chain` 的 `dialer-proxy` 必须指向该节点 `access_host` 对应的 per-base relay 组；同一 `access_host` 的多个 base 共享同一个 relay 组名。
-- 同一 `{base}` 在 provider payload 中应稳定排序，使 `🛬 {base}` 过滤链式节点后的候选顺序为 `{base}-ss-chain`、`{base}-reality-chain`。
+- 同一 `{base}` 在 provider payload 中应稳定排序，使 `🛬 {base}` 过滤后的候选顺序为
+  `{base}-reality`、`{base}-ss-chain`、`{base}-reality-chain`。
+- `🚀 节点选择` 通过精确 Reality filter 在全部 `🛬 {base}` 后追加 `{base}-reality`，不追加
+  `{base}-ss`。
 - provider payload 可被 Mihomo `proxy-providers.type=http` 直接消费。
 - 不依赖用户是否配置 Mihomo profile；即使主配置路径因缺少 profile 回退 clash，system payload 路径仍可单独返回系统隐藏直连节点。
 - 新节点一旦拥有 system payload entry 且主动探测得到地区归类，就会自动通过 provider filter 出现在地区组 / `💎 高质量` / `🚀 节点选择` 中，无需更新用户模板。
