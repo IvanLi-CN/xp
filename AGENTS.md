@@ -23,6 +23,9 @@
   `GOMEMLIMIT=8MiB`, `GOGC=50`, and `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`.
   Release assets use the pinned low-memory Go build, and upgrade backfill must
   preserve operator overrides.
+- Managed VLESS HTTPS canary certificates use Cloudflare DNS-01. Propagation checks query
+  Cloudflare and Google over DoH; supported nodes require outbound HTTPS to those resolvers, but
+  do not require direct authority access on UDP/TCP port 53.
 - Web-triggered automatic upgrade is supported only for host-managed `systemd` / `OpenRC` nodes via
   the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
   nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow

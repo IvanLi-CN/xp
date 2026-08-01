@@ -620,12 +620,9 @@ fn dns_propagation_uses_only_dns_over_https_resolvers() {
     );
     for (_, config) in resolvers {
         assert!(!config.name_servers().is_empty());
-        assert!(
-            config
-                .name_servers()
-                .iter()
-                .all(|server| server.protocol == Protocol::Https)
-        );
+        assert!(config.name_servers().iter().all(|server| {
+            server.protocol == Protocol::Https && !server.trust_negative_responses
+        }));
     }
 }
 

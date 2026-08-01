@@ -1222,9 +1222,24 @@ fn ensure_fqdn(name: &str) -> String {
 
 fn dns_over_https_propagation_resolvers() -> [(&'static str, ResolverConfig); 2] {
     [
-        ("cloudflare", ResolverConfig::cloudflare_https()),
-        ("google", ResolverConfig::google_https()),
+        (
+            "cloudflare",
+            retryable_dns_over_https_config(ResolverConfig::cloudflare_https()),
+        ),
+        (
+            "google",
+            retryable_dns_over_https_config(ResolverConfig::google_https()),
+        ),
     ]
+}
+
+fn retryable_dns_over_https_config(config: ResolverConfig) -> ResolverConfig {
+    let mut retryable = ResolverConfig::new();
+    for mut name_server in config.name_servers().iter().cloned() {
+        name_server.trust_negative_responses = false;
+        retryable.add_name_server(name_server);
+    }
+    retryable
 }
 
 async fn dns_over_https_txt_contains(

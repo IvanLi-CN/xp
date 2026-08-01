@@ -30,11 +30,14 @@ depend on a network path that ACME DNS-01 does not require.
 
 Use both Cloudflare and Google DNS-over-HTTPS resolvers for TXT propagation checks. Keep the
 Cloudflare API as the only DNS-01 record writer and retain the configured propagation timeout.
+Treat negative answers from an individual resolver upstream as retryable so cached NXDOMAIN or
+NODATA responses do not end the propagation check early.
 
 ## Guardrails
 
 - Do not replace DNS-01 with HTTP-01 or TLS-ALPN-01 for this canary.
 - Do not require node-to-authority UDP/TCP 53 reachability for the propagation gate.
+- Do not trust a single DoH resolver upstream's negative response as the final visibility result.
 - Treat either DoH resolver failing to show the expected TXT before timeout as not propagated.
 
 ## References

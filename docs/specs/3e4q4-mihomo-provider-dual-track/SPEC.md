@@ -93,7 +93,8 @@
 - `GET /api/health` 与 `GET /api/admin/config` 必须增量暴露 `vless_https_canary` 运行态，包括 enabled/bind、证书到期时间与最近一次续期错误；管理面视图保持只读，不提供手工修改接入面 probe URL 的入口。
 - 托管 VLESS HTTPS canary 的 ACME 证书只使用 Cloudflare DNS-01。
   TXT 传播预检必须同时通过 Cloudflare 与 Google 的 DNS-over-HTTPS 解析器，
-  且不得要求节点直连权威 DNS 的 UDP/TCP 53 端口。
+  且不得要求节点直连权威 DNS 的 UDP/TCP 53 端口。单个 DoH upstream 的负缓存响应
+  必须可重试，不得直接终止 TXT 可见性等待。
 - legacy Mihomo 路径已移除；raw/base64/clash 路径不得回归。
 
 ### SHOULD
