@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-07-04
-- Last: 2026-07-04
+- Last: 2026-08-03
 
 ## 背景 / 问题陈述
 
@@ -68,6 +68,17 @@
   流程，并写 durable status。
 - UI 点击 Upgrade 必须先弹出确认框；确认后才调用 start API。
 - UI 必须在 running/restarting 时禁用重复启动，并轮询恢复状态。
+- UI 确认升级前必须建立同标签页观察记录，并将目标版本和绝对截止时间写入
+  `sessionStorage`。
+  刷新页面后只恢复剩余观察时间。
+- 观察期间必须每 2.5 秒查询 status。无结构 5xx、网络中断和
+  `409 upgrade_already_running` 只表示 start 结果未知或已有任务；必须继续观察。
+  结构化拒绝必须立即显示失败。
+- status 返回 `succeeded|failed|unsupported` 时必须停止观察。
+  连续 60 秒不能获得确定结果时，必须停止轮询、保持 Upgrade 锁定并显示安全的 timeout 摘要。
+- 观察开始后 popover 必须保持打开且不因 pointer leave 自动关闭。
+  用户可用点击外部或 Esc 主动收起，后台观察继续，顶栏保留 spinner。
+  timeout 后手动 Status 查询到 active job 时必须开启新的 60 秒窗口；查询到 idle 或 terminal 状态时解除锁定。
 
 ### SHOULD
 
@@ -168,6 +179,16 @@ Status states:
 - Given 服务端版本检查缓存中仍保存旧 latest release，
   When 用户在版本 popover 内点击手动 Check，
   Then UI 必须请求 refresh 模式，后端必须绕过缓存重新查询 latest release。
+- Given 确认升级后 start 响应在服务重启边界返回无结构 502 或网络错误，
+  When UI 无法确认请求结果，Then popover 保持打开、Upgrade 保持禁用，
+  并继续每 2.5 秒查询 status。
+- Given 观察状态在同一标签页内刷新，When `sessionStorage` 中的绝对截止时间尚未到期，
+  Then UI 只恢复剩余观察窗口；到期后显示 timeout 并停止自动轮询。
+- Given 用户在观察期间主动收起 popover，When 后台 status 仍在查询，
+  Then 顶栏 spinner 保留且重新打开时显示当前观察状态。
+- Given timeout 后用户点击 Status，When status 返回 running 或 restarting，
+  Then 开启新的 60 秒观察窗口；When 返回 idle、succeeded、failed 或 unsupported，
+  Then 解除 Upgrade 锁定。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -186,7 +207,8 @@ Status states:
 - `cd web && bun run test`
 - `cd web && bun run storybook`
 - `cd web && bun run test-storybook`
-- UI 视觉证据：Storybook `Components/VersionIndicator/UpdateAvailable` 展示打开的 popover。
+- UI 视觉证据：Storybook Docs `Components/VersionIndicator/Reconnecting evidence` 与
+  `Components/VersionIndicator/Status timeout evidence` 展示打开的 popover 与观察终态。
 
 ## Visual Evidence
 
@@ -196,6 +218,35 @@ Status states:
 - Storybook `Components/VersionIndicator/UpdateAvailableUnsupported`
   - PR: include
   - ![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
+- source_type: storybook_docs
+  - docs_entry_or_title: `Components/VersionIndicator/Reconnecting evidence`
+  - target_program: mock-only
+  - capture_scope: element
+  - requested_viewport: none
+  - viewport_strategy: storybook-viewport
+  - margin_policy: require_margin
+  - evidence_surface: component
+  - sensitive_exclusion: N/A
+  - submission_gate: pending-owner-approval
+  - state: reconnecting after an ambiguous start result
+  - evidence_note: verifies spinner, preserved popover, safe reconnecting summary,
+    and locked Upgrade action
+  - PR: include
+  - ![Version indicator reconnecting](./assets/version-indicator-reconnecting.png)
+- source_type: storybook_docs
+  - docs_entry_or_title: `Components/VersionIndicator/Status timeout evidence`
+  - target_program: mock-only
+  - capture_scope: element
+  - requested_viewport: none
+  - viewport_strategy: storybook-viewport
+  - margin_policy: require_margin
+  - evidence_surface: component
+  - sensitive_exclusion: N/A
+  - submission_gate: pending-owner-approval
+  - state: one-minute observation timeout
+  - evidence_note: verifies safe timeout summary, Status recovery action, and locked Upgrade action
+  - PR: include
+  - ![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
 
 ## 文档更新（Docs to Update）
 
@@ -241,6 +292,9 @@ Status states:
 - 2026-07-30: OpenRC readiness 改为调用 root-owned fixed helper 的 non-interactive doas
   `--check`。这避免 `xp` 直接读取 root-only `/etc/doas.conf` 造成有效委托被误报为
   unsupported，同时保留固定 `xp-upgrade start` 的最小授权边界。
+- 2026-08-03: Web 客户端在确认升级后维护同标签页的 60 秒观察状态。
+  无结构 5xx、网络中断与 `upgrade_already_running` 不再被当作确定失败；popover 保持可观察状态。
+  terminal status 或显式 timeout 才收口，timeout 的手动 Status 可按服务端事实恢复或解除锁定。
 
 ## 参考（References）
 

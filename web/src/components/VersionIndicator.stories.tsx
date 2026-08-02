@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, screen, userEvent } from "@storybook/test";
 import type { ReactNode } from "react";
+import { useState } from "react";
 
 import type { AdminUpgradeStatusResponse } from "@/api/adminUpgrade";
 import { Card, CardContent } from "@/components/ui/card";
+import type { UpgradeObservation } from "@/offline/upgradeObservation";
 
 import { VersionIndicator } from "./VersionIndicator";
 
@@ -60,6 +63,35 @@ function Wrap(props: { children: ReactNode }) {
 				{props.children}
 			</CardContent>
 		</Card>
+	);
+}
+
+function UpgradeObservationHarness() {
+	const [observation, setObservation] = useState<UpgradeObservation | null>(
+		null,
+	);
+	return (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={baseUpgradeStatus}
+				upgradeObservation={observation}
+				onStartUpgrade={(targetTag) => {
+					setObservation({
+						targetTag,
+						deadlineAtMs: Date.now() + 60_000,
+						phase: "observing",
+					});
+				}}
+			/>
+		</Wrap>
 	);
 }
 
@@ -172,6 +204,72 @@ export const RunningUpgrade: Story = {
 			/>
 		</Wrap>
 	),
+};
+
+export const Reconnecting: Story = {
+	render: () => (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={baseUpgradeStatus}
+				upgradeObservation={{
+					targetTag: "v0.2.0",
+					deadlineAtMs: Date.now() + 60_000,
+					phase: "observing",
+				}}
+			/>
+		</Wrap>
+	),
+};
+
+export const StatusTimedOut: Story = {
+	render: () => (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={baseUpgradeStatus}
+				upgradeObservation={{
+					targetTag: "v0.2.0",
+					deadlineAtMs: Date.now() - 1,
+					phase: "timed_out",
+				}}
+			/>
+		</Wrap>
+	),
+};
+
+export const ConfirmKeepsPopoverOpen: Story = {
+	render: () => <UpgradeObservationHarness />,
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Upgrade" }),
+		);
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Start upgrade" }),
+		);
+		await expect(
+			await screen.findByText(
+				"Waiting for the node to reconnect and report the upgrade status.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			await screen.findByRole("button", { name: "Upgrading..." }),
+		).toBeDisabled();
+	},
 };
 
 export const UpgradeFailed: Story = {

@@ -13,7 +13,14 @@
   - OpenRC: `xp-upgrade` one-shot script + root-owned fixed readiness helper + two narrow
     doas rules for `--check` and fixed runner start。
 - Web 顶栏改为单个 `VersionIndicator`，通过 Radix Popover 展示版本检查与升级状态；确认后
-  调用 start API，并在 running/restarting 期间轮询 status。
+  先在 `sessionStorage` 写入目标版本与绝对截止时间，再调用 start API。观察器每 2.5 秒查询
+  status，跨同标签页刷新只保留剩余时间。
+- 无结构 5xx、网络中断和 `409 upgrade_already_running` 保留观察而不显示为确定失败；带 code 的
+  结构化拒绝立即结束观察并展示 API 错误。status 的 succeeded/failed/unsupported 终态停止轮询并
+  保持结果，直到用户主动关闭 popover。
+- 观察期间 popover 维持打开并禁用 Upgrade，pointer leave 不会关闭它；用户仍可用点击外部或 Esc
+  主动收起，顶栏 spinner 与后台轮询继续。60 秒无确定状态时进入 timeout、停止轮询并保持锁定；手动
+  Status 查到 active job 时建立新窗口，查到 idle 或 terminal 时解除锁定。
 - systemd 支持检测要求 `xp-upgrade.service` 存在，并验证以下任一窄授权：
   - `sudo -n /usr/local/libexec/xp-upgrade-trigger --check` 可成功执行，且
     `sudo -n -l /usr/local/libexec/xp-upgrade-trigger` 确认 no-arg start grant 存在。
@@ -75,8 +82,11 @@
   - version check API schema/fetch tests cover cached default requests and user-forced refresh
     requests.
   - admin upgrade API schema parse。
-  - `Components/VersionIndicator` Storybook 覆盖 idle/checking/update/unsupported/running/failed/
-    up-to-date/check-failed 状态。
+- `Components/VersionIndicator` Storybook 覆盖 idle/checking/update/unsupported/running/failed/
+  up-to-date/check-failed/reconnecting/timeout 状态，并用 `play` 覆盖确认后 popover 保持打开与
+  Upgrade 锁定。
+- `upgradeObservation.test.ts` 覆盖无结构 502 后持续观察、terminal 收口、60 秒 timeout、手动
+  active 续期和 `sessionStorage` 恢复；`VersionIndicator.test.tsx` 覆盖确认后 popover 生命周期。
 
 ## 验证命令
 

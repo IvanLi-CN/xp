@@ -1,0 +1,23 @@
+import { Meta } from "@storybook/blocks";
+
+import { StatusTimedOutEvidence } from "./VersionIndicatorEvidence";
+
+<Meta title="Components/VersionIndicator/Status timeout evidence" />
+
+<style>{`body { background: #101820 !important; }`}</style>
+
+<div
+  style={{
+    background: "#101820",
+    color: "#e7edf3",
+    padding: "48px",
+  }}
+>
+  <h1 style={{ color: "#e7edf3" }}>Status timeout</h1>
+  <p>
+    The observation window has elapsed without a readable status. The result
+    remains visible and the upgrade action stays locked until a manual status
+    check resolves it.
+  </p>
+  <StatusTimedOutEvidence />
+</div>
