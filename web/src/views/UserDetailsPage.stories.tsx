@@ -101,7 +101,12 @@ export const UserAndMihomoSections: Story = {
 	beforeEach: () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = async (input, init) => {
-			const request = new Request(input, init);
+			const request = new Request(
+				typeof input === "string"
+					? new URL(input, window.location.href)
+					: input,
+				init,
+			);
 			if (
 				new URL(request.url).pathname.endsWith("/subscription-mihomo-profile")
 			) {
