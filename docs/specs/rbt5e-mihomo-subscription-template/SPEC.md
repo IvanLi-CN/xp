@@ -141,6 +141,13 @@
 - Given 目标示例自带脱敏后的静态 `proxies`（如遮蔽的 REALITY 公钥），When 需要做真实 Mihomo `-t` 校验，Then 应基于同一份业务 mixin 去掉这些不可解析的脱敏静态节点后再校验，以验证系统生成的动态层、provider 池与业务分组仍可被 Mihomo 实际加载。
 - Given 现有 `raw/clash/base64` 调用，When 回归测试，Then 输出语义与 content-type 不回归。
 
+## Visual Evidence
+
+PR: none
+
+Storybook canvas evidence for the split User Details layout was captured
+and shown in the owner handoff; no repository image is published for this change.
+
 ## 实现前置条件（Definition of Ready / Preconditions）
 
 - API 主字段命名与回退策略已冻结。
