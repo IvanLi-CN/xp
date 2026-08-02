@@ -606,7 +606,6 @@ describe("<UserDetailsPage />", () => {
 	it("saves edited user profile", async () => {
 		setupMocks();
 		renderPage();
-
 		const input = await screenByLabel("Display name");
 		fireEvent.change(input, { target: { value: "Ivan Updated" } });
 		fireEvent.click(await screenByRole("button", "Save user"));
@@ -614,12 +613,12 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(patchAdminUser).toHaveBeenCalled();
 		});
+		expect(putAdminUserMihomoProfile).not.toHaveBeenCalled();
 	});
 
 	it("loads subscription preview from user tab", async () => {
 		setupMocks();
 		renderPage();
-
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
@@ -669,6 +668,7 @@ describe("<UserDetailsPage />", () => {
 				},
 			);
 		});
+		expect(patchAdminUser).not.toHaveBeenCalled();
 	});
 
 	it("normalizes legacy mixed mihomo profile before save", async () => {

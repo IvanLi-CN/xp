@@ -135,6 +135,8 @@
 - Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 必须包含 `base-reality`，且不得再把 `base-ss` 暴露为该组成员。
 - Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 继续沿用 `base-chain` 与 `base-ss` 的兼容回落路径。
 - Given 请求体只提供旧字段 `template_yaml`，When 保存 profile，Then 请求被拒绝。
+- Given 管理员打开 User Details，When 编辑用户资料或 Mihomo mixin，Then 用户资料保存区与 Mihomo 配置保存区以同级区域呈现，
+  且各自的保存按钮只属于对应区域。
 - Given 一份外部提供的脱敏 Mihomo 示例作为目标，When 在共享测试机生成 `format=mihomo` 输出，Then 必须能展示一份脱敏但结构真实的订阅片段，并说明系统托管动态段带来的结构差异与业务行为等价证据。
 - Given 目标示例自带脱敏后的静态 `proxies`（如遮蔽的 REALITY 公钥），When 需要做真实 Mihomo `-t` 校验，Then 应基于同一份业务 mixin 去掉这些不可解析的脱敏静态节点后再校验，以验证系统生成的动态层、provider 池与业务分组仍可被 Mihomo 实际加载。
 - Given 现有 `raw/clash/base64` 调用，When 回归测试，Then 输出语义与 content-type 不回归。

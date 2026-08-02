@@ -1131,7 +1131,13 @@ export function UserDetailsPage() {
 
 			{tab === "user" ? (
 				<div className="space-y-6">
-					<div className="xp-card p-4 space-y-3">
+					<section
+						aria-labelledby="user-profile-heading"
+						className="xp-card p-4 space-y-4"
+					>
+						<h3 id="user-profile-heading" className="font-semibold">
+							User profile
+						</h3>
 						<div className="xp-field-stack gap-2">
 							<span className="text-sm font-medium">Display name</span>
 							<Input
@@ -1141,7 +1147,6 @@ export function UserDetailsPage() {
 								onChange={(event) => setDisplayName(event.target.value)}
 							/>
 						</div>
-
 						<div className="grid gap-3 md:grid-cols-3">
 							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">Quota reset policy</span>
@@ -1163,7 +1168,6 @@ export function UserDetailsPage() {
 									</SelectContent>
 								</Select>
 							</div>
-
 							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">Day of month</span>
 								<Input
@@ -1178,7 +1182,6 @@ export function UserDetailsPage() {
 									}
 								/>
 							</div>
-
 							<div className="xp-field-stack gap-2">
 								<span className="text-sm font-medium">TZ offset (minutes)</span>
 								<Input
@@ -1191,7 +1194,6 @@ export function UserDetailsPage() {
 								/>
 							</div>
 						</div>
-
 						<div className="flex items-center gap-3 text-sm">
 							<span className="font-medium">User ID:</span>
 							<span className="font-mono">{user.user_id}</span>
@@ -1202,7 +1204,29 @@ export function UserDetailsPage() {
 								{user.subscription_token}
 							</span>
 						</div>
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						{userSaveError ? (
+							<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+								{userSaveError}
+							</div>
+						) : null}
+						<div>
+							<Button
+								onClick={saveUserProfile}
+								loading={isSavingUser}
+								disabled={runtime.isReadOnly}
+							>
+								Save user
+							</Button>
+						</div>
+					</section>
+					<section
+						aria-labelledby="mihomo-config-heading"
+						className="xp-card p-4 space-y-4"
+					>
+						<h3 id="mihomo-config-heading" className="font-semibold">
+							Mihomo configuration
+						</h3>
+						<div className="space-y-3">
 							<div className="flex flex-wrap items-end gap-3">
 								<SubscriptionFormatSegmentedControl
 									className="w-full sm:w-auto"
@@ -1235,7 +1259,7 @@ export function UserDetailsPage() {
 								provider-backed delivery path.
 							</div>
 						</div>
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						<div className="border-t border-border/70 pt-4 space-y-3">
 							<div className="font-medium text-sm">
 								Mihomo mixin config (per user)
 							</div>
@@ -1289,22 +1313,7 @@ export function UserDetailsPage() {
 								</Button>
 							</div>
 						</div>
-
-						{userSaveError ? (
-							<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-								{userSaveError}
-							</div>
-						) : null}
-						<div>
-							<Button
-								onClick={saveUserProfile}
-								loading={isSavingUser}
-								disabled={runtime.isReadOnly}
-							>
-								Save user
-							</Button>
-						</div>
-					</div>
+					</section>
 
 					<div className="xp-card p-4 space-y-3">
 						<h3 className="font-semibold">Node quotas</h3>

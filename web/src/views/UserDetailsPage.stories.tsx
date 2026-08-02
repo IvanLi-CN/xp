@@ -96,6 +96,58 @@ type Story = StoryObj<typeof meta>;
 
 export const User1: Story = {};
 
+export const UserAndMihomoSections: Story = {
+	tags: ["user-mihomo-layout"],
+	beforeEach: () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input, init) => {
+			const request = new Request(input, init);
+			if (
+				new URL(request.url).pathname.endsWith("/subscription-mihomo-profile")
+			) {
+				return new Response(
+					JSON.stringify({
+						mixin_yaml: "port: 0\nproxy-groups: []\n",
+						extra_proxies_yaml: "",
+						extra_proxy_providers_yaml: "",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			return originalFetch(request);
+		};
+		return () => {
+			globalThis.fetch = originalFetch;
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const userProfile = await canvas.findByRole("region", {
+			name: "User profile",
+		});
+		const mihomoConfig = await canvas.findByRole("region", {
+			name: "Mihomo configuration",
+		});
+
+		await expect(
+			within(userProfile).getByRole("button", { name: "Save user" }),
+		).toBeInTheDocument();
+		await expect(
+			within(userProfile).queryByRole("button", {
+				name: "Save mihomo mixin",
+			}),
+		).not.toBeInTheDocument();
+		await expect(
+			within(mihomoConfig).getByRole("button", {
+				name: "Save mihomo mixin",
+			}),
+		).toBeInTheDocument();
+		await expect(
+			within(mihomoConfig).queryByRole("button", { name: "Save user" }),
+		).not.toBeInTheDocument();
+	},
+};
+
 export const User2: Story = {
 	parameters: {
 		router: {
