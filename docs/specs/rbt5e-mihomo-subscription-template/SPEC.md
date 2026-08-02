@@ -143,10 +143,19 @@
 
 ## Visual Evidence
 
-PR: none
+source_type=storybook_canvas
+target_program=mock-only
+capture_scope=browser-viewport
+sensitive_exclusion=N/A; mock-only Storybook canvas
+submission_gate=approved
+
+PR: include
+
+User Details sibling save regions after the layout split.
+![User Details sibling sections](./assets/user-mihomo-layout.png)
 
 Storybook canvas evidence for the split User Details layout was captured
-and shown in the owner handoff; no repository image is published for this change.
+and shown in the owner handoff; the committed asset is the approved PR evidence.
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
