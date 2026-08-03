@@ -168,6 +168,10 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
     let binaries = resolve_binary_paths(&paths, &env_map);
     let existing_meta = load_existing_metadata(&paths, &env_map)?;
     let spec = ContainerSpec::from_env_map(&paths, &env_map, existing_meta.as_ref()).await?;
+    cutover::write_marker_if(
+        &spec.data_dir,
+        args.allow_internal_auth_v2_cutover && mode == Mode::Real,
+    )?;
 
     ensure_container_layout(&paths, &spec, mode)?;
     if let Some(cf) = spec.cloudflare.as_ref() {
@@ -1719,6 +1723,8 @@ fn render_dry_run(spec: &ContainerSpec, binaries: &BinaryPaths) {
         eprintln!("  - default_ss: disabled");
     }
 }
+
+mod cutover;
 
 #[cfg(test)]
 mod tests;

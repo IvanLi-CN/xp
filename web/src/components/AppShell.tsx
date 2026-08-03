@@ -130,6 +130,7 @@ export function AppShell({
 		error: null,
 	});
 	const lastUpgradeStateRef = useRef<string | null>(null);
+	const lastMeshRevisionRef = useRef<number | null>(null);
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -258,6 +259,12 @@ export function AppShell({
 						["adminUpgradeStatus", adminToken],
 						message.data.upgrade,
 					);
+					if (lastMeshRevisionRef.current !== message.data.mesh_revision) {
+						lastMeshRevisionRef.current = message.data.mesh_revision;
+						void queryClient.invalidateQueries({
+							queryKey: ["adminMeshStatus", adminToken],
+						});
+					}
 					setStatusStream({
 						connected: true,
 						lastEventAtMs: Number.isFinite(lastEventAtMs)

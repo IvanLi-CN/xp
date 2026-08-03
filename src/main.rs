@@ -325,13 +325,23 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         node_history.clone(),
     );
 
+    let persisted_member_count = store.lock().await.list_nodes().len();
+    xp::internal_auth_epoch::ensure_startup_epoch(&config.data_dir, persisted_member_count)?;
+
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
-    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_state(
+    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_mesh_auth(
         &cluster_ca_pem,
         &node_cert_pem,
         &node_key_pem,
         config.mesh_proxy_url.as_deref(),
         mesh_proxy_state.clone(),
+        xp::raft::network_http::RaftMeshAuth {
+            cluster_id: cluster.cluster_id.clone(),
+            sender_id: cluster.node_id.clone(),
+            cluster_ca_key_pem: cluster_ca_key_pem_required.clone(),
+            cluster_ca_cert_pem: cluster_ca_pem.clone(),
+            store: store.clone(),
+        },
     )?;
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
@@ -413,6 +423,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             config_arc.clone(),
             store.clone(),
             cluster.node_id.clone(),
+            cluster.cluster_id.clone(),
+            cluster_ca_key_pem_required.clone(),
+            cluster_ca_pem.clone(),
         )
         .await;
         if disable_managed_vless_reconcile_for_canary_result(

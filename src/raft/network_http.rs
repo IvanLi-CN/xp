@@ -1,6 +1,12 @@
 use crate::{
-    control_plane_mesh::{MeshAwareHttpClient, MeshProxyStateHandle, apply_optional_proxy},
+    control_plane_mesh::{
+        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
+        apply_optional_proxy,
+    },
+    internal_auth::InternalRoute,
+    managed_default_endpoints::managed_default_vless_endpoint,
     raft::types::{NodeId, NodeMeta, TypeConfig},
+    state::JsonSnapshotStore,
 };
 
 use anyhow::Context;
@@ -13,10 +19,22 @@ use openraft::{
         InstallSnapshotResponse, VoteRequest, VoteResponse,
     },
 };
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+#[derive(Clone)]
+pub struct RaftMeshAuth {
+    pub cluster_id: String,
+    pub sender_id: String,
+    pub cluster_ca_key_pem: String,
+    pub cluster_ca_cert_pem: String,
+    pub store: Arc<Mutex<JsonSnapshotStore>>,
+}
 
 #[derive(Clone)]
 pub struct HttpNetworkFactory {
     client: MeshAwareHttpClient,
+    mesh_auth: Option<RaftMeshAuth>,
 }
 
 impl HttpNetworkFactory {
@@ -25,6 +43,7 @@ impl HttpNetworkFactory {
         let state = MeshProxyStateHandle::disabled();
         Self {
             client: MeshAwareHttpClient::new(client, None, state),
+            mesh_auth: None,
         }
     }
 
@@ -32,6 +51,7 @@ impl HttpNetworkFactory {
         let state = MeshProxyStateHandle::disabled();
         Self {
             client: MeshAwareHttpClient::new(client, None, state),
+            mesh_auth: None,
         }
     }
 
@@ -96,7 +116,28 @@ impl HttpNetworkFactory {
         };
         Ok(Self {
             client: MeshAwareHttpClient::new(direct, relay, state),
+            mesh_auth: None,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_mtls_with_mesh_auth(
+        cluster_ca_pem: &str,
+        node_cert_pem: &str,
+        node_key_pem: &str,
+        mesh_proxy_url: Option<&str>,
+        state: MeshProxyStateHandle,
+        mesh_auth: RaftMeshAuth,
+    ) -> anyhow::Result<Self> {
+        let mut factory = Self::try_new_mtls_with_state(
+            cluster_ca_pem,
+            node_cert_pem,
+            node_key_pem,
+            mesh_proxy_url,
+            state,
+        )?;
+        factory.mesh_auth = Some(mesh_auth);
+        Ok(factory)
     }
 }
 
@@ -118,6 +159,7 @@ pub struct HttpNetwork {
     target_node: NodeMeta,
     base: String,
     client: MeshAwareHttpClient,
+    mesh_auth: Option<RaftMeshAuth>,
 }
 
 impl HttpNetwork {
@@ -147,7 +189,9 @@ impl HttpNetwork {
                 error = %e,
                 "raft rpc unreachable"
             );
-            RPCError::Unreachable(openraft::error::Unreachable::new(&e))
+            RPCError::Unreachable(openraft::error::Unreachable::new(&std::io::Error::other(
+                e.to_string(),
+            )))
         })?;
 
         match result {
@@ -165,7 +209,7 @@ impl HttpNetwork {
         path: &str,
         req: &Req,
         option: RPCOption,
-    ) -> Result<Resp, reqwest::Error> {
+    ) -> anyhow::Result<Resp> {
         let url = self.url(path);
         tracing::trace!(
             target = "xp::raft::network_http",
@@ -175,15 +219,42 @@ impl HttpNetwork {
             "raft rpc send"
         );
 
-        let resp = self
-            .client
-            .send_with_fallback(option.hard_ttl(), |client| {
-                client
-                    .post(url.clone())
-                    .timeout(option.hard_ttl())
-                    .json(req)
-            })
-            .await?;
+        let resp = if let Some(mesh_auth) = &self.mesh_auth {
+            let body = serde_json::to_vec(req).context("serialize raft rpc")?;
+            let target =
+                mesh_target_for_raft(&mesh_auth.store, &self.base, &self.target_node).await;
+            self.client
+                .send_peer_request(
+                    &target,
+                    MeshRequest {
+                        method: reqwest::Method::POST,
+                        path_and_query: path.to_string(),
+                        content_type: Some("application/json".to_string()),
+                        body,
+                        total_budget: option.hard_ttl(),
+                        // Raft RPCs are protocol-idempotent. The same request id is preserved
+                        // across the Mesh/public attempt inside this call.
+                        allow_ambiguous_fallback: true,
+                        request_id: ulid::Ulid::new().to_string(),
+                        route: InternalRoute::MeshV2,
+                        cluster_id: mesh_auth.cluster_id.clone(),
+                        sender_id: mesh_auth.sender_id.clone(),
+                    },
+                    &mesh_auth.cluster_ca_key_pem,
+                    &mesh_auth.cluster_ca_cert_pem,
+                )
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        } else {
+            self.client
+                .send_with_fallback(option.hard_ttl(), |client| {
+                    client
+                        .post(url.clone())
+                        .timeout(option.hard_ttl())
+                        .json(req)
+                })
+                .await?
+        };
         tracing::trace!(
             target = "xp::raft::network_http",
             target_id = self.target,
@@ -191,7 +262,44 @@ impl HttpNetwork {
             status = %resp.status(),
             "raft rpc response"
         );
-        resp.error_for_status()?.json::<Resp>().await
+        Ok(resp.error_for_status()?.json::<Resp>().await?)
+    }
+}
+
+async fn mesh_target_for_raft(
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    raft_base_url: &str,
+    target_node: &NodeMeta,
+) -> MeshPeerTarget {
+    let store = store.lock().await;
+    let peer = store.list_nodes().into_iter().find(|node| {
+        node.api_base_url == target_node.api_base_url || node.api_base_url == raft_base_url
+    });
+    let Some(peer) = peer else {
+        return MeshPeerTarget {
+            node_id: target_node.name.clone(),
+            node_name: target_node.name.clone(),
+            mesh_base_url: None,
+            public_base_url: raft_base_url.to_string(),
+        };
+    };
+    let mesh_base_url = store
+        .list_endpoints()
+        .into_iter()
+        .filter(|endpoint| endpoint.node_id == peer.node_id)
+        .filter_map(|endpoint| managed_default_vless_endpoint(&endpoint).map(|_| endpoint.port))
+        .collect::<Vec<_>>();
+    let mesh_base_url = match mesh_base_url.as_slice() {
+        [port] if !peer.access_host.trim().is_empty() => {
+            Some(format!("https://{}:{port}", peer.access_host))
+        }
+        _ => None,
+    };
+    MeshPeerTarget {
+        node_id: peer.node_id,
+        node_name: peer.node_name,
+        mesh_base_url,
+        public_base_url: peer.api_base_url,
     }
 }
 
@@ -204,6 +312,7 @@ impl RaftNetworkFactory<TypeConfig> for HttpNetworkFactory {
             target_node: node.clone(),
             base: node.raft_endpoint.clone(),
             client: self.client.clone(),
+            mesh_auth: self.mesh_auth.clone(),
         }
     }
 }

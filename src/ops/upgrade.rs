@@ -326,6 +326,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let xp_ops_asset_name = platform.xp_ops_asset_name();
 
     if mode == Mode::DryRun {
+        if args.allow_internal_auth_v2_cutover {
+            eprintln!(
+                "would write internal-auth v2 cutover marker: {}",
+                args.data_dir
+                    .join("mesh/internal-auth-v2-cutover.json")
+                    .display()
+            );
+        }
         eprintln!("would download checksums: {CHECKSUMS_ASSET_NAME}");
         eprintln!("would download asset: {xp_asset_name}");
         eprintln!("would install to: {}", xp_dest.display());
@@ -344,6 +352,15 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
 
     if !xp_dest.exists() {
         return Err(ExitError::new(3, "invalid_args: xp is not installed"));
+    }
+
+    if args.allow_internal_auth_v2_cutover {
+        crate::internal_auth_epoch::write_cutover_marker(&args.data_dir).map_err(|error| {
+            ExitError::new(
+                7,
+                format!("service_error: write internal-auth v2 cutover marker: {error}"),
+            )
+        })?;
     }
 
     let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
@@ -388,6 +405,9 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     match phase_result {
         Ok(()) => Ok(()),
         Err(err) => {
+            if args.allow_internal_auth_v2_cutover {
+                crate::internal_auth_epoch::clear_cutover_marker(&args.data_dir);
+            }
             if let Some(resume) = resume.as_ref() {
                 clear_upgrade_resume_env();
                 return rollback_xp_ops_after_resumed_failure(
@@ -415,6 +435,8 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     let upgrade_args = UpgradeArgs {
         release: release_args,
         dry_run: false,
+        data_dir: args.data_dir.clone(),
+        allow_internal_auth_v2_cutover: false,
     };
 
     let result = cmd_upgrade(paths, upgrade_args).await;

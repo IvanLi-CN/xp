@@ -19,6 +19,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 					title: "Nav",
 					items: [
 						{ label: "Dashboard", to: "/", icon: "tabler:layout-dashboard" },
+						{
+							label: "System status",
+							to: "/system-status",
+							icon: "tabler:activity-heartbeat",
+						},
 						{ label: "Nodes", to: "/nodes", icon: "tabler:server" },
 						{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" },
 						{ label: "Users", to: "/users", icon: "tabler:users" },

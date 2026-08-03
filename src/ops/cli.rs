@@ -128,6 +128,9 @@ pub enum ContainerCommand {
 pub struct ContainerRunArgs {
     #[arg(long)]
     pub dry_run: bool,
+
+    #[arg(long)]
+    pub allow_internal_auth_v2_cutover: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -201,6 +204,17 @@ pub struct UpgradeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "XP_DATA_DIR",
+        default_value = "/var/lib/xp/data"
+    )]
+    pub data_dir: PathBuf,
+
+    #[arg(long)]
+    pub allow_internal_auth_v2_cutover: bool,
 }
 
 #[derive(Args, Debug, Clone)]

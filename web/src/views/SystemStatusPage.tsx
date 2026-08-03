@@ -1,0 +1,519 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+
+import { fetchAdminAlerts } from "@/api/adminAlerts";
+import {
+	type AdminMeshPeer,
+	type AdminMeshStatus,
+	fetchAdminMeshStatus,
+	runAdminMeshProbes,
+} from "@/api/adminMesh";
+import { fetchAdminNodesRuntime } from "@/api/adminNodeRuntime";
+import { Button } from "@/components/Button";
+import { Icon } from "@/components/Icon";
+import { MeshUptimeStrip } from "@/components/MeshUptimeStrip";
+import { PageHeader } from "@/components/PageHeader";
+import { PageState } from "@/components/PageState";
+import { ReadStateBanner } from "@/components/ReadStateBanner";
+import { readAdminToken } from "@/components/auth";
+import { Badge } from "@/components/ui/badge";
+import { useAppRuntime } from "@/offline/appRuntime";
+import {
+	formatSyncTimestamp,
+	hasQueryData,
+	latestQueryDataUpdatedAt,
+	queryIsOfflineBlocked,
+} from "@/offline/queryReadState";
+import { useQueryWithOfflineFallback } from "@/offline/useQueryWithOfflineFallback";
+
+export type SystemStatusSurfaceProps = {
+	status: AdminMeshStatus;
+	components?: Array<{ component: string; status: string }>;
+	isRefreshing?: boolean;
+	isProbing?: boolean;
+	readOnly?: boolean;
+	onRefresh?: () => void;
+	onProbeAll?: () => void;
+	onProbePeer?: (nodeId: string) => void;
+};
+
+const qualityLabel = {
+	good: "Good",
+	slow: "Slow",
+	unstable: "Unstable",
+	down: "Down",
+	unknown: "Unknown",
+} as const;
+
+const qualityVariant = {
+	good: "success",
+	slow: "warning",
+	unstable: "warning",
+	down: "destructive",
+	unknown: "outline",
+} as const;
+
+function percent(value: number | null) {
+	return value === null ? "-" : `${(value * 100).toFixed(1)}%`;
+}
+
+function timestamp(value: string | null) {
+	if (!value) return "No sample";
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed)
+		? new Intl.DateTimeFormat(undefined, {
+				hour: "2-digit",
+				minute: "2-digit",
+				month: "short",
+				day: "numeric",
+			}).format(parsed)
+		: value;
+}
+
+function routeLabel(peer: AdminMeshPeer) {
+	if (!peer.current_path) return "Awaiting sample";
+	return peer.current_path === "mesh" ? "Reality Mesh" : "Public fallback";
+}
+
+function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
+	const label =
+		state === "half_open"
+			? "Half-open"
+			: state[0].toUpperCase() + state.slice(1);
+	return (
+		<Badge
+			variant={
+				state === "open"
+					? "destructive"
+					: state === "disabled"
+						? "outline"
+						: "secondary"
+			}
+			size="sm"
+		>
+			{label}
+		</Badge>
+	);
+}
+
+function PeerRows({
+	peer,
+	onProbe,
+}: { peer: AdminMeshPeer; onProbe?: () => void }) {
+	const content = (
+		<>
+			<div className="min-w-40">
+				<div className="flex items-center gap-2">
+					<span className="truncate font-medium">{peer.node_name}</span>
+					<Badge variant={qualityVariant[peer.quality]} size="sm">
+						{qualityLabel[peer.quality]}
+					</Badge>
+					{peer.stale ? (
+						<Badge variant="outline" size="sm">
+							Stale
+						</Badge>
+					) : null}
+				</div>
+				<p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+					{peer.mesh_url ?? peer.api_base_url}
+				</p>
+			</div>
+			<div className="min-w-28 text-sm">
+				<p>{routeLabel(peer)}</p>
+				<p className="mt-1 text-xs text-muted-foreground">
+					{timestamp(peer.last_transition_at)}
+				</p>
+			</div>
+			<div className="min-w-64 flex-1">
+				<MeshUptimeStrip
+					buckets={peer.buckets}
+					quality={peer.quality}
+					label={`${peer.node_name} 24 hour uptime`}
+				/>
+				<div className="mt-1 flex justify-between text-xs text-muted-foreground">
+					<span>24h uptime {percent(peer.availability_24h)}</span>
+					<span>Mesh {percent(peer.mesh_availability_24h)}</span>
+				</div>
+			</div>
+			<div className="min-w-24 text-sm">
+				<p>{percent(peer.availability_1h)}</p>
+				<p className="mt-1 text-xs text-muted-foreground">1h availability</p>
+			</div>
+			<div className="min-w-24 font-mono text-sm">
+				<p>
+					{peer.latency_p50_ms ?? "-"} / {peer.latency_p95_ms ?? "-"}
+				</p>
+				<p className="mt-1 text-xs font-sans text-muted-foreground">
+					p50 / p95 ms
+				</p>
+			</div>
+			<div className="min-w-24">
+				<BreakerBadge state={peer.breaker} />
+			</div>
+		</>
+	);
+	return (
+		<>
+			<div className="hidden items-center gap-4 border-b border-border/70 py-3 md:flex">
+				{content}
+				<div className="flex shrink-0 items-center gap-1">
+					<Button
+						variant="ghost"
+						size="sm"
+						className="size-8 px-0"
+						aria-label={`Probe ${peer.node_name}`}
+						title={`Probe ${peer.node_name}`}
+						onClick={onProbe}
+					>
+						<Icon name="tabler:activity" size={16} />
+					</Button>
+					<Button
+						asChild
+						variant="ghost"
+						size="sm"
+						className="size-8 px-0"
+						aria-label={`Open ${peer.node_name} details`}
+						title={`Open ${peer.node_name} details`}
+					>
+						<Link to="/nodes/$nodeId" params={{ nodeId: peer.node_id }}>
+							<Icon name="tabler:arrow-up-right" size={16} />
+						</Link>
+					</Button>
+				</div>
+			</div>
+			<div className="space-y-3 border-b border-border/70 py-4 md:hidden">
+				{content}
+				<div className="flex justify-end gap-2">
+					<Button
+						variant="secondary"
+						size="sm"
+						onClick={onProbe}
+						iconLeft={<Icon name="tabler:activity" size={15} />}
+					>
+						Probe
+					</Button>
+					<Button asChild variant="ghost" size="sm">
+						<Link to="/nodes/$nodeId" params={{ nodeId: peer.node_id }}>
+							Details
+						</Link>
+					</Button>
+				</div>
+			</div>
+		</>
+	);
+}
+
+export function SystemStatusSurface({
+	status,
+	components = [],
+	isRefreshing,
+	isProbing,
+	readOnly,
+	onRefresh,
+	onProbeAll,
+	onProbePeer,
+}: SystemStatusSurfaceProps) {
+	const summary = useMemo(() => {
+		const total = status.peers.length;
+		const meshReady = status.peers.filter(
+			(peer) => peer.current_path === "mesh",
+		).length;
+		const fallback = status.peers.filter(
+			(peer) => peer.current_path === "public",
+		).length;
+		return { total, meshReady, fallback };
+	}, [status.peers]);
+
+	return (
+		<div className="space-y-7">
+			<PageHeader
+				title="System status"
+				description="Control-plane reachability, transport quality, and node runtime health."
+				meta={
+					<>
+						<Badge variant="secondary" size="sm">
+							{status.local.role}
+						</Badge>
+						<span className="font-mono text-xs text-muted-foreground">
+							term {status.local.term} · rev {status.revision}
+						</span>
+					</>
+				}
+				actions={
+					<>
+						<Button
+							variant="secondary"
+							size="sm"
+							loading={isRefreshing}
+							onClick={onRefresh}
+							iconLeft={<Icon name="tabler:refresh" size={15} />}
+						>
+							Refresh
+						</Button>
+						<Button
+							size="sm"
+							loading={isProbing}
+							disabled={readOnly || status.peers.length === 0}
+							onClick={onProbeAll}
+							iconLeft={<Icon name="tabler:activity-heartbeat" size={15} />}
+						>
+							Probe all
+						</Button>
+					</>
+				}
+			/>
+
+			<section className="border-y border-border/70 py-4">
+				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+					<StatusFact
+						label="Local node"
+						value={status.local.node_name}
+						detail={status.local.node_id}
+					/>
+					<StatusFact
+						label="Raft"
+						value={status.local.role}
+						detail={
+							status.local.leader_api_base_url || `term ${status.local.term}`
+						}
+					/>
+					<StatusFact
+						label="Mesh peers"
+						value={`${summary.meshReady}/${summary.total}`}
+						detail="on Reality Mesh"
+					/>
+					<StatusFact
+						label="Public fallback"
+						value={String(summary.fallback)}
+						detail="active paths"
+					/>
+					<StatusFact
+						label="Control relay"
+						value={status.local.mesh_proxy_status}
+						detail={
+							status.local.mesh_proxy_reason ??
+							"direct when no proxy is configured"
+						}
+					/>
+					<StatusFact
+						label="Last snapshot"
+						value={timestamp(status.generated_at)}
+						detail={status.local.cluster_id}
+					/>
+				</div>
+			</section>
+
+			<section>
+				<div className="mb-3 flex items-end justify-between gap-4">
+					<div>
+						<h2 className="text-lg font-semibold">Peer transport</h2>
+						<p className="mt-1 text-sm text-muted-foreground">
+							A blue edge on a timeline marks end-to-end success through public
+							fallback.
+						</p>
+					</div>
+					<span className="text-xs text-muted-foreground">No pagination</span>
+				</div>
+				{status.peers.length === 0 ? (
+					<div
+						className={
+							"border border-dashed border-border/80 px-4 py-10 text-center " +
+							"text-sm text-muted-foreground"
+						}
+					>
+						No remote members have been recorded for this cluster.
+					</div>
+				) : (
+					<div className="border-t border-border/70">
+						{status.peers.map((peer) => (
+							<PeerRows
+								key={peer.node_id}
+								peer={peer}
+								onProbe={
+									readOnly ? undefined : () => onProbePeer?.(peer.node_id)
+								}
+							/>
+						))}
+					</div>
+				)}
+			</section>
+
+			<section className="grid gap-6 border-t border-border/70 pt-6 lg:grid-cols-[1.2fr_0.8fr]">
+				<div>
+					<h2 className="text-lg font-semibold">Runtime components</h2>
+					<div className="mt-3 grid grid-cols-2 border-t border-border/70 sm:grid-cols-5">
+						{[
+							...components,
+							{ component: "canary", status: status.local.mesh_proxy_status },
+						].map((item) => (
+							<div
+								key={item.component}
+								className="border-b border-r border-border/70 px-3 py-3"
+							>
+								<p className="text-xs uppercase text-muted-foreground">
+									{item.component}
+								</p>
+								<p className="mt-1 font-medium capitalize">{item.status}</p>
+							</div>
+						))}
+					</div>
+				</div>
+				<div>
+					<h2 className="text-lg font-semibold">Recent mesh events</h2>
+					<ol className="mt-3 divide-y divide-border/70 border-t border-border/70">
+						{status.events
+							.slice(-6)
+							.reverse()
+							.map((event) => (
+								<li
+									key={`${event.at}-${event.peer_id}-${event.kind}`}
+									className="py-2 text-sm"
+								>
+									<div className="flex justify-between gap-3">
+										<span className="font-medium">
+											{event.kind.replaceAll("_", " ")}
+										</span>
+										<span className="shrink-0 text-xs text-muted-foreground">
+											{timestamp(event.at)}
+										</span>
+									</div>
+									<p className="mt-1 text-muted-foreground">{event.message}</p>
+								</li>
+							))}
+						{status.events.length === 0 ? (
+							<li className="py-4 text-sm text-muted-foreground">
+								No transport events yet.
+							</li>
+						) : null}
+					</ol>
+				</div>
+			</section>
+		</div>
+	);
+}
+
+function StatusFact({
+	label,
+	value,
+	detail,
+}: { label: string; value: string; detail: string }) {
+	return (
+		<div className="min-w-0">
+			<p className="text-xs uppercase text-muted-foreground">{label}</p>
+			<p className="mt-1 truncate text-base font-semibold">{value}</p>
+			<p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>
+		</div>
+	);
+}
+
+export function SystemStatusPage() {
+	const runtime = useAppRuntime();
+	const [adminToken] = useState(() => readAdminToken());
+	const meshQuery = useQuery({
+		queryKey: ["adminMeshStatus", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminMeshStatus(adminToken, signal),
+		refetchInterval: 30_000,
+	});
+	const meshState = useQueryWithOfflineFallback(
+		["adminMeshStatus", adminToken],
+		meshQuery,
+	);
+	const runtimeQuery = useQuery({
+		queryKey: ["adminNodesRuntime", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
+	});
+	const alertsQuery = useQuery({
+		queryKey: ["adminAlerts", adminToken],
+		enabled: adminToken.length > 0,
+		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
+	});
+	const probe = useMutation({
+		mutationFn: (nodeIds: string[]) => runAdminMeshProbes(adminToken, nodeIds),
+		onSuccess: () => meshQuery.refetch(),
+	});
+	const latestAt = latestQueryDataUpdatedAt([
+		meshState,
+		runtimeQuery,
+		alertsQuery,
+	]);
+	const localComponents =
+		runtimeQuery.data?.items
+			.find((item) => item.node_id === meshState.data?.local.node_id)
+			?.components.map((item) => ({
+				component: item.component,
+				status: item.status,
+			})) ?? [];
+
+	if (adminToken.length === 0)
+		return (
+			<PageState
+				variant="empty"
+				title="Admin token required"
+				description="Set an admin token to inspect mesh status."
+			/>
+		);
+	if (meshState.isLoading && !hasQueryData(meshState))
+		return (
+			<PageState
+				variant="loading"
+				title="Loading system status"
+				description="Collecting the local telemetry snapshot."
+			/>
+		);
+	if (
+		!hasQueryData(meshState) &&
+		queryIsOfflineBlocked(meshState, runtime.isOnline)
+	)
+		return (
+			<PageState
+				variant="offline"
+				title="Offline snapshot unavailable"
+				description="Open System status once while online to keep a local snapshot."
+			/>
+		);
+	if (meshState.isError && !hasQueryData(meshState))
+		return (
+			<PageState
+				variant="error"
+				title="Failed to load system status"
+				description="The mesh telemetry endpoint did not return a usable snapshot."
+				error={meshState.error}
+				action={
+					<Button variant="secondary" onClick={() => meshState.refetch()}>
+						Retry
+					</Button>
+				}
+			/>
+		);
+	if (!meshState.data) return null;
+
+	return (
+		<div className="space-y-5">
+			{latestAt !== null && (!runtime.isOnline || meshState.isError) ? (
+				<ReadStateBanner
+					tone={!runtime.isOnline ? "warning" : "info"}
+					variant="inline"
+					title={
+						!runtime.isOnline
+							? "Offline read-only snapshot"
+							: "Showing cached system status"
+					}
+					description={`Last successful sync: ${formatSyncTimestamp(latestAt)}.`}
+				/>
+			) : null}
+			<SystemStatusSurface
+				status={meshState.data}
+				components={localComponents}
+				isRefreshing={meshState.isFetching}
+				isProbing={probe.isPending}
+				readOnly={runtime.isReadOnly}
+				onRefresh={() => meshState.refetch()}
+				onProbeAll={() => probe.mutate([])}
+				onProbePeer={(nodeId) => probe.mutate([nodeId])}
+			/>
+		</div>
+	);
+}

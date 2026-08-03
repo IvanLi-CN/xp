@@ -29,7 +29,7 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` can optionally route xp-to-xp control-plane HTTP requests through a local proxy with `XP_MESH_PROXY_URL`; `xp-ops init` provisions a loopback-only Xray SOCKS listener at `127.0.0.1:10808` for this purpose.
+- `xp` derives its primary per-peer control-plane route from exactly one managed-default VLESS/REALITY endpoint on the target node. `XP_MESH_PROXY_URL` remains an optional proxy-first/direct compatibility layer only for the public fallback egress.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
@@ -96,6 +96,47 @@ Contract:
 - This does not move the admin UI / cluster API onto the VLESS port.
 - Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
+
+## Reality fallback control-plane Mesh
+
+When a peer has exactly one managed-default VLESS/REALITY endpoint, XP derives
+`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The canary keeps
+ordinary `/generate_204` and authority-based camouflage traffic separate from Mesh traffic:
+
+- signed `health-v2` requests reach only the bodyless Mesh health endpoint;
+- signed `mesh-v2` requests may reach only `/raft/*` and `/api/admin/_internal/*` on the fixed
+  local XP loopback origin;
+- malformed or unsigned requests carrying reserved `X-XP-*` route headers return `404` and are
+  never forwarded to a camouflage upstream.
+
+Each peer has an independent breaker. After three retryable Mesh transport failures it uses the
+`30/60/120/240/300s` backoff sequence and sends the remaining request budget to the public
+`api_base_url`. A signed acknowledgement is authoritative even for a non-2xx HTTP result, so it
+never triggers a second path attempt. The local node keeps 24 hours of one-minute buckets and the
+last 200 transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect them with
+`GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
+accepts only current remote member IDs.
+
+### Auth epoch cutover
+
+A multi-node cluster cannot cross to internal-auth v2 through the Web upgrade action. During a
+maintenance window, run the host-managed upgrade on every node with:
+
+```bash
+sudo xp-ops upgrade --data-dir /var/lib/xp/data --allow-internal-auth-v2-cutover
+```
+
+For the official single-image runtime, use the same entrypoint command for the replacement that
+starts the v2 image:
+
+```bash
+xp-ops container run --allow-internal-auth-v2-cutover
+```
+
+The command writes a one-shot marker under `${XP_DATA_DIR}/mesh/`. A new binary on a multi-node
+cluster consumes that marker into the durable v2 epoch record; without it startup fails so the
+host upgrade path can roll back. After the epoch record exists, normal same-epoch Web upgrades are
+available again. Never stagger v1 and v2 nodes outside this maintenance window.
 
 Host-managed upgrade note:
 
@@ -312,8 +353,8 @@ Required (or commonly set):
     DNS-over-HTTPS resolvers before ACME validation starts. Nodes do not need direct authority
     access on UDP/TCP port 53.
 - `XP_MESH_PROXY_URL` (default: unset)
-  - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
-  - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
+  - Optional proxy-first/direct egress layer for public control-plane fallback. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
+  - This does not carry Reality Mesh traffic and does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
 
 DDNS runtime notes:
 
