@@ -1,6 +1,7 @@
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AdminUpgradeStatusResponse } from "../api/adminUpgrade";
+import type { UpgradeObservation } from "../offline/upgradeObservation";
 import { Button } from "./Button";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
@@ -14,6 +15,11 @@ import {
 	xpVersionLinkHref,
 } from "./versionCheckUi";
 
+const UPGRADE_TIMEOUT_MESSAGE = [
+	"Upgrade status could not be confirmed after one minute. Use Status to check again; ",
+	"Upgrade remains locked until the node reports an idle or terminal state.",
+].join("");
+
 type VersionIndicatorProps = {
 	xpVersion: string | null | undefined;
 	versionCheck: VersionCheckUiState;
@@ -22,6 +28,8 @@ type VersionIndicatorProps = {
 	upgradeStatusError?: string | null;
 	upgradeStatusLoading?: boolean;
 	upgradeStarting?: boolean;
+	upgradeObservation?: UpgradeObservation | null;
+	onDismissUpgradeResult?: () => void;
 	onRetryVersionCheck?: () => void;
 	onRefreshUpgradeStatus?: () => void;
 	onStartUpgrade?: (targetTag: string) => void;
@@ -35,6 +43,8 @@ export function VersionIndicator({
 	upgradeStatusError,
 	upgradeStatusLoading = false,
 	upgradeStarting = false,
+	upgradeObservation = null,
+	onDismissUpgradeResult,
 	onRetryVersionCheck,
 	onRefreshUpgradeStatus,
 	onStartUpgrade,
@@ -43,6 +53,7 @@ export function VersionIndicator({
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const closeTimerRef = useRef<number | null>(null);
 	const hoveringRef = useRef(false);
+	const openedObservationRef = useRef(false);
 	const repo = versionRepo(versionCheck);
 	const currentHref = xpVersionLinkHref(xpVersion, repo);
 	const currentDisplay = displayReleaseVersion(xpVersion);
@@ -57,25 +68,51 @@ export function VersionIndicator({
 	const job = upgradeStatus?.status ?? null;
 	const support = upgradeStatus?.support ?? null;
 	const jobActive = job?.state === "running" || job?.state === "restarting";
+	const observingUpgrade = upgradeObservation?.phase === "observing";
 	const upgradeUnavailableReason =
 		support && !support.supported
 			? (support.reason ?? "Web automatic upgrade is not supported here.")
 			: null;
+	const upgradeLocked =
+		upgradeObservation?.phase === "observing" ||
+		upgradeObservation?.phase === "timed_out";
 	const canUpgrade =
 		Boolean(upgradeTarget) &&
 		Boolean(support?.supported) &&
 		!jobActive &&
+		!upgradeLocked &&
 		!upgradeStarting;
 	const upgradeButtonLabel = upgradeUnavailableReason
 		? "Unavailable"
-		: "Upgrade";
-	const icon = indicatorIcon(versionCheck, job?.state);
+		: upgradeLocked
+			? "Upgrading..."
+			: upgradeStarting
+				? "Starting..."
+				: "Upgrade";
+	const icon = indicatorIcon(versionCheck, job?.state, observingUpgrade);
 	const tone = versionCheck.kind === "update_available" ? "warning" : "ghost";
 
 	const statusText = useMemo(
-		() => describeStatus(versionCheck, upgradeStatus, upgradeStatusError),
-		[versionCheck, upgradeStatus, upgradeStatusError],
+		() =>
+			describeStatus(
+				versionCheck,
+				upgradeStatus,
+				upgradeStatusError,
+				upgradeObservation,
+			),
+		[versionCheck, upgradeStatus, upgradeStatusError, upgradeObservation],
 	);
+
+	useEffect(() => {
+		if (!upgradeObservation) {
+			openedObservationRef.current = false;
+			return;
+		}
+		if (openedObservationRef.current) return;
+		openedObservationRef.current = true;
+		clearCloseTimer();
+		setOpen(true);
+	}, [upgradeObservation]);
 
 	function clearCloseTimer() {
 		if (closeTimerRef.current === null) return;
@@ -84,6 +121,7 @@ export function VersionIndicator({
 	}
 
 	function scheduleClose() {
+		if (upgradeObservation) return;
 		clearCloseTimer();
 		closeTimerRef.current = window.setTimeout(() => {
 			if (!hoveringRef.current) setOpen(false);
@@ -101,9 +139,16 @@ export function VersionIndicator({
 		scheduleClose();
 	}
 
+	function handleOpenChange(nextOpen: boolean) {
+		setOpen(nextOpen);
+		if (!nextOpen && upgradeObservation?.phase === "terminal") {
+			onDismissUpgradeResult?.();
+		}
+	}
+
 	return (
 		<>
-			<Popover open={open} onOpenChange={setOpen}>
+			<Popover open={open} onOpenChange={handleOpenChange}>
 				<div
 					onPointerEnter={handlePointerEnter}
 					onPointerLeave={handlePointerLeave}
@@ -130,7 +175,7 @@ export function VersionIndicator({
 					</PopoverTrigger>
 					<PopoverContent
 						align="end"
-						className="w-80 p-3"
+						className="w-[22rem] p-4"
 						onPointerEnter={handlePointerEnter}
 						onPointerLeave={handlePointerLeave}
 					>
@@ -178,10 +223,26 @@ export function VersionIndicator({
 									)}
 								</span>
 								<span className="text-muted-foreground">Upgrade</span>
-								<span className="min-w-0">{describeUpgrade(job, support)}</span>
+								<span className="min-w-0">
+									{describeUpgrade(job, support, upgradeObservation)}
+								</span>
 							</div>
 
-							{upgradeStatusError ? (
+							{upgradeObservation?.phase === "observing" ||
+							upgradeObservation?.phase === "timed_out" ? (
+								<p
+									className={
+										upgradeObservation.phase === "timed_out"
+											? "rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive"
+											: "rounded-lg bg-warning/10 px-2.5 py-2 text-xs text-warning"
+									}
+									aria-live="polite"
+								>
+									{upgradeObservation.phase === "timed_out"
+										? UPGRADE_TIMEOUT_MESSAGE
+										: "Waiting for the node to reconnect and report the upgrade status."}
+								</p>
+							) : upgradeStatusError ? (
 								<p className="rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
 									{upgradeStatusError}
 								</p>
@@ -274,8 +335,9 @@ function versionRepo(versionCheck: VersionCheckUiState): string {
 function indicatorIcon(
 	versionCheck: VersionCheckUiState,
 	jobState?: string,
+	observingUpgrade = false,
 ): ReactNode {
-	if (jobState === "running" || jobState === "restarting") {
+	if (observingUpgrade || jobState === "running" || jobState === "restarting") {
 		return <Icon name="tabler:loader-2" size={14} className="animate-spin" />;
 	}
 	if (versionCheck.kind === "checking") {
@@ -303,7 +365,14 @@ function describeStatus(
 	versionCheck: VersionCheckUiState,
 	upgradeStatus?: AdminUpgradeStatusResponse | null,
 	upgradeStatusError?: string | null,
+	upgradeObservation?: UpgradeObservation | null,
 ): string {
+	if (upgradeObservation?.phase === "observing") {
+		return "Waiting for the node to reconnect and report upgrade status.";
+	}
+	if (upgradeObservation?.phase === "timed_out") {
+		return "Upgrade status could not be confirmed after one minute.";
+	}
 	const job = upgradeStatus?.status;
 	if (job?.state === "running" || job?.state === "restarting") {
 		return `Upgrade to ${job.target_tag ?? "target release"} is running.`;
@@ -331,7 +400,14 @@ function describeStatus(
 function describeUpgrade(
 	job: AdminUpgradeStatusResponse["status"] | null,
 	support: AdminUpgradeStatusResponse["support"] | null,
+	upgradeObservation?: UpgradeObservation | null,
 ): ReactNode {
+	if (upgradeObservation?.phase === "observing") {
+		return <span className="text-warning">reconnecting</span>;
+	}
+	if (upgradeObservation?.phase === "timed_out") {
+		return <span className="text-destructive">status timeout</span>;
+	}
 	if (job?.state === "running" || job?.state === "restarting") {
 		return <span className="text-warning">running</span>;
 	}
