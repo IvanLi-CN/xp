@@ -210,7 +210,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 (
                     availability_for(peer, 60, now),
                     availability_for(peer, 24 * 60, now),
-                    mesh_availability_for(peer),
+                    mesh_availability_for(peer, now),
                     p50,
                     p95,
                 )
@@ -286,13 +286,45 @@ mod tests {
         assert_eq!(breaker_for_mesh_target(false, None), BreakerState::Disabled);
         assert_eq!(breaker_for_mesh_target(true, None), BreakerState::Closed);
     }
+
+    #[test]
+    fn mesh_availability_uses_only_the_last_24_hours() {
+        let now = Utc::now();
+        let peer = crate::mesh_telemetry::MeshPeerTelemetry {
+            buckets: std::collections::VecDeque::from([
+                crate::mesh_telemetry::MeshTelemetryBucket {
+                    minute: (now - chrono::Duration::hours(25)).to_rfc3339(),
+                    mesh_success: 1,
+                    ..Default::default()
+                },
+                crate::mesh_telemetry::MeshTelemetryBucket {
+                    minute: now.to_rfc3339(),
+                    mesh_failure: 1,
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+
+        assert_eq!(mesh_availability_for(&peer, now), Some(0.0));
+    }
 }
 
-fn mesh_availability_for(peer: &crate::mesh_telemetry::MeshPeerTelemetry) -> Option<f64> {
+fn mesh_availability_for(
+    peer: &crate::mesh_telemetry::MeshPeerTelemetry,
+    now: DateTime<Utc>,
+) -> Option<f64> {
+    let from = now - chrono::Duration::hours(24);
     let (success, total) = peer
         .buckets
         .iter()
-        .fold((0u32, 0u32), |(success, total), bucket| {
+        .filter_map(|bucket| {
+            DateTime::parse_from_rfc3339(&bucket.minute)
+                .ok()
+                .map(|at| (bucket, at))
+        })
+        .filter(|(_, at)| at.with_timezone(&Utc) >= from)
+        .fold((0u32, 0u32), |(success, total), (bucket, _)| {
             (
                 success + bucket.mesh_success,
                 total + bucket.mesh_success + bucket.mesh_failure,
