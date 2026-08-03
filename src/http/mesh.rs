@@ -76,10 +76,15 @@ pub(super) fn spawn_mesh_probe_worker(state: AppState) {
                     .map(|node| node.node_id)
                     .collect::<Vec<_>>()
             };
+            let probe_gate = state.mesh_telemetry.probe_gate();
             stream::iter(node_ids)
                 .map(|node_id| {
                     let state = state.clone();
+                    let probe_gate = probe_gate.clone();
                     async move {
+                        let Ok(_permit) = probe_gate.acquire_owned().await else {
+                            return;
+                        };
                         if let Err(error) = probe_mesh_peer(&state, &node_id).await {
                             tracing::debug!(
                                 peer_id = %node_id,
@@ -375,11 +380,16 @@ pub(super) async fn admin_run_mesh_probes(
     }
     let state_for_probes = state.clone();
     let probe_node_ids = accepted_node_ids.clone();
+    let probe_gate = state.mesh_telemetry.probe_gate();
     tokio::spawn(async move {
         stream::iter(probe_node_ids)
             .map(|node_id| {
                 let state = state_for_probes.clone();
+                let probe_gate = probe_gate.clone();
                 async move {
+                    let Ok(_permit) = probe_gate.acquire_owned().await else {
+                        return;
+                    };
                     if let Err(error) = probe_mesh_peer(&state, &node_id).await {
                         tracing::debug!(
                             peer_id = %node_id,

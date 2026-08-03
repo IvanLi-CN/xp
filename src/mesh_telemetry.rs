@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
@@ -129,6 +129,7 @@ pub struct MeshTelemetrySample {
 pub struct MeshTelemetryHandle {
     path: Arc<PathBuf>,
     state: Arc<Mutex<PersistedTelemetry>>,
+    probe_gate: Arc<Semaphore>,
 }
 
 impl MeshTelemetryHandle {
@@ -151,7 +152,13 @@ impl MeshTelemetryHandle {
         Ok(Self {
             path: Arc::new(path),
             state: Arc::new(Mutex::new(state)),
+            probe_gate: Arc::new(Semaphore::new(4)),
         })
+    }
+
+    /// Limits all scheduled and operator-triggered peer probes on this node together.
+    pub fn probe_gate(&self) -> Arc<Semaphore> {
+        self.probe_gate.clone()
     }
 
     pub async fn snapshot(&self) -> MeshTelemetrySnapshot {
@@ -520,6 +527,24 @@ mod tests {
         assert_eq!(snapshot.peers.len(), 1);
         assert_eq!(snapshot.peers[0].buckets[0].mesh_success, 1);
         assert_eq!(snapshot.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn probe_gate_is_shared_by_telemetry_clones() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        let shared_gate = telemetry.clone().probe_gate();
+        let gate = telemetry.probe_gate();
+        let permits = [
+            gate.clone().acquire_owned().await.unwrap(),
+            gate.clone().acquire_owned().await.unwrap(),
+            gate.clone().acquire_owned().await.unwrap(),
+            gate.clone().acquire_owned().await.unwrap(),
+        ];
+
+        assert!(shared_gate.try_acquire().is_err());
+        drop(permits);
+        assert!(shared_gate.try_acquire().is_ok());
     }
 
     #[test]

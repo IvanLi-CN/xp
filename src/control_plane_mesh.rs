@@ -592,24 +592,55 @@ impl MeshAwareHttpClient {
             )
             .await
             {
-                Ok(Ok(value)) => value,
+                Ok(Ok(value)) => {
+                    self.state.mark_ready().await;
+                    value
+                }
                 Ok(Err(_)) | Err(_) if !request.allow_ambiguous_fallback => {
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
-                Ok(Err(_)) | Err(_) => tokio::time::timeout(
-                    budget.saturating_sub(relay_started.elapsed()),
-                    signed_send(
-                        &self.direct,
-                        url,
-                        request,
-                        context,
-                        cluster_ca_key_pem,
-                        cluster_ca_cert_pem,
-                    ),
-                )
-                .await
-                .map_err(|_| MeshRequestError::OutcomeUnknown)?
-                .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?,
+                Ok(Err(error)) => {
+                    self.state
+                        .mark_fallback(format!("control relay request failed: {error}"))
+                        .await;
+                    tokio::time::timeout(
+                        budget.saturating_sub(relay_started.elapsed()),
+                        signed_send(
+                            &self.direct,
+                            url,
+                            request,
+                            context,
+                            cluster_ca_key_pem,
+                            cluster_ca_cert_pem,
+                        ),
+                    )
+                    .await
+                    .map_err(|_| MeshRequestError::OutcomeUnknown)?
+                    .map_err(|error| {
+                        public_transport_error(error, request.allow_ambiguous_fallback)
+                    })?
+                }
+                Err(_) => {
+                    self.state
+                        .mark_fallback(format!("control relay timed out after {relay_budget:?}"))
+                        .await;
+                    tokio::time::timeout(
+                        budget.saturating_sub(relay_started.elapsed()),
+                        signed_send(
+                            &self.direct,
+                            url,
+                            request,
+                            context,
+                            cluster_ca_key_pem,
+                            cluster_ca_cert_pem,
+                        ),
+                    )
+                    .await
+                    .map_err(|_| MeshRequestError::OutcomeUnknown)?
+                    .map_err(|error| {
+                        public_transport_error(error, request.allow_ambiguous_fallback)
+                    })?
+                }
             }
         } else {
             tokio::time::timeout(
@@ -814,94 +845,18 @@ async fn signed_send(
     Ok((response, verified))
 }
 #[cfg(test)]
+#[path = "control_plane_mesh/peer_target_tests.rs"]
+mod peer_target_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    fn peer_node() -> Node {
-        Node {
-            node_id: "peer-a".to_string(),
-            node_name: "peer-a".to_string(),
-            access_host: "peer-a.example.test".to_string(),
-            api_base_url: "https://public-peer-a.example.test".to_string(),
-            quota_limit_bytes: 0,
-            quota_reset: Default::default(),
-        }
-    }
-    fn managed_vless_endpoint(endpoint_id: &str, port: u16) -> Endpoint {
-        Endpoint {
-            endpoint_id: endpoint_id.to_string(),
-            node_id: "peer-a".to_string(),
-            tag: format!("vless-vision-{endpoint_id}"),
-            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
-            port,
-            meta: serde_json::json!({
-                "reality": {
-                    "dest": "example.com:443",
-                    "server_names": ["example.com"],
-                    "fingerprint": "chrome"
-                },
-                "reality_keys": {
-                    "private_key": "private",
-                    "public_key": "public"
-                },
-                "short_ids": ["0123456789abcdef"],
-                "active_short_id": "0123456789abcdef",
-                "managed_default": true
-            }),
-        }
-    }
     #[test]
     fn mesh_proxy_status_strings_are_stable() {
         assert_eq!(MeshProxyStatus::Disabled.as_str(), "disabled");
         assert_eq!(MeshProxyStatus::Ready.as_str(), "ready");
         assert_eq!(MeshProxyStatus::Fallback.as_str(), "fallback");
         assert_eq!(MeshProxyStatus::Degraded.as_str(), "degraded");
-    }
-    #[test]
-    fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
-        let node = peer_node();
-        let unique = peer_target_from_node(&node, &[managed_vless_endpoint("one", 443)]);
-        assert_eq!(
-            unique.mesh_base_url.as_deref(),
-            Some("https://peer-a.example.test:443")
-        );
-        assert_eq!(unique.public_base_url, node.api_base_url);
-        assert!(peer_target_from_node(&node, &[]).mesh_base_url.is_none());
-        let missing_access_host = Node {
-            access_host: String::new(),
-            ..node.clone()
-        };
-        assert!(
-            peer_target_from_node(&missing_access_host, &[managed_vless_endpoint("one", 443)],)
-                .mesh_base_url
-                .is_none()
-        );
-        let invalid_access_host = Node {
-            access_host: "https://peer-a.example.test:443/mesh".to_string(),
-            ..node.clone()
-        };
-        assert!(
-            peer_target_from_node(&invalid_access_host, &[managed_vless_endpoint("one", 443)],)
-                .mesh_base_url
-                .is_none()
-        );
-        let absolute_fqdn = Node {
-            access_host: "peer-a.example.test.".to_string(),
-            ..node.clone()
-        };
-        assert_eq!(
-            peer_target_from_node(&absolute_fqdn, &[managed_vless_endpoint("one", 443)],)
-                .mesh_base_url
-                .as_deref(),
-            Some("https://peer-a.example.test:443")
-        );
-        let ambiguous = peer_target_from_node(
-            &node,
-            &[
-                managed_vless_endpoint("one", 443),
-                managed_vless_endpoint("two", 8443),
-            ],
-        );
-        assert!(ambiguous.mesh_base_url.is_none());
     }
     #[test]
     fn invalid_proxy_url_is_rejected() {
