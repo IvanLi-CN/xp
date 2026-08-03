@@ -476,6 +476,7 @@ impl MeshAwareHttpClient {
                             ack,
                         ) {
                             self.circuits.release_half_open_probe(&peer.node_id).await;
+                            self.record_terminal_failure(peer).await;
                             return Err(error.into());
                         }
                         let breaker_state = self.circuits.record_success(&peer.node_id).await;
@@ -496,27 +497,20 @@ impl MeshAwareHttpClient {
                         return Ok(response);
                     }
                     self.circuits.release_half_open_probe(&peer.node_id).await;
+                    self.record_terminal_failure(peer).await;
                     return Err(MeshRequestError::Protocol(
                         "Mesh response did not carry a valid signed acknowledgement".to_string(),
                     ));
                 }
                 Ok(Err(error)) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        error.to_string(),
-                        request.updates_active_path,
-                    )
-                    .await;
+                    self.record_mesh_transport_failure(peer, error.to_string())
+                        .await;
                     fallback = true;
                     mesh_outcome_ambiguous = true;
                 }
                 Err(_) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        "Mesh request timed out".to_string(),
-                        request.updates_active_path,
-                    )
-                    .await;
+                    self.record_mesh_transport_failure(peer, "Mesh request timed out".to_string())
+                        .await;
                     fallback = true;
                     mesh_outcome_ambiguous = true;
                 }
@@ -524,11 +518,13 @@ impl MeshAwareHttpClient {
         }
 
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
+            self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let elapsed = started.elapsed();
         let remaining = request.total_budget.saturating_sub(elapsed);
         if remaining.is_zero() {
+            self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let public_url = join_url(&peer.public_base_url, &request.path_and_query)?;
@@ -654,12 +650,7 @@ impl MeshAwareHttpClient {
         Ok(response)
     }
 
-    async fn record_mesh_transport_failure(
-        &self,
-        peer: &MeshPeerTarget,
-        reason: String,
-        updates_active_path: bool,
-    ) {
+    async fn record_mesh_transport_failure(&self, peer: &MeshPeerTarget, reason: String) {
         let state = self.circuits.record_retryable_failure(&peer.node_id).await;
         self.record_sample(
             peer,
@@ -667,7 +658,7 @@ impl MeshAwareHttpClient {
             false,
             Duration::ZERO,
             false,
-            updates_active_path,
+            false,
         )
         .await;
         if let Some(telemetry) = &self.telemetry {
@@ -709,6 +700,14 @@ impl MeshAwareHttpClient {
                         updates_active_path,
                     },
                 )
+                .await;
+        }
+    }
+
+    async fn record_terminal_failure(&self, peer: &MeshPeerTarget) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .record_terminal_failure(&peer.node_id, &peer.node_name)
                 .await;
         }
     }

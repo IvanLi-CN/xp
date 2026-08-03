@@ -182,11 +182,12 @@ impl MeshTelemetryHandle {
             });
         peer.peer_name = peer_name.into();
         let previous_path = peer.last_path;
-        if sample.updates_active_path {
+        let updates_active_path = sample.updates_active_path && sample.success;
+        if updates_active_path {
             peer.last_path = Some(sample.path);
         }
         peer.last_sample_at = Some(timestamp(now));
-        if sample.updates_active_path && previous_path != Some(sample.path) {
+        if updates_active_path && previous_path != Some(sample.path) {
             peer.last_transition_at = Some(timestamp(now));
         }
         let bucket = ensure_bucket(peer, now);
@@ -238,7 +239,6 @@ impl MeshTelemetryHandle {
         let previous = peer.breaker;
         peer.breaker = Some(state_value);
         if previous != Some(state_value) {
-            peer.last_transition_at = Some(timestamp(now));
             if let Some(message) = event_message {
                 push_event(
                     &mut state.events,
@@ -254,6 +254,31 @@ impl MeshTelemetryHandle {
             persist(&self.path, &state)?;
         }
         Ok(())
+    }
+
+    /// Records a final request failure after an earlier transport sample. This keeps path-attempt
+    /// diagnostics separate from the end-to-end outcome so one failed Mesh attempt followed by a
+    /// fallback remains one logical request.
+    pub async fn record_terminal_failure(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+    ) -> anyhow::Result<()> {
+        let now = Utc::now();
+        let peer_id = peer_id.into();
+        let mut state = self.state.lock().await;
+        let peer = state
+            .peers
+            .entry(peer_id.clone())
+            .or_insert_with(|| MeshPeerTelemetry {
+                peer_id,
+                ..MeshPeerTelemetry::default()
+            });
+        peer.peer_name = peer_name.into();
+        peer.last_sample_at = Some(timestamp(now));
+        ensure_bucket(peer, now).end_to_end_failure += 1;
+        state.revision += 1;
+        persist(&self.path, &state)
     }
 
     pub async fn record_event(
@@ -573,6 +598,94 @@ mod tests {
         assert_eq!(after.last_path, Some(TelemetryPath::Mesh));
         assert_eq!(after.last_transition_at, before.last_transition_at);
         assert_eq!(after.buckets[0].public_success, 1);
+    }
+
+    #[tokio::test]
+    async fn mesh_attempt_failure_does_not_flap_an_already_active_public_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Public,
+                    success: true,
+                    latency_ms: Some(50),
+                    fallback: false,
+                    updates_active_path: true,
+                },
+            )
+            .await
+            .unwrap();
+        {
+            let mut state = telemetry.state.lock().await;
+            state.peers.get_mut("peer-a").unwrap().last_transition_at =
+                Some("2000-01-01T00:00:00Z".to_string());
+        }
+
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Mesh,
+                    success: false,
+                    latency_ms: None,
+                    fallback: false,
+                    updates_active_path: true,
+                },
+            )
+            .await
+            .unwrap();
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Public,
+                    success: true,
+                    latency_ms: Some(60),
+                    fallback: true,
+                    updates_active_path: true,
+                },
+            )
+            .await
+            .unwrap();
+
+        let peer = telemetry.snapshot().await.peers.remove(0);
+        assert_eq!(peer.last_path, Some(TelemetryPath::Public));
+        assert_eq!(
+            peer.last_transition_at.as_deref(),
+            Some("2000-01-01T00:00:00Z")
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_mesh_failure_contributes_one_end_to_end_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Mesh,
+                    success: false,
+                    latency_ms: None,
+                    fallback: false,
+                    updates_active_path: false,
+                },
+            )
+            .await
+            .unwrap();
+        telemetry
+            .record_terminal_failure("peer-a", "alpha")
+            .await
+            .unwrap();
+
+        let peer = telemetry.snapshot().await.peers.remove(0);
+        assert_eq!(end_to_end_counts(&peer.buckets[0]), (0, 1));
     }
 
     #[test]

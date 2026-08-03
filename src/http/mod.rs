@@ -6288,7 +6288,7 @@ async fn admin_probe_endpoint_canary(
                 body,
                 Some("application/json".to_string()),
                 Duration::from_secs(8),
-                true,
+                false,
                 crate::id::new_ulid_string(),
             )
             .await

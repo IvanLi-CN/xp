@@ -296,6 +296,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         bootstrap_access_host: cluster.access_host.clone(),
         bootstrap_api_base_url: cluster.api_base_url.clone(),
     })?;
+    // Do not start workers that can issue internal traffic before the durable auth epoch is valid.
+    let persisted_member_count = store.list_nodes().len();
+    xp::internal_auth_epoch::ensure_startup_epoch(&config.data_dir, persisted_member_count)?;
     let store = Arc::new(Mutex::new(store));
 
     let reconcile = xp::reconcile::spawn_reconciler(
@@ -325,8 +328,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         node_history.clone(),
     );
 
-    let persisted_member_count = store.lock().await.list_nodes().len();
-    xp::internal_auth_epoch::ensure_startup_epoch(&config.data_dir, persisted_member_count)?;
     let mesh_telemetry = xp::mesh_telemetry::MeshTelemetryHandle::load(&config.data_dir)
         .context("load local mesh telemetry")?;
 

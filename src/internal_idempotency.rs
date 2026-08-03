@@ -97,19 +97,20 @@ impl InternalIdempotencyLedger {
             anyhow::bail!("request_id is invalid");
         }
         let mut state = self.state.lock().await;
-        prune(&mut state, Utc::now());
-        if let Some(entry) = state.entries.get(request_id) {
+        let mut next = state.clone();
+        prune(&mut next, Utc::now());
+        if let Some(entry) = next.entries.get(request_id) {
             return Ok(match &entry.state {
                 LedgerState::Pending { .. } => BeginResult::InFlight,
                 LedgerState::Complete { result, .. } => BeginResult::Existing(result.clone()),
             });
         }
-        if state.entries.len() >= MAX_ENTRIES {
+        if next.entries.len() >= MAX_ENTRIES {
             // Do not evict still-valid records: ambiguous retries must always receive their first
             // answer, so capacity pressure is a deliberate rejection rather than silent loss.
             return Ok(BeginResult::Full);
         }
-        state.entries.insert(
+        next.entries.insert(
             request_id.to_string(),
             LedgerEntry {
                 state: LedgerState::Pending {
@@ -117,18 +118,20 @@ impl InternalIdempotencyLedger {
                 },
             },
         );
-        state.order.push_back(request_id.to_string());
-        persist(&self.path, &state)?;
+        next.order.push_back(request_id.to_string());
+        persist(&self.path, &next)?;
+        *state = next;
         Ok(BeginResult::New)
     }
 
     pub async fn finish(&self, request_id: &str, result: StoredResult) -> anyhow::Result<()> {
         let mut state = self.state.lock().await;
-        prune(&mut state, Utc::now());
-        if !state.entries.contains_key(request_id) && state.entries.len() >= MAX_ENTRIES {
+        let mut next = state.clone();
+        prune(&mut next, Utc::now());
+        if !next.entries.contains_key(request_id) && next.entries.len() >= MAX_ENTRIES {
             anyhow::bail!("idempotency ledger is full");
         }
-        state.entries.insert(
+        next.entries.insert(
             request_id.to_string(),
             LedgerEntry {
                 state: LedgerState::Complete {
@@ -137,10 +140,12 @@ impl InternalIdempotencyLedger {
                 },
             },
         );
-        if !state.order.iter().any(|id| id == request_id) {
-            state.order.push_back(request_id.to_string());
+        if !next.order.iter().any(|id| id == request_id) {
+            next.order.push_back(request_id.to_string());
         }
-        persist(&self.path, &state)
+        persist(&self.path, &next)?;
+        *state = next;
+        Ok(())
     }
 }
 
@@ -225,5 +230,64 @@ mod tests {
             restored.begin("request-1").await.unwrap(),
             BeginResult::InFlight
         );
+    }
+
+    fn ledger_with_unwritable_parent(
+        temp: &tempfile::TempDir,
+        state: PersistedLedger,
+    ) -> InternalIdempotencyLedger {
+        let parent = temp.path().join("not-a-directory");
+        fs::write(&parent, b"file blocks ledger directory").unwrap();
+        InternalIdempotencyLedger {
+            path: Arc::new(parent.join("idempotency.json")),
+            state: Arc::new(Mutex::new(state)),
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_begin_does_not_publish_an_unpersisted_pending_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let ledger = ledger_with_unwritable_parent(&temp, PersistedLedger::default());
+
+        assert!(ledger.begin("request-1").await.is_err());
+
+        let state = ledger.state.lock().await;
+        assert!(state.entries.is_empty());
+        assert!(state.order.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_finish_keeps_the_persisted_pending_state_in_memory() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut initial = PersistedLedger::default();
+        initial.entries.insert(
+            "request-1".to_string(),
+            LedgerEntry {
+                state: LedgerState::Pending {
+                    started_at: timestamp(Utc::now()),
+                },
+            },
+        );
+        initial.order.push_back("request-1".to_string());
+        let ledger = ledger_with_unwritable_parent(&temp, initial);
+
+        assert!(
+            ledger
+                .finish(
+                    "request-1",
+                    StoredResult {
+                        status: 200,
+                        body: serde_json::json!({ "ok": true }),
+                    },
+                )
+                .await
+                .is_err()
+        );
+
+        let state = ledger.state.lock().await;
+        assert!(matches!(
+            state.entries["request-1"].state,
+            LedgerState::Pending { .. }
+        ));
     }
 }
