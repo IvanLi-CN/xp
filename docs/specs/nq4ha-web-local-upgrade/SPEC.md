@@ -213,11 +213,15 @@ Status states:
 ## Visual Evidence
 
 - Storybook `Components/VersionIndicator/UpdateAvailable`
-  - PR: include
-  - ![Version indicator update available](./assets/version-indicator-update-available.png)
+
+PR: include
+![Version indicator update available](./assets/version-indicator-update-available.png)
+
 - Storybook `Components/VersionIndicator/UpdateAvailableUnsupported`
-  - PR: include
-  - ![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
+
+PR: include
+![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
+
 - source_type: storybook_canvas
   - story_id_or_title: `Components/VersionIndicator/Reconnecting`
   - target_program: mock-only
@@ -231,8 +235,10 @@ Status states:
   - state: reconnecting after an ambiguous start result
   - evidence_note: direct popover element capture verifies spinner, preserved
     popover, reconnecting summary, and locked Upgrade action
-  - PR: include
-  - ![Version indicator reconnecting](./assets/version-indicator-reconnecting.png)
+
+PR: include
+![Version indicator reconnecting](./assets/version-indicator-reconnecting.png)
+
 - source_type: storybook_canvas
   - story_id_or_title: `Components/VersionIndicator/StatusTimedOut`
   - target_program: mock-only
@@ -246,8 +252,9 @@ Status states:
   - state: one-minute observation timeout
   - evidence_note: direct popover element capture verifies the timeout summary,
     Status recovery action, locked Upgrade action, and content padding
-  - PR: include
-  - ![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
+
+PR: include
+![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
 
 ## 文档更新（Docs to Update）
 
