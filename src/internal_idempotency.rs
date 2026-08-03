@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-const LEDGER_SCHEMA_VERSION: u32 = 2;
+const LEDGER_SCHEMA_VERSION: u32 = 3;
 const RETENTION: Duration = Duration::minutes(10);
 pub const MAX_ENTRIES: usize = 16_384;
 
@@ -70,7 +70,8 @@ pub enum BeginResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdempotencyRequest {
     pub sender_id: String,
-    pub canonical_sha256: String,
+    #[serde(alias = "canonical_sha256")]
+    pub semantic_sha256: String,
 }
 
 #[derive(Clone)]
@@ -87,12 +88,19 @@ impl InternalIdempotencyLedger {
         } else {
             PersistedLedger::default()
         };
-        if !matches!(persisted.schema_version, 1 | LEDGER_SCHEMA_VERSION) {
+        if !matches!(persisted.schema_version, 1 | 2 | LEDGER_SCHEMA_VERSION) {
             anyhow::bail!(
-                "internal idempotency schema_version mismatch: expected 1 or {}, got {}",
+                "internal idempotency schema_version mismatch: expected 1, 2, or {}, got {}",
                 LEDGER_SCHEMA_VERSION,
                 persisted.schema_version
             );
+        }
+        if persisted.schema_version == 2 {
+            // Schema v2 stored a timestamp-bound digest. It cannot establish that a freshly
+            // signed retry is the same semantic request, so fail closed until it drains.
+            for entry in persisted.entries.values_mut() {
+                entry.request = None;
+            }
         }
         // Schema v1 records do not bind a request id to an authenticated request. They stay
         // unreadable as retries until retention expires, then naturally prune on the next write.
@@ -188,9 +196,9 @@ fn validate_request(request: &IdempotencyRequest) -> anyhow::Result<()> {
     if request.sender_id.trim().is_empty() || request.sender_id.len() > 256 {
         anyhow::bail!("internal request sender is invalid");
     }
-    if request.canonical_sha256.len() != 64
+    if request.semantic_sha256.len() != 64
         || !request
-            .canonical_sha256
+            .semantic_sha256
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit())
     {
@@ -246,14 +254,14 @@ mod tests {
     fn request() -> IdempotencyRequest {
         IdempotencyRequest {
             sender_id: "node-a".to_string(),
-            canonical_sha256: "a".repeat(64),
+            semantic_sha256: "a".repeat(64),
         }
     }
 
     fn different_request() -> IdempotencyRequest {
         IdempotencyRequest {
             sender_id: "node-b".to_string(),
-            canonical_sha256: "b".repeat(64),
+            semantic_sha256: "b".repeat(64),
         }
     }
 
@@ -358,6 +366,40 @@ mod tests {
             order: VecDeque::from(["request-1".to_string()]),
         };
         fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        assert_eq!(
+            ledger.begin("request-1", &request()).await.unwrap(),
+            BeginResult::Mismatch
+        );
+    }
+
+    #[tokio::test]
+    async fn schema_two_entries_drain_without_reusing_timestamp_bound_digests() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mesh").join("idempotency.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let schema_two = serde_json::json!({
+            "schema_version": 2,
+            "entries": {
+                "request-1": {
+                    "request": {
+                        "sender_id": "node-a",
+                        "canonical_sha256": "c".repeat(64),
+                    },
+                    "state": {
+                        "state": "complete",
+                        "completed_at": timestamp(Utc::now()),
+                        "result": {
+                            "status": 200,
+                            "body": { "old": true },
+                        },
+                    },
+                },
+            },
+            "order": ["request-1"],
+        });
+        fs::write(&path, serde_json::to_vec(&schema_two).unwrap()).unwrap();
 
         let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
         assert_eq!(

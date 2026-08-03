@@ -15,6 +15,9 @@
 - Durable idempotency binds `request_id` to the authenticated semantic request
   (route, method, URI, content metadata/hash and member context), excluding
   `issued-at` so a newly signed retry returns the first result.
+- A legacy timestamp-bound ledger record has no safe semantic migration input;
+  schema v3 keeps it in fail-closed drain state until its 10-minute retention
+  expires rather than return a result for a different request.
 
 ## Key derivation and acknowledgement
 
