@@ -243,6 +243,7 @@ export function SystemStatusSurface({
 				actions={
 					<>
 						<Button
+							className="w-28"
 							variant="secondary"
 							size="sm"
 							loading={isRefreshing}
@@ -252,6 +253,7 @@ export function SystemStatusSurface({
 							Refresh
 						</Button>
 						<Button
+							className="w-28"
 							size="sm"
 							loading={isProbing}
 							disabled={readOnly || status.peers.length === 0}

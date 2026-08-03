@@ -8,7 +8,7 @@ import { SystemStatusSurface } from "./SystemStatusPage";
 const meta = {
 	title: "Views/SystemStatusPage",
 	component: SystemStatusSurface,
-	tags: ["autodocs", "coverage-ui"],
+	tags: ["autodocs", "coverage-ui", "system-status"],
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof SystemStatusSurface>;
 
@@ -28,12 +28,18 @@ export const Healthy: Story = {
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
+		const refreshButton = await canvas.findByRole("button", {
+			name: "Refresh",
+		});
+		const probeAllButton = await canvas.findByRole("button", {
+			name: "Probe all",
+		});
+		await expect(refreshButton).toHaveClass("w-28");
+		await expect(probeAllButton).toHaveClass("w-28");
 		await expect(
 			await canvas.findByRole("heading", { name: "Peer transport" }),
 		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Probe all" }),
-		);
+		await userEvent.click(probeAllButton);
 		await expect(args.onProbeAll).toHaveBeenCalledOnce();
 	},
 };
