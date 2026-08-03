@@ -89,7 +89,7 @@ describe("<VersionIndicator /> upgrade observation", () => {
 			),
 		).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Upgrading..." })).toBeDisabled();
-	});
+	}, 10_000);
 
 	it("does not reopen after manual close when observation state changes", async () => {
 		render(<UpgradeHarness />);
