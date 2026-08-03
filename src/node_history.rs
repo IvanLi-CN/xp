@@ -7,9 +7,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Context;
 use chrono::{DateTime, Days, Duration as ChronoDuration, SecondsFormat, Utc};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{Mutex, RwLock},
@@ -19,6 +17,7 @@ use tracing::warn;
 
 use crate::{
     config::Config,
+    control_plane_mesh::{MeshAwareHttpClient, peer_target_from_node},
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{Node, NodeQuotaReset, User, UserQuotaReset},
     node_runtime::{
@@ -1906,27 +1905,21 @@ pub fn spawn_node_history_remote_sync_worker(
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
     history: NodeHistoryHandle,
-    cluster_ca_pem: String,
     cluster_ca_key_pem: String,
+    cluster_ca_pem: String,
+    mesh_client: MeshAwareHttpClient,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let client = match build_cluster_http_client(&cluster_ca_pem) {
-            Ok(client) => client,
-            Err(err) => {
-                warn!(%err, "node history remote sync disabled");
-                return;
-            }
-        };
         let mut ticker = tokio::time::interval(Duration::from_secs(SYNC_INTERVAL_SECS));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            let nodes = {
+            let (nodes, endpoints) = {
                 let store = store.lock().await;
-                store.list_nodes()
+                (store.list_nodes(), store.list_endpoints())
             };
             sync_remote_node_histories(
-                &client,
+                &mesh_client,
                 &remote::RemoteSyncAuth::new(
                     &cluster_id,
                     &local_node_id,
@@ -1936,6 +1929,7 @@ pub fn spawn_node_history_remote_sync_worker(
                 &history,
                 &local_node_id,
                 nodes,
+                endpoints,
             )
             .await;
         }
@@ -2081,29 +2075,28 @@ fn traffic_cycle_for_user(user: &User, now: DateTime<Utc>) -> Option<TrafficCycl
 }
 
 async fn sync_remote_node_histories(
-    client: &Client,
+    client: &MeshAwareHttpClient,
     auth: &remote::RemoteSyncAuth<'_>,
     history: &NodeHistoryHandle,
     local_node_id: &str,
     nodes: Vec<Node>,
+    endpoints: Vec<crate::domain::Endpoint>,
 ) {
     for node in nodes {
         if node.node_id == local_node_id {
             continue;
         }
         let now = Utc::now();
-        let base = node.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
+        if node.api_base_url.trim().is_empty() {
             history
                 .mark_sync_error(now, &node.node_id, "node api_base_url is empty".to_string())
                 .await;
             continue;
         }
+        let peer = peer_target_from_node(&node, &endpoints);
 
         for target_node_id in history.pending_node_history_cleanup(&node.node_id).await {
-            match remote::clear_node_history(client, auth, base, &node.node_id, &target_node_id)
-                .await
-            {
+            match remote::clear_node_history(client, auth, &peer, &target_node_id).await {
                 Ok(()) => {
                     history
                         .complete_node_history_cleanup(&node.node_id, &target_node_id)
@@ -2121,7 +2114,7 @@ async fn sync_remote_node_histories(
         }
 
         for user_id in history.pending_user_traffic_cleanup(&node.node_id).await {
-            match remote::clear_user_traffic(client, auth, base, &node.node_id, &user_id).await {
+            match remote::clear_user_traffic(client, auth, &peer, &user_id).await {
                 Ok(()) => {
                     history
                         .complete_user_traffic_cleanup(&node.node_id, &user_id)
@@ -2138,7 +2131,7 @@ async fn sync_remote_node_histories(
             }
         }
 
-        match remote::fetch_snapshot(client, auth, base, &node.node_id).await {
+        match remote::fetch_snapshot(client, auth, &peer).await {
             Ok(snapshot) => {
                 history
                     .replace_node_snapshot(now, &node.node_id, snapshot)
@@ -2151,16 +2144,6 @@ async fn sync_remote_node_histories(
             }
         }
     }
-}
-
-fn build_cluster_http_client(cluster_ca_pem: &str) -> anyhow::Result<Client> {
-    let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-        .context("parse cluster ca pem")?;
-    Client::builder()
-        .add_root_certificate(ca)
-        .danger_accept_invalid_hostnames(true)
-        .build()
-        .context("build cluster reqwest client")
 }
 
 fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {

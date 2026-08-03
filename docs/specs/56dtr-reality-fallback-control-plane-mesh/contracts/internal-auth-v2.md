@@ -20,7 +20,8 @@
 - Salt is the CA certificate SHA-256 fingerprint.
 - Request and acknowledgement use separate info labels.
 - Accepted responses carry `X-XP-Internal-Ack`.
-- The ack binds request ID, request digest, issued-at, responder ID and status.
+- The ack binds request ID, the SHA-256 digest of the full canonical request, issued-at,
+  responder ID and status.
 - Response bodies and SSE rely on the trusted TLS termination boundary.
 
 ## Authorization

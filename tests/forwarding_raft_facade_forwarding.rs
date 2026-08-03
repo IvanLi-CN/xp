@@ -405,8 +405,14 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         .await
         .context("spawn admin server")?;
 
+    let mesh_client = xp::control_plane_mesh::MeshAwareHttpClient::new(
+        reqwest::Client::new(),
+        None,
+        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
+    );
     let forwarding = ForwardingRaftFacade::try_new(
         follower.raft(),
+        mesh_client,
         cluster_ca_key_pem
             .clone()
             .ok_or_else(|| anyhow::anyhow!("missing cluster ca key"))?,
@@ -414,8 +420,6 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         cluster.cluster_id.clone(),
         cluster.node_id.clone(),
         follower_store.clone(),
-        None,
-        None,
     )
     .context("build forwarding facade")?;
 

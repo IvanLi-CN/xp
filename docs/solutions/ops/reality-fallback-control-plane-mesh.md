@@ -25,17 +25,24 @@ outcome question.
 - Count a signed acknowledgement for any HTTP status as authoritative. Only
   retryable transport failures can open the per-peer breaker or permit a public
   fallback.
+- A relay timeout is just as ambiguous as a Mesh timeout. Retry it on a direct public path only
+  when the operation is read-only, Raft-idempotent, or protected by the durable request ledger.
 
 ## Operational Consequences
 
 - A Mesh failure followed by public success is end-to-end availability, but must
   remain visible as fallback in local telemetry and the uptime strip.
+- Public standby probes add availability data but do not rewrite the active transport selected by
+  real Mesh or public-fallback traffic.
 - A 3-minute sample gap is stale telemetry, not evidence that a peer is down.
 - `XP_MESH_PROXY_URL` remains a public-egress proxy-first/direct compatibility
   layer; it does not carry Reality Mesh traffic.
-- Clusters change auth epochs only in a maintenance window. The explicit
-  cutover marker is consumed at startup into a durable epoch record so a Web
-  single-node upgrade cannot silently create a mixed cluster.
+- Clusters change auth epochs only in a maintenance window. Existing v1 `xp-ops` binaries cannot
+  parse a new cutover flag, so host-managed cutover bootstraps from a verified target-release
+  binary. Container cutover uses a target-image marker command against the persistent volume. The
+  marker is cancellable only before the first v2 process consumes it into the durable epoch record;
+  that durable state intentionally rules out a v1 rollback, including when later runtime reconcile
+  work fails.
 
 ## Validation Pattern
 

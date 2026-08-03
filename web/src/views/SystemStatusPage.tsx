@@ -100,7 +100,8 @@ function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
 function PeerRows({
 	peer,
 	onProbe,
-}: { peer: AdminMeshPeer; onProbe?: () => void }) {
+	probeDisabled,
+}: { peer: AdminMeshPeer; onProbe?: () => void; probeDisabled?: boolean }) {
 	const content = (
 		<>
 			<div className="min-w-40">
@@ -165,6 +166,7 @@ function PeerRows({
 						aria-label={`Probe ${peer.node_name}`}
 						title={`Probe ${peer.node_name}`}
 						onClick={onProbe}
+						disabled={probeDisabled || !onProbe}
 					>
 						<Icon name="tabler:activity" size={16} />
 					</Button>
@@ -189,6 +191,7 @@ function PeerRows({
 						variant="secondary"
 						size="sm"
 						onClick={onProbe}
+						disabled={probeDisabled || !onProbe}
 						iconLeft={<Icon name="tabler:activity" size={15} />}
 					>
 						Probe
@@ -224,6 +227,11 @@ export function SystemStatusSurface({
 		).length;
 		return { total, meshReady, fallback };
 	}, [status.peers]);
+	const canaryStatus = !status.local.canary.enabled
+		? "disabled"
+		: status.local.canary.last_error
+			? "degraded"
+			: "ready";
 
 	return (
 		<div className="space-y-7">
@@ -332,6 +340,7 @@ export function SystemStatusSurface({
 							<PeerRows
 								key={peer.node_id}
 								peer={peer}
+								probeDisabled={readOnly}
 								onProbe={
 									readOnly ? undefined : () => onProbePeer?.(peer.node_id)
 								}
@@ -345,20 +354,19 @@ export function SystemStatusSurface({
 				<div>
 					<h2 className="text-lg font-semibold">Runtime components</h2>
 					<div className="mt-3 grid grid-cols-2 border-t border-border/70 sm:grid-cols-5">
-						{[
-							...components,
-							{ component: "canary", status: status.local.mesh_proxy_status },
-						].map((item) => (
-							<div
-								key={item.component}
-								className="border-b border-r border-border/70 px-3 py-3"
-							>
-								<p className="text-xs uppercase text-muted-foreground">
-									{item.component}
-								</p>
-								<p className="mt-1 font-medium capitalize">{item.status}</p>
-							</div>
-						))}
+						{[...components, { component: "canary", status: canaryStatus }].map(
+							(item) => (
+								<div
+									key={item.component}
+									className="border-b border-r border-border/70 px-3 py-3"
+								>
+									<p className="text-xs uppercase text-muted-foreground">
+										{item.component}
+									</p>
+									<p className="mt-1 font-medium capitalize">{item.status}</p>
+								</div>
+							),
+						)}
 					</div>
 				</div>
 				<div>

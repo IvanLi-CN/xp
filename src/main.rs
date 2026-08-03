@@ -327,6 +327,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
 
     let persisted_member_count = store.lock().await.list_nodes().len();
     xp::internal_auth_epoch::ensure_startup_epoch(&config.data_dir, persisted_member_count)?;
+    let mesh_telemetry = xp::mesh_telemetry::MeshTelemetryHandle::load(&config.data_dir)
+        .context("load local mesh telemetry")?;
 
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
     let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_mesh_auth(
@@ -342,7 +344,10 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             cluster_ca_cert_pem: cluster_ca_pem.clone(),
             store: store.clone(),
         },
-    )?;
+    )?
+    .with_mesh_observability(mesh_telemetry.clone());
+    let mesh_client = raft_network.mesh_client();
+    let mesh_circuits = mesh_client.circuits();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),
@@ -467,13 +472,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
+            mesh_client.clone(),
             cluster_ca_key_pem_required.clone(),
             &cluster_ca_pem,
             cluster.cluster_id.clone(),
             cluster.node_id.clone(),
             store.clone(),
-            Some(&node_cert_pem),
-            Some(&node_key_pem),
         )?);
     let pending_managed_default_reconcile =
         should_reconcile_managed_defaults_at_startup(&managed_default_intent)
@@ -494,8 +498,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         cluster.node_id.clone(),
         store.clone(),
         node_history.clone(),
-        cluster_ca_pem.clone(),
         cluster_ca_key_pem_required.clone(),
+        cluster_ca_pem.clone(),
+        mesh_client,
     );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
@@ -519,7 +524,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         Duration::from_secs(60),
     );
 
-    let app = xp::http::build_router(
+    let app = xp::http::build_router_with_mesh_telemetry(
         config.clone(),
         store.clone(),
         reconcile,
@@ -536,6 +541,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         Some(raft.raft()),
         geo_db_update,
         mesh_proxy_state,
+        mesh_telemetry,
+        mesh_circuits,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

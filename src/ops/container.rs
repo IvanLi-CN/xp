@@ -6,7 +6,9 @@ use crate::managed_default_endpoints::{
     DefaultSsEndpointSpec, DefaultVlessEndpointSpec, ManagedDefaultEndpointsSpec,
     build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
 };
-use crate::ops::cli::{CloudflareProvisionArgs, ContainerRunArgs, ExitError};
+use crate::ops::cli::{
+    CloudflareProvisionArgs, ContainerRunArgs, ExitError, InternalAuthV2CutoverMarkerArgs,
+};
 use crate::ops::cloudflare::{self, CloudflareTokenSource, ZoneLookup};
 use crate::ops::init;
 use crate::ops::paths::Paths;
@@ -277,6 +279,49 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
     }
 
     supervise_children(&mut xp_child, &mut xray_child, cloudflared_child.as_mut()).await
+}
+
+pub async fn cmd_mark_internal_auth_v2_cutover(
+    paths: Paths,
+    args: InternalAuthV2CutoverMarkerArgs,
+) -> Result<(), ExitError> {
+    let data_dir = paths.map_abs(&args.data_dir);
+    if args.dry_run {
+        eprintln!(
+            "would write internal-auth v2 cutover marker: {}",
+            data_dir
+                .join("mesh/internal-auth-v2-cutover.json")
+                .display()
+        );
+        return Ok(());
+    }
+
+    cutover::write_marker_if(&data_dir, true)
+}
+
+pub async fn cmd_cancel_internal_auth_v2_cutover(
+    paths: Paths,
+    args: InternalAuthV2CutoverMarkerArgs,
+) -> Result<(), ExitError> {
+    let data_dir = paths.map_abs(&args.data_dir);
+    if crate::internal_auth_epoch::is_v2_epoch(&data_dir) {
+        return Err(ExitError::new(
+            3,
+            "invalid_args: internal-auth v2 epoch is already durable; v1 rollback is unsupported",
+        ));
+    }
+    if args.dry_run {
+        eprintln!(
+            "would remove internal-auth v2 cutover marker: {}",
+            data_dir
+                .join("mesh/internal-auth-v2-cutover.json")
+                .display()
+        );
+        return Ok(());
+    }
+
+    crate::internal_auth_epoch::clear_cutover_marker(&data_dir);
+    Ok(())
 }
 
 impl ContainerSpec {

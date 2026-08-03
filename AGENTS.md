@@ -30,8 +30,11 @@
   `health-v2` and `mesh-v2` traffic is routed by the canary only to fixed local XP loopback paths;
   public `/generate_204` and authority-based camouflage remain separate. `XP_MESH_PROXY_URL` is
   public-fallback egress compatibility, not a Mesh tunnel. Multi-node internal-auth v2 upgrades
-  require the explicit one-shot `--allow-internal-auth-v2-cutover` maintenance marker; Web upgrade
-  must return `coordinated_upgrade_required` until the durable epoch has been established.
+  require a one-shot maintenance marker: host-managed nodes bootstrap from a verified target
+  `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the target
+  image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
+  `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
+  rollback is unsupported.
 - Web-triggered automatic upgrade is supported only for host-managed `systemd` / `OpenRC` nodes via
   the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
   nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow

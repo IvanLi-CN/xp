@@ -64,7 +64,7 @@ pub fn ensure_startup_epoch(data_dir: &Path, member_count: usize) -> anyhow::Res
     let bytes = fs::read(&marker).map_err(|_| {
         anyhow::anyhow!(concat!(
             "internal-auth v2 cutover marker is required for a multi-node cluster; ",
-            "run xp-ops upgrade --allow-internal-auth-v2-cutover during the maintenance window"
+            "prepare the marker with the documented maintenance-window cutover procedure"
         ))
     })?;
     let record: AuthEpochRecord = serde_json::from_slice(&bytes)

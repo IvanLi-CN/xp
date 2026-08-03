@@ -24,6 +24,49 @@ fn env_map(values: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 #[tokio::test]
+async fn cutover_marker_command_writes_to_the_selected_data_dir() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    cmd_mark_internal_auth_v2_cutover(
+        paths,
+        InternalAuthV2CutoverMarkerArgs {
+            data_dir: PathBuf::from("/var/lib/xp/data"),
+            dry_run: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        tmp.path()
+            .join("var/lib/xp/data/mesh/internal-auth-v2-cutover.json")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn cutover_marker_can_be_cancelled_before_the_epoch_is_consumed() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let args = InternalAuthV2CutoverMarkerArgs {
+        data_dir: PathBuf::from("/var/lib/xp/data"),
+        dry_run: false,
+    };
+    cmd_mark_internal_auth_v2_cutover(paths.clone(), args.clone())
+        .await
+        .unwrap();
+    cmd_cancel_internal_auth_v2_cutover(paths, args)
+        .await
+        .unwrap();
+
+    assert!(
+        !tmp.path()
+            .join("var/lib/xp/data/mesh/internal-auth-v2-cutover.json")
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn bootstrap_requires_admin_token() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());

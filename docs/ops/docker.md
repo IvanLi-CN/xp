@@ -107,11 +107,31 @@ For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST
 
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 
-- Replace every node during the same multi-node internal-auth v2 maintenance window.
-- Start the first v2 process with `xp-ops container run --allow-internal-auth-v2-cutover`.
-- This writes the one-shot marker in the persistent data volume.
-- The new binary consumes it before serving control-plane traffic.
-- Web upgrade remains unavailable until the v2 epoch is durable.
+For a multi-node internal-auth v2 cutover, use a maintenance window and replace every node from
+the same immutable image digest. The fixed entrypoint cannot receive a new `container run` flag,
+so invoke the target image's marker command against its normal persistent volume before starting
+the target image:
+
+```bash
+export XP_IMAGE=ghcr.io/ivanli-cn/xp@sha256:<target-image-digest>
+export XP_COMPOSE=deploy/docker/compose.bootstrap.yml # or compose.join.yml
+docker compose -f "$XP_COMPOSE" pull xp
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container mark-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+docker compose -f "$XP_COMPOSE" up -d xp
+```
+
+The marker is consumed by the v2 binary before it serves control-plane traffic. If the new
+container fails before consumption, restore the prior `XP_IMAGE` digest and cancel the prepared
+marker through the target image:
+
+```bash
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container cancel-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+```
+
+Once the v2 epoch record is durable, v1 rollback is unsupported. Restore a pre-cutover data backup
+or finish recovery with the v2 image. Web upgrade remains unavailable until the v2 epoch is durable.
 
 ## Bootstrap node
 
@@ -215,6 +235,10 @@ docker compose -f deploy/docker/compose.bootstrap.yml up -d
 The Web UI does not replace binaries inside the container. If an update is available, the Web
 upgrade popover reports this deployment shape as unsupported for automatic upgrade and points
 operators back to the host-side image / Compose flow.
+
+For the internal-auth v2 boundary, use the maintenance procedure above rather than this ordinary
+image replacement. It creates the one-shot marker with the target image and defines the only
+pre-consumption rollback path.
 
 ## Image publishing
 

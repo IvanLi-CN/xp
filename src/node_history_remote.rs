@@ -1,11 +1,10 @@
-use std::time::Duration;
-
 use anyhow::Context;
-use reqwest::Client;
 
-use crate::{internal_auth, node_history::NodeHistorySnapshot};
-
-const REMOTE_SYNC_TIMEOUT: Duration = Duration::from_secs(10);
+use crate::{
+    control_plane_mesh::{MeshAwareHttpClient, MeshPeerTarget, MeshRequest},
+    internal_auth::InternalRoute,
+    node_history::NodeHistorySnapshot,
+};
 
 pub(super) struct RemoteSyncAuth<'a> {
     cluster_id: &'a str,
@@ -30,56 +29,52 @@ impl<'a> RemoteSyncAuth<'a> {
     }
 }
 
-fn signed_remote_headers(
+async fn send_signed_remote_request(
     auth: &RemoteSyncAuth<'_>,
-    target_id: &str,
-    method: axum::http::Method,
-    uri: axum::http::Uri,
-) -> anyhow::Result<axum::http::HeaderMap> {
-    let context = internal_auth::RequestContext::now(
-        internal_auth::InternalRoute::MeshV2,
-        auth.cluster_id,
-        auth.sender_id,
-        target_id,
-        crate::id::new_ulid_string(),
-    );
-    let mut headers = axum::http::HeaderMap::new();
-    internal_auth::sign_request_v2(
-        auth.cluster_ca_key_pem,
-        auth.cluster_ca_pem,
-        &method,
-        &uri,
-        None,
-        &[],
-        &context,
-        &mut headers,
-    )
-    .map_err(|error| anyhow::anyhow!("sign internal request: {error}"))?;
-    Ok(headers)
+    client: &MeshAwareHttpClient,
+    peer: &MeshPeerTarget,
+    method: reqwest::Method,
+    path_and_query: String,
+    allow_ambiguous_fallback: bool,
+) -> anyhow::Result<reqwest::Response> {
+    client
+        .send_peer_request(
+            peer,
+            MeshRequest {
+                method,
+                path_and_query,
+                content_type: None,
+                body: Vec::new(),
+                total_budget: std::time::Duration::from_secs(10),
+                allow_ambiguous_fallback,
+                request_id: crate::id::new_ulid_string(),
+                route: InternalRoute::MeshV2,
+                cluster_id: auth.cluster_id.to_string(),
+                sender_id: auth.sender_id.to_string(),
+                updates_active_path: true,
+            },
+            auth.cluster_ca_key_pem,
+            auth.cluster_ca_pem,
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 pub(super) async fn clear_node_history(
-    client: &Client,
+    client: &MeshAwareHttpClient,
     auth: &RemoteSyncAuth<'_>,
-    base: &str,
-    target_id: &str,
+    peer: &MeshPeerTarget,
     node_id: &str,
 ) -> anyhow::Result<()> {
-    let uri: axum::http::Uri = format!("/api/admin/_internal/nodes/{node_id}/history")
-        .parse()
-        .context("invalid node history cleanup path")?;
-    let headers = signed_remote_headers(auth, target_id, axum::http::Method::DELETE, uri)?;
-    let response = tokio::time::timeout(
-        REMOTE_SYNC_TIMEOUT,
-        client
-            .delete(format!(
-                "{base}/api/admin/_internal/nodes/{node_id}/history"
-            ))
-            .headers(headers)
-            .send(),
+    let response = send_signed_remote_request(
+        auth,
+        client,
+        peer,
+        reqwest::Method::DELETE,
+        format!("/api/admin/_internal/nodes/{node_id}/history"),
+        false,
     )
-    .await
-    .context("node history cleanup request timeout")??;
+    .await?;
     if !response.status().is_success() {
         anyhow::bail!("node history cleanup request failed: {}", response.status());
     }
@@ -87,27 +82,20 @@ pub(super) async fn clear_node_history(
 }
 
 pub(super) async fn clear_user_traffic(
-    client: &Client,
+    client: &MeshAwareHttpClient,
     auth: &RemoteSyncAuth<'_>,
-    base: &str,
-    target_id: &str,
+    peer: &MeshPeerTarget,
     user_id: &str,
 ) -> anyhow::Result<()> {
-    let uri: axum::http::Uri = format!("/api/admin/_internal/users/{user_id}/traffic/local")
-        .parse()
-        .context("invalid user traffic cleanup path")?;
-    let headers = signed_remote_headers(auth, target_id, axum::http::Method::DELETE, uri)?;
-    let response = tokio::time::timeout(
-        REMOTE_SYNC_TIMEOUT,
-        client
-            .delete(format!(
-                "{base}/api/admin/_internal/users/{user_id}/traffic/local"
-            ))
-            .headers(headers)
-            .send(),
+    let response = send_signed_remote_request(
+        auth,
+        client,
+        peer,
+        reqwest::Method::DELETE,
+        format!("/api/admin/_internal/users/{user_id}/traffic/local"),
+        false,
     )
-    .await
-    .context("user traffic cleanup request timeout")??;
+    .await?;
     if !response.status().is_success() {
         anyhow::bail!("user traffic cleanup request failed: {}", response.status());
     }
@@ -115,22 +103,19 @@ pub(super) async fn clear_user_traffic(
 }
 
 pub(super) async fn fetch_snapshot(
-    client: &Client,
+    client: &MeshAwareHttpClient,
     auth: &RemoteSyncAuth<'_>,
-    base: &str,
-    target_id: &str,
+    peer: &MeshPeerTarget,
 ) -> anyhow::Result<NodeHistorySnapshot> {
-    let uri: axum::http::Uri = "/api/admin/_internal/nodes/history/local"
-        .parse()
-        .expect("valid uri");
-    let headers = signed_remote_headers(auth, target_id, axum::http::Method::GET, uri)?;
-    let request = client
-        .get(format!("{base}/api/admin/_internal/nodes/history/local"))
-        .headers(headers)
-        .send();
-    let response = tokio::time::timeout(REMOTE_SYNC_TIMEOUT, request)
-        .await
-        .context("request timeout")??;
+    let response = send_signed_remote_request(
+        auth,
+        client,
+        peer,
+        reqwest::Method::GET,
+        "/api/admin/_internal/nodes/history/local".to_string(),
+        true,
+    )
+    .await?;
     if !response.status().is_success() {
         anyhow::bail!("node history request failed: {}", response.status());
     }

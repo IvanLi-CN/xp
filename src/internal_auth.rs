@@ -78,6 +78,7 @@ impl RequestContext {
 pub struct VerifiedRequest {
     pub context: RequestContext,
     pub body_sha256: String,
+    pub canonical_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +213,7 @@ pub fn verify_request_v2(
     Ok(VerifiedRequest {
         context,
         body_sha256,
+        canonical_sha256: hex::encode(Sha256::digest(canonical.as_bytes())),
     })
 }
 
@@ -343,6 +345,8 @@ fn canonical_ack(verified: &VerifiedRequest, responder_id: &str, status: u16) ->
     [
         "v2-ack",
         &verified.context.request_id,
+        &verified.canonical_sha256,
+        &verified.context.issued_at.to_string(),
         responder_id,
         &status.to_string(),
         &verified.body_sha256,
@@ -517,6 +521,19 @@ mod tests {
                 &verified,
                 "01JTESTTARGET0000000000000000",
                 200,
+                &ack,
+            )
+            .is_err()
+        );
+        let mut replayed = verified;
+        replayed.context.issued_at += 1;
+        assert!(
+            verify_ack_v2(
+                &key,
+                &cert,
+                &replayed,
+                "01JTESTTARGET0000000000000000",
+                409,
                 &ack,
             )
             .is_err()

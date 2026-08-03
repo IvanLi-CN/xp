@@ -45,7 +45,8 @@
 ## 必须满足
 
 - Mesh URL 只能由唯一 managed-default endpoint 推导。
-- 无端点、多个端点或 health ack 无效时，使用 `Node.api_base_url`。
+- 无端点、多个 endpoint 或不可用的 `access_host` 时，使用 `Node.api_base_url`；已选择 Mesh
+  路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
 - `XP_MESH_PROXY_URL` 仅保留公网出站 proxy-first/direct 兼容语义。
 - `health-v2` 与 `mesh-v2` 使用同一个 v2 认证协议。
 - canonical 覆盖版本、route、method、原始 URI、content metadata、body hash、
@@ -64,21 +65,25 @@
 - 每个 peer 连续三次可重试 Mesh transport 失败后打开 breaker。
 - breaker 退避为 `30/60/120/240/300s`。
 - half-open 只允许一次探测性 Mesh 请求。
+- auth 或 protocol failure 会释放 half-open 探测槽，但不触发公网降级或改变 breaker 失败计数。
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - auth、protocol error 与 headers 后的流中断不得触发公网降级。
 - 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback。
 - 其他 mutation 必须返回 `outcome_unknown`。
 - 跨 Mesh/public 的 mutation 重用同一个 `request_id`。
+- `XP_MESH_PROXY_URL` 的 relay 无响应同样属于模糊结果；没有 durable 幂等保障的 mutation
+  不得再直连重试。
 - 本地 ledger 保留 10 分钟，最多 16,384 条，满载拒绝新请求。
 
 ## 遥测与 API
 
 - 遥测原子保存在 `XP_DATA_DIR/mesh/telemetry.json`，不经过 Raft。
-- 每个 peer 保存 24 小时的 1 分钟 buckets 与最近 200 个事件。
+- 每个 peer 保存 24 小时的 1 分钟 buckets；本机另外保存最近 200 个全局事件。
 - Mesh probe 每 60 秒；public standby 每 5 分钟。
+- public standby 记录可用性样本，但不得覆盖 peer 的当前 active path 或最近切换时间。
 - probe 有 jitter，最多并发四个 peer；三分钟无样本标记 stale。
-- `GET /api/admin/mesh/status` 支持 ETag。
+- `GET /api/admin/mesh/status` 对完整状态表示计算 ETag。
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
 - status SSE 只发布合并后的 telemetry revision。
 - 质量枚举固定为 good、slow、unstable、down 与 unknown。
@@ -97,10 +102,13 @@
 ## 升级
 
 - 多节点跨 auth epoch 的 Web upgrade 返回 `coordinated_upgrade_required`。
-- `xp-ops upgrade` 与 `container run` 接受显式 cutover flag。
-- flag 写入 one-shot marker。
+- host 由已校验的目标版 `xp-ops upgrade --allow-internal-auth-v2-cutover` 执行一次性 bootstrap；
+  容器由目标 image 的 `container mark-internal-auth-v2-cutover` 写入 marker。
+- marker 未消费时可由容器的 `container cancel-internal-auth-v2-cutover` 取消。
 - 新 binary 在多节点且没有 marker 时拒绝启动，交给现有升级路径回滚。
-- marker 消费后持久化 epoch；同 epoch 的 Web upgrade 再次可用。
+- marker 消费后持久化 epoch；此后拒绝 v1 回滚，同 epoch 的 Web upgrade 再次可用。
+- 若 marker 已被新进程消费，随后重启或 runtime reconcile 失败都只保留 v2 XP；绝不恢复旧 v1
+  XP binary。
 
 ## 契约
 

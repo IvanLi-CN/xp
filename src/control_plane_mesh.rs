@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::{
+    domain::{Endpoint, Node},
     internal_auth::{self, InternalRoute, RequestContext},
-    mesh_telemetry::{BreakerState, MeshTelemetryHandle, TelemetryPath},
+    managed_default_endpoints::managed_default_vless_endpoint,
+    mesh_telemetry::{BreakerState, MeshTelemetryHandle, MeshTelemetrySample, TelemetryPath},
 };
 
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
@@ -72,8 +74,14 @@ impl PeerCircuitBreakers {
         BreakerState::Closed
     }
 
-    /// Returns the externally visible state. Only retryable transport errors are passed here;
-    /// authenticated HTTP responses and auth/protocol failures must never trip this breaker.
+    pub async fn release_half_open_probe(&self, peer_id: &str) {
+        let mut peers = self.peers.lock().await;
+        if let Some(circuit) = peers.get_mut(peer_id) {
+            circuit.half_open_in_flight = false;
+        }
+    }
+
+    /// Only retryable transport errors may alter the breaker.
     pub async fn record_retryable_failure(&self, peer_id: &str) -> BreakerState {
         let now = Instant::now();
         let mut peers = self.peers.lock().await;
@@ -118,6 +126,27 @@ pub struct MeshPeerTarget {
     pub public_base_url: String,
 }
 
+pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTarget {
+    let access_host = node.access_host.trim();
+    let managed = endpoints
+        .iter()
+        .filter(|endpoint| endpoint.node_id == node.node_id)
+        .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
+        .collect::<Vec<_>>();
+    let mesh_base_url = match managed.as_slice() {
+        [endpoint] if !access_host.is_empty() => {
+            Some(format!("https://{access_host}:{}", endpoint.port))
+        }
+        _ => None,
+    };
+    MeshPeerTarget {
+        node_id: node.node_id.clone(),
+        node_name: node.node_name.clone(),
+        mesh_base_url,
+        public_base_url: node.api_base_url.clone(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MeshRequest {
     pub method: reqwest::Method,
@@ -130,6 +159,7 @@ pub struct MeshRequest {
     pub route: InternalRoute,
     pub cluster_id: String,
     pub sender_id: String,
+    pub updates_active_path: bool,
 }
 
 #[derive(Debug)]
@@ -325,6 +355,11 @@ impl MeshAwareHttpClient {
         self
     }
 
+    pub fn with_circuits(mut self, circuits: PeerCircuitBreakers) -> Self {
+        self.circuits = circuits;
+        self
+    }
+
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
     }
@@ -397,9 +432,7 @@ impl MeshAwareHttpClient {
         build_request(&self.direct).send().await
     }
 
-    /// Sends a signed control-plane request through the peer's REALITY fallback first, then the
-    /// public origin if and only if the Mesh failure was an unambiguous retryable transport
-    /// failure. Any valid acknowledgement (including 4xx/5xx) is authoritative.
+    /// Sends through Mesh first, then public only after a retryable transport failure.
     pub async fn send_peer_request(
         &self,
         peer: &MeshPeerTarget,
@@ -421,9 +454,8 @@ impl MeshAwareHttpClient {
             .before_attempt(&peer.node_id, mesh_enabled)
             .await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
+        let mut mesh_outcome_ambiguous = false;
 
-        // A half-open circuit gets exactly one live request. A valid signed acknowledgement
-        // immediately closes the circuit; a transport failure reopens it with the next delay.
         if matches!(
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
@@ -452,43 +484,63 @@ impl MeshAwareHttpClient {
                         .get(internal_auth::INTERNAL_ACK_HEADER)
                         .and_then(|value| value.to_str().ok())
                     {
-                        internal_auth::verify_ack_v2(
+                        if let Err(error) = internal_auth::verify_ack_v2(
                             cluster_ca_key_pem,
                             cluster_ca_cert_pem,
                             &verified,
                             &peer.node_id,
                             response.status().as_u16(),
                             ack,
-                        )?;
+                        ) {
+                            self.circuits.release_half_open_probe(&peer.node_id).await;
+                            return Err(error.into());
+                        }
+                        let breaker_state = self.circuits.record_success(&peer.node_id).await;
+                        if let Some(telemetry) = &self.telemetry {
+                            let _ = telemetry
+                                .set_breaker(&peer.node_id, breaker_state, None)
+                                .await;
+                        }
                         self.record_sample(
                             peer,
                             TelemetryPath::Mesh,
                             true,
                             started.elapsed(),
                             false,
+                            request.updates_active_path,
                         )
                         .await;
-                        self.circuits.record_success(&peer.node_id).await;
                         return Ok(response);
                     }
+                    self.circuits.release_half_open_probe(&peer.node_id).await;
                     return Err(MeshRequestError::Protocol(
                         "Mesh response did not carry a valid signed acknowledgement".to_string(),
                     ));
                 }
                 Ok(Err(error)) => {
-                    self.record_mesh_transport_failure(peer, error.to_string())
-                        .await;
+                    self.record_mesh_transport_failure(
+                        peer,
+                        error.to_string(),
+                        request.updates_active_path,
+                    )
+                    .await;
                     fallback = true;
+                    mesh_outcome_ambiguous = true;
                 }
                 Err(_) => {
-                    self.record_mesh_transport_failure(peer, "Mesh request timed out".to_string())
-                        .await;
+                    self.record_mesh_transport_failure(
+                        peer,
+                        "Mesh request timed out".to_string(),
+                        request.updates_active_path,
+                    )
+                    .await;
                     fallback = true;
+                    mesh_outcome_ambiguous = true;
                 }
             }
         }
 
-        if !request.allow_ambiguous_fallback && fallback {
+        if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let elapsed = started.elapsed();
@@ -497,7 +549,7 @@ impl MeshAwareHttpClient {
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let public_url = join_url(&peer.public_base_url, &request.path_and_query)?;
-        let response = self
+        let response = match self
             .send_public_signed(
                 &public_url,
                 &request,
@@ -506,13 +558,29 @@ impl MeshAwareHttpClient {
                 cluster_ca_cert_pem,
                 remaining,
             )
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.record_sample(
+                    peer,
+                    TelemetryPath::Public,
+                    false,
+                    started.elapsed(),
+                    fallback,
+                    request.updates_active_path,
+                )
+                .await;
+                return Err(error);
+            }
+        };
         self.record_sample(
             peer,
             TelemetryPath::Public,
             true,
             started.elapsed(),
             fallback,
+            request.updates_active_path,
         )
         .await;
         if fallback {
@@ -549,6 +617,9 @@ impl MeshAwareHttpClient {
             .await
             {
                 Ok(Ok(value)) => value,
+                Ok(Err(_)) | Err(_) if !request.allow_ambiguous_fallback => {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
                 Ok(Err(_)) | Err(_) => tokio::time::timeout(
                     budget.saturating_sub(relay_started.elapsed()),
                     signed_send(
@@ -562,7 +633,7 @@ impl MeshAwareHttpClient {
                 )
                 .await
                 .map_err(|_| MeshRequestError::OutcomeUnknown)?
-                .map_err(MeshRequestError::Public)?,
+                .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?,
             }
         } else {
             tokio::time::timeout(
@@ -578,7 +649,7 @@ impl MeshAwareHttpClient {
             )
             .await
             .map_err(|_| MeshRequestError::OutcomeUnknown)?
-            .map_err(MeshRequestError::Public)?
+            .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?
         };
         let ack = response
             .headers()
@@ -600,10 +671,22 @@ impl MeshAwareHttpClient {
         Ok(response)
     }
 
-    async fn record_mesh_transport_failure(&self, peer: &MeshPeerTarget, reason: String) {
+    async fn record_mesh_transport_failure(
+        &self,
+        peer: &MeshPeerTarget,
+        reason: String,
+        updates_active_path: bool,
+    ) {
         let state = self.circuits.record_retryable_failure(&peer.node_id).await;
-        self.record_sample(peer, TelemetryPath::Mesh, false, Duration::ZERO, false)
-            .await;
+        self.record_sample(
+            peer,
+            TelemetryPath::Mesh,
+            false,
+            Duration::ZERO,
+            false,
+            updates_active_path,
+        )
+        .await;
         if let Some(telemetry) = &self.telemetry {
             let message = if state == BreakerState::Open {
                 format!("Mesh breaker opened after retryable transport failure: {reason}")
@@ -627,19 +710,35 @@ impl MeshAwareHttpClient {
         success: bool,
         elapsed: Duration,
         fallback: bool,
+        updates_active_path: bool,
     ) {
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
                 .record_sample(
                     &peer.node_id,
                     &peer.node_name,
-                    path,
-                    success,
-                    success.then_some(elapsed.as_millis().min(u32::MAX as u128) as u32),
-                    fallback,
+                    MeshTelemetrySample {
+                        path,
+                        success,
+                        latency_ms: success
+                            .then_some(elapsed.as_millis().min(u32::MAX as u128) as u32),
+                        fallback,
+                        updates_active_path,
+                    },
                 )
                 .await;
         }
+    }
+}
+
+fn public_transport_error(
+    error: reqwest::Error,
+    allow_ambiguous_fallback: bool,
+) -> MeshRequestError {
+    if allow_ambiguous_fallback {
+        MeshRequestError::Public(error)
+    } else {
+        MeshRequestError::OutcomeUnknown
     }
 }
 
@@ -691,8 +790,7 @@ async fn signed_send(
             .parse()
             .expect("valid content length"),
     );
-    // Signing failures reflect malformed local inputs. They cannot be represented as a network
-    // error, so use a build-time request error by asserting the internal contract here.
+    // Signing failures are malformed local inputs, not network errors.
     internal_auth::sign_request_v2(
         cluster_ca_key_pem,
         cluster_ca_cert_pem,
@@ -729,12 +827,74 @@ async fn signed_send(
 mod tests {
     use super::*;
 
+    fn peer_node() -> Node {
+        Node {
+            node_id: "peer-a".to_string(),
+            node_name: "peer-a".to_string(),
+            access_host: "peer-a.example.test".to_string(),
+            api_base_url: "https://public-peer-a.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: Default::default(),
+        }
+    }
+    fn managed_vless_endpoint(endpoint_id: &str, port: u16) -> Endpoint {
+        Endpoint {
+            endpoint_id: endpoint_id.to_string(),
+            node_id: "peer-a".to_string(),
+            tag: format!("vless-vision-{endpoint_id}"),
+            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+            port,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "example.com:443",
+                    "server_names": ["example.com"],
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "private",
+                    "public_key": "public"
+                },
+                "short_ids": ["0123456789abcdef"],
+                "active_short_id": "0123456789abcdef",
+                "managed_default": true
+            }),
+        }
+    }
     #[test]
     fn mesh_proxy_status_strings_are_stable() {
         assert_eq!(MeshProxyStatus::Disabled.as_str(), "disabled");
         assert_eq!(MeshProxyStatus::Ready.as_str(), "ready");
         assert_eq!(MeshProxyStatus::Fallback.as_str(), "fallback");
         assert_eq!(MeshProxyStatus::Degraded.as_str(), "degraded");
+    }
+    #[test]
+    fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
+        let node = peer_node();
+        let unique = peer_target_from_node(&node, &[managed_vless_endpoint("one", 443)]);
+        assert_eq!(
+            unique.mesh_base_url.as_deref(),
+            Some("https://peer-a.example.test:443")
+        );
+        assert_eq!(unique.public_base_url, node.api_base_url);
+        let absent = peer_target_from_node(&node, &[]);
+        assert!(absent.mesh_base_url.is_none());
+        let missing_access_host = Node {
+            access_host: String::new(),
+            ..node.clone()
+        };
+        assert!(
+            peer_target_from_node(&missing_access_host, &[managed_vless_endpoint("one", 443)],)
+                .mesh_base_url
+                .is_none()
+        );
+        let ambiguous = peer_target_from_node(
+            &node,
+            &[
+                managed_vless_endpoint("one", 443),
+                managed_vless_endpoint("two", 8443),
+            ],
+        );
+        assert!(ambiguous.mesh_base_url.is_none());
     }
 
     #[test]
@@ -813,6 +973,27 @@ mod tests {
         assert_eq!(
             breakers.record_success("peer-a").await,
             BreakerState::Closed
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_failure_releases_the_half_open_probe_slot() {
+        let breakers = PeerCircuitBreakers::default();
+        breakers.peers.lock().await.insert(
+            "peer-a".to_string(),
+            PeerCircuit {
+                retry_at: Some(Instant::now() - Duration::from_secs(1)),
+                ..PeerCircuit::default()
+            },
+        );
+        assert_eq!(
+            breakers.before_attempt("peer-a", true).await,
+            MeshAttemptDecision::Probe
+        );
+        breakers.release_half_open_probe("peer-a").await;
+        assert_eq!(
+            breakers.before_attempt("peer-a", true).await,
+            MeshAttemptDecision::Probe
         );
     }
 }

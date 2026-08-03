@@ -1,10 +1,10 @@
 use crate::{
     control_plane_mesh::{
         MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
-        apply_optional_proxy,
+        apply_optional_proxy, peer_target_from_node,
     },
     internal_auth::InternalRoute,
-    managed_default_endpoints::managed_default_vless_endpoint,
+    mesh_telemetry::MeshTelemetryHandle,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     state::JsonSnapshotStore,
 };
@@ -139,6 +139,15 @@ impl HttpNetworkFactory {
         factory.mesh_auth = Some(mesh_auth);
         Ok(factory)
     }
+
+    pub fn with_mesh_observability(mut self, telemetry: MeshTelemetryHandle) -> Self {
+        self.client = self.client.with_mesh_observability(telemetry);
+        self
+    }
+
+    pub fn mesh_client(&self) -> MeshAwareHttpClient {
+        self.client.clone()
+    }
 }
 
 impl Default for HttpNetworkFactory {
@@ -239,6 +248,7 @@ impl HttpNetwork {
                         route: InternalRoute::MeshV2,
                         cluster_id: mesh_auth.cluster_id.clone(),
                         sender_id: mesh_auth.sender_id.clone(),
+                        updates_active_path: true,
                     },
                     &mesh_auth.cluster_ca_key_pem,
                     &mesh_auth.cluster_ca_cert_pem,
@@ -283,24 +293,7 @@ async fn mesh_target_for_raft(
             public_base_url: raft_base_url.to_string(),
         };
     };
-    let mesh_base_url = store
-        .list_endpoints()
-        .into_iter()
-        .filter(|endpoint| endpoint.node_id == peer.node_id)
-        .filter_map(|endpoint| managed_default_vless_endpoint(&endpoint).map(|_| endpoint.port))
-        .collect::<Vec<_>>();
-    let mesh_base_url = match mesh_base_url.as_slice() {
-        [port] if !peer.access_host.trim().is_empty() => {
-            Some(format!("https://{}:{port}", peer.access_host))
-        }
-        _ => None,
-    };
-    MeshPeerTarget {
-        node_id: peer.node_id,
-        node_name: peer.node_name,
-        mesh_base_url,
-        public_base_url: peer.api_base_url,
-    }
+    peer_target_from_node(&peer, &store.list_endpoints())
 }
 
 impl RaftNetworkFactory<TypeConfig> for HttpNetworkFactory {

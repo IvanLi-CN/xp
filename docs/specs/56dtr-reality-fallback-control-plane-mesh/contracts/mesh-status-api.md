@@ -7,7 +7,8 @@
   stale state, 24h buckets and local events.
 - Peer quality is good, slow, unstable, down or unknown.
 - `current_path` and bucket `fallback_success` distinguish public fallback.
-- Supports ETag and returns `304 Not Modified` for a matching `If-None-Match`.
+- Computes ETag from the complete stable response representation (without its generated-at time)
+  and returns `304 Not Modified` for a matching `If-None-Match`.
 - Public health does not expose URL, signatures or fallback diagnostics.
 
 ## `POST /api/admin/mesh/probes`

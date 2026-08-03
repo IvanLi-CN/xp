@@ -1,6 +1,7 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
     revision: u64,
@@ -9,7 +10,7 @@ struct AdminMeshStatusResponse {
     events: Vec<crate::mesh_telemetry::MeshTelemetryEvent>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AdminMeshLocalStatus {
     node_id: String,
     node_name: String,
@@ -19,9 +20,10 @@ struct AdminMeshLocalStatus {
     term: u64,
     mesh_proxy_status: String,
     mesh_proxy_reason: Option<String>,
+    canary: crate::vless_https_canary::VlessHttpsCanaryStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AdminMeshPeerStatus {
     node_id: String,
     node_name: String,
@@ -193,10 +195,8 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 .filter(|endpoint| endpoint.node_id == node.node_id)
                 .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
                 .collect::<Vec<_>>();
-            let mesh_url = match matching.as_slice() {
-                [endpoint] => Some(format!("https://{}:{}", node.access_host, endpoint.port)),
-                _ => None,
-            };
+            let mesh_url =
+                crate::control_plane_mesh::peer_target_from_node(&node, &endpoints).mesh_base_url;
             let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
             let (
                 availability_1h,
@@ -260,6 +260,10 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             term: metrics.current_term,
             mesh_proxy_status: proxy.status.as_str().to_string(),
             mesh_proxy_reason: proxy.fallback_reason,
+            canary: crate::vless_https_canary::load_status(
+                &state.config.data_dir,
+                state.config.vless_canary_bind,
+            ),
         },
         peers,
         events: telemetry.events,
@@ -295,7 +299,10 @@ pub(super) async fn admin_get_mesh_status(
     headers: HeaderMap,
 ) -> Response {
     let snapshot = build_admin_mesh_status_response(&state).await;
-    let etag = format!("\"mesh-{}\"", snapshot.revision);
+    let mut stable_snapshot = snapshot.clone();
+    stable_snapshot.generated_at.clear();
+    let stable_bytes = serde_json::to_vec(&stable_snapshot).expect("serialize mesh status ETag");
+    let etag = format!("\"mesh-{}\"", hex::encode(Sha256::digest(stable_bytes)));
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
@@ -384,20 +391,9 @@ async fn mesh_peer_target(state: &AppState, node_id: &str) -> Result<MeshPeerTar
         )
     };
     let node = node.ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
-    let managed = endpoints
-        .iter()
-        .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
-        .collect::<Vec<_>>();
-    let mesh_base_url = match managed.as_slice() {
-        [endpoint] => Some(format!("https://{}:{}", node.access_host, endpoint.port)),
-        _ => None,
-    };
-    Ok(MeshPeerTarget {
-        node_id: node.node_id,
-        node_name: node.node_name,
-        mesh_base_url,
-        public_base_url: node.api_base_url,
-    })
+    Ok(crate::control_plane_mesh::peer_target_from_node(
+        &node, &endpoints,
+    ))
 }
 
 pub(super) async fn send_mesh_internal_read(
@@ -454,6 +450,7 @@ pub(super) async fn send_mesh_internal_request(
                 route: internal_auth::InternalRoute::MeshV2,
                 cluster_id: state.cluster.cluster_id.clone(),
                 sender_id: state.cluster.node_id.clone(),
+                updates_active_path: true,
             },
             ca_key_pem,
             &state.cluster_ca_pem,
@@ -500,6 +497,7 @@ async fn run_mesh_health_probe(
                 route: internal_auth::InternalRoute::HealthV2,
                 cluster_id: state.cluster.cluster_id.clone(),
                 sender_id: state.cluster.node_id.clone(),
+                updates_active_path: !public_only,
             },
             ca_key_pem,
             &state.cluster_ca_pem,

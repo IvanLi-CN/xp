@@ -87,6 +87,49 @@ export const Down: Story = {
 	},
 };
 
+export const CanaryDegraded: Story = {
+	args: {
+		status: {
+			...demoMeshStatus,
+			local: {
+				...demoMeshStatus.local,
+				canary: {
+					...demoMeshStatus.local.canary,
+					last_error: "certificate renewal is waiting for DNS propagation",
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText("canary")).toBeInTheDocument();
+		await expect(await canvas.findByText("degraded")).toBeInTheDocument();
+	},
+};
+
+export const OfflineReadOnly: Story = {
+	args: {
+		status: demoMeshStatus,
+		readOnly: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("button", { name: "Probe all" }),
+		).toBeDisabled();
+		await expect(
+			await canvas.findByRole("button", {
+				name: `Probe ${demoMeshStatus.peers[0].node_name}`,
+			}),
+		).toBeDisabled();
+		await expect(
+			await canvas.findByRole("link", {
+				name: `Open ${demoMeshStatus.peers[0].node_name} details`,
+			}),
+		).toBeInTheDocument();
+	},
+};
+
 export const Stale: Story = {
 	args: {
 		status: {

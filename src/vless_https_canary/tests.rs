@@ -202,6 +202,22 @@ fn reserved_mesh_headers_never_enter_camouflage_forwarding() {
 }
 
 #[test]
+fn health_v2_mesh_ingress_requires_an_empty_body() {
+    assert!(mesh::permitted_mesh_ingress(
+        Some("health-v2"),
+        &Method::GET,
+        "/api/admin/_internal/mesh/health",
+        0,
+    ));
+    assert!(!mesh::permitted_mesh_ingress(
+        Some("health-v2"),
+        &Method::GET,
+        "/api/admin/_internal/mesh/health",
+        1,
+    ));
+}
+
+#[test]
 fn websocket_proxy_rejects_h2c_upstreams() {
     let clients = CanaryProxyClients::new().unwrap();
     let auto_client = clients.for_websocket_mode(CanaryUpstreamMode::Auto);

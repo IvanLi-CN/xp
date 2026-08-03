@@ -10,28 +10,12 @@ pub(super) async fn proxy_mesh_request(
     if is_upgrade_request(req.headers()) {
         return Err(not_found_response());
     }
-    let path = req.uri().path();
+    let path = req.uri().path().to_string();
     let route = req
         .headers()
         .get(internal_auth::INTERNAL_ROUTE_HEADER)
-        .and_then(|value| value.to_str().ok());
-    let permitted = matches!(
-        (route, req.method(), path),
-        (
-            Some("health-v2"),
-            &Method::GET,
-            "/api/admin/_internal/mesh/health"
-        )
-    ) || matches!(
-        (
-            route,
-            path.starts_with("/raft/") || path.starts_with("/api/admin/_internal/")
-        ),
-        (Some("mesh-v2"), true)
-    );
-    if !permitted {
-        return Err(not_found_response());
-    }
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let limit = if path.starts_with("/raft/") {
         8 * 1024 * 1024
     } else {
@@ -41,6 +25,9 @@ pub(super) async fn proxy_mesh_request(
     let body = to_bytes(body, limit)
         .await
         .map_err(|_| not_found_response())?;
+    if !permitted_mesh_ingress(route.as_deref(), &parts.method, &path, body.len()) {
+        return Err(not_found_response());
+    }
     let verified = internal_auth::verify_request_v2(
         &auth.cluster_ca_key_pem,
         &auth.cluster_ca_cert_pem,
@@ -74,6 +61,29 @@ pub(super) async fn proxy_mesh_request(
     }
     let response = request.send().await.map_err(|_| bad_gateway_response())?;
     Ok(mesh_upstream_response_to_axum(response))
+}
+
+pub(super) fn permitted_mesh_ingress(
+    route: Option<&str>,
+    method: &Method,
+    path: &str,
+    body_len: usize,
+) -> bool {
+    matches!(
+        (route, method, path, body_len),
+        (
+            Some("health-v2"),
+            &Method::GET,
+            "/api/admin/_internal/mesh/health",
+            0
+        )
+    ) || matches!(
+        (
+            route,
+            path.starts_with("/raft/") || path.starts_with("/api/admin/_internal/")
+        ),
+        (Some("mesh-v2"), true)
+    )
 }
 
 fn mesh_upstream_response_to_axum(response: reqwest::Response) -> Response<Body> {

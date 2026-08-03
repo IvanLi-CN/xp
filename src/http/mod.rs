@@ -40,7 +40,9 @@ use crate::{
     cluster_identity::JoinToken,
     cluster_metadata::ClusterMetadata,
     config::Config,
-    control_plane_mesh::{MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest},
+    control_plane_mesh::{
+        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest, PeerCircuitBreakers,
+    },
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
         Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain, User,
@@ -133,6 +135,7 @@ pub struct AppState {
     pub ops_github_api_base_url: Arc<String>,
     pub ops_github_client: reqwest::Client,
     pub mesh_proxy_state: MeshProxyStateHandle,
+    pub mesh_circuits: PeerCircuitBreakers,
     pub mesh_telemetry: MeshTelemetryHandle,
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
@@ -928,9 +931,52 @@ pub fn build_router(
     geo_db_update: GeoDbUpdateHandle,
     mesh_proxy_state: MeshProxyStateHandle,
 ) -> Router {
-    let cluster_id = cluster.cluster_id.clone();
     let mesh_telemetry =
         MeshTelemetryHandle::load(&config.data_dir).expect("load local mesh telemetry");
+    build_router_with_mesh_telemetry(
+        config,
+        store,
+        reconcile,
+        xray_health,
+        cloudflared_health,
+        node_runtime,
+        node_history,
+        endpoint_probe,
+        node_egress_probe,
+        cluster,
+        cluster_ca_pem,
+        cluster_ca_key_pem,
+        raft,
+        raft_rpc,
+        geo_db_update,
+        mesh_proxy_state,
+        mesh_telemetry,
+        PeerCircuitBreakers::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_router_with_mesh_telemetry(
+    config: Config,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    reconcile: ReconcileHandle,
+    xray_health: XrayHealthHandle,
+    cloudflared_health: CloudflaredHealthHandle,
+    node_runtime: NodeRuntimeHandle,
+    node_history: NodeHistoryHandle,
+    endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
+    node_egress_probe: NodeEgressProbeHandle,
+    cluster: ClusterMetadata,
+    cluster_ca_pem: String,
+    cluster_ca_key_pem: Option<String>,
+    raft: Arc<dyn RaftFacade>,
+    raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
+    geo_db_update: GeoDbUpdateHandle,
+    mesh_proxy_state: MeshProxyStateHandle,
+    mesh_telemetry: MeshTelemetryHandle,
+    mesh_circuits: PeerCircuitBreakers,
+) -> Router {
+    let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
         .expect("load local internal idempotency ledger");
     let auth_state = AdminAuthState {
@@ -975,6 +1021,7 @@ pub fn build_router(
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
         mesh_proxy_state,
+        mesh_circuits,
         mesh_telemetry,
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
@@ -1321,6 +1368,9 @@ async fn admin_auth(
         if !route_permitted {
             return ApiError::unauthorized("internal route is not permitted").into_response();
         }
+        if verified.context.route == internal_auth::InternalRoute::HealthV2 && !bytes.is_empty() {
+            return ApiError::unauthorized("mesh health requests must be bodyless").into_response();
+        }
         let sender_is_member = auth
             .store
             .lock()
@@ -1423,7 +1473,6 @@ pub(super) async fn authorize_admin_token(
 async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value> {
     let snap = state.xray_health.snapshot().await;
     let cloudflared = state.cloudflared_health.snapshot().await;
-    let mesh_proxy = state.mesh_proxy_state.snapshot().await;
     let vless_https_canary = crate::vless_https_canary::load_status(
         &state.config.data_dir,
         state.config.vless_canary_bind,
@@ -1459,11 +1508,6 @@ async fn health(Extension(state): Extension<AppState>) -> Json<serde_json::Value
             "restart_backoff_secs": cloudflared.restart_backoff_secs,
             "restart_backoff_attempts": cloudflared.restart_backoff_attempts,
             "automatic_restart_enabled": cloudflared.automatic_restart_enabled,
-        },
-        "mesh_proxy": {
-            "status": mesh_proxy.status.as_str(),
-            "fallback_reason": mesh_proxy.fallback_reason,
-            "last_fallback_at": mesh_proxy.last_fallback_at,
         },
         "vless_https_canary": vless_https_canary
     }))
@@ -4968,7 +5012,8 @@ fn build_cluster_http_client(state: &AppState) -> Result<MeshAwareHttpClient, Ap
 
     Ok(
         MeshAwareHttpClient::new(direct, relay, state.mesh_proxy_state.clone())
-            .with_mesh_observability(state.mesh_telemetry.clone()),
+            .with_mesh_observability(state.mesh_telemetry.clone())
+            .with_circuits(state.mesh_circuits.clone()),
     )
 }
 
@@ -7767,7 +7812,8 @@ fn build_admin_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiE
     };
     Ok(
         MeshAwareHttpClient::new(direct, relay, state.mesh_proxy_state.clone())
-            .with_mesh_observability(state.mesh_telemetry.clone()),
+            .with_mesh_observability(state.mesh_telemetry.clone())
+            .with_circuits(state.mesh_circuits.clone()),
     )
 }
 

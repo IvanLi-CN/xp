@@ -354,15 +354,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         return Err(ExitError::new(3, "invalid_args: xp is not installed"));
     }
 
-    if args.allow_internal_auth_v2_cutover {
-        crate::internal_auth_epoch::write_cutover_marker(&args.data_dir).map_err(|error| {
-            ExitError::new(
-                7,
-                format!("service_error: write internal-auth v2 cutover marker: {error}"),
-            )
-        })?;
-    }
-
     let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
     ensure_dir(&tmp_dir).map_err(|e| ExitError::new(7, format!("service_error: {e}")))?;
 
@@ -379,10 +370,38 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
     let checksums = read_checksums(&checksums_path)?;
 
+    if args.allow_internal_auth_v2_cutover {
+        crate::internal_auth_epoch::write_cutover_marker(&args.data_dir).map_err(|error| {
+            ExitError::new(
+                7,
+                format!("service_error: write internal-auth v2 cutover marker: {error}"),
+            )
+        })?;
+    }
+
     let phase_result = async {
-        upgrade_xp(&paths, &release, &checksums, xp_asset_name, &xp_backup).await?;
-        upgrade_and_reconcile_managed_runtimes(&paths, &release, &checksums, platform, &xp_backup)
-            .await?;
+        upgrade_xp(
+            &paths,
+            &release,
+            &checksums,
+            xp_asset_name,
+            &xp_backup,
+            &args.data_dir,
+        )
+        .await?;
+        // A new process consumes the cutover marker at startup. Once the v2 epoch is durable,
+        // restoring the backed-up v1 binary would violate the cluster protocol contract.
+        let rollback_xp_on_runtime_failure =
+            !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir);
+        upgrade_and_reconcile_managed_runtimes(
+            &paths,
+            &release,
+            &checksums,
+            platform,
+            &xp_backup,
+            rollback_xp_on_runtime_failure,
+        )
+        .await?;
 
         if resume.is_some() {
             clear_upgrade_resume_env();
@@ -405,7 +424,9 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     match phase_result {
         Ok(()) => Ok(()),
         Err(err) => {
-            if args.allow_internal_auth_v2_cutover {
+            if args.allow_internal_auth_v2_cutover
+                && !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir)
+            {
                 crate::internal_auth_epoch::clear_cutover_marker(&args.data_dir);
             }
             if let Some(resume) = resume.as_ref() {
@@ -457,6 +478,7 @@ async fn upgrade_xp(
     checksums: &HashMap<String, [u8; 32]>,
     asset_name: &str,
     backup: &Path,
+    data_dir: &Path,
 ) -> Result<(), ExitError> {
     let Some(asset_url) = find_asset_url(release, asset_name) else {
         return Err(ExitError::new(
@@ -506,6 +528,15 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
+        if crate::internal_auth_epoch::is_v2_epoch(data_dir) {
+            return Err(ExitError::new(
+                7,
+                concat!(
+                    "service_error: restart failed after internal-auth v2 epoch was consumed; ",
+                    "v1 rollback is blocked"
+                ),
+            ));
+        }
         let _ = fs::rename(
             &dest,
             dest.with_extension(format!("failed.{}", now_unix_secs())),

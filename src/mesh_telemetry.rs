@@ -116,6 +116,15 @@ pub struct MeshTelemetrySnapshot {
     pub events: Vec<MeshTelemetryEvent>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MeshTelemetrySample {
+    pub path: TelemetryPath,
+    pub success: bool,
+    pub latency_ms: Option<u32>,
+    pub fallback: bool,
+    pub updates_active_path: bool,
+}
+
 #[derive(Clone)]
 pub struct MeshTelemetryHandle {
     path: Arc<PathBuf>,
@@ -159,10 +168,7 @@ impl MeshTelemetryHandle {
         &self,
         peer_id: impl Into<String>,
         peer_name: impl Into<String>,
-        path: TelemetryPath,
-        success: bool,
-        latency_ms: Option<u32>,
-        fallback: bool,
+        sample: MeshTelemetrySample,
     ) -> anyhow::Result<()> {
         let now = Utc::now();
         let peer_id = peer_id.into();
@@ -176,13 +182,15 @@ impl MeshTelemetryHandle {
             });
         peer.peer_name = peer_name.into();
         let previous_path = peer.last_path;
-        peer.last_path = Some(path);
+        if sample.updates_active_path {
+            peer.last_path = Some(sample.path);
+        }
         peer.last_sample_at = Some(timestamp(now));
-        if previous_path != Some(path) {
+        if sample.updates_active_path && previous_path != Some(sample.path) {
             peer.last_transition_at = Some(timestamp(now));
         }
         let bucket = ensure_bucket(peer, now);
-        match (path, success) {
+        match (sample.path, sample.success) {
             (TelemetryPath::Mesh, true) => {
                 bucket.mesh_success += 1;
                 bucket.end_to_end_success += 1;
@@ -197,10 +205,10 @@ impl MeshTelemetryHandle {
                 bucket.end_to_end_failure += 1;
             }
         }
-        if fallback && success {
+        if sample.fallback && sample.success {
             bucket.fallback_success += 1;
         }
-        if let Some(latency_ms) = latency_ms {
+        if let Some(latency_ms) = sample.latency_ms {
             // Per-minute quantiles do not need unbounded precision. Keeping 64 values remains
             // stable under probe bursts while retaining enough signal for p50/p95.
             if bucket.latency_samples_ms.len() < 64 {
@@ -464,10 +472,13 @@ mod tests {
             .record_sample(
                 "peer-a",
                 "alpha",
-                TelemetryPath::Mesh,
-                true,
-                Some(42),
-                false,
+                MeshTelemetrySample {
+                    path: TelemetryPath::Mesh,
+                    success: true,
+                    latency_ms: Some(42),
+                    fallback: false,
+                    updates_active_path: true,
+                },
             )
             .await
             .unwrap();
@@ -522,6 +533,46 @@ mod tests {
         };
         assert_eq!(availability_for(&peer, 60, now), Some(1.0));
         assert_eq!(quality_for_peer(&peer, now), MeshQuality::Good);
+    }
+
+    #[tokio::test]
+    async fn passive_public_sample_does_not_replace_active_mesh_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Mesh,
+                    success: true,
+                    latency_ms: Some(42),
+                    fallback: false,
+                    updates_active_path: true,
+                },
+            )
+            .await
+            .unwrap();
+        let before = telemetry.snapshot().await.peers.remove(0);
+
+        telemetry
+            .record_sample(
+                "peer-a",
+                "alpha",
+                MeshTelemetrySample {
+                    path: TelemetryPath::Public,
+                    success: true,
+                    latency_ms: Some(50),
+                    fallback: false,
+                    updates_active_path: false,
+                },
+            )
+            .await
+            .unwrap();
+        let after = telemetry.snapshot().await.peers.remove(0);
+        assert_eq!(after.last_path, Some(TelemetryPath::Mesh));
+        assert_eq!(after.last_transition_at, before.last_transition_at);
+        assert_eq!(after.buckets[0].public_success, 1);
     }
 
     #[test]

@@ -31,6 +31,14 @@ export const demoMeshStatus: AdminMeshStatus = {
 		term: 42,
 		mesh_proxy_status: "ready",
 		mesh_proxy_reason: null,
+		canary: {
+			enabled: true,
+			bind: "127.0.0.1:39043",
+			acme_directory_url: null,
+			cert_not_after: "2026-11-01T00:00:00Z",
+			last_renewed_at: "2026-08-01T00:00:00Z",
+			last_error: null,
+		},
 	},
 	peers: [
 		{

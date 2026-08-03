@@ -60,6 +60,14 @@ export const AdminMeshStatusSchema = z.object({
 		term: z.number(),
 		mesh_proxy_status: z.string(),
 		mesh_proxy_reason: z.string().nullable(),
+		canary: z.object({
+			enabled: z.boolean(),
+			bind: z.string().nullable().optional(),
+			acme_directory_url: z.string().nullable().optional(),
+			cert_not_after: z.string().nullable().optional(),
+			last_renewed_at: z.string().nullable().optional(),
+			last_error: z.string().nullable().optional(),
+		}),
 	}),
 	peers: z.array(AdminMeshPeerSchema),
 	events: z.array(

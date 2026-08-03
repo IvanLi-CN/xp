@@ -113,29 +113,52 @@ Each peer has an independent breaker. After three retryable Mesh transport failu
 `30/60/120/240/300s` backoff sequence and sends the remaining request budget to the public
 `api_base_url`. A signed acknowledgement is authoritative even for a non-2xx HTTP result, so it
 never triggers a second path attempt. The local node keeps 24 hours of one-minute buckets and the
-last 200 transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect them with
+last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect them with
 `GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
 accepts only current remote member IDs.
 
 ### Auth epoch cutover
 
-A multi-node cluster cannot cross to internal-auth v2 through the Web upgrade action. During a
-maintenance window, run the host-managed upgrade on every node with:
+A multi-node cluster cannot cross to internal-auth v2 through the Web upgrade action. The already
+installed v1 `xp-ops` does not recognize the v2 cutover flag, so this boundary requires a
+maintenance window and a verified target-release `xp-ops` bootstrap on every host-managed node.
+Quiesce the cluster, choose one immutable release tag, and run the following on each node before
+allowing any node to resume control-plane traffic:
 
 ```bash
-sudo xp-ops upgrade --data-dir /var/lib/xp/data --allow-internal-auth-v2-cutover
+export XP_RELEASE=vX.Y.Z
+export XP_ARCH="$(uname -m)"
+case "$XP_ARCH" in x86_64|amd64) XP_ARCH=x86_64 ;; aarch64|arm64) XP_ARCH=aarch64 ;; *) exit 2 ;; esac
+mkdir -p /tmp/xp-internal-auth-v2 && cd /tmp/xp-internal-auth-v2
+curl -fLO "https://github.com/IvanLi-CN/xp/releases/download/${XP_RELEASE}/checksums.txt"
+curl -fLO "https://github.com/IvanLi-CN/xp/releases/download/${XP_RELEASE}/xp-ops-linux-${XP_ARCH}"
+grep " xp-ops-linux-${XP_ARCH}$" checksums.txt | sha256sum -c -
+chmod 0755 "xp-ops-linux-${XP_ARCH}"
+sudo "./xp-ops-linux-${XP_ARCH}" upgrade --version "$XP_RELEASE" \
+  --data-dir /var/lib/xp/data --allow-internal-auth-v2-cutover
 ```
 
-For the official single-image runtime, use the same entrypoint command for the replacement that
-starts the v2 image:
+For the official single-image runtime, pull the target image first, then invoke its marker command
+against the same persistent volume before starting that image. Replace the Compose file with the
+node's actual bootstrap or join file:
 
 ```bash
-xp-ops container run --allow-internal-auth-v2-cutover
+export XP_IMAGE=ghcr.io/ivanli-cn/xp@sha256:<target-image-digest>
+export XP_COMPOSE=deploy/docker/compose.bootstrap.yml
+docker compose -f "$XP_COMPOSE" pull xp
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container mark-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+docker compose -f "$XP_COMPOSE" up -d xp
 ```
 
-The command writes a one-shot marker under `${XP_DATA_DIR}/mesh/`. A new binary on a multi-node
-cluster consumes that marker into the durable v2 epoch record; without it startup fails so the
-host upgrade path can roll back. After the epoch record exists, normal same-epoch Web upgrades are
+The marker lives under `${XP_DATA_DIR}/mesh/`. A new binary consumes it into a durable v2 epoch
+record; without it startup fails. A host-managed upgrade failure clears a marker it created only
+before the new process consumes it. If restart or managed runtime reconcile fails after consumption,
+XP stays on v2 while the runtime rollback completes; it never restores the old v1 binary. For a
+container failure before the new `xp` process consumes the marker, restore the previous immutable
+image and run `container cancel-internal-auth-v2-cutover` through that target image. Once the epoch
+record exists, v1 rollback is intentionally unsupported: restore a pre-cutover data backup or
+complete the v2 recovery instead. After the durable epoch exists, same-epoch Web upgrades are
 available again. Never stagger v1 and v2 nodes outside this maintenance window.
 
 Host-managed upgrade note:
@@ -624,12 +647,16 @@ Use the path that matches the node shape instead of mixing procedures:
 
 - Host-managed systemd/OpenRC nodes:
   - Upgrade binaries with `xp-ops upgrade` when the distro family is officially supported by `xp-ops`.
+  - At the internal-auth v2 boundary, use the verified bootstrap procedure above instead of an
+    ordinary `xp-ops upgrade` invocation from the old installed binary.
   - Alternatively, after `xp-ops init` has installed the one-shot runner and narrow privilege rule,
     start the same current-node upgrade from the Web UI.
   - Arch/Debian/Ubuntu/RHEL-family nodes are covered by the supported automation path.
   - If a host-managed node falls outside those distro families, upgrade the `xp` and `xp-ops` binaries manually, then restart `xp` and verify the post-upgrade checks below.
 - Docker / Compose nodes:
   - Update the image tag or digest, then restart the container.
+  - At the internal-auth v2 boundary, use the image marker procedure above; the fixed entrypoint
+    cannot receive a new `container run` flag from Compose.
   - Let `xp-ops container run` perform runtime reconcile on startup.
   - The Web UI reports this shape as unsupported for automatic upgrade and does not replace binaries
     inside the container.

@@ -49,11 +49,14 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     checksums: &HashMap<String, [u8; 32]>,
     platform: Platform,
     xp_backup: &Path,
+    rollback_xp_on_failure: bool,
 ) -> Result<(), ExitError> {
     let backups = match upgrade_managed_runtime_binaries(paths, release, checksums, platform).await
     {
         Ok(backups) => backups,
-        Err(err) => return rollback_xp_after_xray_failure(paths, xp_backup, err),
+        Err(err) => {
+            return finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure);
+        }
     };
     let runtime_defaults = match snapshot_runtime_defaults(paths) {
         Ok(snapshot) => snapshot,
@@ -66,7 +69,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
                     &RuntimeDefaultsBackup { files: Vec::new() },
                 ),
             );
-            return rollback_xp_after_xray_failure(paths, xp_backup, err);
+            return finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure);
         }
     };
     if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
@@ -74,9 +77,22 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             err,
             rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults),
         );
-        return rollback_xp_after_xray_failure(paths, xp_backup, err);
+        return finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure);
     }
     Ok(())
+}
+
+fn finish_runtime_failure(
+    paths: &Paths,
+    xp_backup: &Path,
+    error: ExitError,
+    rollback_xp_on_failure: bool,
+) -> Result<(), ExitError> {
+    if rollback_xp_on_failure {
+        rollback_xp_after_xray_failure(paths, xp_backup, error)
+    } else {
+        Err(error)
+    }
 }
 
 fn retain_original_error(original: ExitError, rollback: Result<(), ExitError>) -> ExitError {
