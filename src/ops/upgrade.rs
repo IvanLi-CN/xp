@@ -281,8 +281,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     };
     let platform = detect_platform()?;
     let current_exe = std::env::current_exe()
-        .map_err(|e| ExitError::new(7, format!("install_failed: current_exe: {e}")))?;
-
+        .map_err(|error| ExitError::new(7, format!("install_failed: current_exe: {error}")))?;
     let resume = load_resume_context(args.release.repo.as_deref())?;
     let release_args = resume
         .as_ref()
@@ -318,7 +317,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let xp_ops_dest = resume
         .as_ref()
         .map(|ctx| ctx.xp_ops_dest.clone())
-        .unwrap_or_else(|| current_exe.clone());
+        .unwrap_or_else(|| {
+            let installed = paths.usr_local_bin_xp_ops();
+            if installed.exists() {
+                installed
+            } else {
+                current_exe
+            }
+        });
     let xp_ops_backup = resume
         .as_ref()
         .map(|ctx| ctx.xp_ops_backup.clone())
@@ -392,7 +398,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         // A new process consumes the cutover marker at startup. Once the v2 epoch is durable,
         // restoring the backed-up v1 binary would violate the cluster protocol contract.
         let rollback_xp_on_runtime_failure =
-            !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir);
+            !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir).map_err(|error| {
+                ExitError::new(
+                    7,
+                    format!(
+                        "service_error: read internal-auth epoch before rollback decision: {error}"
+                    ),
+                )
+            })?;
         upgrade_and_reconcile_managed_runtimes(
             &paths,
             &release,
@@ -425,9 +438,20 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         Ok(()) => Ok(()),
         Err(err) => {
             if args.allow_internal_auth_v2_cutover
-                && !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir)
+                && matches!(
+                    crate::internal_auth_epoch::is_v2_epoch(&args.data_dir),
+                    Ok(false)
+                )
+                && let Err(marker_error) =
+                    crate::internal_auth_epoch::clear_cutover_marker(&args.data_dir)
             {
-                crate::internal_auth_epoch::clear_cutover_marker(&args.data_dir);
+                tracing::warn!(
+                    error = %marker_error,
+                    concat!(
+                        "failed to clear unconsumed internal-auth v2 cutover marker ",
+                        "after upgrade failure"
+                    )
+                );
             }
             if let Some(resume) = resume.as_ref() {
                 clear_upgrade_resume_env();
@@ -528,14 +552,29 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
-        if crate::internal_auth_epoch::is_v2_epoch(data_dir) {
-            return Err(ExitError::new(
-                7,
-                concat!(
-                    "service_error: restart failed after internal-auth v2 epoch was consumed; ",
-                    "v1 rollback is blocked"
-                ),
-            ));
+        match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
+            Ok(true) => {
+                return Err(ExitError::new(
+                    7,
+                    concat!(
+                        "service_error: restart failed after internal-auth v2 epoch was consumed; ",
+                        "v1 rollback is blocked"
+                    ),
+                ));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return Err(ExitError::new(
+                    7,
+                    format!(
+                        concat!(
+                            "service_error: restart failed and internal-auth epoch is unreadable; ",
+                            "v1 rollback is blocked: {}"
+                        ),
+                        error
+                    ),
+                ));
+            }
         }
         let _ = fs::rename(
             &dest,
@@ -575,14 +614,6 @@ async fn install_xp_ops_binary(
     backup: &Path,
     skip_verify_under_test: bool,
 ) -> Result<bool, ExitError> {
-    let current = crate::version::VERSION;
-    let tag = release.tag_name.as_str();
-    let target = tag.strip_prefix('v').unwrap_or(tag);
-    if current == target {
-        eprintln!("already up-to-date: v{current}");
-        return Ok(false);
-    }
-
     let Some(asset_url) = find_asset_url(release, asset_name) else {
         return Err(ExitError::new(
             5,

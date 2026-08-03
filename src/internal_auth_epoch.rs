@@ -26,11 +26,29 @@ fn marker_path(data_dir: &Path) -> PathBuf {
     mesh_dir(data_dir).join(CUTOVER_MARKER_FILE)
 }
 
-pub fn is_v2_epoch(data_dir: &Path) -> bool {
-    fs::read(epoch_path(data_dir))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<AuthEpochRecord>(&bytes).ok())
-        .is_some_and(|record| record.epoch == 2)
+/// Returns whether the durable cluster epoch is v2. A missing record represents a legacy
+/// cluster, but a record that cannot be read or decoded must never be treated as legacy.
+pub fn is_v2_epoch(data_dir: &Path) -> anyhow::Result<bool> {
+    let path = epoch_path(data_dir);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).map_err(|error| {
+                anyhow::anyhow!("read internal-auth epoch {}: {error}", path.display())
+            });
+        }
+    };
+    let record: AuthEpochRecord = serde_json::from_slice(&bytes).map_err(|error| {
+        anyhow::anyhow!("decode internal-auth epoch {}: {error}", path.display())
+    })?;
+    match record.epoch {
+        2 => Ok(true),
+        epoch => anyhow::bail!(
+            "internal-auth epoch {} has unsupported value {epoch}",
+            path.display()
+        ),
+    }
 }
 
 /// Creates the single-use marker consumed by the first v2 binary during a maintenance window.
@@ -43,14 +61,24 @@ pub fn write_cutover_marker(data_dir: &Path) -> anyhow::Result<()> {
     )
 }
 
-pub fn clear_cutover_marker(data_dir: &Path) {
-    let _ = fs::remove_file(marker_path(data_dir));
+pub fn clear_cutover_marker(data_dir: &Path) -> anyhow::Result<()> {
+    let path = marker_path(data_dir);
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).map_err(|error| {
+            anyhow::anyhow!(
+                "remove internal-auth cutover marker {}: {error}",
+                path.display()
+            )
+        }),
+    }
 }
 
 /// Multi-member clusters cannot silently cross from the legacy auth contract. A marker is
 /// consumed atomically into the durable epoch record once the new binary has started.
 pub fn ensure_startup_epoch(data_dir: &Path, member_count: usize) -> anyhow::Result<()> {
-    if is_v2_epoch(data_dir) {
+    if is_v2_epoch(data_dir)? {
         return Ok(());
     }
     if member_count <= 1 {
@@ -97,7 +125,7 @@ mod tests {
         assert!(ensure_startup_epoch(temp.path(), 2).is_err());
         write_cutover_marker(temp.path()).expect("marker");
         ensure_startup_epoch(temp.path(), 2).expect("consume marker");
-        assert!(is_v2_epoch(temp.path()));
+        assert!(is_v2_epoch(temp.path()).expect("read epoch"));
         assert!(!marker_path(temp.path()).exists());
     }
 
@@ -105,7 +133,17 @@ mod tests {
     fn single_node_startup_persists_the_v2_epoch() {
         let temp = tempfile::tempdir().expect("temp dir");
         ensure_startup_epoch(temp.path(), 1).expect("initialize single node epoch");
-        assert!(is_v2_epoch(temp.path()));
+        assert!(is_v2_epoch(temp.path()).expect("read epoch"));
         ensure_startup_epoch(temp.path(), 2).expect("persisted epoch avoids cutover gate");
+    }
+
+    #[test]
+    fn malformed_epoch_does_not_fall_back_to_legacy() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        fs::create_dir_all(mesh_dir(temp.path())).expect("mesh dir");
+        fs::write(epoch_path(temp.path()), "not json").expect("epoch file");
+
+        assert!(is_v2_epoch(temp.path()).is_err());
+        assert!(ensure_startup_epoch(temp.path(), 2).is_err());
     }
 }

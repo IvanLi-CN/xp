@@ -4406,7 +4406,15 @@ async fn admin_start_upgrade(
     ApiJson(req): ApiJson<AdminUpgradeStartRequest>,
 ) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
     let member_count = state.store.lock().await.list_nodes().len();
-    if member_count > 1 && !crate::internal_auth_epoch::is_v2_epoch(&state.config.data_dir) {
+    let v2_epoch =
+        crate::internal_auth_epoch::is_v2_epoch(&state.config.data_dir).map_err(|error| {
+            ApiError::new(
+                "internal_auth_epoch_unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("read internal-auth epoch: {error}"),
+            )
+        })?;
+    if member_count > 1 && !v2_epoch {
         return Err(ApiError::new(
             "coordinated_upgrade_required",
             StatusCode::CONFLICT,

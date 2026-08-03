@@ -372,18 +372,27 @@ pub(super) async fn admin_run_mesh_probes(
             )
             .await
             .map_err(|error| ApiError::internal(format!("persist mesh probe request: {error}")))?;
-        let state_for_probe = state.clone();
-        let node_id = node_id.clone();
-        tokio::spawn(async move {
-            if let Err(error) = probe_mesh_peer(&state_for_probe, &node_id).await {
-                tracing::debug!(
-                    peer_id = %node_id,
-                    ?error,
-                    "immediate mesh probe did not complete"
-                );
-            }
-        });
     }
+    let state_for_probes = state.clone();
+    let probe_node_ids = accepted_node_ids.clone();
+    tokio::spawn(async move {
+        stream::iter(probe_node_ids)
+            .map(|node_id| {
+                let state = state_for_probes.clone();
+                async move {
+                    if let Err(error) = probe_mesh_peer(&state, &node_id).await {
+                        tracing::debug!(
+                            peer_id = %node_id,
+                            ?error,
+                            "immediate mesh probe did not complete"
+                        );
+                    }
+                }
+            })
+            .buffer_unordered(4)
+            .collect::<Vec<_>>()
+            .await;
+    });
     let revision = state.mesh_telemetry.snapshot().await.revision;
     Ok(Json(AdminMeshProbeResponse {
         accepted_node_ids,

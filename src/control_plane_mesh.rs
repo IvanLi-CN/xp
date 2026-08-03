@@ -476,6 +476,7 @@ impl MeshAwareHttpClient {
                             ack,
                         ) {
                             self.circuits.release_half_open_probe(&peer.node_id).await;
+                            self.record_mesh_protocol_failure(peer).await;
                             self.record_terminal_failure(peer).await;
                             return Err(error.into());
                         }
@@ -497,6 +498,7 @@ impl MeshAwareHttpClient {
                         return Ok(response);
                     }
                     self.circuits.release_half_open_probe(&peer.node_id).await;
+                    self.record_mesh_protocol_failure(peer).await;
                     self.record_terminal_failure(peer).await;
                     return Err(MeshRequestError::Protocol(
                         "Mesh response did not carry a valid signed acknowledgement".to_string(),
@@ -562,11 +564,6 @@ impl MeshAwareHttpClient {
             request.updates_active_path,
         )
         .await;
-        if fallback {
-            self.state
-                .mark_fallback("per-peer Reality fallback unavailable")
-                .await;
-        }
         Ok(response)
     }
 
@@ -675,6 +672,18 @@ impl MeshAwareHttpClient {
                 )
                 .await;
         }
+    }
+
+    async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
+        self.record_sample(
+            peer,
+            TelemetryPath::Mesh,
+            false,
+            Duration::ZERO,
+            false,
+            false,
+        )
+        .await;
     }
 
     async fn record_sample(
@@ -804,7 +813,6 @@ async fn signed_send(
     let response = builder.send().await?;
     Ok((response, verified))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,8 +865,7 @@ mod tests {
             Some("https://peer-a.example.test:443")
         );
         assert_eq!(unique.public_base_url, node.api_base_url);
-        let absent = peer_target_from_node(&node, &[]);
-        assert!(absent.mesh_base_url.is_none());
+        assert!(peer_target_from_node(&node, &[]).mesh_base_url.is_none());
         let missing_access_host = Node {
             access_host: String::new(),
             ..node.clone()
@@ -898,8 +905,7 @@ mod tests {
     }
     #[test]
     fn invalid_proxy_url_is_rejected() {
-        let builder = reqwest::Client::builder();
-        let err = apply_optional_proxy(builder, Some("not a url")).unwrap_err();
+        let err = apply_optional_proxy(reqwest::Client::builder(), Some("not a url")).unwrap_err();
         assert!(err.to_string().contains("invalid proxy url"));
     }
     #[test]
@@ -917,7 +923,6 @@ mod tests {
             Duration::from_secs(5)
         );
     }
-
     #[tokio::test]
     async fn peer_breaker_opens_after_three_transport_failures() {
         let breakers = PeerCircuitBreakers::default();
@@ -946,7 +951,6 @@ mod tests {
             BreakerState::Closed
         );
     }
-
     #[tokio::test]
     async fn half_open_allows_exactly_one_mesh_probe() {
         let breakers = PeerCircuitBreakers::default();
@@ -959,7 +963,6 @@ mod tests {
                 half_open_in_flight: false,
             },
         );
-
         assert_eq!(
             breakers.before_attempt("peer-a", true).await,
             MeshAttemptDecision::Probe
@@ -973,7 +976,6 @@ mod tests {
             BreakerState::Closed
         );
     }
-
     #[tokio::test]
     async fn protocol_failure_releases_the_half_open_probe_slot() {
         let breakers = PeerCircuitBreakers::default();

@@ -304,7 +304,12 @@ pub async fn cmd_cancel_internal_auth_v2_cutover(
     args: InternalAuthV2CutoverMarkerArgs,
 ) -> Result<(), ExitError> {
     let data_dir = paths.map_abs(&args.data_dir);
-    if crate::internal_auth_epoch::is_v2_epoch(&data_dir) {
+    if crate::internal_auth_epoch::is_v2_epoch(&data_dir).map_err(|error| {
+        ExitError::new(
+            7,
+            format!("service_error: read internal-auth epoch before cancelling cutover: {error}"),
+        )
+    })? {
         return Err(ExitError::new(
             3,
             "invalid_args: internal-auth v2 epoch is already durable; v1 rollback is unsupported",
@@ -320,7 +325,12 @@ pub async fn cmd_cancel_internal_auth_v2_cutover(
         return Ok(());
     }
 
-    crate::internal_auth_epoch::clear_cutover_marker(&data_dir);
+    crate::internal_auth_epoch::clear_cutover_marker(&data_dir).map_err(|error| {
+        ExitError::new(
+            7,
+            format!("service_error: cancel internal-auth v2 cutover marker: {error}"),
+        )
+    })?;
     Ok(())
 }
 
