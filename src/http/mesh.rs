@@ -118,15 +118,23 @@ pub(super) async fn admin_internal_raft_client_write(
     let Some(Extension(internal)) = internal else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
-    let request_id = internal
+    let idempotency_request = internal
         .verified
         .as_ref()
         .filter(|verified| verified.context.route == internal_auth::InternalRoute::MeshV2)
-        .map(|verified| verified.context.request_id.clone());
-    if let Some(request_id) = request_id.as_deref() {
+        .map(|verified| {
+            (
+                verified.context.request_id.clone(),
+                IdempotencyRequest {
+                    sender_id: verified.context.sender_id.clone(),
+                    canonical_sha256: verified.canonical_sha256.clone(),
+                },
+            )
+        });
+    if let Some((request_id, request)) = idempotency_request.as_ref() {
         match state
             .internal_idempotency
-            .begin(request_id)
+            .begin(request_id, request)
             .await
             .map_err(|error| {
                 ApiError::internal(format!("read internal idempotency ledger: {error}"))
@@ -144,6 +152,13 @@ pub(super) async fn admin_internal_raft_client_write(
                     "internal mutation pending",
                 ));
             }
+            IdempotencyBegin::Mismatch => {
+                return Err(ApiError::new(
+                    "idempotency_request_mismatch",
+                    StatusCode::CONFLICT,
+                    "internal request id is already bound to a different request",
+                ));
+            }
             IdempotencyBegin::Full => {
                 return Err(ApiError::new(
                     "idempotency_ledger_full",
@@ -159,11 +174,12 @@ pub(super) async fn admin_internal_raft_client_write(
         .client_write(cmd)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    if let Some(request_id) = request_id {
+    if let Some((request_id, request)) = idempotency_request {
         state
             .internal_idempotency
             .finish(
                 &request_id,
+                &request,
                 StoredResult {
                     status: StatusCode::OK.as_u16(),
                     body: serde_json::to_value(&resp).map_err(|error| {

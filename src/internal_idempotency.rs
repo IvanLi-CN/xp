@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-const LEDGER_SCHEMA_VERSION: u32 = 1;
+const LEDGER_SCHEMA_VERSION: u32 = 2;
 const RETENTION: Duration = Duration::minutes(10);
 pub const MAX_ENTRIES: usize = 16_384;
 
@@ -22,6 +22,8 @@ pub struct StoredResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LedgerEntry {
+    #[serde(default)]
+    request: Option<IdempotencyRequest>,
     state: LedgerState,
 }
 
@@ -61,7 +63,14 @@ pub enum BeginResult {
     New,
     Existing(StoredResult),
     InFlight,
+    Mismatch,
     Full,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdempotencyRequest {
+    pub sender_id: String,
+    pub canonical_sha256: String,
 }
 
 #[derive(Clone)]
@@ -78,13 +87,16 @@ impl InternalIdempotencyLedger {
         } else {
             PersistedLedger::default()
         };
-        if persisted.schema_version != LEDGER_SCHEMA_VERSION {
+        if !matches!(persisted.schema_version, 1 | LEDGER_SCHEMA_VERSION) {
             anyhow::bail!(
-                "internal idempotency schema_version mismatch: expected {}, got {}",
+                "internal idempotency schema_version mismatch: expected 1 or {}, got {}",
                 LEDGER_SCHEMA_VERSION,
                 persisted.schema_version
             );
         }
+        // Schema v1 records do not bind a request id to an authenticated request. They stay
+        // unreadable as retries until retention expires, then naturally prune on the next write.
+        persisted.schema_version = LEDGER_SCHEMA_VERSION;
         prune(&mut persisted, Utc::now());
         Ok(Self {
             path: Arc::new(path),
@@ -92,14 +104,22 @@ impl InternalIdempotencyLedger {
         })
     }
 
-    pub async fn begin(&self, request_id: &str) -> anyhow::Result<BeginResult> {
+    pub async fn begin(
+        &self,
+        request_id: &str,
+        request: &IdempotencyRequest,
+    ) -> anyhow::Result<BeginResult> {
         if request_id.trim().is_empty() || request_id.len() > 256 {
             anyhow::bail!("request_id is invalid");
         }
+        validate_request(request)?;
         let mut state = self.state.lock().await;
         let mut next = state.clone();
         prune(&mut next, Utc::now());
         if let Some(entry) = next.entries.get(request_id) {
+            if entry.request.as_ref() != Some(request) {
+                return Ok(BeginResult::Mismatch);
+            }
             return Ok(match &entry.state {
                 LedgerState::Pending { .. } => BeginResult::InFlight,
                 LedgerState::Complete { result, .. } => BeginResult::Existing(result.clone()),
@@ -113,6 +133,7 @@ impl InternalIdempotencyLedger {
         next.entries.insert(
             request_id.to_string(),
             LedgerEntry {
+                request: Some(request.clone()),
                 state: LedgerState::Pending {
                     started_at: timestamp(Utc::now()),
                 },
@@ -124,16 +145,30 @@ impl InternalIdempotencyLedger {
         Ok(BeginResult::New)
     }
 
-    pub async fn finish(&self, request_id: &str, result: StoredResult) -> anyhow::Result<()> {
+    pub async fn finish(
+        &self,
+        request_id: &str,
+        request: &IdempotencyRequest,
+        result: StoredResult,
+    ) -> anyhow::Result<()> {
+        validate_request(request)?;
         let mut state = self.state.lock().await;
         let mut next = state.clone();
         prune(&mut next, Utc::now());
+        if next
+            .entries
+            .get(request_id)
+            .is_some_and(|entry| entry.request.as_ref() != Some(request))
+        {
+            anyhow::bail!("request_id is already bound to a different internal request");
+        }
         if !next.entries.contains_key(request_id) && next.entries.len() >= MAX_ENTRIES {
             anyhow::bail!("idempotency ledger is full");
         }
         next.entries.insert(
             request_id.to_string(),
             LedgerEntry {
+                request: Some(request.clone()),
                 state: LedgerState::Complete {
                     completed_at: timestamp(Utc::now()),
                     result,
@@ -147,6 +182,21 @@ impl InternalIdempotencyLedger {
         *state = next;
         Ok(())
     }
+}
+
+fn validate_request(request: &IdempotencyRequest) -> anyhow::Result<()> {
+    if request.sender_id.trim().is_empty() || request.sender_id.len() > 256 {
+        anyhow::bail!("internal request sender is invalid");
+    }
+    if request.canonical_sha256.len() != 64
+        || !request
+            .canonical_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        anyhow::bail!("internal request digest is invalid");
+    }
+    Ok(())
 }
 
 fn prune(state: &mut PersistedLedger, now: DateTime<Utc>) {
@@ -193,14 +243,33 @@ fn timestamp(value: DateTime<Utc>) -> String {
 mod tests {
     use super::*;
 
+    fn request() -> IdempotencyRequest {
+        IdempotencyRequest {
+            sender_id: "node-a".to_string(),
+            canonical_sha256: "a".repeat(64),
+        }
+    }
+
+    fn different_request() -> IdempotencyRequest {
+        IdempotencyRequest {
+            sender_id: "node-b".to_string(),
+            canonical_sha256: "b".repeat(64),
+        }
+    }
+
     #[tokio::test]
     async fn returns_first_result_after_restart() {
         let temp = tempfile::tempdir().unwrap();
         let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
-        assert_eq!(ledger.begin("request-1").await.unwrap(), BeginResult::New);
+        let request = request();
+        assert_eq!(
+            ledger.begin("request-1", &request).await.unwrap(),
+            BeginResult::New
+        );
         ledger
             .finish(
                 "request-1",
+                &request,
                 StoredResult {
                     status: 201,
                     body: serde_json::json!({ "created": true }),
@@ -210,7 +279,7 @@ mod tests {
             .unwrap();
         let restored = InternalIdempotencyLedger::load(temp.path()).unwrap();
         assert!(matches!(
-            restored.begin("request-1").await.unwrap(),
+            restored.begin("request-1", &request).await.unwrap(),
             BeginResult::Existing(StoredResult { status: 201, .. })
         ));
     }
@@ -219,16 +288,81 @@ mod tests {
     async fn pending_request_never_executes_twice_after_restart() {
         let temp = tempfile::tempdir().unwrap();
         let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
-        assert_eq!(ledger.begin("request-1").await.unwrap(), BeginResult::New);
+        let request = request();
         assert_eq!(
-            ledger.begin("request-1").await.unwrap(),
+            ledger.begin("request-1", &request).await.unwrap(),
+            BeginResult::New
+        );
+        assert_eq!(
+            ledger.begin("request-1", &request).await.unwrap(),
             BeginResult::InFlight
         );
 
         let restored = InternalIdempotencyLedger::load(temp.path()).unwrap();
         assert_eq!(
-            restored.begin("request-1").await.unwrap(),
+            restored.begin("request-1", &request).await.unwrap(),
             BeginResult::InFlight
+        );
+    }
+
+    #[tokio::test]
+    async fn reused_id_must_match_the_authenticated_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        let request = request();
+        assert_eq!(
+            ledger.begin("request-1", &request).await.unwrap(),
+            BeginResult::New
+        );
+        ledger
+            .finish(
+                "request-1",
+                &request,
+                StoredResult {
+                    status: 201,
+                    body: serde_json::json!({ "created": true }),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            ledger
+                .begin("request-1", &different_request())
+                .await
+                .unwrap(),
+            BeginResult::Mismatch
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_entries_are_not_reused_without_a_request_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mesh").join("idempotency.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let legacy = PersistedLedger {
+            schema_version: 1,
+            entries: BTreeMap::from([(
+                "request-1".to_string(),
+                LedgerEntry {
+                    request: None,
+                    state: LedgerState::Complete {
+                        completed_at: timestamp(Utc::now()),
+                        result: StoredResult {
+                            status: 200,
+                            body: serde_json::json!({ "old": true }),
+                        },
+                    },
+                },
+            )]),
+            order: VecDeque::from(["request-1".to_string()]),
+        };
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        assert_eq!(
+            ledger.begin("request-1", &request()).await.unwrap(),
+            BeginResult::Mismatch
         );
     }
 
@@ -249,7 +383,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let ledger = ledger_with_unwritable_parent(&temp, PersistedLedger::default());
 
-        assert!(ledger.begin("request-1").await.is_err());
+        assert!(ledger.begin("request-1", &request()).await.is_err());
 
         let state = ledger.state.lock().await;
         assert!(state.entries.is_empty());
@@ -263,6 +397,7 @@ mod tests {
         initial.entries.insert(
             "request-1".to_string(),
             LedgerEntry {
+                request: Some(request()),
                 state: LedgerState::Pending {
                     started_at: timestamp(Utc::now()),
                 },
@@ -275,6 +410,7 @@ mod tests {
             ledger
                 .finish(
                     "request-1",
+                    &request(),
                     StoredResult {
                         status: 200,
                         body: serde_json::json!({ "ok": true }),

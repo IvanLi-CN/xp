@@ -57,7 +57,8 @@ use crate::{
     },
     internal_auth,
     internal_idempotency::{
-        BeginResult as IdempotencyBegin, InternalIdempotencyLedger, StoredResult,
+        BeginResult as IdempotencyBegin, IdempotencyRequest, InternalIdempotencyLedger,
+        StoredResult,
     },
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
     managed_default_endpoints::{

@@ -170,7 +170,7 @@ pub fn verify_request_v2(
         return Err(AuthError::Invalid("target id does not match"));
     }
     let now = now_unix_secs();
-    if (context.issued_at - now).abs() > AUTH_WINDOW_SECS {
+    if !is_within_auth_window(context.issued_at, now) {
         return Err(AuthError::Invalid(
             "request signature is outside the accepted clock window",
         ));
@@ -215,6 +215,11 @@ pub fn verify_request_v2(
         body_sha256,
         canonical_sha256: hex::encode(Sha256::digest(canonical.as_bytes())),
     })
+}
+
+fn is_within_auth_window(issued_at: i64, now: i64) -> bool {
+    issued_at >= now.saturating_sub(AUTH_WINDOW_SECS)
+        && issued_at <= now.saturating_add(AUTH_WINDOW_SECS)
 }
 
 pub fn sign_ack_v2(
@@ -470,6 +475,14 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn auth_window_rejects_timestamp_extremes_without_overflow() {
+        let now = now_unix_secs();
+        assert!(is_within_auth_window(now, now));
+        assert!(!is_within_auth_window(i64::MIN, now));
+        assert!(!is_within_auth_window(i64::MAX, now));
     }
 
     #[test]
