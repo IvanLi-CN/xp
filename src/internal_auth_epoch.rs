@@ -50,8 +50,15 @@ pub fn clear_cutover_marker(data_dir: &Path) {
 /// Multi-member clusters cannot silently cross from the legacy auth contract. A marker is
 /// consumed atomically into the durable epoch record once the new binary has started.
 pub fn ensure_startup_epoch(data_dir: &Path, member_count: usize) -> anyhow::Result<()> {
-    if member_count <= 1 || is_v2_epoch(data_dir) {
+    if is_v2_epoch(data_dir) {
         return Ok(());
+    }
+    if member_count <= 1 {
+        fs::create_dir_all(mesh_dir(data_dir))?;
+        return write_atomic(
+            &epoch_path(data_dir),
+            &serde_json::to_vec(&AuthEpochRecord { epoch: 2 })?,
+        );
     }
     let marker = marker_path(data_dir);
     let bytes = fs::read(&marker).map_err(|_| {
@@ -92,5 +99,13 @@ mod tests {
         ensure_startup_epoch(temp.path(), 2).expect("consume marker");
         assert!(is_v2_epoch(temp.path()));
         assert!(!marker_path(temp.path()).exists());
+    }
+
+    #[test]
+    fn single_node_startup_persists_the_v2_epoch() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        ensure_startup_epoch(temp.path(), 1).expect("initialize single node epoch");
+        assert!(is_v2_epoch(temp.path()));
+        ensure_startup_epoch(temp.path(), 2).expect("persisted epoch avoids cutover gate");
     }
 }

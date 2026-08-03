@@ -1,7 +1,7 @@
 use std::{any::Any, collections::BTreeSet, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use anyhow::Context;
-use axum::http::{Method, Uri, header::HeaderName};
+use axum::http::Method;
 use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -293,13 +293,21 @@ pub struct ForwardingRaftFacade {
     metrics: watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>,
     client: reqwest::Client,
     cluster_ca_key_pem: String,
+    cluster_ca_pem: String,
+    cluster_id: String,
+    local_node_id: String,
+    store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
 }
 
 impl ForwardingRaftFacade {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         raft: openraft::Raft<TypeConfig>,
         cluster_ca_key_pem: String,
         cluster_ca_pem: &str,
+        cluster_id: String,
+        local_node_id: String,
+        store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
         node_cert_pem: Option<&str>,
         node_key_pem: Option<&str>,
     ) -> anyhow::Result<Self> {
@@ -319,6 +327,10 @@ impl ForwardingRaftFacade {
             metrics,
             client,
             cluster_ca_key_pem,
+            cluster_ca_pem: cluster_ca_pem.to_string(),
+            cluster_id,
+            local_node_id,
+            store,
         })
     }
 }
@@ -336,6 +348,10 @@ impl RaftFacade for ForwardingRaftFacade {
         let metrics = self.metrics.clone();
         let client = self.client.clone();
         let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
+        let cluster_ca_pem = self.cluster_ca_pem.clone();
+        let cluster_id = self.cluster_id.clone();
+        let local_node_id = self.local_node_id.clone();
+        let store = self.store.clone();
         Box::pin(async move {
             let cmd_clone = cmd.clone();
             match catch_raft_panic("raft client_write", raft.client_write(cmd)).await? {
@@ -351,8 +367,22 @@ impl RaftFacade for ForwardingRaftFacade {
                         leader_api_base_url_from_forward(forward, &metrics_snapshot).ok_or_else(
                             || anyhow::anyhow!("raft client_write forward: leader not available"),
                         )?;
-                    forward_client_write(&client, &cluster_ca_key_pem, &leader_base_url, &cmd_clone)
-                        .await
+                    let target_id =
+                        leader_target_id(&store, forward, &metrics_snapshot, &leader_base_url)
+                            .await?;
+                    forward_client_write(
+                        &client,
+                        &ForwardingAuth {
+                            cluster_ca_key_pem: &cluster_ca_key_pem,
+                            cluster_ca_pem: &cluster_ca_pem,
+                            cluster_id: &cluster_id,
+                            sender_id: &local_node_id,
+                        },
+                        &leader_base_url,
+                        &target_id,
+                        &cmd_clone,
+                    )
+                    .await
                 }
             }
         })
@@ -392,6 +422,10 @@ impl RaftFacade for ForwardingRaftFacade {
         let metrics = self.metrics.clone();
         let client = self.client.clone();
         let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
+        let cluster_ca_pem = self.cluster_ca_pem.clone();
+        let cluster_id = self.cluster_id.clone();
+        let local_node_id = self.local_node_id.clone();
+        let store = self.store.clone();
         Box::pin(async move {
             let changes_clone = changes.clone();
             match catch_raft_panic(
@@ -415,10 +449,19 @@ impl RaftFacade for ForwardingRaftFacade {
                     .ok_or_else(|| {
                         anyhow::anyhow!("raft change_membership forward: leader not available")
                     })?;
+                    let target_id =
+                        leader_target_id(&store, forward, &metrics_snapshot, &leader_base_url)
+                            .await?;
                     forward_change_membership(
                         &client,
-                        &cluster_ca_key_pem,
+                        &ForwardingAuth {
+                            cluster_ca_key_pem: &cluster_ca_key_pem,
+                            cluster_ca_pem: &cluster_ca_pem,
+                            cluster_id: &cluster_id,
+                            sender_id: &local_node_id,
+                        },
                         &leader_base_url,
+                        &target_id,
                         &changes_clone,
                         retain,
                     )
@@ -427,6 +470,29 @@ impl RaftFacade for ForwardingRaftFacade {
             }
         })
     }
+}
+
+async fn leader_target_id(
+    store: &Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
+    forward: &openraft::error::ForwardToLeader<NodeId, NodeMeta>,
+    metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
+    leader_base_url: &str,
+) -> anyhow::Result<String> {
+    let leader_id = forward
+        .leader_id
+        .or(metrics.current_leader)
+        .ok_or_else(|| anyhow::anyhow!("raft forward: leader id is unavailable"))?;
+    let store = store.lock().await;
+    store
+        .list_nodes()
+        .into_iter()
+        .find(|node| {
+            crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+                .is_ok_and(|node_id| node_id == leader_id)
+                || node.api_base_url.trim_end_matches('/') == leader_base_url.trim_end_matches('/')
+        })
+        .map(|node| node.node_id)
+        .ok_or_else(|| anyhow::anyhow!("raft forward: leader is not a current cluster member"))
 }
 
 fn leader_api_base_url_from_forward(
@@ -465,10 +531,47 @@ enum InternalChangeMembers {
     RemoveNodes { node_ids: Vec<NodeId> },
 }
 
+struct ForwardingAuth<'a> {
+    cluster_ca_key_pem: &'a str,
+    cluster_ca_pem: &'a str,
+    cluster_id: &'a str,
+    sender_id: &'a str,
+}
+
+fn signed_forward_headers(
+    auth: &ForwardingAuth<'_>,
+    target_id: &str,
+    method: &Method,
+    uri: &axum::http::Uri,
+    body: &[u8],
+) -> anyhow::Result<axum::http::HeaderMap> {
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        auth.cluster_id,
+        auth.sender_id,
+        target_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        auth.cluster_ca_key_pem,
+        auth.cluster_ca_pem,
+        method,
+        uri,
+        Some("application/json"),
+        body,
+        &context,
+        &mut headers,
+    )
+    .map_err(|error| anyhow::anyhow!("sign internal request: {error}"))?;
+    Ok(headers)
+}
+
 async fn forward_change_membership(
     client: &reqwest::Client,
-    cluster_ca_key_pem: &str,
+    auth: &ForwardingAuth<'_>,
     leader_base_url: &str,
+    target_id: &str,
     changes: &openraft::ChangeMembers<NodeId, NodeMeta>,
     retain: bool,
 ) -> anyhow::Result<()> {
@@ -478,12 +581,9 @@ async fn forward_change_membership(
     );
     // Note: the admin auth middleware is attached to the `/admin` nested router, so the
     // verifier sees a stripped path like `/_internal/...` (not `/api/admin/...`).
-    let uri: Uri = "/_internal/raft/change-membership"
+    let uri: axum::http::Uri = "/api/admin/_internal/raft/change-membership"
         .parse()
         .expect("valid uri");
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
-        .map_err(|e| anyhow::anyhow!("sign internal request: {e}"))?;
-
     let changes = match changes {
         openraft::ChangeMembers::RemoveVoters(node_ids) => InternalChangeMembers::RemoveVoters {
             node_ids: node_ids.iter().cloned().collect(),
@@ -497,14 +597,14 @@ async fn forward_change_membership(
             ));
         }
     };
+    let body = serde_json::to_vec(&InternalChangeMembershipRequest { retain, changes })?;
+    let headers = signed_forward_headers(auth, target_id, &Method::POST, &uri, &body)?;
 
     client
         .post(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .json(&InternalChangeMembershipRequest { retain, changes })
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .headers(headers)
+        .body(body)
         .send()
         .await
         .context("forward change_membership request")?
@@ -516,8 +616,9 @@ async fn forward_change_membership(
 
 async fn forward_client_write(
     client: &reqwest::Client,
-    cluster_ca_key_pem: &str,
+    auth: &ForwardingAuth<'_>,
     leader_base_url: &str,
+    target_id: &str,
     cmd: &DesiredStateCommand,
 ) -> anyhow::Result<ClientResponse> {
     let url = format!(
@@ -526,16 +627,16 @@ async fn forward_client_write(
     );
     // Note: the admin auth middleware is attached to the `/admin` nested router, so the
     // verifier sees a stripped path like `/_internal/...` (not `/api/admin/...`).
-    let uri: Uri = "/_internal/raft/client-write".parse().expect("valid uri");
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
-        .map_err(|e| anyhow::anyhow!("sign internal request: {e}"))?;
+    let uri: axum::http::Uri = "/api/admin/_internal/raft/client-write"
+        .parse()
+        .expect("valid uri");
+    let body = serde_json::to_vec(cmd)?;
+    let headers = signed_forward_headers(auth, target_id, &Method::POST, &uri, &body)?;
     let resp = client
         .post(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .json(cmd)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .headers(headers)
+        .body(body)
         .send()
         .await
         .context("forward client_write request")?

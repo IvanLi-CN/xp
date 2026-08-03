@@ -260,44 +260,6 @@ pub fn verify_ack_v2(
         .map_err(|_| AuthError::Invalid("acknowledgement does not verify"))
 }
 
-/// Compatibility shim for pre-v2 internal fan-out call sites. It intentionally emits a distinct
-/// v2c marker rather than retaining v1. Mesh and Raft endpoints never accept this marker.
-pub fn sign_request(
-    cluster_ca_key_pem: &str,
-    method: &Method,
-    uri: &Uri,
-) -> Result<String, String> {
-    let msg = legacy_compat_message(method, uri);
-    let mut mac =
-        HmacSha256::new_from_slice(cluster_ca_key_pem.as_bytes()).map_err(|e| e.to_string())?;
-    mac.update(msg.as_bytes());
-    Ok(format!(
-        "v2c:{}",
-        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
-    ))
-}
-
-/// Only exists to keep non-Mesh internal maintenance endpoints working while their callers move
-/// to the explicit v2 API. A literal `v1:` value is always rejected.
-pub fn verify_request(
-    cluster_ca_key_pem: &str,
-    method: &Method,
-    uri: &Uri,
-    signature_header_value: &str,
-) -> bool {
-    let Some(encoded) = signature_header_value.trim().strip_prefix("v2c:") else {
-        return false;
-    };
-    let Ok(actual) = URL_SAFE_NO_PAD.decode(encoded.as_bytes()) else {
-        return false;
-    };
-    let Ok(mut mac) = HmacSha256::new_from_slice(cluster_ca_key_pem.as_bytes()) else {
-        return false;
-    };
-    mac.update(legacy_compat_message(method, uri).as_bytes());
-    mac.verify_slice(&actual).is_ok()
-}
-
 fn request_context_from_headers(headers: &HeaderMap) -> Result<RequestContext, AuthError> {
     let route = InternalRoute::parse(&required_header(headers, INTERNAL_ROUTE_HEADER)?)?;
     let issued_at = required_header(headers, INTERNAL_ISSUED_AT_HEADER)?
@@ -428,14 +390,6 @@ fn derive_subkey(
     expand.update(info);
     expand.update(&[1]);
     Ok(expand.finalize().into_bytes().into())
-}
-
-fn legacy_compat_message(method: &Method, uri: &Uri) -> String {
-    let path = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or_else(|| uri.path());
-    format!("{} {}", method.as_str(), path)
 }
 
 fn now_unix_secs() -> i64 {
@@ -610,8 +564,35 @@ mod tests {
     }
 
     #[test]
-    fn literal_v1_is_rejected() {
-        let uri: Uri = "/x".parse().unwrap();
-        assert!(!verify_request("key", &Method::GET, &uri, "v1:abc"));
+    fn v2_rejects_literal_v1_signature() {
+        let (key, cert) = identity();
+        let uri: Uri = "/api/admin/_internal/mesh/health".parse().unwrap();
+        let request = context();
+        let mut headers = HeaderMap::new();
+        sign_request_v2(
+            &key,
+            &cert,
+            &Method::GET,
+            &uri,
+            None,
+            &[],
+            &request,
+            &mut headers,
+        )
+        .unwrap();
+        headers.insert(INTERNAL_SIGNATURE_HEADER, "v1:legacy".parse().unwrap());
+        assert!(
+            verify_request_v2(
+                &key,
+                &cert,
+                &Method::GET,
+                &uri,
+                &headers,
+                &[],
+                "01JTESTCLUSTERID00000000000000",
+                "01JTESTTARGET0000000000000000",
+            )
+            .is_err()
+        );
     }
 }

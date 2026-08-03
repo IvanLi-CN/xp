@@ -236,7 +236,9 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 mesh_availability_24h,
                 latency_p50_ms,
                 latency_p95_ms,
-                buckets: peer.map_or_else(Vec::new, |peer| peer.buckets.iter().cloned().collect()),
+                buckets: peer.map_or_else(Vec::new, |peer| {
+                    crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
+                }),
             }
         })
         .collect();

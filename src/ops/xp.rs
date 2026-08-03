@@ -5,9 +5,11 @@ use crate::ops::cli::{
     ExitError, XpBootstrapArgs, XpInstallArgs, XpRecoverSingleNodeArgs, XpRestartArgs,
     XpSyncNodeMetaArgs,
 };
+use crate::ops::cluster_info;
+use crate::ops::internal_auth::InternalOpsAuth;
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
-use axum::http::{Method, Uri, header::HeaderName};
+use axum::http::{Method, Uri};
 use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -371,14 +373,20 @@ pub(crate) async fn sync_node_meta_runtime(
         .read_cluster_ca_pem(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_ca_error: {e}")))?;
     let client = build_xp_ops_http_client(xp_base_url, &cluster_ca_pem)?;
-    let endpoints = fetch_admin_endpoints_internal(&client, xp_base_url, &ca_key_pem).await?;
+    let ops_auth = InternalOpsAuth::new(
+        &ca_key_pem,
+        &cluster_ca_pem,
+        &meta.cluster_id,
+        &node_id,
+        &node_id,
+    );
+    let endpoints = fetch_admin_endpoints_internal(&client, xp_base_url, &ops_auth).await?;
     let node_endpoints = endpoints
         .into_iter()
         .filter(|endpoint| endpoint.node_id == node_id)
         .collect::<Vec<_>>();
 
-    let current_node =
-        fetch_admin_node_internal(&client, xp_base_url, &ca_key_pem, &node_id).await?;
+    let current_node = fetch_admin_node_internal(&client, xp_base_url, &ops_auth, &node_id).await?;
 
     let current = current_node.clone().unwrap_or_else(|| crate::domain::Node {
         node_id: node_id.clone(),
@@ -422,12 +430,12 @@ pub(crate) async fn sync_node_meta_runtime(
     internal_client_write(
         &client,
         xp_base_url,
-        &ca_key_pem,
+        &ops_auth,
         crate::state::DesiredStateCommand::UpsertNode { node: desired_node },
     )
     .await?;
 
-    let info = fetch_cluster_info(&client, xp_base_url).await?;
+    let info = cluster_info::fetch(&client, xp_base_url).await?;
     let set_nodes_base_url = if info.role == "leader" {
         xp_base_url
     } else {
@@ -439,10 +447,11 @@ pub(crate) async fn sync_node_meta_runtime(
             "cluster_error: leader_api_base_url is empty",
         ));
     }
+    let leader_info = cluster_info::fetch(&client, set_nodes_base_url).await?;
     internal_set_nodes(
         &client,
         set_nodes_base_url,
-        &ca_key_pem,
+        &ops_auth.for_target(leader_info.node_id),
         vec![InternalSetNodeArgs {
             node_id: node_id.clone(),
             node_name: node_name.to_string(),
@@ -452,7 +461,7 @@ pub(crate) async fn sync_node_meta_runtime(
     .await?;
 
     let mut writer = |cmd| async {
-        internal_client_write(&client, xp_base_url, &ca_key_pem, cmd)
+        internal_client_write(&client, xp_base_url, &ops_auth, cmd)
             .await
             .map_err(|err| anyhow::anyhow!(err.message))
     };
@@ -993,56 +1002,22 @@ pub(crate) fn build_xp_ops_http_client(
         .map_err(|e| ExitError::new(5, format!("http_error: build client: {e}")))
 }
 
-#[derive(serde::Deserialize)]
-struct ClusterInfoPartial {
-    role: String,
-    leader_api_base_url: String,
-}
-
-async fn fetch_cluster_info(
-    client: &reqwest::Client,
-    base_url: &str,
-) -> Result<ClusterInfoPartial, ExitError> {
-    let base = base_url.trim_end_matches('/');
-    let url = format!("{base}/api/cluster/info");
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(ExitError::new(
-            5,
-            format!("cluster_error: cluster info failed: {status}: {body}"),
-        ));
-    }
-    resp.json::<ClusterInfoPartial>()
-        .await
-        .map_err(|e| ExitError::new(5, format!("http_error: parse cluster info: {e}")))
-}
-
 pub(crate) async fn fetch_admin_node_internal(
     client: &reqwest::Client,
     base_url: &str,
-    cluster_ca_key_pem: &str,
+    auth: &InternalOpsAuth,
     node_id: &str,
 ) -> Result<Option<crate::domain::Node>, ExitError> {
     let base = base_url.trim_end_matches('/');
-    let url = format!("{base}/api/admin/nodes/{node_id}");
-    let uri: Uri = format!("/nodes/{node_id}")
+    let url = format!("{base}/api/admin/_internal/nodes/{node_id}");
+    let uri: Uri = format!("/api/admin/_internal/nodes/{node_id}")
         .parse()
         .map_err(|e| ExitError::new(2, format!("invalid_input: uri: {e}")))?;
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::GET, &uri)
-        .map_err(|e| ExitError::new(5, format!("sign internal request: {e}")))?;
+    let headers = auth.signed_headers(&Method::GET, &uri, None, &[])?;
 
     let resp = client
         .get(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
+        .headers(headers)
         .send()
         .await
         .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
@@ -1069,22 +1044,23 @@ pub(crate) async fn fetch_admin_node_internal(
 pub(crate) async fn internal_client_write(
     client: &reqwest::Client,
     base_url: &str,
-    cluster_ca_key_pem: &str,
+    auth: &InternalOpsAuth,
     cmd: crate::state::DesiredStateCommand,
 ) -> Result<(), ExitError> {
     let base = base_url.trim_end_matches('/');
     let url = format!("{base}/api/admin/_internal/raft/client-write");
-    let uri: Uri = "/_internal/raft/client-write".parse().expect("valid uri");
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
-        .map_err(|e| ExitError::new(5, format!("sign internal request: {e}")))?;
+    let uri: Uri = "/api/admin/_internal/raft/client-write"
+        .parse()
+        .expect("valid uri");
+    let body = serde_json::to_vec(&cmd)
+        .map_err(|error| ExitError::new(5, format!("encode internal request: {error}")))?;
+    let headers = auth.signed_headers(&Method::POST, &uri, Some("application/json"), &body)?;
 
     let resp = client
         .post(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .json(&cmd)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .headers(headers)
+        .body(body)
         .send()
         .await
         .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
@@ -1130,22 +1106,23 @@ pub(crate) struct InternalSetNodeArgs {
 pub(crate) async fn internal_set_nodes(
     client: &reqwest::Client,
     base_url: &str,
-    cluster_ca_key_pem: &str,
+    auth: &InternalOpsAuth,
     nodes: Vec<InternalSetNodeArgs>,
 ) -> Result<(), ExitError> {
     let base = base_url.trim_end_matches('/');
     let url = format!("{base}/api/admin/_internal/raft/set-nodes");
-    let uri: Uri = "/_internal/raft/set-nodes".parse().expect("valid uri");
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::POST, &uri)
-        .map_err(|e| ExitError::new(5, format!("sign internal request: {e}")))?;
+    let uri: Uri = "/api/admin/_internal/raft/set-nodes"
+        .parse()
+        .expect("valid uri");
+    let body = serde_json::to_vec(&InternalSetNodesRequestArgs { nodes })
+        .map_err(|error| ExitError::new(5, format!("encode internal request: {error}")))?;
+    let headers = auth.signed_headers(&Method::POST, &uri, Some("application/json"), &body)?;
 
     let resp = client
         .post(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .json(&InternalSetNodesRequestArgs { nodes })
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .headers(headers)
+        .body(body)
         .send()
         .await
         .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
@@ -1169,20 +1146,16 @@ struct InternalItems<T> {
 pub(crate) async fn fetch_admin_endpoints_internal(
     client: &reqwest::Client,
     base_url: &str,
-    cluster_ca_key_pem: &str,
+    auth: &InternalOpsAuth,
 ) -> Result<Vec<crate::domain::Endpoint>, ExitError> {
     let base = base_url.trim_end_matches('/');
-    let url = format!("{base}/api/admin/endpoints");
-    let uri: Uri = "/endpoints".parse().expect("valid uri");
-    let sig = crate::internal_auth::sign_request(cluster_ca_key_pem, &Method::GET, &uri)
-        .map_err(|e| ExitError::new(5, format!("sign internal request: {e}")))?;
+    let url = format!("{base}/api/admin/_internal/endpoints");
+    let uri: Uri = "/api/admin/_internal/endpoints".parse().expect("valid uri");
+    let headers = auth.signed_headers(&Method::GET, &uri, None, &[])?;
 
     let resp = client
         .get(url)
-        .header(
-            HeaderName::from_static(crate::internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
+        .headers(headers)
         .send()
         .await
         .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;

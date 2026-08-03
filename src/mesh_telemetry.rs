@@ -62,6 +62,10 @@ pub struct MeshTelemetryBucket {
     #[serde(default)]
     pub fallback_success: u32,
     #[serde(default)]
+    pub end_to_end_success: u32,
+    #[serde(default)]
+    pub end_to_end_failure: u32,
+    #[serde(default)]
     pub latency_samples_ms: Vec<u32>,
 }
 
@@ -179,10 +183,19 @@ impl MeshTelemetryHandle {
         }
         let bucket = ensure_bucket(peer, now);
         match (path, success) {
-            (TelemetryPath::Mesh, true) => bucket.mesh_success += 1,
+            (TelemetryPath::Mesh, true) => {
+                bucket.mesh_success += 1;
+                bucket.end_to_end_success += 1;
+            }
             (TelemetryPath::Mesh, false) => bucket.mesh_failure += 1,
-            (TelemetryPath::Public, true) => bucket.public_success += 1,
-            (TelemetryPath::Public, false) => bucket.public_failure += 1,
+            (TelemetryPath::Public, true) => {
+                bucket.public_success += 1;
+                bucket.end_to_end_success += 1;
+            }
+            (TelemetryPath::Public, false) => {
+                bucket.public_failure += 1;
+                bucket.end_to_end_failure += 1;
+            }
         }
         if fallback && success {
             bucket.fallback_success += 1;
@@ -270,8 +283,9 @@ pub fn quality_for_peer(peer: &MeshPeerTelemetry, now: DateTime<Utc>) -> MeshQua
     let mut failure = 0u32;
     let mut latencies = Vec::new();
     for bucket in &peer.buckets {
-        success += bucket.mesh_success + bucket.public_success;
-        failure += bucket.mesh_failure + bucket.public_failure;
+        let (bucket_success, bucket_failure) = end_to_end_counts(bucket);
+        success += bucket_success;
+        failure += bucket_failure;
         latencies.extend_from_slice(&bucket.latency_samples_ms);
     }
     if success == 0 && failure > 0 {
@@ -301,8 +315,8 @@ pub fn availability_for(peer: &MeshPeerTelemetry, minutes: i64, now: DateTime<Ut
         })
         .filter(|(_, at)| at.with_timezone(&Utc) >= from)
         .fold((0u32, 0u32), |(success, total), (bucket, _)| {
-            let bucket_success = bucket.mesh_success + bucket.public_success;
-            let bucket_total = bucket_success + bucket.mesh_failure + bucket.public_failure;
+            let (bucket_success, bucket_failure) = end_to_end_counts(bucket);
+            let bucket_total = bucket_success + bucket_failure;
             (success + bucket_success, total + bucket_total)
         });
     (total > 0).then_some(success as f64 / total as f64)
@@ -337,20 +351,71 @@ fn ensure_bucket(peer: &mut MeshPeerTelemetry, now: DateTime<Utc>) -> &mut MeshT
         .and_then(|value| value.with_nanosecond(0))
         .unwrap_or(now);
     let minute_key = timestamp(minute);
-    if peer
+    let cutoff = timestamp(now - Duration::hours(24));
+    peer.buckets.retain(|bucket| bucket.minute >= cutoff);
+    if !peer
         .buckets
-        .back()
-        .is_none_or(|bucket| bucket.minute != minute_key)
+        .iter()
+        .any(|bucket| bucket.minute == minute_key)
     {
         peer.buckets.push_back(MeshTelemetryBucket {
             minute: minute_key,
             ..MeshTelemetryBucket::default()
         });
     }
+    peer.buckets
+        .make_contiguous()
+        .sort_by(|left, right| left.minute.cmp(&right.minute));
     while peer.buckets.len() > MAX_BUCKETS {
         peer.buckets.pop_front();
     }
-    peer.buckets.back_mut().expect("bucket was inserted")
+    let bucket_index = peer
+        .buckets
+        .iter()
+        .position(|bucket| bucket.minute == timestamp(minute))
+        .expect("bucket was inserted");
+    peer.buckets
+        .get_mut(bucket_index)
+        .expect("bucket index is valid")
+}
+
+pub fn buckets_for_last_24_hours(
+    peer: &MeshPeerTelemetry,
+    now: DateTime<Utc>,
+) -> Vec<MeshTelemetryBucket> {
+    let now_minute = now
+        .with_second(0)
+        .and_then(|value| value.with_nanosecond(0))
+        .unwrap_or(now);
+    let indexed = peer
+        .buckets
+        .iter()
+        .map(|bucket| (bucket.minute.as_str(), bucket))
+        .collect::<BTreeMap<_, _>>();
+    (0..MAX_BUCKETS)
+        .map(|offset| {
+            let minute = now_minute - Duration::minutes((MAX_BUCKETS - 1 - offset) as i64);
+            let key = timestamp(minute);
+            indexed
+                .get(key.as_str())
+                .cloned()
+                .cloned()
+                .unwrap_or(MeshTelemetryBucket {
+                    minute: key,
+                    ..MeshTelemetryBucket::default()
+                })
+        })
+        .collect()
+}
+
+pub fn end_to_end_counts(bucket: &MeshTelemetryBucket) -> (u32, u32) {
+    if bucket.end_to_end_success > 0 || bucket.end_to_end_failure > 0 {
+        return (bucket.end_to_end_success, bucket.end_to_end_failure);
+    }
+    let success = bucket.mesh_success + bucket.public_success;
+    let failure =
+        (bucket.mesh_failure + bucket.public_failure).saturating_sub(bucket.fallback_success);
+    (success, failure)
 }
 
 fn push_event(events: &mut VecDeque<MeshTelemetryEvent>, event: MeshTelemetryEvent) {
@@ -430,11 +495,52 @@ mod tests {
                 minute: timestamp(now),
                 public_success: 1,
                 fallback_success: 1,
+                end_to_end_success: 1,
                 latency_samples_ms: vec![120],
                 ..MeshTelemetryBucket::default()
             }]),
             ..MeshPeerTelemetry::default()
         };
         assert_eq!(quality_for_peer(&peer, now), MeshQuality::Good);
+    }
+
+    #[test]
+    fn fallback_is_one_successful_logical_request() {
+        let now = Utc::now();
+        let peer = MeshPeerTelemetry {
+            last_sample_at: Some(timestamp(now)),
+            buckets: VecDeque::from([MeshTelemetryBucket {
+                minute: timestamp(now),
+                mesh_failure: 1,
+                public_success: 1,
+                fallback_success: 1,
+                end_to_end_success: 1,
+                latency_samples_ms: vec![120],
+                ..MeshTelemetryBucket::default()
+            }]),
+            ..MeshPeerTelemetry::default()
+        };
+        assert_eq!(availability_for(&peer, 60, now), Some(1.0));
+        assert_eq!(quality_for_peer(&peer, now), MeshQuality::Good);
+    }
+
+    #[test]
+    fn buckets_are_pruned_by_age_and_expand_unknown_minutes() {
+        let now = Utc::now();
+        let mut peer = MeshPeerTelemetry {
+            buckets: VecDeque::from([MeshTelemetryBucket {
+                minute: timestamp(now - Duration::hours(25)),
+                mesh_success: 1,
+                ..MeshTelemetryBucket::default()
+            }]),
+            ..MeshPeerTelemetry::default()
+        };
+        let bucket = ensure_bucket(&mut peer, now);
+        bucket.mesh_success = 1;
+        assert_eq!(peer.buckets.len(), 1);
+        let timeline = buckets_for_last_24_hours(&peer, now);
+        assert_eq!(timeline.len(), MAX_BUCKETS);
+        assert_eq!(timeline[0].mesh_success, 0);
+        assert_eq!(timeline[MAX_BUCKETS - 1].mesh_success, 1);
     }
 }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::managed_default_endpoints::{
+    ManagedDefaultEndpointIntent, ManagedDefaultEndpointSource,
     build_managed_default_vless_endpoint, reconcile_managed_default_vless_endpoint,
 };
 use crate::protocol::VlessRealityVisionTcpEndpointMeta;

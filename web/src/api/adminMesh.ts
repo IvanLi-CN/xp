@@ -24,6 +24,8 @@ export const AdminMeshBucketSchema = z.object({
 	public_success: z.number(),
 	public_failure: z.number(),
 	fallback_success: z.number(),
+	end_to_end_success: z.number(),
+	end_to_end_failure: z.number(),
 	latency_samples_ms: z.array(z.number()),
 });
 

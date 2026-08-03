@@ -534,6 +534,7 @@ impl MeshAwareHttpClient {
     ) -> Result<reqwest::Response, MeshRequestError> {
         let (response, verified) = if let Some(relay) = &self.relay {
             let relay_budget = std::cmp::max(Duration::from_millis(1), budget / 2);
+            let relay_started = Instant::now();
             match tokio::time::timeout(
                 relay_budget,
                 signed_send(
@@ -549,7 +550,7 @@ impl MeshAwareHttpClient {
             {
                 Ok(Ok(value)) => value,
                 Ok(Err(_)) | Err(_) => tokio::time::timeout(
-                    budget,
+                    budget.saturating_sub(relay_started.elapsed()),
                     signed_send(
                         &self.direct,
                         url,

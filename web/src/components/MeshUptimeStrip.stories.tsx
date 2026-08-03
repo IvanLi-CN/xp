@@ -10,6 +10,8 @@ function buckets(values: Array<"good" | "fallback" | "slow" | "down">) {
 		public_success: value === "fallback" ? 1 : 0,
 		public_failure: 0,
 		fallback_success: value === "fallback" ? 1 : 0,
+		end_to_end_success: value === "down" ? 0 : 1,
+		end_to_end_failure: value === "down" ? 1 : 0,
 		latency_samples_ms: [value === "slow" ? 640 : 32],
 	}));
 }

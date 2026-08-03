@@ -11,6 +11,8 @@ function buckets(pattern: Array<"mesh" | "fallback" | "slow" | "down">) {
 		public_success: item === "fallback" ? 1 : 0,
 		public_failure: item === "down" ? 1 : 0,
 		fallback_success: item === "fallback" ? 1 : 0,
+		end_to_end_success: item === "down" ? 0 : 1,
+		end_to_end_failure: item === "down" ? 1 : 0,
 		latency_samples_ms: [
 			item === "slow" ? 680 : item === "fallback" ? 190 : 36,
 		],

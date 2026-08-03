@@ -469,6 +469,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             raft.raft(),
             cluster_ca_key_pem_required.clone(),
             &cluster_ca_pem,
+            cluster.cluster_id.clone(),
+            cluster.node_id.clone(),
+            store.clone(),
             Some(&node_cert_pem),
             Some(&node_key_pem),
         )?);
@@ -487,6 +490,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         geo_db_update.resolver(),
     );
     let _node_history_remote_sync_task = xp::node_history::spawn_node_history_remote_sync_worker(
+        cluster.cluster_id.clone(),
         cluster.node_id.clone(),
         store.clone(),
         node_history.clone(),

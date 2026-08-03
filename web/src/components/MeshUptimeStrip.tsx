@@ -22,8 +22,8 @@ const stateColor: Record<StripState, string> = {
 };
 
 function bucketState(bucket: AdminMeshBucket): StripState {
-	const success = bucket.mesh_success + bucket.public_success;
-	const failure = bucket.mesh_failure + bucket.public_failure;
+	const success = bucket.end_to_end_success;
+	const failure = bucket.end_to_end_failure;
 	if (success === 0 && failure === 0) return "unknown";
 	if (success === 0) return "down";
 	if (failure > 0) return "degraded";

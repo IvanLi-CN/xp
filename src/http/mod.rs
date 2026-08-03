@@ -1198,6 +1198,14 @@ pub fn build_router(
             delete(admin_internal_clear_node_history),
         )
         .route(
+            "/_internal/nodes/{node_id}",
+            get(admin_internal_get_node_raw),
+        )
+        .route(
+            "/_internal/endpoints",
+            get(admin_internal_list_endpoints_raw),
+        )
+        .route(
             "/_internal/nodes/traffic/local",
             get(admin_internal_get_local_node_traffic),
         )
@@ -1268,90 +1276,79 @@ async fn admin_auth(
     if let (Some(signature), Some(ca_key_pem)) = (
         extract_internal_signature(req.headers()),
         auth.cluster_ca_key_pem.as_deref(),
-    ) {
-        if signature.starts_with("v2:") {
-            let limit = if req.uri().path().contains("/raft/") {
-                8 * 1024 * 1024
-            } else {
-                1024 * 1024
-            };
-            let (parts, body) = req.into_parts();
-            let bytes = match axum::body::to_bytes(body, limit).await {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return ApiError::invalid_request("internal request body is too large")
-                        .into_response();
-                }
-            };
-            req = Request::from_parts(parts, Body::from(bytes.clone()));
-            // Axum strips `/api/admin` before this middleware. The caller always signs the
-            // external raw URI, so restore that mount point for canonical verification.
-            let canonical_uri = format!("/api/admin{}", req.uri())
-                .parse()
-                .expect("canonical internal admin URI");
-            let verified = match internal_auth::verify_request_v2(
-                ca_key_pem,
-                &auth.cluster_ca_pem,
-                req.method(),
-                &canonical_uri,
-                req.headers(),
-                &bytes,
-                &auth.cluster_id,
-                &auth.local_node_id,
-            ) {
-                Ok(verified) => verified,
-                Err(_) => {
-                    return ApiError::unauthorized("invalid internal authentication")
-                        .into_response();
-                }
-            };
-            let route_permitted = match verified.context.route {
-                internal_auth::InternalRoute::MeshV2 => req.uri().path().starts_with("/_internal/"),
-                internal_auth::InternalRoute::HealthV2 => {
-                    req.method() == Method::GET && req.uri().path() == "/_internal/mesh/health"
-                }
-            };
-            if !route_permitted {
-                return ApiError::unauthorized("internal route is not permitted").into_response();
-            }
-            let sender_is_member = auth
-                .store
-                .lock()
-                .await
-                .get_node(&verified.context.sender_id)
-                .is_some();
-            if !sender_is_member {
-                return ApiError::unauthorized("internal sender is not a cluster member")
+    ) && signature.starts_with("v2:")
+    {
+        let limit = if req.uri().path().contains("/raft/") {
+            8 * 1024 * 1024
+        } else {
+            1024 * 1024
+        };
+        let (parts, body) = req.into_parts();
+        let bytes = match axum::body::to_bytes(body, limit).await {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return ApiError::invalid_request("internal request body is too large")
                     .into_response();
             }
-            req.extensions_mut().insert(InternalSignatureAuth {
-                verified: Some(verified.clone()),
-            });
-            let mut response = next.run(req).await;
-            if let Ok(ack) = internal_auth::sign_ack_v2(
-                ca_key_pem,
-                &auth.cluster_ca_pem,
-                &verified,
-                &auth.local_node_id,
-                response.status().as_u16(),
-            ) && let Ok(value) = ack.parse()
-            {
-                response.headers_mut().insert(
-                    header::HeaderName::from_static(internal_auth::INTERNAL_ACK_HEADER),
-                    value,
-                );
+        };
+        req = Request::from_parts(parts, Body::from(bytes.clone()));
+        // Axum strips `/api/admin` before this middleware. The caller always signs the
+        // external raw URI, so restore that mount point for canonical verification.
+        let canonical_uri = format!("/api/admin{}", req.uri())
+            .parse()
+            .expect("canonical internal admin URI");
+        let verified = match internal_auth::verify_request_v2(
+            ca_key_pem,
+            &auth.cluster_ca_pem,
+            req.method(),
+            &canonical_uri,
+            req.headers(),
+            &bytes,
+            &auth.cluster_id,
+            &auth.local_node_id,
+        ) {
+            Ok(verified) => verified,
+            Err(_) => {
+                return ApiError::unauthorized("invalid internal authentication").into_response();
             }
-            return response;
+        };
+        let route_permitted = match verified.context.route {
+            internal_auth::InternalRoute::MeshV2 => req.uri().path().starts_with("/_internal/"),
+            internal_auth::InternalRoute::HealthV2 => {
+                req.method() == Method::GET && req.uri().path() == "/_internal/mesh/health"
+            }
+        };
+        if !route_permitted {
+            return ApiError::unauthorized("internal route is not permitted").into_response();
         }
-        if req.uri().path().starts_with("/_internal/")
-            && internal_auth::verify_request(ca_key_pem, req.method(), req.uri(), &signature)
+        let sender_is_member = auth
+            .store
+            .lock()
+            .await
+            .get_node(&verified.context.sender_id)
+            .is_some();
+        if !sender_is_member {
+            return ApiError::unauthorized("internal sender is not a cluster member")
+                .into_response();
+        }
+        req.extensions_mut().insert(InternalSignatureAuth {
+            verified: Some(verified.clone()),
+        });
+        let mut response = next.run(req).await;
+        if let Ok(ack) = internal_auth::sign_ack_v2(
+            ca_key_pem,
+            &auth.cluster_ca_pem,
+            &verified,
+            &auth.local_node_id,
+            response.status().as_u16(),
+        ) && let Ok(value) = ack.parse()
         {
-            // Compatibility marker for non-Mesh maintenance fan-out. It is deliberately not
-            // accepted by the Mesh health or Raft routers.
-            req.extensions_mut()
-                .insert(InternalSignatureAuth { verified: None });
-            return next.run(req).await;
+            response.headers_mut().insert(
+                header::HeaderName::from_static(internal_auth::INTERNAL_ACK_HEADER),
+                value,
+            );
         }
+        return response;
     }
 
     let Some(token) = extract_bearer_token(req.headers()) else {
@@ -2661,28 +2658,15 @@ async fn admin_get_user_traffic(
 
     let local_node_id = state.cluster.node_id.clone();
     let client = build_admin_http_client(&state)?;
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let uri: axum::http::Uri = format!(
-        "/_internal/users/{user_id}/traffic/local?window={}",
-        window.as_str()
-    )
-    .parse()
-    .map_err(|_| ApiError::invalid_request("invalid traffic window"))?;
-    let signature = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-        .map_err(|err| ApiError::internal(err.to_string()))?;
     let report_now = Utc::now();
     let history = state.node_history.clone();
+    let state_for_fanout = state.clone();
     let fanout_results = stream::iter(selected_nodes.into_iter().map(|node| {
         let client = client.clone();
+        let state = state_for_fanout.clone();
         let local_node_id = local_node_id.clone();
         let history = history.clone();
-        let signature = signature.clone();
         let request_user_id = user_id.clone();
-        let request_uri = uri.clone();
         async move {
             let node_id = node.node_id.clone();
             if node_id == local_node_id {
@@ -2695,18 +2679,18 @@ async fn admin_get_user_traffic(
             if base.is_empty() {
                 return (node, None, true);
             }
-            let url = format!("{base}/api/admin{request_uri}");
-            let response = tokio::time::timeout(
+            let response = send_mesh_internal_read(
+                &state,
+                &client,
+                &node,
+                format!(
+                    "/api/admin/_internal/users/{request_user_id}/traffic/local?window={}",
+                    window.as_str()
+                ),
                 Duration::from_secs(3),
-                client.send_with_fallback(Duration::from_secs(3), |client| {
-                    client.get(url.clone()).header(
-                        header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                        signature.clone(),
-                    )
-                }),
             )
             .await;
-            let Ok(Ok(response)) = response else {
+            let Ok(response) = response else {
                 return (node, None, true);
             };
             if response.status() == StatusCode::NOT_FOUND {
@@ -3084,35 +3068,17 @@ async fn admin_get_node_tcp_connections(
     }
 
     let client = build_cluster_http_client(&state)?;
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let uri: axum::http::Uri = format!(
-        "/_internal/nodes/tcp-connections/local?window={}",
-        window.as_str()
+    let response = send_mesh_internal_read(
+        &state,
+        &client,
+        &node,
+        format!(
+            "/api/admin/_internal/nodes/tcp-connections/local?window={}",
+            window.as_str()
+        ),
+        Duration::from_secs(3),
     )
-    .parse()
-    .map_err(|_| ApiError::invalid_request("invalid window"))?;
-    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
-
-    let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-        client
-            .get(format!(
-                "{base}/api/admin/_internal/nodes/tcp-connections/local?window={}",
-                window.as_str()
-            ))
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-    });
-    let response = tokio::time::timeout(Duration::from_secs(3), request)
-        .await
-        .map_err(|_| ApiError::internal("request timeout"))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await?;
 
     if !response.status().is_success() {
         return Err(ApiError::internal(format!(
@@ -3217,33 +3183,17 @@ async fn admin_get_node_ip_usage(
     }
 
     let client = build_cluster_http_client(&state)?;
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let uri: axum::http::Uri =
-        format!("/_internal/nodes/ip-usage/local?window={}", window.as_str())
-            .parse()
-            .map_err(|_| ApiError::invalid_request("invalid window"))?;
-    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
-
-    let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-        client
-            .get(format!(
-                "{base}/api/admin/_internal/nodes/ip-usage/local?window={}",
-                window.as_str()
-            ))
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-    });
-    let response = tokio::time::timeout(Duration::from_secs(3), request)
-        .await
-        .map_err(|_| ApiError::internal("request timeout"))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let response = send_mesh_internal_read(
+        &state,
+        &client,
+        &node,
+        format!(
+            "/api/admin/_internal/nodes/ip-usage/local?window={}",
+            window.as_str()
+        ),
+        Duration::from_secs(3),
+    )
+    .await?;
 
     if !response.status().is_success() {
         return Err(ApiError::internal(format!(
@@ -3369,20 +3319,6 @@ async fn admin_get_user_ip_usage(
     let mut unreachable_nodes = Vec::<String>::new();
 
     let client = build_admin_http_client(&state)?;
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let local_uri: axum::http::Uri = format!(
-        "/_internal/users/{user_id}/ip-usage/local?window={}",
-        window.as_str()
-    )
-    .parse()
-    .map_err(|_| ApiError::invalid_request("invalid window"))?;
-    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &local_uri)
-        .map_err(|err| ApiError::internal(err.to_string()))?;
-
     for node in relevant_nodes {
         if node.node_id == local_node_id {
             let geo_source = state.geo_db_update.ip_geo_source();
@@ -3406,19 +3342,19 @@ async fn admin_get_user_ip_usage(
             continue;
         }
 
-        let url = format!(
-            "{base}/api/admin/_internal/users/{user_id}/ip-usage/local?window={}",
-            window.as_str()
-        );
-        let request = client.send_with_fallback(Duration::from_secs(3), |client| {
-            client.get(url.clone()).header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-        });
-        let response = tokio::time::timeout(Duration::from_secs(3), request).await;
-        let response = match response {
-            Ok(Ok(response)) => response,
+        let response = match send_mesh_internal_read(
+            &state,
+            &client,
+            &node,
+            format!(
+                "/api/admin/_internal/users/{user_id}/ip-usage/local?window={}",
+                window.as_str()
+            ),
+            Duration::from_secs(3),
+        )
+        .await
+        {
+            Ok(response) => response,
             _ => {
                 unreachable_nodes.push(node.node_id.clone());
                 continue;
@@ -3532,20 +3468,20 @@ async fn forward_local_node_runtime_events(
 }
 
 async fn forward_remote_node_runtime_events(
+    state: AppState,
     client: MeshAwareHttpClient,
-    url: String,
-    sig: String,
-    node_id: String,
+    node: Node,
     tx: mpsc::Sender<Event>,
 ) {
-    let response = match client
-        .send_with_fallback(Duration::from_secs(3), |client| {
-            client.get(url.clone()).header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-        })
-        .await
+    let node_id = node.node_id.clone();
+    let response = match send_mesh_internal_read(
+        &state,
+        &client,
+        &node,
+        "/api/admin/_internal/nodes/runtime/local/events".to_string(),
+        Duration::from_secs(3),
+    )
+    .await
     {
         Ok(response) => response,
         Err(err) => {
@@ -3554,7 +3490,7 @@ async fn forward_remote_node_runtime_events(
                     "node_error",
                     &AdminNodeRuntimeSseNodeError {
                         node_id,
-                        error: err.to_string(),
+                        error: err.message,
                     },
                 ))
                 .await;
@@ -3679,17 +3615,9 @@ async fn admin_stream_node_runtime_events(
             ));
         } else {
             let client = build_cluster_http_client(&state)?;
-            let ca_key_pem = state.cluster_ca_key_pem.as_ref().as_ref().ok_or_else(|| {
-                ApiError::internal("cluster ca key is not available on this node")
-            })?;
-            let uri: axum::http::Uri = "/_internal/nodes/runtime/local/events"
-                .parse()
-                .expect("valid uri");
-            let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-                .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
-            let url = format!("{base}/api/admin/_internal/nodes/runtime/local/events");
+            let state_for_remote = state.clone();
             tokio::spawn(async move {
-                forward_remote_node_runtime_events(client, url, sig, node_id, tx).await;
+                forward_remote_node_runtime_events(state_for_remote, client, node, tx).await;
             });
         }
     }
@@ -3877,31 +3805,19 @@ async fn admin_refresh_node_egress_probe(
     }
 
     let client = build_cluster_http_client(&state)?;
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_ref()
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("cluster ca key is not available on this node"))?;
-    let uri: axum::http::Uri = "/_internal/nodes/egress-probe/local/refresh"
-        .parse()
-        .expect("valid uri");
-    let sig = internal_auth::sign_request(ca_key_pem, &Method::POST, &uri)
-        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
-
-    let request = client.send_with_fallback(Duration::from_secs(20), |client| {
-        client
-            .post(format!(
-                "{base}/api/admin/_internal/nodes/egress-probe/local/refresh"
-            ))
-            .header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-    });
-    let response = tokio::time::timeout(Duration::from_secs(20), request)
-        .await
-        .map_err(|_| ApiError::internal("request timeout"))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let response = send_mesh_internal_request(
+        &state,
+        &client,
+        &node,
+        Method::POST,
+        "/api/admin/_internal/nodes/egress-probe/local/refresh".to_string(),
+        Vec::new(),
+        None,
+        Duration::from_secs(20),
+        false,
+        crate::id::new_ulid_string(),
+    )
+    .await?;
     if !response.status().is_success() {
         return Err(ApiError::internal(format!(
             "node egress probe refresh request failed: {}",
@@ -3941,6 +3857,17 @@ async fn admin_get_node(
         .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
     let probe = store.get_node_egress_probe(&node_id);
     Ok(Json(admin_node_response(node, probe)))
+}
+
+async fn admin_internal_get_node_raw(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<Node>, ApiError> {
+    let store = state.store.lock().await;
+    store
+        .get_node(&node_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))
 }
 
 async fn admin_get_node_delete_preview(
@@ -4608,6 +4535,15 @@ async fn admin_list_endpoints(
             })
             .collect(),
     }))
+}
+
+async fn admin_internal_list_endpoints_raw(
+    Extension(state): Extension<AppState>,
+) -> Json<Items<Endpoint>> {
+    let store = state.store.lock().await;
+    Json(Items {
+        items: store.list_endpoints(),
+    })
 }
 
 async fn admin_get_endpoint(
@@ -5535,21 +5471,21 @@ async fn forward_local_endpoint_probe_run_events(
 }
 
 async fn forward_remote_endpoint_probe_run_events(
+    state: AppState,
     client: MeshAwareHttpClient,
-    url: String,
-    sig: String,
-    node_id: String,
+    node: Node,
     run_id: String,
     tx: mpsc::Sender<Event>,
 ) {
-    let resp = match client
-        .send_with_fallback(Duration::from_secs(3), |client| {
-            client.get(url.clone()).header(
-                header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                sig.clone(),
-            )
-        })
-        .await
+    let node_id = node.node_id.clone();
+    let resp = match send_mesh_internal_read(
+        &state,
+        &client,
+        &node,
+        format!("/api/admin/_internal/endpoint-probe/runs/{run_id}/events"),
+        Duration::from_secs(3),
+    )
+    .await
     {
         Ok(resp) => resp,
         Err(err) => {
@@ -5559,7 +5495,7 @@ async fn forward_remote_endpoint_probe_run_events(
                     &AdminEndpointProbeRunSseNodeError {
                         node_id,
                         run_id,
-                        error: err.to_string(),
+                        error: err.message,
                     },
                 ))
                 .await;
@@ -5671,16 +5607,7 @@ async fn admin_stream_endpoint_probe_run_events(
     initial_events.push_back(sse_json_event("hello", &hello));
 
     let local_node_id = state.cluster.node_id.clone();
-    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_deref() else {
-        return Err(ApiError::internal("cluster ca key is not available"));
-    };
-
     let client = build_cluster_http_client(&state)?;
-    let uri: axum::http::Uri = format!("/_internal/endpoint-probe/runs/{run_id}/events")
-        .parse()
-        .map_err(|_| ApiError::invalid_request("run_id is invalid"))?;
-    let sig = internal_auth::sign_request(ca_key_pem, &Method::GET, &uri)
-        .map_err(|e| ApiError::internal(format!("sign internal request: {e}")))?;
 
     let (tx, rx) = mpsc::channel::<Event>(512);
 
@@ -5698,17 +5625,13 @@ async fn admin_stream_endpoint_probe_run_events(
         }
 
         let client = client.clone();
-        let sig = sig.clone();
+        let state_for_remote = state.clone();
         let tx = tx.clone();
         let run_id = run_id.clone();
-        let url = format!(
-            "{}/api/admin/_internal/endpoint-probe/runs/{}/events",
-            node.api_base_url.trim_end_matches('/'),
-            run_id
-        );
 
         tokio::spawn(async move {
-            forward_remote_endpoint_probe_run_events(client, url, sig, node_id, run_id, tx).await;
+            forward_remote_endpoint_probe_run_events(state_for_remote, client, node, run_id, tx)
+                .await;
         });
     }
 
