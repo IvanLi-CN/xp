@@ -62,7 +62,6 @@ use crate::{
     ip_geo_db::{COUNTRY_IS_ORIGIN, GeoDbUpdateHandle, IpGeoSource},
     managed_default_endpoints::{
         DEFAULT_VLESS_FINGERPRINT, DefaultVlessEndpointSpec, build_managed_default_vless_endpoint,
-        managed_default_vless_endpoint,
     },
     mesh_telemetry::{
         BreakerState, MeshQuality, MeshTelemetryHandle, TelemetryPath, availability_for,

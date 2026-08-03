@@ -13,6 +13,7 @@ use crate::{
     internal_auth::{self, InternalRoute, RequestContext},
     managed_default_endpoints::managed_default_vless_endpoint,
     mesh_telemetry::{BreakerState, MeshTelemetryHandle, MeshTelemetrySample, TelemetryPath},
+    protocol::validate_reality_server_name,
 };
 
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
@@ -63,7 +64,6 @@ impl PeerCircuitBreakers {
             }
         }
     }
-
     pub async fn record_success(&self, peer_id: &str) -> BreakerState {
         let mut peers = self.peers.lock().await;
         let circuit = peers.entry(peer_id.to_string()).or_default();
@@ -73,14 +73,12 @@ impl PeerCircuitBreakers {
         circuit.half_open_in_flight = false;
         BreakerState::Closed
     }
-
     pub async fn release_half_open_probe(&self, peer_id: &str) {
         let mut peers = self.peers.lock().await;
         if let Some(circuit) = peers.get_mut(peer_id) {
             circuit.half_open_in_flight = false;
         }
     }
-
     /// Only retryable transport errors may alter the breaker.
     pub async fn record_retryable_failure(&self, peer_id: &str) -> BreakerState {
         let now = Instant::now();
@@ -96,7 +94,6 @@ impl PeerCircuitBreakers {
         circuit.retry_at = Some(now + backoff);
         BreakerState::Open
     }
-
     pub async fn state(&self, peer_id: &str, enabled: bool) -> BreakerState {
         if !enabled {
             return BreakerState::Disabled;
@@ -112,12 +109,10 @@ impl PeerCircuitBreakers {
         }
     }
 }
-
 pub fn mesh_attempt_budget(total: Duration) -> Duration {
     let third = total / 3;
     third.clamp(Duration::from_millis(500), Duration::from_secs(5))
 }
-
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
@@ -125,16 +120,15 @@ pub struct MeshPeerTarget {
     pub mesh_base_url: Option<String>,
     pub public_base_url: String,
 }
-
 pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTarget {
-    let access_host = node.access_host.trim();
+    let access_host = node.access_host.trim().trim_end_matches('.');
     let managed = endpoints
         .iter()
         .filter(|endpoint| endpoint.node_id == node.node_id)
         .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
         .collect::<Vec<_>>();
     let mesh_base_url = match managed.as_slice() {
-        [endpoint] if !access_host.is_empty() => {
+        [endpoint] if validate_reality_server_name(access_host).is_ok() => {
             Some(format!("https://{access_host}:{}", endpoint.port))
         }
         _ => None,
@@ -146,7 +140,6 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         public_base_url: node.api_base_url.clone(),
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct MeshRequest {
     pub method: reqwest::Method,
@@ -161,7 +154,6 @@ pub struct MeshRequest {
     pub sender_id: String,
     pub updates_active_path: bool,
 }
-
 #[derive(Debug)]
 pub enum MeshRequestError {
     InvalidTarget(String),
@@ -170,13 +162,11 @@ pub enum MeshRequestError {
     Protocol(String),
     Public(reqwest::Error),
 }
-
 impl From<internal_auth::AuthError> for MeshRequestError {
     fn from(value: internal_auth::AuthError) -> Self {
         Self::Auth(value)
     }
 }
-
 impl std::fmt::Display for MeshRequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -190,7 +180,6 @@ impl std::fmt::Display for MeshRequestError {
         }
     }
 }
-
 impl std::error::Error for MeshRequestError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -200,7 +189,6 @@ impl std::error::Error for MeshRequestError {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshProxyStatus {
@@ -209,7 +197,6 @@ pub enum MeshProxyStatus {
     Fallback,
     Degraded,
 }
-
 impl MeshProxyStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -220,7 +207,6 @@ impl MeshProxyStatus {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshProxySnapshot {
     pub status: MeshProxyStatus,
@@ -229,12 +215,10 @@ pub struct MeshProxySnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_fallback_at: Option<String>,
 }
-
 #[derive(Clone)]
 pub struct MeshProxyStateHandle {
     inner: Arc<Mutex<MeshProxySnapshot>>,
 }
-
 impl MeshProxyStateHandle {
     pub fn disabled() -> Self {
         Self {
@@ -281,7 +265,6 @@ impl MeshProxyStateHandle {
         inner.last_fallback_at = Some(Utc::now().to_rfc3339());
     }
 }
-
 #[derive(Debug)]
 pub enum MeshProxyError {
     InvalidProxyUrl { proxy_url: String, message: String },
@@ -826,7 +809,6 @@ async fn signed_send(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn peer_node() -> Node {
         Node {
             node_id: "peer-a".to_string(),
@@ -887,6 +869,25 @@ mod tests {
                 .mesh_base_url
                 .is_none()
         );
+        let invalid_access_host = Node {
+            access_host: "https://peer-a.example.test:443/mesh".to_string(),
+            ..node.clone()
+        };
+        assert!(
+            peer_target_from_node(&invalid_access_host, &[managed_vless_endpoint("one", 443)],)
+                .mesh_base_url
+                .is_none()
+        );
+        let absolute_fqdn = Node {
+            access_host: "peer-a.example.test.".to_string(),
+            ..node.clone()
+        };
+        assert_eq!(
+            peer_target_from_node(&absolute_fqdn, &[managed_vless_endpoint("one", 443)],)
+                .mesh_base_url
+                .as_deref(),
+            Some("https://peer-a.example.test:443")
+        );
         let ambiguous = peer_target_from_node(
             &node,
             &[
@@ -896,14 +897,12 @@ mod tests {
         );
         assert!(ambiguous.mesh_base_url.is_none());
     }
-
     #[test]
     fn invalid_proxy_url_is_rejected() {
         let builder = reqwest::Client::builder();
         let err = apply_optional_proxy(builder, Some("not a url")).unwrap_err();
         assert!(err.to_string().contains("invalid proxy url"));
     }
-
     #[test]
     fn mesh_budget_reserves_the_public_remainder() {
         assert_eq!(

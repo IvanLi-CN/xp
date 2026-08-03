@@ -190,13 +190,9 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .into_iter()
         .filter(|node| node.node_id != state.cluster.node_id)
         .map(|node| {
-            let matching = endpoints
-                .iter()
-                .filter(|endpoint| endpoint.node_id == node.node_id)
-                .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
-                .collect::<Vec<_>>();
             let mesh_url =
                 crate::control_plane_mesh::peer_target_from_node(&node, &endpoints).mesh_base_url;
+            let mesh_enabled = mesh_url.is_some();
             let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
             let (
                 availability_1h,
@@ -222,13 +218,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 current_path: peer.and_then(|peer| peer.last_path),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: is_mesh_peer_stale(peer, now),
-                breaker: peer.and_then(|peer| peer.breaker).unwrap_or({
-                    if matching.len() == 1 {
-                        BreakerState::Closed
-                    } else {
-                        BreakerState::Disabled
-                    }
-                }),
+                breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
                 last_sample_at: peer.and_then(|peer| peer.last_sample_at.clone()),
                 last_transition_at: peer.and_then(|peer| peer.last_transition_at.clone()),
                 availability_1h,
@@ -267,6 +257,29 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         },
         peers,
         events: telemetry.events,
+    }
+}
+
+fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -> BreakerState {
+    if mesh_enabled {
+        recorded.unwrap_or(BreakerState::Closed)
+    } else {
+        BreakerState::Disabled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_mesh_target_never_reports_an_active_breaker() {
+        assert_eq!(
+            breaker_for_mesh_target(false, Some(BreakerState::Open)),
+            BreakerState::Disabled
+        );
+        assert_eq!(breaker_for_mesh_target(false, None), BreakerState::Disabled);
+        assert_eq!(breaker_for_mesh_target(true, None), BreakerState::Closed);
     }
 }
 
