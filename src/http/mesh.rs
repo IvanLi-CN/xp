@@ -127,7 +127,7 @@ pub(super) async fn admin_internal_raft_client_write(
                 verified.context.request_id.clone(),
                 IdempotencyRequest {
                     sender_id: verified.context.sender_id.clone(),
-                    canonical_sha256: verified.canonical_sha256.clone(),
+                    canonical_sha256: verified.idempotency_sha256.clone(),
                 },
             )
         });

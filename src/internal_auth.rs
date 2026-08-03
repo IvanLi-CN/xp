@@ -79,6 +79,7 @@ pub struct VerifiedRequest {
     pub context: RequestContext,
     pub body_sha256: String,
     pub canonical_sha256: String,
+    pub idempotency_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,10 +211,22 @@ pub fn verify_request_v2(
     mac.update(canonical.as_bytes());
     mac.verify_slice(&actual)
         .map_err(|_| AuthError::Invalid("internal signature does not verify"))?;
+    let idempotency_sha256 = hex::encode(Sha256::digest(
+        idempotency_canonical_request(
+            &context,
+            method,
+            uri,
+            &content_type,
+            &content_length,
+            &body_sha256,
+        )
+        .as_bytes(),
+    ));
     Ok(VerifiedRequest {
         context,
         body_sha256,
         canonical_sha256: hex::encode(Sha256::digest(canonical.as_bytes())),
+        idempotency_sha256,
     })
 }
 
@@ -346,6 +359,34 @@ fn canonical_request(
     .join("\n")
 }
 
+fn idempotency_canonical_request(
+    context: &RequestContext,
+    method: &Method,
+    uri: &Uri,
+    content_type: &str,
+    content_length: &str,
+    body_sha256: &str,
+) -> String {
+    let raw_uri = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or_else(|| uri.path());
+    [
+        "v2-idempotency",
+        context.route.as_str(),
+        method.as_str(),
+        raw_uri,
+        content_type,
+        content_length,
+        body_sha256,
+        &context.cluster_id,
+        &context.sender_id,
+        &context.target_id,
+        &context.request_id,
+    ]
+    .join("\n")
+}
+
 fn canonical_ack(verified: &VerifiedRequest, responder_id: &str, status: u16) -> String {
     [
         "v2-ack",
@@ -474,6 +515,57 @@ mod tests {
                 "01JTESTTARGET0000000000000000",
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn idempotency_digest_is_stable_across_auth_timestamp_refreshes() {
+        let (key, cert) = identity();
+        let uri: Uri = "/api/admin/_internal/raft/client-write?a=1"
+            .parse()
+            .unwrap();
+        let mut first_context = context();
+        let mut retried_context = first_context.clone();
+        retried_context.issued_at += 1;
+
+        let verify = |context: &RequestContext| {
+            let mut headers = HeaderMap::new();
+            sign_request_v2(
+                &key,
+                &cert,
+                &Method::POST,
+                &uri,
+                Some("application/json"),
+                br#"{"name":"one"}"#,
+                context,
+                &mut headers,
+            )
+            .unwrap();
+            headers.insert("content-type", "application/json".parse().unwrap());
+            headers.insert("content-length", "14".parse().unwrap());
+            verify_request_v2(
+                &key,
+                &cert,
+                &Method::POST,
+                &uri,
+                &headers,
+                br#"{"name":"one"}"#,
+                "01JTESTCLUSTERID00000000000000",
+                "01JTESTTARGET0000000000000000",
+            )
+            .unwrap()
+        };
+
+        let first = verify(&first_context);
+        let retried = verify(&retried_context);
+        assert_ne!(first.canonical_sha256, retried.canonical_sha256);
+        assert_eq!(first.idempotency_sha256, retried.idempotency_sha256);
+
+        first_context.request_id = "01JTESTREQUEST000000000000001".to_string();
+        let different_request = verify(&first_context);
+        assert_ne!(
+            first.idempotency_sha256,
+            different_request.idempotency_sha256
         );
     }
 

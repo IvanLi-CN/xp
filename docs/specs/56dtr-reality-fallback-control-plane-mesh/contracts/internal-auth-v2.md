@@ -12,6 +12,9 @@
   request ID and issued-at.
 - The receiver requires timestamp skew within 120 seconds, a matching cluster
   and target, a current sender member and a valid HMAC.
+- Durable idempotency binds `request_id` to the authenticated semantic request
+  (route, method, URI, content metadata/hash and member context), excluding
+  `issued-at` so a newly signed retry returns the first result.
 
 ## Key derivation and acknowledgement
 
