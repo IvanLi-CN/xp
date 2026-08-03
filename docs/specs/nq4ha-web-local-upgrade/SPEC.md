@@ -229,8 +229,8 @@ Status states:
   - sensitive_exclusion: N/A
   - submission_gate: pending-owner-approval
   - state: reconnecting after an ambiguous start result
-  - evidence_note: verifies spinner, preserved popover, safe reconnecting summary,
-    and locked Upgrade action
+  - evidence_note: element capture of the card and popover verifies spinner,
+    preserved popover, safe reconnecting summary, and locked Upgrade action
   - PR: include
   - ![Version indicator reconnecting](./assets/version-indicator-reconnecting.png)
 - source_type: storybook_docs
@@ -244,8 +244,8 @@ Status states:
   - sensitive_exclusion: N/A
   - submission_gate: pending-owner-approval
   - state: one-minute observation timeout
-  - evidence_note: verifies the dark-theme timeout summary, Status recovery action,
-    locked Upgrade action, and right-side action padding
+  - evidence_note: element capture of the card and popover verifies the dark-theme
+    timeout summary, Status recovery action, locked Upgrade action, and padding
   - PR: include
   - ![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
 
