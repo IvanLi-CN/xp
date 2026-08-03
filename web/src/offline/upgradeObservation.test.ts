@@ -38,14 +38,14 @@ describe("upgrade observation", () => {
 		).toMatchObject({ phase: "terminal" });
 	});
 
-	it("ignores a terminal snapshot from before the current upgrade attempt", () => {
-		const observation = beginUpgradeObservation("v3.21.10", NOW);
+	it("ignores a stale terminal from the same start second", () => {
+		const observation = beginUpgradeObservation("v3.21.10", NOW + 500);
 		const stale = observeUpgradeStatus(
 			observation,
 			{
 				state: "failed",
 				target_tag: "v3.21.10",
-				updated_at: new Date(NOW - 1_000).toISOString(),
+				updated_at: new Date(NOW).toISOString(),
 			},
 			NOW + 2_500,
 		);
@@ -58,6 +58,32 @@ describe("upgrade observation", () => {
 					state: "succeeded",
 					target_tag: "v3.21.10",
 					updated_at: new Date(NOW + 1_000).toISOString(),
+				},
+				NOW + 2_500,
+			),
+		).toMatchObject({ phase: "terminal" });
+	});
+
+	it("accepts a terminal status after observing the current active job", () => {
+		const observation = beginUpgradeObservation("v3.21.10", NOW + 500);
+		const active = observeUpgradeStatus(
+			observation,
+			{
+				state: "running",
+				target_tag: "v3.21.10",
+				updated_at: new Date(NOW).toISOString(),
+			},
+			NOW + 2_500,
+		);
+
+		expect(active).toMatchObject({ hasSeenActive: true });
+		expect(
+			observeUpgradeStatus(
+				active,
+				{
+					state: "succeeded",
+					target_tag: "v3.21.10",
+					updated_at: new Date(NOW).toISOString(),
 				},
 				NOW + 2_500,
 			),
@@ -138,6 +164,19 @@ describe("upgrade observation", () => {
 				NOW,
 			),
 		).toMatchObject({ phase: "timed_out" });
+	});
+
+	it("preserves a stored terminal result after its original deadline", () => {
+		expect(
+			restoreUpgradeObservation(
+				JSON.stringify({
+					targetTag: "v3.21.10",
+					deadlineAtMs: NOW - 1,
+					phase: "terminal",
+				}),
+				NOW,
+			),
+		).toMatchObject({ phase: "terminal" });
 	});
 
 	it("treats structured rejections as final and an existing active job as observable", () => {
