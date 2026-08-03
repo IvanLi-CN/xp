@@ -10,6 +10,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 argon2 = "0.5"
 async-trait = "0.1"
 base64 = "0.22"
+bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 crossterm = "0.29.0"

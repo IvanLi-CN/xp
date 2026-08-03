@@ -68,7 +68,7 @@ use crate::{
         BreakerState, MeshQuality, MeshTelemetryHandle, TelemetryPath, availability_for,
         latency_percentiles_for, quality_for_peer,
     },
-    mihomo_redact,
+    mihomo_redact, mihomo_resources,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
     node_history::{
         NodeHistoryHandle, NodeHistorySnapshot, TrafficReport, TrafficWindow,
@@ -127,6 +127,7 @@ pub struct AppState {
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
+    pub mihomo_resource_directory: Arc<mihomo_resources::ResourceDirectoryCache>,
     pub raft: Arc<dyn RaftFacade>,
     pub raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     pub geo_db_update: GeoDbUpdateHandle,
@@ -161,6 +162,10 @@ impl ApiError {
 
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn unprocessable_entity(message: impl Into<String>) -> Self {
+        Self::new("invalid_request", StatusCode::UNPROCESSABLE_ENTITY, message)
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
@@ -1013,6 +1018,7 @@ pub fn build_router_with_mesh_telemetry(
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
+        mihomo_resource_directory: Arc::new(mihomo_resources::ResourceDirectoryCache::new()),
         raft,
         raft_rpc: raft_rpc.clone(),
         geo_db_update,
@@ -1281,6 +1287,7 @@ pub fn build_router_with_mesh_telemetry(
             "/sub/{subscription_token}/mihomo/provider/system",
             get(get_subscription_mihomo_provider_system),
         )
+        .route("/mihomo/resources/{resource_id}", get(get_mihomo_resource))
         .route("/sub/{subscription_token}", get(get_subscription))
         .nest("/admin", admin)
         .fallback(fallback_not_found);
@@ -7940,6 +7947,7 @@ const CSP_HEADER_VALUE: &str = concat!(
 #[derive(Debug, Deserialize)]
 struct SubscriptionQuery {
     format: Option<String>,
+    external_resources: Option<String>,
 }
 
 #[derive(Clone)]
@@ -8011,6 +8019,9 @@ fn map_subscription_render_error(err: subscription::SubscriptionError) -> ApiErr
         | other @ subscription::SubscriptionError::MihomoExtraProxyProviderConflict { .. }
         | other @ subscription::SubscriptionError::MihomoInvalidFinalConfigReference { .. } => {
             ApiError::invalid_request(other.to_string())
+        }
+        other @ subscription::SubscriptionError::MihomoExternalResourceMirrorInvalid { .. } => {
+            ApiError::unprocessable_entity(other.to_string())
         }
         other => ApiError::internal(format!("failed to build subscription: {other}")),
     }
@@ -8088,6 +8099,7 @@ fn render_mihomo_subscription(
     mode: MihomoRenderMode,
     headers: &HeaderMap,
     fallback_api_base_url: &str,
+    external_resource_mode: subscription::MihomoExternalResourceMode,
 ) -> Result<Response, ApiError> {
     match mode {
         MihomoRenderMode::ProviderSystem => subscription::build_mihomo_provider_system_yaml(
@@ -8106,7 +8118,8 @@ fn render_mihomo_subscription(
                     "{origin}/api/sub/{}/mihomo/provider/system",
                     ctx.user.subscription_token
                 );
-                subscription::build_mihomo_provider_yaml_with_node_probes(
+                let resource_mirror_base_url = format!("{origin}/api/mihomo/resources");
+                subscription::build_mihomo_provider_yaml_with_node_probes_mode(
                     ca_key_pem,
                     &ctx.user,
                     &ctx.memberships,
@@ -8115,6 +8128,8 @@ fn render_mihomo_subscription(
                     &ctx.node_egress_probes,
                     profile,
                     &system_provider_url,
+                    external_resource_mode,
+                    &resource_mirror_base_url,
                 )
                 .map(text_yaml_utf8)
                 .map_err(map_subscription_render_error)
@@ -8147,6 +8162,21 @@ async fn get_subscription(
         Some(_) => {
             return Err(ApiError::invalid_request(
                 "invalid format, expected raw|clash|mihomo or omit for base64",
+            ));
+        }
+    };
+
+    let external_resource_mode = match query.external_resources.as_deref() {
+        None => subscription::MihomoExternalResourceMode::Direct,
+        Some("mirror") if format == "mihomo" => subscription::MihomoExternalResourceMode::Mirror,
+        Some("mirror") => {
+            return Err(ApiError::invalid_request(
+                "external_resources=mirror is only supported for mihomo",
+            ));
+        }
+        Some(_) => {
+            return Err(ApiError::invalid_request(
+                "invalid external_resources, expected mirror or omit",
             ));
         }
     };
@@ -8193,6 +8223,7 @@ async fn get_subscription(
             MihomoRenderMode::Provider,
             &headers,
             &state.config.api_base_url,
+            external_resource_mode,
         ),
         _ => Err(ApiError::internal("unreachable subscription format")),
     }
@@ -8202,6 +8233,7 @@ async fn get_subscription_mihomo_provider(
     Extension(state): Extension<AppState>,
     headers: HeaderMap,
     Path(subscription_token): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<SubscriptionQuery>,
 ) -> Result<Response, ApiError> {
     let ca_key_pem = state
         .cluster_ca_key_pem
@@ -8215,6 +8247,15 @@ async fn get_subscription_mihomo_provider(
         MihomoRenderMode::Provider,
         &headers,
         &state.config.api_base_url,
+        match query.external_resources.as_deref() {
+            None => subscription::MihomoExternalResourceMode::Direct,
+            Some("mirror") => subscription::MihomoExternalResourceMode::Mirror,
+            Some(_) => {
+                return Err(ApiError::invalid_request(
+                    "invalid external_resources, expected mirror or omit",
+                ));
+            }
+        },
     )
 }
 
@@ -8235,7 +8276,52 @@ async fn get_subscription_mihomo_provider_system(
         MihomoRenderMode::ProviderSystem,
         &headers,
         &state.config.api_base_url,
+        subscription::MihomoExternalResourceMode::Direct,
     )
+}
+
+async fn get_mihomo_resource(
+    Extension(state): Extension<AppState>,
+    Path(resource_id): Path<String>,
+) -> Response {
+    let Some(cluster_ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    };
+    if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    }
+    let revision = {
+        let store = state.store.lock().await;
+        store.state().mihomo_resource_revision
+    };
+    let url = if let Some(cached) = state
+        .mihomo_resource_directory
+        .lookup_cached(revision, &resource_id)
+        .await
+    {
+        cached
+    } else {
+        let (revision, profiles) = {
+            let store = state.store.lock().await;
+            (
+                store.state().mihomo_resource_revision,
+                store
+                    .state()
+                    .user_mihomo_profiles
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        };
+        state
+            .mihomo_resource_directory
+            .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
+            .await
+    };
+    let Some(url) = url else {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    };
+    mihomo_resources::proxy_resource(url, &resource_id).await
 }
 
 #[cfg(test)]

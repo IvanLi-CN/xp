@@ -5998,6 +5998,85 @@ async fn mihomo_provider_route_rejects_reserved_system_provider_name_in_extra_pr
 }
 
 #[tokio::test]
+async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    set_bootstrap_node_access_host(&store, "example.com").await;
+
+    let fixtures = setup_subscription_fixtures(&tmp, &app).await;
+    let user_id = fixtures.user_id.clone();
+    let token = fixtures.subscription_token.clone();
+    let put_res = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &format!("/api/admin/users/{user_id}/subscription-mihomo-profile"),
+            json!({
+                "mixin_yaml": r#"rule-providers:
+  ads:
+    type: http
+    behavior: domain
+    url: https://rules.example/ads.yaml
+"#,
+                "extra_proxies_yaml": "",
+                "extra_proxy_providers_yaml": "",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(put_res.status(), StatusCode::OK);
+
+    let mirror_res = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}?format=mihomo&external_resources=mirror"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(mirror_res.status(), StatusCode::OK);
+    let mirror_yaml: YamlValue = serde_yaml::from_str(&body_text(mirror_res).await).unwrap();
+    let rule_url = mirror_yaml
+        .get("rule-providers")
+        .and_then(YamlValue::as_mapping)
+        .and_then(|rules| rules.get("ads"))
+        .and_then(YamlValue::as_mapping)
+        .and_then(|provider| provider.get("url"))
+        .and_then(YamlValue::as_str)
+        .expect("mirror rule provider URL");
+    assert!(rule_url.starts_with("https://127.0.0.1:62416/api/mihomo/resources/"));
+    assert_eq!(
+        mirror_yaml
+            .get("rule-providers")
+            .and_then(YamlValue::as_mapping)
+            .and_then(|rules| rules.get("ads"))
+            .and_then(YamlValue::as_mapping)
+            .and_then(|provider| provider.get("proxy"))
+            .and_then(YamlValue::as_str),
+        Some("DIRECT")
+    );
+
+    let arbitrary_res = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/api/mihomo/resources/0000000000000000000000000000000000000000000000000000000000000000?url=https%3A%2F%2Fexample.com%2Fanything",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(arbitrary_res.status(), StatusCode::NOT_FOUND);
+
+    let raw_res = app
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}?format=raw&external_resources=mirror"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(raw_res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());

@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use rand::RngCore;
 use regex::Regex;
+use reqwest::Url;
 
 use crate::{
     credentials,
@@ -84,6 +85,17 @@ pub enum SubscriptionError {
     MihomoProxyNameNotString {
         index: usize,
     },
+    MihomoExternalResourceMirrorInvalid {
+        kind: String,
+        name: String,
+        reason: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MihomoExternalResourceMode {
+    Direct,
+    Mirror,
 }
 
 impl std::fmt::Display for SubscriptionError {
@@ -195,6 +207,12 @@ impl std::fmt::Display for SubscriptionError {
             }
             Self::MihomoProxyNameNotString { index } => {
                 write!(f, "mihomo proxy name must be string at index={index}")
+            }
+            Self::MihomoExternalResourceMirrorInvalid { kind, name, reason } => {
+                write!(
+                    f,
+                    "mihomo external resource is not mirrorable ({kind}:{name}): {reason}"
+                )
             }
         }
     }
@@ -462,6 +480,33 @@ pub fn build_mihomo_provider_yaml_with_node_probes(
     profile: &UserMihomoProfile,
     system_provider_url: &str,
 ) -> Result<String, SubscriptionError> {
+    build_mihomo_provider_yaml_with_node_probes_mode(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        node_egress_probes,
+        profile,
+        system_provider_url,
+        MihomoExternalResourceMode::Direct,
+        "",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_mihomo_provider_yaml_with_node_probes_mode(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+    node_egress_probes: &std::collections::BTreeMap<String, NodeEgressProbeState>,
+    profile: &UserMihomoProfile,
+    system_provider_url: &str,
+    external_resource_mode: MihomoExternalResourceMode,
+    resource_mirror_base_url: &str,
+) -> Result<String, SubscriptionError> {
     let (root, _) = build_mihomo_provider_roots_with_node_probes(
         cluster_ca_key_pem,
         user,
@@ -471,6 +516,8 @@ pub fn build_mihomo_provider_yaml_with_node_probes(
         node_egress_probes,
         profile,
         system_provider_url,
+        external_resource_mode,
+        resource_mirror_base_url,
     )?;
     serde_yaml::to_string(&serde_yaml::Value::Mapping(root)).map_err(|e| {
         SubscriptionError::YamlSerialize {
@@ -489,6 +536,8 @@ fn build_mihomo_provider_roots_with_node_probes(
     node_egress_probes: &std::collections::BTreeMap<String, NodeEgressProbeState>,
     profile: &UserMihomoProfile,
     system_provider_url: &str,
+    external_resource_mode: MihomoExternalResourceMode,
+    resource_mirror_base_url: &str,
 ) -> Result<(serde_yaml::Mapping, serde_yaml::Mapping), SubscriptionError> {
     let mut rng = rand::thread_rng();
     let relay_node_ids = build_mihomo_subscribed_node_ids(user, memberships, endpoints, nodes)?;
@@ -561,6 +610,12 @@ fn build_mihomo_provider_roots_with_node_probes(
         serde_yaml::Value::String("proxy-providers".to_string()),
         serde_yaml::Value::Mapping(provider_map),
     );
+    rewrite_mihomo_external_resources(
+        &mut root,
+        external_resource_mode,
+        cluster_ca_key_pem,
+        resource_mirror_base_url,
+    )?;
     inject_mihomo_provider_proxy_groups(
         &mut root,
         &provider_names,
@@ -593,6 +648,211 @@ fn build_mihomo_provider_roots_with_node_probes(
     validate_final_mihomo_config_references(&root, &system_root)?;
 
     Ok((root, system_root))
+}
+
+fn rewrite_mihomo_external_resources(
+    root: &mut serde_yaml::Mapping,
+    mode: MihomoExternalResourceMode,
+    cluster_ca_key_pem: &str,
+    resource_mirror_base_url: &str,
+) -> Result<(), SubscriptionError> {
+    if mode == MihomoExternalResourceMode::Direct {
+        return Ok(());
+    }
+
+    let mut geox = match root.remove(serde_yaml::Value::String("geox-url".to_string())) {
+        None => serde_yaml::Mapping::new(),
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        Some(_) => {
+            return Err(SubscriptionError::MihomoExternalResourceMirrorInvalid {
+                kind: "geox-url".to_string(),
+                name: "geox-url".to_string(),
+                reason: "must be a mapping",
+            });
+        }
+    };
+
+    for (key, value) in geox.iter_mut() {
+        let Some(name) = key.as_str() else {
+            continue;
+        };
+        let Some(url) = value.as_str() else {
+            return Err(SubscriptionError::MihomoExternalResourceMirrorInvalid {
+                kind: "geox-url".to_string(),
+                name: name.to_string(),
+                reason: "URL must be a string",
+            });
+        };
+        *value = serde_yaml::Value::String(build_mihomo_mirror_url(
+            cluster_ca_key_pem,
+            resource_mirror_base_url,
+            "geox-url",
+            name,
+            url,
+        )?);
+    }
+    for (name, url) in crate::mihomo_resources::fixed_geox_assets() {
+        geox.entry(serde_yaml::Value::String((*name).to_string()))
+            .or_insert_with(|| {
+                serde_yaml::Value::String(
+                    build_mihomo_mirror_url(
+                        cluster_ca_key_pem,
+                        resource_mirror_base_url,
+                        "geox-url",
+                        name,
+                        url,
+                    )
+                    .expect("fixed Mihomo GeoX URL must be mirrorable"),
+                )
+            });
+    }
+    root.insert(
+        serde_yaml::Value::String("geox-url".to_string()),
+        serde_yaml::Value::Mapping(geox),
+    );
+
+    for provider_kind in ["rule-providers", "proxy-providers"] {
+        let Some(serde_yaml::Value::Mapping(providers)) =
+            root.get_mut(serde_yaml::Value::String(provider_kind.to_string()))
+        else {
+            continue;
+        };
+        for (provider_name, provider) in providers.iter_mut() {
+            let Some(name) = provider_name.as_str() else {
+                continue;
+            };
+            if provider_kind == "proxy-providers" && name == MIHOMO_SYSTEM_PROVIDER_NAME {
+                continue;
+            }
+            let serde_yaml::Value::Mapping(provider_map) = provider else {
+                continue;
+            };
+            let Some(url_value) = provider_map.get(serde_yaml::Value::String("url".to_string()))
+            else {
+                continue;
+            };
+            let Some(url) = url_value.as_str().map(str::to_string) else {
+                return Err(SubscriptionError::MihomoExternalResourceMirrorInvalid {
+                    kind: provider_kind.to_string(),
+                    name: name.to_string(),
+                    reason: "URL must be a string",
+                });
+            };
+            if provider_map.contains_key(serde_yaml::Value::String("header".to_string()))
+                || provider_map.contains_key(serde_yaml::Value::String("headers".to_string()))
+            {
+                return Err(SubscriptionError::MihomoExternalResourceMirrorInvalid {
+                    kind: provider_kind.to_string(),
+                    name: name.to_string(),
+                    reason: "custom headers are not allowed",
+                });
+            }
+            let mirror_url = build_mihomo_mirror_url(
+                cluster_ca_key_pem,
+                resource_mirror_base_url,
+                provider_kind,
+                name,
+                &url,
+            )?;
+            provider_map.insert(
+                serde_yaml::Value::String("url".to_string()),
+                serde_yaml::Value::String(mirror_url),
+            );
+            provider_map.insert(
+                serde_yaml::Value::String("proxy".to_string()),
+                serde_yaml::Value::String("DIRECT".to_string()),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn build_mihomo_mirror_url(
+    cluster_ca_key_pem: &str,
+    resource_mirror_base_url: &str,
+    kind: &str,
+    name: &str,
+    original_url: &str,
+) -> Result<String, SubscriptionError> {
+    let normalized = normalize_mihomo_external_url(original_url).ok_or_else(|| {
+        SubscriptionError::MihomoExternalResourceMirrorInvalid {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            reason: "only HTTPS URLs without userinfo are allowed",
+        }
+    })?;
+    let resource_id = crate::mihomo_resources::resource_id(cluster_ca_key_pem, &normalized);
+    Ok(format!(
+        "{}/{}",
+        resource_mirror_base_url.trim_end_matches('/'),
+        resource_id
+    ))
+}
+
+pub fn normalize_mihomo_external_url(raw: &str) -> Option<Url> {
+    let mut url = Url::parse(raw.trim()).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    if let Some(host) = url.host_str() {
+        let lower = host.to_ascii_lowercase();
+        if lower != host {
+            url.set_host(Some(&lower)).ok()?;
+        }
+    }
+    url.set_fragment(None);
+    Some(url)
+}
+
+pub fn mihomo_external_resource_urls(
+    profile: &UserMihomoProfile,
+) -> Result<Vec<Url>, SubscriptionError> {
+    let mut urls = Vec::new();
+    let root = parse_mixin_mapping(&profile.mixin_yaml)?;
+    collect_mihomo_mapping_urls(&root, "geox-url", &mut urls);
+    collect_mihomo_provider_urls(&root, "rule-providers", &mut urls);
+    collect_mihomo_provider_urls(&root, "proxy-providers", &mut urls);
+    let extra_providers = parse_extra_proxy_providers_yaml(&profile.extra_proxy_providers_yaml)?;
+    collect_urls_from_provider_map(&extra_providers, &mut urls);
+    Ok(urls)
+}
+
+fn collect_mihomo_mapping_urls(root: &serde_yaml::Mapping, key: &str, urls: &mut Vec<Url>) {
+    let Some(serde_yaml::Value::Mapping(map)) =
+        root.get(serde_yaml::Value::String(key.to_string()))
+    else {
+        return;
+    };
+    for value in map.values() {
+        if let Some(url) = value.as_str().and_then(normalize_mihomo_external_url) {
+            urls.push(url);
+        }
+    }
+}
+
+fn collect_mihomo_provider_urls(root: &serde_yaml::Mapping, key: &str, urls: &mut Vec<Url>) {
+    let Some(serde_yaml::Value::Mapping(map)) =
+        root.get(serde_yaml::Value::String(key.to_string()))
+    else {
+        return;
+    };
+    collect_urls_from_provider_map(map, urls);
+}
+
+fn collect_urls_from_provider_map(map: &serde_yaml::Mapping, urls: &mut Vec<Url>) {
+    for value in map.values() {
+        let Some(provider) = value.as_mapping() else {
+            continue;
+        };
+        if let Some(url) = provider
+            .get(serde_yaml::Value::String("url".to_string()))
+            .and_then(serde_yaml::Value::as_str)
+            .and_then(normalize_mihomo_external_url)
+        {
+            urls.push(url);
+        }
+    }
 }
 
 pub fn build_mihomo_provider_system_yaml(
@@ -644,6 +904,8 @@ pub fn validate_mihomo_profile_via_provider_render(
         node_egress_probes,
         profile,
         system_provider_url,
+        MihomoExternalResourceMode::Direct,
+        "",
     )?;
     Ok(())
 }

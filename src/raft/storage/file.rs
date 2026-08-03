@@ -690,7 +690,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
 
         {
             let mut store = self.store.lock().await;
+            let resource_revision = store.state().mihomo_resource_revision.wrapping_add(1);
             *store.state_mut() = state;
+            store.state_mut().mihomo_resource_revision = resource_revision;
             store.save().map_err(|e| {
                 io_err(
                     ErrorSubject::StateMachine,

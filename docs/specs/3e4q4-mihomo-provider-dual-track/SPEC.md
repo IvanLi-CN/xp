@@ -233,6 +233,10 @@
 PR: none
 
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Components/SubscriptionResourceMirrorToggle/Checked`
+  - evidence_note: Mihomo 订阅的临时镜像选项在 checked 状态下显示明确的 XP mirror 选择，不改变 Raw/Clash 控件可见性。
+    ![Mihomo external resource mirror toggle](./assets/mihomo-resource-mirror-toggle.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/ServiceConfigPage/ProviderOnly`
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import yaml from "js-yaml";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import {
@@ -52,6 +52,7 @@ import { QueryErrorState } from "../components/QueryErrorState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
+import { SubscriptionResourceMirrorToggle } from "../components/SubscriptionResourceMirrorToggle";
 import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -283,10 +284,13 @@ export function UserDetailsPage() {
 	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
 		DEFAULT_SUBSCRIPTION_FORMAT,
 	);
+	const [useExternalResourceMirror, setUseExternalResourceMirror] =
+		useState(false);
 	const [subOpen, setSubOpen] = useState(false);
 	const [subLoading, setSubLoading] = useState(false);
 	const [subText, setSubText] = useState("");
 	const [subError, setSubError] = useState<string | null>(null);
+	const subscriptionPreviewRequestRef = useRef(0);
 	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
 	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
 	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
@@ -466,8 +470,11 @@ export function UserDetailsPage() {
 		}
 		const url = new URL(basePath, window.location.origin);
 		url.searchParams.set("format", subFormat);
+		if (subFormat === "mihomo" && useExternalResourceMirror) {
+			url.searchParams.set("external_resources", "mirror");
+		}
 		return url.toString();
-	}, [subFormat, subscriptionToken]);
+	}, [subFormat, subscriptionToken, useExternalResourceMirror]);
 
 	useEffect(() => {
 		if (!userId) return;
@@ -815,19 +822,31 @@ export function UserDetailsPage() {
 		}
 	}
 
-	async function loadSubscriptionPreview(nextFormat = subFormat) {
+	async function loadSubscriptionPreview(
+		nextFormat = subFormat,
+		nextMirror = useExternalResourceMirror,
+	) {
 		if (!subscriptionToken) return;
+		const requestId = ++subscriptionPreviewRequestRef.current;
 		setSubLoading(true);
 		setSubError(null);
 		setSubFormat(nextFormat);
+		setUseExternalResourceMirror(nextMirror);
 		try {
-			const text = await fetchSubscription(subscriptionToken, nextFormat);
+			const text =
+				nextFormat === "mihomo" && nextMirror
+					? await fetchSubscription(subscriptionToken, nextFormat, "mirror")
+					: await fetchSubscription(subscriptionToken, nextFormat);
+			if (requestId !== subscriptionPreviewRequestRef.current) return;
 			setSubText(text);
 		} catch (error) {
+			if (requestId !== subscriptionPreviewRequestRef.current) return;
 			setSubError(formatError(error));
 			setSubText("");
 		} finally {
-			setSubLoading(false);
+			if (requestId === subscriptionPreviewRequestRef.current) {
+				setSubLoading(false);
+			}
 		}
 	}
 
@@ -1234,6 +1253,14 @@ export function UserDetailsPage() {
 									testId="subscription-format"
 									value={subFormat}
 								/>
+								{subFormat === "mihomo" ? (
+									<SubscriptionResourceMirrorToggle
+										checked={useExternalResourceMirror}
+										onCheckedChange={(checked) => {
+											setUseExternalResourceMirror(checked);
+										}}
+									/>
+								) : null}
 								<CopyButton
 									text={subscriptionUrl}
 									label="Copy URL"
@@ -1697,6 +1724,10 @@ export function UserDetailsPage() {
 				content={subText}
 				error={subError}
 				onFormatChange={loadSubscriptionPreview}
+				externalResourceMirror={useExternalResourceMirror}
+				onExternalResourceMirrorChange={(checked) =>
+					loadSubscriptionPreview(subFormat, checked)
+				}
 			/>
 			<ConfirmDialog
 				open={resetTokenOpen}

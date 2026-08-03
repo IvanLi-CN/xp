@@ -60,7 +60,7 @@
     "max_line_length": 183
   },
   "docs/desgin/subscription.md": {
-    "long_line_count": 24,
+    "long_line_count": 25,
     "max_line_length": 292
   },
   "docs/desgin/workflows.md": {
@@ -72,7 +72,7 @@
     "max_line_length": 263
   },
   "docs/ops/README.md": {
-    "long_line_count": 117,
+    "long_line_count": 119,
     "max_line_length": 748
   },
   "docs/ops/cloudflare-tunnel.md": {
@@ -583,12 +583,12 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8331
+    "source_lines": 8332
   },
   "src/http/tests.rs": {
-    "long_line_count": 2,
-    "max_line_length": 126,
-    "source_lines": 9760
+    "long_line_count": 3,
+    "max_line_length": 142,
+    "source_lines": 9839
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -725,7 +725,7 @@
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4405
+    "source_lines": 4411
   },
   "src/state/tests.rs": {
     "source_lines": 2296
@@ -733,7 +733,7 @@
   "src/subscription.rs": {
     "long_line_count": 5,
     "max_line_length": 133,
-    "source_lines": 5138
+    "source_lines": 5393
   },
   "src/subscription/tests.rs": {
     "long_line_count": 45,
@@ -1091,12 +1091,12 @@
   "web/src/views/UserDetailsPage.test.tsx": {
     "long_line_count": 1,
     "max_line_length": 122,
-    "source_lines": 1081
+    "source_lines": 1108
   },
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
     "max_line_length": 151,
-    "source_lines": 1756
+    "source_lines": 1787
   },
   "web/src/views/UserNewPage.tsx": {
     "long_line_count": 1,

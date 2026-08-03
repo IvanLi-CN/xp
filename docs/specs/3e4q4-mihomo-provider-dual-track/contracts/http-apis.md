@@ -72,6 +72,9 @@ Notes:
 - 当用户未配置 Mihomo profile 时，仍回退到 clash 输出。
 - 当用户已配置 Mihomo profile 时，返回 provider 主配置。
 - `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 会先对最终 provider 主配置 + `/mihomo/provider/system` payload 做联合预渲染校验；任何未定义的 `proxies`、`use`、`dialer-proxy` 或 `rules` 引用都会返回 `400 invalid_request`。
+- `external_resources=mirror` 是临时输出选项。仅在 Mihomo 格式有效；省略时保持原始 URL。
+- 镜像模式只改写 GeoX、`rule-providers` 和 `proxy-providers` 中的 HTTPS URL，并为缺失的 GeoX 键注入固定 MetaCubeX 资产集。镜像 provider 强制 `proxy: DIRECT`，不转发用户自定义 Header。
+- 非 HTTPS、带 URL userinfo 或带自定义 Header 的资源返回 `422 invalid_request`；原地址模式不受影响。
 
 Response:
 
@@ -114,10 +117,29 @@ Response:
 - PUT 保存阶段不会自动抽取 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不会把 legacy relay alias、旧 landing 引用或保留名冲突做隐含转换。
 - hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在 `💎 高质量` 与地区组之间。
 - `💎 高质量` 的兜底语义不依赖 mixin 是否显式声明 `🤯 All`；如果最终输出缺少面向 owner 的全局兜底层，视为渲染合同缺失。
+- `external_resources=mirror` 与 canonical 订阅使用相同的镜像改写合同。
 
 Response:
 
 - `200 text/yaml; charset=utf-8`
+
+## GET `/api/mihomo/resources/{resource_id}`
+
+- `resource_id` 是使用现有集群持久化密钥对规范化原 URL 做 HMAC-SHA-256 后的十六进制值。
+- 目录只包含当前 Mihomo profile 仍引用的 GeoX、规则 provider、代理 provider URL，以及 XP 固定 GeoX 资产；不接受 `url` 查询参数或其它任意上游地址。
+- 资源内容不在 XP 缓存、不写磁盘、不聚合到内存；上游响应按块流式转发。XP 施加 256 MiB、90 秒总超时、全局 32 条和单资源 4 条并发限制。
+- 初始 URL 和每个重定向目标都必须是无 userinfo 的 HTTPS；重定向在服务端最多跟随 5 次，不增加主机/IP 访问限制，客户端永远看不到 `Location`。
+
+Responses:
+
+- `200`: upstream success, streamed body
+- `404`: resource ID 不在当前目录（删除最后一个引用后立即失效）
+- `413`: upstream 声明超过 256 MiB
+- `429`: 并发闸门已满，带 `Retry-After: 1`
+- `502`: DNS、连接、TLS 或重定向解析失败
+- `504`: 90 秒总超时
+- `508`: 第六次重定向
+- upstream `4xx/5xx`: 保留状态码，使用 XP 固定错误体且不透传上游响应体或 `Location`
 
 ## GET `/api/sub/{subscription_token}/mihomo/provider/system`
 
