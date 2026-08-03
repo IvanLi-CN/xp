@@ -208,7 +208,8 @@ fn validate_request(request: &IdempotencyRequest) -> anyhow::Result<()> {
 }
 
 fn prune(state: &mut PersistedLedger, now: DateTime<Utc>) {
-    while let Some(id) = state.order.front().cloned() {
+    let mut retained = VecDeque::with_capacity(state.order.len());
+    while let Some(id) = state.order.pop_front() {
         let expired = state
             .entries
             .get(&id)
@@ -221,12 +222,13 @@ fn prune(state: &mut PersistedLedger, now: DateTime<Utc>) {
                 }
             })
             .is_some_and(|at| now.signed_duration_since(at.with_timezone(&Utc)) > RETENTION);
-        if !expired {
-            break;
+        if expired {
+            state.entries.remove(&id);
+        } else {
+            retained.push_back(id);
         }
-        state.order.pop_front();
-        state.entries.remove(&id);
     }
+    state.order = retained;
 }
 
 fn persist(path: &Path, value: &PersistedLedger) -> anyhow::Result<()> {
@@ -406,6 +408,49 @@ mod tests {
             ledger.begin("request-1", &request()).await.unwrap(),
             BeginResult::Mismatch
         );
+    }
+
+    #[test]
+    fn prune_removes_expired_records_behind_a_newer_record() {
+        let now = Utc::now();
+        let mut state = PersistedLedger {
+            schema_version: LEDGER_SCHEMA_VERSION,
+            entries: BTreeMap::from([
+                (
+                    "newer".to_string(),
+                    LedgerEntry {
+                        request: Some(request()),
+                        state: LedgerState::Complete {
+                            completed_at: timestamp(now - Duration::minutes(1)),
+                            result: StoredResult {
+                                status: 200,
+                                body: serde_json::json!({ "newer": true }),
+                            },
+                        },
+                    },
+                ),
+                (
+                    "expired".to_string(),
+                    LedgerEntry {
+                        request: Some(different_request()),
+                        state: LedgerState::Complete {
+                            completed_at: timestamp(now - Duration::minutes(11)),
+                            result: StoredResult {
+                                status: 200,
+                                body: serde_json::json!({ "expired": true }),
+                            },
+                        },
+                    },
+                ),
+            ]),
+            order: VecDeque::from(["newer".to_string(), "expired".to_string()]),
+        };
+
+        prune(&mut state, now);
+
+        assert!(state.entries.contains_key("newer"));
+        assert!(!state.entries.contains_key("expired"));
+        assert_eq!(state.order, VecDeque::from(["newer".to_string()]));
     }
 
     fn ledger_with_unwritable_parent(
