@@ -645,23 +645,42 @@ impl MeshAwareHttpClient {
             .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
             (response, verified, false)
         };
-        let ack = response
+        let response_source = if relay_succeeded {
+            "control relay response"
+        } else {
+            "control relay fallback response"
+        };
+        let Some(ack) = response
             .headers()
             .get(internal_auth::INTERNAL_ACK_HEADER)
             .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Protocol(
-                    "public response has no signed acknowledgement".to_string(),
-                )
-            })?;
-        internal_auth::verify_ack_v2(
+        else {
+            if self.relay.is_some() {
+                self.state
+                    .mark_degraded(format!("{response_source} has no signed acknowledgement"))
+                    .await;
+            }
+            return Err(MeshRequestError::Protocol(
+                "public response has no signed acknowledgement".to_string(),
+            ));
+        };
+        if let Err(error) = internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             &verified,
             &context.target_id,
             response.status().as_u16(),
             ack,
-        )?;
+        ) {
+            if self.relay.is_some() {
+                self.state
+                    .mark_degraded(format!(
+                        "{response_source} acknowledgement failed verification: {error}"
+                    ))
+                    .await;
+            }
+            return Err(error.into());
+        }
         if relay_succeeded {
             self.state.mark_ready().await;
         }
@@ -872,9 +891,9 @@ async fn signed_send(
     Ok((response, verified))
 }
 #[cfg(test)]
-#[path = "control_plane_mesh/peer_target_tests.rs"]
 mod peer_target_tests;
-
+#[cfg(test)]
+mod relay_state_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,17 +904,6 @@ mod tests {
         assert_eq!(MeshProxyStatus::Fallback.as_str(), "fallback");
         assert_eq!(MeshProxyStatus::Degraded.as_str(), "degraded");
     }
-
-    #[tokio::test]
-    async fn relay_state_tracks_fallback_and_terminal_failure() {
-        let state = MeshProxyStateHandle::ready();
-        state.mark_fallback("relay unavailable").await;
-        assert_eq!(state.snapshot().await.status, MeshProxyStatus::Fallback);
-
-        state.mark_degraded("relay and direct unavailable").await;
-        assert_eq!(state.snapshot().await.status, MeshProxyStatus::Degraded);
-    }
-
     #[test]
     fn invalid_proxy_url_is_rejected() {
         let err = apply_optional_proxy(reqwest::Client::builder(), Some("not a url")).unwrap_err();
