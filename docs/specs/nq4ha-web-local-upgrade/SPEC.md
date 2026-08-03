@@ -75,6 +75,8 @@
   `409 upgrade_already_running` 只表示 start 结果未知或已有任务；必须继续观察。
   结构化拒绝必须立即显示失败。
 - status 返回 `succeeded|failed|unsupported` 时必须停止观察。
+  属于新一次 attempt 的 terminal snapshot 必须已见 active 状态，或其更新时间严格晚于本次启动时刻；
+  不得让残留的上一轮结果收口新一轮观察。
   连续 60 秒不能获得确定结果时，必须停止轮询、保持 Upgrade 锁定并显示安全的 timeout 摘要。
 - 观察开始后 popover 必须保持打开且不因 pointer leave 自动关闭。
   用户可用点击外部或 Esc 主动收起，后台观察继续，顶栏保留 spinner。
