@@ -121,6 +121,12 @@
 
 PR: none
 
+- Source: mock-only, login-free `/ui-demo/system-status`.
+- Bound implementation commit: `3ef19d70a5f09b48fc5f7e039ece4875ac5c0c1e`.
+- [Desktop capture](./assets/system-status-desktop.png)
+- [Mobile capture at 393x852](./assets/system-status-mobile.png)
+- Whitespace normalization: no meaningful surrounding whitespace was present.
+
 ## 参考
 
 - `docs/specs/nbs5f-xray-control-plane-relay/SPEC.md`
