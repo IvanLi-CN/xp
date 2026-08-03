@@ -30,8 +30,8 @@ use tokio::{
 mod embedded_ui;
 mod mesh;
 use mesh::{
-    admin_get_mesh_status, admin_run_mesh_probes, send_mesh_internal_read,
-    send_mesh_internal_request, spawn_mesh_probe_worker,
+    admin_get_mesh_status, admin_internal_raft_client_write, admin_run_mesh_probes,
+    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
 };
 
 use crate::{
@@ -1611,68 +1611,6 @@ fn validate_cluster_join_request(
     }
     validate_https_origin(&req.api_base_url)?;
     raft_node_id_from_ulid(node_id).map_err(|e| ApiError::invalid_request(e.to_string()))
-}
-
-async fn admin_internal_raft_client_write(
-    Extension(state): Extension<AppState>,
-    internal: Option<Extension<InternalSignatureAuth>>,
-    ApiJson(cmd): ApiJson<DesiredStateCommand>,
-) -> Result<Json<RaftClientResponse>, ApiError> {
-    let Some(Extension(internal)) = internal else {
-        return Err(ApiError::unauthorized("internal auth required"));
-    };
-    let request_id = internal
-        .verified
-        .as_ref()
-        .filter(|verified| verified.context.route == internal_auth::InternalRoute::MeshV2)
-        .map(|verified| verified.context.request_id.clone());
-    if let Some(request_id) = request_id.as_deref() {
-        match state
-            .internal_idempotency
-            .begin(request_id)
-            .await
-            .map_err(|error| {
-                ApiError::internal(format!("read internal idempotency ledger: {error}"))
-            })? {
-            IdempotencyBegin::Existing(stored) => {
-                let response = serde_json::from_value(stored.body).map_err(|error| {
-                    ApiError::internal(format!("decode stored internal result: {error}"))
-                })?;
-                return Ok(Json(response));
-            }
-            IdempotencyBegin::Full => {
-                return Err(ApiError::new(
-                    "idempotency_ledger_full",
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "internal idempotency ledger is full; retry after active records expire",
-                ));
-            }
-            IdempotencyBegin::New => {}
-        }
-    }
-    let resp = state
-        .raft
-        .client_write(cmd)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    if let Some(request_id) = request_id {
-        state
-            .internal_idempotency
-            .finish(
-                &request_id,
-                StoredResult {
-                    status: StatusCode::OK.as_u16(),
-                    body: serde_json::to_value(&resp).map_err(|error| {
-                        ApiError::internal(format!("encode internal idempotency result: {error}"))
-                    })?,
-                },
-            )
-            .await
-            .map_err(|error| {
-                ApiError::internal(format!("persist internal idempotency result: {error}"))
-            })?;
-    }
-    Ok(Json(resp))
 }
 
 async fn admin_internal_mesh_health(

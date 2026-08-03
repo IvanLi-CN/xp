@@ -318,7 +318,9 @@ fn required_header(headers: &HeaderMap, name: &'static str) -> Result<String, Au
 }
 
 fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers.get(name)?.to_str().ok().map(ToString::to_string)
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    (values.next().is_none()).then(|| value.to_string())
 }
 
 fn insert_header(
@@ -562,6 +564,46 @@ mod tests {
                 "01JTESTTARGET0000000000000000",
                 200,
                 &ack,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn v2_rejects_duplicate_reserved_headers() {
+        let (key, cert) = identity();
+        let uri: Uri = "/api/admin/_internal/mesh/health".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        let request = RequestContext::now(
+            InternalRoute::HealthV2,
+            "01JTESTCLUSTERID00000000000000",
+            "01JTESTSENDER0000000000000000",
+            "01JTESTTARGET0000000000000000",
+            "01JTESTREQUEST000000000000000",
+        );
+        sign_request_v2(
+            &key,
+            &cert,
+            &Method::GET,
+            &uri,
+            None,
+            &[],
+            &request,
+            &mut headers,
+        )
+        .unwrap();
+        headers.append(INTERNAL_ROUTE_HEADER, "mesh-v2".parse().unwrap());
+
+        assert!(
+            verify_request_v2(
+                &key,
+                &cert,
+                &Method::GET,
+                &uri,
+                &headers,
+                &[],
+                "01JTESTCLUSTERID00000000000000",
+                "01JTESTTARGET0000000000000000",
             )
             .is_err()
         );

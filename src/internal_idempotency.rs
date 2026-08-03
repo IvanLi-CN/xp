@@ -22,8 +22,19 @@ pub struct StoredResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LedgerEntry {
-    completed_at: String,
-    result: StoredResult,
+    state: LedgerState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum LedgerState {
+    Pending {
+        started_at: String,
+    },
+    Complete {
+        completed_at: String,
+        result: StoredResult,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +60,7 @@ impl Default for PersistedLedger {
 pub enum BeginResult {
     New,
     Existing(StoredResult),
+    InFlight,
     Full,
 }
 
@@ -87,13 +99,26 @@ impl InternalIdempotencyLedger {
         let mut state = self.state.lock().await;
         prune(&mut state, Utc::now());
         if let Some(entry) = state.entries.get(request_id) {
-            return Ok(BeginResult::Existing(entry.result.clone()));
+            return Ok(match &entry.state {
+                LedgerState::Pending { .. } => BeginResult::InFlight,
+                LedgerState::Complete { result, .. } => BeginResult::Existing(result.clone()),
+            });
         }
         if state.entries.len() >= MAX_ENTRIES {
             // Do not evict still-valid records: ambiguous retries must always receive their first
             // answer, so capacity pressure is a deliberate rejection rather than silent loss.
             return Ok(BeginResult::Full);
         }
+        state.entries.insert(
+            request_id.to_string(),
+            LedgerEntry {
+                state: LedgerState::Pending {
+                    started_at: timestamp(Utc::now()),
+                },
+            },
+        );
+        state.order.push_back(request_id.to_string());
+        persist(&self.path, &state)?;
         Ok(BeginResult::New)
     }
 
@@ -106,8 +131,10 @@ impl InternalIdempotencyLedger {
         state.entries.insert(
             request_id.to_string(),
             LedgerEntry {
-                completed_at: timestamp(Utc::now()),
-                result,
+                state: LedgerState::Complete {
+                    completed_at: timestamp(Utc::now()),
+                    result,
+                },
             },
         );
         if !state.order.iter().any(|id| id == request_id) {
@@ -122,7 +149,14 @@ fn prune(state: &mut PersistedLedger, now: DateTime<Utc>) {
         let expired = state
             .entries
             .get(&id)
-            .and_then(|entry| DateTime::parse_from_rfc3339(&entry.completed_at).ok())
+            .and_then(|entry| match &entry.state {
+                LedgerState::Pending { started_at } => {
+                    DateTime::parse_from_rfc3339(started_at).ok()
+                }
+                LedgerState::Complete { completed_at, .. } => {
+                    DateTime::parse_from_rfc3339(completed_at).ok()
+                }
+            })
             .is_some_and(|at| now.signed_duration_since(at.with_timezone(&Utc)) > RETENTION);
         if !expired {
             break;
@@ -174,5 +208,22 @@ mod tests {
             restored.begin("request-1").await.unwrap(),
             BeginResult::Existing(StoredResult { status: 201, .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn pending_request_never_executes_twice_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        assert_eq!(ledger.begin("request-1").await.unwrap(), BeginResult::New);
+        assert_eq!(
+            ledger.begin("request-1").await.unwrap(),
+            BeginResult::InFlight
+        );
+
+        let restored = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        assert_eq!(
+            restored.begin("request-1").await.unwrap(),
+            BeginResult::InFlight
+        );
     }
 }
