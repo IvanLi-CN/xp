@@ -128,10 +128,10 @@
 ## Visual Evidence
 
 - Source: mock-only, login-free `/ui-demo/system-status`.
-- Bound implementation commit: `b678d0cb2099e4f8d34cdde6121b85a61f574cbb`.
+- Bound implementation commit: `721c0a6a1d4e1cd2c6f4ff20e6a067802766058a`.
 - Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
-  `capture_scope=browser-viewport`, `sensitive_exclusion=N/A`,
-  `submission_gate=approved`.
+  `capture_scope=browser-viewport`, `requested_viewport=393x852`,
+  `sensitive_exclusion=N/A`, `submission_gate=approved`.
 
 PR: include
 ![Desktop system status controls](./assets/system-status-desktop.png)
