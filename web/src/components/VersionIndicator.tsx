@@ -175,7 +175,7 @@ export function VersionIndicator({
 					</PopoverTrigger>
 					<PopoverContent
 						align="end"
-						className="w-80 p-3"
+						className="w-[21rem] p-3"
 						onPointerEnter={handlePointerEnter}
 						onPointerLeave={handlePointerLeave}
 					>
@@ -258,7 +258,7 @@ export function VersionIndicator({
 									<Icon name="tabler:refresh" ariaLabel="Check" />
 									Check
 								</Button>
-								<div className="flex items-center gap-2">
+								<div className="flex items-center gap-2 pr-2">
 									<Button
 										type="button"
 										variant="ghost"

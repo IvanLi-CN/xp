@@ -244,7 +244,8 @@ Status states:
   - sensitive_exclusion: N/A
   - submission_gate: pending-owner-approval
   - state: one-minute observation timeout
-  - evidence_note: verifies safe timeout summary, Status recovery action, and locked Upgrade action
+  - evidence_note: verifies safe timeout summary, Status recovery action, locked Upgrade
+    action, and right-side action padding
   - PR: include
   - ![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
 
