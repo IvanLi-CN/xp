@@ -53,6 +53,12 @@
   pass `XP_DATA_DIR` through the unit environment, not through shell-expanded `--data-dir` command
   text. If the one-shot runner fails before writing a terminal status, the admin upgrade status API
   must reconcile the durable `running` / `restarting` status to `failed`.
+- The Web client must treat an unstructured start 5xx or a restart-boundary network interruption as
+  an unknown result, not a terminal failure: maintain a same-tab 60-second status observation with
+  2.5-second polling, preserve only the remaining window through refresh, and end only on a
+  terminal status, a structured rejection, or timeout. During that observation, duplicate Upgrade
+  remains disabled even if the popover is manually closed; timeout stays locked until a manual
+  status query proves an active job (new window) or idle/terminal state (unlock).
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.

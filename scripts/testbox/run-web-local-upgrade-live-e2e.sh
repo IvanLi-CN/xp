@@ -296,6 +296,35 @@ if [ "$#" -eq 3 ] \
   exit 0
 fi
 
+if [ "$#" -eq 4 ] \
+  && [ "$1" = "show" ] \
+  && [ "$2" = "xp-upgrade.service" ]; then
+  cat <<'EOF'
+LoadState=loaded
+ActiveState=active
+SubState=running
+Result=success
+ExecMainStatus=0
+EOF
+  exit 0
+fi
+
+if [ "$#" -eq 3 ] \
+  && [ "$1" = "is-active" ] \
+  && [ "$2" = "--quiet" ] \
+  && [ "$3" = "xp.service" ] \
+  && [ -f "$XP_PID_FILE" ] \
+  && kill -0 "$(cat "$XP_PID_FILE")" >/dev/null 2>&1; then
+  exit 0
+fi
+
+if [ "$#" -eq 3 ] \
+  && [ "$1" = "is-active" ] \
+  && [ "$2" = "--quiet" ] \
+  && [ "$3" = "xray.service" ]; then
+  exit 0
+fi
+
 if [ "$#" -eq 2 ] && [ "$1" = "restart" ] && [ "$2" = "xray.service" ]; then
   exit 0
 fi
@@ -408,7 +437,7 @@ prepare_case() {
   ASSET_API_BASE="http://127.0.0.1:$asset_port"
   XP_BIN="$TEST_ROOT/usr/local/bin/xp"
   XP_OPS_BIN="$TEST_ROOT/usr/local/bin/xp-ops"
-  ADMIN_TOKEN="testtoken"
+  ADMIN_TOKEN="test-admin-token-for-live-upgrade-e2e"
 
   mkdir -p "$TEST_ROOT/usr/local/bin" "$TEST_ROOT/etc/xray" "$FAKE_BIN"
   ln -f "$XP_ARTIFACTS/old/xp" "$XP_BIN"

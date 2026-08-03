@@ -596,8 +596,15 @@ Web-triggered local upgrade contract:
   status at `${XP_DATA_DIR}/upgrade/status.json`.
 - Only one active job is allowed. A second start request while a job is `running` or `restarting`
   returns `409 upgrade_already_running`.
-- The Web UI polls status while the job is running. If `xp` restarts during the upgrade, the status
-  file is used to recover the last known result.
+- The Web UI starts a same-tab observation before it sends start and polls status every 2.5 seconds.
+  If the restart boundary returns an unstructured 5xx or drops the connection, that response is
+  treated as unknown rather than failed; the client keeps observing the durable status for up to 60
+  seconds and restores the remaining window after a same-tab refresh.
+- During observation the popover stays visible, Upgrade remains disabled, and the header keeps a
+  spinner. The operator may close the popover with outside click or Esc without cancelling the
+  observation. A terminal status (`succeeded`, `failed`, or `unsupported`) ends it; a 60-second
+  timeout stops automatic polling and keeps Upgrade locked until a manual Status query finds an
+  active job (new window) or an idle/terminal state (unlock).
 - If a host one-shot runner fails before it can write a terminal status, the status endpoint
   reconciles the stale active status to `failed` instead of reporting `running` forever. On systemd
   nodes this reconciliation uses `xp-upgrade.service` failure state as the durable local fact.

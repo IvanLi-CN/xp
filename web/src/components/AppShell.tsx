@@ -54,7 +54,9 @@ import { fetchHealth } from "../api/health";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
+import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
+import { useUpgradeObservation } from "../offline/useUpgradeObservation";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { ReadStateIndicator } from "./ReadStateIndicator";
@@ -131,6 +133,7 @@ export function AppShell({
 	});
 	const lastUpgradeStateRef = useRef<string | null>(null);
 	const lastMeshRevisionRef = useRef<number | null>(null);
+	const upgradeObservation = useUpgradeObservation();
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -154,7 +157,11 @@ export function AppShell({
 		queryFn: ({ signal }) => fetchAdminUpgradeStatus(adminToken, signal),
 		refetchInterval: (query) => {
 			const state = query.state.data?.status.state;
-			return state === "running" || state === "restarting" ? 2500 : false;
+			return upgradeObservation.isObserving ||
+				state === "running" ||
+				state === "restarting"
+				? 2500
+				: false;
 		},
 	});
 
@@ -168,7 +175,31 @@ export function AppShell({
 			void clusterInfo.refetch();
 			void runVersionCheck({ force: true });
 		},
+		onError: (error) => {
+			if (classifyUpgradeStartError(error) === "failed") {
+				upgradeObservation.clear();
+				return;
+			}
+			void adminUpgradeStatus.refetch();
+		},
 	});
+
+	useEffect(() => {
+		if (!adminUpgradeStatus.data) return;
+		const state = adminUpgradeStatus.data.status.state;
+		if (
+			upgradeObservation.observation &&
+			(state === "succeeded" || state === "failed" || state === "unsupported")
+		) {
+			adminUpgradeStart.reset();
+		}
+		upgradeObservation.observeStatus(adminUpgradeStatus.data.status);
+	}, [
+		adminUpgradeStart,
+		adminUpgradeStatus.data,
+		upgradeObservation.observation,
+		upgradeObservation.observeStatus,
+	]);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -449,8 +480,9 @@ export function AppShell({
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
 				? clusterInfo.data.xp_version
 				: null;
-		const upgradeError =
-			adminUpgradeStart.isError && adminUpgradeStart.error
+		const upgradeError = upgradeObservation.observation
+			? null
+			: adminUpgradeStart.isError && adminUpgradeStart.error
 				? formatApiError(adminUpgradeStart.error)
 				: adminUpgradeStatus.isError && adminUpgradeStatus.error
 					? formatApiError(adminUpgradeStatus.error)
@@ -463,13 +495,20 @@ export function AppShell({
 				upgradeStatusError={upgradeError}
 				upgradeStatusLoading={adminUpgradeStatus.isFetching}
 				upgradeStarting={adminUpgradeStart.isPending}
+				upgradeObservation={upgradeObservation.observation}
+				onDismissUpgradeResult={upgradeObservation.clear}
 				onRetryVersionCheck={() => {
 					void runVersionCheck({ force: true });
 				}}
 				onRefreshUpgradeStatus={() => {
-					void adminUpgradeStatus.refetch();
+					void adminUpgradeStatus.refetch().then((result) => {
+						if (result.isSuccess && result.data) {
+							upgradeObservation.refreshTimedOutStatus(result.data.status);
+						}
+					});
 				}}
 				onStartUpgrade={(targetTag) => {
+					upgradeObservation.begin(targetTag);
 					adminUpgradeStart.mutate({ targetTag });
 				}}
 			/>
@@ -479,6 +518,7 @@ export function AppShell({
 		adminUpgradeStatus,
 		clusterInfo,
 		runVersionCheck,
+		upgradeObservation,
 		versionCheck,
 	]);
 

@@ -29,3 +29,7 @@
   one-shot 自愈，避免 UI 永久显示 running。
 - 2026-07-07: hinet-lam 在 `v3.17.4` 发布后仍显示 latest `v3.17.3`，根因是
   `/api/version/check` 在发布前缓存了旧 latest 一小时；手动 Check 改为 refresh 请求，保留自动检查缓存。
+- 2026-08-03: SG 节点升级触发后，服务重启边界返回的无结构 502 会让旧 UI 停止轮询并关闭 popover，
+  即使 durable job 已开始。客户端改为先持久化同标签页观察记录，持续查询 status 60 秒；只有服务端
+  terminal state、结构化拒绝或 timeout 才终止观察，手动 Status 可依服务端事实恢复或解除锁定。
+- 同日修复观察边界：残留 terminal status 不会结束新 attempt，且刷新恢复的 terminal result 不会被误报为 timeout。
