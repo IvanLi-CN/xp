@@ -576,7 +576,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         budget: Duration,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        let (response, verified) = if let Some(relay) = &self.relay {
+        let (response, verified, relay_succeeded) = if let Some(relay) = &self.relay {
             let relay_budget = std::cmp::max(Duration::from_millis(1), budget / 2);
             let relay_started = Instant::now();
             match tokio::time::timeout(
@@ -592,58 +592,44 @@ impl MeshAwareHttpClient {
             )
             .await
             {
-                Ok(Ok(value)) => {
-                    self.state.mark_ready().await;
-                    value
-                }
-                Ok(Err(_)) | Err(_) if !request.allow_ambiguous_fallback => {
+                Ok(Ok((response, verified))) => (response, verified, true),
+                Ok(Err(error)) if !request.allow_ambiguous_fallback => {
+                    self.state
+                        .mark_degraded(format!("control relay request failed: {error}"))
+                        .await;
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
-                Ok(Err(error)) => {
+                Err(_) if !request.allow_ambiguous_fallback => {
                     self.state
-                        .mark_fallback(format!("control relay request failed: {error}"))
+                        .mark_degraded(format!("control relay timed out after {relay_budget:?}"))
                         .await;
-                    tokio::time::timeout(
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Ok(Err(error)) => self
+                    .fallback_public_to_direct(
+                        format!("control relay request failed: {error}"),
                         budget.saturating_sub(relay_started.elapsed()),
-                        signed_send(
-                            &self.direct,
-                            url,
-                            request,
-                            context,
-                            cluster_ca_key_pem,
-                            cluster_ca_cert_pem,
-                        ),
+                        url,
+                        request,
+                        context,
+                        (cluster_ca_key_pem, cluster_ca_cert_pem),
                     )
                     .await
-                    .map_err(|_| MeshRequestError::OutcomeUnknown)?
-                    .map_err(|error| {
-                        public_transport_error(error, request.allow_ambiguous_fallback)
-                    })?
-                }
-                Err(_) => {
-                    self.state
-                        .mark_fallback(format!("control relay timed out after {relay_budget:?}"))
-                        .await;
-                    tokio::time::timeout(
+                    .map(|(response, verified)| (response, verified, false))?,
+                Err(_) => self
+                    .fallback_public_to_direct(
+                        format!("control relay timed out after {relay_budget:?}"),
                         budget.saturating_sub(relay_started.elapsed()),
-                        signed_send(
-                            &self.direct,
-                            url,
-                            request,
-                            context,
-                            cluster_ca_key_pem,
-                            cluster_ca_cert_pem,
-                        ),
+                        url,
+                        request,
+                        context,
+                        (cluster_ca_key_pem, cluster_ca_cert_pem),
                     )
                     .await
-                    .map_err(|_| MeshRequestError::OutcomeUnknown)?
-                    .map_err(|error| {
-                        public_transport_error(error, request.allow_ambiguous_fallback)
-                    })?
-                }
+                    .map(|(response, verified)| (response, verified, false))?,
             }
         } else {
-            tokio::time::timeout(
+            let (response, verified) = tokio::time::timeout(
                 budget,
                 signed_send(
                     &self.direct,
@@ -656,7 +642,8 @@ impl MeshAwareHttpClient {
             )
             .await
             .map_err(|_| MeshRequestError::OutcomeUnknown)?
-            .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?
+            .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+            (response, verified, false)
         };
         let ack = response
             .headers()
@@ -675,7 +662,47 @@ impl MeshAwareHttpClient {
             response.status().as_u16(),
             ack,
         )?;
+        if relay_succeeded {
+            self.state.mark_ready().await;
+        }
         Ok(response)
+    }
+
+    async fn fallback_public_to_direct(
+        &self,
+        relay_reason: String,
+        budget: Duration,
+        url: &str,
+        request: &MeshRequest,
+        context: &RequestContext,
+        cluster_ca: (&str, &str),
+    ) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), MeshRequestError> {
+        self.state.mark_fallback(relay_reason.clone()).await;
+        let result = tokio::time::timeout(
+            budget,
+            signed_send(
+                &self.direct,
+                url,
+                request,
+                context,
+                cluster_ca.0,
+                cluster_ca.1,
+            ),
+        )
+        .await
+        .map_err(|_| MeshRequestError::OutcomeUnknown)
+        .and_then(|result| {
+            result.map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))
+        });
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                self.state
+                    .mark_degraded(format!("{relay_reason}; direct request failed: {error}"))
+                    .await;
+                Err(error)
+            }
+        }
     }
 
     async fn record_mesh_transport_failure(&self, peer: &MeshPeerTarget, reason: String) {
@@ -858,6 +885,17 @@ mod tests {
         assert_eq!(MeshProxyStatus::Fallback.as_str(), "fallback");
         assert_eq!(MeshProxyStatus::Degraded.as_str(), "degraded");
     }
+
+    #[tokio::test]
+    async fn relay_state_tracks_fallback_and_terminal_failure() {
+        let state = MeshProxyStateHandle::ready();
+        state.mark_fallback("relay unavailable").await;
+        assert_eq!(state.snapshot().await.status, MeshProxyStatus::Fallback);
+
+        state.mark_degraded("relay and direct unavailable").await;
+        assert_eq!(state.snapshot().await.status, MeshProxyStatus::Degraded);
+    }
+
     #[test]
     fn invalid_proxy_url_is_rejected() {
         let err = apply_optional_proxy(reqwest::Client::builder(), Some("not a url")).unwrap_err();
