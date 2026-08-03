@@ -38,6 +38,32 @@ describe("upgrade observation", () => {
 		).toMatchObject({ phase: "terminal" });
 	});
 
+	it("ignores a terminal snapshot from before the current upgrade attempt", () => {
+		const observation = beginUpgradeObservation("v3.21.10", NOW);
+		const stale = observeUpgradeStatus(
+			observation,
+			{
+				state: "failed",
+				target_tag: "v3.21.10",
+				updated_at: new Date(NOW - 1_000).toISOString(),
+			},
+			NOW + 2_500,
+		);
+
+		expect(stale).toEqual(observation);
+		expect(
+			observeUpgradeStatus(
+				stale,
+				{
+					state: "succeeded",
+					target_tag: "v3.21.10",
+					updated_at: new Date(NOW + 1_000).toISOString(),
+				},
+				NOW + 2_500,
+			),
+		).toMatchObject({ phase: "terminal" });
+	});
+
 	it("stops polling and holds an unsupported terminal status", () => {
 		expect(
 			observeUpgradeStatus(

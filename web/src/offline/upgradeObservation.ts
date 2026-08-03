@@ -7,11 +7,13 @@ export const UPGRADE_OBSERVATION_STORAGE_KEY = "xp.upgrade-observation";
 type UpgradeJobSnapshot = {
 	state: string;
 	target_tag?: string | null;
+	updated_at?: string;
 };
 
 export type UpgradeObservation = {
 	targetTag: string;
 	deadlineAtMs: number;
+	startedAtMs?: number;
 	phase: "observing" | "timed_out" | "terminal";
 };
 
@@ -27,6 +29,7 @@ export function beginUpgradeObservation(
 	return {
 		targetTag,
 		deadlineAtMs: nowMs + UPGRADE_OBSERVATION_TIMEOUT_MS,
+		startedAtMs: Math.floor(nowMs / 1_000) * 1_000,
 		phase: "observing",
 	};
 }
@@ -47,7 +50,7 @@ export function observeUpgradeStatus(
 ): UpgradeObservation | null {
 	if (!observation) return null;
 	if (observation.phase !== "observing") return observation;
-	if (isTerminal(status?.state)) {
+	if (isCurrentAttemptTerminal(observation, status)) {
 		return { ...observation, phase: "terminal" };
 	}
 	if (nowMs >= observation.deadlineAtMs) {
@@ -129,6 +132,16 @@ function isActive(state: string | undefined): boolean {
 
 function isTerminal(state: string | undefined): boolean {
 	return state === "succeeded" || state === "failed" || state === "unsupported";
+}
+
+function isCurrentAttemptTerminal(
+	observation: UpgradeObservation,
+	status: UpgradeJobSnapshot | null,
+): boolean {
+	if (!isTerminal(status?.state)) return false;
+	if (observation.startedAtMs === undefined || !status?.updated_at) return true;
+	const updatedAtMs = Date.parse(status.updated_at);
+	return Number.isFinite(updatedAtMs) && updatedAtMs >= observation.startedAtMs;
 }
 
 function isStoredObservation(value: unknown): value is UpgradeObservation {

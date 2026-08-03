@@ -17,7 +17,8 @@
   status，跨同标签页刷新只保留剩余时间。
 - 无结构 5xx、网络中断和 `409 upgrade_already_running` 保留观察而不显示为确定失败；带 code 的
   结构化拒绝立即结束观察并展示 API 错误。status 的 succeeded/failed/unsupported 终态停止轮询并
-  保持结果，直到用户主动关闭 popover。
+  保持结果，直到用户主动关闭 popover。观察器以本次 attempt 的起始时间过滤旧 terminal snapshot，
+  避免上一次升级结果结束新一次升级的观察。
 - 观察期间 popover 维持打开并禁用 Upgrade，pointer leave 不会关闭它；用户仍可用点击外部或 Esc
   主动收起，顶栏 spinner 与后台轮询继续。60 秒无确定状态时进入 timeout、停止轮询并保持锁定；手动
   Status 查到 active job 时建立新窗口，查到 idle 或 terminal 时解除锁定。
@@ -86,7 +87,8 @@
   up-to-date/check-failed/reconnecting/timeout 状态，并用 `play` 覆盖确认后 popover 保持打开与
   Upgrade 锁定。
 - `upgradeObservation.test.ts` 覆盖无结构 502 后持续观察、terminal 收口、60 秒 timeout、手动
-  active 续期和 `sessionStorage` 恢复；`VersionIndicator.test.tsx` 覆盖确认后 popover 生命周期。
+  active 续期、旧 terminal snapshot 过滤和 `sessionStorage` 恢复；`VersionIndicator.test.tsx`
+  覆盖确认后 popover 生命周期。
 
 ## 验证命令
 
