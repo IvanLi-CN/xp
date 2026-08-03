@@ -207,8 +207,8 @@ Status states:
 - `cd web && bun run test`
 - `cd web && bun run storybook`
 - `cd web && bun run test-storybook`
-- UI 视觉证据：Storybook Docs `Components/VersionIndicator/Reconnecting evidence` 与
-  `Components/VersionIndicator/Status timeout evidence` 展示打开的 popover 与观察终态。
+- UI 视觉证据：Storybook Canvas `Components/VersionIndicator/Reconnecting` 与
+  `Components/VersionIndicator/StatusTimedOut` 展示打开的 popover 与观察终态。
 
 ## Visual Evidence
 
@@ -218,8 +218,8 @@ Status states:
 - Storybook `Components/VersionIndicator/UpdateAvailableUnsupported`
   - PR: include
   - ![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
-- source_type: storybook_docs
-  - docs_entry_or_title: `Components/VersionIndicator/Reconnecting evidence`
+- source_type: storybook_canvas
+  - story_id_or_title: `Components/VersionIndicator/Reconnecting`
   - target_program: mock-only
   - capture_scope: element
   - requested_viewport: none
@@ -227,14 +227,14 @@ Status states:
   - margin_policy: require_margin
   - evidence_surface: component
   - sensitive_exclusion: N/A
-  - submission_gate: pending-owner-approval
+  - submission_gate: owner-approved
   - state: reconnecting after an ambiguous start result
-  - evidence_note: element capture of the card and popover verifies spinner,
-    preserved popover, safe reconnecting summary, and locked Upgrade action
+  - evidence_note: direct popover element capture verifies spinner, preserved
+    popover, reconnecting summary, and locked Upgrade action
   - PR: include
   - ![Version indicator reconnecting](./assets/version-indicator-reconnecting.png)
-- source_type: storybook_docs
-  - docs_entry_or_title: `Components/VersionIndicator/Status timeout evidence`
+- source_type: storybook_canvas
+  - story_id_or_title: `Components/VersionIndicator/StatusTimedOut`
   - target_program: mock-only
   - capture_scope: element
   - requested_viewport: none
@@ -242,10 +242,10 @@ Status states:
   - margin_policy: require_margin
   - evidence_surface: component
   - sensitive_exclusion: N/A
-  - submission_gate: pending-owner-approval
+  - submission_gate: owner-approved
   - state: one-minute observation timeout
-  - evidence_note: element capture of the card and popover verifies the dark-theme
-    timeout summary, Status recovery action, locked Upgrade action, and padding
+  - evidence_note: direct popover element capture verifies the timeout summary,
+    Status recovery action, locked Upgrade action, and content padding
   - PR: include
   - ![Version indicator status timeout](./assets/version-indicator-status-timeout.png)
 

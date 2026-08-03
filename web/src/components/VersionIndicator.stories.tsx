@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import type { AdminUpgradeStatusResponse } from "@/api/adminUpgrade";
-import { Card, CardContent } from "@/components/ui/card";
 import type { UpgradeObservation } from "@/offline/upgradeObservation";
 
 import { VersionIndicator } from "./VersionIndicator";
@@ -58,11 +57,9 @@ type Story = StoryObj<typeof meta>;
 
 function Wrap(props: { children: ReactNode }) {
 	return (
-		<Card>
-			<CardContent className="flex min-h-56 items-start justify-end p-4">
-				{props.children}
-			</CardContent>
-		</Card>
+		<div className="flex min-h-56 items-start justify-end p-4">
+			{props.children}
+		</div>
 	);
 }
 
