@@ -230,6 +230,18 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         ))
         .context("init follower store")?,
     ));
+    let leader_node = leader_store
+        .lock()
+        .await
+        .list_nodes()
+        .into_iter()
+        .next()
+        .context("leader store has bootstrap node")?;
+    follower_store
+        .lock()
+        .await
+        .upsert_node(leader_node)
+        .context("mirror leader node into follower store")?;
 
     let cluster_name = "forwarding-raft-facade".to_string();
     let leader_id: NodeId = 1;
@@ -380,7 +392,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
             cluster.node_id.clone(),
             leader_store.clone(),
         ),
-        cluster,
+        cluster.clone(),
         cluster_ca_pem.clone(),
         cluster_ca_key_pem.clone(),
         raft_facade,
@@ -393,14 +405,21 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         .await
         .context("spawn admin server")?;
 
+    let mesh_client = xp::control_plane_mesh::MeshAwareHttpClient::new(
+        reqwest::Client::new(),
+        None,
+        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
+    );
     let forwarding = ForwardingRaftFacade::try_new(
         follower.raft(),
+        mesh_client,
         cluster_ca_key_pem
             .clone()
             .ok_or_else(|| anyhow::anyhow!("missing cluster ca key"))?,
         &cluster_ca_pem,
-        None,
-        None,
+        cluster.cluster_id.clone(),
+        cluster.node_id.clone(),
+        follower_store.clone(),
     )
     .context("build forwarding facade")?;
 

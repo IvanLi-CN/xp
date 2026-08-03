@@ -25,6 +25,7 @@ import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
+import { SystemStatusPage } from "./views/SystemStatusPage";
 import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
 import { UserNewPage } from "./views/UserNewPage";
@@ -90,6 +91,14 @@ const DemoToolsPage = lazyRouteComponent(
 	() => import("./demo/DemoSettingsPages"),
 	"DemoToolsPage",
 );
+const DemoSystemStatusPage = lazyRouteComponent(
+	() => import("./demo/DemoSystemStatusPage"),
+	"DemoSystemStatusPage",
+);
+const UiDemoSystemStatusPage = lazyRouteComponent(
+	() => import("./demo/DemoSystemStatusPage"),
+	"UiDemoSystemStatusPage",
+);
 const DemoUserDetailsPage = lazyRouteComponent(
 	() => import("./demo/DemoUsersPage"),
 	"DemoUserDetailsPage",
@@ -111,6 +120,12 @@ const loginRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/login",
 	component: LoginPage,
+});
+
+const uiDemoSystemStatusRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/ui-demo/system-status",
+	component: UiDemoSystemStatusPage,
 });
 
 const appRoute = createRoute({
@@ -138,6 +153,12 @@ const dashboardRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/",
 	component: HomePage,
+});
+
+const systemStatusRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/system-status",
+	component: SystemStatusPage,
 });
 
 const nodesRoute = createRoute({
@@ -246,6 +267,12 @@ const demoDashboardRoute = createRoute({
 	component: DemoDashboardPage,
 });
 
+const demoSystemStatusRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/system-status",
+	component: DemoSystemStatusPage,
+});
+
 const demoNodesRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/nodes",
@@ -332,6 +359,7 @@ const demoToolsRoute = createRoute({
 
 const appRouteTree = appRoute.addChildren([
 	dashboardRoute,
+	systemStatusRoute,
 	nodesRoute,
 	nodeDetailsRoute,
 	endpointsRoute,
@@ -351,6 +379,7 @@ const demoLoginRouteTree = demoLoginRootRoute.addChildren([demoLoginPageRoute]);
 
 const demoAppRouteTree = demoAppRoute.addChildren([
 	demoDashboardRoute,
+	demoSystemStatusRoute,
 	demoNodesRoute,
 	demoNodeDetailsRoute,
 	demoEndpointsRoute,
@@ -369,6 +398,7 @@ const demoAppRouteTree = demoAppRoute.addChildren([
 
 const routeTree = rootRoute.addChildren([
 	loginRoute,
+	uiDemoSystemStatusRoute,
 	appRouteTree,
 	demoLoginRouteTree,
 	demoAppRouteTree,

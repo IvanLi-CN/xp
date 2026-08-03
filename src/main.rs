@@ -296,6 +296,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         bootstrap_access_host: cluster.access_host.clone(),
         bootstrap_api_base_url: cluster.api_base_url.clone(),
     })?;
+    // Do not start workers that can issue internal traffic before the durable auth epoch is valid.
+    let persisted_member_count = store.list_nodes().len();
+    xp::internal_auth_epoch::ensure_startup_epoch(&config.data_dir, persisted_member_count)?;
     let store = Arc::new(Mutex::new(store));
 
     let reconcile = xp::reconcile::spawn_reconciler(
@@ -325,14 +328,27 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         node_history.clone(),
     );
 
+    let mesh_telemetry = xp::mesh_telemetry::MeshTelemetryHandle::load(&config.data_dir)
+        .context("load local mesh telemetry")?;
+
     let raft_id = xp::raft::types::raft_node_id_from_ulid(&cluster.node_id)?;
-    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_state(
+    let raft_network = xp::raft::network_http::HttpNetworkFactory::try_new_mtls_with_mesh_auth(
         &cluster_ca_pem,
         &node_cert_pem,
         &node_key_pem,
         config.mesh_proxy_url.as_deref(),
         mesh_proxy_state.clone(),
-    )?;
+        xp::raft::network_http::RaftMeshAuth {
+            cluster_id: cluster.cluster_id.clone(),
+            sender_id: cluster.node_id.clone(),
+            cluster_ca_key_pem: cluster_ca_key_pem_required.clone(),
+            cluster_ca_cert_pem: cluster_ca_pem.clone(),
+            store: store.clone(),
+        },
+    )?
+    .with_mesh_observability(mesh_telemetry.clone());
+    let mesh_client = raft_network.mesh_client();
+    let mesh_circuits = mesh_client.circuits();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),
@@ -413,6 +429,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             config_arc.clone(),
             store.clone(),
             cluster.node_id.clone(),
+            cluster.cluster_id.clone(),
+            cluster_ca_key_pem_required.clone(),
+            cluster_ca_pem.clone(),
         )
         .await;
         if disable_managed_vless_reconcile_for_canary_result(
@@ -454,10 +473,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let raft_facade: Arc<dyn xp::raft::app::RaftFacade> =
         Arc::new(xp::raft::app::ForwardingRaftFacade::try_new(
             raft.raft(),
+            mesh_client.clone(),
             cluster_ca_key_pem_required.clone(),
             &cluster_ca_pem,
-            Some(&node_cert_pem),
-            Some(&node_key_pem),
+            cluster.cluster_id.clone(),
+            cluster.node_id.clone(),
+            store.clone(),
         )?);
     let pending_managed_default_reconcile =
         should_reconcile_managed_defaults_at_startup(&managed_default_intent)
@@ -474,11 +495,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         geo_db_update.resolver(),
     );
     let _node_history_remote_sync_task = xp::node_history::spawn_node_history_remote_sync_worker(
+        cluster.cluster_id.clone(),
         cluster.node_id.clone(),
         store.clone(),
         node_history.clone(),
-        cluster_ca_pem.clone(),
         cluster_ca_key_pem_required.clone(),
+        cluster_ca_pem.clone(),
+        mesh_client,
     );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
@@ -502,7 +525,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         Duration::from_secs(60),
     );
 
-    let app = xp::http::build_router(
+    let app = xp::http::build_router_with_mesh_telemetry(
         config.clone(),
         store.clone(),
         reconcile,
@@ -519,6 +542,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         Some(raft.raft()),
         geo_db_update,
         mesh_proxy_state,
+        mesh_telemetry,
+        mesh_circuits,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

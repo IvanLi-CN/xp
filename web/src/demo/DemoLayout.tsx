@@ -35,6 +35,11 @@ const navGroups = [
 		title: "Demo",
 		items: [
 			{ label: "Dashboard", to: "/demo", icon: "tabler:layout-dashboard" },
+			{
+				label: "System status",
+				to: "/demo/system-status",
+				icon: "tabler:activity-heartbeat",
+			},
 			{ label: "Nodes", to: "/demo/nodes", icon: "tabler:server" },
 			{ label: "Endpoints", to: "/demo/endpoints", icon: "tabler:plug" },
 			{ label: "Users", to: "/demo/users", icon: "tabler:users" },

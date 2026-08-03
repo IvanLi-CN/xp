@@ -7,9 +7,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Context;
 use chrono::{DateTime, Days, Duration as ChronoDuration, SecondsFormat, Utc};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{Mutex, RwLock},
@@ -19,9 +17,9 @@ use tracing::warn;
 
 use crate::{
     config::Config,
+    control_plane_mesh::{MeshAwareHttpClient, peer_target_from_node},
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{Node, NodeQuotaReset, User, UserQuotaReset},
-    internal_auth,
     node_runtime::{
         LocalNodeRuntimeSnapshot, NodeRuntimeEventKind, NodeRuntimeHandle, RuntimeComponent,
         RuntimeStatus,
@@ -29,6 +27,9 @@ use crate::{
     state::{JsonSnapshotStore, membership_xray_email},
     xray,
 };
+
+#[path = "node_history_remote.rs"]
+mod remote;
 
 const HISTORY_SCHEMA_VERSION: u32 = 2;
 const HISTORY_WINDOW_DAYS: u64 = 90;
@@ -39,7 +40,6 @@ const TRAFFIC_DAILY_BUCKETS: usize = 90;
 const EVENT_WINDOW_DAYS: u64 = 7;
 const MAX_EVENTS_PER_NODE: usize = 50;
 const SYNC_INTERVAL_SECS: u64 = 5 * 60;
-const REMOTE_SYNC_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeHistoryDailyTraffic {
@@ -1901,34 +1901,35 @@ async fn sleep_until_next_traffic_boundary() {
 }
 
 pub fn spawn_node_history_remote_sync_worker(
+    cluster_id: String,
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
     history: NodeHistoryHandle,
-    cluster_ca_pem: String,
     cluster_ca_key_pem: String,
+    cluster_ca_pem: String,
+    mesh_client: MeshAwareHttpClient,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let client = match build_cluster_http_client(&cluster_ca_pem) {
-            Ok(client) => client,
-            Err(err) => {
-                warn!(%err, "node history remote sync disabled");
-                return;
-            }
-        };
         let mut ticker = tokio::time::interval(Duration::from_secs(SYNC_INTERVAL_SECS));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            let nodes = {
+            let (nodes, endpoints) = {
                 let store = store.lock().await;
-                store.list_nodes()
+                (store.list_nodes(), store.list_endpoints())
             };
             sync_remote_node_histories(
-                &client,
-                &cluster_ca_key_pem,
+                &mesh_client,
+                &remote::RemoteSyncAuth::new(
+                    &cluster_id,
+                    &local_node_id,
+                    &cluster_ca_key_pem,
+                    &cluster_ca_pem,
+                ),
                 &history,
                 &local_node_id,
                 nodes,
+                endpoints,
             )
             .await;
         }
@@ -2074,27 +2075,28 @@ fn traffic_cycle_for_user(user: &User, now: DateTime<Utc>) -> Option<TrafficCycl
 }
 
 async fn sync_remote_node_histories(
-    client: &Client,
-    ca_key_pem: &str,
+    client: &MeshAwareHttpClient,
+    auth: &remote::RemoteSyncAuth<'_>,
     history: &NodeHistoryHandle,
     local_node_id: &str,
     nodes: Vec<Node>,
+    endpoints: Vec<crate::domain::Endpoint>,
 ) {
     for node in nodes {
         if node.node_id == local_node_id {
             continue;
         }
         let now = Utc::now();
-        let base = node.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
+        if node.api_base_url.trim().is_empty() {
             history
                 .mark_sync_error(now, &node.node_id, "node api_base_url is empty".to_string())
                 .await;
             continue;
         }
+        let peer = peer_target_from_node(&node, &endpoints);
 
         for target_node_id in history.pending_node_history_cleanup(&node.node_id).await {
-            match clear_remote_node_history(client, ca_key_pem, base, &target_node_id).await {
+            match remote::clear_node_history(client, auth, &peer, &target_node_id).await {
                 Ok(()) => {
                     history
                         .complete_node_history_cleanup(&node.node_id, &target_node_id)
@@ -2112,7 +2114,7 @@ async fn sync_remote_node_histories(
         }
 
         for user_id in history.pending_user_traffic_cleanup(&node.node_id).await {
-            match clear_remote_user_traffic(client, ca_key_pem, base, &user_id).await {
+            match remote::clear_user_traffic(client, auth, &peer, &user_id).await {
                 Ok(()) => {
                     history
                         .complete_user_traffic_cleanup(&node.node_id, &user_id)
@@ -2129,7 +2131,7 @@ async fn sync_remote_node_histories(
             }
         }
 
-        match fetch_remote_history(client, ca_key_pem, base).await {
+        match remote::fetch_snapshot(client, auth, &peer).await {
             Ok(snapshot) => {
                 history
                     .replace_node_snapshot(now, &node.node_id, snapshot)
@@ -2142,105 +2144,6 @@ async fn sync_remote_node_histories(
             }
         }
     }
-}
-
-async fn clear_remote_node_history(
-    client: &Client,
-    ca_key_pem: &str,
-    base: &str,
-    node_id: &str,
-) -> anyhow::Result<()> {
-    let uri: axum::http::Uri = format!("/_internal/nodes/{node_id}/history")
-        .parse()
-        .context("invalid node history cleanup path")?;
-    let signature = internal_auth::sign_request(ca_key_pem, &axum::http::Method::DELETE, &uri)
-        .map_err(|err| anyhow::anyhow!("sign node history cleanup request: {err}"))?;
-    let response = tokio::time::timeout(
-        REMOTE_SYNC_TIMEOUT,
-        client
-            .delete(format!(
-                "{base}/api/admin/_internal/nodes/{node_id}/history"
-            ))
-            .header(
-                reqwest::header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                signature,
-            )
-            .send(),
-    )
-    .await
-    .context("node history cleanup request timeout")??;
-    if !response.status().is_success() {
-        anyhow::bail!("node history cleanup request failed: {}", response.status());
-    }
-    Ok(())
-}
-
-async fn clear_remote_user_traffic(
-    client: &Client,
-    ca_key_pem: &str,
-    base: &str,
-    user_id: &str,
-) -> anyhow::Result<()> {
-    let uri: axum::http::Uri = format!("/_internal/users/{user_id}/traffic/local")
-        .parse()
-        .context("invalid user traffic cleanup path")?;
-    let signature = internal_auth::sign_request(ca_key_pem, &axum::http::Method::DELETE, &uri)
-        .map_err(|err| anyhow::anyhow!("sign user traffic cleanup request: {err}"))?;
-    let response = tokio::time::timeout(
-        REMOTE_SYNC_TIMEOUT,
-        client
-            .delete(format!(
-                "{base}/api/admin/_internal/users/{user_id}/traffic/local"
-            ))
-            .header(
-                reqwest::header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-                signature,
-            )
-            .send(),
-    )
-    .await
-    .context("user traffic cleanup request timeout")??;
-    if !response.status().is_success() {
-        anyhow::bail!("user traffic cleanup request failed: {}", response.status());
-    }
-    Ok(())
-}
-
-async fn fetch_remote_history(
-    client: &Client,
-    ca_key_pem: &str,
-    base: &str,
-) -> anyhow::Result<NodeHistorySnapshot> {
-    let uri: axum::http::Uri = "/_internal/nodes/history/local".parse().expect("valid uri");
-    let sig = internal_auth::sign_request(ca_key_pem, &axum::http::Method::GET, &uri)
-        .map_err(|err| anyhow::anyhow!("sign internal request: {err}"))?;
-    let request = client
-        .get(format!("{base}/api/admin/_internal/nodes/history/local"))
-        .header(
-            reqwest::header::HeaderName::from_static(internal_auth::INTERNAL_SIGNATURE_HEADER),
-            sig,
-        )
-        .send();
-    let response = tokio::time::timeout(REMOTE_SYNC_TIMEOUT, request)
-        .await
-        .context("request timeout")??;
-    if !response.status().is_success() {
-        anyhow::bail!("node history request failed: {}", response.status());
-    }
-    response
-        .json::<NodeHistorySnapshot>()
-        .await
-        .context("decode node history response")
-}
-
-fn build_cluster_http_client(cluster_ca_pem: &str) -> anyhow::Result<Client> {
-    let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-        .context("parse cluster ca pem")?;
-    Client::builder()
-        .add_root_certificate(ca)
-        .danger_accept_invalid_hostnames(true)
-        .build()
-        .context("build cluster reqwest client")
 }
 
 fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {

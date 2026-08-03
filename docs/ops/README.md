@@ -29,7 +29,7 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` can optionally route xp-to-xp control-plane HTTP requests through a local proxy with `XP_MESH_PROXY_URL`; `xp-ops init` provisions a loopback-only Xray SOCKS listener at `127.0.0.1:10808` for this purpose.
+- `xp` derives its primary per-peer control-plane route from exactly one managed-default VLESS/REALITY endpoint on the target node. `XP_MESH_PROXY_URL` remains an optional proxy-first/direct compatibility layer only for the public fallback egress.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
@@ -96,6 +96,70 @@ Contract:
 - This does not move the admin UI / cluster API onto the VLESS port.
 - Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
+
+## Reality fallback control-plane Mesh
+
+When a peer has exactly one managed-default VLESS/REALITY endpoint, XP derives
+`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The canary keeps
+ordinary `/generate_204` and authority-based camouflage traffic separate from Mesh traffic:
+
+- signed `health-v2` requests reach only the bodyless Mesh health endpoint;
+- signed `mesh-v2` requests may reach only `/raft/*` and `/api/admin/_internal/*` on the fixed
+  local XP loopback origin;
+- malformed or unsigned requests carrying reserved `X-XP-*` route headers return `404` and are
+  never forwarded to a camouflage upstream.
+
+Each peer has an independent breaker. After three retryable Mesh transport failures it uses the
+`30/60/120/240/300s` backoff sequence and sends the remaining request budget to the public
+`api_base_url`. A signed acknowledgement is authoritative even for a non-2xx HTTP result, so it
+never triggers a second path attempt. The local node keeps 24 hours of one-minute buckets and the
+last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect them with
+`GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
+accepts only current remote member IDs.
+
+### Auth epoch cutover
+
+A multi-node cluster cannot cross to internal-auth v2 through the Web upgrade action. The already
+installed v1 `xp-ops` does not recognize the v2 cutover flag, so this boundary requires a
+maintenance window and a verified target-release `xp-ops` bootstrap on every host-managed node.
+Quiesce the cluster, choose one immutable release tag, and run the following on each node before
+allowing any node to resume control-plane traffic:
+
+```bash
+export XP_RELEASE=vX.Y.Z
+export XP_ARCH="$(uname -m)"
+case "$XP_ARCH" in x86_64|amd64) XP_ARCH=x86_64 ;; aarch64|arm64) XP_ARCH=aarch64 ;; *) exit 2 ;; esac
+mkdir -p /tmp/xp-internal-auth-v2 && cd /tmp/xp-internal-auth-v2
+curl -fLO "https://github.com/IvanLi-CN/xp/releases/download/${XP_RELEASE}/checksums.txt"
+curl -fLO "https://github.com/IvanLi-CN/xp/releases/download/${XP_RELEASE}/xp-ops-linux-${XP_ARCH}"
+grep " xp-ops-linux-${XP_ARCH}$" checksums.txt | sha256sum -c -
+chmod 0755 "xp-ops-linux-${XP_ARCH}"
+sudo "./xp-ops-linux-${XP_ARCH}" upgrade --version "$XP_RELEASE" \
+  --data-dir /var/lib/xp/data --allow-internal-auth-v2-cutover
+```
+
+For the official single-image runtime, pull the target image first, then invoke its marker command
+against the same persistent volume before starting that image. Replace the Compose file with the
+node's actual bootstrap or join file:
+
+```bash
+export XP_IMAGE=ghcr.io/ivanli-cn/xp@sha256:<target-image-digest>
+export XP_COMPOSE=deploy/docker/compose.bootstrap.yml
+docker compose -f "$XP_COMPOSE" pull xp
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container mark-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+docker compose -f "$XP_COMPOSE" up -d xp
+```
+
+The marker lives under `${XP_DATA_DIR}/mesh/`. A new binary consumes it into a durable v2 epoch
+record; without it startup fails. A host-managed upgrade failure clears a marker it created only
+before the new process consumes it. If restart or managed runtime reconcile fails after consumption,
+XP stays on v2 while the runtime rollback completes; it never restores the old v1 binary. For a
+container failure before the new `xp` process consumes the marker, restore the previous immutable
+image and run `container cancel-internal-auth-v2-cutover` through that target image. Once the epoch
+record exists, v1 rollback is intentionally unsupported: restore a pre-cutover data backup or
+complete the v2 recovery instead. After the durable epoch exists, same-epoch Web upgrades are
+available again. Never stagger v1 and v2 nodes outside this maintenance window.
 
 Host-managed upgrade note:
 
@@ -312,8 +376,8 @@ Required (or commonly set):
     DNS-over-HTTPS resolvers before ACME validation starts. Nodes do not need direct authority
     access on UDP/TCP port 53.
 - `XP_MESH_PROXY_URL` (default: unset)
-  - Optional proxy URL for node-to-node control-plane traffic. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
-  - This does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
+  - Optional proxy-first/direct egress layer for public control-plane fallback. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
+  - This does not carry Reality Mesh traffic and does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
 
 DDNS runtime notes:
 
@@ -590,12 +654,16 @@ Use the path that matches the node shape instead of mixing procedures:
 
 - Host-managed systemd/OpenRC nodes:
   - Upgrade binaries with `xp-ops upgrade` when the distro family is officially supported by `xp-ops`.
+  - At the internal-auth v2 boundary, use the verified bootstrap procedure above instead of an
+    ordinary `xp-ops upgrade` invocation from the old installed binary.
   - Alternatively, after `xp-ops init` has installed the one-shot runner and narrow privilege rule,
     start the same current-node upgrade from the Web UI.
   - Arch/Debian/Ubuntu/RHEL-family nodes are covered by the supported automation path.
   - If a host-managed node falls outside those distro families, upgrade the `xp` and `xp-ops` binaries manually, then restart `xp` and verify the post-upgrade checks below.
 - Docker / Compose nodes:
   - Update the image tag or digest, then restart the container.
+  - At the internal-auth v2 boundary, use the image marker procedure above; the fixed entrypoint
+    cannot receive a new `container run` flag from Compose.
   - Let `xp-ops container run` perform runtime reconcile on startup.
   - The Web UI reports this shape as unsupported for automatic upgrade and does not replace binaries
     inside the container.

@@ -45,7 +45,7 @@ xp-ops container run
 | `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`           | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                             |
 | `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`           | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
 | `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                     | DNS-01 DoH visibility wait budget; defaults to `180` seconds                                                                            |
-| `XP_MESH_PROXY_URL`                            | optional                     | Enables xp-to-xp control-plane requests through the local proxy; use `socks5h://127.0.0.1:10808` with the bundled Xray config           |
+| `XP_MESH_PROXY_URL`                            | optional                     | Optional proxy-first/direct layer for public fallback egress; Mesh itself uses managed VLESS/REALITY HTTPS fallback                     |
 | `XP_DEFAULT_VLESS_PORT`                        | optional                     | Enables the managed default VLESS endpoint; managed SNI is derived from `XP_ACCESS_HOST`                                                |
 | `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated compatibility input; values are validated when present but no longer choose managed VLESS SNI                                |
 | `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
@@ -61,7 +61,7 @@ xp-ops container run
 - When `XP_ACCESS_HOST` is unset, it is derived from `XP_CLOUDFLARE_HOSTNAME` or `XP_API_BASE_URL`
 - `XP_VLESS_CANARY_BIND` defaults to `127.0.0.1:39043`
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
-- The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional control-plane relay. It is disabled unless `XP_MESH_PROXY_URL` is set.
+- The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional public fallback egress. It is disabled unless `XP_MESH_PROXY_URL` is set; it is not the Mesh transport.
 - Xray defaults to `GOMEMLIMIT=16MiB` and `GOGC=50`; cloudflared defaults to
   `GOMEMLIMIT=8MiB`, `GOGC=50`, and disabled management diagnostics. The image
   contains the same pinned, checksummed low-memory binaries published with the
@@ -106,6 +106,32 @@ The managed default endpoint contract is:
 For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each managed VLESS endpoint may carry its own `canary_upstream` plus an `accepted_authorities` alias set; aliases use `host[:port]`, and omitting the port means HTTPS default `443`. `GET/HEAD /generate_204` is always answered by xp, and other requests route by canonical `Host`/`:authority` or one of the accepted aliases to the endpoint upstream. Public misses are exposed as plain text `404 Not Found`.
 
 If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
+
+For a multi-node internal-auth v2 cutover, use a maintenance window and replace every node from
+the same immutable image digest. The fixed entrypoint cannot receive a new `container run` flag,
+so invoke the target image's marker command against its normal persistent volume before starting
+the target image:
+
+```bash
+export XP_IMAGE=ghcr.io/ivanli-cn/xp@sha256:<target-image-digest>
+export XP_COMPOSE=deploy/docker/compose.bootstrap.yml # or compose.join.yml
+docker compose -f "$XP_COMPOSE" pull xp
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container mark-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+docker compose -f "$XP_COMPOSE" up -d xp
+```
+
+The marker is consumed by the v2 binary before it serves control-plane traffic. If the new
+container fails before consumption, restore the prior `XP_IMAGE` digest and cancel the prepared
+marker through the target image:
+
+```bash
+docker compose -f "$XP_COMPOSE" run --rm --no-deps --entrypoint xp-ops xp \
+  container cancel-internal-auth-v2-cutover --data-dir /var/lib/xp/data
+```
+
+Once the v2 epoch record is durable, v1 rollback is unsupported. Restore a pre-cutover data backup
+or finish recovery with the v2 image. Web upgrade remains unavailable until the v2 epoch is durable.
 
 ## Bootstrap node
 
@@ -209,6 +235,10 @@ docker compose -f deploy/docker/compose.bootstrap.yml up -d
 The Web UI does not replace binaries inside the container. If an update is available, the Web
 upgrade popover reports this deployment shape as unsupported for automatic upgrade and points
 operators back to the host-side image / Compose flow.
+
+For the internal-auth v2 boundary, use the maintenance procedure above rather than this ordinary
+image replacement. It creates the one-shot marker with the target image and defines the only
+pre-consumption rollback path.
 
 ## Image publishing
 

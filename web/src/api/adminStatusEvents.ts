@@ -19,6 +19,7 @@ const AdminStatusEventsSnapshotSchema = z.object({
 	nodes_runtime: AdminNodesRuntimeResponseSchema,
 	alerts: AlertsResponseSchema,
 	upgrade: AdminUpgradeStatusResponseSchema,
+	mesh_revision: z.number(),
 });
 
 const AdminStatusEventsErrorSchema = z.object({

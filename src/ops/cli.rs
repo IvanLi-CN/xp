@@ -122,10 +122,26 @@ pub enum XpCommand {
 #[derive(Subcommand, Debug)]
 pub enum ContainerCommand {
     Run(ContainerRunArgs),
+    /// Write the one-shot internal-auth v2 cutover marker into the persistent data volume.
+    MarkInternalAuthV2Cutover(InternalAuthV2CutoverMarkerArgs),
+    /// Cancel a prepared but not yet consumed internal-auth v2 cutover marker.
+    CancelInternalAuthV2Cutover(InternalAuthV2CutoverMarkerArgs),
 }
 
 #[derive(Args, Debug, Clone)]
 pub struct ContainerRunArgs {
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long)]
+    pub allow_internal_auth_v2_cutover: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InternalAuthV2CutoverMarkerArgs {
+    #[arg(long, env = "XP_DATA_DIR", default_value = "/var/lib/xp/data")]
+    pub data_dir: PathBuf,
+
     #[arg(long)]
     pub dry_run: bool,
 }
@@ -201,6 +217,17 @@ pub struct UpgradeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "XP_DATA_DIR",
+        default_value = "/var/lib/xp/data"
+    )]
+    pub data_dir: PathBuf,
+
+    #[arg(long)]
+    pub allow_internal_auth_v2_cutover: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -561,6 +588,12 @@ pub async fn run() -> i32 {
         Some(Command::Init(args)) => init::cmd_init(paths, args).await,
         Some(Command::Container(cmd)) => match cmd {
             ContainerCommand::Run(args) => container::cmd_container_run(paths, args).await,
+            ContainerCommand::MarkInternalAuthV2Cutover(args) => {
+                container::cmd_mark_internal_auth_v2_cutover(paths, args).await
+            }
+            ContainerCommand::CancelInternalAuthV2Cutover(args) => {
+                container::cmd_cancel_internal_auth_v2_cutover(paths, args).await
+            }
         },
         Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
         Some(Command::UpgradeRunner(args)) => upgrade::cmd_upgrade_runner(paths, args).await,

@@ -296,24 +296,40 @@ async fn internal_restore_existing_node_requires_internal_auth() {
 async fn internal_restore_existing_node_promotes_existing_state_node() {
     let tmp = TempDir::new().unwrap();
     let (app, calls, restored, ca_key_pem) = app_with_recording_raft(&tmp).await;
-    let internal_uri: Uri = "/_internal/raft/restore-existing-node".parse().unwrap();
-    let sig =
-        crate::internal_auth::sign_request(&ca_key_pem, &Method::POST, &internal_uri).unwrap();
-
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/admin/_internal/raft/restore-existing-node")
-                .header(crate::internal_auth::INTERNAL_SIGNATURE_HEADER, sig)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({ "node_id": restored.node_id }).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let body = json!({ "node_id": restored.node_id }).to_string();
+    let uri: Uri = "/api/admin/_internal/raft/restore-existing-node"
+        .parse()
         .unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+
+    let mut request = Request::builder()
+        .method("POST")
+        .uri("/api/admin/_internal/raft/restore-existing-node")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let res = app.oneshot(request).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(

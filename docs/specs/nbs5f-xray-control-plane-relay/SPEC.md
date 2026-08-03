@@ -3,6 +3,7 @@
 ## 状态
 
 - Status: 已完成
+- Superseded by: `docs/specs/56dtr-reality-fallback-control-plane-mesh/SPEC.md`
 - Created: 2026-05-23
 - Last: 2026-05-23
 

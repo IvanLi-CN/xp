@@ -9,7 +9,7 @@ use std::{
 use anyhow::Context;
 use axum::{
     Router,
-    body::Body,
+    body::{Body, to_bytes},
     extract::State,
     http::{
         HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri,
@@ -39,11 +39,16 @@ use trust_dns_resolver::{
 use crate::{
     config::Config,
     domain::{Endpoint, EndpointKind},
+    internal_auth,
     managed_default_endpoints::managed_default_vless_endpoint,
     ops::cloudflare,
     protocol::{CanaryUpstreamConfig, CanaryUpstreamMode, normalize_accepted_authority},
     state::JsonSnapshotStore,
 };
+
+mod mesh;
+
+use mesh::proxy_mesh_request;
 
 pub const GENERATE_204_PATH: &str = "/generate_204";
 const READY_ATTEMPTS: usize = 60;
@@ -62,12 +67,22 @@ struct CanaryProxyState {
     store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
     node_id: String,
     clients: Arc<CanaryProxyClients>,
+    mesh_auth: Option<CanaryMeshAuth>,
+}
+
+#[derive(Clone)]
+struct CanaryMeshAuth {
+    cluster_id: String,
+    cluster_ca_key_pem: String,
+    cluster_ca_cert_pem: String,
+    loopback_base_url: String,
 }
 
 struct CanaryProxyClients {
     auto: reqwest::Client,
     http1: reqwest::Client,
     h2c: reqwest::Client,
+    loopback: reqwest::Client,
 }
 
 impl CanaryProxyClients {
@@ -93,6 +108,11 @@ impl CanaryProxyClients {
                 .pool_idle_timeout(Duration::from_secs(90))
                 .build()
                 .context("build canary h2c upstream client")?,
+            loopback: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(Duration::from_secs(2))
+                .build()
+                .context("build canary loopback client")?,
         })
     }
 
@@ -109,6 +129,10 @@ impl CanaryProxyClients {
             CanaryUpstreamMode::Auto | CanaryUpstreamMode::Http1 => Some(&self.http1),
             CanaryUpstreamMode::H2c => None,
         }
+    }
+
+    fn loopback(&self) -> &reqwest::Client {
+        &self.loopback
     }
 }
 
@@ -459,6 +483,9 @@ pub async fn spawn(
     config: Arc<Config>,
     store: Arc<tokio::sync::Mutex<JsonSnapshotStore>>,
     node_id: String,
+    cluster_id: String,
+    cluster_ca_key_pem: String,
+    cluster_ca_cert_pem: String,
 ) -> anyhow::Result<Option<std::thread::JoinHandle<()>>> {
     let prepared = match prepare_runtime(config.as_ref()).await {
         Ok(prepared) => prepared,
@@ -483,8 +510,14 @@ pub async fn spawn(
     let config_for_thread = config.clone();
     let proxy_state = CanaryProxyState {
         store,
-        node_id,
+        node_id: node_id.clone(),
         clients: Arc::new(CanaryProxyClients::new()?),
+        mesh_auth: Some(CanaryMeshAuth {
+            cluster_id,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            loopback_base_url: format!("http://127.0.0.1:{}", config.bind.port()),
+        }),
     };
     let handle = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -673,6 +706,9 @@ async fn proxy_request(
     state: &CanaryProxyState,
     req: &mut Request<Body>,
 ) -> Result<Response<Body>, Response<Body>> {
+    if is_reserved_mesh_request(req.headers()) {
+        return proxy_mesh_request(state, req).await;
+    }
     let routed = route_upstream(state, req.headers(), req.uri()).await?;
     let upstream_url =
         build_upstream_url(&routed.upstream.url, req.uri()).map_err(error_response)?;
@@ -688,6 +724,11 @@ async fn proxy_request(
         return proxy_websocket(client, req, routed, upstream_url).await;
     }
     proxy_http(state, req, routed, upstream_url).await
+}
+
+fn is_reserved_mesh_request(headers: &HeaderMap) -> bool {
+    headers.contains_key(internal_auth::INTERNAL_ROUTE_HEADER)
+        || headers.contains_key(internal_auth::INTERNAL_SIGNATURE_HEADER)
 }
 
 async fn route_upstream(
@@ -959,6 +1000,9 @@ fn is_upgrade_request(headers: &HeaderMap) -> bool {
 
 fn request_header_allowed(name: &str, upgrade: bool) -> bool {
     let name = name.to_ascii_lowercase();
+    if name.starts_with("x-xp-") {
+        return false;
+    }
     if upgrade && matches!(name.as_str(), "connection" | "upgrade") {
         return true;
     }
@@ -978,6 +1022,9 @@ fn request_header_allowed(name: &str, upgrade: bool) -> bool {
 
 fn response_header_allowed(name: &str, upgrade: bool) -> bool {
     let name = name.to_ascii_lowercase();
+    if name.starts_with("x-xp-") {
+        return false;
+    }
     if upgrade && matches!(name.as_str(), "connection" | "upgrade") {
         return true;
     }
