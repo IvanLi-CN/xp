@@ -119,12 +119,18 @@
 
 ## Visual Evidence
 
-PR: none
-
 - Source: mock-only, login-free `/ui-demo/system-status`.
-- Bound implementation commit: `3ef19d70a5f09b48fc5f7e039ece4875ac5c0c1e`.
-- [Desktop capture](./assets/system-status-desktop.png)
-- [Mobile capture at 393x852](./assets/system-status-mobile.png)
+- Bound implementation commit: `b678d0cb2099e4f8d34cdde6121b85a61f574cbb`.
+- Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
+  `capture_scope=browser-viewport`, `sensitive_exclusion=N/A`,
+  `submission_gate=approved`.
+
+PR: include
+![Desktop system status controls](./assets/system-status-desktop.png)
+
+PR: include
+![Mobile system status controls at 393x852](./assets/system-status-mobile.png)
+
 - Whitespace normalization: no meaningful surrounding whitespace was present.
 
 ## 参考
