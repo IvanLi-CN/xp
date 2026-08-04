@@ -8342,17 +8342,7 @@ async fn get_mihomo_resource(
     if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     }
-    let revision = {
-        let store = state.store.lock().await;
-        store.state().mihomo_resource_revision
-    };
-    let mut url = if let Some(cached) = state
-        .mihomo_resource_directory
-        .lookup_cached(revision, &resource_id)
-        .await
-    {
-        cached
-    } else {
+    let url = loop {
         let (revision, profiles) = {
             let store = state.store.lock().await;
             (
@@ -8365,33 +8355,27 @@ async fn get_mihomo_resource(
                     .collect::<Vec<_>>(),
             )
         };
-        state
+        let url = match state
             .mihomo_resource_directory
-            .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
+            .lookup_cached(revision, &resource_id)
             .await
-    };
-    let current_revision = {
-        let store = state.store.lock().await;
-        store.state().mihomo_resource_revision
-    };
-    if current_revision != revision {
-        let (revision, profiles) = {
-            let store = state.store.lock().await;
-            (
-                store.state().mihomo_resource_revision,
-                store
-                    .state()
-                    .user_mihomo_profiles
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )
+        {
+            Some(cached) => cached,
+            None => {
+                state
+                    .mihomo_resource_directory
+                    .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
+                    .await
+            }
         };
-        url = state
-            .mihomo_resource_directory
-            .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
-            .await;
-    }
+        let current_revision = {
+            let store = state.store.lock().await;
+            store.state().mihomo_resource_revision
+        };
+        if current_revision == revision {
+            break url;
+        }
+    };
     let Some(url) = url else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
