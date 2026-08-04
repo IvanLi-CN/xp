@@ -140,7 +140,11 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/resource"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"chunk-onechunk-two"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-encoding", "gzip")
+                    .set_body_bytes(b"chunk-onechunk-two"),
+            )
             .mount(&server)
             .await;
         let response = proxy_resource(
@@ -150,6 +154,10 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_ENCODING),
+            Some(&HeaderValue::from_static("gzip"))
+        );
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"chunk-onechunk-two")
@@ -432,6 +440,7 @@ pub async fn proxy_resource(
     for name in [
         header::CONTENT_TYPE,
         header::CONTENT_LENGTH,
+        header::CONTENT_ENCODING,
         header::CACHE_CONTROL,
         header::ETAG,
         header::LAST_MODIFIED,
