@@ -4,8 +4,9 @@
   QUIC rather than the Go heap limit. HTTP/2 reduced CPU from about `7.70%` to
   `0.90%`; `10MiB` did not improve CPU or GC over `8MiB`. Managed deployments
   now use HTTP/2 with `GOMEMLIMIT=12MiB`, and upgrades migrate XP-generated
-  `8MiB` defaults plus the recognized legacy provider wrapper while preserving
-  operator overrides. Current HK, SG, and JP aggregate PSS still exceeds the
+  `8MiB` defaults in complete managed templates while preserving operator
+  overrides. Ambiguous legacy custom/provider OpenRC limits require explicit
+  operator review. Current HK, SG, and JP aggregate PSS still exceeds the
   `65,536 KiB` gate and remains an open release blocker.
 
 - OpenRC restart commands can return before `supervise-daemon` reports its child started.

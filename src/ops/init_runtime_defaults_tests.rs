@@ -755,7 +755,7 @@ fn low_memory_backfill_supports_provider_wrapper_script() {
 }
 
 #[test]
-fn low_memory_backfill_migrates_previous_provider_wrapper_memory_default() {
+fn low_memory_backfill_preserves_ambiguous_provider_wrapper_memory_default() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
     fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
@@ -775,8 +775,8 @@ fn low_memory_backfill_migrates_previous_provider_wrapper_memory_default() {
     backfill_low_memory_runtime_defaults(&paths).unwrap();
 
     let updated = fs::read_to_string(service).unwrap();
-    assert!(updated.contains("GOMEMLIMIT:-12MiB"));
-    assert!(!updated.contains("GOMEMLIMIT:-8MiB"));
+    assert!(updated.contains("GOMEMLIMIT:-8MiB"));
+    assert!(!updated.contains("GOMEMLIMIT:-12MiB"));
 }
 
 #[test]
