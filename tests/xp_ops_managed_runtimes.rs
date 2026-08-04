@@ -260,8 +260,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         .path()
         .join("etc/systemd/system/cloudflared.service.d/20-xp-memory.conf");
     fs::create_dir_all(cloudflared_drop_in.parent().unwrap()).unwrap();
-    let original_runtime_defaults =
-        "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n";
+    let original_runtime_defaults = "[Service]\nEnvironment=GOMEMLIMIT=8MiB\nEnvironment=GOGC=50\n";
     fs::write(&cloudflared_drop_in, original_runtime_defaults).unwrap();
     let local_bin = tmp.path().join("usr/local/bin");
     fs::create_dir_all(&local_bin).unwrap();

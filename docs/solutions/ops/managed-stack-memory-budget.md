@@ -54,11 +54,12 @@ manager for readiness before the upgrade commits. On timeout, preserve the origi
 run the ordinary binary and runtime rollback path.
 
 Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
-Set cloudflared `GOMEMLIMIT=8MiB`, `GOGC=50`, and
+Set cloudflared `GOMEMLIMIT=12MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values
-through a managed systemd drop-in or an OpenRC script insertion that leaves
-existing operator values untouched. Container launches pass the same values
-to child processes and retain explicit `XP_*` overrides.
+through a managed systemd drop-in or an OpenRC script insertion. Upgrade only
+XP-generated `8MiB` defaults; leave explicit operator values untouched.
+Container launches pass the same values to child processes and retain explicit
+`XP_*` overrides.
 
 Some provider networks block outbound UDP/7844. New cloudflared builds begin
 with QUIC, and a node can remain unreachable at Cloudflare's edge while its
@@ -68,6 +69,16 @@ local process appears healthy.
 - Use `XP_CLOUDFLARED_PROTOCOL` only for an explicit operator override.
 - Upgrade backfill may update a recognizable managed command, but must leave
   an existing explicit `--protocol` untouched.
+- A provider wrapper can hide the actual cloudflared arguments from the OpenRC
+  service. Migrate only the exact known legacy wrapper from inline `--token`
+  and implicit transport to `--token-file` plus an environment-backed HTTP/2
+  default; preserve both `XP_CLOUDFLARED_PROTOCOL` overrides and all custom wrappers.
+
+When CPU is high, compare transport before tightening the heap. On SG, QUIC at
+`8MiB` used about `7.70%` CPU and `8.15` GC/s; HTTP/2 at the same limit used
+about `0.90%` CPU and `0.85` GC/s. Raising HTTP/2 to `10MiB` did not improve
+those measures, so transport was the causal lever. The managed `12MiB` default
+retains GC headroom; the aggregate PSS gate must still be measured separately.
 
 Heap tuning alone may not fit a sub-64 MiB process-tree budget because PSS also
 charges executable mappings. For the pinned upstream Xray and cloudflared

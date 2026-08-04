@@ -148,6 +148,7 @@ fn snapshot_runtime_defaults(paths: &Paths) -> Result<RuntimeDefaultsBackup, Exi
         paths.systemd_unit_dir().join("cloudflared.service"),
         paths.openrc_initd_dir().join("xray"),
         paths.openrc_initd_dir().join("cloudflared"),
+        paths.usr_local_libexec_dir().join("cloudflared-tunnel"),
     ];
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
@@ -541,7 +542,7 @@ mod tests {
         fs::write(&cloudflared_unit, original_unit).unwrap();
         let cloudflared_drop_in = systemd.join("cloudflared.service.d/20-xp-memory.conf");
         fs::create_dir_all(cloudflared_drop_in.parent().unwrap()).unwrap();
-        let original_drop_in = "[Service]\nEnvironment=GOMEMLIMIT=12MiB\nEnvironment=GOGC=50\n";
+        let original_drop_in = "[Service]\nEnvironment=GOMEMLIMIT=8MiB\nEnvironment=GOGC=50\n";
         fs::write(&cloudflared_drop_in, original_drop_in).unwrap();
 
         let openrc = paths.openrc_initd_dir();
@@ -549,7 +550,7 @@ mod tests {
         let cloudflared_openrc = openrc.join("cloudflared");
         let original_openrc = concat!(
             "command_user=\"cloudflared:cloudflared\"\n",
-            "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"\n",
+            "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"\n",
             "export GOGC=\"${GOGC:-50}\"\n",
         );
         fs::write(&cloudflared_openrc, original_openrc).unwrap();
@@ -558,18 +559,36 @@ mod tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o640),
         )
         .unwrap();
+        fs::create_dir_all(paths.usr_local_libexec_dir()).unwrap();
+        let cloudflared_wrapper = paths.usr_local_libexec_dir().join("cloudflared-tunnel");
+        let original_wrapper = concat!(
+            "#!/bin/sh\n",
+            "exec /usr/local/bin/cloudflared tunnel --no-autoupdate run ",
+            "--token \"$(cat /etc/cloudflared/tunnel-token)\"\n",
+        );
+        fs::write(&cloudflared_wrapper, original_wrapper).unwrap();
+        fs::set_permissions(
+            &cloudflared_wrapper,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
 
         let snapshot = snapshot_runtime_defaults(&paths).unwrap();
         backfill_low_memory_runtime_defaults(&paths).unwrap();
         assert!(
             fs::read_to_string(&cloudflared_drop_in)
                 .unwrap()
-                .contains("GOMEMLIMIT=8MiB")
+                .contains("GOMEMLIMIT=12MiB")
         );
         assert!(
             fs::read_to_string(&cloudflared_openrc)
                 .unwrap()
-                .contains("GOMEMLIMIT:-8MiB")
+                .contains("GOMEMLIMIT:-12MiB")
+        );
+        assert!(
+            fs::read_to_string(&cloudflared_wrapper)
+                .unwrap()
+                .contains("--token-file")
         );
 
         rollback_runtime_binaries_and_services(&paths, &[], &snapshot).unwrap();
@@ -584,10 +603,20 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(cloudflared_unit).unwrap(), original_unit);
         assert_eq!(
+            fs::read_to_string(&cloudflared_wrapper).unwrap(),
+            original_wrapper
+        );
+        assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(
                 &fs::metadata(&cloudflared_openrc).unwrap().permissions(),
             ) & 0o777,
             0o640
+        );
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(
+                &fs::metadata(&cloudflared_wrapper).unwrap().permissions(),
+            ) & 0o777,
+            0o755
         );
         assert!(!systemd.join("xray.service.d/20-xp-memory.conf").exists());
         assert!(!systemd.join("xray.service.d").exists());

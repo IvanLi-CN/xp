@@ -10,7 +10,7 @@ Type=simple
 # Create this user/group (example): useradd --system --home /var/lib/cloudflared --shell /usr/sbin/nologin --user-group cloudflared
 User=cloudflared
 Group=cloudflared
-Environment=GOMEMLIMIT=8MiB
+Environment=GOMEMLIMIT=12MiB
 Environment=GOGC=50
 Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false
 Environment=XP_CLOUDFLARED_PROTOCOL=http2

@@ -595,6 +595,10 @@ the local network has verified QUIC support:
 - OpenRC: set `XP_CLOUDFLARED_PROTOCOL=quic` in `/etc/conf.d/cloudflared`.
 - containers: pass `XP_CLOUDFLARED_PROTOCOL=quic` to `xp-ops container run`.
 
+Managed cloudflared also defaults to `GOMEMLIMIT=12MiB`, `GOGC=50`, and
+`TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Existing XP-generated `8MiB` defaults
+are upgraded to `12MiB`; explicit operator overrides remain unchanged.
+
 ## Upgrade and rollback strategy
 
 ### Recommended: upgrade via `xp-ops` (GitHub Releases)

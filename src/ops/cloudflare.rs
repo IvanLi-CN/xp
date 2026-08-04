@@ -368,7 +368,7 @@ After=network-online.target\n\
 Type=simple\n\
 User=cloudflared\n\
 Group=cloudflared\n\
-Environment=GOMEMLIMIT=8MiB\n\
+Environment=GOMEMLIMIT=12MiB\n\
 Environment=GOGC=50\n\
 Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n\
 Environment=XP_CLOUDFLARED_PROTOCOL=http2\n\
@@ -390,7 +390,7 @@ description="cloudflared (Cloudflare Tunnel)"
 command="/usr/local/bin/cloudflared"
 command_args="--no-autoupdate --protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} --config /etc/cloudflared/config.yml tunnel run"
 command_user="cloudflared:cloudflared"
-export GOMEMLIMIT="${GOMEMLIMIT:-8MiB}"
+export GOMEMLIMIT="${GOMEMLIMIT:-12MiB}"
 export GOGC="${GOGC:-50}"
 export TUNNEL_MANAGEMENT_DIAGNOSTICS="${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}"
 
@@ -930,7 +930,7 @@ mod tests {
     fn openrc_cloudflared_script_is_supervised() {
         let script = openrc_cloudflared_script();
         assert!(script.contains("supervisor=supervise-daemon"));
-        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\""));
+        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\""));
         assert!(
             script.contains(
                 "TUNNEL_MANAGEMENT_DIAGNOSTICS=\"${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}\""

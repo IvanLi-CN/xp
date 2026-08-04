@@ -1069,7 +1069,7 @@ fn spawn_cloudflared(
             runtime_env
                 .get("XP_CLOUDFLARED_GOMEMLIMIT")
                 .map(String::as_str)
-                .unwrap_or("8MiB"),
+                .unwrap_or("12MiB"),
         )
         .env(
             "GOGC",

@@ -1,5 +1,13 @@
 # History
 
+- 2026-08-04: SG production A/B testing traced elevated cloudflared CPU to
+  QUIC rather than the Go heap limit. HTTP/2 reduced CPU from about `7.70%` to
+  `0.90%`; `10MiB` did not improve CPU or GC over `8MiB`. Managed deployments
+  now use HTTP/2 with `GOMEMLIMIT=12MiB`, and upgrades migrate XP-generated
+  `8MiB` defaults plus the recognized legacy provider wrapper while preserving
+  operator overrides. Current HK, SG, and JP aggregate PSS still exceeds the
+  `65,536 KiB` gate and remains an open release blocker.
+
 - OpenRC restart commands can return before `supervise-daemon` reports its child started.
   Host upgrades now wait for manager readiness and roll back on timeout.
 
