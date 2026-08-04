@@ -547,6 +547,10 @@ fn systemd_logical_lines(source: &str) -> Vec<String> {
     let mut logical_lines = Vec::new();
     let mut current = String::new();
     for line in source.lines() {
+        let trimmed = line.trim_start();
+        if !current.is_empty() && (trimmed.starts_with('#') || trimmed.starts_with(';')) {
+            continue;
+        }
         let continued = line.ends_with('\\');
         let fragment = line.strip_suffix('\\').unwrap_or(line);
         if !current.is_empty() {

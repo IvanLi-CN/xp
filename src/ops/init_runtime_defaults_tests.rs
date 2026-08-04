@@ -84,6 +84,7 @@ fn low_memory_backfill_preserves_continued_systemd_environment_override() {
         concat!(
             "[Service]\n",
             "Environment=\"OTHER=value\" \\\n",
+            "  # operator explanation\n",
             "  \"GOMEMLIMIT=24MiB\"\n",
         ),
     )
