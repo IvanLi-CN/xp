@@ -1343,8 +1343,16 @@ async function handleRequest(
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
 			ip_geo_origin: "https://api.country.is",
+			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
 			admin_token_masked: "*".repeat("storybook-admin-token".length),
+		});
+	}
+
+	if (path === "/api/admin/mihomo/resource-policy" && method === "PUT") {
+		const payload = await readJson<{ allow_private_targets?: boolean }>(req);
+		return jsonResponse({
+			allow_private_targets: payload?.allow_private_targets === true,
 		});
 	}
 

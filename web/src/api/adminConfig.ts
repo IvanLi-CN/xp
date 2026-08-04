@@ -14,6 +14,7 @@ export const AdminConfigResponseSchema = z.object({
 	quota_auto_unban: z.boolean(),
 	ip_geo_enabled: z.boolean(),
 	ip_geo_origin: z.string(),
+	mihomo_resource_allow_private_targets: z.boolean(),
 	admin_token_present: z.boolean(),
 	admin_token_masked: z.string(),
 });
@@ -37,4 +38,31 @@ export async function fetchAdminConfig(
 
 	const json: unknown = await res.json();
 	return AdminConfigResponseSchema.parse(json);
+}
+
+export async function putMihomoResourcePolicy(
+	adminToken: string,
+	allowPrivateTargets: boolean,
+	signal?: AbortSignal,
+): Promise<Pick<AdminConfigResponse, "mihomo_resource_allow_private_targets">> {
+	const res = await fetch("/api/admin/mihomo/resource-policy", {
+		method: "PUT",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${adminToken}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({ allow_private_targets: allowPrivateTargets }),
+		signal,
+	});
+
+	await throwIfNotOk(res);
+
+	const json: unknown = await res.json();
+	return z
+		.object({ allow_private_targets: z.boolean() })
+		.transform((value) => ({
+			mihomo_resource_allow_private_targets: value.allow_private_targets,
+		}))
+		.parse(json);
 }

@@ -269,6 +269,10 @@ html[data-density="compact"] {
 		@apply border-warning/30 bg-warning/10 text-foreground;
 	}
 
+	.xp-alert-success {
+		@apply border-success/30 bg-success/10 text-foreground;
+	}
+
 	.xp-alert-error {
 		@apply border-destructive/30 bg-destructive/10 text-foreground;
 	}

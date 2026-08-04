@@ -10,6 +10,14 @@
 - `GET /api/sub/{subscription_token}/mihomo/provider`：显式 provider Mihomo 主配置
 - `GET /api/sub/{subscription_token}/mihomo/provider/system`：provider payload（`proxies:` YAML）
 
+### Mihomo 外部资源镜像
+
+- Mihomo 订阅工具栏和预览弹窗提供临时的 `Use XP mirror for external resources` 选项，默认使用原地址；Raw/Clash 不显示该选项。
+- 勾选后只改写 GeoX、`rule-providers`、`proxy-providers` 的无认证 HTTPS URL，并通过 `external_resources=mirror` 传递给 canonical/provider URL。镜像 provider 固定使用 `proxy: DIRECT`，不转发自定义 Header。
+- 集群 `Service config` 默认拒绝镜像访问 loopback、私网和链路本地目标；管理员可以显式开启 `Allow private Mihomo mirror targets`，该策略对初始 URL 与每次重定向同时生效。
+- XP 只为当前 profile 引用的 URL 和固定 MetaCubeX GeoX 资产建立一对一 HMAC 目录；没有任意 URL 代理参数。删除最后一个引用后资源 ID 立即失效。
+- 镜像端点使用 256 MiB、90 秒、全局 32/单资源 4 的流式限制，不缓存内容、不落盘、不聚合响应；仅跟随无 userinfo 的 HTTPS 重定向，最多服务端跟随 5 次且不向客户端暴露跳转。
+
 ## 2. 统一规则
 
 ### 2.1 host 与端口
@@ -212,3 +220,4 @@ MVP 建议输出“可直接导入”的最小 YAML：
 ### 6.6 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。
+- 若用户在未配置 Mihomo profile 时请求 `external_resources=mirror`，返回 `422 invalid_request`，避免镜像选项无效却继续输出原始 Clash 配置。

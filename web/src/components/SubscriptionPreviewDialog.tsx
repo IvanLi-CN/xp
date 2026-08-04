@@ -8,6 +8,7 @@ import type { SubscriptionFormat } from "../api/subscription";
 import { EditorShortcutHint } from "./EditorShortcutHint";
 import { Icon } from "./Icon";
 import { SubscriptionFormatSegmentedControl } from "./SubscriptionFormatSegmentedControl";
+import { SubscriptionResourceMirrorToggle } from "./SubscriptionResourceMirrorToggle";
 import { useUiPrefsOptional } from "./UiPrefs";
 import {
 	Dialog,
@@ -26,6 +27,8 @@ type SubscriptionPreviewDialogProps = {
 	content: string;
 	error?: string | null;
 	onFormatChange?: (format: SubscriptionFormat) => void | Promise<void>;
+	externalResourceMirror?: boolean;
+	onExternalResourceMirrorChange?: (checked: boolean) => void | Promise<void>;
 };
 
 type ClashFields = {
@@ -219,6 +222,8 @@ export function SubscriptionPreviewDialog({
 	content,
 	error,
 	onFormatChange,
+	externalResourceMirror = false,
+	onExternalResourceMirrorChange,
 }: SubscriptionPreviewDialogProps) {
 	const fields = useMemo(
 		() => (format === "clash" ? extractClashFields(content) : {}),
@@ -314,6 +319,16 @@ export function SubscriptionPreviewDialog({
 								testId="subscription-preview-format"
 								value={format}
 							/>
+							{format === "mihomo" ? (
+								<SubscriptionResourceMirrorToggle
+									checked={externalResourceMirror}
+									compact
+									disabled={loading}
+									onCheckedChange={(checked) => {
+										void onExternalResourceMirrorChange?.(checked);
+									}}
+								/>
+							) : null}
 						</div>
 
 						<div className="col-start-2 row-start-1 flex justify-end lg:col-start-3">

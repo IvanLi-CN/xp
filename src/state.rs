@@ -257,6 +257,10 @@ pub enum MihomoDeliveryMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedState {
     pub schema_version: u32,
+    #[serde(skip)]
+    pub mihomo_resource_revision: u64,
+    #[serde(default)]
+    pub mihomo_resource_allow_private_targets: bool,
     #[serde(default)]
     pub nodes: BTreeMap<String, Node>,
     #[serde(default)]
@@ -304,6 +308,8 @@ impl PersistedState {
     pub fn empty() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            mihomo_resource_revision: 0,
+            mihomo_resource_allow_private_targets: false,
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
@@ -1858,6 +1864,9 @@ pub enum DesiredStateCommand {
     SetMihomoDeliveryMode {
         mode: MihomoDeliveryMode,
     },
+    SetMihomoResourceAllowPrivateTargets {
+        allow: bool,
+    },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
     },
@@ -1991,6 +2000,9 @@ enum DesiredStateCommandCompat {
     },
     SetMihomoDeliveryMode {
         mode: MihomoDeliveryMode,
+    },
+    SetMihomoResourceAllowPrivateTargets {
+        allow: bool,
     },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
@@ -2132,6 +2144,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             }
             DesiredStateCommandCompat::SetMihomoDeliveryMode { mode } => {
                 Self::SetMihomoDeliveryMode { mode }
+            }
+            DesiredStateCommandCompat::SetMihomoResourceAllowPrivateTargets { allow } => {
+                Self::SetMihomoResourceAllowPrivateTargets { allow }
             }
             DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => Self::CompatNoop {
                 note: format!(
@@ -2775,6 +2790,7 @@ impl DesiredStateCommand {
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::DeleteUser { user_id } => {
+                state.mihomo_resource_revision = state.mihomo_resource_revision.wrapping_add(1);
                 let deleted = state.users.remove(user_id).is_some();
                 state.user_node_quotas.remove(user_id);
                 state.user_node_weights.remove(user_id);
@@ -2906,6 +2922,7 @@ impl DesiredStateCommand {
                     }
                     .into());
                 }
+                state.mihomo_resource_revision = state.mihomo_resource_revision.wrapping_add(1);
                 state
                     .user_mihomo_profiles
                     .insert(user_id.clone(), profile.clone());
@@ -2913,6 +2930,10 @@ impl DesiredStateCommand {
             }
             Self::SetMihomoDeliveryMode { mode } => {
                 state.mihomo_delivery_mode = *mode;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetMihomoResourceAllowPrivateTargets { allow } => {
+                state.mihomo_resource_allow_private_targets = *allow;
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::SetGeoDbUpdateSettings { .. } => Ok(DesiredStateApplyResult::Applied),
@@ -3529,6 +3550,7 @@ impl JsonSnapshotStore {
     }
 
     pub fn state_mut(&mut self) -> &mut PersistedState {
+        self.state.mihomo_resource_revision = self.state.mihomo_resource_revision.wrapping_add(1);
         &mut self.state
     }
 
@@ -4217,6 +4239,10 @@ impl JsonSnapshotStore {
 
     pub fn mihomo_delivery_mode(&self) -> MihomoDeliveryMode {
         self.state.mihomo_delivery_mode
+    }
+
+    pub fn mihomo_resource_allow_private_targets(&self) -> bool {
+        self.state.mihomo_resource_allow_private_targets
     }
 
     pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {

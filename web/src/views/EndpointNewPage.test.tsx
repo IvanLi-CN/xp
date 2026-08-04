@@ -119,6 +119,7 @@ function setupNodeMocks() {
 		quota_auto_unban: true,
 		ip_geo_enabled: false,
 		ip_geo_origin: "https://api.country.is",
+		mihomo_resource_allow_private_targets: false,
 		admin_token_present: true,
 		admin_token_masked: "********",
 	});
@@ -281,6 +282,7 @@ describe("EndpointNewPage", () => {
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
 			ip_geo_origin: "https://api.country.is",
+			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
 			admin_token_masked: "********",
 		});
@@ -391,6 +393,7 @@ describe("EndpointNewPage", () => {
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
 			ip_geo_origin: "https://api.country.is",
+			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
 			admin_token_masked: "********",
 		});
@@ -527,6 +530,7 @@ describe("EndpointNewPage", () => {
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
 			ip_geo_origin: "https://api.country.is",
+			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
 			admin_token_masked: "********",
 		});

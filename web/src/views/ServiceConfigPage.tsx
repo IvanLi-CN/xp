@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { fetchAdminConfig } from "../api/adminConfig";
+import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
@@ -12,6 +12,7 @@ import { PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { Checkbox } from "../components/ui/checkbox";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
 	formatSyncTimestamp,
@@ -113,6 +114,7 @@ export function ServiceConfigPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
 	const runtime = useAppRuntime();
+	const queryClient = useQueryClient();
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -128,6 +130,34 @@ export function ServiceConfigPage() {
 		queryKey: ["adminConfig", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
+	});
+
+	const privateTargetPolicyMutation = useMutation({
+		mutationFn: (allowPrivateTargets: boolean) =>
+			putMihomoResourcePolicy(adminToken, allowPrivateTargets),
+		onSuccess: (result) => {
+			queryClient.setQueryData(
+				["adminConfig", adminToken],
+				(previous: typeof configQuery.data) =>
+					previous
+						? {
+								...previous,
+								mihomo_resource_allow_private_targets:
+									result.mihomo_resource_allow_private_targets,
+							}
+						: previous,
+			);
+			toast.pushToast({
+				variant: "success",
+				message: "Mihomo mirror policy updated.",
+			});
+		},
+		onError: (error) => {
+			toast.pushToast({
+				variant: "error",
+				message: `Failed to update Mihomo mirror policy: ${formatErrorMessage(error)}`,
+			});
+		},
 	});
 
 	const headerActions = (
@@ -253,132 +283,210 @@ export function ServiceConfigPage() {
 					<SummaryChip label="mihomo" value="provider-only" />
 				</div>
 
-				<div className="grid gap-4 lg:grid-cols-2">
-					<div className="xp-card">
-						<div className="xp-card-body space-y-3">
-							<div>
-								<h2 className="text-base font-semibold">Network</h2>
-								<p className="text-sm text-muted-foreground">
-									控制面监听与对外 API 地址。
-								</p>
-							</div>
-							<div className="space-y-3">
-								<FieldBlock
-									label="BIND"
-									value={data.bind}
-									copyText={data.bind}
-								/>
-								<FieldBlock
-									label="XRAY API ADDR"
-									value={data.xray_api_addr}
-									copyText={data.xray_api_addr}
-								/>
-								<FieldBlock
-									label="API BASE URL"
-									value={data.api_base_url}
-									copyText={data.api_base_url}
-								/>
+				<section
+					aria-labelledby="cluster-settings-heading"
+					className="space-y-3"
+				>
+					<div>
+						<h2 id="cluster-settings-heading" className="text-lg font-semibold">
+							Cluster settings
+						</h2>
+						<p className="text-sm text-muted-foreground">
+							Raft-persisted policies applied consistently across the cluster.
+						</p>
+					</div>
+					<div className="grid gap-4 lg:grid-cols-2">
+						<div className="xp-card lg:col-span-2">
+							<div className="xp-card-body space-y-4">
+								<div className="flex flex-wrap items-start justify-between gap-4">
+									<div className="max-w-2xl">
+										<h3 className="text-base font-semibold">
+											Mihomo external resource mirror
+										</h3>
+										<p className="text-sm text-muted-foreground">
+											Cluster-wide control for private, loopback, and link-local
+											upstream targets.
+										</p>
+									</div>
+									<label
+										className="flex items-center gap-3 text-sm font-medium"
+										htmlFor="mihomo-private-targets"
+									>
+										<Checkbox
+											id="mihomo-private-targets"
+											checked={data.mihomo_resource_allow_private_targets}
+											disabled={
+												runtime.isReadOnly ||
+												privateTargetPolicyMutation.isPending
+											}
+											aria-label="Allow private Mihomo mirror targets"
+											onCheckedChange={(checked) => {
+												if (checked !== "indeterminate") {
+													privateTargetPolicyMutation.mutate(checked);
+												}
+											}}
+										/>
+										<span>
+											{data.mihomo_resource_allow_private_targets
+												? "Allowed"
+												: "Blocked"}
+										</span>
+									</label>
+								</div>
+								<div
+									className={
+										data.mihomo_resource_allow_private_targets
+											? "xp-alert xp-alert-warning px-4 py-3"
+											: "xp-alert xp-alert-success px-4 py-3"
+									}
+								>
+									{data.mihomo_resource_allow_private_targets
+										? "Enabled: a configured mirror URL may reach private network services. " +
+											"Only enable this for trusted profiles."
+										: "Protected: private network targets are rejected before XP connects to them."}
+								</div>
 							</div>
 						</div>
 					</div>
+				</section>
 
-					<div className="xp-card">
-						<div className="xp-card-body space-y-3">
-							<div>
-								<h2 className="text-base font-semibold">Node</h2>
-								<p className="text-sm text-muted-foreground">
-									用于订阅与客户端连接的对外 host。
-								</p>
-							</div>
-							<div className="space-y-3">
-								<FieldBlock
-									label="NODE NAME"
-									value={data.node_name}
-									copyText={data.node_name}
-								/>
-								<FieldBlock
-									label="ACCESS HOST"
-									value={data.access_host}
-									copyText={data.access_host}
-								/>
-								<FieldBlock
-									label="DATA DIR"
-									value={data.data_dir}
-									copyText={data.data_dir}
-								/>
+				<section aria-labelledby="node-settings-heading" className="space-y-3">
+					<div>
+						<h2 id="node-settings-heading" className="text-lg font-semibold">
+							Node settings
+						</h2>
+						<p className="text-sm text-muted-foreground">
+							Effective runtime values for this node. These fields are
+							read-only.
+						</p>
+					</div>
+					<div className="grid gap-4 lg:grid-cols-2">
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h3 className="text-base font-semibold">Network</h3>
+									<p className="text-sm text-muted-foreground">
+										控制面监听与对外 API 地址。
+									</p>
+								</div>
+								<div className="space-y-3">
+									<FieldBlock
+										label="BIND"
+										value={data.bind}
+										copyText={data.bind}
+									/>
+									<FieldBlock
+										label="XRAY API ADDR"
+										value={data.xray_api_addr}
+										copyText={data.xray_api_addr}
+									/>
+									<FieldBlock
+										label="API BASE URL"
+										value={data.api_base_url}
+										copyText={data.api_base_url}
+									/>
+								</div>
 							</div>
 						</div>
-					</div>
 
-					<div className="xp-card">
-						<div className="xp-card-body space-y-3">
-							<div>
-								<h2 className="text-base font-semibold">Quota</h2>
-								<p className="text-sm text-muted-foreground">
-									流量统计与自动解封策略。
-								</p>
-							</div>
-							<div className="space-y-3">
-								<FieldBlock
-									label="POLL INTERVAL"
-									value={`${data.quota_poll_interval_secs} sec`}
-									copyText={`${data.quota_poll_interval_secs}`}
-								/>
-								<FieldBlock
-									label="AUTO UNBAN"
-									value={data.quota_auto_unban ? "true" : "false"}
-									copyText={data.quota_auto_unban ? "true" : "false"}
-								/>
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h3 className="text-base font-semibold">Node</h3>
+									<p className="text-sm text-muted-foreground">
+										用于订阅与客户端连接的对外 host。
+									</p>
+								</div>
+								<div className="space-y-3">
+									<FieldBlock
+										label="NODE NAME"
+										value={data.node_name}
+										copyText={data.node_name}
+									/>
+									<FieldBlock
+										label="ACCESS HOST"
+										value={data.access_host}
+										copyText={data.access_host}
+									/>
+									<FieldBlock
+										label="DATA DIR"
+										value={data.data_dir}
+										copyText={data.data_dir}
+									/>
+								</div>
 							</div>
 						</div>
-					</div>
 
-					<div className="xp-card">
-						<div className="xp-card-body space-y-3">
-							<div>
-								<h2 className="text-base font-semibold">IP Geo</h2>
-								<p className="text-sm text-muted-foreground">
-									入站 IP Geo enrichment 与 upstream 设置。
-								</p>
-							</div>
-							<div className="space-y-3">
-								<FieldBlock
-									label="IP GEO ENABLED"
-									value={data.ip_geo_enabled ? "true" : "false"}
-									copyText={data.ip_geo_enabled ? "true" : "false"}
-								/>
-								<FieldBlock
-									label="IP GEO ORIGIN"
-									value={data.ip_geo_origin}
-									copyText={data.ip_geo_origin}
-								/>
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h3 className="text-base font-semibold">Quota</h3>
+									<p className="text-sm text-muted-foreground">
+										流量统计与自动解封策略。
+									</p>
+								</div>
+								<div className="space-y-3">
+									<FieldBlock
+										label="POLL INTERVAL"
+										value={`${data.quota_poll_interval_secs} sec`}
+										copyText={`${data.quota_poll_interval_secs}`}
+									/>
+									<FieldBlock
+										label="AUTO UNBAN"
+										value={data.quota_auto_unban ? "true" : "false"}
+										copyText={data.quota_auto_unban ? "true" : "false"}
+									/>
+								</div>
 							</div>
 						</div>
-					</div>
 
-					<div className="xp-card">
-						<div className="xp-card-body space-y-3">
-							<div>
-								<h2 className="text-base font-semibold">Security</h2>
-								<p className="text-sm text-muted-foreground">
-									仅展示可公开信息，敏感字段全量脱敏。
-								</p>
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h3 className="text-base font-semibold">IP Geo</h3>
+									<p className="text-sm text-muted-foreground">
+										入站 IP Geo enrichment 与 upstream 设置。
+									</p>
+								</div>
+								<div className="space-y-3">
+									<FieldBlock
+										label="IP GEO ENABLED"
+										value={data.ip_geo_enabled ? "true" : "false"}
+										copyText={data.ip_geo_enabled ? "true" : "false"}
+									/>
+									<FieldBlock
+										label="IP GEO ORIGIN"
+										value={data.ip_geo_origin}
+										copyText={data.ip_geo_origin}
+									/>
+								</div>
 							</div>
-							<div className="space-y-3">
-								<FieldBlock
-									label="ADMIN TOKEN"
-									value={data.admin_token_masked}
-									copyText={data.admin_token_masked}
-								/>
-								<FieldBlock
-									label="ADMIN TOKEN PRESENT"
-									value={data.admin_token_present ? "true" : "false"}
-									copyText={data.admin_token_present ? "true" : "false"}
-								/>
+						</div>
+
+						<div className="xp-card">
+							<div className="xp-card-body space-y-3">
+								<div>
+									<h3 className="text-base font-semibold">Security</h3>
+									<p className="text-sm text-muted-foreground">
+										仅展示可公开信息，敏感字段全量脱敏。
+									</p>
+								</div>
+								<div className="space-y-3">
+									<FieldBlock
+										label="ADMIN TOKEN"
+										value={data.admin_token_masked}
+										copyText={data.admin_token_masked}
+									/>
+									<FieldBlock
+										label="ADMIN TOKEN PRESENT"
+										value={data.admin_token_present ? "true" : "false"}
+										copyText={data.admin_token_present ? "true" : "false"}
+									/>
+								</div>
 							</div>
 						</div>
 					</div>
-				</div>
+				</section>
 
 				<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
 					<div>Settings / Service config</div>

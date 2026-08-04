@@ -5,6 +5,101 @@ use pretty_assertions::assert_eq;
 use serde_yaml::Value;
 use std::collections::BTreeMap;
 
+const MIRROR_BASE: &str = "https://xp.example/api/mihomo/resources";
+
+#[test]
+fn mihomo_mirror_rewrites_external_resources_and_injects_fixed_geox_assets() {
+    let profile = UserMihomoProfile {
+        mixin_yaml: r#"
+rule-providers:
+  ads:
+    type: http
+    behavior: domain
+    url: https://rules.example/ads.yaml?channel=stable
+proxy-providers:
+  upstream:
+    type: http
+    url: https://providers.example/sub.yaml
+"#
+        .to_string(),
+        ..UserMihomoProfile::default()
+    };
+    let yaml = build_mihomo_provider_yaml_with_node_probes_mode(
+        SEED,
+        &user("u1", "alice"),
+        &[],
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &profile,
+        "https://xp.example/api/sub/system",
+        MihomoExternalResourceMode::Mirror,
+        MIRROR_BASE,
+    )
+    .expect("mirror rendering should succeed");
+    let root: Value = serde_yaml::from_str(&yaml).expect("valid yaml");
+
+    let geox = root
+        .get("geox-url")
+        .and_then(Value::as_mapping)
+        .expect("fixed geox map");
+    assert!(geox.contains_key(Value::String("geoip".to_string())));
+    assert!(
+        geox.get(Value::String("geoip".to_string()))
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.starts_with(MIRROR_BASE))
+    );
+    let provider = root
+        .get("proxy-providers")
+        .and_then(Value::as_mapping)
+        .and_then(|map| map.get(Value::String("upstream".to_string())))
+        .and_then(Value::as_mapping)
+        .expect("provider map");
+    assert!(
+        provider
+            .get(Value::String("url".to_string()))
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.starts_with(MIRROR_BASE))
+    );
+    assert_eq!(
+        provider.get(Value::String("proxy".to_string())),
+        Some(&Value::String("DIRECT".to_string()))
+    );
+}
+
+#[test]
+fn mihomo_mirror_rejects_non_https_and_custom_headers() {
+    let profile = UserMihomoProfile {
+        mixin_yaml: r#"
+rule-providers:
+  ads:
+    type: http
+    url: http://rules.example/ads.yaml
+    header:
+      Authorization: secret
+"#
+        .to_string(),
+        ..UserMihomoProfile::default()
+    };
+    let err = build_mihomo_provider_yaml_with_node_probes_mode(
+        SEED,
+        &user("u1", "alice"),
+        &[],
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &profile,
+        "https://xp.example/api/sub/system",
+        MihomoExternalResourceMode::Mirror,
+        MIRROR_BASE,
+    )
+    .expect_err("invalid mirror resource should be rejected");
+    assert!(matches!(
+        err,
+        SubscriptionError::MihomoExternalResourceMirrorInvalid { .. }
+    ));
+}
+
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successful_probe() {
     let nodes = vec![

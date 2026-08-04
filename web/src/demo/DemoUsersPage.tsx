@@ -957,7 +957,7 @@ export function DemoUserDetailsPage() {
 								minRows={6}
 							/>
 							{mihomoDirty ? (
-								<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+								<div className="xp-alert xp-alert-warning px-4 py-2">
 									Mihomo profile has unsaved changes.
 								</div>
 							) : null}
@@ -1069,7 +1069,7 @@ export function DemoUserDetailsPage() {
 				<div className="xp-card p-4 space-y-3">
 					{state.quotaPolicy.enforcementMode === "block" &&
 					user.status === "quota_limited" ? (
-						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+						<div className="xp-alert xp-alert-warning px-4 py-2">
 							Quota status is partial for access decisions because this user is
 							quota-limited.
 						</div>

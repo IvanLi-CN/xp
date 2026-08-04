@@ -18,12 +18,16 @@ export const DEFAULT_SUBSCRIPTION_FORMAT: SubscriptionFormat = "raw";
 export async function fetchSubscription(
 	subscriptionToken: string,
 	format?: SubscriptionFormat,
+	externalResources?: "mirror",
 	signal?: AbortSignal,
 ): Promise<string> {
 	const params = new URLSearchParams();
 	let url = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
 	if (format) {
 		params.set("format", format);
+	}
+	if (externalResources) {
+		params.set("external_resources", externalResources);
 	}
 	const query = params.toString();
 	if (query) {

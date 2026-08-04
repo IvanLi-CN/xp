@@ -248,6 +248,14 @@ Container-specific note:
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 
+### Mihomo 外部资源公开镜像
+
+Mihomo canonical/provider 订阅可用 `external_resources=mirror` 临时启用 XP 外部资源镜像。镜像目录只来自当前 profile 的 GeoX、rule-provider、proxy-provider HTTPS URL 与固定 MetaCubeX GeoX 资产，不接受任意 `url` 参数。XP 采用 DIRECT 上游、逐块流式转发，不缓存内容、不写磁盘，限制为 256 MiB、90 秒、全局 32 条/单资源 4 条；删除最后一个 profile 引用后资源 ID 立即返回 404。
+
+集群级 `Service config` 中的 `Allow private Mihomo mirror targets` 默认关闭。关闭时，XP 会在初始请求和每次重定向前解析并固定目标地址，只允许公网 IP；loopback、私网、链路本地、保留和文档地址返回 `403 private_target_blocked`。该开关通过 `/api/admin/mihomo/resource-policy` 走 Raft 持久化，只有明确维护可信内部资源时才应开启。
+
+资源端点错误合同：DNS/连接/TLS 为 502，超时为 504，第六次重定向为 508，上游 4xx/5xx 保留状态码但使用脱敏错误体；并发超额为 429。初始资源必须是无 userinfo 的 HTTPS，镜像不转发自定义 Header。
+
 Use `xp-ops mihomo redact` to sanitize Mihomo subscription/config text before sharing logs or snippets.
 
 Command shape:

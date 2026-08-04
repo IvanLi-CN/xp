@@ -60,7 +60,7 @@
     "max_line_length": 183
   },
   "docs/desgin/subscription.md": {
-    "long_line_count": 24,
+    "long_line_count": 27,
     "max_line_length": 292
   },
   "docs/desgin/workflows.md": {
@@ -72,7 +72,7 @@
     "max_line_length": 263
   },
   "docs/ops/README.md": {
-    "long_line_count": 117,
+    "long_line_count": 120,
     "max_line_length": 748
   },
   "docs/ops/cloudflare-tunnel.md": {
@@ -372,7 +372,7 @@
     "max_line_length": 162
   },
   "docs/specs/3e4q4-mihomo-provider-dual-track/contracts/http-apis.md": {
-    "long_line_count": 15,
+    "long_line_count": 16,
     "max_line_length": 364
   },
   "docs/specs/3hpk4-admin-delete-node/HISTORY.md": {
@@ -583,12 +583,12 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8331
+    "source_lines": 8410
   },
   "src/http/tests.rs": {
-    "long_line_count": 2,
-    "max_line_length": 126,
-    "source_lines": 9760
+    "long_line_count": 3,
+    "max_line_length": 142,
+    "source_lines": 9902
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -725,7 +725,7 @@
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4405
+    "source_lines": 4431
   },
   "src/state/tests.rs": {
     "source_lines": 2296
@@ -733,7 +733,7 @@
   "src/subscription.rs": {
     "long_line_count": 5,
     "max_line_length": 133,
-    "source_lines": 5138
+    "source_lines": 5393
   },
   "src/subscription/tests.rs": {
     "long_line_count": 45,
@@ -776,7 +776,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2472
+    "source_lines": 2480
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -823,7 +823,7 @@
     "max_line_length": 151
   },
   "web/src/components/IpUsageView.tsx": {
-    "long_line_count": 8,
+    "long_line_count": 9,
     "max_line_length": 156,
     "source_lines": 1907
   },
@@ -1053,10 +1053,6 @@
     "long_line_count": 1,
     "max_line_length": 133
   },
-  "web/src/views/LoginPage.tsx": {
-    "long_line_count": 2,
-    "max_line_length": 118
-  },
   "web/src/views/NodeDetailsPage.tsx": {
     "long_line_count": 9,
     "max_line_length": 134,
@@ -1091,16 +1087,12 @@
   "web/src/views/UserDetailsPage.test.tsx": {
     "long_line_count": 1,
     "max_line_length": 122,
-    "source_lines": 1081
+    "source_lines": 1108
   },
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
     "max_line_length": 151,
-    "source_lines": 1756
-  },
-  "web/src/views/UserNewPage.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 118
+    "source_lines": 1787
   },
   "web/src/views/UsersPage.tsx": {
     "long_line_count": 4,

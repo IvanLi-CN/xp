@@ -99,3 +99,33 @@ export const Raw: Story = {
 		);
 	},
 };
+
+export const MihomoWithMirror: Story = {
+	render: () => {
+		const [open, setOpen] = useState(true);
+		const [mirror, setMirror] = useState(true);
+		const mirrorContent = [
+			"geox-url:",
+			"  geosite: https://example.com/api/mihomo/resources/abc",
+			"rule-providers:",
+			"  ads:",
+			"    url: https://example.com/api/mihomo/resources/def",
+			"",
+		].join("\\n");
+		return (
+			<DesignBackdrop>
+				<SubscriptionPreviewDialog
+					open={open}
+					onClose={() => setOpen(false)}
+					subscriptionUrl="https://example.com/api/sub/sub-demo?format=mihomo&external_resources=mirror"
+					format="mihomo"
+					loading={false}
+					content={mirrorContent}
+					onFormatChange={() => {}}
+					externalResourceMirror={mirror}
+					onExternalResourceMirrorChange={setMirror}
+				/>
+			</DesignBackdrop>
+		);
+	},
+};
