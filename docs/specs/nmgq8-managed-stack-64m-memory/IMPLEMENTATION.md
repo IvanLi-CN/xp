@@ -4,10 +4,14 @@
 
 - Authentication, runtime defaults, upgrade activation, OpenRC compatibility,
   and XP release-footprint changes are released through `v3.21.0`.
-- On SG, pinned Xray/cloudflared builds with Go inlining disabled plus the
-  `8MiB` cloudflared profile passed a 60-second preflight at `63,632 KiB` peak
-  (`xp=15,500`, `xray=21,920`, `cloudflared=26,424`). These binaries remain a
-  production canary while the remaining nodes complete their formal rollout.
+- The 2026-08-04 SG production comparison isolated cloudflared transport as the
+  CPU cause: QUIC with `8MiB` used about `7.70%` CPU and `8.15` GC/s, while
+  HTTP/2 with `8MiB` used about `0.90%` CPU and `0.85` GC/s. An HTTP/2
+  `10MiB` run showed no measurable CPU or GC benefit. The managed default is
+  therefore HTTP/2 with `12MiB`, retaining explicit overrides.
+- The current HK, SG, and JP production process trees exceed the `65,536 KiB`
+  aggregate gate. The earlier SG `8MiB` 60-second preflight at `63,632 KiB`
+  remains historical evidence, not a current passing result.
 
 ## Work areas
 
@@ -19,6 +23,21 @@
 - Joined Docker/Compose administrator-token reconciliation from an explicitly
   configured low-memory PHC before the XP child starts.
 - Xray low-buffer static policy and upgrade backfill.
+- Runtime-default backfill recognizes systemd drop-ins and EnvironmentFile
+  overrides, including explicit variable/all-environment resets and readable
+  non-regular inputs and continued directives. Environment-file values retain
+  embedded spaces rather than being parsed as unit-directive word lists; only
+  complete XP-generated legacy service templates are eligible for the `8MiB`
+  to `12MiB` migration.
+- Systemd override discovery follows the `/usr/lib`, `/usr/local/lib`, `/run`,
+  and `/etc` drop-in hierarchy with higher-priority same-name masking. A
+  lower-priority collision with XP's managed filename suppresses backfill
+  rather than masking operator configuration; `EnvironmentFile` paths are
+  lexically normalized inside the selected filesystem root.
+- Legacy custom/provider OpenRC scripts lack a durable ownership marker, so an
+  ambiguous existing `8MiB` value is preserved for explicit operator review.
+  Provider wrapper migration and rollback snapshots include regular files
+  only, leaving symbolic links and other custom filesystem objects untouched.
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.
 - Host-managed upgrades replace `xp` and managed runtime assets before the optional
@@ -35,7 +54,8 @@ JWT-first authorization, Xray/cloudflared runtime defaults for
 systemd/OpenRC/container launches, upgrade backfill, and the PSS sampler at
 `scripts/ops/sample-managed-stack-pss.sh`.
 
-Remaining gates: pass the 15-minute load gate, roll the same release and PHC
-across the remaining nodes, and complete the 24-hour production observation.
+Remaining gates: restore the aggregate PSS budget, pass the 15-minute load
+gate, roll the same release and PHC across the remaining nodes, and complete
+the 24-hour production observation.
 The shared testbox run is blocked until space is available under its managed
 workspace.

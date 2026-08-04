@@ -1,5 +1,21 @@
 # History
 
+- 2026-08-04: runtime-default backfill now inspects the complete systemd
+  drop-in hierarchy and honors same-name masking before deciding whether an
+  operator override permits migration. Managed-name collisions remain active,
+  parent components in `EnvironmentFile` paths are normalized safely, and
+  environment-file assignments use their own value grammar. Upgrade snapshots
+  exclude non-regular provider wrappers because backfill never modifies them.
+
+- 2026-08-04: SG production A/B testing traced elevated cloudflared CPU to
+  QUIC rather than the Go heap limit. HTTP/2 reduced CPU from about `7.70%` to
+  `0.90%`; `10MiB` did not improve CPU or GC over `8MiB`. Managed deployments
+  now use HTTP/2 with `GOMEMLIMIT=12MiB`, and upgrades migrate XP-generated
+  `8MiB` defaults in complete managed templates while preserving operator
+  overrides. Ambiguous legacy custom/provider OpenRC limits require explicit
+  operator review. Current HK, SG, and JP aggregate PSS still exceeds the
+  `65,536 KiB` gate and remains an open release blocker.
+
 - OpenRC restart commands can return before `supervise-daemon` reports its child started.
   Host upgrades now wait for manager readiness and roll back on timeout.
 
@@ -37,7 +53,8 @@
 
 - 2026-07-29: release builds use Thin LTO, one codegen unit, and stripped
   symbols to reduce XP's mapped code footprint; OpenRC backfill now supports
-  provider wrapper scripts without `command_user`.
+  provider wrapper scripts without `command_user`. Wrapper migration is
+  restricted to regular files so operator-owned symbolic links remain intact.
 
 - 2026-07-29: OpenRC memory backfill now preserves executable service-script
   permissions after atomic replacement.

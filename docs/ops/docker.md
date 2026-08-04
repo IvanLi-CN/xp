@@ -63,7 +63,7 @@ xp-ops container run
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
 - The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional public fallback egress. It is disabled unless `XP_MESH_PROXY_URL` is set; it is not the Mesh transport.
 - Xray defaults to `GOMEMLIMIT=16MiB` and `GOGC=50`; cloudflared defaults to
-  `GOMEMLIMIT=8MiB`, `GOGC=50`, and disabled management diagnostics. The image
+  `GOMEMLIMIT=12MiB`, `GOGC=50`, and disabled management diagnostics. The image
   contains the same pinned, checksummed low-memory binaries published with the
   XP Release. Explicit `XP_XRAY_*` and `XP_CLOUDFLARED_*` values override the
   defaults.

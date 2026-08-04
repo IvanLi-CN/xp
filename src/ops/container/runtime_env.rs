@@ -43,7 +43,7 @@ pub(super) fn build_runtime_env(
     for (key, value) in [
         ("XP_XRAY_GOMEMLIMIT", "16MiB"),
         ("XP_XRAY_GOGC", "50"),
-        ("XP_CLOUDFLARED_GOMEMLIMIT", "8MiB"),
+        ("XP_CLOUDFLARED_GOMEMLIMIT", "12MiB"),
         ("XP_CLOUDFLARED_GOGC", "50"),
         ("XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS", "false"),
         ("XP_CLOUDFLARED_PROTOCOL", "http2"),
