@@ -1224,7 +1224,7 @@ export function UserDetailsPage() {
 							</span>
 						</div>
 						{userSaveError ? (
-							<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+							<div className="xp-alert xp-alert-error px-4 py-2">
 								{userSaveError}
 							</div>
 						) : null}
@@ -1296,7 +1296,7 @@ export function UserDetailsPage() {
 								</div>
 							) : null}
 							{mihomoProfileQuery.isError ? (
-								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+								<div className="xp-alert xp-alert-error px-4 py-2">
 									{formatError(mihomoProfileQuery.error)}
 								</div>
 							) : null}
@@ -1326,7 +1326,7 @@ export function UserDetailsPage() {
 								readOnly={runtime.isReadOnly}
 							/>
 							{mihomoProfileSaveError ? (
-								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+								<div className="xp-alert xp-alert-error px-4 py-2">
 									{mihomoProfileSaveError}
 								</div>
 							) : null}
@@ -1410,7 +1410,7 @@ export function UserDetailsPage() {
 					</div>
 
 					{accessError ? (
-						<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+						<div className="xp-alert xp-alert-error px-4 py-2">
 							{accessError}
 						</div>
 					) : null}
@@ -1579,7 +1579,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{ipUsageQuery.data?.partial ? (
-						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+						<div className="xp-alert xp-alert-warning px-4 py-2">
 							<div className="space-y-1">
 								<div>Usage details are partial.</div>
 								<div className="font-mono text-xs">
@@ -1678,7 +1678,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{nodeQuotaStatusQuery.data?.partial ? (
-						<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+						<div className="xp-alert xp-alert-warning px-4 py-2">
 							<div className="space-y-1">
 								<div>Quota status is partial.</div>
 								<div className="font-mono text-xs">

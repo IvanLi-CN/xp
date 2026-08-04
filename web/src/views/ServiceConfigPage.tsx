@@ -336,8 +336,8 @@ export function ServiceConfigPage() {
 								<div
 									className={
 										data.mihomo_resource_allow_private_targets
-											? "rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground"
-											: "rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success-foreground"
+											? "xp-alert xp-alert-warning px-4 py-3"
+											: "xp-alert xp-alert-success px-4 py-3"
 									}
 								>
 									{data.mihomo_resource_allow_private_targets

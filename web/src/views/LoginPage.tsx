@@ -170,10 +170,8 @@ export function LoginPage() {
 							/>
 
 							{tokenLength === 0 ? (
-								<div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-									<p className="font-medium text-warning-foreground">
-										No token set.
-									</p>
+								<div className="xp-alert xp-alert-warning px-4 py-3">
+									<p className="font-medium">No token set.</p>
 									<p className="mt-1 text-muted-foreground">
 										Ask an administrator for a token or a temporary login link.
 									</p>
@@ -185,7 +183,7 @@ export function LoginPage() {
 							)}
 
 							{serverError ? (
-								<div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+								<div className="xp-alert xp-alert-error px-4 py-3">
 									{serverError}
 								</div>
 							) : null}

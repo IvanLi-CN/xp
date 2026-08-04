@@ -1834,7 +1834,7 @@ export function IpUsageView({
 				<GeoSourceNotice geoSource={geoSource} />
 
 				{blockingWarning && empty ? (
-					<div className="rounded-2xl border border-warning/40 bg-warning/10 px-4 py-10 text-center">
+					<div className="xp-alert xp-alert-warning flex-col items-center rounded-2xl px-4 py-10 text-center">
 						<p className="text-base font-semibold">
 							Online snapshots are unavailable
 						</p>

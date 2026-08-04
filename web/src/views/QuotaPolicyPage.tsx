@@ -1477,7 +1477,7 @@ export function QuotaPolicyPage() {
 									Unlocked {globalUnlockedCount}
 								</span>
 								{globalTotalBasisPoints < RATIO_BASIS_POINTS ? (
-									<span className="text-sm text-warning-foreground">
+									<span className="text-sm text-foreground dark:text-warning">
 										Remaining{" "}
 										{formatRatioPercent(
 											RATIO_BASIS_POINTS - globalTotalBasisPoints,
@@ -2104,7 +2104,7 @@ export function QuotaPolicyPage() {
 											: "Mode node_override"}
 									</span>
 									{totalBasisPoints < RATIO_BASIS_POINTS ? (
-										<span className="text-sm text-warning-foreground">
+										<span className="text-sm text-foreground dark:text-warning">
 											Remaining{" "}
 											{formatRatioPercent(
 												RATIO_BASIS_POINTS - totalBasisPoints,

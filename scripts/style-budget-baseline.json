@@ -823,7 +823,7 @@
     "max_line_length": 151
   },
   "web/src/components/IpUsageView.tsx": {
-    "long_line_count": 8,
+    "long_line_count": 9,
     "max_line_length": 156,
     "source_lines": 1907
   },
@@ -1053,10 +1053,6 @@
     "long_line_count": 1,
     "max_line_length": 133
   },
-  "web/src/views/LoginPage.tsx": {
-    "long_line_count": 2,
-    "max_line_length": 118
-  },
   "web/src/views/NodeDetailsPage.tsx": {
     "long_line_count": 9,
     "max_line_length": 134,
@@ -1070,10 +1066,6 @@
     "long_line_count": 8,
     "max_line_length": 198,
     "source_lines": 406
-  },
-  "web/src/views/ServiceConfigPage.tsx": {
-    "long_line_count": 3,
-    "max_line_length": 120
   },
   "web/src/views/QuotaPolicyPage.tsx": {
     "long_line_count": 10,
@@ -1101,10 +1093,6 @@
     "long_line_count": 14,
     "max_line_length": 151,
     "source_lines": 1787
-  },
-  "web/src/views/UserNewPage.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 118
   },
   "web/src/views/UsersPage.tsx": {
     "long_line_count": 4,

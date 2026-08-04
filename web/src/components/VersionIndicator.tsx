@@ -233,8 +233,8 @@ export function VersionIndicator({
 								<p
 									className={
 										upgradeObservation.phase === "timed_out"
-											? "rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive"
-											: "rounded-lg bg-warning/10 px-2.5 py-2 text-xs text-warning"
+											? "xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
+											: "xp-alert xp-alert-warning rounded-lg px-2.5 py-2 text-xs"
 									}
 									aria-live="polite"
 								>
@@ -243,7 +243,7 @@ export function VersionIndicator({
 										: "Waiting for the node to reconnect and report the upgrade status."}
 								</p>
 							) : upgradeStatusError ? (
-								<p className="rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+								<p className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs">
 									{upgradeStatusError}
 								</p>
 							) : null}
