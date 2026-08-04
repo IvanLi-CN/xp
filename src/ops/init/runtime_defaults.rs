@@ -465,12 +465,12 @@ fn should_backfill_systemd_value(
     let unit_assignments = sources
         .first()
         .into_iter()
-        .flat_map(|source| source.lines())
-        .flat_map(parse_systemd_environment_line)
+        .flat_map(|source| systemd_logical_lines(source))
+        .flat_map(|line| parse_systemd_environment_line(&line))
         .filter_map(|(assignment_key, value)| (assignment_key == key).then_some(value))
         .collect::<Vec<_>>();
     let operator_has_assignment = sources.iter().skip(1).any(|source| {
-        source.lines().any(|line| {
+        systemd_logical_lines(source).iter().any(|line| {
             if line.trim() == "Environment=" {
                 return true;
             }

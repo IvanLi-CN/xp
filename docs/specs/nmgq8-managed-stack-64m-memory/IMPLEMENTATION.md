@@ -25,8 +25,8 @@
 - Xray low-buffer static policy and upgrade backfill.
 - Runtime-default backfill recognizes systemd drop-ins and EnvironmentFile
   overrides, including explicit variable/all-environment resets and readable
-  non-regular inputs; only complete XP-generated legacy service templates are
-  eligible for the `8MiB` to `12MiB` migration.
+  non-regular inputs and continued directives; only complete XP-generated
+  legacy service templates are eligible for the `8MiB` to `12MiB` migration.
 - Systemd override discovery follows the `/usr/lib`, `/usr/local/lib`, `/run`,
   and `/etc` drop-in hierarchy with higher-priority same-name masking. A
   lower-priority collision with XP's managed filename suppresses backfill
