@@ -55,6 +55,8 @@
 - request 与 acknowledgement key 经 HKDF-SHA256 做用途分离。
 - key material 来自 parsed CA private-key DER 与 CA certificate fingerprint。
 - canary 顺序固定为 `/generate_204`、health、mesh、ordinary camouflage。
+- Canary 转发只把认证后的原始 path/query 组合到固定 XP loopback origin；HTTP/2
+  absolute-form URI 的 origin 不得进入 loopback URL，URL client 会规范化 path/query 时必须拒绝。
 - 无效 reserved route 返回普通 `404`，不得把 body 交给 camouflage upstream。
 - Mesh 只允许 `/raft/*` 与 `/api/admin/_internal/*`。
 - 普通 `/api/admin/*` 始终要求管理员 Bearer token。

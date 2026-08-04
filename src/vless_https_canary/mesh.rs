@@ -48,19 +48,52 @@ pub(super) async fn proxy_mesh_request(
     if !sender_is_member {
         return Err(not_found_response());
     }
-    let url = format!("{}{}", auth.loopback_base_url, parts.uri);
+    let url = build_mesh_loopback_url(&auth.loopback_base_url, &parts.uri).map_err(|err| {
+        tracing::warn!(
+            error = %err,
+            method = %parts.method,
+            path = %parts.uri.path(),
+            "failed to build Mesh loopback URL"
+        );
+        bad_gateway_response()
+    })?;
     let mut request = state
         .clients
         .loopback()
-        .request(parts.method, url)
+        .request(parts.method.clone(), url)
         .body(body);
     for (name, value) in &parts.headers {
         if is_mesh_forwarded_header(name.as_str()) {
             request = request.header(name, value);
         }
     }
-    let response = request.send().await.map_err(|_| bad_gateway_response())?;
+    let response = request.send().await.map_err(|err| {
+        tracing::warn!(
+            error = %err,
+            method = %parts.method,
+            path = %parts.uri.path(),
+            "Mesh loopback request failed"
+        );
+        bad_gateway_response()
+    })?;
     Ok(mesh_upstream_response_to_axum(response))
+}
+
+pub(super) fn build_mesh_loopback_url(base: &str, incoming: &Uri) -> anyhow::Result<reqwest::Url> {
+    let raw_path_and_query = incoming
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or_else(|| incoming.path());
+    let url = build_upstream_url(base, incoming)?;
+    let forwarded_path_and_query = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_string(),
+    };
+    anyhow::ensure!(
+        forwarded_path_and_query == raw_path_and_query,
+        "authenticated Mesh URI cannot be forwarded without normalization"
+    );
+    Ok(url)
 }
 
 pub(super) fn permitted_mesh_ingress(

@@ -11,6 +11,9 @@
 - auth v1/v2 以维护窗口 hard cut，不支持持续 mixed-version 集群。
 - 状态页采用 all-peer table 和 uptime strip，不采用 topology graph。
 - `XP_MESH_PROXY_URL` 保留为公网 egress compatibility，不定义 Mesh。
+- HTTP/2 ingress may expose an absolute-form URI. Canary forwarding must discard its origin and
+  combine only the authenticated raw path/query with the fixed XP loopback origin; forcing
+  HTTP/1.1 would hide the defect instead of preserving the transport contract.
 
 ## Supersession
 

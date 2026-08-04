@@ -1,6 +1,9 @@
 use super::*;
 use crate::cluster_identity::generate_cluster_ca;
 use crate::config::{Config, DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE, XrayRestartMode};
+use crate::domain::{Node, NodeQuotaReset};
+use crate::internal_auth::{InternalRoute, RequestContext};
+use crate::state::StoreInit;
 use axum::routing::get;
 use http_body_util::BodyExt;
 use rcgen::{
@@ -173,6 +176,31 @@ fn build_upstream_url_uses_incoming_path_and_query() {
         url.as_str(),
         "http://127.0.0.1:8080/api/items?cursor=abc&limit=20"
     );
+}
+
+#[test]
+fn build_upstream_url_ignores_http2_absolute_uri_origin() {
+    let incoming: Uri = "https://mesh.example.com/api/items/a%2Fb?cursor=a%2Fb&limit=20"
+        .parse()
+        .unwrap();
+    let url = build_upstream_url("http://127.0.0.1:8080", &incoming).unwrap();
+
+    assert_eq!(
+        url.as_str(),
+        "http://127.0.0.1:8080/api/items/a%2Fb?cursor=a%2Fb&limit=20"
+    );
+}
+
+#[test]
+fn mesh_loopback_url_rejects_authenticated_uri_normalization() {
+    for incoming in [
+        "/api/admin/_internal/mesh/../health",
+        "/api/admin/_internal/mesh/%2e%2e/health",
+        "/api/admin/_internal/mesh\\health",
+    ] {
+        let incoming: Uri = incoming.parse().unwrap();
+        assert!(mesh::build_mesh_loopback_url("http://127.0.0.1:8080", &incoming).is_err());
+    }
 }
 
 #[test]
@@ -642,6 +670,173 @@ async fn wait_until_ready_accepts_self_signed_canary_cert() {
     handle.abort();
 
     assert!(result.is_ok(), "unexpected readiness error: {result:?}");
+}
+
+#[tokio::test]
+async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
+    install_test_crypto_provider();
+
+    const CLUSTER_ID: &str = "01JTESTCLUSTERID00000000000000";
+    const SENDER_ID: &str = "01JTESTSENDER0000000000000000";
+    const TARGET_ID: &str = "01JTESTTARGET0000000000000000";
+    const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health?probe=a%2Fb";
+
+    let ca = generate_cluster_ca(CLUSTER_ID).unwrap();
+    let request_uri: Uri = HEALTH_PATH.parse().unwrap();
+    let context = RequestContext::now(
+        InternalRoute::HealthV2,
+        CLUSTER_ID,
+        SENDER_ID,
+        TARGET_ID,
+        "01JTESTREQUEST000000000000000",
+    );
+    let mut signed_headers = HeaderMap::new();
+    internal_auth::sign_request_v2(
+        &ca.key_pem,
+        &ca.cert_pem,
+        &Method::GET,
+        &request_uri,
+        None,
+        &[],
+        &context,
+        &mut signed_headers,
+    )
+    .unwrap();
+    let verified = internal_auth::verify_request_v2(
+        &ca.key_pem,
+        &ca.cert_pem,
+        &Method::GET,
+        &request_uri,
+        &signed_headers,
+        &[],
+        CLUSTER_ID,
+        TARGET_ID,
+    )
+    .unwrap();
+    let ack = internal_auth::sign_ack_v2(
+        &ca.key_pem,
+        &ca.cert_pem,
+        &verified,
+        TARGET_ID,
+        StatusCode::OK.as_u16(),
+    )
+    .unwrap();
+
+    let loopback_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let loopback_addr = loopback_listener.local_addr().unwrap();
+    let expected_uri = request_uri.clone();
+    let loopback_app = Router::new().fallback(move |uri: Uri| {
+        let ack = ack.clone();
+        let expected_uri = expected_uri.clone();
+        async move {
+            assert_eq!(uri.path_and_query(), expected_uri.path_and_query());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(internal_auth::INTERNAL_ACK_HEADER, ack)
+                .body(Body::empty())
+                .unwrap()
+        }
+    });
+    let loopback_server = tokio::spawn(async move {
+        axum::serve(loopback_listener, loopback_app).await.unwrap();
+    });
+
+    let tmp = tempdir().unwrap();
+    let mut store = JsonSnapshotStore::load_or_init(StoreInit {
+        data_dir: tmp.path().join("store"),
+        bootstrap_node_id: Some(TARGET_ID.to_string()),
+        bootstrap_node_name: "target".to_string(),
+        bootstrap_access_host: "canary.example.com".to_string(),
+        bootstrap_api_base_url: "https://target.example.com".to_string(),
+    })
+    .unwrap();
+    store
+        .upsert_node(Node {
+            node_id: SENDER_ID.to_string(),
+            node_name: "sender".to_string(),
+            access_host: "sender.example.com".to_string(),
+            api_base_url: "https://sender.example.com".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+
+    let ca_key = KeyPair::from_pem(&ca.key_pem).unwrap();
+    let ca_cert = Issuer::from_ca_cert_pem(&ca.cert_pem, ca_key).unwrap();
+    let cert_params = CertificateParams::new(vec!["canary.example.com".to_string()]).unwrap();
+    let cert_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+    let cert = cert_params.signed_by(&cert_key, &ca_cert).unwrap();
+    let rustls = axum_server::tls_rustls::RustlsConfig::from_pem(
+        cert.pem().into_bytes(),
+        cert_key.serialize_pem().into_bytes(),
+    )
+    .await
+    .unwrap();
+    let canary_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    canary_listener.set_nonblocking(true).unwrap();
+    let canary_addr = canary_listener.local_addr().unwrap();
+    let state = CanaryProxyState {
+        store: Arc::new(tokio::sync::Mutex::new(store)),
+        node_id: TARGET_ID.to_string(),
+        clients: Arc::new(CanaryProxyClients::new().unwrap()),
+        mesh_auth: Some(CanaryMeshAuth {
+            cluster_id: CLUSTER_ID.to_string(),
+            cluster_ca_key_pem: ca.key_pem.clone(),
+            cluster_ca_cert_pem: ca.cert_pem.clone(),
+            loopback_base_url: format!("http://{loopback_addr}"),
+        }),
+    };
+    let canary_app = Router::new().fallback(canary_proxy).with_state(state);
+    let canary_server = axum_server::from_tcp_rustls(canary_listener, rustls)
+        .unwrap()
+        .serve(canary_app.into_make_service());
+    let canary_handle = tokio::spawn(canary_server.into_future());
+
+    for http2 in [false, true] {
+        let mut client = reqwest::Client::builder()
+            .resolve("canary.example.com", canary_addr)
+            .danger_accept_invalid_certs(true);
+        client = if http2 {
+            client.http2_prior_knowledge()
+        } else {
+            client.http1_only()
+        };
+        let response = client
+            .build()
+            .unwrap()
+            .get(format!("https://canary.example.com{HEALTH_PATH}"))
+            .headers(signed_headers.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "http2={http2}");
+        assert_eq!(
+            response.version(),
+            if http2 {
+                axum::http::Version::HTTP_2
+            } else {
+                axum::http::Version::HTTP_11
+            }
+        );
+        let response_ack = response
+            .headers()
+            .get(internal_auth::INTERNAL_ACK_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        internal_auth::verify_ack_v2(
+            &ca.key_pem,
+            &ca.cert_pem,
+            &verified,
+            TARGET_ID,
+            response.status().as_u16(),
+            response_ack,
+        )
+        .unwrap();
+    }
+
+    canary_handle.abort();
+    loopback_server.abort();
 }
 
 #[test]
