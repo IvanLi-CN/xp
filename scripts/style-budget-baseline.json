@@ -583,7 +583,7 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8388
+    "source_lines": 8410
   },
   "src/http/tests.rs": {
     "long_line_count": 3,

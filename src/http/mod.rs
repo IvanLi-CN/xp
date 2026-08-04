@@ -8346,7 +8346,7 @@ async fn get_mihomo_resource(
         let store = state.store.lock().await;
         store.state().mihomo_resource_revision
     };
-    let url = if let Some(cached) = state
+    let mut url = if let Some(cached) = state
         .mihomo_resource_directory
         .lookup_cached(revision, &resource_id)
         .await
@@ -8370,6 +8370,28 @@ async fn get_mihomo_resource(
             .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
             .await
     };
+    let current_revision = {
+        let store = state.store.lock().await;
+        store.state().mihomo_resource_revision
+    };
+    if current_revision != revision {
+        let (revision, profiles) = {
+            let store = state.store.lock().await;
+            (
+                store.state().mihomo_resource_revision,
+                store
+                    .state()
+                    .user_mihomo_profiles
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        };
+        url = state
+            .mihomo_resource_directory
+            .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
+            .await;
+    }
     let Some(url) = url else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
