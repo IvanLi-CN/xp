@@ -534,7 +534,6 @@ fn expand_systemd_environment_file_pattern(pattern: &Path) -> Result<Vec<PathBuf
             _ => {}
         }
     }
-    candidates.retain(|path| path.is_file());
     candidates.sort();
     Ok(candidates)
 }

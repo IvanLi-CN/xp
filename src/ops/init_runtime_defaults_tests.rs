@@ -2,6 +2,7 @@ use crate::ops::init::backfill_low_memory_runtime_defaults;
 use crate::ops::paths::Paths;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use tempfile::tempdir;
 
 #[test]
@@ -103,6 +104,32 @@ fn low_memory_backfill_preserves_systemd_operator_unset() {
         "[Service]\nEnvironment=GOMEMLIMIT\n",
     )
     .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
+}
+
+#[test]
+fn low_memory_backfill_accepts_non_regular_systemd_environment_file() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(systemd.join("cloudflared.service.d")).unwrap();
+    fs::create_dir_all(paths.etc_cloudflared_dir()).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=8MiB\n",
+    )
+    .unwrap();
+    fs::write(
+        systemd.join("cloudflared.service.d/10-operator.conf"),
+        "[Service]\nEnvironmentFile=/etc/cloudflared/empty.env\n",
+    )
+    .unwrap();
+    symlink("/dev/null", paths.etc_cloudflared_dir().join("empty.env")).unwrap();
 
     backfill_low_memory_runtime_defaults(&paths).unwrap();
 
