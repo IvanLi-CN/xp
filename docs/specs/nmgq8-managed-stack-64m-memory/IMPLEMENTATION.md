@@ -25,8 +25,10 @@
 - Xray low-buffer static policy and upgrade backfill.
 - Runtime-default backfill recognizes systemd drop-ins and EnvironmentFile
   overrides, including explicit variable/all-environment resets and readable
-  non-regular inputs and continued directives; only complete XP-generated
-  legacy service templates are eligible for the `8MiB` to `12MiB` migration.
+  non-regular inputs and continued directives. Environment-file values retain
+  embedded spaces rather than being parsed as unit-directive word lists; only
+  complete XP-generated legacy service templates are eligible for the `8MiB`
+  to `12MiB` migration.
 - Systemd override discovery follows the `/usr/lib`, `/usr/local/lib`, `/run`,
   and `/etc` drop-in hierarchy with higher-priority same-name masking. A
   lower-priority collision with XP's managed filename suppresses backfill
@@ -34,6 +36,8 @@
   lexically normalized inside the selected filesystem root.
 - Legacy custom/provider OpenRC scripts lack a durable ownership marker, so an
   ambiguous existing `8MiB` value is preserved for explicit operator review.
+  Provider wrapper migration and rollback snapshots include regular files
+  only, leaving symbolic links and other custom filesystem objects untouched.
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.
 - Host-managed upgrades replace `xp` and managed runtime assets before the optional

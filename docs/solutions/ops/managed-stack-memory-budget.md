@@ -74,6 +74,7 @@ local process appears healthy.
   and implicit transport to `--token-file` plus an environment-backed HTTP/2
   default. Only migrate a regular file; preserve symbolic links, other custom
   filesystem objects, `XP_CLOUDFLARED_PROTOCOL` overrides, and all custom wrappers.
+  Upgrade snapshots must exclude those non-regular objects for the same reason.
 
 When CPU is high, compare transport before tightening the heap. On SG, QUIC at
 `8MiB` used about `7.70%` CPU and `8.15` GC/s; HTTP/2 at the same limit used

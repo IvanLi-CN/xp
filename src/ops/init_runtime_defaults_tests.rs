@@ -466,6 +466,31 @@ fn low_memory_backfill_preserves_systemd_environment_file_override() {
 }
 
 #[test]
+fn low_memory_backfill_does_not_split_environment_file_values_on_spaces() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::create_dir_all(paths.etc_cloudflared_dir()).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironmentFile=/etc/cloudflared/operator.env\n",
+    )
+    .unwrap();
+    fs::write(
+        paths.etc_cloudflared_dir().join("operator.env"),
+        "OTHER=foo GOMEMLIMIT=24MiB\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(managed.contains("Environment=GOMEMLIMIT=12MiB"));
+}
+
+#[test]
 fn low_memory_backfill_parses_continued_systemd_environment_file_directive() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());

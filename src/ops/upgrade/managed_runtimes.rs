@@ -138,6 +138,7 @@ fn rollback_runtime_binaries_and_services(
 }
 
 fn snapshot_runtime_defaults(paths: &Paths) -> Result<RuntimeDefaultsBackup, ExitError> {
+    let provider_wrapper = paths.usr_local_libexec_dir().join("cloudflared-tunnel");
     let paths = [
         paths
             .systemd_unit_dir()
@@ -148,10 +149,23 @@ fn snapshot_runtime_defaults(paths: &Paths) -> Result<RuntimeDefaultsBackup, Exi
         paths.systemd_unit_dir().join("cloudflared.service"),
         paths.openrc_initd_dir().join("xray"),
         paths.openrc_initd_dir().join("cloudflared"),
-        paths.usr_local_libexec_dir().join("cloudflared-tunnel"),
+        provider_wrapper.clone(),
     ];
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
+        if path == provider_wrapper {
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if !metadata.file_type().is_file() => continue,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(ExitError::new(
+                        8,
+                        format!("rollback_failed: inspect provider wrapper: {error}"),
+                    ));
+                }
+            }
+        }
         let parent_existed = path.parent().is_some_and(Path::exists);
         let (contents, mode) = match fs::metadata(&path) {
             Ok(metadata) => (
@@ -620,5 +634,27 @@ mod tests {
         );
         assert!(!systemd.join("xray.service.d/20-xp-memory.conf").exists());
         assert!(!systemd.join("xray.service.d").exists());
+    }
+
+    #[test]
+    fn runtime_defaults_snapshot_skips_non_regular_provider_wrappers() {
+        use std::os::unix::fs::symlink;
+
+        for dangling_symlink in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let paths = Paths::new(tmp.path().to_path_buf());
+            fs::create_dir_all(paths.usr_local_libexec_dir()).unwrap();
+            let wrapper = paths.usr_local_libexec_dir().join("cloudflared-tunnel");
+            if dangling_symlink {
+                symlink(tmp.path().join("missing-provider-wrapper"), &wrapper).unwrap();
+            } else {
+                fs::create_dir(&wrapper).unwrap();
+            }
+
+            let snapshot = snapshot_runtime_defaults(&paths).unwrap();
+
+            assert!(!snapshot.files.iter().any(|file| file.path == wrapper));
+            assert!(fs::symlink_metadata(wrapper).is_ok());
+        }
     }
 }

@@ -417,9 +417,14 @@ fn read_systemd_environment_files(
                 Ok(raw) => {
                     let mut assignments = String::new();
                     for line in raw.lines().map(str::trim) {
-                        if !line.is_empty() && !line.starts_with('#') && !line.starts_with(';') {
+                        if !line.is_empty()
+                            && !line.starts_with('#')
+                            && !line.starts_with(';')
+                            && let Some((key, _)) = line.split_once('=')
+                        {
                             assignments.push_str("Environment=");
-                            assignments.push_str(line);
+                            assignments.push_str(key);
+                            assignments.push_str("=operator-controlled");
                             assignments.push('\n');
                         }
                     }
