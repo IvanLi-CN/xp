@@ -244,11 +244,8 @@ fn systemd_environment_sources(
         .ok_or_else(|| ExitError::new(4, "filesystem_error: systemd unit has no file name"))?;
     let unit_source = fs::read_to_string(unit).map_err(filesystem_error)?;
     let mut sources = vec![unit_source.clone()];
-    sources.extend(read_systemd_environment_files(
-        paths,
-        unit_name,
-        &unit_source,
-    )?);
+    let mut environment_files = Vec::new();
+    update_systemd_environment_files(&unit_source, &mut environment_files);
     let mut drop_ins = Vec::new();
     for entry in fs::read_dir(drop_in_dir).map_err(filesystem_error)? {
         let path = entry.map_err(filesystem_error)?.path();
@@ -259,23 +256,39 @@ fn systemd_environment_sources(
     drop_ins.sort();
     for path in drop_ins {
         let source = fs::read_to_string(path).map_err(filesystem_error)?;
-        let environment_sources = read_systemd_environment_files(paths, unit_name, &source)?;
+        update_systemd_environment_files(&source, &mut environment_files);
         sources.push(source);
-        sources.extend(environment_sources);
     }
+    sources.extend(read_systemd_environment_files(
+        paths,
+        unit_name,
+        &environment_files,
+    )?);
     Ok(sources)
 }
 
 fn read_systemd_environment_files(
     paths: &Paths,
     unit_name: &str,
-    source: &str,
+    environment_files: &[String],
 ) -> Result<Vec<String>, ExitError> {
     let mut environment_sources = Vec::new();
-    for environment_file in parse_systemd_environment_files(source) {
+    for environment_file in environment_files {
         let optional = environment_file.starts_with('-');
         let environment_file =
             expand_systemd_unit_specifiers(environment_file.trim_start_matches('-'), unit_name);
+        let Some(environment_file) = environment_file else {
+            environment_sources.push(
+                concat!(
+                    "Environment=GOMEMLIMIT=operator-controlled\n",
+                    "Environment=GOGC=operator-controlled\n",
+                    "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=operator-controlled\n",
+                    "Environment=XP_CLOUDFLARED_PROTOCOL=operator-controlled\n",
+                )
+                .to_string(),
+            );
+            continue;
+        };
         let mapped = paths.map_abs(Path::new(&environment_file));
         let matches = expand_systemd_environment_file_pattern(&mapped)?;
         if matches.is_empty() && !optional {
@@ -369,26 +382,34 @@ fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn parse_systemd_environment_files(source: &str) -> Vec<String> {
-    source
+fn update_systemd_environment_files(source: &str, environment_files: &mut Vec<String>) {
+    for value in source
         .lines()
         .filter_map(|line| line.trim_start().strip_prefix("EnvironmentFile="))
-        .flat_map(parse_systemd_words)
-        .collect()
+    {
+        let words = parse_systemd_words(value);
+        if words.is_empty() {
+            environment_files.clear();
+        } else {
+            environment_files.extend(words);
+        }
+    }
 }
 
-fn expand_systemd_unit_specifiers(path: &str, unit_name: &str) -> String {
+fn expand_systemd_unit_specifiers(path: &str, unit_name: &str) -> Option<String> {
     let name_without_suffix = unit_name.strip_suffix(".service").unwrap_or(unit_name);
     let prefix = unit_name
         .split_once('@')
         .map(|(prefix, _)| prefix)
         .unwrap_or(name_without_suffix);
     let placeholder = "\u{0}";
-    path.replace("%%", placeholder)
+    let expanded = path
+        .replace("%%", placeholder)
         .replace("%n", unit_name)
         .replace("%N", name_without_suffix)
         .replace("%p", prefix)
-        .replace(placeholder, "%")
+        .replace(placeholder, "%");
+    (!expanded.contains('%')).then_some(expanded)
 }
 
 fn expand_systemd_environment_file_pattern(pattern: &Path) -> Result<Vec<PathBuf>, ExitError> {
@@ -409,7 +430,11 @@ fn expand_systemd_environment_file_pattern(pattern: &Path) -> Result<Vec<PathBuf
                         };
                         for entry in entries {
                             let entry = entry.map_err(filesystem_error)?;
-                            if matcher.is_match(&entry.file_name().to_string_lossy()) {
+                            let name = entry.file_name();
+                            let name = name.to_string_lossy();
+                            if (!name.starts_with('.') || value.starts_with('.'))
+                                && matcher.is_match(&name)
+                            {
                                 expanded.push(entry.path());
                             }
                         }
