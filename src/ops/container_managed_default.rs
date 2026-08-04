@@ -1,10 +1,7 @@
 use super::{ContainerSpec, socket_addr_env};
 use crate::cluster_metadata::ClusterMetadata;
 use crate::domain::Endpoint;
-use crate::managed_default_endpoints::{
-    ManagedDefaultEndpointIntent, ManagedDefaultEndpointSource,
-    reconcile_managed_default_endpoints as reconcile_managed_default_endpoints_shared,
-};
+use crate::managed_default_endpoints::reconcile_managed_default_endpoints;
 use crate::ops::cli::ExitError;
 use crate::ops::internal_auth::InternalOpsAuth;
 use crate::ops::paths::Paths;
@@ -52,30 +49,27 @@ pub(super) async fn reconcile(
             .await
             .map_err(|err| anyhow::anyhow!(err.message))
     };
-    let mut reconcile_intent = crate::managed_default_endpoints::ManagedDefaultEndpointsIntent {
-        vless: match spec.default_endpoints.vless.clone() {
-            Some(spec) => ManagedDefaultEndpointIntent::Manage {
-                spec,
-                source: ManagedDefaultEndpointSource::Explicit,
-            },
-            None => ManagedDefaultEndpointIntent::Remove,
-        },
-        ss: match spec.default_endpoints.ss.clone() {
-            Some(spec) => ManagedDefaultEndpointIntent::Manage {
-                spec,
-                source: ManagedDefaultEndpointSource::Explicit,
-            },
-            None => ManagedDefaultEndpointIntent::Remove,
-        },
-    };
+    let managed_default_state =
+        crate::managed_default_endpoints::load_managed_default_endpoints_state(&abs_data_dir)
+            .map_err(|e| ExitError::new(5, format!("managed_default_state_error: {e}")))?;
+    let mut reconcile_intent =
+        crate::managed_default_endpoints::resolve_host_managed_default_endpoints_intent(
+            &spec.default_endpoints,
+            &node_endpoints,
+            &spec.access_host,
+            canary_bind,
+            &managed_default_state,
+        )
+        .map_err(|e| ExitError::new(5, format!("managed_default_resolve_failed: {e}")))?;
     if matches!(
         reconcile_intent.vless,
-        ManagedDefaultEndpointIntent::Manage { .. }
+        crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
     ) && !canary_ready
     {
-        reconcile_intent.vless = ManagedDefaultEndpointIntent::Skip;
+        reconcile_intent.vless =
+            crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Skip;
     }
-    reconcile_managed_default_endpoints_shared(
+    reconcile_managed_default_endpoints(
         &abs_data_dir,
         &cluster_meta.node_id,
         &node_endpoints,

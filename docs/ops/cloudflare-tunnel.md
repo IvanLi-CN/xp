@@ -140,7 +140,11 @@ Notes:
 - `--ddns-zone-id` is optional; when omitted, deploy tries to derive the Cloudflare zone from `--access-host`.
 - Runtime DDNS keeps records normalized as `DNS only` + `TTL=Auto`.
 - If Cloudflare already has exactly one `A` / `AAAA` for `XP_ACCESS_HOST`, `xp` adopts and updates it. Multiple same-type records are treated as an operator error and are not modified automatically.
-- For managed-default VLESS/SS bootstrap on host-managed nodes, pass `--default-vless-port`, `--default-vless-server-names`, and optionally `--default-vless-fingerprint` / `--default-ss-port`; `xp-ops deploy` writes those into `/etc/xp/xp.env` so the post-upgrade auto-adoption path stays explicit.
+- For managed-default VLESS/SS bootstrap on host-managed nodes, pass `--default-vless-port`,
+  `--default-vless-server-names`, and optionally `--default-vless-fingerprint` /
+  `--default-ss-port`; `xp-ops deploy` writes those into `/etc/xp/xp.env`. These values bootstrap
+  missing endpoints only. Existing or auto-adopted ports remain cluster-owned and are changed
+  through the Admin UI/API.
 - `--vless-canary-acme-contact-email` is the operator-controlled ACME contact for the loopback HTTPS canary and should be set on the same one-shot deploy if you want a fully reproducible certificate flow.
 
 - If you want to provide the Cloudflare token from the command line (not recommended, can leak via shell history / `ps`):

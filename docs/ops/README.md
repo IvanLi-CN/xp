@@ -14,12 +14,15 @@ This directory contains both the traditional host-managed service examples and t
 | --------------------------- | ---------------------------- | --------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Host-managed service node   | systemd                      | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by systemd             |
 | Host-managed service node   | OpenRC                       | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by OpenRC              |
-| Single-image container node | Docker Compose / OCI runtime | fully supported | official single-image container node                                  | `xp-ops container run` owns bootstrap/join, child process supervision, and default endpoint reconcile |
+| Single-image container node | Docker Compose / OCI runtime | fully supported | official single-image container node                                  | `xp-ops container run` owns bootstrap/join, child process supervision, and missing endpoint bootstrap |
 
 Current support boundaries that operators must know:
 
 - Host-managed automation in `xp-ops` currently recognizes Arch/Debian/Ubuntu/RHEL-family/Alpine distro families. Historical CentOS 7 / RHEL-family host-managed nodes are first-class host-managed targets and should use the host-managed deployment / upgrade paths in this document.
 - Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
+- Managed-default endpoint ports are cluster-owned after creation or auto-adoption.
+  `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only bootstrap a missing endpoint; changing or
+  removing those env values does not reconfigure or delete an existing endpoint.
 - When a deployment environment needs manual intervention, document the exact branch and operator steps instead of implying the generic path will work.
 
 ## Minimal runtime assumptions
@@ -92,7 +95,15 @@ Contract:
 - Ordinary HTTPS clients probing `https://<access_host[:vless_port]>/generate_204` receive the canary `204` through the VLESS ingress itself and never touch upstream.
 - The endpoint detail page exposes a managed VLESS **Canary /generate_204** test for that ordinary HTTPS path. It fans out to every xp node, reports per-node status/latency/error, and is an immediate diagnostic for public ingress, TLS, REALITY fallback, and xp canary behavior; it is separate from the hourly cluster-wide proxy path probe and is not stored in endpoint probe history.
 - Host-managed and container-managed nodes use the same managed-default endpoint contract. On host-managed nodes, `xp` startup and `xp-ops xp sync-node-meta` both reconcile the local default endpoint set; on container-managed nodes, `xp-ops container run` does the same after the local control plane is ready.
-- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted into the managed-default contract during upgrade when that endpoint still predates the `managed_default` metadata flag; the runtime only rewrites that ingress to the loopback canary semantics after the canary itself is ready, and if canary preparation fails the old ingress stays untouched while `vless_https_canary_status.last_error` explains the blocker.
+- Existing managed-default VLESS and SS2022 ports come from Raft state. Reconcile refreshes
+  system-managed metadata but preserves the endpoint port when the local bootstrap env differs or
+  is absent.
+- Historical host-managed nodes with exactly one legacy VLESS endpoint on the node are auto-adopted
+  into the managed-default contract during upgrade when that endpoint still predates the
+  `managed_default` metadata flag; auto-adoption preserves the legacy endpoint port. The runtime
+  only rewrites that ingress to the loopback canary semantics after the canary itself is ready. If
+  canary preparation fails, the old ingress stays untouched while
+  `vless_https_canary_status.last_error` explains the blocker.
 - This does not move the admin UI / cluster API onto the VLESS port.
 - Mihomo relay groups prefer `https://<access_host[:managed_vless_port]>/generate_204`, then fall back to `api_base_url + /api/health`, then `https://www.gstatic.com/generate_204`.
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
@@ -163,13 +174,25 @@ available again. Never stagger v1 and v2 nodes outside this maintenance window.
 
 Host-managed upgrade note:
 
-- If `/etc/xp/xp.env` already declares `XP_DEFAULT_VLESS_PORT`, startup uses that port as the source of truth. `XP_DEFAULT_VLESS_SERVER_NAMES` is ignored for SNI selection after validation.
+- If no managed-default VLESS endpoint exists, `/etc/xp/xp.env` `XP_DEFAULT_VLESS_PORT` supplies its
+  bootstrap port. Once an endpoint exists, its Raft value is authoritative and a stale or changed
+  env value does not move it. `XP_DEFAULT_VLESS_SERVER_NAMES` is ignored for SNI selection after
+  validation.
 - If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint whose metadata still predates the `managed_default` flag, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary only after the canary is healthy; when canary preparation is blocked, startup/sync leave the existing endpoint untouched and surface the error via `vless_https_canary_status`.
 - If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
+- Change an existing managed-default port through the Endpoints Admin UI or
+  `PATCH /api/admin/endpoints/{endpoint_id}`. Delete it through the corresponding endpoint delete
+  operation. If the bootstrap env remains set after deletion, the next startup/sync recreates the
+  missing endpoint from that value.
+- To intentionally rebootstrap at a different port, first change the bootstrap env, explicitly
+  delete the endpoint through the Admin UI/API, then restart or run
+  `xp-ops xp sync-node-meta`; ordinary env edits alone never reconfigure an existing endpoint.
 
 Deployment note:
 
-- `xp-ops deploy` now writes the managed-default endpoint contract into `/etc/xp/xp.env` when you pass `--default-vless-port` + `--default-vless-server-names` and/or `--default-ss-port`.
+- `xp-ops deploy` writes managed-default bootstrap inputs into `/etc/xp/xp.env` when you pass
+  `--default-vless-port` + `--default-vless-server-names` and/or `--default-ss-port`; redeploying
+  does not override an existing endpoint's Raft-owned port.
 - `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
 - The host-managed deploy path is therefore no longer container-only; the same one-shot flow now covers host-managed service nodes as well as official single-image container nodes.
 
@@ -237,7 +260,8 @@ If you prefer one container per cluster node, use:
 Container-specific note:
 
 - `xp-ops container run` owns the `xray` / `cloudflared` child processes inside the container.
-- It also prepares DDNS runtime files and reconciles default managed SS/VLESS endpoints from container env on every start.
+- It also prepares DDNS runtime files and uses container env to bootstrap missing managed SS/VLESS
+  endpoints; existing ports and endpoint existence remain cluster-owned.
 - For an existing joined node, set `XP_ADMIN_TOKEN_HASH` in the host-owned Compose environment
   file, then recreate the service to rotate the administrator credential. The entrypoint accepts
   only the low-memory Argon2id profile (`m=4096,t=3,p=1`) and atomically reconciles the persisted
@@ -714,7 +738,8 @@ Ideal post-release path:
    - optional `--default-ss-port`
    - recommended `--vless-canary-acme-contact-email`
    - `--enable-services -y`
-3. Confirm `/etc/xp/xp.env` now contains the managed-default endpoint keys and the canary/DDNS keys.
+3. Confirm `/etc/xp/xp.env` contains the intended bootstrap endpoint keys and the canary/DDNS keys.
+   Existing endpoint ports may intentionally differ from stale bootstrap values.
 4. Restart validation:
    - `curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status`
    - `curl -Ik https://<access_host[:vless_port]>/generate_204`
@@ -731,18 +756,21 @@ Ideal post-release path:
    - `XP_NODE_NAME`
    - `XP_ACCESS_HOST` when the node has public ingress
    - `XP_CLOUDFLARE_DDNS_ENABLED=true` when DDNS should manage `XP_ACCESS_HOST`
-   - `XP_DEFAULT_VLESS_PORT`
+   - `XP_DEFAULT_VLESS_PORT` when a missing VLESS endpoint should be bootstrapped
    - `XP_DEFAULT_VLESS_SERVER_NAMES`
    - optional `XP_DEFAULT_VLESS_FINGERPRINT`
-   - optional `XP_DEFAULT_SS_PORT`
+   - optional `XP_DEFAULT_SS_PORT` when a missing SS2022 endpoint should be bootstrapped
    - optional `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`
-3. Restart the container so `xp-ops container run` replays bootstrap/join, runtime reconcile, and default endpoint reconcile.
+3. Restart the container so `xp-ops container run` replays bootstrap/join, runtime reconcile, and
+   missing endpoint bootstrap without changing existing cluster-owned ports.
 4. Validate:
    - container logs show successful `xp-ops container run`
    - `GET /api/admin/config` returns healthy `vless_https_canary_status`
    - `curl -Ik https://<access_host[:vless_port]>/generate_204` succeeds from outside the node path you actually use
    - Mihomo provider render uses `https://<access_host[:managed_vless_port]>/generate_204`
-5. If the env intentionally removes `XP_DEFAULT_VLESS_*` or `XP_DEFAULT_SS_PORT`, expect the corresponding managed-default endpoint to be removed on next reconcile.
+5. To change a managed-default port or remove an endpoint, use the Admin UI/API. Editing or removing
+   bootstrap env alone has no effect on an existing endpoint; retaining the env after an API
+   deletion recreates the missing endpoint on next reconcile.
 
 ## Disaster recovery: quorum lost (single-node leader recovery)
 
@@ -796,7 +824,8 @@ After recovery:
 - Treat `xp join` success as voter success: a node that cannot be promoted to voter must not be
   considered joined.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
-  `NodeMeta` (leader discovery/forwarding) matches config.
+  `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
+  managed-default endpoint ports from Raft even when the local bootstrap env differs.
 - After all intended nodes are rejoined, confirm `/api/cluster/info` has a leader and endpoint
   creation succeeds through the admin UI/API. Any `membership.nodes - voter_ids` divergence is an
   incident and must be repaired by the leader-side guard or by explicit disaster recovery.
