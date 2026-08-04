@@ -65,6 +65,20 @@ fn build_default_vless_endpoint_spec_rejects_zero_port() {
 }
 
 #[test]
+fn build_default_vless_endpoint_spec_ignores_auxiliary_fields_without_bootstrap_port() {
+    let spec = build_default_vless_endpoint_spec(
+        None,
+        "node.example.com",
+        Some("cdn-a.example.test"),
+        Some("chrome"),
+        "127.0.0.1:39043".parse().unwrap(),
+    )
+    .unwrap();
+
+    assert!(spec.is_none());
+}
+
+#[test]
 fn build_default_ss_endpoint_spec_rejects_zero_port() {
     let err = build_default_ss_endpoint_spec(Some(0)).unwrap_err();
     assert!(err.to_string().contains("invalid port: 0"));

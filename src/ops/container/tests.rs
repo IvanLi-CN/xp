@@ -395,6 +395,18 @@ fn parses_default_endpoint_specs_from_env() {
 }
 
 #[test]
+fn auxiliary_vless_env_does_not_require_a_bootstrap_port() {
+    let env = env_map(&[
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
+        ("XP_DEFAULT_VLESS_FINGERPRINT", "chrome"),
+    ]);
+
+    let spec = ManagedDefaultEndpointsSpec::from_env_map(&env, "node-1-ep.example.com").unwrap();
+
+    assert!(spec.vless.is_none());
+}
+
+#[test]
 fn default_vless_canary_bind_must_be_socket_addr() {
     let env = env_map(&[
         ("XP_ACCESS_HOST", "node-1-ep.example.com"),

@@ -138,9 +138,6 @@ pub fn build_default_vless_endpoint_spec(
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let Some(port) = port else {
-        if server_names_raw.is_some() || fingerprint.is_some() {
-            bail!("XP_DEFAULT_VLESS_PORT is required when managing the default VLESS endpoint");
-        }
         return Ok(None);
     };
     validate_port(port).map_err(|err| anyhow!("{err}"))?;
