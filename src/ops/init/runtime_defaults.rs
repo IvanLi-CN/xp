@@ -457,9 +457,12 @@ fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {
     }
     tokens
         .into_iter()
-        .filter_map(|assignment| {
-            let (key, value) = assignment.split_once('=')?;
-            Some((key.to_owned(), value.to_owned()))
+        .map(|assignment| match assignment.find('=') {
+            Some(index) => (
+                assignment[..index].to_owned(),
+                assignment[index + 1..].to_owned(),
+            ),
+            None => (assignment, String::new()),
         })
         .collect()
 }
