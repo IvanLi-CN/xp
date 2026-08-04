@@ -113,6 +113,43 @@ fn low_memory_backfill_preserves_systemd_operator_unset() {
 }
 
 #[test]
+fn low_memory_backfill_preserves_systemd_operator_environment_reset() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(systemd.join("cloudflared.service.d")).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        concat!(
+            "[Unit]\nDescription=cloudflared (Cloudflare Tunnel)\n",
+            "Wants=network-online.target\nAfter=network-online.target\n\n",
+            "[Service]\nType=simple\nUser=cloudflared\nGroup=cloudflared\n",
+            "Environment=GOMEMLIMIT=8MiB\nEnvironment=GOGC=50\n",
+            "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n",
+            "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+            "--config /etc/cloudflared/config.yml tunnel run\n",
+            "Restart=always\nRestartSec=2s\n\n",
+            "[Install]\nWantedBy=multi-user.target\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        systemd.join("cloudflared.service.d/10-operator.conf"),
+        "[Service]\nEnvironment=\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert_eq!(
+        managed,
+        "[Service]\n# Managed by xp-ops; use a separate drop-in for overrides\n"
+    );
+}
+
+#[test]
 fn low_memory_backfill_accepts_non_regular_systemd_environment_file() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());

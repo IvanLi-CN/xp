@@ -412,6 +412,9 @@ fn should_backfill_systemd_value(
         .collect::<Vec<_>>();
     let operator_has_assignment = sources.iter().skip(1).any(|source| {
         source.lines().any(|line| {
+            if line.trim() == "Environment=" {
+                return true;
+            }
             parse_systemd_environment_line(line)
                 .iter()
                 .any(|(assignment_key, _)| assignment_key == key)
